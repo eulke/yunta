@@ -202,7 +202,7 @@ lista.
 **D193 — What a run's commands print belongs to the run, never to the terminal.** `accepted` → [`adr/D193-what-a-run-s-commands-print-belongs-to-the-run.md`](adr/D193-what-a-run-s-commands-print-belongs-to-the-run.md)
 **D194 — A gate shows what it asks about, and a correction goes back to the session that made the work.** `revised` *(Revisada por D227.)* → [`adr/D194-a-gate-shows-what-it-asks-about.md`](adr/D194-a-gate-shows-what-it-asks-about.md)
 **D195 — A plan a person reviews explains itself, in the same document the engine runs.** `revised` *(Revisada por D223.)* → [`adr/D195-a-plan-a-person-reviews-explains-itself.md`](adr/D195-a-plan-a-person-reviews-explains-itself.md)
-**D196 — Every task is held to the suite its lineage measured green.** `accepted` → [`adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md`](adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md)
+**D196 — Every task is held to the suite its lineage measured green.** `revised` *(Revisada por D256.)* → [`adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md`](adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md)
 **D197 — A check retried on the tree it failed on is not run again.** `accepted` → [`adr/D197-a-check-retried-on-the-tree-it-failed-on-is-not-run-again.md`](adr/D197-a-check-retried-on-the-tree-it-failed-on-is-not-run-again.md)
 **D198 — An invariant's pass holds for the tree it left.** `revised` *(Revisada por D200.)* → [`adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md`](adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md)
 **D199 — A run records the time its host was suspended, and its durations leave it out.** `accepted` → [`adr/D199-a-run-records-the-time-its-host-was-suspended.md`](adr/D199-a-run-records-the-time-its-host-was-suspended.md)
@@ -262,3 +262,4 @@ lista.
 **D253 — An agent is defined by Yunta, and every adapter adds its instructions.** `accepted` → [`adr/D253-an-agent-is-defined-by-yunta.md`](adr/D253-an-agent-is-defined-by-yunta.md)
 **D254 — A session's stop is judged before it ends, once for one state of its work.** `accepted` → [`adr/D254-a-session-s-stop-is-judged-before-it-ends.md`](adr/D254-a-session-s-stop-is-judged-before-it-ends.md)
 **D255 — What a session writes is formatted the moment it writes it.** `accepted` → [`adr/D255-what-a-session-writes-is-formatted-as-it-writes-it.md`](adr/D255-what-a-session-writes-is-formatted-as-it-writes-it.md)
+**D256 — A project command held beside the suite holds every task, as the suite does.** `accepted` → [`adr/D256-a-project-command-held-beside-the-suite-holds-every-task.md`](adr/D256-a-project-command-held-beside-the-suite-holds-every-task.md)

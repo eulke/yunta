@@ -311,6 +311,11 @@ pub struct LimitsConfig {
 #[serde(deny_unknown_fields)]
 pub struct BaselineConfig {
     pub suite: String,
+    /// Project commands measured beside the suite, on the same tree: each
+    /// that passes there holds every task of a loop as a guard, as the
+    /// suite does — the project's lint, for one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<CommandName>,
 }
 
 /// `coverage:` — backs the `coverage_gate` check kind; `cmd`'s stdout must

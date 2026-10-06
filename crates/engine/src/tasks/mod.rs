@@ -24,7 +24,7 @@ use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
 pub(crate) use derived::derive_reach;
-pub use judged::{held_by, judged_plan, judged_task, suite_of, HeldBy};
+pub use judged::{held_by, held_of, judged_plan, judged_task, measured, HeldBy};
 pub(crate) use respecified::respecifications_owed;
 pub use review::review as plan_review;
 

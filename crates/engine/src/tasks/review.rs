@@ -11,23 +11,23 @@ use yunta_core::{SpecFile, Task, TasksFile};
 use super::judged::{specified, waived};
 
 /// `plan` as the run judges it, given the `spec` it is shown with, the
-/// `suite` the run measured green and the departures a person accepted.
+/// commands the run measured green and the departures a person accepted.
 pub fn review(
     plan: TasksFile,
     spec: Option<SpecFile>,
-    suite: Option<&str>,
+    held: &[String],
     departed: Vec<AcceptedDeparture>,
 ) -> PlanReview {
     let tasks = plan
         .tasks
         .iter()
-        .map(|task| task_review(task, spec.as_ref(), suite, &departed))
+        .map(|task| task_review(task, spec.as_ref(), held, &departed))
         .collect();
     PlanReview {
         plan,
         departed,
         spec,
-        suite: suite.map(str::to_string),
+        held: held.to_vec(),
         tasks,
         handed_over: None,
         answered: Vec::new(),
@@ -37,10 +37,10 @@ pub fn review(
 fn task_review(
     task: &Task,
     spec: Option<&SpecFile>,
-    suite: Option<&str>,
+    held: &[String],
     departed: &[AcceptedDeparture],
 ) -> TaskReview {
-    let judged = waived(specified(task.clone(), spec), departed, suite, spec);
+    let judged = waived(specified(task.clone(), spec), departed, held, spec);
     let reviewed = |criterion: &yunta_core::Criterion| JudgedCriterion {
         cmd: criterion.cmd.clone(),
         proves: criterion.proves.clone(),
@@ -49,7 +49,11 @@ fn task_review(
     let (guards, criteria): (Vec<_>, Vec<_>) = judged
         .criteria
         .iter()
-        .filter(|criterion| Some(criterion.cmd.trim()) != suite)
+        .filter(|criterion| {
+            !held
+                .iter()
+                .any(|command| command.trim() == criterion.cmd.trim())
+        })
         .partition(|criterion| criterion.is_guard());
     TaskReview {
         task: task.id.clone(),
@@ -161,7 +165,7 @@ specs:
     fn reviewed() -> PlanReview {
         let plan: TasksFile = yunta_core::yaml::parse(PLAN).unwrap();
         let spec: SpecFile = yunta_core::yaml::parse(SPEC).unwrap();
-        review(plan, Some(spec), Some("cargo test"), Vec::new())
+        review(plan, Some(spec), &["cargo test".to_string()], Vec::new())
     }
 
     #[test]
@@ -219,7 +223,7 @@ specs:
     #[test]
     fn the_suite_guards_every_task_once() {
         let review = reviewed();
-        assert_eq!(review.suite.as_deref(), Some("cargo test"));
+        assert_eq!(review.held, vec!["cargo test".to_string()]);
         assert!(review
             .tasks
             .iter()
@@ -253,7 +257,7 @@ specs:
     fn flaws_of(plan: &str, spec: &str) -> Vec<yunta_core::shown::Flaw> {
         let plan: TasksFile = yunta_core::yaml::parse(plan).unwrap();
         let spec: SpecFile = yunta_core::yaml::parse(spec).unwrap();
-        review(plan, Some(spec), Some("cargo test"), Vec::new()).flaws()
+        review(plan, Some(spec), &["cargo test".to_string()], Vec::new()).flaws()
     }
 
     #[test]
@@ -289,14 +293,14 @@ specs:
         );
         let plan: TasksFile = yunta_core::yaml::parse(&plan).unwrap();
         let spec: SpecFile = yunta_core::yaml::parse(SPEC).unwrap();
-        let review = review(plan, Some(spec), None, Vec::new());
+        let review = review(plan, Some(spec), &[], Vec::new());
         assert_eq!(review.tasks[0].denied.len(), 1, "{:?}", review.tasks[0]);
     }
 
     #[test]
     fn a_task_s_own_guards_are_kept_apart_from_its_criteria() {
         let plan: TasksFile = yunta_core::yaml::parse(BY_A_NAME).unwrap();
-        let review = review(plan, None, Some("cargo test"), Vec::new());
+        let review = review(plan, None, &["cargo test".to_string()], Vec::new());
         let guards: Vec<&str> = review.tasks[0]
             .guards
             .iter()

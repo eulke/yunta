@@ -37,6 +37,7 @@ fn run_kinds(event: &RunEvent) {
     match event {
         RunEvent::Created(_)
         | RunEvent::BaselineCaptured(_)
+        | RunEvent::BaselineHeld(_)
         | RunEvent::PromotionSignaled(_)
         | RunEvent::HostSuspended(_)
         | RunEvent::Paused(_)

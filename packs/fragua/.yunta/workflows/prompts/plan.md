@@ -6,8 +6,9 @@ and make a decision of any point where the plan departs from it.
 Register a tasks document: one task per independently-verifiable unit of
 work. Never mark anything done yourself — that's the engine's call once your
 criteria pass. The run holds every task to the test suite it measured before
-any work, so keep each task's criteria to what its own change turns green
-rather than repeating the suite.
+any work, and to each project command it measured beside it — its lint, for
+one — so keep each task's criteria to what its own change turns green rather
+than repeating any of them, and declare no lint or formatting guard.
 
 A person reads this plan — before any work starts when the run asks them to
 approve it, and beside the finished work before its pull request. Write it so

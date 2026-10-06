@@ -33,13 +33,13 @@ impl<'a> Aside<'a> {
         }
     }
 
-    /// Starts measuring `suite`, unless a measurement is under way. The
-    /// checks of a loop that starts beside it wait for its answer.
-    pub(super) fn start(&mut self, ctx: &'a RunCtx<'_>, suite: &str) {
+    /// Starts measuring what is `owed`, unless a measurement is under way.
+    /// The checks of a loop that starts beside it wait for its answers.
+    pub(super) fn start(&mut self, ctx: &'a RunCtx<'_>, owed: super::baseline::Owed) {
         if self.under_way.is_none() {
-            ctx.memo.suite().expect(suite);
+            ctx.memo.held().expect(&owed.commands());
             let stop = self.stop.clone();
-            self.under_way = Some(Box::pin(measure_aside(ctx, suite.to_string(), stop)));
+            self.under_way = Some(Box::pin(measure_aside(ctx, owed, stop)));
         }
     }
 
@@ -91,12 +91,12 @@ impl<'a> Aside<'a> {
     }
 }
 
-/// Measures `suite` in a checkout of the run's pool at the commit the run
-/// opened on, held while the suite runs. `stop` ends it early, recording
-/// nothing.
+/// Measures what is `owed` in a checkout of the run's pool at the commit
+/// the run opened on, held while it runs. `stop` ends it early, recording
+/// nothing more.
 async fn measure_aside(
     ctx: &RunCtx<'_>,
-    suite: String,
+    owed: super::baseline::Owed,
     stop: CancellationToken,
 ) -> Result<(), RunError> {
     let supervision = ctx.supervision(&stop);
@@ -105,15 +105,15 @@ async fn measure_aside(
         // Stopped while its checkout was being made, it measured nothing,
         // like a suite stopped while it ran.
         Err(stopped) if stopped.cancelled() => {
-            ctx.memo.suite().give_up();
+            ctx.memo.held().give_up();
             return Ok(());
         }
-        opened => opened.inspect_err(|_| ctx.memo.suite().give_up())?,
+        opened => opened.inspect_err(|_| ctx.memo.held().give_up())?,
     };
-    let measured = super::baseline::measure_in(ctx, suite, &checkout, supervision).await;
+    let measured = super::baseline::measure_in(ctx, owed, &checkout, supervision).await;
     ctx.pool.put_back(held, supervision).await;
     // A measurement that ended without an answer leaves nobody waiting for
     // one: a guard runs the suite itself, as with no measurement at all.
-    ctx.memo.suite().give_up();
+    ctx.memo.held().give_up();
     measured
 }

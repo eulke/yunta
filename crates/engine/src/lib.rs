@@ -137,8 +137,8 @@ pub use run::{
     awaits_decision, close_run, create_promotion_successor, create_run, current_escalation,
     execute_run, read_manifest, record_pause_after_crash, resolve_gate, session_token_budget,
     BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams, ManifestReadError,
-    Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError, RunReport, RunRoots,
-    RunTerminal,
+    OwedMeasurement, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError,
+    RunReport, RunRoots, RunTerminal,
 };
 pub use run_tools::{
     consolidate_blackboard, open_session_listener, HostOf, NodeScopeAccess, RunTool,
@@ -158,7 +158,7 @@ pub use task_cycle::{
     CriterionRun, DispatchOutcome, KeepsOutput, Memo, PostCheck, ScopeGovernance, SessionObserver,
     SessionSetup, Surprise, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
-pub use tasks::{judged_task, suite_of};
+pub use tasks::{held_of, judged_task, measured};
 pub use time_spent::TimeSpent;
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,

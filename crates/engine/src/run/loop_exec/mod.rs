@@ -230,7 +230,7 @@ pub(super) async fn execute_loop(
         }
         if !departures.is_empty() {
             let holders = depart::Holders {
-                suite: prep.setup.suite.as_deref(),
+                held: &prep.setup.held,
                 spec: prep.setup.spec.as_deref(),
                 writer: prep.writer.as_ref(),
             };
@@ -293,9 +293,12 @@ impl LoopPrep<'_> {
     /// plan as it is judged.
     async fn rejudge(&mut self, ctx: &RunCtx<'_>) -> Result<(), RunError> {
         let view = ctx.run_view().await?;
-        let suite = ctx.memo.suite().holding(view.state.run.baseline());
+        let held = ctx
+            .memo
+            .held()
+            .holding(&crate::tasks::measured(&view.state.run));
         let (spec, tasks) = (self.setup.spec.as_deref(), &view.state.tasks);
-        self.tasks = crate::tasks::judged_plan(&self.document, suite.as_deref(), spec, tasks);
+        self.tasks = crate::tasks::judged_plan(&self.document, &held, spec, tasks);
         self.setup.plan = Some(std::sync::Arc::new(self.tasks.clone()));
         Ok(())
     }
@@ -369,13 +372,16 @@ async fn prepare_loop<'a>(
     registered_here(&held, &view.state)?;
     // Every task this loop runs is judged the way the run judges it, once,
     // here: its pre-check, its session's own checks, its close and its
-    // integration all read these criteria — its own, the suite the run
+    // integration all read these criteria — its own, the commands the run
     // measured, and the tests the run's spec gives it.
-    let suite = ctx.memo.suite().holding(view.state.run.baseline());
+    let holding = ctx
+        .memo
+        .held()
+        .holding(&crate::tasks::measured(&view.state.run));
     let spec = crate::artifacts::latest::<yunta_core::SpecFile>(ctx.run_dir, &view.events)
         .await?
         .map(|held| std::sync::Arc::new(held.document));
-    let (held_by, ledger) = (suite.as_deref(), &view.state.tasks);
+    let (held_by, ledger) = (holding.as_slice(), &view.state.tasks);
     let tasks = crate::tasks::judged_plan(&held.document, held_by, spec.as_deref(), ledger);
     // Every task session reads the plan its task belongs to: the design
     // it names, and the tasks that own what it may not touch.
@@ -384,7 +390,7 @@ async fn prepare_loop<'a>(
     let setup = crate::task_cycle::SessionSetup {
         plan: Some(std::sync::Arc::new(tasks.clone())),
         spec,
-        suite,
+        held: holding,
         superseded,
         ..setup
     };

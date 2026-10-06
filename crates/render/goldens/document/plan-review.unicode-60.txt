@@ -53,7 +53,7 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
     · Greeting in other languages.
 
   every task keeps passing
-    the suite    green before this run changed anything
+    measured     green before this run changed anything
                  $ cargo test
 
   step 1 of 2

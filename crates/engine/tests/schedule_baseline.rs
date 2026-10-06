@@ -26,6 +26,7 @@ nodes:
 
 fn policy() -> SchedulingPolicy {
     SchedulingPolicy {
+        baseline_held: Vec::new(),
         max_parallel_nodes: 2,
         on_interrupt: OnInterrupt::RestartNode,
         on_failure: DefaultOnFailure::Pause,
@@ -85,7 +86,7 @@ fn a_run_owing_a_baseline_is_told_to_measure_it_before_any_node() {
     assert_eq!(
         decide(&workflow(), &derive(&events), &policy),
         Decision::MeasureBaseline {
-            suite: "cargo test".to_string()
+            owed: yunta_engine::OwedMeasurement::suite("cargo test")
         },
         "a run whose config names a suite and whose log holds no measurement owes one"
     );
@@ -134,7 +135,7 @@ nodes:
     assert_eq!(
         decide(&workflow, &derive(&planned), &policy),
         Decision::MeasureBaseline {
-            suite: "cargo test".to_string()
+            owed: yunta_engine::OwedMeasurement::suite("cargo test")
         },
         "`compare` reads the measurement, so it waits for it"
     );
@@ -179,7 +180,7 @@ fn a_gate_showing_a_plan_waits_for_the_measurement() {
             &aside
         ),
         Decision::MeasureBaseline {
-            suite: "cargo test".to_string()
+            owed: yunta_engine::OwedMeasurement::suite("cargo test")
         }
     );
     assert_eq!(
@@ -261,7 +262,7 @@ nodes:
     assert_eq!(
         decide(&workflow, &planned, &aside),
         Decision::MeasureBaseline {
-            suite: "cargo test".to_string()
+            owed: yunta_engine::OwedMeasurement::suite("cargo test")
         }
     );
 }

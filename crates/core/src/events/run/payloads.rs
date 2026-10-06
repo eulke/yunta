@@ -59,6 +59,33 @@ impl BaselineCapturedPayload {
     }
 }
 
+/// What one project command `baseline.held` names did on the tree the
+/// run's lineage measured its suite on, and whose measurement it is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BaselineHeldPayload {
+    /// The command's name, as `commands:` declares it.
+    pub name: crate::ids::CommandName,
+    /// What the project runs for it.
+    pub command: String,
+    pub results: BaselineResults,
+    pub origin: BaselineOrigin,
+    /// The git tree it was measured on; absent for a measurement the run
+    /// was born holding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<crate::TreeId>,
+    /// How long it took. Absent where `tree` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+}
+
+impl BaselineHeldPayload {
+    /// Whether it passed when it was measured — whether it holds the
+    /// run's tasks at all.
+    pub fn passed(&self) -> bool {
+        self.results.exit_code == 0
+    }
+}
+
 /// What the suite reported: the code it exited with, and the tail a
 /// reader sees without opening what the measuring run kept.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

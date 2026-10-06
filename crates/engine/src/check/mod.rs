@@ -137,7 +137,7 @@ pub fn check_mounted(
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
     check_unset_keys(workflow, config, &mut errors);
-    check_format_commands(config, &mut errors);
+    check_config_commands(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
     check_artifact_declarations(workflow, &mut errors);
     check_asking_nodes(workflow, &mut errors);

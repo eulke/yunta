@@ -58,7 +58,7 @@ graph LR
 
 ### every task keeps passing
 
-- the suite: green before this run changed anything  
+- measured: green before this run changed anything  
   `$ cargo test`
 
 ### step 1 of 2

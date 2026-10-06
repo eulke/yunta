@@ -38,9 +38,9 @@ pub struct Memo {
     /// take turns, and the second reuses what the first answered instead
     /// of running the command alongside it.
     asking: Mutex<HashMap<ContentHash, std::sync::Arc<tokio::sync::Mutex<()>>>>,
-    /// What the lineage's measurement says about the suite every task is
-    /// held to, as this invocation learns it.
-    suite: super::SuiteGate,
+    /// What the lineage's measurement says about the commands every task
+    /// is held to, as this invocation learns it.
+    held: super::HeldGate,
 }
 
 /// What a command answered on one tree. A red answer keeps what the
@@ -60,13 +60,14 @@ impl Memo {
             config_hash,
             cache: Mutex::new(HashMap::new()),
             asking: Mutex::new(HashMap::new()),
-            suite: super::SuiteGate::default(),
+            held: super::HeldGate::default(),
         }
     }
 
-    /// The suite every task is held to, as the measurement settles it.
-    pub fn suite(&self) -> &super::SuiteGate {
-        &self.suite
+    /// The commands every task is held to, as the measurement settles
+    /// them.
+    pub fn held(&self) -> &super::HeldGate {
+        &self.held
     }
 
     pub(super) fn key(&self, cmd: &str, tree: &Tree) -> ContentHash {

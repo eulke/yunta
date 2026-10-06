@@ -763,6 +763,22 @@ can still answer for it — instead of surfacing after every task closed, at a
 suite in a task's criteria; a task that declares it is judged by its own
 declaration. A suite that was already red when measured holds no task to it.
 
+The same holds for any project command `baseline.held` names — the project's lint,
+for one:
+
+```yaml
+commands:
+  lint: "cargo clippy --workspace --all-targets -- -D warnings"
+baseline:
+  suite: "cargo test --workspace"
+  held: [lint]
+```
+
+Each is measured beside the suite, on the same tree, and one that passed there holds
+every task as a guard, ahead of the suite; one already red holds none. A planner
+then declares no lint guard of its own, and a lint that a task breaks is fixed by
+the session that broke it.
+
 Narrow, but through the suite's own command: a criterion that runs the project's
 tests extends `baseline.suite` — `cargo test --workspace --test pool` under a suite of
 `cargo test --workspace` — and the engine refuses one that runs them another way,

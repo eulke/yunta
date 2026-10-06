@@ -73,7 +73,7 @@ pub enum Decision {
     /// has run: what worked before the invocation started is measured
     /// on the tree the run opens on, once, before anything changes it.
     MeasureBaseline {
-        suite: String,
+        owed: crate::run::baseline::Owed,
     },
     /// One or more independently-ready nodes to execute concurrently —
     /// `(node, attempt)` pairs, in workflow declaration order.
@@ -276,6 +276,8 @@ pub struct Policy {
     /// The suite this run's lineage measures, from `baseline.suite`;
     /// `None` when the config names none and nothing is measured.
     pub baseline_suite: Option<String>,
+    /// The commands `baseline.held` names, measured beside the suite.
+    pub baseline_held: Vec<(yunta_core::CommandName, String)>,
     /// Whether the suite is measured in a checkout of its own while the
     /// run goes on: a run born in a checkout holding exactly the commit
     /// it opened on. Otherwise it is measured in the run's own tree,
@@ -313,6 +315,7 @@ impl Policy {
             on_failure: manifest.config.resolved_on_failure(),
             mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, run.left_out()),
             baseline_suite: crate::run::baseline::suite(manifest).map(str::to_string),
+            baseline_held: crate::run::baseline::held(manifest),
             measures_aside: run.opens_on_base(),
             may_promote: next_mode_after(&manifest.workflow, mode_name).is_some(),
             grants_scope: person_may_grant_scope(&manifest.config),

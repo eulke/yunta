@@ -30,7 +30,7 @@ const SEND_BACK: &str = "send-back";
 /// what accepting a departure from one of them does — and the node that
 /// writes the spec again, when one of the run does.
 pub(super) struct Holders<'a> {
-    pub(super) suite: Option<&'a str>,
+    pub(super) held: &'a [String],
     pub(super) spec: Option<&'a yunta_core::SpecFile>,
     pub(super) writer: Option<&'a yunta_core::NodeId>,
 }
@@ -46,7 +46,7 @@ impl Holders<'_> {
             .filter_map(|deviation| match &deviation.from {
                 DepartsFrom::Criterion(cmd) => Some((
                     cmd.as_str(),
-                    crate::tasks::held_by(task, cmd, self.suite, self.spec),
+                    crate::tasks::held_by(task, cmd, self.held, self.spec),
                 )),
                 _ => None,
             })

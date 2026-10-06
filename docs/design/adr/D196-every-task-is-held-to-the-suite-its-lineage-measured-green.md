@@ -1,9 +1,9 @@
 ---
 number: D196
 title: "Every task is held to the suite its lineage measured green"
-status: accepted
+status: revised
 revises: [D65]
-revised_by: []
+revised_by: [D256]
 ---
 
 # D196 — Every task is held to the suite its lineage measured green

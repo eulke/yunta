@@ -34,7 +34,7 @@ pub enum ShownContent {
 
 /// A plan as the run will judge it: what the planner wrote, and beside
 /// it what holds each task — its own criteria, the tests the run's spec
-/// gives it, the suite every task keeps passing — and where the plan
+/// gives it, the commands every task keeps passing — and where the plan
 /// says a session will change something no session may.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanReview {
@@ -45,9 +45,9 @@ pub struct PlanReview {
     /// The spec the plan is shown with, when a decision shows both: its
     /// tests are read on their tasks rather than as a second document.
     pub spec: Option<SpecFile>,
-    /// The suite the run measured green before any work, which holds
-    /// every task.
-    pub suite: Option<String>,
+    /// The commands the run measured green before any work — its suite,
+    /// and each `baseline.held` names — which hold every task.
+    pub held: Vec<String>,
     /// Each task's review, in the plan's order.
     pub tasks: Vec<TaskReview>,
     /// How its planner handed it over, when the run's log says.

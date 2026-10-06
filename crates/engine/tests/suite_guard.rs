@@ -4,10 +4,10 @@
 
 use yunta_core::events::{
     BaselineCapturedPayload, BaselineOrigin, BaselineResults, CriterionResult, CriterionType,
-    EventPayload, NodeEvent, Phase, SessionEvent, TaskStatus,
+    EventPayload, NodeEvent, Phase, RunEvent, SessionEvent, TaskStatus,
 };
 use yunta_core::{Criterion, RunId, Task};
-use yunta_engine::{judged_task, suite_of, RunReport, RunTerminal};
+use yunta_engine::{judged_task, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 const SUITE: &str = "test ! -f broken.txt";
@@ -24,6 +24,23 @@ fn measured(exit_code: i32, origin: BaselineOrigin) -> BaselineCapturedPayload {
         tree: None,
         duration_ms: None,
     }
+}
+
+/// What a run whose log holds `measurements` holds its tasks to.
+fn held(measurements: Vec<RunEvent>) -> Vec<String> {
+    let log = measurements
+        .into_iter()
+        .fold(
+            yunta_testkit_core::Log::for_run("run-held"),
+            |log, event| log.event(EventPayload::Run(event)),
+        )
+        .build();
+    yunta_engine::held_of(&yunta_engine::derive(&log).run)
+}
+
+/// The suite, measured with `exit_code`.
+fn suite(exit_code: i32, origin: BaselineOrigin) -> RunEvent {
+    RunEvent::BaselineCaptured(measured(exit_code, origin))
 }
 
 fn task_with(criteria: Vec<Criterion>) -> Task {
@@ -61,10 +78,7 @@ fn commands(task: &Task) -> Vec<(&str, bool)> {
 #[test]
 fn a_task_is_judged_by_the_suite_its_lineage_measured_green() {
     let task = task_with(vec![criterion("test -f made.txt", None)]);
-    let judged = judged_task(
-        &task,
-        suite_of(Some(&measured(0, BaselineOrigin::Measured))),
-    );
+    let judged = judged_task(&task, &held(vec![suite(0, BaselineOrigin::Measured)]));
     assert_eq!(
         commands(&judged),
         vec![("test -f made.txt", false), (SUITE, true)]
@@ -80,13 +94,10 @@ fn a_task_is_judged_by_the_suite_its_lineage_measured_green() {
 fn a_red_measurement_adds_no_guard_to_any_task() {
     let task = task_with(vec![criterion("test -f made.txt", None)]);
     assert_eq!(
-        judged_task(
-            &task,
-            suite_of(Some(&measured(1, BaselineOrigin::Measured)))
-        ),
+        judged_task(&task, &held(vec![suite(1, BaselineOrigin::Measured)])),
         task
     );
-    assert_eq!(judged_task(&task, None), task, "nor does no measurement");
+    assert_eq!(judged_task(&task, &[]), task, "nor does no measurement");
 }
 
 #[test]
@@ -97,10 +108,7 @@ fn a_task_that_declares_the_suite_is_judged_by_its_own_declaration() {
             criterion(&format!("  {SUITE} "), declared),
         ]);
         assert_eq!(
-            judged_task(
-                &task,
-                suite_of(Some(&measured(0, BaselineOrigin::Measured)))
-            ),
+            judged_task(&task, &held(vec![suite(0, BaselineOrigin::Measured)])),
             task
         );
     }
@@ -109,14 +117,14 @@ fn a_task_that_declares_the_suite_is_judged_by_its_own_declaration() {
 #[test]
 fn an_inherited_measurement_holds_tasks_to_the_same_suite() {
     let task = task_with(vec![criterion("test -f made.txt", None)]);
-    let inherited = measured(
+    let inherited = suite(
         0,
         BaselineOrigin::Inherited {
             run: RunId::from("01JROOT0000000000000000000"),
         },
     );
     assert_eq!(
-        commands(&judged_task(&task, suite_of(Some(&inherited)))),
+        commands(&judged_task(&task, &held(vec![inherited]))),
         vec![("test -f made.txt", false), (SUITE, true)]
     );
 }

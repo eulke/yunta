@@ -37,9 +37,9 @@ pub struct SessionSetup {
     /// each task's files are laid over the tree its work starts from and
     /// denied to that work.
     pub spec: Option<std::sync::Arc<yunta_core::SpecFile>>,
-    /// The suite the run measured green before any work, which holds
-    /// every task as a guard. `None` when it holds none.
-    pub suite: Option<String>,
+    /// The commands the run measured green before any work — its suite,
+    /// and each `baseline.held` names — which hold every task as guards.
+    pub held: Vec<String>,
     /// The files a spec the run accepted before gave each task, which the
     /// spec it holds now does not: work the task did under the earlier
     /// spec carries them, and they leave it before the current ones go in.
@@ -161,7 +161,7 @@ impl SessionSetup {
             shared_dirs: Vec::new(),
             plan: None,
             spec: None,
-            suite: None,
+            held: Vec::new(),
             superseded: Default::default(),
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),

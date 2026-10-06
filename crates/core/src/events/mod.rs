@@ -384,6 +384,7 @@ wire_kinds! {
     RunCreated => "run_created",
     RunnerResolved => "runner_resolved",
     BaselineCaptured => "baseline_captured",
+    BaselineHeld => "baseline_held",
     NodeStarted => "node_started",
     AgentSessionOpened => "agent_session_opened",
     AgentMessage => "agent_message",

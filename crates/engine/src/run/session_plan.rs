@@ -65,7 +65,7 @@ pub(crate) async fn resolve_setup(
             .collect(),
         plan: None,
         spec: None,
-        suite: None,
+        held: Vec::new(),
         superseded: Default::default(),
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),

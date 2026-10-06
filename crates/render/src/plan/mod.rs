@@ -107,14 +107,12 @@ fn bounded(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
             ));
         }
     }
-    if let Some(suite) = &review.suite {
-        doc = doc.with(titled(
-            "every task keeps passing",
-            vec![Fields::new()
-                .push_if("the suite", "green before this run changed anything")
-                .push_command("", format!("$ {suite}"))
-                .into()],
-        ));
+    if !review.held.is_empty() {
+        let held = review.held.iter().fold(
+            Fields::new().push_if("measured", "green before this run changed anything"),
+            |fields, command| fields.push_command("", format!("$ {command}")),
+        );
+        doc = doc.with(titled("every task keeps passing", vec![held.into()]));
     }
     doc
 }

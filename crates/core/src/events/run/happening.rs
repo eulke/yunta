@@ -30,6 +30,13 @@ pub enum Happening {
         origin: BaselineOrigin,
         red: Option<i32>,
     },
+    /// The same, for a command `baseline.held` names: whether it holds
+    /// the run's tasks.
+    BaselineHeld {
+        name: crate::ids::CommandName,
+        origin: BaselineOrigin,
+        red: Option<i32>,
+    },
     /// The run moved into a checkout that already built where it stands.
     Moved {
         checkout: std::path::PathBuf,
@@ -70,6 +77,11 @@ impl From<&RunEvent> for Happening {
                 tokens: p.metrics.tokens,
             },
             RunEvent::BaselineCaptured(p) => Happening::BaselineCaptured {
+                origin: p.origin.clone(),
+                red: (!p.passed()).then_some(p.results.exit_code),
+            },
+            RunEvent::BaselineHeld(p) => Happening::BaselineHeld {
+                name: p.name.clone(),
                 origin: p.origin.clone(),
                 red: (!p.passed()).then_some(p.results.exit_code),
             },

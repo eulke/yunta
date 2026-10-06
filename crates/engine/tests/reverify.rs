@@ -33,6 +33,7 @@ fn workflow(yaml: &str) -> Workflow {
 
 fn policy() -> SchedulingPolicy {
     SchedulingPolicy {
+        baseline_held: Vec::new(),
         max_parallel_nodes: 1,
         on_interrupt: OnInterrupt::RestartNode,
         on_failure: DefaultOnFailure::Pause,

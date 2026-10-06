@@ -16,6 +16,9 @@ pub enum RunEvent {
     /// run opens on — measured by this run on its first wake, or held
     /// from birth because a run of the same lineage measured it.
     BaselineCaptured(BaselineCapturedPayload),
+    /// What a command `baseline.held` names did on the same tree as the
+    /// suite: measured beside it, or held from birth.
+    BaselineHeld(BaselineHeldPayload),
     /// The host was suspended while the run was open: a fact about the
     /// machine, not something the run did.
     HostSuspended(HostSuspendedPayload),
@@ -26,6 +29,7 @@ impl RunEvent {
     pub const KINDS: &'static [&'static str] = &[
         "run_created",
         "baseline_captured",
+        "baseline_held",
         "promotion_signaled",
         "host_suspended",
         "run_paused",
@@ -44,6 +48,7 @@ impl RunEvent {
             Self::Moved(_) => "run_moved",
             Self::Finished(_) => "run_finished",
             Self::BaselineCaptured(_) => "baseline_captured",
+            Self::BaselineHeld(_) => "baseline_held",
             Self::HostSuspended(_) => "host_suspended",
         }
     }
@@ -64,6 +69,7 @@ impl RunEvent {
             Self::Moved(_) => false,
             Self::Finished(_) => false,
             Self::BaselineCaptured(_) => false,
+            Self::BaselineHeld(_) => false,
             Self::HostSuspended(_) => false,
         }
     }

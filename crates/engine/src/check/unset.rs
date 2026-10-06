@@ -58,15 +58,23 @@ pub(crate) fn check_unset_keys(
     }
 }
 
-/// Every `format:` rule whose command the project does not declare.
-pub(crate) fn check_format_commands(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
-    for rule in config.format_rules() {
-        if config.command(&rule.run).is_none() {
+/// Every project command a `format:` rule or `baseline.held` names that
+/// the project does not declare.
+pub(crate) fn check_config_commands(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    let held = config.baseline.iter().flat_map(|baseline| &baseline.held);
+    let named = config
+        .format_rules()
+        .iter()
+        .map(|rule| ("format", &rule.run))
+        .chain(held.map(|command| ("baseline.held", command)));
+    for (field, command) in named {
+        if config.command(command).is_none() {
             let key = ConfigKey::Command {
-                command: rule.run.clone(),
+                command: command.clone(),
             };
-            errors.push(CheckError::FormatCommandUnset {
-                command: rule.run.clone(),
+            errors.push(CheckError::CommandUnsetIn {
+                field,
+                command: command.clone(),
                 near: near_key(&key, config),
             });
         }

@@ -44,7 +44,7 @@
     ␛[2m·␛[0m Greeting in other languages.
 
   ␛[1mevery task keeps passing␛[0m
-    ␛[2mthe suite   ␛[0m green before this run changed anything
+    ␛[2mmeasured    ␛[0m green before this run changed anything
     ␛[2m            ␛[0m ␛[1m$ cargo test␛[0m
 
   ␛[1mstep 1 of 2␛[0m

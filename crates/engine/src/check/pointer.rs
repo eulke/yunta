@@ -83,7 +83,7 @@ impl CheckError {
             | CheckError::MaxParallelNodesZero
             | CheckError::Composition(Composition::Unparseable { .. })
             | CheckError::BaselineWithoutSuite { .. }
-            | CheckError::FormatCommandUnset { .. }
+            | CheckError::CommandUnsetIn { .. }
             | CheckError::Composition(Composition::Cycle { .. })
             | CheckError::Composition(Composition::TooDeep { .. })
             | CheckError::PackRequirementUnmet { .. } => return None,

@@ -8,7 +8,7 @@
 
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
-    BaselineOrigin, GateResolvedPayload, TaskStatus, ToolTarget,
+    GateResolvedPayload, TaskStatus, ToolTarget,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::text::{detailed, one_line};
@@ -51,7 +51,12 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
                 yunta_core::text::counted(n, "orphan")
             ),
         },
-        H::BaselineCaptured { origin, red } => return baseline_words(origin, *red),
+        H::BaselineCaptured { origin, red } => {
+            return super::baseline_words::measured(origin, *red)
+        }
+        H::BaselineHeld { name, origin, red } => {
+            return super::baseline_words::held(name, origin, *red)
+        }
         H::Moved { checkout } => format!(
             "moved into {}, which already built this commit",
             checkout.display()
@@ -73,23 +78,6 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
 /// Whose measurement the run holds, and — when the suite was already
 /// failing — that nothing this run does can be compared against it, which
 /// a person watching must learn before trusting a comparison that passes.
-fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<Mark>, String) {
-    let held = match origin {
-        BaselineOrigin::Measured => "baseline measured".to_string(),
-        BaselineOrigin::Inherited { run } => format!("baseline inherited from run {run}"),
-    };
-    match red {
-        None => (None, held),
-        Some(exit_code) => (
-            Some(Mark::Caution),
-            format!(
-                "{held}, already red (exit {exit_code}): no comparison can find a regression, \
-                 and no task is held to it"
-            ),
-        ),
-    }
-}
-
 fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark>, String) {
     use node::happening::Happening as H;
     match happening {

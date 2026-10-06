@@ -2867,7 +2867,7 @@ fn a_format_rule_naming_an_undeclared_command_is_refused() {
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::FormatCommandUnset { command, near }
+            CheckError::CommandUnsetIn { field: "format", command, near }
                 if command.as_str() == "formt" && near.as_deref() == Some("format")
         )),
         "{errors:?}"
@@ -2878,5 +2878,29 @@ fn a_format_rule_naming_an_undeclared_command_is_refused() {
     .unwrap();
     assert!(!check(&wf, &declared)
         .iter()
-        .any(|e| matches!(e, CheckError::FormatCommandUnset { .. })));
+        .any(|e| matches!(e, CheckError::CommandUnsetIn { .. })));
+}
+
+/// A command `baseline.held` names must be one the project declares, or
+/// no task would ever be held to it.
+#[test]
+fn a_held_command_the_project_does_not_declare_is_refused() {
+    let wf: Workflow =
+        yunta_core::yaml::parse("name: w\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
+            .unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(
+        "commands:\n  lint: \"cargo clippy\"\nbaseline:\n  suite: \"cargo test\"\n  held: [lnt]\n",
+    )
+    .unwrap();
+
+    let errors = check(&wf, &config);
+
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CommandUnsetIn { field: "baseline.held", command, near }
+                if command.as_str() == "lnt" && near.as_deref() == Some("lint")
+        )),
+        "{errors:?}"
+    );
 }

@@ -68,11 +68,11 @@ impl SessionTools {
     }
 }
 
-/// Refuses a departure from the suite the run holds every task to: it
-/// is the run's, measured before any work, and no plan's to depart from.
+/// Refuses a departure from a command the run holds every task to: it is
+/// the run's, measured before any work, and no plan's to depart from.
 fn not_the_suite(access: &TaskAccess, from: &DepartsFrom) -> Result<(), RunToolError> {
-    match (from, access.suite.as_deref()) {
-        (DepartsFrom::Criterion(cmd), Some(suite)) if cmd.trim() == suite.trim() => {
+    match from {
+        DepartsFrom::Criterion(cmd) if access.held.iter().any(|held| held.trim() == cmd.trim()) => {
             Err(RunToolError::SuiteDeparture { cmd: cmd.clone() })
         }
         _ => Ok(()),

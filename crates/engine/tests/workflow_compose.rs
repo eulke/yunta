@@ -1595,6 +1595,54 @@ nodes:
     assert_eq!(child_held[0].command, parent_measured[0].command);
 }
 
+/// What the root measured of a command `baseline.held` names is the
+/// child's too: it measures nothing of its own, and holds its tasks to
+/// what the root found green.
+#[tokio::test]
+async fn a_child_is_born_holding_what_the_root_measured_of_each_held_command() {
+    let bench = Bench::with_run_id("run-parent-held").with_workflow(
+        "child-wf",
+        "name: child-wf\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n",
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let parent = "name: parent\nnodes:\n  - { id: feat, kind: workflow, use: child-wf }\n";
+    let config = format!(
+        "{CONFIG_WITH_BASELINE}  held: [lint]\ncommands:\n  lint: \"test -f marker.txt\"\n"
+    );
+
+    let RunReport { terminal, .. } = bench.run_with_config(parent, EMPTY_FIXTURE, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let held = |events: &[yunta_core::events::StoredEvent]| {
+        events
+            .iter()
+            .filter_map(|event| match event.payload() {
+                Some(yunta_core::events::EventPayload::Run(
+                    yunta_core::events::RunEvent::BaselineHeld(held),
+                )) => Some((held.name.to_string(), held.origin.clone(), held.passed())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        held(&bench.events()),
+        vec![("lint".to_string(), BaselineOrigin::Measured, true)]
+    );
+    let (child_id, _) = children_created(&bench.events())[0].clone();
+    assert_eq!(
+        held(&bench.storage.events_for_run(&child_id).unwrap()),
+        vec![(
+            "lint".to_string(),
+            BaselineOrigin::Inherited {
+                run: "run-parent-held".into()
+            },
+            true
+        )]
+    );
+}
+
 /// A run born holding a measurement has not been woken: its first wake
 /// is a first wake, not a resume of a history it does not have.
 #[tokio::test]

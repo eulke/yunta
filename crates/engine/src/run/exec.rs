@@ -191,9 +191,9 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
         // handler that needs the run's state read the same derivation.
         let events = ctx.load_events().await?;
         let state = crate::replay::derive(&events);
-        if let Some(suite) = schedule::owed_baseline(&state, policy) {
+        if let Some(owed) = schedule::owed_baseline(&state, policy) {
             if policy.measures_aside {
-                aside.start(ctx, suite);
+                aside.start(ctx, owed);
             }
         }
         let decision = schedule::decide(&ctx.manifest.workflow, &state, policy);
@@ -283,7 +283,7 @@ fn step<'s>(
 ) -> Stepped<'s> {
     match decision {
         Decision::Broken { diagnostic } => Box::pin(fails(steps::broken(ctx, diagnostic))),
-        Decision::MeasureBaseline { suite } => Box::pin(goes_on(baseline::measure(ctx, suite))),
+        Decision::MeasureBaseline { owed } => Box::pin(goes_on(baseline::measure(ctx, owed))),
         Decision::Finish => Box::pin(ends(steps::run_finished(ctx, mode))),
         Decision::Pause { reason } => Box::pin(ends(pause(ctx, reason))),
         Decision::Fail { reason } => Box::pin(ends(steps::run_failed(ctx, reason))),

@@ -5,14 +5,16 @@
 //! than walking the log for a `run_finished` itself. With four kinds
 //! that move a run between phases, a second fold is a second answer.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::run::kinds::RunEvent;
 use crate::events::run::suspensions::{Suspension, Suspensions};
 use crate::events::{
-    BaselineCapturedPayload, BaselineOrigin, EnvironmentDrift, Evidence, ExecutionEnvironment,
-    TerminalState, TokenUsage,
+    BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, EnvironmentDrift, Evidence,
+    ExecutionEnvironment, TerminalState, TokenUsage,
 };
 use crate::ids::{ModeName, Seq};
 
@@ -59,6 +61,9 @@ pub struct RunLedger {
     /// The measurement this run holds: its own, or the one it was born
     /// holding. `None` for a lineage whose root declared no suite.
     baseline: Option<BaselineCapturedPayload>,
+    /// What each command `baseline.held` names did beside the suite, by
+    /// name.
+    held: BTreeMap<crate::ids::CommandName, BaselineHeldPayload>,
     /// Every span the host was suspended while the run was open.
     suspensions: Suspensions,
     /// Whether an invocation has woken this run. A birth writes any
@@ -142,6 +147,11 @@ impl RunLedger {
     /// holding. `None` for a lineage whose root declared no suite.
     pub fn baseline(&self) -> Option<&BaselineCapturedPayload> {
         self.baseline.as_ref()
+    }
+
+    /// What each held command did beside the suite, by name.
+    pub fn held(&self) -> &BTreeMap<crate::ids::CommandName, BaselineHeldPayload> {
+        &self.held
     }
 
     /// Whether the run's own events say an invocation woke it: a
@@ -261,6 +271,10 @@ impl RunLedger {
                 // holding a measurement is not.
                 self.woken |= p.origin == BaselineOrigin::Measured;
                 self.baseline = Some(p.clone());
+            }
+            RunEvent::BaselineHeld(p) => {
+                self.woken |= p.origin == BaselineOrigin::Measured;
+                self.held.insert(p.name.clone(), p.clone());
             }
             // The machine slept: a fact about the host, not something an
             // invocation did, so it neither wakes the run nor moves it

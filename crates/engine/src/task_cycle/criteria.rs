@@ -203,7 +203,7 @@ pub async fn pre_check(
     let mut ordered: Vec<&Criterion> = task
         .criteria
         .iter()
-        .filter(|criterion| !memo.suite().pending(criterion))
+        .filter(|criterion| !memo.held().pending(criterion))
         .collect();
     // Stable sort: criteria the log never priced (u64::MAX key) keep
     // declared order among themselves.
@@ -276,7 +276,7 @@ pub async fn post_check(
             tree: tree.content,
         });
     }
-    let (ready, pending) = memo.suite().split(guards);
+    let (ready, pending) = memo.held().split(guards);
     let (ran, mut waiting) = run_until_red(&task.id, &ready, &tree, cwd, memo, supervision).await?;
     let red = ran.iter().any(|run| run.exit_code != 0);
     runs.extend(ran);
@@ -290,7 +290,7 @@ pub async fn post_check(
     }
     // The suite still being measured is waited for here, where its answer
     // is what decides whether it holds the task at all.
-    let pending = memo.suite().judging(pending, supervision.cancel).await;
+    let pending = memo.held().judging(pending, supervision.cancel).await;
     let (ran, waiting) = run_until_red(&task.id, &pending, &tree, cwd, memo, supervision).await?;
     runs.extend(ran);
     Ok(PostCheck {

@@ -12,8 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 46 rows and **56 `kind` names**.
-It had 45 rows and 55 kinds before `write_formatted` was added. The table
+The current Run Contract event table has 47 rows and **57 `kind` names**.
+It had 46 rows and 56 kinds before `baseline_held` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -160,6 +160,20 @@ Un nodo con sesión resuelve su runner antes de armar su contexto: el contexto l
 | `origin` | `{type: measured}` \| `{type: inherited, run}` | sí | de quién es la medición: `measured`, este run la tomó; `inherited`, nació teniéndola y `run` nombra a la raíz del linaje que la midió. Un log sin el campo se lee `measured` |
 | `tree` | `Option<TreeId>` | no | el árbol sobre el que se midió la suite: una invocación posterior toma la respuesta para ese árbol. Ausente en una medición heredada —habla del árbol con que abrió el run que la midió— y en un log anterior al campo |
 | `duration_ms` | `Option<u64>` | no | cuánto tardó la medición; ausente donde `tree` lo está |
+
+### 5.3a `baseline_held` — engine
+**Fuente:** un comando de `baseline.held`, medido al lado de la suite sobre
+el mismo árbol (D256). Si pasó, sostiene cada tarea como `guard`, como la
+suite; si ya estaba rojo, no sostiene ninguna.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `name` | `CommandName` | sí | el nombre del comando, como lo declara `commands:` |
+| `command` | string | sí | lo que el proyecto corre para él |
+| `results` | `{exit_code, summary}` | sí | cómo salió, y el final de lo que imprimió |
+| `origin` | `{type: measured}` \| `{type: inherited, run}` | sí | de quién es la medición, como en `baseline_captured` |
+| `tree` | `Option<TreeId>` | no | el árbol sobre el que se midió; ausente en una medición heredada |
+| `duration_ms` | `Option<u64>` | no | cuánto tardó; ausente donde `tree` lo está |
 
 ### 5.4 `node_started` — engine
 **Fuente:** node_id, intento N

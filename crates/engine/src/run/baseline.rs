@@ -16,9 +16,10 @@
 use std::path::Path;
 
 use yunta_core::events::{
-    BaselineCapturedPayload, BaselineOrigin, BaselineResults, EventPayload, RunEvent,
+    BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, BaselineResults, EventPayload,
+    RunEvent,
 };
-use yunta_core::{ContentHash, RunId};
+use yunta_core::{CommandName, ContentHash, RunId};
 
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
@@ -32,6 +33,59 @@ pub fn suite(manifest: &yunta_core::Manifest) -> Option<&str> {
         .as_ref()
         .filter(|_| reads_the_baseline(&manifest.workflow))
         .map(|baseline| baseline.suite.as_str())
+}
+
+/// The commands `baseline.held` names that a run of `manifest` measures
+/// beside its suite, each with what the project runs for it — none when
+/// it measures no suite. A name `commands:` does not declare is `check`'s
+/// to refuse, and measures nothing.
+pub fn held(manifest: &yunta_core::Manifest) -> Vec<(CommandName, String)> {
+    let Some(baseline) = manifest.config.baseline.as_ref() else {
+        return Vec::new();
+    };
+    if suite(manifest).is_none() {
+        return Vec::new();
+    }
+    baseline
+        .held
+        .iter()
+        .filter_map(|name| Some((name.clone(), manifest.config.command(name)?.to_string())))
+        .collect()
+}
+
+/// What a run still owes of its lineage's measurement.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Owed {
+    /// The suite, when the lineage holds no measurement of it.
+    pub suite: Option<String>,
+    /// Each command `baseline.held` names that the lineage holds no
+    /// measurement of, with what the project runs for it.
+    pub held: Vec<(CommandName, String)>,
+}
+
+impl Owed {
+    /// The suite alone.
+    pub fn suite(suite: impl Into<String>) -> Self {
+        Owed {
+            suite: Some(suite.into()),
+            held: Vec::new(),
+        }
+    }
+
+    /// Whether nothing is owed.
+    pub fn is_empty(&self) -> bool {
+        self.suite.is_none() && self.held.is_empty()
+    }
+
+    /// Every command owed, as tasks are held to them: the held ones, then
+    /// the suite.
+    pub fn commands(&self) -> Vec<String> {
+        self.held
+            .iter()
+            .map(|(_, command)| command.clone())
+            .chain(self.suite.clone())
+            .collect()
+    }
 }
 
 /// Whether a run of `workflow` reads its lineage's measurement: a node
@@ -91,6 +145,8 @@ pub struct BirthBaseline {
     pub command: String,
     pub results: BaselineResults,
     pub hash: ContentHash,
+    /// What each command `baseline.held` names did beside the suite.
+    pub held: Vec<BaselineHeldPayload>,
 }
 
 impl BirthBaseline {
@@ -106,6 +162,21 @@ impl BirthBaseline {
             tree: None,
             duration_ms: None,
         }
+    }
+
+    /// Each held command's fact as the run receiving it records it.
+    pub(super) fn held(&self) -> Vec<BaselineHeldPayload> {
+        self.held
+            .iter()
+            .map(|held| BaselineHeldPayload {
+                origin: BaselineOrigin::Inherited {
+                    run: self.measured_by.clone(),
+                },
+                tree: None,
+                duration_ms: None,
+                ..held.clone()
+            })
+            .collect()
     }
 }
 
@@ -125,23 +196,83 @@ pub fn inherited(from: &RunId, from_state: &RunState) -> Option<BirthBaseline> {
         command: held.command.clone(),
         results: held.results.clone(),
         hash: held.hash.clone(),
+        held: from_state.run.held().values().cloned().collect(),
     })
 }
 
-/// Measures the suite the scheduler decided this run owes: runs it on
-/// the tree the run opens on, under the run's own supervision, keeps
-/// everything it wrote under `baseline/`, and records the measurement.
+/// Measures what the scheduler decided this run owes: runs the suite and
+/// each held command on the tree the run opens on, under the run's own
+/// supervision, keeps everything the suite wrote under `baseline/`, and
+/// records each measurement.
 ///
-/// A suite the cancellation stops records nothing and answers `Ok(())`:
+/// A command the cancellation stops records nothing and answers `Ok(())`:
 /// a step is not a node, so there is no node end to write, and the
 /// loop's next turn sees the token fired and pauses the run. The next
 /// invocation finds no measurement on the log and measures then.
-pub(super) async fn measure(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError> {
-    measure_in(ctx, suite, ctx.worktree, ctx.root_supervision()).await
+pub(super) async fn measure(ctx: &RunCtx<'_>, owed: Owed) -> Result<(), RunError> {
+    measure_in(ctx, owed, ctx.worktree, ctx.root_supervision()).await
 }
 
-/// [`measure`], with the suite run in `cwd` under `supervision`.
+/// [`measure`], with every command run in `cwd` under `supervision`.
 pub(super) async fn measure_in(
+    ctx: &RunCtx<'_>,
+    owed: Owed,
+    cwd: &Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(), RunError> {
+    if let Some(suite) = owed.suite {
+        measure_suite(ctx, suite, cwd, supervision).await?;
+    }
+    for (name, command) in owed.held {
+        if supervision.cancel.is_cancelled() {
+            break;
+        }
+        measure_held(ctx, name, command, cwd, supervision).await?;
+    }
+    Ok(())
+}
+
+/// One command `baseline.held` names, run beside the suite on the same
+/// tree: it holds every task when it passes there.
+async fn measure_held(
+    ctx: &RunCtx<'_>,
+    name: CommandName,
+    command: String,
+    cwd: &Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(), RunError> {
+    let measured_on = ctx.memo.tree_for(&command, cwd, supervision).await.ok();
+    let started = std::time::Instant::now();
+    let output = match super::check_exec::run_command(supervision, cwd, &command).await? {
+        super::check_exec::CommandRun::Done(output) => output,
+        super::check_exec::CommandRun::Cancelled => return Ok(()),
+    };
+    let took = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let passed = output.exit_code == 0;
+    if let Some(tree) = measured_on.as_ref().filter(|_| passed) {
+        ctx.memo.passed_on(&command, tree);
+    }
+    ctx.emit(
+        None,
+        EventPayload::Run(RunEvent::BaselineHeld(BaselineHeldPayload {
+            name,
+            command: command.clone(),
+            results: BaselineResults {
+                exit_code: output.exit_code,
+                summary: summary(&output.stdout),
+            },
+            origin: BaselineOrigin::Measured,
+            tree: measured_on.map(|tree| tree.content().clone()),
+            duration_ms: Some(took),
+        })),
+    )
+    .await?;
+    ctx.memo.held().settle(&command, passed);
+    Ok(())
+}
+
+/// The suite, measured on the tree the run opens on.
+async fn measure_suite(
     ctx: &RunCtx<'_>,
     suite: String,
     cwd: &Path,
@@ -185,7 +316,7 @@ pub(super) async fn measure_in(
     .await?;
     // The checks of a loop that started beside the measurement wait for
     // this answer.
-    ctx.memo.suite().settle(&command, output.exit_code == 0);
+    ctx.memo.held().settle(&command, output.exit_code == 0);
     Ok(())
 }
 

@@ -128,7 +128,7 @@ pub(super) fn review() -> PlanReview {
         plan,
         departed: Vec::new(),
         spec: Some(spec),
-        suite: Some("cargo test".to_string()),
+        held: vec!["cargo test".to_string()],
         tasks: vec![
             TaskReview {
                 task: "greet".into(),

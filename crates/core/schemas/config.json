@@ -227,6 +227,13 @@
       "description": "`baseline:` — backs the `baseline_compare` check kind; the suite the engine\nruns and re-runs to catch regressions (\"cero regresiones\" as a data\ncomparison, never an agent's claim).",
       "type": "object",
       "properties": {
+        "held": {
+          "description": "Project commands measured beside the suite, on the same tree: each\nthat passes there holds every task of a loop as a guard, as the\nsuite does — the project's lint, for one.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommandName"
+          }
+        },
         "suite": {
           "type": "string"
         }

@@ -83,7 +83,7 @@ use crate::observer::RunObserver;
 use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
-pub use baseline::BirthBaseline;
+pub use baseline::{BirthBaseline, Owed as OwedMeasurement};
 pub use budget::session_token_budget;
 pub use close::{close_run, CloseRunError};
 pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};

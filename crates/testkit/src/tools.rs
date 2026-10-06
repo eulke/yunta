@@ -218,7 +218,7 @@ impl ToolsHost {
             denied: Vec::new(),
             checks: Default::default(),
             plan: None,
-            suite: None,
+            held: Vec::new(),
         }
     }
 

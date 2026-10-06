@@ -440,14 +440,16 @@ pub enum CheckError {
     #[error("{sites}: {}", yunta_core::ConfigKey::BaselineSuite)]
     BaselineWithoutSuite { sites: String },
 
-    /// A `format:` rule whose command the project does not declare: every
-    /// write it covers would go unformatted, with nobody told why.
+    /// A config key that names a project command the project does not
+    /// declare — a `format:` rule, a command `baseline.held` holds tasks
+    /// to — would do nothing, with nobody told why.
     #[error(
-        "`format` runs `{command}`, which `commands:` does not declare — declare it, or drop \
-         the rule{}",
+        "`{field}` names `{command}`, which `commands:` does not declare — declare it, or drop \
+         it{}",
         super::pointer::near(.near.as_ref())
     )]
-    FormatCommandUnset {
+    CommandUnsetIn {
+        field: &'static str,
         command: yunta_core::CommandName,
         near: Option<String>,
     },

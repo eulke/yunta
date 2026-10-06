@@ -344,7 +344,7 @@ async fn open_and_dispatch(
         staged: Default::default(),
         checks: Default::default(),
         plan: setup.plan.clone(),
-        suite: setup.suite.clone(),
+        held: setup.held.clone(),
     });
     // One door for every session: the per-attempt listener (mandatory
     // for a task session, which reads its task through it), the brief,

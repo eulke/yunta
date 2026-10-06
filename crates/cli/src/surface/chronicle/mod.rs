@@ -12,6 +12,7 @@
 //! `Capability::as_str`. Nothing here formats a domain type with
 //! `Debug`: a reader is owed a word, not a Rust identifier.
 
+mod baseline_words;
 mod scope_words;
 mod words;
 

@@ -16,6 +16,7 @@ mod dispatch;
 mod error;
 mod evidence;
 mod expansion;
+mod held;
 mod judge;
 mod memo;
 mod outcome;
@@ -24,7 +25,6 @@ mod recorded;
 mod session;
 mod spec;
 mod stream;
-mod suite;
 mod tree;
 
 use std::path::PathBuf;
@@ -51,11 +51,11 @@ pub use criteria::{post_check, pre_check, PostCheck};
 pub use dispatch::DispatchError;
 pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
 pub(crate) use evidence::locates_a_refusal;
+pub use held::HeldGate;
 pub(crate) use judge::{judge, Judgement, Work};
 pub use memo::{Memo, Memoized};
 pub use session::{KeepsOutput, RunToolsNeed, SessionObserver, SessionSetup};
 pub(crate) use stream::record_unlisted_tools;
-pub use suite::SuiteGate;
 pub(crate) use tree::content_of;
 
 pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};

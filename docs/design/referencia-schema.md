@@ -73,6 +73,8 @@ shared_dirs:                        # caches que comparten todos los comandos y 
   PIP_CACHE_DIR: ~/.cache/yunta/pip   # exportado bajo la variable; escribible en cada sandbox que escribe
 baseline:
   suite: "cargo test --workspace"
+  held: [lint]                      # comandos de `commands:` medidos al lado de la suite: el que pasa
+                                    # en la base sostiene cada tarea como guarda, igual que la suite (D256)
 coverage:
   cmd: "cargo llvm-cov --summary-only"
   threshold: 90

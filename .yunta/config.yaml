@@ -33,6 +33,9 @@ defaults:
 # nodes (fragua's `tests`) fail when something that passed stops passing.
 baseline:
   suite: "cargo test --workspace"
+  # Measured beside the suite: every task keeps it green when it was green
+  # before the run changed anything.
+  held: [lint]
 
 
 # What this project runs for each capability a workflow names

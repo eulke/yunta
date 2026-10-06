@@ -276,6 +276,10 @@ pub async fn create_run(
             EventPayload::Run(RunEvent::BaselineCaptured(baseline.captured())),
         )
         .await?;
+        for held in baseline.held() {
+            log.record(None, EventPayload::Run(RunEvent::BaselineHeld(held)))
+                .await?;
+        }
     }
 
     Ok(run_dir)

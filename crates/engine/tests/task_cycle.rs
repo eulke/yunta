@@ -794,7 +794,7 @@ async fn a_red_guard_answers_without_waiting_for_the_suite_being_measured() {
         vec![cmd("test -f a.txt"), guard(suite), guard("exit 1")],
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    memo.suite().expect(suite);
+    memo.held().expect(&[suite.to_string()]);
 
     let checked = tokio::time::timeout(
         std::time::Duration::from_secs(2),

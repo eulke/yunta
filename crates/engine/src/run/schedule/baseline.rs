@@ -10,14 +10,27 @@ use yunta_core::{NodeId, Workflow};
 
 use super::{Decision, Policy};
 use crate::replay::RunState;
-use crate::run::baseline::waits_for_the_measurement;
+use crate::run::baseline::{waits_for_the_measurement, Owed};
 
-/// The measurement this run's lineage declared and its log does not hold.
-/// A run born holding one — a `kind: workflow` child, a promotion
-/// successor — never owes it.
-pub fn owed_baseline<'p>(state: &RunState, policy: &'p Policy) -> Option<&'p str> {
+/// What of the measurement this run's lineage declared its log does not
+/// hold: the suite, and each held command. A run born holding one — a
+/// `kind: workflow` child, a promotion successor — never owes it.
+pub fn owed_baseline(state: &RunState, policy: &Policy) -> Option<Owed> {
     let suite = policy.baseline_suite.as_deref()?;
-    state.run.baseline().is_none().then_some(suite)
+    let held = state.run.baseline();
+    if held.is_some_and(|held| held.origin != yunta_core::events::BaselineOrigin::Measured) {
+        return None;
+    }
+    let owed = Owed {
+        suite: held.is_none().then(|| suite.to_string()),
+        held: policy
+            .baseline_held
+            .iter()
+            .filter(|(name, _)| !state.run.held().contains_key(name))
+            .cloned()
+            .collect(),
+    };
+    (!owed.is_empty()).then_some(owed)
 }
 
 /// `next`, unless the run owes its measurement before it: always, when it
@@ -30,10 +43,8 @@ pub(super) fn before(
     next: Decision,
 ) -> Decision {
     match owed_baseline(state, policy) {
-        Some(suite) if !policy.measures_aside || reads(workflow, policy, &next) => {
-            Decision::MeasureBaseline {
-                suite: suite.to_string(),
-            }
+        Some(owed) if !policy.measures_aside || reads(workflow, policy, &next) => {
+            Decision::MeasureBaseline { owed }
         }
         _ => next,
     }

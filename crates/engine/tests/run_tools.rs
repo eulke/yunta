@@ -730,18 +730,7 @@ async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
 #[tokio::test]
 async fn a_task_session_reads_which_guard_is_the_runs_suite() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
-    let baseline = yunta_core::events::BaselineCapturedPayload {
-        command: "make test".to_string(),
-        results: yunta_core::events::BaselineResults {
-            exit_code: 0,
-            summary: String::new(),
-        },
-        hash: yunta_core::sha256_hex(b""),
-        origin: yunta_core::events::BaselineOrigin::Measured,
-        tree: None,
-        duration_ms: None,
-    };
-    let task = yunta_engine::judged_task(&greeting_task(), yunta_engine::suite_of(Some(&baseline)));
+    let task = yunta_engine::judged_task(&greeting_task(), &["make test".to_string()]);
     let session = host
         .task_session(
             "implement",

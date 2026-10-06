@@ -557,6 +557,52 @@
         "hash"
       ]
     },
+    "BaselineHeldPayload": {
+      "description": "What one project command `baseline.held` names did on the tree the\nrun's lineage measured its suite on, and whose measurement it is.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "What the project runs for it.",
+          "type": "string"
+        },
+        "duration_ms": {
+          "description": "How long it took. Absent where `tree` is.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "name": {
+          "description": "The command's name, as `commands:` declares it.",
+          "$ref": "#/$defs/CommandName"
+        },
+        "origin": {
+          "$ref": "#/$defs/BaselineOrigin"
+        },
+        "results": {
+          "$ref": "#/$defs/BaselineResults"
+        },
+        "tree": {
+          "description": "The git tree it was measured on; absent for a measurement the run\nwas born holding.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "command",
+        "results",
+        "origin"
+      ]
+    },
     "BaselineOrigin": {
       "description": "Who took the measurement a run holds: this run, or the root of the\nlineage it was born into.\n\nA lineage measures once. A run born of another — a `kind: workflow`\nchild, a promotion successor — is born holding the root's\nmeasurement, so every comparison anywhere in the lineage answers the\nsame question: what worked before the invocation started.",
       "oneOf": [
@@ -1673,6 +1719,19 @@
             }
           },
           "$ref": "#/$defs/BaselineCapturedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "baseline_held"
+            }
+          },
+          "$ref": "#/$defs/BaselineHeldPayload",
           "required": [
             "kind"
           ]

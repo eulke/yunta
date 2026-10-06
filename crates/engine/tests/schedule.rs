@@ -39,6 +39,7 @@ nodes:
 
 fn policy() -> SchedulingPolicy {
     SchedulingPolicy {
+        baseline_held: Vec::new(),
         max_parallel_nodes: 2,
         on_interrupt: OnInterrupt::RestartNode,
         on_failure: DefaultOnFailure::Pause,

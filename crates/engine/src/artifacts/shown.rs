@@ -138,8 +138,8 @@ fn plan_reviewed(
 ) -> Result<yunta_core::shown::PlanReview, super::HeldError> {
     let plan = yunta_core::shape::read::<TasksFile>(bytes, path.display().to_string())?;
     let departed = departed(&plan, &state.tasks);
-    let suite = crate::tasks::suite_of(state.run.baseline());
-    let mut review = crate::tasks::plan_review(plan, None, suite, departed);
+    let held = crate::tasks::held_of(&state.run);
+    let mut review = crate::tasks::plan_review(plan, None, &held, departed);
     review.handed_over = shown
         .producer
         .as_ref()
@@ -214,7 +214,7 @@ fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
             let read = crate::tasks::plan_review(
                 review.plan.clone(),
                 Some(spec.clone()),
-                review.suite.as_deref(),
+                &review.held,
                 review.departed.clone(),
             );
             **review = yunta_core::shown::PlanReview {
