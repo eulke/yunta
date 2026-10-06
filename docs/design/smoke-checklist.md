@@ -232,3 +232,7 @@ logs its stdin and answers as told. Each item is what the engine relies on.
 - The first run of a freshly linked binary takes 310–500 ms (24 MB: ~500 ms);
   later runs take 5–10 ms. The suite runs 229 test binaries in sequence, and
   a suite whose binaries were linked again spends ~200–230 s outside any test.
+- `yunta doctor` links a probe with `cc` and says so: 307 ms first run, 4 ms
+  the next, here. Whether the Developer Tools exemption brings the first run
+  down to the next, and what a suite then spends outside its tests, is still
+  to be measured on a terminal a person exempts.

@@ -12,12 +12,16 @@
 //! budget, and over the part of it always kept free — under which a run
 //! stops.
 //!
+//! Says, on macOS, what a new binary's first run costs here — what a run
+//! whose suite links its test binaries again pays for each of them.
+//!
 //! Also validates every installed pack's own `requires:` against this
 //! project's merged config: roles resolvable, `mcp_servers:` defined,
 //! and — the one part `yunta_engine::check_pack_requires` deliberately
 //! leaves to this command, since it needs real filesystem access —
 //! `requires.programs` present on `PATH`.
 
+mod first_run;
 mod session;
 
 use std::collections::BTreeSet;
@@ -42,6 +46,9 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     }
     checks.extend(super::forge::forge_checks(&ctx).await);
     checkouts(&ctx, &mut checks).await;
+    if let Some((found, said)) = first_run::first_run().await {
+        checks.push(found, "first run", said);
+    }
     check_installed_pack_requires(&ctx.cwd, &ctx.project.config, &mut checks, &mut steps);
     check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await;
     if session {

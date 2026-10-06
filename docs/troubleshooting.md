@@ -289,6 +289,22 @@ then sleeps again would leave a session hanging. Commands and checks don't
 wait. If nothing moves after those two minutes, the run is waiting on something
 else: check `yunta status`.
 
+## A suite takes minutes longer than its tests on macOS
+
+```
+▲ first run    a new binary's first run takes 307 ms here, its next 4 ms: macOS assesses each new executable before its first run …
+```
+
+`yunta doctor` links a binary nobody ran before and runs it twice. macOS
+assesses every executable it has not seen before letting it run, and a Rust
+suite links one binary per test target: a run whose tasks change a base crate
+links them all again, and pays that assessment once for each of them, outside
+any test — on this repository, two hundred binaries and over three minutes per
+suite. Add the terminal you run yunta from under System Settings › Privacy &
+Security › Developer Tools, open it again, and run `yunta doctor` once more:
+processes it starts are no longer assessed, and the first run costs what the
+next one does.
+
 ## A run says it `needs you`
 
 Not stuck — paused on a `gate`, waiting for a human decision, and it
