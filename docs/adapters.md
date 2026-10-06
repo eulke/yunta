@@ -81,26 +81,26 @@ adapters:
 model, agent, permissions and budget are typed fields a node or runner sets,
 never settings. Each adapter reads its own, and `yunta doctor` (and every
 `run`, before opening a session) refuses a key it does not read, naming the
-keys it does. `codex` reads `sandbox`: the `codex exec --sandbox` mode the
-`edit` profile runs under (`workspace-write` by default; `read-only` narrows
-it, `danger-full-access` widens it). It also reads `network_access`: the
-`workspace-write` sandbox keeps every socket off, loopback included, so a
-test suite that listens on `127.0.0.1` fails inside a session; `true` opens
-the network to those sessions. The CLI has no loopback-only switch, so it
-opens all of it. `claude-code` reads none.
+keys it does. Both read `sandbox`: the mode the `edit` profile's commands run
+under (`workspace-write` by default; `read-only` narrows it,
+`danger-full-access` widens it).
 
 ```yaml
 adapters:
   codex:
     adapter_settings:
-      network_access: true
+      sandbox: read-only
 ```
 
-The three permission profiles map onto each CLI's own mechanism. On
-`claude-code`, `read-only` allows the non-mutating tools, `edit` allows file
-editing and nothing that reaches a shell or the network, and `full` leaves the
-whole tool set available; on `codex`, they are the `read-only`,
-`workspace-write` and `danger-full-access` sandbox modes. `budget.max_turns`
+The three permission profiles map onto the same confinement on both CLIs. A
+session's commands run in its CLI's own sandbox, enforced by the operating
+system: under `read-only` they write nothing of the checkout, under `edit` they
+write the checkout and the run's directories, and under `full` nothing confines
+them. Whether they reach the network — loopback included — is the node's
+`network:`, else the project's `permissions.network.default`, else open; a
+closed network keeps a test suite from listening on `127.0.0.1`, so leave it
+open where one does. `check` refuses `network: false` on a `full` node, whose
+commands nothing confines. `budget.max_turns`
 reaches `claude-code` as `--max-turns`; `codex exec` has no turn cap, so there
 the engine's own timeout and token budget bound the session. The timeout
 counts time the host is awake: a machine that sleeps spends none of it, and

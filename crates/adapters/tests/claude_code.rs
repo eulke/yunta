@@ -216,7 +216,10 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
         .iter()
         .position(|a| a == "--tools")
         .expect("ReadOnly restricts the tools");
-    assert_eq!(args[tools_pos + 1], "Read,Grep,Glob,WebFetch,WebSearch");
+    assert_eq!(
+        args[tools_pos + 1],
+        "Read,Grep,Glob,WebFetch,WebSearch,Bash"
+    );
     let mode_pos = args
         .iter()
         .position(|a| a == "--permission-mode")
@@ -542,12 +545,12 @@ async fn capability_permission_profiles_give_edit_a_bounded_tool_set() {
         .iter()
         .position(|a| a == "--tools")
         .expect("Edit restricts the tools");
-    // The exact set: the file-editing tools plus read-only navigation,
-    // and nothing that reaches a shell (Bash) or the network (WebFetch,
-    // WebSearch) — the bound the profile's name promises.
+    // The exact set: the file-editing tools, read-only navigation and a
+    // shell the sandbox confines, and no web tools — the bound the
+    // profile's name promises.
     assert_eq!(
         args[pos + 1],
-        "Read,Grep,Glob,Edit,Write,MultiEdit,NotebookEdit"
+        "Read,Grep,Glob,Bash,Edit,Write,MultiEdit,NotebookEdit"
     );
 }
 
@@ -1193,7 +1196,7 @@ async fn a_session_never_opens_under_settings_that_do_not_read() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = ClaudeCodeAdapter::new(&AdapterSettings {
         adapter_settings: Some(
-            serde_json::from_str(r#"{"sandbox": "read-only"}"#).expect("the settings parse"),
+            serde_json::from_str(r#"{"sandbox": "no-such-mode"}"#).expect("the settings parse"),
         ),
         binary: Some(stub_path()),
     });
@@ -1203,7 +1206,7 @@ async fn a_session_never_opens_under_settings_that_do_not_read() {
     };
     let text = yunta_core::describe(&error);
     assert!(
-        text.contains("cannot read its `adapter_settings`") && text.contains("sandbox"),
+        text.contains("cannot read its `adapter_settings`") && text.contains("no-such-mode"),
         "the refusal names what it could not read: {text}"
     );
 }
@@ -1263,15 +1266,24 @@ async fn a_claude_session_without_a_hook_or_an_engine_to_ask_fails_before_spawni
     }
 }
 
-/// An `edit` session exposes no shell, so both channels are exact; a
-/// `full` one does, and nothing fences a shell by path.
+/// A `read_only` session's commands write nothing, so the session is
+/// exact; an `edit` one's are confined to the workspace, and a `full`
+/// one's to nothing at all.
 #[tokio::test]
-async fn an_edit_profile_reports_exact_coverage_and_full_reports_tools_only() {
+async fn coverage_follows_what_the_sandbox_leaves_commands() {
     for (profile, expected) in [
-        (PermissionProfile::Edit, Coverage::Exact),
-        (PermissionProfile::Full, Coverage::ToolsOnly),
+        (PermissionProfile::ReadOnly, None),
+        (PermissionProfile::Edit, Some("workspace")),
+        (PermissionProfile::Full, Some("unconfined")),
     ] {
         let dir = tempfile::tempdir().unwrap();
+        let expected = match expected {
+            None => Coverage::Exact,
+            Some("workspace") => Coverage::WidenedToRoots {
+                roots: vec![dir.path().to_path_buf()],
+            },
+            Some(_) => Coverage::ToolsOnly,
+        };
         let mut req = request(dir.path().to_path_buf());
         req.permissions = profile;
         let events = spawn_with(&dir, req, &[INIT_LINE, RESULT_LINE]).await;
@@ -1281,6 +1293,48 @@ async fn an_edit_profile_reports_exact_coverage_and_full_reports_tools_only() {
         };
         assert_eq!(fence.as_ref(), Some(&expected), "under {profile:?}");
     }
+}
+
+/// The settings a session is handed carry the sandbox its commands run in:
+/// one that fails rather than run unconfined, whose network the request
+/// opens or keeps closed, that writes nothing of the checkout under
+/// `read_only`, and that a `full` session runs without.
+#[tokio::test]
+async fn a_session_s_commands_run_in_the_sandbox_its_profile_and_request_say() {
+    let sandbox = |profile: PermissionProfile, network: bool| async move {
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(dir.path().to_path_buf());
+        req.permissions = profile;
+        req.network = network;
+        let args = argv_for(dir.path(), req).await;
+        let settings = args
+            .iter()
+            .position(|arg| arg == "--settings")
+            .map(|pos| args[pos + 1].clone())
+            .expect("a session is handed its settings");
+        let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+        (settings["sandbox"].clone(), dir)
+    };
+
+    let (open, _dir) = sandbox(PermissionProfile::Edit, true).await;
+    assert_eq!(open["enabled"], true);
+    assert_eq!(open["failIfUnavailable"], true);
+    assert_eq!(open["allowUnsandboxedCommands"], false);
+    assert_eq!(open["network"]["allowedDomains"], serde_json::json!(["*"]));
+    assert_eq!(open["network"]["allowLocalBinding"], true);
+
+    let (closed, _dir) = sandbox(PermissionProfile::Edit, false).await;
+    assert_eq!(closed["network"], serde_json::json!({}));
+
+    let (read_only, dir) = sandbox(PermissionProfile::ReadOnly, true).await;
+    assert_eq!(read_only["network"], serde_json::json!({}));
+    assert_eq!(
+        read_only["filesystem"]["denyWrite"],
+        serde_json::json!([dir.path()])
+    );
+
+    let (full, _dir) = sandbox(PermissionProfile::Full, true).await;
+    assert!(full.is_null(), "{full}");
 }
 
 /// The hook's refusal comes back through the conversation as an errored

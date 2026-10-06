@@ -765,12 +765,23 @@ async fn argv_with(
     profile: PermissionProfile,
     cli_config: yunta_core::CliConfig,
 ) -> Vec<String> {
+    argv_of(adapter, profile, cli_config, true).await
+}
+
+/// The same, for a session whose commands may reach the network or not.
+async fn argv_of(
+    adapter: &CodexAdapter,
+    profile: PermissionProfile,
+    cli_config: yunta_core::CliConfig,
+    network: bool,
+) -> Vec<String> {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
     let mut req = request(dir.path().to_path_buf());
     req.permissions = profile;
     req.cli_config = cli_config;
+    req.network = network;
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),
@@ -818,28 +829,25 @@ async fn an_isolated_session_ignores_the_person_s_own_config_and_rules() {
     );
 }
 
+/// A session's request says whether its commands reach the network; only
+/// `workspace-write` reads it — `read-only` has none to open and
+/// `danger-full-access` never closed it.
 #[tokio::test]
-async fn network_access_opens_the_network_only_where_workspace_write_closed_it() {
+async fn the_request_opens_the_network_only_where_workspace_write_closed_it() {
     const OPENS: &str = "sandbox_workspace_write.network_access=true";
-    for (settings, profile, opened) in [
-        (serde_json::json!({}), PermissionProfile::Edit, false),
+    for (network, settings, profile, opened) in [
+        (true, serde_json::json!({}), PermissionProfile::Edit, true),
+        (false, serde_json::json!({}), PermissionProfile::Edit, false),
         (
-            serde_json::json!({ "network_access": true }),
-            PermissionProfile::Edit,
             true,
-        ),
-        (
-            serde_json::json!({ "network_access": true }),
+            serde_json::json!({}),
             PermissionProfile::ReadOnly,
             false,
         ),
+        (true, serde_json::json!({}), PermissionProfile::Full, false),
         (
-            serde_json::json!({ "network_access": true }),
-            PermissionProfile::Full,
-            false,
-        ),
-        (
-            serde_json::json!({ "network_access": true, "sandbox": "danger-full-access" }),
+            true,
+            serde_json::json!({ "sandbox": "danger-full-access" }),
             PermissionProfile::Edit,
             false,
         ),
@@ -851,19 +859,20 @@ async fn network_access_opens_the_network_only_where_workspace_write_closed_it()
             adapter_settings: Some(extra),
             binary: Some(stub_path()),
         });
-        let args = argv_under(&adapter, profile).await;
+        let args = argv_of(&adapter, profile, yunta_core::CliConfig::Inherit, network).await;
         assert_eq!(
             args.iter().any(|arg| arg == OPENS),
             opened,
-            "{settings} under {profile:?}: {args:?}"
+            "network {network}, {settings} under {profile:?}: {args:?}"
         );
     }
 }
 
+/// The network is the session's to open, not a setting of this adapter.
 #[tokio::test]
-async fn a_network_access_that_is_not_a_boolean_is_reported_by_probe() {
+async fn a_network_access_setting_is_one_this_adapter_does_not_read() {
     let mut extra = serde_json::Map::new();
-    extra.insert("network_access".to_string(), serde_json::Value::from("yes"));
+    extra.insert("network_access".to_string(), serde_json::Value::from(true));
     let adapter = CodexAdapter::new(&AdapterSettings {
         adapter_settings: Some(extra),
         binary: Some(stub_path()),

@@ -60,12 +60,11 @@ pub struct Capabilities {
     /// Puede conectarse al servidor MCP por-run de Yunta como cliente
     /// (blackboard, tareas, findings, solicitud de ampliación de scope).
     pub run_tools: bool,
-    /// Puede confinar el proceso de la sesión sin acceso a red, que es
-    /// lo que hace cumplir el `network: false` de un nodo. Una política
-    /// declarativa no es un sandbox del sistema operativo (D105): donde
-    /// esta capacidad falta, `network: false` degrada con
+    /// Puede confinar los comandos de la sesión sin acceso a red, que es
+    /// lo que hace cumplir el `network: false` de un nodo (`network` del
+    /// pedido). Donde esta capacidad falta, `network: false` degrada con
     /// `capability_degraded` — queda registrado para política y
-    /// auditoría, nunca exigido.
+    /// auditoría, nunca exigido (D252).
     pub network_isolation: bool,
 }
 
@@ -293,7 +292,7 @@ el engine consulta antes de pedir nada (§5).
 | `usage_reporting` | `true` |
 | `skills` | `true` |
 | `run_tools` | `true` |
-| `network_isolation` | `false` |
+| `network_isolation` | `true` |
 
 Lanza `claude -p` headless con salida en streaming JSON y traduce ese stream a
 `AgentEvent`; `resume` reutiliza la sesión vía el flag de reanudación del CLI con el
@@ -307,9 +306,12 @@ declarado: si el hook no responde en su timeout, el CLI deja pasar la llamada; e
 post-check la atrapa y `fence_breach` la nombra. `custom_agents` mapea `agent:` a los
 agentes definidos por el equipo en su configuración de Claude Code, verificando su
 existencia en `probe()`; `permission_profiles` mapea a los modos de permisos del CLI;
-skills y MCP por-run se inyectan por la configuración de sesión. Ninguna red se
-confina: la auditoría posterior del engine es la frontera, así que `network: false`
-queda declarativo. Los detalles de flags viven en el adapter y se validan en
+skills y MCP por-run se inyectan por la configuración de sesión. Los comandos corren
+en el sandbox del CLI (`sandbox` en `--settings`, que falla en vez de correr sin
+confinar): bajo `edit` escriben el workspace y las raíces, bajo `read_only` solo las
+raíces (`denyWrite` sobre el workspace), y bajo `full` no se confinan; la red, loopback
+incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
+`allowLocalBinding`), así que `network_isolation` se declara (D252). Los detalles de flags viven en el adapter y se validan en
 `probe()` contra la versión instalada; el engine no conoce ninguno.
 
 ### `codex`
@@ -323,7 +325,7 @@ queda declarativo. Los detalles de flags viven en el adapter y se validan en
 | `usage_reporting` | `true` |
 | `skills` | `false` |
 | `run_tools` | `true` |
-| `network_isolation` | `false` |
+| `network_isolation` | `true` |
 
 `codex exec` headless con salida JSON; `permission_profiles` mapea a sus modos de
 sandbox. El cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse` sobre
@@ -339,8 +341,10 @@ escribibles corre bajo `workspace-write` —`read-only` sella también las raíc
 hook rechaza toda edición que no sea a ellas. Límite declarado: la política partida del sandbox
 (`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. `custom_agents` y
 `skills` no se declaran porque `codex exec` no tiene selector de agente ni mecanismo
-de skills al que mapearlos, y `network_isolation` porque no aísla red: declarar
-cualquiera de los tres sería prometer lo que no está construido.
+de skills al que mapearlos: declararlos sería prometer lo que no está construido. La
+red de los comandos la abre el pedido (`sandbox_workspace_write.network_access`); bajo
+`read-only` no hay red y bajo `danger-full-access` no se cierra, y `check` rechaza
+`network: false` en un nodo `full` (D252).
 
 ### `mock`
 

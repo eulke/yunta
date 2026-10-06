@@ -86,10 +86,11 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
 ///
 /// The CLI confines file writes to its working directory, and a root the
 /// fence keeps writable is never inside it — without this the session is
-/// told to write a file it is then refused permission to create.
+/// told to write a file it is then refused permission to create. The same
+/// settings carry the sandbox its commands run in under `mode`.
 /// `launch` refused already when there is no hook to run, so a session
 /// never opens without one.
-fn fence_args(req: &SessionRequest) -> Vec<String> {
+fn fence_args(req: &SessionRequest, mode: crate::session::Sandbox) -> Vec<String> {
     let mut args = Vec::new();
     for root in &req.fence.roots {
         args.push("--add-dir".to_string());
@@ -97,7 +98,10 @@ fn fence_args(req: &SessionRequest) -> Vec<String> {
     }
     if let Some(command) = &req.rail_command {
         args.push("--settings".to_string());
-        args.push(rail::settings_json(command));
+        args.push(rail::settings_json(
+            command,
+            permissions::sandbox(mode, &req.cwd, req.network),
+        ));
     }
     args
 }
@@ -119,6 +123,18 @@ impl ClaudeCodeAdapter {
                 .unwrap_or_else(|| PathBuf::from("claude")),
             settings: settings::ClaudeSettings::read(settings),
         }
+    }
+
+    /// The sandbox mode a session's commands run under: its profile's, an
+    /// `edit` one taking the configured mode.
+    fn mode(&self, req: &SessionRequest) -> crate::session::Sandbox {
+        let edit = self
+            .settings
+            .as_ref()
+            .ok()
+            .and_then(|settings| settings.sandbox)
+            .unwrap_or_default();
+        crate::session::Sandbox::of(req.permissions, edit)
     }
 
     fn build_args(
@@ -150,7 +166,7 @@ impl ClaudeCodeAdapter {
             req.permissions,
             !req.fence.roots.is_empty(),
         ));
-        args.extend(fence_args(req));
+        args.extend(fence_args(req, self.mode(req)));
         // An isolated session loads none of the person's own settings, and
         // no MCP server but the run's; its credentials stay theirs.
         if req.cli_config == yunta_core::CliConfig::Isolated {
@@ -221,7 +237,7 @@ impl ClaudeCodeAdapter {
             prompt: &req.prompt,
             parser: Box::new(ClaudeParser::new(Coverage::of(
                 Fenced::Exact,
-                permissions::other_channels(req.permissions),
+                permissions::other_channels(self.mode(&req), &req.cwd, &req.fence.roots),
             ))),
         })
         .await
@@ -286,10 +302,9 @@ impl Adapter for ClaudeCodeAdapter {
             // Mounted by staging into the session cwd's own
             // `.claude/skills/` — the CLI's native discovery location.
             skills: true,
-            // No network sandbox is wired for the real CLI — the engine's
-            // post-hoc audit is the boundary, so `network: false` degrades
-            // to declarative-only rather than claiming isolation.
-            network_isolation: false,
+            // Commands run in the CLI's own sandbox, which keeps the
+            // network closed unless the session's request opens it.
+            network_isolation: true,
             // The CLI lists an MCP server's tools as `mcp__<server>__<tool>`
             // in its own init line, and that is the only name a call
             // reaches them by.

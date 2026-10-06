@@ -61,9 +61,10 @@ impl RailCodec for ClaudeRailCodec {
     }
 }
 
-/// The `--settings` document that installs the hooks: the one place this
-/// adapter states how its CLI is told to ask.
-pub(super) fn settings_json(command: &RailCommand) -> String {
+/// The `--settings` document that installs the hooks — the one place this
+/// adapter states how its CLI is told to ask — beside the `sandbox` its
+/// commands run in, when they are confined.
+pub(super) fn settings_json(command: &RailCommand, sandbox: Option<serde_json::Value>) -> String {
     let hook = |event: RailEvent| {
         command
             .argv(&super::ID, event)
@@ -72,8 +73,10 @@ pub(super) fn settings_json(command: &RailCommand) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     };
-    serde_json::json!({
-        "hooks": {
+    let mut settings = serde_json::Map::new();
+    settings.insert(
+        "hooks".to_string(),
+        serde_json::json!({
             "PreToolUse": [{
                 "matcher": WRITING_TOOLS,
                 "hooks": [{
@@ -82,9 +85,12 @@ pub(super) fn settings_json(command: &RailCommand) -> String {
                     "timeout": crate::session::HOOK_TIMEOUT_SECONDS,
                 }],
             }],
-        }
-    })
-    .to_string()
+        }),
+    );
+    if let Some(sandbox) = sandbox {
+        settings.insert("sandbox".to_string(), sandbox);
+    }
+    serde_json::Value::Object(settings).to_string()
 }
 
 #[cfg(test)]

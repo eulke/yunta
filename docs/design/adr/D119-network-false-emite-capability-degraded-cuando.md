@@ -1,9 +1,9 @@
 ---
 number: D119
 title: "`network: false` emite `capability_degraded` cuando el adapter no puede aplicarlo"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D252]
 ---
 
 # D119 — `network: false` emite `capability_degraded` cuando el adapter no puede aplicarlo

@@ -1,9 +1,9 @@
 ---
 number: D105
 title: "`network` es declarativa; nunca aislamiento de sistema operativo (Contrato §6.1)"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D252]
 ---
 
 # D105 — `network` es declarativa; nunca aislamiento de sistema operativo (Contrato §6.1)

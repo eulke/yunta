@@ -70,6 +70,7 @@ impl CheckError {
             | CheckError::MountInsideParallel { node: id, .. } => node(id).key("mounts"),
             CheckError::ResumeSessionOnSessionlessNode { node: id } => node(id).key("on_interrupt"),
             CheckError::AskOnANodeThatAsksNothing { node: id } => node(id).key("ask"),
+            CheckError::ClosedNetworkUnderFull { node: id } => node(id).key("network"),
             CheckError::Composition(Composition::Missing { node: id, .. })
             | CheckError::Composition(Composition::Ambiguous { node: id, .. })
             | CheckError::Composition(Composition::CrossPack { node: id, .. })

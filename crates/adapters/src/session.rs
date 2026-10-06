@@ -29,6 +29,40 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
     })
 }
 
+/// The confinement a session's commands run under, as both CLIs name
+/// their modes: nothing written but the run's roots, the workspace and the
+/// roots, or anything. `adapter_settings.sandbox` picks the mode an `edit`
+/// session runs under; `read_only` and `full` map to their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Sandbox {
+    ReadOnly,
+    #[default]
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+impl Sandbox {
+    /// The mode a session under `profile` runs in, `edit` taking the
+    /// configured one.
+    pub(crate) fn of(profile: yunta_core::port::PermissionProfile, edit: Sandbox) -> Sandbox {
+        match profile {
+            yunta_core::port::PermissionProfile::ReadOnly => Sandbox::ReadOnly,
+            yunta_core::port::PermissionProfile::Edit => edit,
+            yunta_core::port::PermissionProfile::Full => Sandbox::DangerFullAccess,
+        }
+    }
+
+    /// The mode as a command line spells it.
+    pub(crate) fn as_flag(self) -> &'static str {
+        match self {
+            Sandbox::ReadOnly => "read-only",
+            Sandbox::WorkspaceWrite => "workspace-write",
+            Sandbox::DangerFullAccess => "danger-full-access",
+        }
+    }
+}
+
 /// How long a CLI waits for its write hook to answer. A hook that does not
 /// answer in time lets the call through — so the hook itself gives up on
 /// the engine sooner and refuses, and the post-check diff catches anything

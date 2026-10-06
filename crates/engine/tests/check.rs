@@ -1603,6 +1603,36 @@ nodes:
     assert_eq!(refused, ["build"]);
 }
 
+#[test]
+fn a_closed_network_on_a_full_node_is_refused() {
+    let yaml = r#"
+name: w
+nodes:
+  - id: open
+    kind: prompt
+    prompt: "go"
+    permissions: full
+  - id: closed
+    kind: prompt
+    prompt: "go"
+    permissions: full
+    network: false
+  - id: confined
+    kind: prompt
+    prompt: "go"
+    network: false
+"#;
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let refused: Vec<String> = check(&wf, &ConfigLayer::default())
+        .iter()
+        .filter_map(|e| match e {
+            CheckError::ClosedNetworkUnderFull { node } => Some(node.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(refused, ["closed"]);
+}
+
 // --- resume_session only where a session exists ----------------------------------
 
 #[test]

@@ -84,6 +84,8 @@ pub struct SessionSetup {
     /// Whose configuration of the CLI this node's sessions load beside
     /// what the run mounts.
     pub cli_config: yunta_core::CliConfig,
+    /// Whether this node's sessions' commands may reach the network.
+    pub network: bool,
     /// What a node's own session works to: the scope the node declared
     /// plus every path a person granted it on this run, which fences the
     /// session and is what its scope tools judge by. `None` for a node
@@ -164,6 +166,7 @@ impl SessionSetup {
             run_tools: None,
             rail_command: None,
             cli_config: yunta_core::CliConfig::Inherit,
+            network: true,
             run_dir,
             node,
             chosen,

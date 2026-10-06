@@ -95,9 +95,9 @@ impl CodexAdapter {
         ));
         // Only `workspace-write` reads the switch: `read-only` has no
         // network to open and `danger-full-access` never closed it.
-        let opens_network = settings.network_access
+        let opens_network = req.network
             && fence::mode(&req.fence, req.permissions, edit_sandbox)
-                == settings::Sandbox::WorkspaceWrite;
+                == crate::session::Sandbox::WorkspaceWrite;
         args.extend(config_overrides(req, opens_network));
         args.extend(rail::hook_overrides(command));
         // An isolated session loads none of the person's own configuration
@@ -287,12 +287,10 @@ impl Adapter for CodexAdapter {
             // see this module's doc comment.
             run_tools: true,
             // The `read-only` and `workspace-write` sandboxes keep a
-            // session off the network unless `network_access` opens it,
-            // but `danger-full-access` — every `full` session — leaves it
-            // open. The capability is one answer for all of them, so it
-            // is never claimed, and `network: false` degrades to
-            // declarative-only here even where the sandbox closes it.
-            network_isolation: false,
+            // session off the network unless its request opens it; a
+            // `full` session, unconfined on every adapter, is one `check`
+            // refuses `network: false` for.
+            network_isolation: true,
             // The CLI names an MCP server's tools `mcp__<server>__<tool>`
             // with the server's `-` written `_`: a session finds
             // `mcp__yunta_run__yunta_task`, never `yunta_task`.

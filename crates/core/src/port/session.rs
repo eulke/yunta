@@ -57,6 +57,11 @@ pub struct SessionRequest {
     /// Whose configuration of the CLI the session loads beside what the
     /// run mounts: the person's own, or none but the run's.
     pub cli_config: crate::CliConfig,
+    /// Whether the commands the session runs may reach the network —
+    /// loopback included. A session that may write the workspace keeps
+    /// it closed when this says so; a read-only one never has it, and an
+    /// unconfined one always does.
+    pub network: bool,
     /// Secrets arrive here, already resolved from the manifest — never
     /// any other way — and stay wrapped until the child process is
     /// spawned.

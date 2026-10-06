@@ -20,14 +20,20 @@
 //!
 //! Each profile is a distinct tool set, which is what makes the
 //! `permission_profiles` capability true: `ReadOnly` gets the
-//! non-mutating tools, so "accept edits" has nothing mutating to
-//! accept; `Edit` gets the file-editing tools and nothing that reaches a
-//! shell or the network; `Full` gets the CLI's whole tool set. Where a
-//! file lands is the fence: every writing tool goes through the hook
-//! that runs the judge before the write happens.
+//! non-mutating tools and a shell that writes nothing but the run's
+//! roots; `Edit` gets the file-editing tools and a shell confined to the
+//! workspace and the roots; `Full` gets the CLI's whole tool set and an
+//! unconfined shell. Where a file tool writes is the fence: every writing
+//! tool goes through the hook that asks the engine before the write
+//! happens. Where a command writes, and whether it reaches the network, is
+//! the CLI's own sandbox, enforced by the operating system.
+
+use std::path::{Path, PathBuf};
 
 use yunta_core::fence::Fenced;
 use yunta_core::port::PermissionProfile;
+
+use crate::session::Sandbox;
 
 /// The tools a profile allows, as the CLI names them; `None` leaves the
 /// CLI's whole tool set available.
@@ -41,22 +47,66 @@ use yunta_core::port::PermissionProfile;
 pub(super) fn tools(profile: PermissionProfile, has_declared_files: bool) -> Option<&'static str> {
     match profile {
         PermissionProfile::ReadOnly if has_declared_files => {
-            Some("Read,Grep,Glob,WebFetch,WebSearch,Write,Edit")
+            Some("Read,Grep,Glob,WebFetch,WebSearch,Bash,Write,Edit")
         }
-        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch"),
-        PermissionProfile::Edit => Some("Read,Grep,Glob,Edit,Write,MultiEdit,NotebookEdit"),
+        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch,Bash"),
+        PermissionProfile::Edit => Some("Read,Grep,Glob,Bash,Edit,Write,MultiEdit,NotebookEdit"),
         PermissionProfile::Full => None,
     }
 }
 
-/// What each profile leaves fenced outside the file tools. `edit` and
-/// `read_only` expose no shell at all, so there is no second channel to
-/// widen the coverage; `full` does, and nothing fences a shell by path.
-pub(super) fn other_channels(profile: PermissionProfile) -> Option<Fenced> {
-    match profile {
-        PermissionProfile::ReadOnly | PermissionProfile::Edit => Some(Fenced::Exact),
-        PermissionProfile::Full => None,
+/// What a session's commands are left fenced by under `mode`: nothing
+/// written but the roots, the workspace and the roots, or anything.
+pub(super) fn other_channels(mode: Sandbox, cwd: &Path, roots: &[PathBuf]) -> Option<Fenced> {
+    match mode {
+        Sandbox::ReadOnly if roots.is_empty() => Some(Fenced::Exact),
+        Sandbox::ReadOnly => Some(Fenced::Roots(roots.to_vec())),
+        Sandbox::WorkspaceWrite => Some(Fenced::Roots(
+            std::iter::once(cwd.to_path_buf())
+                .chain(roots.iter().cloned())
+                .collect(),
+        )),
+        Sandbox::DangerFullAccess => None,
     }
+}
+
+/// The CLI's `sandbox` settings for a session's commands under `mode`, or
+/// `None` for one left unconfined. The sandbox fails the session rather
+/// than run unconfined, and never lets a command leave it. A command
+/// writes the working directory — except under `read-only` — and the
+/// roots the CLI was handed with `--add-dir`; it reaches the network,
+/// loopback included, only where `network` says so and the mode lets it.
+pub(super) fn sandbox(mode: Sandbox, cwd: &Path, network: bool) -> Option<serde_json::Value> {
+    let network = match (mode, network) {
+        (Sandbox::WorkspaceWrite, true) => serde_json::json!({
+            "allowLocalBinding": true,
+            "allowedDomains": ["*"],
+        }),
+        _ => serde_json::json!({}),
+    };
+    let mut settings = serde_json::Map::from_iter([
+        ("enabled".to_string(), serde_json::Value::Bool(true)),
+        (
+            "failIfUnavailable".to_string(),
+            serde_json::Value::Bool(true),
+        ),
+        (
+            "allowUnsandboxedCommands".to_string(),
+            serde_json::Value::Bool(false),
+        ),
+        ("network".to_string(), network),
+    ]);
+    match mode {
+        Sandbox::DangerFullAccess => return None,
+        Sandbox::ReadOnly => {
+            settings.insert(
+                "filesystem".to_string(),
+                serde_json::json!({ "denyWrite": [cwd] }),
+            );
+        }
+        Sandbox::WorkspaceWrite => {}
+    }
+    Some(serde_json::Value::Object(settings))
 }
 
 pub(super) fn permission_args(profile: PermissionProfile, has_declared_files: bool) -> Vec<String> {

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use yunta_core::fence::{Coverage, Fence, Fenced};
 use yunta_core::port::PermissionProfile;
 
-use super::settings::Sandbox;
+use crate::session::Sandbox;
 
 /// The sandbox flags one session runs under.
 pub(super) fn sandbox_args(

@@ -68,7 +68,8 @@ pub(crate) async fn resolve_setup(
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
         run_tools,
         rail_command: ctx.rail_command.clone(),
-        cli_config: cli_config(ctx, node),
+        cli_config: super::session_policy::cli_config(ctx, node),
+        network: super::session_policy::network(ctx, node),
         run_dir: ctx.run_dir.to_path_buf(),
         node: node.id.clone(),
         chosen: chosen.clone(),
@@ -76,20 +77,6 @@ pub(crate) async fn resolve_setup(
         run_tools_required: mandatory_tools(ctx, node),
         node_scope,
     }))
-}
-
-/// Whose CLI configuration `node`'s sessions load: its own word, else the
-/// workflow's `node_defaults`, else the person's own.
-fn cli_config(ctx: &crate::run::RunCtx<'_>, node: &Node) -> yunta_core::CliConfig {
-    node.cli_config
-        .or_else(|| {
-            ctx.manifest
-                .workflow
-                .node_defaults
-                .as_ref()
-                .and_then(|defaults| defaults.cli_config)
-        })
-        .unwrap_or_default()
 }
 
 /// The two capabilities whose absence is the run's condition rather
@@ -307,6 +294,7 @@ pub(crate) async fn open_session(
         agent: setup.chosen.agent.clone(),
         permissions: plan.profile,
         cli_config: setup.cli_config,
+        network: setup.network,
         env: setup.env.clone(),
         fence,
         rail_command: setup.rail_command.clone(),

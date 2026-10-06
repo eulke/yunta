@@ -31,14 +31,17 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         agent: None,
         permissions: PermissionProfile::Edit,
         cli_config: yunta_core::CliConfig::Inherit,
+        network: true,
         env: HashMap::new(),
         fence: Fence::everything(Vec::new(), Advice::ReportFinding),
         rail_command: Some(RailCommand::new(PathBuf::from("yunta"))),
         // Where a hook would reach the engine: nothing listens there, and
-        // a stub CLI never runs its hooks.
+        // a stub CLI never runs its hooks. The token is a value no output
+        // carries: the child's environment is redacted from what a session
+        // prints, and a common word would be cut out of unrelated text.
         rail: Some(RailEndpoint {
             url: "http://127.0.0.1:9/rail".to_string(),
-            token: yunta_core::Secret::new("token".to_string()),
+            token: yunta_core::Secret::new("rail-token-7c1e5a90d24b".to_string()),
         }),
         budget: Budget::default(),
         adapter_settings: serde_json::Map::new(),

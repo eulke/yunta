@@ -201,6 +201,13 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   and `cache_creation_input_tokens` add up to the `result` totals exactly;
   `output_tokens` is only complete in `result`.
 - `--add-dir` is variadic: the prompt goes on stdin, never after it.
+- With `allowedDomains: ["*"]` and `allowLocalBinding: true` a sandboxed
+  command reaches the internet and `127.0.0.1`; with neither it reaches
+  neither. `filesystem.denyWrite` on the working directory keeps a command
+  from writing it while `--add-dir` roots stay writable.
+- Through the engine: an `edit` session under `network: false` wrote the
+  checkout from Bash, was refused `example.com` by the sandbox's proxy, and
+  could not write `~`.
 
 **macOS**
 

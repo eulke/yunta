@@ -85,15 +85,14 @@ pub struct Node {
     /// governs which *commands* run at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<NodePermissions>,
-    /// A node's network policy, declarative ONLY: `network: false` asks for
-    /// no network access, `network: true` allows it, and absent (`None`)
-    /// declares no policy at all. The engine never blocks a network call
-    /// over this — it exists for policy and audit (a pack declaring `false`
-    /// and then curling is a detectable contradiction), and an executor may
-    /// choose to enforce it on its own. Where a session's resolved adapter
-    /// cannot enforce a declared `network: false`, the engine records a
-    /// `capability_degraded` before the session; reading it as a sandbox is
-    /// reading a guarantee the system never offered (D105/D119).
+    /// A node's network policy: `network: false` asks for no network
+    /// access, `network: true` allows it, and absent (`None`) leaves it to
+    /// the project's `permissions.network.default`, else open. An agent's
+    /// session keeps it in its CLI's own sandbox, for every command the
+    /// session runs; where the resolved adapter cannot, the engine records a
+    /// `capability_degraded` before the session. For any other command it is
+    /// declarative: the engine never blocks a network call a `bash` node
+    /// makes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<bool>,
     /// `context:` — data resolved and materialized

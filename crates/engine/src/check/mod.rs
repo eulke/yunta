@@ -133,6 +133,7 @@ pub fn check_mounted(
     check_fanout_scopes(workflow, config, &mut errors);
     check_resume_session(workflow, &mut errors);
     check_ask(workflow, &mut errors);
+    check_network(workflow, &mut errors);
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
     check_unset_keys(workflow, config, &mut errors);

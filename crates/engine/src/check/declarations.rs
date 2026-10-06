@@ -56,6 +56,21 @@ pub(crate) fn check_ask(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     }
 }
 
+/// `network: false` on a node whose sessions run `full`: a full session's
+/// commands run unconfined on every adapter, so the network cannot be
+/// kept closed for it — the two cannot both hold.
+pub(crate) fn check_network(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
+        if node.network == Some(false)
+            && node.permissions == Some(yunta_core::NodePermissions::Full)
+        {
+            errors.push(CheckError::ClosedNetworkUnderFull {
+                node: node.id.clone(),
+            });
+        }
+    }
+}
+
 /// The range held for this binary's own schema major, or the workflow
 /// declares a requirement this binary does not meet.
 pub(crate) fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {

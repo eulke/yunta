@@ -526,7 +526,7 @@
       "minLength": 1
     },
     "NetworkPermissions": {
-      "description": "`permissions.network` — declarative ONLY: `default: false`\nactivates no sandboxing whatsoever. It exists for policy and audit; an\nexecutor that wants to actually enforce it does so on its own. Policy\n≠ capability ≠ OS enforcement — Yunta core never promises the third.",
+      "description": "`permissions.network` — whether the commands an agent's session runs\nmay reach the network when its node says nothing: the session's CLI\nkeeps it in its own sandbox. For any other command it is declarative;\nan executor that wants to enforce it does so on its own.",
       "type": "object",
       "properties": {
         "default": {

@@ -122,10 +122,10 @@ pub struct PublisherPermissions {
     pub allow: Vec<Publisher>,
 }
 
-/// `permissions.network` — declarative ONLY: `default: false`
-/// activates no sandboxing whatsoever. It exists for policy and audit; an
-/// executor that wants to actually enforce it does so on its own. Policy
-/// ≠ capability ≠ OS enforcement — Yunta core never promises the third.
+/// `permissions.network` — whether the commands an agent's session runs
+/// may reach the network when its node says nothing: the session's CLI
+/// keeps it in its own sandbox. For any other command it is declarative;
+/// an executor that wants to enforce it does so on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkPermissions {

@@ -912,8 +912,7 @@ sessions:
     );
 }
 
-/// A `prompt` node that declares `network: false` — the policy no adapter
-/// can enforce.
+/// A `prompt` node that declares `network: false`.
 const NETWORK_DECLARED_WORKFLOW: &str = r#"
 name: network-declared
 nodes:
@@ -926,10 +925,10 @@ nodes:
 
 #[tokio::test]
 async fn network_false_is_reported_as_declarative_only() {
-    // `network: false` is a declared policy, not a capability the engine has:
-    // no adapter isolates the network (D105/D119). The engine records the gap
-    // before the session with a `capability_degraded`, never consolidating it
-    // into silence.
+    // On an adapter that declares no network isolation, `network: false` is
+    // a declared policy it cannot keep. The engine records the gap before
+    // the session with a `capability_degraded`, never consolidating it into
+    // silence.
     let bench = Bench::new();
     let fixture = r#"
 sessions:
@@ -957,6 +956,32 @@ sessions:
         degraded.policy_applied(),
         yunta_core::events::Policy::NetworkOpen.to_string()
     );
+}
+
+/// On an adapter that isolates the network, the node's `network: false`
+/// reaches the session's request, and nothing is degraded.
+#[tokio::test]
+async fn network_false_closes_the_network_of_the_session_s_commands() {
+    let bench = Bench::new();
+    let fixture = r#"
+capabilities: { network_isolation: true }
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let RunReport { terminal, state: _ } = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(
+        requests.iter().map(|req| req.network).collect::<Vec<_>>(),
+        [false]
+    );
+    assert!(!bench.events().iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::Session(
+            SessionEvent::CapabilityDegraded(_)
+        ))
+    )));
 }
 
 #[tokio::test]

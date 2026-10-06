@@ -396,6 +396,15 @@ pub enum CheckError {
     )]
     AskOnANodeThatAsksNothing { node: NodeId },
 
+    /// `network: false` on a `full` node: a full session's commands run
+    /// unconfined, so nothing can keep its network closed.
+    #[error(
+        "node `{node}`: `network: false` cannot hold under `permissions: full` — a full \
+         session's commands run unconfined — lower `permissions` to `edit`, or drop \
+         `network: false`"
+    )]
+    ClosedNetworkUnderFull { node: NodeId },
+
     /// The node asks for a scope-expansion mode more
     /// permissive than the merged `permissions.scope_expansion.max_mode`
     /// ceiling allows — same only-narrowing model as every other
