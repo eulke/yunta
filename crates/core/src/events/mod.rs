@@ -426,6 +426,7 @@ wire_kinds! {
     ChildRunFinished => "child_run_finished",
     CapabilityDegraded => "capability_degraded",
     WriteRefused => "write_refused",
+    StopRefused => "stop_refused",
     RunToolFailed => "run_tool_failed",
     RunToolRefused => "run_tool_refused",
     ServiceUnreachable => "service_unreachable",

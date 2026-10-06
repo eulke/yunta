@@ -15,9 +15,11 @@ use std::time::Duration;
 use yunta_core::port::{HookReply, RailCodec};
 use yunta_core::rail::{unasked, RailCall, RailEndpoint, RailEvent};
 
-/// How long a hook waits for the engine before it answers on its own —
-/// well inside the time a CLI gives its hook, so the CLI never runs out
-/// of patience first and lets a write through unanswered.
+/// How long a write hook waits for the engine before it answers on its
+/// own — well inside the time a CLI gives that hook, so the CLI never runs
+/// out of patience first and lets a write through unanswered. A stop hook
+/// waits as long as the engine judges: a CLI that runs out of patience
+/// there lets the session end, which the close still judges.
 const DEADLINE: Duration = Duration::from_secs(8);
 
 /// What the call fails with when it cannot be read or asked at all:
@@ -57,8 +59,12 @@ pub fn over_loopback(
     endpoint: &RailEndpoint,
     call: &RailCall,
 ) -> Result<yunta_core::rail::RailAnswer, String> {
+    let deadline = match call.act.moment() {
+        RailEvent::BeforeWrite => Some(DEADLINE),
+        RailEvent::BeforeStop => None,
+    };
     endpoint
-        .ask(call, DEADLINE)
+        .ask(call, deadline)
         .map_err(|source| yunta_core::describe(&source))
 }
 

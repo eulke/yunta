@@ -39,6 +39,8 @@ pub enum Happening {
     },
     /// A write the fence turned down, and what it would have touched.
     Refused(ToolTarget),
+    /// A stop sent back to the work, and what kept that work from closing.
+    StopRefused(Vec<crate::events::StopRefusal>),
     /// One failed call is a moment in the chronicle.
     RunToolFailed {
         tool: crate::RunTool,
@@ -81,6 +83,7 @@ impl From<&SessionEvent> for Happening {
                 policy: p.policy_applied().to_string(),
             },
             SessionEvent::WriteRefused(p) => Happening::Refused(p.target.clone()),
+            SessionEvent::StopRefused(p) => Happening::StopRefused(p.why.clone()),
             SessionEvent::RunToolFailed(p) => Happening::RunToolFailed {
                 tool: p.tool,
                 cause: p.cause,

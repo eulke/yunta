@@ -4,7 +4,9 @@
 //! the call as JSON on stdin, the patch in `tool_input.command`. One patch
 //! can add, change, delete and move several files, so every path it names
 //! is asked about at once. Exit 2 with the reason on stderr refuses the
-//! patch, and the model reads the reason; exit 0 lets it through.
+//! patch, and the model reads the reason; exit 0 lets it through. Its
+//! `Stop` hook runs when the session would end its turn, and
+//! `{"decision":"block"}` with a reason on stdout keeps it working.
 //!
 //! The hook reaches the CLI as a `-c` override, and Codex runs a hook from
 //! an override only once it is trusted. The trust is the hook's own hash,
@@ -41,6 +43,10 @@ impl RailCodec for CodexRailCodec {
             .and_then(|id| id.parse::<SessionId>().ok())
             .ok_or(CodecError::MissingField("session_id"))?;
         match event {
+            RailEvent::BeforeStop => Ok(Some(RailCall {
+                session_id,
+                act: RailAct::BeforeStop,
+            })),
             RailEvent::BeforeWrite => {
                 let patch = call
                     .get("tool_input")
@@ -71,7 +77,10 @@ impl RailCodec for CodexRailCodec {
                 },
                 exit: 2,
             },
-            (RailEvent::BeforeWrite, RailAnswer::Proceed) => HookReply {
+            (RailEvent::BeforeStop, RailAnswer::Refuse { reason }) => {
+                crate::session::kept_working(reason)
+            }
+            (_, RailAnswer::Proceed) => HookReply {
                 stdout: Vec::new(),
                 stderr: Vec::new(),
                 exit: 0,
@@ -103,50 +112,88 @@ pub(super) fn patch_paths(patch: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The `-c` overrides that install the hooks and trust them.
-pub(super) fn hook_overrides(command: &RailCommand) -> Vec<String> {
-    let argv = command
-        .argv(&super::ID, RailEvent::BeforeWrite)
-        .iter()
-        .map(|part| crate::session::sh_quoted(part))
-        .collect::<Vec<_>>()
-        .join(" ");
+/// One hook this adapter installs: the CLI's event, as its config and its
+/// trust keys name it, the tool it matches, and how long the CLI waits.
+struct Hook {
+    event: &'static str,
+    key: &'static str,
+    matcher: Option<&'static str>,
+    rail: RailEvent,
+    timeout: u64,
+}
+
+/// The `-c` overrides that install the hooks and trust them. The stop
+/// hook waits for the engine as long as `judging` allows: judging the
+/// work runs its checks.
+pub(super) fn hook_overrides(command: &RailCommand, judging: std::time::Duration) -> Vec<String> {
+    let installed = [
+        Hook {
+            event: "PreToolUse",
+            key: "pre_tool_use",
+            matcher: Some(WRITING_TOOL),
+            rail: RailEvent::BeforeWrite,
+            timeout: u64::from(crate::session::HOOK_TIMEOUT_SECONDS),
+        },
+        Hook {
+            event: "Stop",
+            key: "stop",
+            matcher: None,
+            rail: RailEvent::BeforeStop,
+            timeout: judging.as_secs(),
+        },
+    ];
+    let mut trust = Table::new();
+    let mut overrides = Vec::new();
+    for hook in installed {
+        let argv = command
+            .argv(&super::ID, hook.rail)
+            .iter()
+            .map(|part| crate::session::sh_quoted(part))
+            .collect::<Vec<_>>()
+            .join(" ");
+        overrides.push(ConfigOverride::value(
+            format!("hooks.{}", hook.event),
+            Toml::Array(vec![Toml::Table(group(&hook, &argv))]),
+        ));
+        let hash = trusted_hash(hook.key, hook.matcher, &argv, hook.timeout);
+        trust.insert(
+            format!("{SESSION_FLAGS}:{}:0:0", hook.key),
+            Toml::Table(Table::from_iter([(
+                "trusted_hash".to_string(),
+                Toml::String(hash),
+            )])),
+        );
+    }
+    overrides.push(ConfigOverride::value("hooks.state", Toml::Table(trust)));
+    overrides
+        .into_iter()
+        .flat_map(ConfigOverride::into_args)
+        .collect()
+}
+
+/// `hook`'s one group as the CLI's config reads it: its matcher, and its
+/// one handler running `argv`.
+fn group(hook: &Hook, argv: &str) -> Table {
     let handler = Table::from_iter([
         ("type".to_string(), Toml::String("command".to_string())),
-        ("command".to_string(), Toml::String(argv.clone())),
+        ("command".to_string(), Toml::String(argv.to_string())),
         (
             "timeout".to_string(),
-            Toml::Integer(i64::from(crate::session::HOOK_TIMEOUT_SECONDS)),
+            Toml::Integer(i64::try_from(hook.timeout).unwrap_or(i64::MAX)),
         ),
     ]);
-    let group = Table::from_iter([
-        (
-            "matcher".to_string(),
-            Toml::String(WRITING_TOOL.to_string()),
-        ),
-        ("hooks".to_string(), Toml::Array(vec![Toml::Table(handler)])),
-    ]);
-    let key = format!("{SESSION_FLAGS}:pre_tool_use:0:0");
-    let trust = Table::from_iter([(
-        key,
-        Toml::Table(Table::from_iter([(
-            "trusted_hash".to_string(),
-            Toml::String(trusted_hash("pre_tool_use", Some(WRITING_TOOL), &argv)),
-        )])),
-    )]);
-    [
-        ConfigOverride::value("hooks.PreToolUse", Toml::Array(vec![Toml::Table(group)])),
-        ConfigOverride::value("hooks.state", Toml::Table(trust)),
-    ]
-    .into_iter()
-    .flat_map(ConfigOverride::into_args)
-    .collect()
+    let mut group = Table::new();
+    if let Some(matcher) = hook.matcher {
+        group.insert("matcher".to_string(), Toml::String(matcher.to_string()));
+    }
+    group.insert("hooks".to_string(), Toml::Array(vec![Toml::Table(handler)]));
+    group
 }
 
 /// The hash Codex trusts one command hook by: SHA-256 over the hook's
 /// normalized identity — its event, its matcher and its one handler with
 /// every default written out — as compact JSON with its keys sorted.
-fn trusted_hash(event: &str, matcher: Option<&str>, command: &str) -> String {
+fn trusted_hash(event: &str, matcher: Option<&str>, command: &str, timeout: u64) -> String {
     let mut identity = serde_json::Map::new();
     identity.insert("event_name".to_string(), Value::from(event));
     if let Some(matcher) = matcher {
@@ -157,7 +204,7 @@ fn trusted_hash(event: &str, matcher: Option<&str>, command: &str) -> String {
         serde_json::json!([{
             "async": false,
             "command": command,
-            "timeout": crate::session::HOOK_TIMEOUT_SECONDS,
+            "timeout": timeout,
             "type": "command",
         }]),
     );
@@ -253,14 +300,14 @@ mod tests {
     #[test]
     fn the_trusted_hash_is_the_one_codex_records() {
         assert_eq!(
-            trusted_hash("session_start", None, "bash '/hooks/state.sh' session")
+            trusted_hash("session_start", None, "bash '/hooks/state.sh' session", 10)
                 .strip_prefix("sha256:")
                 .map(str::len),
             Some(64)
         );
         let command = "python3 /tmp/rail.py pre";
         assert_eq!(
-            trusted_hash("pre_tool_use", Some("apply_patch"), command),
+            trusted_hash("pre_tool_use", Some("apply_patch"), command, 10),
             yunta_core::sha256_hex(
                 br#"{"event_name":"pre_tool_use","hooks":[{"async":false,"command":"python3 /tmp/rail.py pre","timeout":10,"type":"command"}],"matcher":"apply_patch"}"#
             )
@@ -269,8 +316,9 @@ mod tests {
     }
 
     #[test]
-    fn the_overrides_read_back_as_the_hook_and_its_trust() {
-        let args = hook_overrides(&RailCommand::new(PathBuf::from("/bin/yunta")));
+    fn the_overrides_read_back_as_the_hooks_and_their_trust() {
+        let judging = std::time::Duration::from_secs(900);
+        let args = hook_overrides(&RailCommand::new(PathBuf::from("/bin/yunta")), judging);
         let assignments: Vec<&String> = args.iter().skip(1).step_by(2).collect();
         let hooks: toml::Table = toml::from_str(assignments[0]).unwrap();
         let group = &hooks["hooks"]["PreToolUse"][0];
@@ -279,10 +327,43 @@ mod tests {
             group["hooks"][0]["command"].as_str(),
             Some("/bin/yunta rail codex before-write")
         );
-        let state: toml::Table = toml::from_str(assignments[1]).unwrap();
-        let trusted = &state["hooks"]["state"]["/<session-flags>/config.toml:pre_tool_use:0:0"];
-        assert!(trusted["trusted_hash"]
-            .as_str()
-            .is_some_and(|hash| hash.starts_with("sha256:")));
+        let stops: toml::Table = toml::from_str(assignments[1]).unwrap();
+        let group = &stops["hooks"]["Stop"][0];
+        assert!(group.get("matcher").is_none());
+        assert_eq!(
+            group["hooks"][0]["command"].as_str(),
+            Some("/bin/yunta rail codex before-stop")
+        );
+        assert_eq!(group["hooks"][0]["timeout"].as_integer(), Some(900));
+        let state: toml::Table = toml::from_str(assignments[2]).unwrap();
+        let trusted = |key: &str| {
+            state["hooks"]["state"][format!("/<session-flags>/config.toml:{key}:0:0").as_str()]
+                ["trusted_hash"]
+                .as_str()
+                .map(str::to_string)
+        };
+        assert_eq!(
+            trusted("stop"),
+            Some(trusted_hash(
+                "stop",
+                None,
+                "/bin/yunta rail codex before-stop",
+                900
+            ))
+        );
+        assert!(trusted("pre_tool_use").is_some_and(|hash| hash.starts_with("sha256:")));
+    }
+
+    #[test]
+    fn a_refused_stop_keeps_the_session_working_with_the_reason() {
+        let reply = CodexRailCodec.encode(
+            RailEvent::BeforeStop,
+            &RailAnswer::Refuse {
+                reason: "a criterion is red".to_string(),
+            },
+        );
+        let said: Value = serde_json::from_slice(&reply.stdout).unwrap();
+        assert_eq!((reply.exit, said["decision"].as_str()), (0, Some("block")));
+        assert_eq!(said["reason"], "a criterion is red");
     }
 }

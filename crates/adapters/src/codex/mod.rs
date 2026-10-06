@@ -90,20 +90,11 @@ impl CodexAdapter {
         let Some(command) = req.rail_command.as_ref().filter(|_| req.rail.is_some()) else {
             return Err(Unbuildable::HookUnavailable);
         };
-        let settings = self.settings.as_ref().cloned().unwrap_or_default();
-        let edit_sandbox = settings.sandbox.unwrap_or_default();
-        args.extend(fence::sandbox_args(
-            &req.fence,
-            req.permissions,
-            edit_sandbox,
+        args.extend(self.confinement_args(req));
+        args.extend(rail::hook_overrides(
+            command,
+            RunToolsEndpoint::call_timeout(&req.budget),
         ));
-        // Only `workspace-write` reads the switch: `read-only` has no
-        // network to open and `danger-full-access` never closed it.
-        let opens_network = req.network
-            && fence::mode(&req.fence, req.permissions, edit_sandbox)
-                == crate::session::Sandbox::WorkspaceWrite;
-        args.extend(config_overrides(req, opens_network));
-        args.extend(rail::hook_overrides(command));
         // An isolated session loads none of the person's own configuration
         // or rules; its credentials stay theirs.
         if req.cli_config == yunta_core::CliConfig::Isolated {
@@ -125,6 +116,21 @@ impl CodexAdapter {
         // it shows in the process list.
         args.push("-".to_string());
         Ok(args)
+    }
+
+    /// The sandbox the session's commands run in, and the configuration
+    /// it opens with inside it.
+    fn confinement_args(&self, req: &SessionRequest) -> Vec<String> {
+        let settings = self.settings.as_ref().cloned().unwrap_or_default();
+        let edit_sandbox = settings.sandbox.unwrap_or_default();
+        let mut args = fence::sandbox_args(&req.fence, req.permissions, edit_sandbox);
+        // Only `workspace-write` reads the switch: `read-only` has no
+        // network to open and `danger-full-access` never closed it.
+        let opens_network = req.network
+            && fence::mode(&req.fence, req.permissions, edit_sandbox)
+                == crate::session::Sandbox::WorkspaceWrite;
+        args.extend(config_overrides(req, opens_network));
+        args
     }
 
     async fn launch(

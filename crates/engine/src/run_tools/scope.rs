@@ -26,13 +26,26 @@ impl SessionTools {
             .node_scope
             .as_deref()
             .ok_or(RunToolError::NoNodeScope)?;
+        let result = self.scope_audit(access).await?;
+        json(&ScopeVerdict {
+            within: result.violations.is_empty(),
+            scope: &access.scope,
+            outside_scope: result.violations,
+        })
+    }
+
+    /// The audit this node's close would make of its work now.
+    pub(super) async fn scope_audit(
+        &self,
+        access: &super::host::NodeScopeAccess,
+    ) -> Result<crate::scope::ScopeCheckResult, RunToolError> {
         let state = crate::replay::derive(&self.events().await?);
         let from = state
             .nodes
             .from_tree(&self.node)
             .cloned()
             .ok_or(RunToolError::NoStartingTree)?;
-        let result = crate::scope::audit(
+        crate::scope::audit(
             &self.cwd,
             &from,
             &access.index,
@@ -44,12 +57,7 @@ impl SessionTools {
             self.host.supervision(&self.stop),
         )
         .await
-        .map_err(|source| RunToolError::Audit { source })?;
-        json(&ScopeVerdict {
-            within: result.violations.is_empty(),
-            scope: &access.scope,
-            outside_scope: result.violations,
-        })
+        .map_err(|source| RunToolError::Audit { source })
     }
 
     pub(super) async fn request_scope_expansion(

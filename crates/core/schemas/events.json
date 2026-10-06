@@ -2228,6 +2228,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "stop_refused"
+            }
+          },
+          "$ref": "#/$defs/StopRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_tool_failed"
             }
           },
@@ -4761,6 +4774,67 @@
       "required": [
         "artifact",
         "content_hash"
+      ]
+    },
+    "StopRefusal": {
+      "description": "One reason a session's work would not close.",
+      "oneOf": [
+        {
+          "description": "A criterion of its task is red, or a guard after one waits.",
+          "type": "string",
+          "const": "criteria_red"
+        },
+        {
+          "description": "It changed a path outside its scope.",
+          "type": "string",
+          "const": "outside_scope"
+        },
+        {
+          "description": "A document its node declares was never handed over.",
+          "type": "string",
+          "const": "artifact_missing"
+        },
+        {
+          "description": "A document was handed over, and the close would refuse it.",
+          "type": "string",
+          "const": "artifact_refused"
+        }
+      ]
+    },
+    "StopRefusedPayload": {
+      "description": "A session that asked to stop with work its close would not take, told\nwhy and sent back to it — at most once for one state of that work.",
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "state": {
+          "description": "What the work stood at: the tree the session left and, for a\nnode's own session, what the run holds of the documents it owes.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "task_id": {
+          "description": "The task a loop's session works; absent for a node's own session.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "description": "What kept the work from closing, in the order the close judges it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopRefusal"
+          }
+        }
+      },
+      "required": [
+        "session_id",
+        "state",
+        "why"
       ]
     },
     "SubmissionOutcome": {

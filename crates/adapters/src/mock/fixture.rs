@@ -296,6 +296,25 @@ pub struct SessionScript {
     /// among the other unmatched scripts.
     #[serde(default)]
     pub match_prompt_contains: Option<String>,
+    /// Whether the session asks the engine before it stops, as a CLI's
+    /// stop hook does, and what it writes when it is sent back. Absent,
+    /// it stops without asking.
+    #[serde(default)]
+    pub before_stop: Option<MockStop>,
+}
+
+/// A session that asks before it stops, and what it does the first time
+/// it is sent back, before it asks again — nothing, for one that asks
+/// again as it was.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MockStop {
+    /// Files it writes, each asked about as its other writes are.
+    #[serde(default)]
+    pub writes: Vec<MockEffect>,
+    /// Steps it plays, after those writes.
+    #[serde(default)]
+    pub steps: Vec<MockStep>,
 }
 
 fn default_model() -> ModelName {

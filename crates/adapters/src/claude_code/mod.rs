@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, Secret, SessionId,
     ToolNaming, Unbuildable,
 };
 
@@ -122,6 +122,7 @@ fn fence_args(req: &SessionRequest, mode: crate::session::Sandbox) -> Vec<String
         args.push(rail::settings_json(
             command,
             permissions::sandbox(mode, &req.cwd, req.network),
+            RunToolsEndpoint::call_timeout(&req.budget),
         ));
     }
     args
@@ -247,6 +248,10 @@ impl ClaudeCodeAdapter {
         if let Some(rail) = &req.rail {
             env.extend(rail.env().map(|(var, value)| (var.to_string(), value)));
         }
+        // The engine sends a stop back at most once for one state of the
+        // work, so the CLI's own cap on how often a stop hook may do so
+        // would only cut that judgement short.
+        env.insert(STOP_BLOCK_CAP.to_string(), Secret::new("0".to_string()));
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
@@ -404,6 +409,10 @@ impl Adapter for ClaudeCodeAdapter {
 /// The CLI's native skills discovery directory, relative to the
 /// session's working directory.
 const SKILLS_MOUNT: &str = ".claude/skills";
+
+/// The variable the CLI reads its cap on how many times in a row a stop
+/// hook may keep the session working from; `0` lifts it.
+const STOP_BLOCK_CAP: &str = "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP";
 
 /// The flags that connect the session to the run's tools, configured in
 /// the file at `mcp_config`. `--tools` selects among built-ins only; an

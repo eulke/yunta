@@ -69,6 +69,17 @@ impl Sandbox {
 /// else.
 pub(crate) const HOOK_TIMEOUT_SECONDS: u32 = 10;
 
+/// What a stop hook answers to keep a session working: the decision both
+/// CLIs read on stdout, with the reason the model is shown.
+pub(crate) fn kept_working(reason: &str) -> yunta_core::port::HookReply {
+    let said = serde_json::json!({ "decision": "block", "reason": reason });
+    yunta_core::port::HookReply {
+        stdout: said.to_string().into_bytes(),
+        stderr: Vec::new(),
+        exit: 0,
+    }
+}
+
 /// `part` as one word of a POSIX shell command line: as written when it
 /// holds nothing the shell would read, and in single quotes otherwise,
 /// where nothing is expanded — a binary under a path with a `$`, a space

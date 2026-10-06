@@ -176,19 +176,7 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             agent,
             model,
             fence,
-        } => {
-            let mut said = "session opened".to_string();
-            if let Some(agent) = agent {
-                said.push_str(&format!(" as {agent}"));
-            }
-            if let Some(model) = model {
-                said.push_str(&format!(" on {model}"));
-            }
-            if let Some(coverage) = fence {
-                said.push_str(&format!(" {sep} {}", fence_covered(coverage)));
-            }
-            said
-        }
+        } => opened(agent.as_ref(), model.as_ref(), fence.as_ref(), sep),
         H::Called { tool, target } => called(tool.as_deref(), target.as_ref()),
         H::Message {
             kind,
@@ -205,6 +193,7 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             &one_line(policy),
         ),
         H::Refused(target) => format!("write refused: {}", target.sentence()),
+        H::StopRefused(why) => stop_refused(why),
         H::RunToolFailed { tool, cause } => {
             format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
         }
@@ -218,6 +207,36 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         H::CutOff { message } => service_words(Some(message), None),
         H::Reconnected { waited } => service_words(None, Some(*waited)),
     }
+}
+
+/// A session opening: the agent it works as, the model it runs on and
+/// how much of it the fence covers, when the log knows them.
+fn opened(
+    agent: Option<&yunta_core::AgentName>,
+    model: Option<&yunta_core::ModelName>,
+    fence: Option<&yunta_core::fence::Coverage>,
+    sep: char,
+) -> String {
+    let mut said = "session opened".to_string();
+    if let Some(agent) = agent {
+        said.push_str(&format!(" as {agent}"));
+    }
+    if let Some(model) = model {
+        said.push_str(&format!(" on {model}"));
+    }
+    if let Some(coverage) = fence {
+        said.push_str(&format!(" {sep} {}", fence_covered(coverage)));
+    }
+    said
+}
+
+/// A stop sent back to the work, and what kept the work from closing.
+fn stop_refused(why: &[yunta_core::events::StopRefusal]) -> String {
+    let why: Vec<String> = why
+        .iter()
+        .map(|why| why.as_str().replace('_', " "))
+        .collect();
+    format!("sent back to its work before stopping: {}", why.join(", "))
 }
 
 /// A session losing its service, saying what its CLI said, or finding it

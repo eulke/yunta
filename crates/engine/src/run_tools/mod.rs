@@ -54,6 +54,7 @@ mod notice;
 mod rail;
 mod scope;
 mod session;
+mod stop;
 mod submission;
 mod tasks;
 mod verdicts;

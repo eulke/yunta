@@ -75,7 +75,16 @@ impl SessionTools {
         spec: &ArtifactSpec,
         held: &crate::artifacts::RunArtifacts<'_>,
     ) -> String {
-        let verified = match crate::artifacts::answerer(&self.node_kind, spec.kind()) {
+        render_verdict(&spec.to_string(), self.verified(spec, held).await)
+    }
+
+    /// What this node's close would make of one declared artifact now.
+    pub(super) async fn verified(
+        &self,
+        spec: &ArtifactSpec,
+        held: &crate::artifacts::RunArtifacts<'_>,
+    ) -> Result<VerifiedArtifact, yunta_core::diagnostic::ArtifactFailure> {
+        match crate::artifacts::answerer(&self.node_kind, spec.kind()) {
             crate::artifacts::Answerer::Log => {
                 crate::artifacts::held_document(&self.node, spec, held).await
             }
@@ -88,8 +97,7 @@ impl SessionTools {
                 )
                 .await
             }
-        };
-        render_verdict(&spec.to_string(), verified)
+        }
     }
 
     /// Why a check has nothing to look at: a name this node does not
@@ -285,7 +293,10 @@ impl SessionTools {
 
 /// One artifact's verdict as the session reads it: what the engine
 /// understood, or the numbered problems standing in the way.
-fn render_verdict(name: &str, verified: Result<VerifiedArtifact, ArtifactFailure>) -> String {
+pub(super) fn render_verdict(
+    name: &str,
+    verified: Result<VerifiedArtifact, ArtifactFailure>,
+) -> String {
     match verified {
         Ok(verified) => format!("{name} — ok. {}", read_as(&verified)),
         Err(failure) => match failure.report() {

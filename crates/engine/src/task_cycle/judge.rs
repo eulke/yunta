@@ -24,8 +24,8 @@ pub struct Judgement {
     /// Every criterion that ran again (or was answered from the cache) on
     /// the tree as it stands.
     pub criteria: Vec<CriterionRun>,
-    /// The guards that did not run, by command, because a criterion of
-    /// the task's own is red: they run once every one of those passes.
+    /// The guards that did not run, by command, because a criterion the
+    /// check ran before them is red.
     pub waiting: Vec<String>,
     /// Every path the work changed, and those outside its scope.
     pub scope: ScopeCheckResult,

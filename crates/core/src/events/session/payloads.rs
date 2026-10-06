@@ -182,6 +182,47 @@ impl WriteRefusedPayload {
     }
 }
 
+/// A session that asked to stop with work its close would not take, told
+/// why and sent back to it — at most once for one state of that work.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StopRefusedPayload {
+    pub session_id: SessionId,
+    /// What the work stood at: the tree the session left and, for a
+    /// node's own session, what the run holds of the documents it owes.
+    pub state: ContentHash,
+    /// What kept the work from closing, in the order the close judges it.
+    pub why: Vec<StopRefusal>,
+    /// The task a loop's session works; absent for a node's own session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+}
+
+/// One reason a session's work would not close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StopRefusal {
+    /// A criterion of its task is red, or a guard after one waits.
+    CriteriaRed,
+    /// It changed a path outside its scope.
+    OutsideScope,
+    /// A document its node declares was never handed over.
+    ArtifactMissing,
+    /// A document was handed over, and the close would refuse it.
+    ArtifactRefused,
+}
+
+impl StopRefusal {
+    /// The word the log and a reader call it by.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StopRefusal::CriteriaRed => "criteria_red",
+            StopRefusal::OutsideScope => "outside_scope",
+            StopRefusal::ArtifactMissing => "artifact_missing",
+            StopRefusal::ArtifactRefused => "artifact_refused",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentMessageType {

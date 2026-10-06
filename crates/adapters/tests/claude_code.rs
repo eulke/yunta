@@ -864,6 +864,41 @@ async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing
     );
 }
 
+/// Before the session ends its turn, the CLI asks the engine, and waits
+/// for it as long as a call that runs the task's checks may take; the
+/// CLI's own cap on how often a stop is sent back is lifted, because the
+/// engine sends one back at most once for one state of the work.
+#[tokio::test]
+async fn a_claude_session_asks_the_engine_before_it_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_file = dir.path().join("env.txt");
+    let mut req = request(dir.path().to_path_buf());
+    req.budget.timeout = Some(std::time::Duration::from_secs(1500));
+    req.env.insert(
+        "CLAUDE_STUB_ENV_FILE".to_string(),
+        env_file.display().to_string().into(),
+    );
+    let args = argv_for(dir.path(), req).await;
+
+    let settings = args
+        .iter()
+        .position(|a| a == "--settings")
+        .map(|pos| args[pos + 1].clone())
+        .unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+    let stop = &settings["hooks"]["Stop"][0]["hooks"][0];
+    assert!(stop["command"]
+        .as_str()
+        .is_some_and(|command| command.ends_with("rail claude-code before-stop")));
+    assert_eq!(stop["timeout"], 1500);
+    let env = tokio::fs::read_to_string(&env_file).await.unwrap();
+    assert!(
+        env.lines()
+            .any(|line| line == "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=0"),
+        "{env}"
+    );
+}
+
 /// An isolated session loads none of the person's own settings and no MCP
 /// server but the run's; an inheriting one loads them as the CLI always
 /// does.

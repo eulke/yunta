@@ -148,6 +148,16 @@ fn decide(mode: ScopeExpansionMode, paths: &[ScopeGlob], beside: &[ScopeGlob]) -
     }
 }
 
+/// Whether `printed` locates a write of `refused`, read the way the
+/// attempt's close reads it: relative to `worktree`.
+pub(crate) fn locates_a_refusal(printed: &str, worktree: &Path, refused: &[ToolTarget]) -> bool {
+    let text = relative_text(printed.to_string(), worktree);
+    refused
+        .iter()
+        .filter_map(|target| relative(worktree, target.display.as_deref()?))
+        .any(|path| locates(&text, &path))
+}
+
 /// `target` relative to the checkout, when it lies in it.
 fn relative(worktree: &Path, target: &str) -> Option<String> {
     let path = Path::new(target);
@@ -188,6 +198,12 @@ async fn text_of(printed: &Printed, worktree: &Path, params: &AttemptParams<'_>)
             }
         }
     };
+    relative_text(text, worktree)
+}
+
+/// `text` with the checkout's own path taken out, so a location reads
+/// relative to it whichever way a command printed it.
+fn relative_text(text: String, worktree: &Path) -> String {
     roots(worktree).iter().fold(text, |text, root| {
         text.replace(&format!("{}/", root.display()), "")
     })

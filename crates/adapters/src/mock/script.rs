@@ -37,6 +37,9 @@ pub(super) struct Script {
     /// The effects this session writes by asking the engine first, as a
     /// CLI's hook does — `None` when they were judged before it opened.
     pub(super) asked: Option<Asked>,
+    /// What the session does when its stop is sent back, when it asks
+    /// the engine before it stops.
+    pub(super) before_stop: Option<BeforeStop>,
     pub(super) steps: Vec<MockStep>,
     pub(super) outcome: MockOutcome,
     pub(super) run_tools_endpoint: Option<RunToolsEndpoint>,
@@ -51,6 +54,28 @@ pub(super) struct Asked {
     pub(super) effects: Vec<super::fixture::MockEffect>,
 }
 
+/// What a session that asks before it stops does when it is sent back.
+pub(super) struct BeforeStop {
+    /// Its writes, asked about as a CLI's write hook asks.
+    pub(super) writes: Asked,
+    pub(super) steps: Vec<MockStep>,
+}
+
+impl BeforeStop {
+    /// The engine's answer to this session's wish to stop.
+    async fn asked(&self, session: &SessionId) -> Result<yunta_core::rail::RailAnswer, String> {
+        let call = yunta_core::rail::RailCall {
+            session_id: session.clone(),
+            act: yunta_core::rail::RailAct::BeforeStop,
+        };
+        let rail = self.writes.rail.clone();
+        tokio::task::spawn_blocking(move || rail.ask(&call, None))
+            .await
+            .map_err(|e| format!("the stop hook did not finish: {e}"))?
+            .map_err(|e| format!("the stop hook could not ask the engine: {e}"))
+    }
+}
+
 impl Asked {
     /// Asks the engine about each effect and writes the ones it allows.
     async fn written(self, session: SessionId) -> Result<(), String> {
@@ -63,7 +88,7 @@ impl Asked {
             };
             let rail = self.rail.clone();
             let answer =
-                tokio::task::spawn_blocking(move || rail.ask(&call, Duration::from_secs(30)))
+                tokio::task::spawn_blocking(move || rail.ask(&call, Some(Duration::from_secs(30))))
                     .await
                     .map_err(|e| format!("the write hook did not finish: {e}"))?
                     .map_err(|e| format!("the write hook could not ask the engine: {e}"))?;
@@ -141,33 +166,102 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         }
     }
 
-    if !wrote(script.asked, session, script.refused, &events).await {
+    if !wrote(script.asked, session.clone(), script.refused, &events).await {
         return;
     }
 
-    for step in script.steps {
-        if !stops.waited(step.after_ms()).await {
+    if !stepped(
+        script.steps,
+        script.run_tools_endpoint.as_ref(),
+        &events,
+        &stops,
+    )
+    .await
+    {
+        return;
+    }
+
+    if let (Some(stop), MockOutcome::Completed { .. }) = (script.before_stop, &script.outcome) {
+        let endpoint = script.run_tools_endpoint.as_ref();
+        if !stopped(stop, session, &events, endpoint, &stops).await {
             return;
         }
-        let generated = match played(step, script.run_tools_endpoint.as_ref()).await {
+    }
+    end(script.outcome, &events, &stops).await;
+}
+
+/// Asks the engine before the session stops, as a CLI's stop hook does.
+/// Sent back, the session does what its script says — once — and asks
+/// again; sent back again with nothing left to do, it asks as it is,
+/// which the engine answers by letting it go. `false` once the session
+/// has failed or gone unheard.
+async fn stopped(
+    stop: BeforeStop,
+    session: SessionId,
+    events: &mpsc::UnboundedSender<AgentEvent>,
+    endpoint: Option<&RunToolsEndpoint>,
+    stops: &Stops,
+) -> bool {
+    let mut after = Some((stop.writes.effects.clone(), stop.steps.clone()));
+    for _ in 0..3 {
+        match stop.asked(&session).await {
+            Ok(yunta_core::rail::RailAnswer::Proceed) => return true,
+            Ok(yunta_core::rail::RailAnswer::Refuse { .. }) => {}
+            Err(message) => {
+                failed(events, message);
+                return false;
+            }
+        }
+        let Some((effects, steps)) = after.take() else {
+            continue;
+        };
+        let writes = Asked {
+            rail: stop.writes.rail.clone(),
+            cwd: stop.writes.cwd.clone(),
+            effects,
+        };
+        if let Err(message) = writes.written(session.clone()).await {
+            failed(events, message);
+            return false;
+        }
+        if !stepped(steps, endpoint, events, stops).await {
+            return false;
+        }
+    }
+    failed(
+        events,
+        "the engine sent the stop back three times".to_string(),
+    );
+    false
+}
+
+/// Plays `steps`, each after its delay. `false` once a stop arrives first,
+/// or the session has failed or gone unheard.
+async fn stepped(
+    steps: Vec<MockStep>,
+    endpoint: Option<&RunToolsEndpoint>,
+    events: &mpsc::UnboundedSender<AgentEvent>,
+    stops: &Stops,
+) -> bool {
+    for step in steps {
+        if !stops.waited(step.after_ms()).await {
+            return false;
+        }
+        let generated = match played(step, endpoint).await {
             Ok(events) => events,
             Err(message) => {
-                failed(&events, message);
-                return;
+                failed(events, message);
+                return false;
             }
         };
         for event in generated {
             let terminal = matches!(event, AgentEvent::Failed { .. });
-            if events.send(event).is_err() {
-                return;
-            }
-            if terminal {
-                return;
+            if events.send(event).is_err() || terminal {
+                return false;
             }
         }
     }
-
-    end(script.outcome, &events, &stops).await;
+    true
 }
 
 /// The session's writes: the ones it asks the engine about, then the ones

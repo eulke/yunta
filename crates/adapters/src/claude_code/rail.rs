@@ -2,8 +2,10 @@
 //!
 //! The CLI runs a `PreToolUse` hook before every file-editing tool and
 //! hands it the call as JSON on stdin. Exit 2 with the reason on stderr
-//! is how that hook denies a call; exit 0 lets it through. What the
-//! engine answers is the engine's — this module only translates.
+//! is how that hook denies a call; exit 0 lets it through. Its `Stop` hook
+//! runs when the session would end its turn: `{"decision":"block"}` with
+//! a reason on stdout keeps it working, and the model reads the reason.
+//! What the engine answers is the engine's — this module only translates.
 
 use std::path::PathBuf;
 
@@ -27,6 +29,10 @@ impl RailCodec for ClaudeRailCodec {
             .and_then(|id| id.parse::<SessionId>().ok())
             .ok_or(CodecError::MissingField("session_id"))?;
         match event {
+            RailEvent::BeforeStop => Ok(Some(RailCall {
+                session_id,
+                act: RailAct::BeforeStop,
+            })),
             RailEvent::BeforeWrite => {
                 let input = call.get("tool_input").unwrap_or(&Value::Null);
                 // `NotebookEdit` names its target `notebook_path`; every
@@ -52,7 +58,10 @@ impl RailCodec for ClaudeRailCodec {
                 stderr: reason.clone().into_bytes(),
                 exit: 2,
             },
-            (RailEvent::BeforeWrite, RailAnswer::Proceed) => HookReply {
+            (RailEvent::BeforeStop, RailAnswer::Refuse { reason }) => {
+                crate::session::kept_working(reason)
+            }
+            (_, RailAnswer::Proceed) => HookReply {
                 stdout: Vec::new(),
                 stderr: Vec::new(),
                 exit: 0,
@@ -63,8 +72,13 @@ impl RailCodec for ClaudeRailCodec {
 
 /// The `--settings` document that installs the hooks — the one place this
 /// adapter states how its CLI is told to ask — beside the `sandbox` its
-/// commands run in, when they are confined.
-pub(super) fn settings_json(command: &RailCommand, sandbox: Option<serde_json::Value>) -> String {
+/// commands run in, when they are confined. The stop hook waits for the
+/// engine as long as `judging` allows: judging the work runs its checks.
+pub(super) fn settings_json(
+    command: &RailCommand,
+    sandbox: Option<serde_json::Value>,
+    judging: std::time::Duration,
+) -> String {
     let hook = |event: RailEvent| {
         command
             .argv(&super::ID, event)
@@ -83,6 +97,13 @@ pub(super) fn settings_json(command: &RailCommand, sandbox: Option<serde_json::V
                     "type": "command",
                     "command": hook(RailEvent::BeforeWrite),
                     "timeout": crate::session::HOOK_TIMEOUT_SECONDS,
+                }],
+            }],
+            "Stop": [{
+                "hooks": [{
+                    "type": "command",
+                    "command": hook(RailEvent::BeforeStop),
+                    "timeout": judging.as_secs(),
                 }],
             }],
         }),
@@ -125,6 +146,28 @@ mod tests {
             decoded(call),
             Err(CodecError::MissingField("session_id"))
         ));
+    }
+
+    #[test]
+    fn a_refused_stop_keeps_the_session_working_with_the_reason() {
+        let reply = ClaudeRailCodec.encode(
+            RailEvent::BeforeStop,
+            &RailAnswer::Refuse {
+                reason: "a criterion is red".to_string(),
+            },
+        );
+        let said: Value = serde_json::from_slice(&reply.stdout).unwrap();
+        assert_eq!(reply.exit, 0);
+        assert_eq!(said["decision"], "block");
+        assert_eq!(said["reason"], "a criterion is red");
+        let call = br#"{"session_id":"s-1","hook_event_name":"Stop","stop_hook_active":false}"#;
+        assert_eq!(
+            ClaudeRailCodec
+                .decode(RailEvent::BeforeStop, call)
+                .unwrap()
+                .map(|call| call.act),
+            Some(RailAct::BeforeStop)
+        );
     }
 
     #[test]

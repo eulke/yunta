@@ -67,11 +67,24 @@ impl SessionTools {
     /// from one that was never asked.
     pub(super) async fn check_task(&self) -> Result<String, RunToolError> {
         let access = self.task_access(RunTool::CheckTask)?;
+        let (judgement, _) = self.judged_now(access).await?;
+        self.check_verdict(judgement)
+    }
+
+    /// The judgement `access`'s task gets on its checkout as it stands,
+    /// on the log as one check of the task, and the tree it judged.
+    pub(super) async fn judged_now(
+        &self,
+        access: &TaskAccess,
+    ) -> Result<(Judgement, yunta_core::TreeId), RunToolError> {
         let tree =
             crate::task_cycle::content_of(&access.unit.worktree, self.host.supervision(&self.stop))
                 .await
                 .map_err(|source| RunToolError::Check { source })?;
-        let (_turn, stop) = access.checks.take(tree, &self.stop, &access.index).await;
+        let (_turn, stop) = access
+            .checks
+            .take(tree.clone(), &self.stop, &access.index)
+            .await;
         self.append(EventPayload::Tasks(TaskEvent::CheckStarted(
             TaskCheckStartedPayload {
                 task_id: access.task.id.clone(),
@@ -106,11 +119,11 @@ impl SessionTools {
             started.elapsed(),
         ))
         .await?;
-        self.check_verdict(judgement)
+        Ok((judgement, tree))
     }
 
     /// What `yunta_check_task` answers for `judgement`.
-    fn check_verdict(&self, judgement: Judgement) -> Result<String, RunToolError> {
+    pub(super) fn check_verdict(&self, judgement: Judgement) -> Result<String, RunToolError> {
         let any_unrunnable = judgement
             .criteria
             .iter()

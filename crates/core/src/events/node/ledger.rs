@@ -21,7 +21,7 @@ use crate::{NonEmpty, RunnerCandidate, TreeId};
 
 mod sessions;
 
-pub use sessions::{OpenSession, OrphanedSession, RefusedWrite, ToolCall};
+pub use sessions::{OpenSession, OrphanedSession, RefusedStop, RefusedWrite, ToolCall};
 
 /// One node's derived lifecycle state. An enum, not booleans: there is
 /// no combination of flags to get wrong.
@@ -172,6 +172,8 @@ pub struct NodeRecord {
     pub sessions: Vec<OpenSession>,
     /// Every write this node's sessions had refused, oldest first.
     pub refused: Vec<RefusedWrite>,
+    /// Every stop this node's sessions were sent back from, oldest first.
+    pub stops_refused: Vec<RefusedStop>,
     /// The tool calls the open attempt made, oldest first.
     pub calls: Vec<ToolCall>,
     /// Last failed run-tool call of the current or most recently closed

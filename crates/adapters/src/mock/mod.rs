@@ -283,6 +283,18 @@ impl MockAdapter {
                     cwd: req.cwd.clone(),
                     effects: script.effects.clone(),
                 }),
+            before_stop: req
+                .rail
+                .clone()
+                .zip(script.before_stop.as_ref())
+                .map(|(rail, stop)| script::BeforeStop {
+                    writes: script::Asked {
+                        rail,
+                        cwd: req.cwd.clone(),
+                        effects: stop.writes.clone(),
+                    },
+                    steps: stop.steps.clone(),
+                }),
             fence: self.fixture.fence_coverage.map(|coverage| {
                 coverage.resolve(
                     std::iter::once(req.cwd.clone())

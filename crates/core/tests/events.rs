@@ -69,6 +69,7 @@ fn session_kinds(event: &SessionEvent) {
         | SessionEvent::Message(_)
         | SessionEvent::CapabilityDegraded(_)
         | SessionEvent::WriteRefused(_)
+        | SessionEvent::StopRefused(_)
         | SessionEvent::RunToolFailed(_)
         | SessionEvent::RunToolRefused(_)
         | SessionEvent::ServiceUnreachable(_)

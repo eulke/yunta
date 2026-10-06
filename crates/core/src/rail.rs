@@ -44,16 +44,19 @@ pub const ROUTE: &str = "/rail";
 pub enum RailEvent {
     /// A file tool is about to write.
     BeforeWrite,
+    /// The session is about to end its turn, and with it its work.
+    BeforeStop,
 }
 
 impl RailEvent {
     /// Every event, in the order a session meets them.
-    pub const ALL: [RailEvent; 1] = [RailEvent::BeforeWrite];
+    pub const ALL: [RailEvent; 2] = [RailEvent::BeforeWrite, RailEvent::BeforeStop];
 
     /// The word the subcommand and the route take.
     pub fn as_str(self) -> &'static str {
         match self {
             RailEvent::BeforeWrite => "before-write",
+            RailEvent::BeforeStop => "before-stop",
         }
     }
 }
@@ -95,6 +98,8 @@ pub enum RailAct {
     /// Every path one call is about to write, as the CLI named them:
     /// absolute, or relative to the session's working directory.
     BeforeWrite { paths: Vec<PathBuf> },
+    /// The session would end here.
+    BeforeStop,
 }
 
 impl RailAct {
@@ -102,6 +107,7 @@ impl RailAct {
     pub fn moment(&self) -> RailEvent {
         match self {
             RailAct::BeforeWrite { .. } => RailEvent::BeforeWrite,
+            RailAct::BeforeStop => RailEvent::BeforeStop,
         }
     }
 }
@@ -125,6 +131,7 @@ pub fn unasked(event: RailEvent, why: &str) -> RailAnswer {
             let reason = format!("yunta: write refused: the engine could not be asked ({why}).");
             RailAnswer::Refuse { reason }
         }
+        RailEvent::BeforeStop => RailAnswer::Proceed,
     }
 }
 
@@ -172,12 +179,18 @@ impl RailEndpoint {
         ]
     }
 
-    /// Asks the engine about `call`, giving up after `deadline`.
+    /// Asks the engine about `call`, giving up after `deadline` — or
+    /// waiting for as long as the engine takes, which the CLI that runs
+    /// the hook bounds with the hook's own timeout.
     ///
     /// Plain HTTP/1.1 over a blocking socket: a hook is a fresh process
     /// per call, and an async runtime would cost more to start than the
     /// call takes.
-    pub fn ask(&self, call: &RailCall, deadline: Duration) -> Result<RailAnswer, RailAskError> {
+    pub fn ask(
+        &self,
+        call: &RailCall,
+        deadline: Option<Duration>,
+    ) -> Result<RailAnswer, RailAskError> {
         let (authority, path) = split_url(&self.url)?;
         let path = format!("{path}/{}", call.act.moment());
         let body = serde_json::to_vec(call).map_err(RailAskError::Encode)?;
@@ -186,11 +199,14 @@ impl RailEndpoint {
             .map_err(RailAskError::Connect)?
             .next()
             .ok_or_else(|| RailAskError::Url(self.url.clone()))?;
-        let mut stream =
-            TcpStream::connect_timeout(&address, deadline).map_err(RailAskError::Connect)?;
+        let mut stream = match deadline {
+            Some(deadline) => TcpStream::connect_timeout(&address, deadline),
+            None => TcpStream::connect(address),
+        }
+        .map_err(RailAskError::Connect)?;
         stream
-            .set_read_timeout(Some(deadline))
-            .and_then(|()| stream.set_write_timeout(Some(deadline)))
+            .set_read_timeout(deadline)
+            .and_then(|()| stream.set_write_timeout(deadline))
             .map_err(RailAskError::Connect)?;
         let head = format!(
             "POST {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {}\r\n\

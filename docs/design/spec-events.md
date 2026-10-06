@@ -12,8 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 44 rows and **54 `kind` names**.
-It had 43 rows and 53 kinds before `run_moved` was added. The table
+The current Run Contract event table has 45 rows and **55 `kind` names**.
+It had 44 rows and 54 kinds before `stop_refused` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -782,6 +782,20 @@ tiempo despierto— a que el servicio responda y el host se asiente, registra
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `waited_ms` | `u64` | sí | lo que esperó, en tiempo despierto del host |
+
+### 5.25a.3 `stop_refused` — engine (el riel de la sesión)
+**Fuente:** la sesión que quiso terminar con trabajo que su cierre no tomaría.
+La escribe el engine cuando el hook de la sesión le pregunta antes de parar y
+el juicio —el de `yunta_check_task` para una tarea; documentos y scope para la
+sesión de un nodo— no cerraría, antes de responderle (D254). Nunca dos veces
+para la misma sesión y el mismo `state`.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `session_id` | `SessionId` | sí | la sesión que quiso parar |
+| `state` | `ContentHash` | sí | en qué estaba el trabajo: el árbol que dejaba y, para la sesión de un nodo, los veredictos de sus documentos |
+| `why` | lista de `criteria_red \| outside_scope \| artifact_missing \| artifact_refused` | sí | qué impedía cerrar, en el orden en que lo juzga el cierre |
+| `task_id` | `TaskId` | no | la tarea de una sesión de loop; ausente para la sesión propia de un nodo |
 
 ### 5.25b `host_suspended` — engine
 

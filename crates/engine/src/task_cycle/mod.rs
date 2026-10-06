@@ -48,6 +48,7 @@ pub(crate) use criteria::{could_not_run, pre_check_unless_cut, probe, probe_comm
 pub use criteria::{post_check, pre_check, PostCheck};
 pub use dispatch::DispatchError;
 pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
+pub(crate) use evidence::locates_a_refusal;
 pub(crate) use judge::{judge, Judgement, Work};
 pub use memo::{Memo, Memoized};
 pub use session::{KeepsOutput, RunToolsNeed, SessionObserver, SessionSetup};

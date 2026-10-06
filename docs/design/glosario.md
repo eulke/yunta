@@ -289,10 +289,11 @@ _Evitar_: validador de scope, checker.
 
 **Riel** (`RailCommand`, `/rail`):
 Lo que el CLI de una sesión le pregunta al engine mientras trabaja — antes de
-escribir, primero que nada. El hook es este binario, su subcomando `rail`, el
-adapter cuyo codec lee la llamada y el momento (`before-write`); la respuesta
-la da el engine por el listener de esa sesión, con el mismo token que sus
-herramientas, y deja en el log lo que juzgó (D249).
+escribir y antes de terminar. El hook es este binario, su subcomando `rail`, el
+adapter cuyo codec lee la llamada y el momento (`before-write`,
+`before-stop`); la respuesta la da el engine por el listener de esa sesión,
+con el mismo token que sus herramientas, y deja en el log lo que juzgó (D249,
+D254).
 _Evitar_: hook del cerco, `yunta fence`.
 
 **Codec** (`RailCodec`):
@@ -305,6 +306,11 @@ El hecho de que una escritura fue rechazada antes de ocurrir. Su texto para el
 modelo nace una sola vez, empieza por un marcador fijo y dice la salida: pedir
 ampliación, o reportar un finding.
 _Evitar_: bloqueo, edición bloqueada.
+
+**Parada devuelta** (`stop_refused`):
+La sesión quiso terminar con trabajo que su cierre no tomaría, y el engine la
+devolvió a él diciendo qué falta. Una vez por estado del trabajo (D254).
+_Evitar_: stop bloqueado, reintento.
 
 ## Fallas
 

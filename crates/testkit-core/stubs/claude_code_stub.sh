@@ -13,6 +13,8 @@
 #   configuration says on its way out. A file rather than the text
 #   itself, because a session redacts every value its environment
 #   carried and a test asserting on the line needs it unredacted.
+# - $CLAUDE_STUB_ENV_FILE, if set: the environment it ran with, one
+#   `NAME=value` per line.
 # - $CLAUDE_STUB_EXIT, if set: the status to exit with.
 # - $CLAUDE_STUB_CHILD_PID_FILE, if set: spawns a background blocker of
 #   its own and records its pid — a grandchild the adapter's kill() must
@@ -34,6 +36,10 @@ if [ -n "$CLAUDE_STUB_HANG" ]; then
   trap '' INT
 elif [ -n "$CLAUDE_STUB_LINGER" ]; then
   trap 'exit 0' INT
+fi
+
+if [ -n "$CLAUDE_STUB_ENV_FILE" ]; then
+  env > "$CLAUDE_STUB_ENV_FILE"
 fi
 
 if [ -n "$CLAUDE_STUB_ARGS_FILE" ]; then

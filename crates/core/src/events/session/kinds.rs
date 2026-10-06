@@ -9,6 +9,9 @@ pub enum SessionEvent {
     Message(AgentMessagePayload),
     CapabilityDegraded(CapabilityDegradedPayload),
     WriteRefused(WriteRefusedPayload),
+    /// The session asked to stop with work its close would not take, and
+    /// was sent back to it.
+    StopRefused(StopRefusedPayload),
     RunToolFailed(RunToolFailedPayload),
     /// A call this binary refused, and why; the session was answered with
     /// the refusal.
@@ -26,6 +29,7 @@ impl SessionEvent {
         "agent_message",
         "capability_degraded",
         "write_refused",
+        "stop_refused",
         "run_tool_failed",
         "run_tool_refused",
         "service_unreachable",
@@ -39,6 +43,7 @@ impl SessionEvent {
             Self::Message(_) => "agent_message",
             Self::CapabilityDegraded(_) => "capability_degraded",
             Self::WriteRefused(_) => "write_refused",
+            Self::StopRefused(_) => "stop_refused",
             Self::RunToolFailed(_) => "run_tool_failed",
             Self::RunToolRefused(_) => "run_tool_refused",
             Self::ServiceUnreachable(_) => "service_unreachable",
@@ -59,6 +64,7 @@ impl SessionEvent {
             Self::Message(_) => false,
             Self::CapabilityDegraded(_) => false,
             Self::WriteRefused(_) => false,
+            Self::StopRefused(_) => false,
             Self::RunToolFailed(_) => false,
             Self::RunToolRefused(_) => true,
             Self::ServiceUnreachable(_) => true,

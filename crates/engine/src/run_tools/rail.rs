@@ -4,6 +4,7 @@
 //! own fence, judged here, and every refusal is on the log before the
 //! hook hears it — so a refused write is recorded the same way whichever
 //! CLI made it, and whatever that CLI does or does not print about it.
+//! Before the session stops, its work is judged (`stop`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -47,6 +48,7 @@ impl SessionTools {
     pub(super) async fn rail(&self, call: RailCall) -> RailAnswer {
         match call.act {
             RailAct::BeforeWrite { paths } => self.before_write(&call.session_id, &paths).await,
+            RailAct::BeforeStop => self.before_stop(&call.session_id).await,
         }
     }
 

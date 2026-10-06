@@ -59,6 +59,14 @@ pub struct RefusedWrite {
     pub target: crate::events::ToolTarget,
 }
 
+/// One stop sent back to the work: which session asked, and the state of
+/// its work it was refused at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefusedStop {
+    pub session_id: crate::ids::SessionId,
+    pub state: crate::ContentHash,
+}
+
 /// One tool call, as `agent_message` recorded it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolCall {
@@ -72,6 +80,23 @@ pub struct ToolCall {
 }
 
 impl NodeLedger {
+    /// Whether `session` of `node` was already sent back from a stop with
+    /// its work at `state`: a stop is refused once for one state, so a
+    /// session that cannot do better is never held in place.
+    pub fn stop_refused_on(
+        &self,
+        node: &crate::ids::NodeId,
+        session: &crate::ids::SessionId,
+        state: &crate::ContentHash,
+    ) -> bool {
+        self.per_node.get(node).is_some_and(|record| {
+            record
+                .stops_refused
+                .iter()
+                .any(|stop| &stop.session_id == session && &stop.state == state)
+        })
+    }
+
     /// Folds a session-domain event onto the node that wrote it: a
     /// session belongs to the attempt that opened it, so what is open
     /// and what it has spent is part of that node's record.
@@ -93,6 +118,10 @@ impl NodeLedger {
             SessionEvent::WriteRefused(p) => record.refused.push(RefusedWrite {
                 session_id: p.session_id.clone(),
                 target: p.target.clone(),
+            }),
+            SessionEvent::StopRefused(p) => record.stops_refused.push(RefusedStop {
+                session_id: p.session_id.clone(),
+                state: p.state.clone(),
             }),
             SessionEvent::RunToolFailed(p) => record.last_tool_failure = Some(p.clone()),
             // The refusal itself reaches a reader through the log; for the

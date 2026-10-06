@@ -102,6 +102,15 @@ happening; the diff Yunta takes after the session is still the guarantee, and
 a write that reaches that diff despite an exact fence is reported as a finding
 against the adapter.
 
+Before a session ends its turn, its CLI asks the engine too. The engine judges
+the work the way the attempt's close will — a task's criteria, guards and
+scope, or a node's documents and scope — and when the close would not take it,
+the session is sent back to it with what stands in the way, recorded as
+`stop_refused`. It does so once for one state of the work, never while the
+attempt's end owes the session an answer about its scope, and a hook that
+cannot reach the engine lets the session stop: the close still judges it.
+Both CLIs wait for that answer as long as a run-tool call may take.
+
 Whatever the adapter, the session's prompt reaches the CLI on its standard
 input, never as a command-line argument, so it is not readable from the
 process list; and the values of the secrets a config declares live only in

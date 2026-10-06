@@ -181,6 +181,10 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   `src/a.txt` and `docs/b.txt` wrote the first; the second was refused by the
   engine before it applied, recorded as `write_refused` naming `docs/b.txt`,
   and the model quoted the refusal.
+- Through the engine: a node scoped to `a.txt`, told to write `b.txt` from the
+  shell and finish, asked before stopping; the engine found `b.txt` outside
+  the scope, recorded `stop_refused` (`outside_scope`), and the same session
+  removed `b.txt` and finished — the `Stop` hook trusted by its seeded hash.
 
 **claude-code**
 
@@ -207,6 +211,8 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   command reaches the internet and `127.0.0.1`; with neither it reaches
   neither. `filesystem.denyWrite` on the working directory keeps a command
   from writing it while `--add-dir` roots stay writable.
+- Through the engine: the same `outside_scope` stop as on `codex` — one
+  `stop_refused`, `b.txt` removed by the same session, the node finished.
 - Through the engine: an `edit` session under `network: false` wrote the
   checkout from Bash, was refused `example.com` by the sandbox's proxy, and
   could not write `~`.

@@ -98,13 +98,23 @@ fn hook(rail: Option<(&str, &str)>, stdin: &str) -> std::process::Output {
     hook_for("claude-code", rail, stdin)
 }
 
-/// The same, for the hook of `adapter`.
+/// The same, for the write hook of `adapter`.
 fn hook_for(adapter: &str, rail: Option<(&str, &str)>, stdin: &str) -> std::process::Output {
+    hook_at(adapter, "before-write", rail, stdin)
+}
+
+/// The same, for `adapter`'s hook at `event`.
+fn hook_at(
+    adapter: &str,
+    event: &str,
+    rail: Option<(&str, &str)>,
+    stdin: &str,
+) -> std::process::Output {
     let away = tempfile::tempdir().expect("a directory for this test's home");
     let mut command = Command::new(env!("CARGO_BIN_EXE_yunta"));
     yunta_testkit::hermetic(&mut command, away.path(), &away.path().join("state"));
     command
-        .args(["rail", adapter, "before-write"])
+        .args(["rail", adapter, event])
         .env_remove(URL_VAR)
         .env_remove(TOKEN_VAR)
         .stdin(Stdio::piped())
@@ -209,4 +219,36 @@ fn a_codex_patch_with_one_path_outside_is_refused_whole() {
             paths: vec!["src/a.rs".into(), "docs/readme.md".into()]
         }
     );
+}
+
+/// A stop the engine sends back keeps the session working: both CLIs read
+/// the decision on stdout, with the engine's reason for the model.
+#[test]
+fn a_refused_stop_is_a_block_decision_on_stdout_for_every_adapter() {
+    for adapter in ["claude-code", "codex"] {
+        let (url, heard) = engine();
+        let stop = r#"{"session_id":"s-1","hook_event_name":"Stop","stop_hook_active":false}"#;
+
+        let out = hook_at(adapter, "before-stop", Some((&url, TOKEN)), stop);
+
+        assert_eq!(out.status.code(), Some(0), "{adapter}");
+        let said: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(said["decision"], "block", "{adapter}");
+        assert!(said["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()));
+        let (path, call) = heard.recv().expect("the engine was asked");
+        assert_eq!(path, "/rail/before-stop");
+        assert_eq!(call.map(|call| call.act), Some(RailAct::BeforeStop));
+    }
+}
+
+/// A stop hook that cannot ask lets the session stop: the attempt's close
+/// still judges the work.
+#[test]
+fn a_stop_hook_that_cannot_ask_lets_the_session_stop() {
+    let stop = r#"{"session_id":"s-1","hook_event_name":"Stop"}"#;
+    let out = hook_at("codex", "before-stop", None, stop);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty());
 }

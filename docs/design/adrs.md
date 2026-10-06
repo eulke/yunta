@@ -260,3 +260,4 @@ lista.
 **D251 — A Codex edit is judged before it applies.** `accepted` → [`adr/D251-a-codex-edit-is-judged-before-it-applies.md`](adr/D251-a-codex-edit-is-judged-before-it-applies.md)
 **D252 — An agent's commands run in its CLI's sandbox, and a node's closed network holds there.** `accepted` → [`adr/D252-an-agent-s-commands-run-in-its-cli-s-sandbox.md`](adr/D252-an-agent-s-commands-run-in-its-cli-s-sandbox.md)
 **D253 — An agent is defined by Yunta, and every adapter adds its instructions.** `accepted` → [`adr/D253-an-agent-is-defined-by-yunta.md`](adr/D253-an-agent-is-defined-by-yunta.md)
+**D254 — A session's stop is judged before it ends, once for one state of its work.** `accepted` → [`adr/D254-a-session-s-stop-is-judged-before-it-ends.md`](adr/D254-a-session-s-stop-is-judged-before-it-ends.md)
