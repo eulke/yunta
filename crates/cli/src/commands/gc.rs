@@ -57,8 +57,11 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
             take_old_layouts(&ctx, run_id, places).await;
         }
         tidy(&ctx, &pool).await;
-    } else if let Ok(kept) = pool.report(ctx.supervision()).await {
-        println!("the project's checkouts: {kept}");
+    } else {
+        would_adopt(&ctx, &pool).await;
+        if let Ok(kept) = pool.report(ctx.supervision()).await {
+            println!("the project's checkouts: {kept}");
+        }
     }
     Ok(Outcome::Success)
 }
@@ -104,7 +107,23 @@ async fn forget_units(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: 
 async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
     match yunta_engine::adopt_unit_branches(pool, &ctx.cwd, None, ctx.supervision()).await {
         Ok(taken) if !taken.is_empty() => {
-            println!("kept the work of {} unit branches by refs", taken.len());
+            let branches =
+                yunta_core::text::counted_as(taken.len(), "unit branch", "unit branches");
+            println!("kept the work of {branches} by refs");
+        }
+        Ok(_) => {}
+        Err(e) => warn(format!("the units' branches: {e}")),
+    }
+}
+
+/// Says which of the units' branches runs made before refs kept their work
+/// a pass would take in, taking none.
+async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+    match yunta_engine::adoptable_unit_branches(pool, &ctx.cwd, ctx.supervision()).await {
+        Ok(branches) if !branches.is_empty() => {
+            let branches =
+                yunta_core::text::counted_as(branches.len(), "unit branch", "unit branches");
+            println!("would keep the work of {branches} by refs");
         }
         Ok(_) => {}
         Err(e) => warn(format!("the units' branches: {e}")),

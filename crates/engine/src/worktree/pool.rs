@@ -51,8 +51,8 @@ use crate::process::Supervision;
 
 pub use give::clear_work;
 pub use release::{
-    adopt_unit_branches, forget_run_units, hand_over_run_checkout, release_run_checkout,
-    release_unit_checkouts, still_the_runs,
+    adopt_unit_branches, adoptable_unit_branches, forget_run_units, hand_over_run_checkout,
+    release_run_checkout, release_unit_checkouts, still_the_runs,
 };
 pub use runs::Birth;
 use slot::SLOT;

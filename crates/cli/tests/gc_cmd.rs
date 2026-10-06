@@ -123,6 +123,36 @@ fn gc_keeps_a_live_runs_unit_branch_work_by_a_ref() {
     );
 }
 
+/// A dry run says how many of the units' branches runs made before refs
+/// a pass would take in, and takes none.
+#[test]
+fn a_dry_run_says_which_unit_branches_it_would_keep_by_refs() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 30\n",
+    );
+    git(&repo, &["branch", "yunta/unit/01JLEGACY/task/T1/1"]);
+
+    let gc = yunta_in!(&repo, &home, &["gc", "--dry-run"]);
+
+    assert!(gc.status.success(), "stderr: {}", stderr(&gc));
+    assert!(
+        stdout(&gc).contains("would keep the work of 1 unit branch by refs"),
+        "{}",
+        stdout(&gc)
+    );
+    let left = git_output(&repo, &["branch", "--list", "yunta/unit/*"]);
+    assert!(
+        left.contains("yunta/unit/01JLEGACY/task/T1/1"),
+        "a dry run takes nothing in"
+    );
+}
+
 /// `gc` says what the project's checkouts keep, and empties a build
 /// nobody used within retention: its source stays, a `git clean` away
 /// from where it was.

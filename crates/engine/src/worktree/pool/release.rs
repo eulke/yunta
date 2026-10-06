@@ -2,7 +2,7 @@
 //! own when it ends, and the ones a project no longer uses when it
 //! collects what is old — and how legacy unit branches are taken in.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::super::WorktreeError;
 use super::{slot, survey, CheckoutPool};
@@ -103,9 +103,10 @@ pub async fn forget_run_units(
     pool.forget_units_of(repo, run_id, supervision).await
 }
 
-/// Takes in the legacy unit branches — `run`'s, or every run's — as the refs units keep their work by: each branch's commit is kept by
-/// its unit's ref, a clean checkout of the pool on it lets it go and is
-/// kept for that unit, and the branch goes. A branch checked out where
+/// Takes in the legacy unit branches — `run`'s, or every run's — as the
+/// refs units keep their work by: each branch's commit is kept by its
+/// unit's ref, a clean checkout of the pool on it lets it go and is kept
+/// for that unit, and the branch goes. A branch checked out where
 /// something is uncommitted, held by a live process, or checked out
 /// outside the pool, stays. Answers the branches taken in.
 pub async fn adopt_unit_branches(
@@ -114,17 +115,73 @@ pub async fn adopt_unit_branches(
     run: Option<&yunta_core::RunId>,
     supervision: Supervision<'_>,
 ) -> Result<Vec<String>, WorktreeError> {
+    let branches = legacy_branches(repo, run, supervision).await?;
+    if branches.is_empty() {
+        return Ok(Vec::new());
+    }
+    let home = pool.home(supervision).await?;
+    let mut taken = Vec::new();
+    for (branch, checked_out) in branches {
+        let Some(unit) = super::super::UnitRef::of_legacy(&branch) else {
+            continue;
+        };
+        if let Some(path) = &checked_out {
+            if !let_go(pool, &home, path, &unit, supervision).await? {
+                continue;
+            }
+        }
+        let tip = format!("refs/heads/{branch}");
+        crate::git::output(repo, &["update-ref", unit.name(), &tip], supervision).await?;
+        super::mutating(repo, &["branch", "-D", &branch], supervision).await?;
+        taken.push(branch);
+    }
+    Ok(taken)
+}
+
+/// The legacy unit branches a pass of `gc` would take in, taking none:
+/// each one checked out nowhere, or in a clean checkout of the pool —
+/// unless a process holds that checkout when the pass runs.
+pub async fn adoptable_unit_branches(
+    pool: &CheckoutPool,
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<String>, WorktreeError> {
+    let home = pool.home(supervision).await?;
+    let mut adoptable = Vec::new();
+    for (branch, checked_out) in legacy_branches(repo, None, supervision).await? {
+        if super::super::UnitRef::of_legacy(&branch).is_none() {
+            continue;
+        }
+        let free = match &checked_out {
+            None => true,
+            Some(path) => {
+                let in_the_pool = slot::number_of(&home, path).await.is_some();
+                let look = survey::look(path, supervision).await;
+                in_the_pool && look.is_some_and(|look| look.clean)
+            }
+        };
+        if free {
+            adoptable.push(branch);
+        }
+    }
+    Ok(adoptable)
+}
+
+/// The legacy unit branches — `run`'s, or every run's — each with the
+/// checkout it is checked out in, if any.
+async fn legacy_branches(
+    repo: &Path,
+    run: Option<&yunta_core::RunId>,
+    supervision: Supervision<'_>,
+) -> Result<Vec<(String, Option<PathBuf>)>, WorktreeError> {
     let prefix = match run {
         Some(run) => super::super::legacy_unit_branches_of(run),
         None => format!("{}/", super::super::LEGACY_UNIT_BRANCHES),
     };
+    let names = format!("refs/heads/{prefix}");
     let listed = crate::git::output(
         repo,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)",
-            &format!("refs/heads/{prefix}"),
-        ],
+        &["for-each-ref", "--format=%(refname:short)", &names],
         supervision,
     )
     .await?;
@@ -132,7 +189,6 @@ pub async fn adopt_unit_branches(
     if branches.is_empty() {
         return Ok(Vec::new());
     }
-    let home = pool.home(supervision).await?;
     let listing =
         crate::git::output(repo, &["worktree", "list", "--porcelain"], supervision).await?;
     let mut checked_out = std::collections::HashMap::new();
@@ -142,22 +198,10 @@ pub async fn adopt_unit_branches(
             checked_out.insert(short, listed.path);
         }
     }
-    let mut taken = Vec::new();
-    for branch in branches {
-        let Some(unit) = super::super::UnitRef::of_legacy(branch) else {
-            continue;
-        };
-        if let Some(path) = checked_out.get(branch) {
-            if !let_go(pool, &home, path, &unit, supervision).await? {
-                continue;
-            }
-        }
-        let tip = format!("refs/heads/{branch}");
-        crate::git::output(repo, &["update-ref", unit.name(), &tip], supervision).await?;
-        super::mutating(repo, &["branch", "-D", branch], supervision).await?;
-        taken.push(branch.to_string());
-    }
-    Ok(taken)
+    Ok(branches
+        .into_iter()
+        .map(|branch| (branch.to_string(), checked_out.remove(branch)))
+        .collect())
 }
 
 /// Lets the checkout at `path` go of the branch it is on, kept for `unit`
