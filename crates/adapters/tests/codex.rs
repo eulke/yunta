@@ -52,6 +52,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.usage_reporting);
     // Never claim a capability that isn't wired end-to-end yet.
     assert!(!caps.custom_agents);
+    assert!(caps.skills);
     // Every edit is judged before it applies, by the hook it runs.
     assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
     assert!(caps.run_tools);
@@ -437,6 +438,29 @@ async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
         "the session had a process"
     );
     wait_until_gone(Pid::try_from(grandchild).unwrap()).await;
+}
+
+/// A skill is mounted where the CLI discovers a project's skills, declared
+/// as the adapter's own staging, and taken back once the session ends.
+#[tokio::test]
+async fn a_skill_is_mounted_where_the_cli_finds_it_and_taken_back_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("skills-src/grill");
+    tokio::fs::create_dir_all(&skill).await.unwrap();
+    let cwd = dir.path().join("worktree");
+    tokio::fs::create_dir_all(&cwd).await.unwrap();
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill.clone()];
+    let staged = [std::path::PathBuf::from(".agents/skills/grill")];
+    assert_eq!(adapter().staged_paths(&req), staged);
+
+    let events = events_with(&dir, req.clone(), &[THREAD_STARTED_LINE]).await;
+    assert!(!events.is_empty());
+    let link = tokio::fs::read_link(cwd.join(&staged[0])).await.unwrap();
+    assert_eq!(link, skill);
+
+    adapter().unstage(&req).unwrap();
+    assert!(!tokio::fs::try_exists(cwd.join(".agents")).await.unwrap());
 }
 
 #[tokio::test]

@@ -42,6 +42,10 @@ use config::ConfigOverride;
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("codex");
 
+/// Where the CLI discovers a project's skills, relative to the session's
+/// working directory.
+const SKILLS_MOUNT: &str = ".agents/skills";
+
 /// The variable the CLI reads the per-run bearer token from. Naming the
 /// variable in the config, rather than inlining the token, is what keeps
 /// the credential out of `argv` — which `ps` shows to any local process.
@@ -137,6 +141,7 @@ impl CodexAdapter {
                 detail: unreadable.to_string(),
             });
         }
+        crate::skills::stage(&ID, SKILLS_MOUNT, &req)?;
         let args =
             self.build_args(&req, resume)
                 .map_err(|source| AdapterError::FenceUnbuildable {
@@ -274,11 +279,10 @@ impl Adapter for CodexAdapter {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume_session: true,
-            // `codex exec` has no skills mechanism to mount into — a
-            // capability must never claim more than is actually built —
-            // so the engine degrades with `capability_degraded` when a
-            // node declares skills here.
-            skills: false,
+            // Mounted by staging into the session cwd's own
+            // `.agents/skills/` — where the CLI discovers a project's
+            // skills.
+            skills: true,
             // Every edit goes through a `PreToolUse` hook that asks the
             // engine before the patch applies; commands stay confined by
             // the process's sandbox, which the coverage reports.
@@ -305,6 +309,17 @@ impl Adapter for CodexAdapter {
             // `mcp__yunta_run__yunta_task`, never `yunta_task`.
             tool_naming: ToolNaming::McpPrefixedUnderscored,
         }
+    }
+
+    fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf> {
+        crate::skills::mounts(SKILLS_MOUNT, req)
+            .into_iter()
+            .map(|(mount, _)| mount)
+            .collect()
+    }
+
+    fn unstage(&self, req: &SessionRequest) -> Result<()> {
+        crate::skills::unstage(&ID, SKILLS_MOUNT, req)
     }
 
     fn rail_codec(&self) -> Option<&dyn yunta_core::port::RailCodec> {

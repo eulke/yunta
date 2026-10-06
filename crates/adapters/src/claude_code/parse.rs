@@ -326,7 +326,7 @@ impl Spent {
             .any(|count| count > 0)
     }
 
-    fn event(self) -> AgentEvent {
+    fn as_usage(self) -> AgentEvent {
         AgentEvent::Usage {
             input_tokens: self.input,
             output_tokens: self.output,
@@ -346,7 +346,7 @@ fn message_usage(value: &Value, reported: &mut Reported) -> Option<AgentEvent> {
     }
     let spent = Spent::of(usage);
     reported.spent = reported.spent.plus(spent);
-    Some(spent.event())
+    Some(spent.as_usage())
 }
 
 fn result_events(value: &Value, reported: &mut Reported) -> Vec<AgentEvent> {
@@ -356,7 +356,7 @@ fn result_events(value: &Value, reported: &mut Reported) -> Vec<AgentEvent> {
         let rest = total.beyond(reported.spent);
         reported.spent = total;
         if rest.says_anything() {
-            events.push(rest.event());
+            events.push(rest.as_usage());
         }
     }
 

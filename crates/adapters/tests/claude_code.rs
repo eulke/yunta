@@ -1158,34 +1158,27 @@ async fn usage_is_reported_per_message_once_and_reconciled_by_the_result() {
             r#"{{"input_tokens":{input},"cache_read_input_tokens":{read},"cache_creation_input_tokens":{created},"output_tokens":{output}}}"#
         )
     };
-    let assistant = |id: &str, block: &str, usage: &str| {
-        format!(
-            r#"{{"type":"assistant","message":{{"id":"{id}","content":[{{"type":"text","text":"{block}"}}],"usage":{usage}}}}}"#
-        )
+    let assistant = |id: &str, usage: &str| {
+        format!(r#"{{"type":"assistant","message":{{"id":"{id}","content":[],"usage":{usage}}}}}"#)
     };
-    let first = usage(3, 0, 8599, 8);
-    let second = usage(1, 8599, 473, 2);
+    let (first, second) = (usage(3, 0, 8599, 8), usage(1, 8599, 473, 2));
+    let result = format!(
+        r#"{{"type":"result","is_error":false,"result":"done","usage":{}}}"#,
+        usage(4, 8599, 9072, 896)
+    );
     let lines = [
         INIT_LINE.to_string(),
-        assistant("msg-1", "thinking", &first),
-        assistant("msg-1", "writing", &first),
-        assistant("msg-2", "reading", &second),
-        format!(
-            r#"{{"type":"result","is_error":false,"result":"done","usage":{}}}"#,
-            usage(4, 8599, 9072, 896)
-        ),
+        assistant("msg-1", &first),
+        assistant("msg-1", &first),
+        assistant("msg-2", &second),
+        result,
     ];
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &lines.iter().map(String::as_str).collect::<Vec<_>>(),
-    );
-    let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
-    );
-    let events = drain(adapter().spawn(req).await.unwrap()).await;
+    let events = spawn_with(
+        &dir,
+        request(dir.path().to_path_buf()),
+        &lines.each_ref().map(String::as_str),
+    )
+    .await;
 
     let spent: Vec<(u64, u64, u64)> = events
         .iter()

@@ -219,7 +219,7 @@ impl ClaudeCodeAdapter {
                 source: Unbuildable::HookUnavailable,
             });
         }
-        stage_skills(&req)?;
+        crate::skills::stage(&ID, SKILLS_MOUNT, &req)?;
         let mcp_config = write_mcp_config(&req)?;
         let args = self.build_args(&req, resume, mcp_config.as_deref());
         // Where the hooks reach the engine travels in the child's own
@@ -279,14 +279,14 @@ impl Adapter for ClaudeCodeAdapter {
     }
 
     fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf> {
-        skill_mounts(req)
+        crate::skills::mounts(SKILLS_MOUNT, req)
             .into_iter()
             .map(|(mount, _)| mount)
             .collect()
     }
 
     fn unstage(&self, req: &SessionRequest) -> Result<()> {
-        unstage_skills(req)
+        crate::skills::unstage(&ID, SKILLS_MOUNT, req)
     }
 
     fn rail_codec(&self) -> Option<&dyn yunta_core::port::RailCodec> {
@@ -385,75 +385,3 @@ impl Adapter for ClaudeCodeAdapter {
 /// The CLI's native skills discovery directory, relative to the
 /// session's working directory.
 const SKILLS_MOUNT: &str = ".claude/skills";
-
-/// Where each resolved skill directory is mounted: a link under
-/// [`SKILLS_MOUNT`] named after the directory itself. Computed once,
-/// for [`stage_skills`] to create and [`Adapter::staged_paths`] to
-/// declare, so what scope leaves out is exactly what was written.
-fn skill_mounts(req: &SessionRequest) -> Vec<(PathBuf, &Path)> {
-    req.skills
-        .iter()
-        .filter_map(|skill| {
-            let name = skill.file_name()?;
-            Some((Path::new(SKILLS_MOUNT).join(name), skill.as_path()))
-        })
-        .collect()
-}
-
-/// Takes back every link [`stage_skills`] made — only links, so nothing
-/// the agent wrote there is touched — and the discovery directories
-/// they left empty.
-fn unstage_skills(req: &SessionRequest) -> Result<()> {
-    for (mount, _) in skill_mounts(req) {
-        let dest = req.cwd.join(mount);
-        let is_link = std::fs::symlink_metadata(&dest).is_ok_and(|m| m.file_type().is_symlink());
-        if is_link {
-            std::fs::remove_file(&dest).map_err(|source| AdapterError::AdapterIo {
-                adapter: ID.clone(),
-                action: format!("take back the skill at {}", dest.display()),
-                source,
-            })?;
-        }
-    }
-    // Removed only when empty: a directory someone else put files in is
-    // theirs, and so is everything above it.
-    let skills_root = req.cwd.join(SKILLS_MOUNT);
-    for dir in skills_root.ancestors().take(2) {
-        if std::fs::remove_dir(dir).is_err() {
-            break;
-        }
-    }
-    Ok(())
-}
-
-/// Mounting is staging a symlink per resolved skill directory under
-/// the CLI's discovery directory. Re-staging (a retry, a resume)
-/// replaces the link; the adapter declares every link it makes
-/// through `staged_paths`, so the engine's scope check never reads
-/// one as agent work.
-fn stage_skills(req: &SessionRequest) -> Result<()> {
-    let mounts = skill_mounts(req);
-    if mounts.is_empty() {
-        return Ok(());
-    }
-    let io_err = |action: String, source: std::io::Error| AdapterError::AdapterIo {
-        adapter: ID.clone(),
-        action,
-        source,
-    };
-    let skills_root = req.cwd.join(SKILLS_MOUNT);
-    std::fs::create_dir_all(&skills_root)
-        .map_err(|e| io_err(format!("create {}", skills_root.display()), e))?;
-    for (mount, skill) in mounts {
-        let dest = req.cwd.join(mount);
-        match std::fs::remove_file(&dest) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io_err(format!("replace {}", dest.display()), e)),
-        }
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(skill, &dest)
-            .map_err(|e| io_err(format!("stage skill at {}", dest.display()), e))?;
-    }
-    Ok(())
-}

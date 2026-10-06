@@ -327,7 +327,7 @@ incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
 | `permission_profiles` | `true` |
 | `custom_agents` | `false` |
 | `usage_reporting` | `true` |
-| `skills` | `false` |
+| `skills` | `true` |
 | `run_tools` | `true` |
 | `network_isolation` | `true` |
 
@@ -343,9 +343,11 @@ hook ajeno corre sin revisar (D251). Los comandos quedan confinados por el sandb
 `danger-full-access`, `ToolsOnly`. Un perfil `read_only` con raíces que mantener
 escribibles corre bajo `workspace-write` —`read-only` sella también las raíces— y el
 hook rechaza toda edición que no sea a ellas. Límite declarado: la política partida del sandbox
-(`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. `custom_agents` y
-`skills` no se declaran porque `codex exec` no tiene selector de agente ni mecanismo
-de skills al que mapearlos: declararlos sería prometer lo que no está construido. La
+(`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. Las skills se montan
+como en `claude-code`: un enlace por skill bajo `.agents/skills/` del directorio de la
+sesión, donde el CLI descubre las de un proyecto, declarado como staging y retirado al
+cerrar. `custom_agents` no se declara porque `codex exec` no tiene selector de agente
+al que mapearlo: declararlo sería prometer lo que no está construido. La
 red de los comandos la abre el pedido (`sandbox_workspace_write.network_access`); bajo
 `read-only` no hay red y bajo `danger-full-access` no se cierra, y `check` rechaza
 `network: false` en un nodo `full` (D252).
