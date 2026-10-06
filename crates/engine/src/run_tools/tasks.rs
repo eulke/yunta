@@ -389,8 +389,8 @@ struct Verdict<'a> {
     /// Whether the task would be done if the session ended now.
     closes: bool,
     criteria: Vec<Answered>,
-    /// The guards this check did not run, because one of the task's own
-    /// criteria is red: they run once every one of those passes.
+    /// The guards this check did not run, because a criterion it ran
+    /// before them is red: they run once every one of those passes.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     guards_waiting: Vec<String>,
     outside_scope: Vec<PathBuf>,

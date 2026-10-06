@@ -233,7 +233,8 @@ fn check_task_tool() -> Tool {
         "Judge your work on this task exactly as the engine will when your session \
          ends: run the task's criteria on the checkout as it stands and audit what \
          changed against the task's scope. Its guards run once every other criterion \
-         passes; until then `guards_waiting` names them. `closes` is true when every \
+         passes, in order and stopping at the first that fails; `guards_waiting` names \
+         those not run yet. `closes` is true when every \
          criterion and guard exits 0 and nothing changed lies outside the scope — the \
          task is then done if the tree does not change again. A scope expansion you \
          asked for counts only once granted. \

@@ -742,6 +742,73 @@ async fn a_guard_waits_while_a_criterion_of_its_own_task_is_red() {
     );
 }
 
+/// Guards run in order and stop at the first red one: one red guard
+/// already keeps the task open, and a guard after it would only cost its
+/// run.
+#[tokio::test]
+async fn guards_stop_at_the_first_red_one_and_the_rest_wait() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let second = root.path().join("second");
+    let touch = format!("touch {}", second.display());
+    let t = task(
+        "red-guard",
+        &["a.txt"],
+        vec![cmd("test -f a.txt"), guard("exit 1"), guard(&touch)],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let ran: Vec<(&str, i32)> = checked
+        .runs
+        .iter()
+        .map(|run| (run.cmd.as_str(), run.exit_code))
+        .collect();
+    assert_eq!(ran, vec![("test -f a.txt", 0), ("exit 1", 1)]);
+    assert_eq!(checked.waiting, vec![touch]);
+    assert!(!checked.passes());
+    assert!(!tokio::fs::try_exists(&second).await.unwrap(), "never ran");
+}
+
+/// A red guard answers the check at once, without waiting for the suite
+/// the run is still measuring: whatever it answers, the task stays open.
+#[tokio::test]
+async fn a_red_guard_answers_without_waiting_for_the_suite_being_measured() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let suite = "cargo test --workspace";
+    let t = task(
+        "suite-pending",
+        &["a.txt"],
+        vec![cmd("test -f a.txt"), guard(suite), guard("exit 1")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    memo.suite().expect(suite);
+
+    let checked = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        yunta_engine::post_check(&t, &repo, &memo, owner.supervision()),
+    )
+    .await
+    .expect("the check answers without the measurement")
+    .unwrap();
+
+    let ran: Vec<&str> = checked.runs.iter().map(|run| run.cmd.as_str()).collect();
+    assert_eq!(ran, vec!["test -f a.txt", "exit 1"]);
+    assert_eq!(checked.waiting, vec![suite.to_string()]);
+}
+
 #[tokio::test]
 async fn a_guard_runs_after_every_criterion_of_its_own_task_passes() {
     let owner = Owner::new();

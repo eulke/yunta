@@ -234,8 +234,8 @@ pub(crate) async fn pre_check_unless_cut(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostCheck {
     pub runs: Vec<CriterionRun>,
-    /// The guards that did not run, by command, because one of the
-    /// task's own criteria is red.
+    /// The guards that did not run, by command, because a criterion the
+    /// check ran before them is red.
     pub waiting: Vec<String>,
     /// The tree the checkout held, which every answer is for.
     pub tree: yunta_core::TreeId,
@@ -250,13 +250,14 @@ impl PostCheck {
 
 /// Post-check: every criterion, guard or not, must now pass. The task's
 /// own criteria run first, in declared order, and its guards only once
-/// every one of those passes.
+/// every one of those passes, in their order until the first red one.
 ///
-/// While one of its own is red the check cannot close the task whatever
-/// a guard answers, and a guard that is the project's whole suite holds
-/// that same red test: run then, it costs the suite and says nothing the
-/// red criterion did not. A guard left waiting is in no run, so nothing
-/// reads it as passed.
+/// While a criterion is red the check cannot close the task whatever a
+/// later guard answers, and a guard that is the project's whole suite
+/// holds that same red test: run then, it costs the suite and says
+/// nothing the red criterion did not. The suite still being measured goes
+/// after every guard that can run now, and is waited for only once those
+/// pass. A guard left waiting is in no run, so nothing reads it as passed.
 pub async fn post_check(
     task: &Task,
     cwd: &Path,
@@ -275,13 +276,57 @@ pub async fn post_check(
             tree: tree.content,
         });
     }
+    let (ready, pending) = memo.suite().split(guards);
+    let (ran, mut waiting) = run_until_red(&task.id, &ready, &tree, cwd, memo, supervision).await?;
+    let red = ran.iter().any(|run| run.exit_code != 0);
+    runs.extend(ran);
+    if red {
+        waiting.extend(pending.into_iter().map(|guard| guard.cmd));
+        return Ok(PostCheck {
+            runs,
+            waiting,
+            tree: tree.content,
+        });
+    }
     // The suite still being measured is waited for here, where its answer
     // is what decides whether it holds the task at all.
-    let guards = memo.suite().judging(guards, supervision.cancel).await;
-    runs.extend(run_on(&task.id, &guards, &tree, cwd, memo, supervision).await?);
+    let pending = memo.suite().judging(pending, supervision.cancel).await;
+    let (ran, waiting) = run_until_red(&task.id, &pending, &tree, cwd, memo, supervision).await?;
+    runs.extend(ran);
     Ok(PostCheck {
         runs,
-        waiting: Vec::new(),
+        waiting,
         tree: tree.content,
     })
+}
+
+/// Runs `guards` in order on `tree` until one is red: what ran, and the
+/// commands after the red one, left waiting.
+async fn run_until_red(
+    task_id: &TaskId,
+    guards: &[Criterion],
+    tree: &Tree,
+    cwd: &Path,
+    memo: &Memo,
+    supervision: Supervision<'_>,
+) -> Result<(Vec<CriterionRun>, Vec<String>), TaskCycleError> {
+    let mut runs = Vec::with_capacity(guards.len());
+    for (at, guard) in guards.iter().enumerate() {
+        let ran = run_on(
+            task_id,
+            std::slice::from_ref(guard),
+            tree,
+            cwd,
+            memo,
+            supervision,
+        )
+        .await?;
+        let red = ran.iter().any(|run| run.exit_code != 0);
+        runs.extend(ran);
+        if red {
+            let waiting = guards.iter().skip(at + 1).map(|guard| guard.cmd.clone());
+            return Ok((runs, waiting.collect()));
+        }
+    }
+    Ok((runs, Vec::new()))
 }

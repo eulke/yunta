@@ -76,6 +76,26 @@ impl SuiteGate {
         }
     }
 
+    /// `guards` split by whether they can run now, in their order: the
+    /// suite still being measured waits apart, and a suite measured red
+    /// holds nothing, so it is in neither.
+    pub fn split(&self, guards: Vec<Criterion>) -> (Vec<Criterion>, Vec<Criterion>) {
+        let known = self.known.borrow();
+        let mut ready = Vec::new();
+        let mut pending = Vec::new();
+        for guard in guards {
+            match &*known {
+                Known::Pending(command) if is(&guard, command) => pending.push(guard),
+                Known::Measured {
+                    command,
+                    passed: false,
+                } if is(&guard, command) => {}
+                _ => ready.push(guard),
+            }
+        }
+        (ready, pending)
+    }
+
     /// Whether `criterion` is the suite, still being measured.
     pub fn pending(&self, criterion: &Criterion) -> bool {
         matches!(&*self.known.borrow(), Known::Pending(command) if is(criterion, command))

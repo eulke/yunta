@@ -259,7 +259,7 @@ registra.
 | `task_id` | string | sí | — |
 | `phase` | enum `pre \| post` | sí | pre-check en rojo vs. post-check |
 | `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?, output?, tail?, tree?, head?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara; `output` es el hash del objeto con lo que imprimió el comando, stdout y después stderr, redactado — en `reused=true`, lo que imprimió la ejecución que dio esa respuesta roja sobre el mismo árbol, y ausente si la respuesta reutilizada pasó o si el comando no imprimió nada; `tail` son sus últimas 20 líneas cuando `exit_code` no es 0, y se omite cuando pasó. Un log anterior a estos dos campos los lee ausentes. `tree` es el árbol git de lo que el checkout tenía cuando el comando respondió —para lo que se guarda la respuesta—, y `head` el commit en que estaba, solo para un comando que corre `git`; ambos ausentes en un check que el engine enuncia sin correr, y en un log anterior a ellos |
-| `waiting` | lista de strings (comandos) | vacía —y omitida— cuando ninguna guarda esperó | los `guard` que el check no corrió porque un criterio propio de la tarea estaba en rojo; solo en `post`. Un log anterior al campo lo lee vacío |
+| `waiting` | lista de strings (comandos) | vacía —y omitida— cuando ninguna guarda esperó | los `guard` que el check no corrió porque un criterio que corrió antes —propio de la tarea u otra guarda— estaba en rojo; solo en `post`. Un log anterior al campo lo lee vacío |
 
 ### 5.11 `task_status_changed` — engine
 **Fuente:** task_id, estado nuevo, evento que lo justifica, commit donde aterrizó el trabajo
@@ -281,7 +281,7 @@ registra.
 | `task_id` | string | yes, in both | the task of the session that asked |
 | `closes` | `bool` | only in `task_check_answered` | whether the task would have been done had the session ended then |
 | `results` | same list as `criteria_checked.results` | only in `task_check_answered` | one per criterion that ran, the run's suite guard included; `reused=true` where the invocation's cache answered it |
-| `waiting` | list of strings (commands) | only in `task_check_answered`; empty — and omitted — when every guard ran | the guards the check did not run because one of the task's own criteria was red |
+| `waiting` | list of strings (commands) | only in `task_check_answered`; empty — and omitted — when every guard ran | the guards the check did not run because a criterion it ran before them — the task's own or another guard — was red |
 | `outside_scope` | list of paths | only in `task_check_answered`; empty — and omitted — when there are none | what the work changed outside the task's scope |
 | `denied` | list of paths | only in `task_check_answered`; empty — and omitted — when there are none | what it changed that the project denies to every run |
 | `duration_ms` | `u64` | only in `task_check_answered` | how long the whole judgement took, cache hits included |
