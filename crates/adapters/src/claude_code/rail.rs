@@ -16,11 +16,6 @@ use yunta_core::SessionId;
 /// file.
 const WRITING_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
 
-/// How long the CLI waits for an answer. A hook that does not answer in
-/// time lets the call through — so the hook itself gives up on the engine
-/// sooner and refuses, and the post-check diff catches anything else.
-pub(super) const TIMEOUT_SECONDS: u32 = 10;
-
 pub(super) struct ClaudeRailCodec;
 
 impl RailCodec for ClaudeRailCodec {
@@ -84,7 +79,7 @@ pub(super) fn settings_json(command: &RailCommand) -> String {
                 "hooks": [{
                     "type": "command",
                     "command": hook(RailEvent::BeforeWrite),
-                    "timeout": TIMEOUT_SECONDS,
+                    "timeout": crate::session::HOOK_TIMEOUT_SECONDS,
                 }],
             }],
         }

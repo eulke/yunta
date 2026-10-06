@@ -3,7 +3,7 @@ number: D172
 title: "El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía"
 status: revised
 revises: [D13, D167]
-revised_by: [D249, D250]
+revised_by: [D249, D250, D251]
 ---
 
 # D172 — El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía

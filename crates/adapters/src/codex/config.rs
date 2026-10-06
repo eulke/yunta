@@ -43,6 +43,14 @@ impl ConfigOverride {
         }
     }
 
+    /// Any TOML value — a table, an array of tables — rendered whole.
+    pub(super) fn value(key: impl Into<String>, value: Value) -> Self {
+        Self {
+            key: key.into(),
+            value,
+        }
+    }
+
     /// A TOML array of strings.
     pub(super) fn list<I>(key: impl Into<String>, values: I) -> Self
     where

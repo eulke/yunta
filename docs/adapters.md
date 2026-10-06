@@ -44,7 +44,7 @@ says which:
 | Adapter | How it fences | What it covers |
 |---|---|---|
 | `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
-| `codex` | The sandbox the process itself runs under, by directory. | The worktree and the run's directories — by directory, never by glob. |
+| `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `workspace-write`, nothing under `read-only`, anything under `full`. |
 | `mock` | The fixture says which of the three levels it builds; at the per-call level each scripted effect asks the engine the way a CLI's hook does. | Whatever the fixture declares. |
 
 Every session also loads its person's own configuration of the CLI — settings,

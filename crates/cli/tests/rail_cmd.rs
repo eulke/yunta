@@ -79,9 +79,10 @@ fn request(stream: &std::net::TcpStream) -> (String, bool, Option<RailCall>) {
 fn answer(call: Option<RailCall>) -> RailAnswer {
     match call.map(|call| call.act) {
         Some(RailAct::BeforeWrite { paths })
-            if paths
-                .iter()
-                .all(|path| path.to_string_lossy().contains("/src/")) =>
+            if paths.iter().all(|path| {
+                let path = path.to_string_lossy();
+                path.starts_with("src/") || path.contains("/src/")
+            }) =>
         {
             RailAnswer::Proceed
         }
@@ -94,11 +95,16 @@ fn answer(call: Option<RailCall>) -> RailAnswer {
 
 /// Runs the hook with `rail` in its environment and the call on stdin.
 fn hook(rail: Option<(&str, &str)>, stdin: &str) -> std::process::Output {
+    hook_for("claude-code", rail, stdin)
+}
+
+/// The same, for the hook of `adapter`.
+fn hook_for(adapter: &str, rail: Option<(&str, &str)>, stdin: &str) -> std::process::Output {
     let away = tempfile::tempdir().expect("a directory for this test's home");
     let mut command = Command::new(env!("CARGO_BIN_EXE_yunta"));
     yunta_testkit::hermetic(&mut command, away.path(), &away.path().join("state"));
     command
-        .args(["rail", "claude-code", "before-write"])
+        .args(["rail", adapter, "before-write"])
         .env_remove(URL_VAR)
         .env_remove(TOKEN_VAR)
         .stdin(Stdio::piped())
@@ -174,4 +180,33 @@ fn a_call_this_codec_cannot_read_refuses() {
     let (url, _heard) = engine();
     let out = hook(Some((&url, TOKEN)), r#"{"tool_name":"Write"}"#);
     assert_eq!(out.status.code(), Some(2));
+}
+
+/// A Codex patch asks about every file it names at once, and one path
+/// outside the fence refuses the whole patch.
+#[test]
+fn a_codex_patch_with_one_path_outside_is_refused_whole() {
+    let (url, heard) = engine();
+    let patch = "*** Begin Patch\n*** Add File: src/a.rs\n+a\n*** Update File: docs/readme.md\n@@\n-x\n+y\n*** End Patch";
+    let call = serde_json::json!({
+        "session_id": "thread-1",
+        "tool_name": "apply_patch",
+        "tool_input": { "command": patch },
+    })
+    .to_string();
+
+    let out = hook_for("codex", Some((&url, TOKEN)), &call);
+
+    assert_eq!(out.status.code(), Some(2), "a refusal is exit 2");
+    assert!(
+        !out.stderr.is_empty(),
+        "Codex reads an empty refusal as a failed hook"
+    );
+    let (_, call) = heard.recv().expect("the engine was asked");
+    assert_eq!(
+        call.expect("the call reads").act,
+        RailAct::BeforeWrite {
+            paths: vec!["src/a.rs".into(), "docs/readme.md".into()]
+        }
+    );
 }

@@ -20,6 +20,7 @@
 mod config;
 mod fence;
 mod parse;
+mod rail;
 mod settings;
 
 use std::path::PathBuf;
@@ -78,18 +79,27 @@ impl CodexAdapter {
         }
         // `launch` refused already for settings that do not read, so
         // the fallback here is a node whose settings named nothing.
+        // The engine judges this CLI's edits only through a hook it can
+        // run and a listener the hook can reach. Without both there is no
+        // fence to build, and a session that opens anyway writes wherever
+        // its sandbox lets it.
+        let Some(command) = req.rail_command.as_ref().filter(|_| req.rail.is_some()) else {
+            return Err(Unbuildable::HookUnavailable);
+        };
         let settings = self.settings.as_ref().cloned().unwrap_or_default();
         let edit_sandbox = settings.sandbox.unwrap_or_default();
         args.extend(fence::sandbox_args(
             &req.fence,
             req.permissions,
             edit_sandbox,
-        )?);
+        ));
         // Only `workspace-write` reads the switch: `read-only` has no
         // network to open and `danger-full-access` never closed it.
         let opens_network = settings.network_access
-            && fence::mode(req.permissions, edit_sandbox) == settings::Sandbox::WorkspaceWrite;
+            && fence::mode(&req.fence, req.permissions, edit_sandbox)
+                == settings::Sandbox::WorkspaceWrite;
         args.extend(config_overrides(req, opens_network));
+        args.extend(rail::hook_overrides(command));
         // An isolated session loads none of the person's own configuration
         // or rules; its credentials stay theirs.
         if req.cli_config == yunta_core::CliConfig::Isolated {
@@ -139,6 +149,20 @@ impl CodexAdapter {
         if let Some(endpoint) = &req.run_tools_endpoint {
             env.insert(TOKEN_VAR.to_string(), endpoint.token.clone());
         }
+        // Where the hooks reach the engine, inherited by every hook this
+        // CLI runs.
+        if let Some(rail) = &req.rail {
+            env.extend(rail.env().map(|(var, value)| (var.to_string(), value)));
+        }
+        let mode = fence::mode(
+            &req.fence,
+            req.permissions,
+            self.settings
+                .as_ref()
+                .ok()
+                .and_then(|settings| settings.sandbox)
+                .unwrap_or_default(),
+        );
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
@@ -148,7 +172,7 @@ impl CodexAdapter {
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
                 last_message: String::new(),
-                fence: fence::coverage(&req.fence, &req.cwd),
+                fence: fence::coverage(&req.fence, &req.cwd, mode),
             }),
         })
         .await
@@ -246,10 +270,10 @@ impl Adapter for CodexAdapter {
             // so the engine degrades with `capability_degraded` when a
             // node declares skills here.
             skills: false,
-            // The sandbox the process itself runs under keeps writes
-            // inside a set of directories — by directory, never by glob,
-            // which is what the coverage a session reports says.
-            fence: FenceLevel::Filesystem,
+            // Every edit goes through a `PreToolUse` hook that asks the
+            // engine before the patch applies; commands stay confined by
+            // the process's sandbox, which the coverage reports.
+            fence: FenceLevel::ToolCalls,
             permission_profiles: true,
             // `codex exec` has no documented `--agent <name>` selector —
             // nothing here to map `agent:` onto, so declaring the
@@ -274,6 +298,10 @@ impl Adapter for CodexAdapter {
             // `mcp__yunta_run__yunta_task`, never `yunta_task`.
             tool_naming: ToolNaming::McpPrefixedUnderscored,
         }
+    }
+
+    fn rail_codec(&self) -> Option<&dyn yunta_core::port::RailCodec> {
+        Some(&rail::CodexRailCodec)
     }
 
     async fn probe(&self) -> Result<ProbeReport> {

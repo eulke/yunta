@@ -29,6 +29,12 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
     })
 }
 
+/// How long a CLI waits for its write hook to answer. A hook that does not
+/// answer in time lets the call through — so the hook itself gives up on
+/// the engine sooner and refuses, and the post-check diff catches anything
+/// else.
+pub(crate) const HOOK_TIMEOUT_SECONDS: u32 = 10;
+
 /// `part` as one word of a POSIX shell command line: as written when it
 /// holds nothing the shell would read, and in single quotes otherwise,
 /// where nothing is expanded — a binary under a path with a `$`, a space

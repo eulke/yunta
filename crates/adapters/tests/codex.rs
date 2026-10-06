@@ -52,8 +52,8 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.usage_reporting);
     // Never claim a capability that isn't wired end-to-end yet.
     assert!(!caps.custom_agents);
-    // The sandbox the process runs under confines writes by directory.
-    assert_eq!(caps.fence, yunta_core::FenceLevel::Filesystem);
+    // Every edit is judged before it applies, by the hook it runs.
+    assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
     assert!(caps.run_tools);
 }
 
@@ -1364,8 +1364,9 @@ async fn a_thread_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
     );
 }
 
-/// The sandbox is by directory in both channels, so the coverage a
-/// session reports is the widened one, naming the directories.
+/// Edits are judged exactly; commands are confined by the sandbox's
+/// directories, so the coverage a session reports is the widened one,
+/// naming them.
 #[tokio::test]
 async fn a_codex_session_reports_widened_coverage_with_its_roots() {
     let dir = tempfile::tempdir().unwrap();
@@ -1386,30 +1387,104 @@ async fn a_codex_session_reports_widened_coverage_with_its_roots() {
     );
 }
 
-/// The sandbox has one setting for the whole filesystem: `read-only`
-/// seals the roots along with everything else, so a session that must
-/// write a declared file could never produce one. A capability that is
-/// absent fails instead of spending the session.
+/// `read-only` seals the run's roots along with everything else, so a
+/// read-only session that must write a declared file runs under
+/// `workspace-write`: its edits are refused by the hook everywhere but
+/// the roots, and its commands are confined to the workspace and the
+/// roots, which its coverage says.
 #[tokio::test]
-async fn a_read_only_codex_session_with_declared_files_fails_before_spawning() {
+async fn a_read_only_codex_session_with_declared_files_writes_them_under_workspace_write() {
     let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
     let mut req = request(dir.path().to_path_buf());
     req.permissions = PermissionProfile::ReadOnly;
-    req.fence = Fence::read_only(
-        vec![dir.path().join("run/artifacts")],
-        Advice::ReportFinding,
-    );
+    req.fence = Fence::read_only(vec![artifacts.clone()], Advice::ReportFinding);
 
-    let refused = adapter()
-        .spawn(req)
-        .await
-        .err()
-        .expect("a fence this sandbox cannot build fails before spawning");
-    let said = yunta_core::describe(&refused);
-    assert!(
-        said.contains("read-only profile"),
-        "the refusal names what it cannot keep writable: {said}"
+    let events = events_with(&dir, req, &[THREAD_STARTED_LINE, TURN_COMPLETED_LINE]).await;
+
+    let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
+        panic!("a session opens first: {events:?}");
+    };
+    assert_eq!(
+        fence.as_ref(),
+        Some(&yunta_core::fence::Coverage::WidenedToRoots {
+            roots: vec![dir.path().to_path_buf(), artifacts],
+        })
     );
+}
+
+/// Under `read-only` with nothing to keep writable, commands write
+/// nothing and edits are judged: the whole session is exact. Under
+/// `full`, nothing confines its commands.
+#[tokio::test]
+async fn coverage_follows_what_the_sandbox_leaves_commands() {
+    for (profile, expected) in [
+        (
+            PermissionProfile::ReadOnly,
+            yunta_core::fence::Coverage::Exact,
+        ),
+        (
+            PermissionProfile::Full,
+            yunta_core::fence::Coverage::ToolsOnly,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(dir.path().to_path_buf());
+        req.permissions = profile;
+        let events = events_with(&dir, req, &[THREAD_STARTED_LINE, TURN_COMPLETED_LINE]).await;
+        let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
+            panic!("a session opens first: {events:?}");
+        };
+        assert_eq!(fence.as_ref(), Some(&expected), "under {profile:?}");
+    }
+}
+
+/// The hook reaches the CLI as an override it trusts in the same call:
+/// no hook of anyone else's runs untrusted to make room for it.
+#[tokio::test]
+async fn a_codex_session_installs_its_write_hook_trusted_and_nothing_more() {
+    let args = argv_under(&adapter(), PermissionProfile::Edit).await;
+    let assigned = |key: &str| {
+        args.iter()
+            .find(|arg| arg.starts_with(&format!("{key}=")))
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert!(
+        assigned("hooks.PreToolUse").contains("rail codex before-write"),
+        "{args:?}"
+    );
+    assert!(
+        assigned("hooks.state").contains("pre_tool_use:0:0"),
+        "{args:?}"
+    );
+    assert!(
+        !args.iter().any(|arg| arg.contains("bypass-hook-trust")),
+        "{args:?}"
+    );
+}
+
+/// The engine judges this CLI's edits only through a hook it can run and a
+/// listener the hook can reach; without either the session never opens.
+#[tokio::test]
+async fn a_codex_session_without_a_hook_or_an_engine_to_ask_fails_before_spawning() {
+    for unset in ["command", "endpoint"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(dir.path().to_path_buf());
+        match unset {
+            "command" => req.rail_command = None,
+            _ => req.rail = None,
+        }
+        let refused = adapter()
+            .spawn(req)
+            .await
+            .err()
+            .expect("a session never opens without a fence to build");
+        assert!(
+            yunta_core::describe(&refused).contains("fence hook"),
+            "{unset}"
+        );
+    }
 }
 
 /// A command the sandbox refused is a write that did not happen, not

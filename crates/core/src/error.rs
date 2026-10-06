@@ -70,12 +70,6 @@ pub enum Unbuildable {
          or no engine listener to ask"
     )]
     HookUnavailable,
-    #[error(
-        "this adapter cannot keep {} writable under a read-only profile; hand the files over \
-         through the run tools or raise the profile to `edit`",
-        .0.iter().map(|root| root.display().to_string()).collect::<Vec<_>>().join(", ")
-    )]
-    SealedRoots(Vec<std::path::PathBuf>),
 }
 
 /// Convenience alias for an adapter's typed `Result`.

@@ -317,7 +317,7 @@ queda declarativo. Los detalles de flags viven en el adapter y se validan en
 | capacidad | valor |
 |---|---|
 | `resume_session` | `true` |
-| `fence` | `filesystem` |
+| `fence` | `tool_calls` |
 | `permission_profiles` | `true` |
 | `custom_agents` | `false` |
 | `usage_reporting` | `true` |
@@ -326,13 +326,17 @@ queda declarativo. Los detalles de flags viven en el adapter y se validan en
 | `network_isolation` | `false` |
 
 `codex exec` headless con salida JSON; `permission_profiles` mapea a sus modos de
-sandbox. El cerco es `FenceLevel::Filesystem`: `--sandbox workspace-write` más las
-raíces del cerco en `sandbox_workspace_write.writable_roots`, de modo que la
-cobertura es `WidenedToRoots { [cwd, …raíces] }` —el sandbox es por directorio en los
-dos canales, y el post-check cubre la diferencia con los globs. Un perfil `read_only`
-con raíces que mantener escribibles no se puede construir: el sandbox tiene una sola
-política para todo el filesystem, y el adapter falla antes de spawn con
-`FenceUnbuildable(SealedRoots)`. Límite declarado: la política partida del sandbox
+sandbox. El cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse` sobre
+`apply_patch` ejecuta `yunta rail codex before-write`, que le pregunta al engine por
+cada path que el patch nombra; el hook llega como override `-c` junto con su propia
+confianza en `hooks.state` (el hash con que Codex confía en un hook), así que ningún
+hook ajeno corre sin revisar (D251). Los comandos quedan confinados por el sandbox:
+`--sandbox workspace-write` más las raíces del cerco en
+`sandbox_workspace_write.writable_roots`, de modo que la cobertura es
+`WidenedToRoots { [cwd, …raíces] }`; bajo `read-only` sin raíces es `Exact` y bajo
+`danger-full-access`, `ToolsOnly`. Un perfil `read_only` con raíces que mantener
+escribibles corre bajo `workspace-write` —`read-only` sella también las raíces— y el
+hook rechaza toda edición que no sea a ellas. Límite declarado: la política partida del sandbox
 (`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. `custom_agents` y
 `skills` no se declaran porque `codex exec` no tiene selector de agente ni mecanismo
 de skills al que mapearlos, y `network_isolation` porque no aísla red: declarar
