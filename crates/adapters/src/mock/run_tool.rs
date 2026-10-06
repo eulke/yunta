@@ -42,6 +42,32 @@ impl RunToolCallError {
     }
 }
 
+/// What a CLI does with a per-run server before its first turn: connect
+/// and list the tools. A listing that fails is a server the session does
+/// not hold, which the engine reads from its own listener.
+pub(super) async fn list_run_tools(endpoint: &RunToolsEndpoint) {
+    use rmcp::ServiceExt;
+
+    let config =
+        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
+            endpoint.url.clone(),
+        )
+        .auth_header(endpoint.token.expose().clone());
+    let transport = rmcp::transport::StreamableHttpClientTransport::with_client(
+        reqwest::Client::default(),
+        config,
+    );
+    let Ok(client) = ().serve(transport).await else {
+        return;
+    };
+    if client.list_all_tools().await.is_err() {
+        tracing::debug!("a mock session could not list its run tools");
+    }
+    if client.cancel().await.is_err() {
+        tracing::debug!("a mock session's tool client did not close");
+    }
+}
+
 /// The mock's own MCP client leg: one `tools/call` against the
 /// session's per-run endpoint, exactly as a real CLI would place it.
 /// Returns a short digest of the response for the audit stream

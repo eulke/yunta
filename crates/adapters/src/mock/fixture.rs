@@ -40,6 +40,16 @@ pub struct MockFixture {
     /// The files the CLI this fixture stands for loads its configuration
     /// from, as a real adapter declares them.
     pub own_config: Vec<yunta_core::ScopeGlob>,
+    /// Whether a session lists its run tools before its first turn, as
+    /// every real CLI does. `false` stands for one whose tools never
+    /// reached it.
+    pub lists_tools: bool,
+}
+
+/// What a fixture that says nothing about listing does: list, as every
+/// real CLI does.
+fn lists() -> bool {
+    true
 }
 
 /// The run directories a fixture names. They are the caller's to
@@ -135,6 +145,8 @@ impl<'de> Deserialize<'de> for MockFixture {
                 service_down_for: u32,
                 #[serde(default)]
                 own_config: Vec<yunta_core::ScopeGlob>,
+                #[serde(default = "lists")]
+                lists_tools: bool,
             }
             let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
             let capabilities: Capabilities = multi.capabilities.into();
@@ -146,6 +158,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 sessions: multi.sessions,
                 service_down_for: multi.service_down_for,
                 own_config: multi.own_config,
+                lists_tools: multi.lists_tools,
             })
         } else {
             // The single-session form is a script with `capabilities`
@@ -160,6 +173,10 @@ impl<'de> Deserialize<'de> for MockFixture {
             let capabilities: FixtureCapabilities = match mapping.remove("capabilities") {
                 Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
                 None => FixtureCapabilities::default(),
+            };
+            let lists_tools: bool = match mapping.remove("lists_tools") {
+                Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
+                None => true,
             };
             let own_config: Vec<yunta_core::ScopeGlob> = match mapping.remove("own_config") {
                 Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
@@ -178,6 +195,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 sessions: vec![script],
                 service_down_for: 0,
                 own_config,
+                lists_tools,
             })
         }
     }

@@ -66,6 +66,9 @@ pub(super) struct SessionTools {
     /// What the session's hooks are judged against, and what they were
     /// refused.
     pub(super) rails: Arc<super::rail::SessionRails>,
+    /// Whether the session's CLI ever listed these tools or called one:
+    /// what says they reached it when its own stream does not.
+    pub(super) listed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SessionTools {
@@ -78,6 +81,7 @@ impl SessionTools {
         cwd: PathBuf,
         stop: CancellationToken,
         rails: Arc<super::rail::SessionRails>,
+        listed: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let RunToolsAccess {
             host,
@@ -97,6 +101,7 @@ impl SessionTools {
             declared,
             naming,
             rails,
+            listed,
         }
     }
 
@@ -374,6 +379,8 @@ impl ServerHandler for SessionTools {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        self.listed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(crate::mcp::tool_list(super::catalog::mounted(self)))
     }
 
@@ -382,6 +389,8 @@ impl ServerHandler for SessionTools {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
+        self.listed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let args = request.arguments.unwrap_or_default();
         // A tool this server never offered is a call the protocol refuses,
         // not a tool that ran and failed.

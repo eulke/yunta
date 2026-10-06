@@ -29,8 +29,9 @@ autenticada (`codex login status`).
    `yunta run wf.yaml` (la vista viva es el default sobre una
    terminal). Verificar contra el log (`yunta status <run>`, `events.jsonl`):
    - `agent_session_opened` con `session_id` = el `thread_id` real y
-     `model` = el pedido (el stream de codex no lo reporta —
-     `openai/codex#14736`; confirmar si sigue así).
+     `model` = el pedido: el stream de codex no lo reporta
+     (`openai/codex#14736`, sigue así en 0.157.0) y el adapter informa el
+     modelo con el que lanzó la sesión.
    - `agent_message` de tipo `tool_use` con digests: `sha256:` y doce
      dígitos, nunca el comando ni el path (el mismo digest para dos
      llamadas idénticas, distinto para dos distintas).

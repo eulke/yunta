@@ -40,6 +40,8 @@ pub(super) struct Script {
     pub(super) steps: Vec<MockStep>,
     pub(super) outcome: MockOutcome,
     pub(super) run_tools_endpoint: Option<RunToolsEndpoint>,
+    /// Whether the session lists its run tools before anything else.
+    pub(super) lists_tools: bool,
 }
 
 /// A session's effects, each written only once the engine allows it.
@@ -131,6 +133,12 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         .is_err()
     {
         return;
+    }
+
+    if script.lists_tools {
+        if let Some(endpoint) = &script.run_tools_endpoint {
+            super::run_tool::list_run_tools(endpoint).await;
+        }
     }
 
     if !wrote(script.asked, session, script.refused, &events).await {

@@ -232,9 +232,7 @@ pub(super) async fn execute_prompt(
         None if sent_back.is_some() => super::session_plan::with_prompt(request, brief.clone()),
         None => request,
     };
-    let crate::task_cycle::Dispatched {
-        outcome, tokens, ..
-    } = dispatch_session(
+    let dispatched = dispatch_session(
         adapter.as_ref(),
         request,
         cancel,
@@ -259,6 +257,17 @@ pub(super) async fn execute_prompt(
         },
         crate::task_cycle::DispatchError::Audit(source) => RunError::Storage(source),
     })?;
+    crate::task_cycle::record_unlisted_tools(
+        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+        adapter.id(),
+        run_tools.as_ref(),
+        &dispatched,
+    )
+    .await
+    .map_err(RunError::Storage)?;
+    let crate::task_cycle::Dispatched {
+        outcome, tokens, ..
+    } = dispatched;
 
     match outcome {
         DispatchOutcome::Completed { summary } => {

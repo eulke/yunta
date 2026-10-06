@@ -31,6 +31,23 @@ fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
         ),
     ))
 }
+/// Records that a session's run tools never reached it, for a session
+/// whose CLI says nothing of the tools it holds: one that was offered the
+/// tools, opened, and never listed them or called one — which both CLIs do
+/// before their first turn.
+pub(crate) async fn record_unlisted_tools(
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    adapter: &yunta_core::AdapterId,
+    run_tools: Option<&crate::run_tools::RunToolsSession>,
+    dispatched: &super::Dispatched,
+) -> Result<(), yunta_storage::StorageError> {
+    let unlisted = run_tools.is_some_and(|session| !session.listed());
+    if unlisted && !dispatched.tools_reported && dispatched.session.is_some() {
+        emit_audit(audit, run_tools_unreachable(adapter)).await?;
+    }
+    Ok(())
+}
+
 /// One streamed `AgentEvent` and the dispatch state [`apply_agent_event`]
 /// folds it into — grouped so the read loop hands them over as a unit.
 pub(super) struct AgentEventCtx<'a> {
@@ -50,6 +67,8 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) fence: &'a mut Option<yunta_core::fence::Coverage>,
     /// Every write the fence refused this session, as it reported it.
     pub(super) refused: &'a mut Vec<yunta_core::events::ToolTarget>,
+    /// Set when the session's CLI said how many run tools it holds.
+    pub(super) tools_reported: &'a mut bool,
     /// Set when the session failed because it lost its service.
     pub(super) cut_off: &'a mut bool,
     /// The task this session works, when a loop opened it.
@@ -80,6 +99,7 @@ pub(super) async fn apply_agent_event(
         opened,
         fence: covered,
         refused,
+        tools_reported,
         cut_off,
         task,
         continues,
@@ -129,6 +149,7 @@ pub(super) async fn apply_agent_event(
             }
         }
         AgentEvent::RunToolsMounted { count } => {
+            *tools_reported = true;
             if run_tools_offered && count == 0 {
                 emit_audit(audit, run_tools_unreachable(adapter.id()))
                     .await

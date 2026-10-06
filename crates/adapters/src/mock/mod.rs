@@ -293,6 +293,7 @@ impl MockAdapter {
             steps: script.steps.clone(),
             outcome: script.outcome.clone(),
             run_tools_endpoint: req.run_tools_endpoint.clone(),
+            lists_tools: self.fixture.lists_tools,
         })
     }
 

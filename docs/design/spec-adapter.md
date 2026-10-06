@@ -273,7 +273,7 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
 | `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
 | `network_isolation` | `network: false` queda registrado para política y auditoría, no exigido · `capability_degraded` |
-| `run_tools` montado y sin efecto | el adapter reporta cuántas tools del servidor por sesión trae la sesión; cero con endpoint entregado emite `capability_degraded` al abrir la sesión, antes de gastarla |
+| `run_tools` montado y sin efecto | el adapter reporta cuántas tools del servidor por sesión trae la sesión; cero con endpoint entregado emite `capability_degraded` al abrir la sesión, antes de gastarla. Un CLI que no nombra sus tools (`codex`) no reporta nada: el listener de la sesión sabe si las listó o llamó alguna —los dos CLIs las listan antes de su primer turno—, y una sesión que abrió y terminó sin hacerlo emite la misma degradación al cerrar |
 
 ## 6. Adapters builtin
 

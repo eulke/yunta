@@ -172,6 +172,7 @@ impl CodexAdapter {
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
                 last_message: String::new(),
+                model: req.model.clone(),
                 fence: fence::coverage(&req.fence, &req.cwd, mode),
             }),
         })
@@ -238,6 +239,9 @@ fn config_overrides(req: &SessionRequest, opens_network: bool) -> Vec<String> {
 /// line to line.
 struct CodexParser {
     last_message: String,
+    /// The model the session was launched with: the CLI's stream names
+    /// none, and the session runs on the one it was told.
+    model: Option<yunta_core::ModelName>,
     /// What the sandbox this session runs under actually fenced —
     /// computed once, when the session was built.
     fence: Coverage,
@@ -245,7 +249,12 @@ struct CodexParser {
 
 impl LineParser for CodexParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        let events = parse::parse_line(line, &self.last_message, &self.fence);
+        let mut events = parse::parse_line(line, &self.last_message, &self.fence);
+        for event in &mut events {
+            if let AgentEvent::SessionOpened { model, .. } = event {
+                model.clone_from(&self.model);
+            }
+        }
         if let Some(text) = events.iter().rev().find_map(|event| match event {
             AgentEvent::Note { text } => Some(text.clone()),
             _ => None,

@@ -48,6 +48,8 @@ pub(crate) struct Dispatched {
     pub session: Option<yunta_core::SessionId>,
     /// Every write the fence refused it.
     pub refused: Vec<yunta_core::events::ToolTarget>,
+    /// Whether the session's CLI said how many run tools it holds.
+    pub tools_reported: bool,
 }
 
 /// How a session opens: the task it works, if any, and the conversation
@@ -152,12 +154,14 @@ fn joined(before: Dispatched, after: Dispatched) -> Dispatched {
     tokens += after.tokens;
     let mut refused = before.refused;
     refused.extend(after.refused);
+    let tools_reported = before.tools_reported || after.tools_reported;
     Dispatched {
         outcome: after.outcome,
         tokens,
         fence: after.fence.or(before.fence),
         session: after.session.or(before.session),
         refused,
+        tools_reported,
     }
 }
 

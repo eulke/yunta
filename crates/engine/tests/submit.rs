@@ -794,6 +794,42 @@ sessions:
     assert_eq!(kinds(&bench, "finding_posted"), 1);
 }
 
+/// A CLI that names none of the tools it holds says nothing when they
+/// never reached it; the engine's own listener does: a session that was
+/// offered the tools and never listed them is degraded the same way.
+#[tokio::test]
+async fn a_session_that_never_listed_its_run_tools_is_reported() {
+    let degraded = |fixture: &'static str| async move {
+        let bench = Bench::new();
+        let _ = bench.run(PLAN_NODE, fixture).await;
+        bench
+            .events()
+            .iter()
+            .filter(|event| match event.payload() {
+                Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p))) => {
+                    p.capability == yunta_core::Capability::RunTools
+                }
+                _ => false,
+            })
+            .count()
+    };
+    assert_eq!(
+        degraded(
+            "capabilities: { run_tools: true }\nlists_tools: false\nsessions:\n  - outcome: { type: completed, summary: done }\n"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        degraded(
+            "capabilities: { run_tools: true }\nsessions:\n  - outcome: { type: completed, summary: done }\n"
+        )
+        .await,
+        0,
+        "a session that listed its tools holds them"
+    );
+}
+
 #[tokio::test]
 async fn a_session_that_holds_none_of_its_run_tools_is_reported_before_it_is_spent() {
     let bench = Bench::new();

@@ -30,6 +30,8 @@ pub struct RunToolsSession {
     rail: yunta_core::rail::RailEndpoint,
     /// What those hooks are judged against, and what they were refused.
     rails: Arc<super::rail::SessionRails>,
+    /// Whether the session's CLI ever listed these tools or called one.
+    listed: Arc<std::sync::atomic::AtomicBool>,
     /// How the session's CLI names these tools to its model.
     naming: yunta_core::ToolNaming,
     /// The tools this session is served, in the order it reads them.
@@ -48,6 +50,12 @@ impl RunToolsSession {
     /// refused.
     pub fn rails(&self) -> &super::rail::SessionRails {
         &self.rails
+    }
+
+    /// Whether the session's CLI ever listed these tools or called one —
+    /// both CLIs list a server's tools before their first turn.
+    pub fn listed(&self) -> bool {
+        self.listed.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// How this session's CLI names these tools to its model.
@@ -106,12 +114,14 @@ pub async fn open_session_listener(
 
     let naming = access.naming;
     let rails = Arc::new(super::rail::SessionRails::default());
+    let listed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let tools = SessionTools::new(
         access,
         (task, node_scope),
         cwd,
         shutdown.clone(),
         Arc::clone(&rails),
+        Arc::clone(&listed),
     );
     let offered = super::catalog::offered(&tools);
     let server = serve(listener, tools, &shutdown, &token);
@@ -127,6 +137,7 @@ pub async fn open_session_listener(
             token,
         },
         rails,
+        listed,
         naming,
         offered,
         shutdown,

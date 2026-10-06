@@ -296,6 +296,7 @@ pub(super) async fn stream_session(
                 fence: None,
                 session: None,
                 refused: Vec::new(),
+                tools_reported: false,
             };
             return Ok((nothing, false));
         }
@@ -362,6 +363,7 @@ pub(super) async fn stream_session(
     let mut opened: Option<yunta_core::SessionId> = None;
     let mut fence: Option<yunta_core::fence::Coverage> = None;
     let mut refused = Vec::new();
+    let mut tools_reported = false;
     let mut cut_off = false;
     let mut terminal = None;
     let mut cancelled = false;
@@ -420,6 +422,7 @@ pub(super) async fn stream_session(
                     opened: &mut opened,
                     fence: &mut fence,
                     refused: &mut refused,
+                    tools_reported: &mut tools_reported,
                     cut_off: &mut cut_off,
                     task: opening.task,
                     continues,
@@ -450,6 +453,7 @@ pub(super) async fn stream_session(
             fence,
             session: opened,
             refused,
+            tools_reported,
         };
         return Ok((cancelled, false));
     }
@@ -469,6 +473,7 @@ pub(super) async fn stream_session(
         fence,
         session: opened,
         refused,
+        tools_reported,
     };
     Ok((dispatched, cut_off))
 }

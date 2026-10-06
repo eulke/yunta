@@ -94,7 +94,7 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
 
     assert!(matches!(
         &events[0],
-        AgentEvent::SessionOpened { model: None, .. }
+        AgentEvent::SessionOpened { model: Some(model), .. } if model.as_str() == "gpt-5-codex"
     ));
     assert!(events
         .iter()
@@ -440,7 +440,7 @@ async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
 }
 
 #[tokio::test]
-async fn a_session_reports_no_model_because_the_cli_names_none() {
+async fn a_session_reports_the_model_it_was_launched_with() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
 
@@ -453,12 +453,11 @@ async fn a_session_reports_no_model_because_the_cli_names_none() {
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
 
-    // The request named a model; the CLI's `thread.started` never
-    // says which one runs, and the session reports only what the CLI
-    // said.
+    // The CLI's `thread.started` never says which model runs; the
+    // session runs on the one it was launched with, and says so.
     assert!(matches!(
         &events[0],
-        AgentEvent::SessionOpened { model: None, .. }
+        AgentEvent::SessionOpened { model: Some(model), .. } if model.as_str() == "gpt-5-codex"
     ));
 }
 

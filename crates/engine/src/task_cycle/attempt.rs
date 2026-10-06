@@ -86,6 +86,7 @@ pub(super) async fn run_one_attempt(
             fence: covered,
             session,
             refused,
+            ..
         },
     ) = open_and_dispatch(params).await?;
     let &AttemptParams {
@@ -415,6 +416,12 @@ async fn open_and_dispatch(
     if let Some(session) = &run_tools {
         dispatched.refused.extend(session.rails().refused());
     }
+    super::record_unlisted_tools(audit, adapter.id(), run_tools.as_ref(), &dispatched)
+        .await
+        .map_err(|source| TaskCycleError::Audit {
+            task: task.id.clone(),
+            source,
+        })?;
     Ok((last_staged, dispatched))
 }
 

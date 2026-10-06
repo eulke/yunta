@@ -51,6 +51,7 @@ pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
 pub(crate) use judge::{judge, Judgement, Work};
 pub use memo::{Memo, Memoized};
 pub use session::{KeepsOutput, RunToolsNeed, SessionObserver, SessionSetup};
+pub(crate) use stream::record_unlisted_tools;
 pub use suite::SuiteGate;
 pub(crate) use tree::content_of;
 
