@@ -156,3 +156,42 @@ async fn a_request_citing_nothing_with_a_path_no_red_output_locates_goes_to_a_pe
     });
     assert!(escalated, "the request stands, for a person to decide");
 }
+
+/// What a run found: a task's change breaks a file outside its scope,
+/// which only a guard that holds the task — the project's lint — points
+/// at. The session asks for the file with a criterion of its own that
+/// already passes, which the loop's rules refuse; the guard's red output,
+/// which locates the file, grants it with nobody asked.
+#[tokio::test]
+async fn a_request_the_rules_refuse_is_granted_on_a_red_guard_that_locates_it() {
+    let bench = Bench::new();
+    let guard = "if [ -f a.rs ] && [ ! -f b.rs ]; then echo 'error[E0308]: mismatched types'; echo '  --> b.rs:3:9'; exit 1; fi\n";
+    tokio::fs::write(bench.worktree.join("guard.sh"), guard)
+        .await
+        .unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "guard"]);
+    let tasks = "tasks:\n  - id: task-g\n    title: \"g\"\n    scope: [\"a.rs\"]\n    criteria:\n      - cmd: \"test -f a.rs\"\n      - { cmd: \"sh guard.sh\", type: guard }\n";
+    let mut fixture = plan_session(tasks).replace(
+        "capabilities: { run_tools: true }",
+        "capabilities: { run_tools: true, resume_session: true }",
+    );
+    fixture.push_str(&format!(
+        "  - match_prompt_contains: \"task-g\"\n    effects:\n      - {{ path: a.rs, content: \"a\" }}\n      - {{ path: {:?}, content: \"paths: [b.rs]\\nreason: its caller breaks\\nproposed_criterion:\\n  cmd: \\\"true\\\"\\n\" }}\n    outcome: {{ type: completed, summary: did-g }}\n\
+         \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.rs, content: \"b\" }}\n    outcome: {{ type: completed, summary: did-b }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
+    ));
+
+    let RunReport { terminal, state } = bench
+        .run(&scope_expansion_workflow("ask", &[], None), &fixture)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("task-g"), Some(TaskStatus::Done));
+    assert_eq!(
+        granted_by(&bench),
+        Some(Decider::Evidence {
+            criterion: "sh guard.sh".into()
+        })
+    );
+}

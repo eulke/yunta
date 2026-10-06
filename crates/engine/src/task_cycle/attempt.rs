@@ -165,12 +165,19 @@ pub(super) async fn run_one_attempt(
     let recorded = recorder.post_check(&post_runs, &waiting).await?;
     recorder.scope(&scope).await?;
 
-    // A write the fence refused that a red criterion of this attempt
-    // points at is decided here, before anything reads the request: the
-    // engine verified it, so no one is asked.
+    // A write the fence refused, or a request the loop's rules did not
+    // grant, that a red criterion of this attempt points at is decided
+    // here, before anything reads the request: the engine verified it, so
+    // no one is asked.
     let expansion_outcome = match expansion_outcome {
-        None if !succeeded => super::evidence::of_refusals(params, &refused, &post_runs).await,
-        outcome => outcome,
+        _ if succeeded => expansion_outcome,
+        None => super::evidence::of_refusals(params, &refused, &post_runs).await,
+        Some(outcome) if outcome.decision == crate::scope_expansion::Decision::Granted => {
+            Some(outcome)
+        }
+        Some(outcome) => super::evidence::of_red(params, &outcome.request, &post_runs)
+            .await
+            .or(Some(outcome)),
     };
     let escalated = matches!(
         expansion_outcome.as_ref().map(|o| &o.decision),

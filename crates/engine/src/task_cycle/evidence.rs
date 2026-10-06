@@ -59,34 +59,47 @@ pub(super) async fn of_refusals(
     granted(params, paths, cmd, reason).await
 }
 
-/// The grant a request earns on evidence: a criterion the task declares,
-/// red on the session's work, whose output locates every path asked for —
-/// the one the request cites, or, when it cites none, the first of the
-/// task's own that does: what the engine can verify, nobody is asked. The
-/// task's own criteria are what this attempt's check runs anyway, so
-/// trying them costs nothing it would not spend. `None` when no criterion
-/// does, and the request is decided like any other.
+/// The grant a request citing `evidence` earns: the criterion is one the
+/// task declares, it is red on the session's work, and what it printed
+/// locates every path asked for. `None` when any of that does not hold,
+/// and the request is decided like any other.
 pub(super) async fn of_request(
     params: &AttemptParams<'_>,
     request: &ScopeExpansionRequest,
 ) -> Result<Option<ScopeExpansionOutcome>, TaskCycleError> {
-    let tried: Vec<&str> = match request.evidence.as_deref() {
-        Some(cmd) if own(params.task, cmd) => vec![cmd],
-        Some(_) => return Ok(None),
-        None => params
-            .task
-            .criteria
-            .iter()
-            .filter(|criterion| !criterion.is_guard())
-            .map(|criterion| criterion.cmd.as_str())
-            .collect(),
-    };
-    for cmd in tried {
-        if let Some(granted) = located_by(params, request, cmd).await? {
-            return Ok(Some(granted));
+    match request.evidence.as_deref() {
+        Some(cmd) if own(params.task, cmd) => located_by(params, request, cmd).await,
+        _ => Ok(None),
+    }
+}
+
+/// The grant a request the loop's rules did not grant earns from this
+/// attempt's own check: a criterion it ran red — the task's own, or a
+/// guard that holds it — whose output locates every path asked for. What
+/// the engine can verify, nobody is asked. `None` when no red output does.
+pub(super) async fn of_red(
+    params: &AttemptParams<'_>,
+    request: &ScopeExpansionRequest,
+    post: &[CriterionRun],
+) -> Option<ScopeExpansionOutcome> {
+    let worktree = params.unit.worktree.as_path();
+    let asked: Vec<String> = request
+        .paths
+        .iter()
+        .map(|glob| glob.as_str().to_string())
+        .collect();
+    for run in post {
+        let red = run.exit_code != 0 && run.could_not_run().is_none();
+        let Some(printed) = run.output.as_ref().filter(|_| red) else {
+            continue;
+        };
+        let text = text_of(printed, worktree, params).await;
+        if !asked.is_empty() && asked.iter().all(|path| locates(&text, path)) {
+            let reason = request.reason.clone();
+            return granted(params, asked, run.cmd.clone(), reason).await;
         }
     }
-    Ok(None)
+    None
 }
 
 /// The grant `request` earns when `cmd`, run on the session's work, is red

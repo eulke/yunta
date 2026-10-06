@@ -304,9 +304,10 @@ fn scope_expansion_tool() -> Tool {
          that is red today — or, when one of your task's own criteria fails and its \
          output points at each path as `path:line`, that criterion's command as \
          `evidence`: the engine runs it and, if it still points there, grants the \
-         paths itself. A task's request that cites nothing is tried against its own \
-         criteria the same way before anyone is asked. The request is decided when \
-         this attempt ends: a task's by \
+         paths itself. A task's request its loop's rules would not grant is tried \
+         against every criterion and guard its attempt's check found red, the same \
+         way, before anyone is asked. The request is decided when this attempt ends: \
+         a task's by \
          its evidence, its loop's rules or a person, and a denial becomes a finding \
          rather than silence; a node's by a person, who is shown your reason.",
         object(json!({
