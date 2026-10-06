@@ -27,10 +27,37 @@ runners:
 
 A role can list more than one candidate — the engine picks the first whose
 adapter is healthy, so a role degrades gracefully across a team with mixed
-tooling instead of hard-failing. `agent:` on a candidate (or on the node
-itself, which wins) names a custom agent definition, for adapters that
-support one (`custom_agents` capability) — an adapter that doesn't declares
-this openly rather than silently ignoring the field.
+tooling instead of hard-failing.
+
+## Agents
+
+`agent:` on a candidate, or on the node itself (which wins), names an agent:
+instructions the session works under, added to its CLI's own. The definition
+is Yunta's, so the same agent runs on every adapter — a Markdown file at
+`.yunta/agents/<name>.md` in the project, or one a pack ships and a workflow
+names as `publisher/agent`:
+
+```markdown
+---
+name: security-auditor
+description: Reviews a change for security issues.
+---
+Read the diff before the code around it. Report each issue as a finding
+with the file and line it is on.
+```
+
+The front matter holds `name`, which matches the file, and `description`, for
+people; the body is the instructions. The model is the runner's, because a
+model belongs to one provider, and the tools are the permission profile's —
+a definition that names either is refused. `claude-code` hands the
+instructions to the CLI with `--append-system-prompt-file`, and `codex` with
+`-c developer_instructions=…`. A node whose agent resolves to no definition
+fails before its session opens, naming where it looked.
+
+To move an agent from `.claude/agents/<name>.md`, copy it to
+`.yunta/agents/<name>.md` and drop every front matter key but `name` and
+`description`: its `model` goes on the runner, and its `tools` follow from
+the node's `permissions:`.
 
 ## What a session may write
 
@@ -43,7 +70,7 @@ says which:
 
 | Adapter | How it fences | What it covers |
 |---|---|---|
-| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens; commands stay inside the CLI's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `edit`, only the run's directories under `read-only`, anything under `full`. |
 | `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `workspace-write`, nothing under `read-only`, anything under `full`. |
 | `mock` | The fixture says which of the three levels it builds; at the per-call level each scripted effect asks the engine the way a CLI's hook does. | Whatever the fixture declares. |
 

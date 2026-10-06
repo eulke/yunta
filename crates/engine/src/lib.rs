@@ -35,6 +35,7 @@ compile_error!(
      same guarantees exists and its cancellation tests pass there."
 );
 
+mod agents;
 mod answers;
 mod artifacts;
 mod catalog;

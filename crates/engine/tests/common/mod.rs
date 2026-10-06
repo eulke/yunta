@@ -762,6 +762,17 @@ pub fn install_skill(worktree: &std::path::Path, name: &str) {
     std::fs::write(dir.join("SKILL.md"), format!("# {name}\n")).unwrap();
 }
 
+/// Writes the definition of agent `name` where the run resolves it.
+pub fn install_agent(worktree: &std::path::Path, name: &str) {
+    let dir = worktree.join(".yunta/agents");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\nname: {name}\ndescription: An agent for this test.\n---\nWork as {name}.\n"),
+    )
+    .unwrap();
+}
+
 // --- on_finish.distill — deterministic knowledge distillation ---------
 
 pub const DISTILL_WORKFLOW: &str = r#"

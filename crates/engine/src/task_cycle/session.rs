@@ -81,6 +81,9 @@ pub struct SessionSetup {
     /// harness with no binary to run; an adapter whose fence needs it
     /// and does not have it fails the session.
     pub rail_command: Option<yunta_core::rail::RailCommand>,
+    /// The agent this node's sessions work as, resolved from the name the
+    /// runner or the node gave.
+    pub agent: Option<yunta_core::agent::AgentDefinition>,
     /// Whose configuration of the CLI this node's sessions load beside
     /// what the run mounts.
     pub cli_config: yunta_core::CliConfig,
@@ -165,6 +168,7 @@ impl SessionSetup {
             env: std::collections::HashMap::new(),
             run_tools: None,
             rail_command: None,
+            agent: None,
             cli_config: yunta_core::CliConfig::Inherit,
             network: true,
             run_dir,
@@ -302,7 +306,7 @@ pub(super) async fn stream_session(
         }
     }
     let budget = request.budget;
-    let requested_agent = request.agent.clone();
+    let requested_agent = request.agent.as_ref().map(|agent| agent.name.clone());
     // Whether this session was handed a per-run tool server at all: a
     // session that holds none of those tools only means something went
     // wrong if it was given a server to hold them from.

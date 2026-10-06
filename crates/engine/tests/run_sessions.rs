@@ -554,6 +554,7 @@ capabilities: { custom_agents: true }
 sessions:
   - outcome: { type: completed, summary: "audited" }
 "#;
+    install_agent(&bench.worktree, "security-auditor");
     let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -561,6 +562,32 @@ sessions:
         vec![Some("security-auditor".into())],
         "the node's own agent wins over the candidate's"
     );
+    let instructions = bench.mock().requests_seen()[0]
+        .agent
+        .as_ref()
+        .map(|agent| agent.instructions.clone());
+    assert_eq!(instructions.as_deref(), Some("Work as security-auditor."));
+}
+
+/// An agent the run cannot resolve to a definition fails its node before
+/// any session spends a token on it, saying where it looked.
+#[tokio::test]
+async fn an_agent_without_a_definition_fails_its_node_before_any_session() {
+    let bench = Bench::new();
+    let workflow = "name: w\nnodes:\n  - { id: audit, kind: prompt, runner: executor, agent: nobody, prompt: \"Audit.\" }\n";
+    let fixture = "capabilities: { custom_agents: true }\nsessions:\n  - outcome: { type: completed, summary: done }\n";
+
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    let Some(NodeState::Failed { failure, .. }) = state.nodes.state("audit") else {
+        panic!("`audit` fails: {state:?}");
+    };
+    assert!(failure.to_string().contains(".yunta/agents"), "{failure}");
+    assert!(bench.mock().requests_seen().is_empty(), "no session opened");
 }
 
 #[tokio::test]

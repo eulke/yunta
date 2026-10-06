@@ -53,7 +53,9 @@ The reference pack's workflow is `fragua.yaml`, so run it with
 `yunta run yunta/fragua` after installing the pack.
 
 The same form works inside a workflow (`use: acme/qa-review`) and a
-node's `skills:` list (`skills: [acme/review-rubric]`). Resolution always
+node's `skills:` list (`skills: [acme/review-rubric]`), and an agent a pack
+declares under `contents.agents` is named the same way in `agent:`
+(`agent: acme/auditor`). Resolution always
 tries the repo's own `.yunta/workflows/` first — a repo file at the same
 `publisher/name` path always wins over the pack: a local workflow with the
 same name shadows the one from the pack. `yunta list` reflects the same
@@ -203,9 +205,11 @@ Field by field:
   enforced at install time — `yunta doctor` reports gaps, naming your pack,
   so an installing team can fix them before running anything.
 - **`contents`** — every path your pack ships, relative to the pack's own
-  root: `workflows`, `skills`, `knowledge` (a pack can be knowledge-only —
-  an empty `workflows`/`skills` with a non-empty `knowledge` is a legitimate
-  pack, e.g. an org-wide style guide with nothing to run), `docs`.
+  root: `workflows`, `skills`, `agents` (definitions a node or runner names
+  in `agent:` — see [adapters](adapters.md#agents)), `knowledge` (a pack can be
+  knowledge-only — an empty `workflows`/`skills` with a non-empty `knowledge`
+  is a legitimate pack, e.g. an org-wide style guide with nothing to run),
+  `docs`.
 
 ### What to keep out
 

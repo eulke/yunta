@@ -44,6 +44,10 @@ pub(crate) async fn resolve_setup(
         Ok(skills) => skills,
         Err(end) => return Ok(Err(end)),
     };
+    let agent = match super::session_policy::agent(ctx, node, chosen).await? {
+        Ok(agent) => agent,
+        Err(end) => return Ok(Err(end)),
+    };
     let run_tools = match tools_access(ctx, node, adapter.as_ref()).await? {
         Ok(access) => access,
         Err(end) => return Ok(Err(end)),
@@ -68,6 +72,7 @@ pub(crate) async fn resolve_setup(
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
         run_tools,
         rail_command: ctx.rail_command.clone(),
+        agent,
         cli_config: super::session_policy::cli_config(ctx, node),
         network: super::session_policy::network(ctx, node),
         run_dir: ctx.run_dir.to_path_buf(),
@@ -291,7 +296,7 @@ pub(crate) async fn open_session(
         prompt: told(setup, plan.prompt, run_tools.as_ref(), task.as_deref()),
         cwd: plan.cwd,
         model: Some(setup.chosen.model.clone()),
-        agent: setup.chosen.agent.clone(),
+        agent: setup.agent.clone(),
         permissions: plan.profile,
         cli_config: setup.cli_config,
         network: setup.network,

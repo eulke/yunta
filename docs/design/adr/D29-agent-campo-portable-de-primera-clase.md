@@ -1,9 +1,9 @@
 ---
 number: D29
 title: "`agent:` campo portable de primera clase"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D253]
 ---
 
 # D29 — `agent:` campo portable de primera clase

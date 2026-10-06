@@ -210,33 +210,44 @@ fn config_overrides(req: &SessionRequest, opens_network: bool) -> Vec<String> {
             ConfigOverride::bool("sandbox_workspace_write.network_access", true).into_args(),
         );
     }
+    // The agent's instructions join the CLI's own, the key a profile
+    // carries them in.
+    if let Some(agent) = &req.agent {
+        args.extend(
+            ConfigOverride::string("developer_instructions", &agent.instructions).into_args(),
+        );
+    }
     if let Some(endpoint) = &req.run_tools_endpoint {
-        let server = RunToolsEndpoint::SERVER_NAME;
-        // The per-run server reaches the CLI as an external MCP server
-        // over streamable HTTP: `url` is the key that selects that
-        // transport, and the credential travels as the name of the
-        // variable the CLI reads it from.
-        for setting in [
-            ConfigOverride::string(format!("mcp_servers.{server}.url"), &endpoint.url),
-            ConfigOverride::string(
-                format!("mcp_servers.{server}.bearer_token_env_var"),
-                TOKEN_VAR,
-            ),
-            ConfigOverride::string(
-                format!("mcp_servers.{server}.default_tools_approval_mode"),
-                "approve",
-            ),
-            // A call can run a task's criteria; the CLI waits for it as
-            // long as the session may run.
-            ConfigOverride::float(
-                format!("mcp_servers.{server}.tool_timeout_sec"),
-                RunToolsEndpoint::call_timeout(&req.budget).as_secs_f64(),
-            ),
-        ] {
-            args.extend(setting.into_args());
-        }
+        args.extend(run_tools_overrides(&endpoint.url, &req.budget));
     }
     args
+}
+
+/// The per-run server reaches the CLI as an external MCP server over
+/// streamable HTTP: `url` is the key that selects that transport, and the
+/// credential travels as the name of the variable the CLI reads it from.
+fn run_tools_overrides(url: &str, budget: &yunta_core::port::Budget) -> Vec<String> {
+    let server = RunToolsEndpoint::SERVER_NAME;
+    [
+        ConfigOverride::string(format!("mcp_servers.{server}.url"), url),
+        ConfigOverride::string(
+            format!("mcp_servers.{server}.bearer_token_env_var"),
+            TOKEN_VAR,
+        ),
+        ConfigOverride::string(
+            format!("mcp_servers.{server}.default_tools_approval_mode"),
+            "approve",
+        ),
+        // A call can run a task's criteria; the CLI waits for it as long
+        // as the session may run.
+        ConfigOverride::float(
+            format!("mcp_servers.{server}.tool_timeout_sec"),
+            RunToolsEndpoint::call_timeout(budget).as_secs_f64(),
+        ),
+    ]
+    .into_iter()
+    .flat_map(ConfigOverride::into_args)
+    .collect()
 }
 
 /// The CLI's JSONL, one event list per line. The last note seen is
@@ -288,10 +299,9 @@ impl Adapter for CodexAdapter {
             // the process's sandbox, which the coverage reports.
             fence: FenceLevel::ToolCalls,
             permission_profiles: true,
-            // `codex exec` has no documented `--agent <name>` selector —
-            // nothing here to map `agent:` onto, so declaring the
-            // capability would be claiming something that isn't built.
-            custom_agents: false,
+            // A named agent's instructions reach the CLI the way a profile
+            // carries them, as `developer_instructions`.
+            custom_agents: true,
             usage_reporting: true,
             // The per-run MCP server reaches the CLI as an external
             // streamable-HTTP server, configured by `-c` overrides.

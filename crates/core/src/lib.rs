@@ -20,6 +20,7 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+pub mod agent;
 mod capabilities;
 mod clock;
 pub mod commit_message;

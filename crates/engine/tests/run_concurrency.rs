@@ -932,6 +932,7 @@ nodes:
          outcome: { type: completed, summary: \"did T001\" }\n",
     );
 
+    install_agent(&bench.worktree, "builder");
     let RunReport { terminal, .. } = bench.run_with_config(workflow, &fixture, config).await;
     let adapter = bench.mock();
 

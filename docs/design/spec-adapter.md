@@ -45,8 +45,8 @@ pub struct Capabilities {
     /// Sin esta capacidad, todo nodo corre con los permisos del CLI
     /// y los nodos que exigen `read_only` fallan en `yunta check`.
     pub permission_profiles: bool,
-    /// Soporta agentes nombrados propios del CLI, seleccionables
-    /// vía el campo portable `agent:` del runner.
+    /// Puede sumar las instrucciones de un agente (`SessionRequest.agent`)
+    /// a las instrucciones de sistema de su CLI.
     pub custom_agents: bool,
     /// Emite uso de tokens confiable en el stream. Si el CLI además
     /// distingue tokens leídos de caché, se reportan en `Usage`
@@ -80,11 +80,12 @@ pub struct SessionRequest {
     pub skills: Vec<PathBuf>,
     /// Modelo pedido por el runner (el adapter lo traduce o rechaza).
     pub model: Option<String>,
-    /// Agente nombrado del adapter, si el runner lo pide. Campo
-    /// PORTABLE: cada adapter lo traduce a su mecanismo nativo.
-    /// Solo se puebla si `capabilities().custom_agents`; `probe()`
-    /// valida que el agente exista en el entorno destino.
-    pub agent: Option<String>,
+    /// El agente que pidió el nodo o el runner, ya resuelto por el engine
+    /// a su definición (`.yunta/agents/<nombre>.md` o la de un pack): su
+    /// nombre y sus instrucciones. El adapter solo se las entrega a su
+    /// CLI, sumadas a las propias; nunca busca un agente por su cuenta
+    /// (D253).
+    pub agent: Option<AgentDefinition>,   // { name, instructions }
     /// Perfil de permisos del nodo.
     pub permissions: PermissionProfile,   // ReadOnly | Edit | Full
     /// Env vars para la sesión. Los secretos llegan SOLO por acá,
@@ -272,7 +273,7 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `resume_session` | `on_interrupt: resume_session` degrada a `restart_node` · warning |
 | `fence` | scope solo post-check + warning, una vez por run |
 | `permission_profiles` | nodo `read_only` → error en check; `edit`/`full` corren con permisos del CLI |
-| `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado |
+| `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado. Un `agent:` sin definición falla el nodo antes de abrir la sesión |
 | `usage_reporting` | presupuesto de tokens no exigible → solo timeout y max_turns; warning por run |
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
 | `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
@@ -303,13 +304,15 @@ Lanza `claude -p` headless con salida en streaming JSON y traduce ese stream a
 `SessionId` persistido; el cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse`
 sobre cada herramienta de escritura ejecuta `yunta rail claude-code before-write`, que
 le pregunta al engine por el listener de la sesión, y las raíces
-del cerco entran por `--add-dir`. Cobertura `Exact` bajo `edit` y `read_only` (que no
-exponen shell), `ToolsOnly` bajo `full`. `read_only` conserva `Write`/`Edit` solo
-cuando el cerco tiene raíces, que es donde van los archivos declarados. Límite
-declarado: si el hook no responde en su timeout, el CLI deja pasar la llamada; el
-post-check la atrapa y `fence_breach` la nombra. `custom_agents` mapea `agent:` a los
-agentes definidos por el equipo en su configuración de Claude Code, verificando su
-existencia en `probe()`; `permission_profiles` mapea a los modos de permisos del CLI;
+del cerco entran por `--add-dir`. Las ediciones se cubren exactas; los comandos, por
+directorio: `WidenedToRoots { [cwd, …raíces] }` bajo `edit`, `WidenedToRoots { raíces }`
+bajo `read_only` con raíces y `Exact` sin ellas, `ToolsOnly` bajo `full`. `read_only`
+conserva `Write`/`Edit` solo cuando el cerco tiene raíces, que es donde van los
+archivos declarados. Límite declarado: si el hook no responde en su timeout, el CLI
+deja pasar la llamada; el post-check la atrapa y `fence_breach` la nombra.
+`custom_agents`: las instrucciones del agente llegan por
+`--append-system-prompt-file`, desde un archivo del directorio de la sesión;
+`permission_profiles` mapea a los modos de permisos del CLI;
 skills y MCP por-run se inyectan por la configuración de sesión. Los comandos corren
 en el sandbox del CLI (`sandbox` en `--settings`, que falla en vez de correr sin
 confinar): bajo `edit` escriben el workspace y las raíces, bajo `read_only` solo las
@@ -325,7 +328,7 @@ incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
 | `resume_session` | `true` |
 | `fence` | `tool_calls` |
 | `permission_profiles` | `true` |
-| `custom_agents` | `false` |
+| `custom_agents` | `true` |
 | `usage_reporting` | `true` |
 | `skills` | `true` |
 | `run_tools` | `true` |
@@ -346,8 +349,9 @@ hook rechaza toda edición que no sea a ellas. Límite declarado: la política p
 (`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. Las skills se montan
 como en `claude-code`: un enlace por skill bajo `.agents/skills/` del directorio de la
 sesión, donde el CLI descubre las de un proyecto, declarado como staging y retirado al
-cerrar. `custom_agents` no se declara porque `codex exec` no tiene selector de agente
-al que mapearlo: declararlo sería prometer lo que no está construido. La
+cerrar. `custom_agents`: las instrucciones del agente llegan como
+`-c developer_instructions=…`, que Codex suma a las suyas; el modelo es el del runner,
+no el de un perfil de Codex (D253). La
 red de los comandos la abre el pedido (`sandbox_workspace_write.network_access`); bajo
 `read-only` no hay red y bajo `danger-full-access` no se cierra, y `check` rechaza
 `network: false` en un nodo `full` (D252).

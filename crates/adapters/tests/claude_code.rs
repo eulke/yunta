@@ -269,35 +269,38 @@ async fn capability_permission_profiles_leave_full_the_whole_tool_set_unattended
     assert!(!args.contains("bypassPermissions"), "got: {args}");
 }
 
+/// A named agent's instructions join the CLI's own system prompt, read
+/// from a file in the session's scratch — never in place of the prompt,
+/// and beside the model the runner chose.
 #[tokio::test]
-async fn capability_custom_agents_passes_the_agent_as_its_own_flag() {
+async fn capability_custom_agents_appends_the_agent_s_instructions() {
     let dir = tempfile::tempdir().unwrap();
-    let args_file = dir.path().join("args.txt");
-    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
-
     let mut req = request(dir.path().to_path_buf());
     req.model = Some("claude-opus-5".into());
-    req.agent = Some("benito".into());
-    req.env.insert(
-        "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
-    );
-    req.env.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let _ = drain(session).await;
+    req.agent = Some(yunta_core::agent::AgentDefinition {
+        name: "benito".into(),
+        instructions: "Review like Benito.".to_string(),
+    });
+    let scratch = req.scratch_dir.clone();
+    let args = argv_for(dir.path(), req).await;
 
-    let args: Vec<String> = std::fs::read_to_string(&args_file)
-        .unwrap()
-        .lines()
-        .map(str::to_string)
-        .collect();
     let model_pos = args.iter().position(|a| a == "--model").unwrap();
     assert_eq!(args[model_pos + 1], "claude-opus-5");
-    let agent_pos = args.iter().position(|a| a == "--agent").unwrap();
-    assert_eq!(args[agent_pos + 1], "benito");
+    assert!(!args
+        .iter()
+        .any(|a| a == "--agent" || a == "--system-prompt"));
+    let file_pos = args
+        .iter()
+        .position(|a| a == "--append-system-prompt-file")
+        .expect("the instructions are appended");
+    assert_eq!(
+        args[file_pos + 1],
+        scratch.join("agent.md").display().to_string()
+    );
+    assert_eq!(
+        std::fs::read_to_string(scratch.join("agent.md")).unwrap(),
+        "Review like Benito."
+    );
 }
 
 #[tokio::test]

@@ -377,6 +377,7 @@ que siempre está al día.
     prompt: "Auditá los cambios y reportá cada hallazgo de seguridad."
   ```
 
-  En workflows compartidos, preferir el agente en los candidatos del runner
-  (portabilidad multi-adapter); el override por nodo es para workflows internos del
-  equipo.
+  El nombre resuelve a `.yunta/agents/<nombre>.md` del proyecto, o a la definición
+  que un pack declara en `contents.agents` (`publisher/agente`): front matter con
+  `name` y `description`, y el cuerpo como instrucciones. La misma definición corre
+  en todo adapter; un nombre sin definición falla el nodo antes de abrir la sesión.

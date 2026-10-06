@@ -124,6 +124,10 @@ pub struct PackContents {
     pub workflows: Vec<String>,
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Agent definitions the pack ships, each a Markdown file a node or a
+    /// runner names as `publisher/agent`.
+    #[serde(default)]
+    pub agents: Vec<String>,
     /// A pack can be knowledge-only (an org
     /// knowledge-pack layer) — an empty `workflows`/`skills` with a
     /// non-empty `knowledge` is a legitimate pack, not a degenerate one.
@@ -212,6 +216,7 @@ impl PackManifest {
             ("contents.workflows", &contents.workflows),
             ("contents.skills", &contents.skills),
             ("contents.knowledge", &contents.knowledge),
+            ("contents.agents", &contents.agents),
             ("contents.docs", &contents.docs),
         ] {
             for path in paths {

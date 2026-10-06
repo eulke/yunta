@@ -50,8 +50,7 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.resume_session);
     assert!(caps.permission_profiles);
     assert!(caps.usage_reporting);
-    // Never claim a capability that isn't wired end-to-end yet.
-    assert!(!caps.custom_agents);
+    assert!(caps.custom_agents);
     assert!(caps.skills);
     // Every edit is judged before it applies, by the hook it runs.
     assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
@@ -438,6 +437,40 @@ async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
         "the session had a process"
     );
     wait_until_gone(Pid::try_from(grandchild).unwrap()).await;
+}
+
+/// A named agent's instructions reach the CLI as the key a profile
+/// carries them in, added to its own.
+#[tokio::test]
+async fn a_named_agent_s_instructions_reach_the_cli_as_developer_instructions() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+    let mut req = request(dir.path().to_path_buf());
+    req.agent = Some(yunta_core::agent::AgentDefinition {
+        name: "benito".into(),
+        instructions: "Review like \"Benito\".".to_string(),
+    });
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let _ = drain(adapter().spawn(req).await.unwrap()).await;
+
+    let args = tokio::fs::read_to_string(&args_file).await.unwrap();
+    let assignment = args
+        .lines()
+        .find(|arg| arg.starts_with("developer_instructions="))
+        .expect("the instructions are passed");
+    let table: toml::Table = toml::from_str(assignment).unwrap();
+    assert_eq!(
+        table["developer_instructions"].as_str(),
+        Some("Review like \"Benito\".")
+    );
 }
 
 /// A skill is mounted where the CLI discovers a project's skills, declared

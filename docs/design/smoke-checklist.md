@@ -95,11 +95,11 @@ autenticada.
    scope-check NO reporta `.claude/skills` como trabajo del agente, y
    que un segundo intento del nodo re-staged sin error (el symlink se
    reemplaza), y que al terminar la sesión el symlink ya no está.
-2. **`agent:` a nivel nodo**: un nodo con `agent: <nombre>`
-   de un agente definido en el repo → la sesión corre con `--agent
-   <nombre>` y responde con la persona correcta; un nombre inexistente
-   → el error del CLI llega como fallo del nodo con diagnóstico, no
-   como cuelgue.
+2. **`agent:` a nivel nodo**: un nodo con `agent: <nombre>` y su
+   definición en `.yunta/agents/<nombre>.md` → la sesión corre con
+   `--append-system-prompt-file` (en `codex`, `-c developer_instructions`)
+   y responde según sus instrucciones; un nombre sin definición falla el
+   nodo antes de abrir la sesión, diciendo dónde la buscó.
 3. **`resume_session`**: mismo caso que A.4 pero con
    claude-code: matar el engine a mitad de sesión, `on_interrupt:
    resume_session`, `yunta resume` → `claude --resume <session_id>`

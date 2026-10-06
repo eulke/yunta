@@ -35,7 +35,7 @@ lista.
 **D26 — Comunicación entre nodos mediada por el engine, jamás directa.** `accepted` → [`adr/D26-comunicacion-entre-nodos-mediada-por-el-engine.md`](adr/D26-comunicacion-entre-nodos-mediada-por-el-engine.md)
 **D27 — Terminología de tres niveles: adapter / runner / agente.** `accepted` → [`adr/D27-terminologia-de-tres-niveles-adapter-runner.md`](adr/D27-terminologia-de-tres-niveles-adapter-runner.md)
 **D28 — Keyword `runner:`, no `role:`.** `accepted` → [`adr/D28-keyword-runner-no-role.md`](adr/D28-keyword-runner-no-role.md)
-**D29 — `agent:` campo portable de primera clase.** `accepted` → [`adr/D29-agent-campo-portable-de-primera-clase.md`](adr/D29-agent-campo-portable-de-primera-clase.md)
+**D29 — `agent:` campo portable de primera clase.** `revised` *(Revisada por D253.)* → [`adr/D29-agent-campo-portable-de-primera-clase.md`](adr/D29-agent-campo-portable-de-primera-clase.md)
 **D30 — Candidatos ordenados por rol, resolución congelada al crear el run (`runner_resolved` con descartes y causas).** `accepted` → [`adr/D30-candidatos-ordenados-por-rol-resolucion.md`](adr/D30-candidatos-ordenados-por-rol-resolucion.md)
 **D31 — Fan-out multi-runner estático.** `accepted` → [`adr/D31-fan-out-multi-runner-estatico.md`](adr/D31-fan-out-multi-runner-estatico.md)
 **D32 — Dos traits: `Adapter` (fábrica) y `AgentSession` (sesión viva).** `accepted` → [`adr/D32-dos-traits-adapter-fabrica-y-agentsession.md`](adr/D32-dos-traits-adapter-fabrica-y-agentsession.md)
@@ -259,3 +259,4 @@ lista.
 **D250 — A session loads its person's own CLI configuration unless its workflow isolates it, and no session writes an agent's configuration.** `accepted` → [`adr/D250-a-session-loads-its-person-s-cli-config-unless-isolated.md`](adr/D250-a-session-loads-its-person-s-cli-config-unless-isolated.md)
 **D251 — A Codex edit is judged before it applies.** `accepted` → [`adr/D251-a-codex-edit-is-judged-before-it-applies.md`](adr/D251-a-codex-edit-is-judged-before-it-applies.md)
 **D252 — An agent's commands run in its CLI's sandbox, and a node's closed network holds there.** `accepted` → [`adr/D252-an-agent-s-commands-run-in-its-cli-s-sandbox.md`](adr/D252-an-agent-s-commands-run-in-its-cli-s-sandbox.md)
+**D253 — An agent is defined by Yunta, and every adapter adds its instructions.** `accepted` → [`adr/D253-an-agent-is-defined-by-yunta.md`](adr/D253-an-agent-is-defined-by-yunta.md)

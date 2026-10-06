@@ -80,6 +80,27 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
     Ok(Some(path))
 }
 
+/// Writes the session's agent instructions to its scratch directory and
+/// returns the file, or `None` when the session works as no agent. The
+/// instructions are added to the CLI's own system prompt, never put in
+/// place of it.
+fn write_agent(req: &SessionRequest) -> Result<Option<PathBuf>> {
+    let Some(agent) = &req.agent else {
+        return Ok(None);
+    };
+    let path = req.scratch_dir.join("agent.md");
+    let io = |source: std::io::Error| AdapterError::Adapter {
+        adapter: ID.clone(),
+        message: format!(
+            "could not write the agent's instructions at {}: {source}",
+            path.display()
+        ),
+    };
+    std::fs::create_dir_all(&req.scratch_dir).map_err(io)?;
+    std::fs::write(&path, &agent.instructions).map_err(io)?;
+    Ok(Some(path))
+}
+
 /// How the fence reaches this CLI: the roots it would otherwise refuse
 /// to write, and the engine as the hook it asks before every writing
 /// tool.
@@ -142,6 +163,7 @@ impl ClaudeCodeAdapter {
         req: &SessionRequest,
         resume: Option<&SessionId>,
         mcp_config: Option<&Path>,
+        agent_file: Option<&Path>,
     ) -> Vec<String> {
         let mut args = vec![
             "-p".to_string(),
@@ -157,10 +179,11 @@ impl ClaudeCodeAdapter {
             args.push("--model".to_string());
             args.push(model.to_string());
         }
-        // Only populated if capabilities().custom_agents — true here.
-        if let Some(agent) = &req.agent {
-            args.push("--agent".to_string());
-            args.push(agent.to_string());
+        // The agent's instructions join the CLI's own, read from the file
+        // the session's scratch holds.
+        if let Some(path) = agent_file {
+            args.push("--append-system-prompt-file".to_string());
+            args.push(path.display().to_string());
         }
         args.extend(permissions::permission_args(
             req.permissions,
@@ -175,16 +198,7 @@ impl ClaudeCodeAdapter {
             args.push("--strict-mcp-config".to_string());
         }
         if let Some(path) = mcp_config {
-            args.push("--mcp-config".to_string());
-            args.push(path.display().to_string());
-            // `--tools` selects among built-ins only; an MCP server's
-            // tools are reached by name. The wildcard admits every tool
-            // of the one server, which keeps this adapter from having to
-            // know which tools the engine mounts — a bare server prefix
-            // names no tool at all, and the CLI drops such a rule with a
-            // startup warning.
-            args.push("--allowedTools".to_string());
-            args.push(format!("mcp__{}__*", RunToolsEndpoint::SERVER_NAME));
+            args.extend(run_tools_args(path));
         }
         if let Some(max_turns) = req.budget.max_turns {
             args.push("--max-turns".to_string());
@@ -221,7 +235,8 @@ impl ClaudeCodeAdapter {
         }
         crate::skills::stage(&ID, SKILLS_MOUNT, &req)?;
         let mcp_config = write_mcp_config(&req)?;
-        let args = self.build_args(&req, resume, mcp_config.as_deref());
+        let agent_file = write_agent(&req)?;
+        let args = self.build_args(&req, resume, mcp_config.as_deref(), agent_file.as_deref());
         // Where the hooks reach the engine travels in the child's own
         // environment, which is how a hook this CLI runs inherits it.
         let mut env = req.env.clone();
@@ -385,3 +400,18 @@ impl Adapter for ClaudeCodeAdapter {
 /// The CLI's native skills discovery directory, relative to the
 /// session's working directory.
 const SKILLS_MOUNT: &str = ".claude/skills";
+
+/// The flags that connect the session to the run's tools, configured in
+/// the file at `mcp_config`. `--tools` selects among built-ins only; an
+/// MCP server's tools are reached by name. The wildcard admits every tool
+/// of the one server, which keeps this adapter from having to know which
+/// tools the engine mounts — a bare server prefix names no tool at all,
+/// and the CLI drops such a rule with a startup warning.
+fn run_tools_args(mcp_config: &Path) -> [String; 4] {
+    [
+        "--mcp-config".to_string(),
+        mcp_config.display().to_string(),
+        "--allowedTools".to_string(),
+        format!("mcp__{}__*", RunToolsEndpoint::SERVER_NAME),
+    ]
+}

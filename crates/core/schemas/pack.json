@@ -7,6 +7,7 @@
     "contents": {
       "$ref": "#/$defs/PackContents",
       "default": {
+        "agents": [],
         "docs": [],
         "knowledge": [],
         "skills": [],
@@ -83,6 +84,14 @@
       "description": "What the pack physically ships — paths relative to the pack's\nown root, resolved by whoever vendors it, not by this type.",
       "type": "object",
       "properties": {
+        "agents": {
+          "description": "Agent definitions the pack ships, each a Markdown file a node or a\nrunner names as `publisher/agent`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
         "docs": {
           "type": "array",
           "default": [],

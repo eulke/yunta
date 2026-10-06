@@ -302,7 +302,10 @@ impl MockAdapter {
         record(&self.skills_seen, req.skills.clone());
         record(&self.endpoints_seen, req.run_tools_endpoint.clone());
         record(&self.artifact_dirs_seen, req.artifact_dir.clone());
-        record(&self.agents_seen, req.agent.clone());
+        record(
+            &self.agents_seen,
+            req.agent.as_ref().map(|agent| agent.name.clone()),
+        );
         record(&self.models_seen, req.model.clone());
         record(&self.requests_seen, req.clone());
     }

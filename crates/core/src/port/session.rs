@@ -21,8 +21,7 @@ use crate::events::SessionExit;
 use crate::fence::{Coverage, Fence};
 use crate::rail::{RailAnswer, RailCall, RailCommand, RailEndpoint, RailEvent};
 use crate::{
-    AdapterError, AdapterId, AgentName, Capabilities, Capability, ModelName, Pid, Result, Secret,
-    SessionId,
+    AdapterError, AdapterId, Capabilities, Capability, ModelName, Pid, Result, Secret, SessionId,
 };
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -50,9 +49,10 @@ pub struct SessionRequest {
     /// The run's worktree.
     pub cwd: PathBuf,
     pub model: Option<ModelName>,
-    /// Portable named-agent selection; only populated if
+    /// The agent this session works as, resolved by the run: instructions
+    /// the adapter adds to its CLI's own. Only populated if
     /// `capabilities().custom_agents`.
-    pub agent: Option<AgentName>,
+    pub agent: Option<crate::agent::AgentDefinition>,
     pub permissions: PermissionProfile,
     /// Whose configuration of the CLI the session loads beside what the
     /// run mounts: the person's own, or none but the run's.
