@@ -38,6 +38,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         agent: None,
         optional: false,
         ask: None,
+        cli_config: None,
     }
 }
 

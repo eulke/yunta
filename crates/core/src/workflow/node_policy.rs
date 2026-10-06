@@ -22,6 +22,23 @@ impl NodePermissions {
     }
 }
 
+/// Whose configuration of the agent's CLI a session loads beside what the
+/// run mounts for it.
+///
+/// `inherit` loads the person's own — their settings, extensions, MCP
+/// servers and hooks — and adds the run's on top; `isolated` loads only
+/// what the run mounts, so a session behaves the same on any machine. The
+/// CLI's credentials are the person's either way.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CliConfig {
+    #[default]
+    Inherit,
+    Isolated,
+}
+
 /// A node's crash-recovery policy — the full triple of options.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,

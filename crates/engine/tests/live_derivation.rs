@@ -50,6 +50,7 @@ fn node(id: &str) -> Node {
         agent: None,
         optional: false,
         ask: None,
+        cli_config: None,
     }
 }
 

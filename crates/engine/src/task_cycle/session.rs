@@ -77,10 +77,13 @@ pub struct SessionSetup {
     /// listener that fails to bind for such a node fails the node; for
     /// any other node it degrades and the session runs on.
     pub run_tools_required: Option<RunToolsNeed>,
-    /// The hook a CLI runs to ask the judge about one write. `None` in a
+    /// The hook a CLI runs to ask the engine about one write. `None` in a
     /// harness with no binary to run; an adapter whose fence needs it
     /// and does not have it fails the session.
     pub rail_command: Option<yunta_core::rail::RailCommand>,
+    /// Whose configuration of the CLI this node's sessions load beside
+    /// what the run mounts.
+    pub cli_config: yunta_core::CliConfig,
     /// What a node's own session works to: the scope the node declared
     /// plus every path a person granted it on this run, which fences the
     /// session and is what its scope tools judge by. `None` for a node
@@ -160,6 +163,7 @@ impl SessionSetup {
             env: std::collections::HashMap::new(),
             run_tools: None,
             rail_command: None,
+            cli_config: yunta_core::CliConfig::Inherit,
             run_dir,
             node,
             chosen,

@@ -46,6 +46,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         runners: Vec::new(),
         agent: None,
         ask: None,
+        cli_config: None,
     }
 }
 
@@ -72,6 +73,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         runners: Vec::new(),
         agent: None,
         ask: None,
+        cli_config: None,
     }
 }
 
@@ -106,6 +108,7 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         runners: Vec::new(),
         agent: None,
         ask: None,
+        cli_config: None,
     }
 }
 
@@ -141,6 +144,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         runners: Vec::new(),
         agent: None,
         ask: None,
+        cli_config: None,
     }
 }
 

@@ -1118,6 +1118,33 @@ nodes:
 }
 
 #[test]
+fn whose_cli_config_a_session_loads_is_said_for_every_node_or_one() {
+    let yaml = r#"
+name: isolated
+node_defaults:
+  cli_config: isolated
+nodes:
+  - id: own
+    kind: bash
+    run: "true"
+    cli_config: inherit
+  - id: defaulted
+    kind: bash
+    run: "true"
+"#;
+    let wf: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    assert_eq!(
+        wf.node_defaults.as_ref().unwrap().cli_config,
+        Some(yunta_core::CliConfig::Isolated)
+    );
+    assert_eq!(wf.nodes[0].cli_config, Some(yunta_core::CliConfig::Inherit));
+    assert_eq!(wf.nodes[1].cli_config, None);
+
+    let unknown = yaml.replace("cli_config: inherit", "cli_config: shared");
+    assert!(yunta_core::yaml::parse::<yunta_core::Workflow>(&unknown).is_err());
+}
+
+#[test]
 fn a_gate_option_that_is_not_a_name_is_refused_naming_the_field() {
     // Options are identifiers: a `yunta resolve-gate` argument, a key of
     // `on:`, a value the log records. One with a space is not one.

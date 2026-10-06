@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
 use super::{
-    Artifacts, Ask, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure,
+    Artifacts, Ask, CliConfig, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure,
     OnInterrupt,
 };
 use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
@@ -24,6 +24,10 @@ pub struct NodeDefaults {
     /// — same replace-wholesale inheritance as `hooks`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<SkillName>,
+    /// Whose CLI configuration every node's sessions load unless the node
+    /// says otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_config: Option<CliConfig>,
 }
 
 /// A single node. Fields here are the ones currently implemented;
@@ -123,6 +127,11 @@ pub struct Node {
     /// [`asks`](Node::asks) declares it; `check` refuses it elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask: Option<Ask>,
+    /// `cli_config:` — whose configuration of the agent's CLI this node's
+    /// sessions load, over what `node_defaults` says. Absent is
+    /// `inherit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_config: Option<CliConfig>,
 }
 
 impl Node {
@@ -180,6 +189,7 @@ pub(super) const NODE_KEYS: &[&str] = &[
     "invariant",
     "optional",
     "ask",
+    "cli_config",
 ];
 
 /// Keys an author reaches for that no node accepts, each with the key
@@ -238,6 +248,8 @@ struct NodeFields {
     optional: bool,
     #[serde(default)]
     ask: Option<Ask>,
+    #[serde(default)]
+    cli_config: Option<CliConfig>,
 }
 
 impl<'de> Deserialize<'de> for Node {
@@ -340,6 +352,7 @@ impl<'de> Deserialize<'de> for Node {
             invariant: fields.invariant,
             optional: fields.optional,
             ask: fields.ask,
+            cli_config: fields.cli_config,
         })
     }
 }
@@ -441,6 +454,7 @@ skills: [s]
 invariant: true
 optional: true
 ask: required
+cli_config: isolated
 "#,
         )
         .unwrap();

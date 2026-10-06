@@ -30,6 +30,7 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         model: None,
         agent: None,
         permissions: PermissionProfile::Edit,
+        cli_config: yunta_core::CliConfig::Inherit,
         env: HashMap::new(),
         fence: Fence::everything(Vec::new(), Advice::ReportFinding),
         rail_command: Some(RailCommand::new(PathBuf::from("yunta"))),

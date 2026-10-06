@@ -132,6 +132,9 @@ node_defaults:
   hooks:
     after:
       - run: "cargo fmt"
+  cli_config: isolated              # inherit (default) | isolated: qué config del CLI
+                                    # del agente cargan las sesiones; un nodo puede
+                                    # decir la suya (D250)
 
 nodes:                              # id: letra seguida de letras, dígitos, `_` o `-`
   - id: grill

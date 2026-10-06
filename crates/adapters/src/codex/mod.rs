@@ -90,6 +90,12 @@ impl CodexAdapter {
         let opens_network = settings.network_access
             && fence::mode(req.permissions, edit_sandbox) == settings::Sandbox::WorkspaceWrite;
         args.extend(config_overrides(req, opens_network));
+        // An isolated session loads none of the person's own configuration
+        // or rules; its credentials stay theirs.
+        if req.cli_config == yunta_core::CliConfig::Isolated {
+            args.push("--ignore-user-config".to_string());
+            args.push("--ignore-rules".to_string());
+        }
         // `exec`'s own options are declared on the parent command and
         // are not `global`, so clap reads one that follows `resume` as
         // an unexpected argument and the invocation dies before a
@@ -278,6 +284,13 @@ impl Adapter for CodexAdapter {
             });
         }
         Ok(subprocess::probe_version(&self.binary).await)
+    }
+
+    fn own_config(&self) -> Vec<yunta_core::ScopeGlob> {
+        [".codex/config.toml", ".codex/hooks.json"]
+            .into_iter()
+            .filter_map(|path| yunta_core::ScopeGlob::exact(std::path::Path::new(path)).ok())
+            .collect()
     }
 
     fn service_vars(&self) -> &'static [&'static str] {

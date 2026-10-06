@@ -169,7 +169,22 @@ list is empty unless the project writes one, so no workflow fails for lacking it
 Once a run holds a [spec](#artifacts-the-engine-reads), every file of it is denied the same way to
 every session of the run — the tests a person approved stay as approved through
 the pull request. A lint command that rewrites files fails over one of them like
-over any denied path.
+over any denied path. The files an agent's CLI loads its own settings, hooks and
+MCP servers from — `.claude/settings.json`, `.claude/settings.local.json`,
+`.mcp.json`, `.codex/config.toml`, `.codex/hooks.json` — are denied the same way to
+every run, whichever CLI it uses: a checkout outlives the session that writes one,
+and the next session to open there would run what it says outside its sandbox.
+
+`cli_config: inherit | isolated`, on a node or in `node_defaults`, says whose
+configuration of the agent's CLI its sessions load. `inherit`, the default, loads
+yours — your settings, extensions, MCP servers and hooks — with the run's added on
+top. `isolated` loads only what the run mounts, so the session behaves the same on
+any machine; your CLI's login is used either way.
+
+```yaml
+node_defaults:
+  cli_config: isolated
+```
 
 ## Config layers and state
 

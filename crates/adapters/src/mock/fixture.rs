@@ -37,6 +37,9 @@ pub struct MockFixture {
     /// cannot be reached before it answers that it can — what a session
     /// cut off from it waits on.
     pub service_down_for: u32,
+    /// The files the CLI this fixture stands for loads its configuration
+    /// from, as a real adapter declares them.
+    pub own_config: Vec<yunta_core::ScopeGlob>,
 }
 
 /// The run directories a fixture names. They are the caller's to
@@ -130,6 +133,8 @@ impl<'de> Deserialize<'de> for MockFixture {
                 sessions: Vec<SessionScript>,
                 #[serde(default)]
                 service_down_for: u32,
+                #[serde(default)]
+                own_config: Vec<yunta_core::ScopeGlob>,
             }
             let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
             let capabilities: Capabilities = multi.capabilities.into();
@@ -140,6 +145,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 capabilities,
                 sessions: multi.sessions,
                 service_down_for: multi.service_down_for,
+                own_config: multi.own_config,
             })
         } else {
             // The single-session form is a script with `capabilities`
@@ -155,6 +161,10 @@ impl<'de> Deserialize<'de> for MockFixture {
                 Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
                 None => FixtureCapabilities::default(),
             };
+            let own_config: Vec<yunta_core::ScopeGlob> = match mapping.remove("own_config") {
+                Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
+                None => Vec::new(),
+            };
             let declared: Option<FixtureCoverage> = match mapping.remove("fence_coverage") {
                 Some(value) => Some(yaml::from_value(value).map_err(D::Error::custom)?),
                 None => None,
@@ -167,6 +177,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 capabilities,
                 sessions: vec![script],
                 service_down_for: 0,
+                own_config,
             })
         }
     }

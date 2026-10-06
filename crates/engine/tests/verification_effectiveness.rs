@@ -32,6 +32,7 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         agent: None,
         optional: false,
         ask: None,
+        cli_config: None,
     }
 }
 
@@ -67,6 +68,7 @@ fn gate_node(id: &str) -> Node {
         agent: None,
         optional: false,
         ask: None,
+        cli_config: None,
     }
 }
 

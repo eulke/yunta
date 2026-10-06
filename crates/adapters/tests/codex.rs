@@ -756,11 +756,21 @@ async fn the_sandbox_setting_governs_the_edit_profile_only() {
 /// The argv `adapter` launches the CLI with for a session under
 /// `profile`.
 async fn argv_under(adapter: &CodexAdapter, profile: PermissionProfile) -> Vec<String> {
+    argv_with(adapter, profile, yunta_core::CliConfig::Inherit).await
+}
+
+/// The same, for a session that loads `cli_config`.
+async fn argv_with(
+    adapter: &CodexAdapter,
+    profile: PermissionProfile,
+    cli_config: yunta_core::CliConfig,
+) -> Vec<String> {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
     let mut req = request(dir.path().to_path_buf());
     req.permissions = profile;
+    req.cli_config = cli_config;
     req.env.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string().into(),
@@ -776,6 +786,36 @@ async fn argv_under(adapter: &CodexAdapter, profile: PermissionProfile) -> Vec<S
         .lines()
         .map(str::to_string)
         .collect()
+}
+
+/// An isolated session loads none of the person's own configuration or
+/// rules; an inheriting one loads them as the CLI always does.
+#[tokio::test]
+async fn an_isolated_session_ignores_the_person_s_own_config_and_rules() {
+    let adapter = CodexAdapter::new(&AdapterSettings {
+        adapter_settings: None,
+        binary: Some(stub_path()),
+    });
+    let isolated = argv_with(
+        &adapter,
+        PermissionProfile::Edit,
+        yunta_core::CliConfig::Isolated,
+    )
+    .await;
+    assert!(
+        isolated.contains(&"--ignore-user-config".to_string()),
+        "{isolated:?}"
+    );
+    assert!(
+        isolated.contains(&"--ignore-rules".to_string()),
+        "{isolated:?}"
+    );
+
+    let inherited = argv_under(&adapter, PermissionProfile::Edit).await;
+    assert!(
+        !inherited.iter().any(|arg| arg.starts_with("--ignore-")),
+        "{inherited:?}"
+    );
 }
 
 #[tokio::test]

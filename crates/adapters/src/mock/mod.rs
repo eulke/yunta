@@ -180,6 +180,10 @@ impl Adapter for MockAdapter {
         self.fixture.capabilities
     }
 
+    fn own_config(&self) -> Vec<yunta_core::ScopeGlob> {
+        self.fixture.own_config.clone()
+    }
+
     async fn probe(&self) -> Result<ProbeReport> {
         Ok(ProbeReport::Healthy {
             version: Some("mock-0.1".to_string()),

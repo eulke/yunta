@@ -178,6 +178,14 @@
         "worktree"
       ]
     },
+    "CliConfig": {
+      "description": "Whose configuration of the agent's CLI a session loads beside what the\nrun mounts for it.\n\n`inherit` loads the person's own — their settings, extensions, MCP\nservers and hooks — and adds the run's on top; `isolated` loads only\nwhat the run mounts, so a session behaves the same on any machine. The\nCLI's credentials are the person's either way.",
+      "type": "string",
+      "enum": [
+        "inherit",
+        "isolated"
+      ]
+    },
     "ContextFile": {
       "description": "A path a `files:` source reads: the bare path when the node requires the file, or `{ path, optional: true }` when it can do without it.",
       "anyOf": [
@@ -867,6 +875,17 @@
             }
           ]
         },
+        "cli_config": {
+          "description": "`cli_config:` — whose configuration of the agent's CLI this node's\nsessions load, over what `node_defaults` says. Absent is\n`inherit`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CliConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "context": {
           "description": "`context:` — data resolved and materialized\n*before* a session opens, in declaration order. Consumed by\n`kind: prompt` (the node's one session) and `kind: loop` (once\nper task brief, volatile sources fresh and stable ones memoized\nper their stability class); `check` rejects it on any kind that opens\nno session (`bash`/`check`/`executor`/`gate`).",
           "type": "array",
@@ -1300,6 +1319,17 @@
       "description": "`node_defaults:` — currently carries only `hooks`, the one consumer\nneeds. Extends when another field needs the same \"declare once,\nnodes inherit\" treatment.",
       "type": "object",
       "properties": {
+        "cli_config": {
+          "description": "Whose CLI configuration every node's sessions load unless the node\nsays otherwise.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CliConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "hooks": {
           "anyOf": [
             {

@@ -151,6 +151,13 @@ impl ClaudeCodeAdapter {
             !req.fence.roots.is_empty(),
         ));
         args.extend(fence_args(req));
+        // An isolated session loads none of the person's own settings, and
+        // no MCP server but the run's; its credentials stay theirs.
+        if req.cli_config == yunta_core::CliConfig::Isolated {
+            args.push("--setting-sources".to_string());
+            args.push(String::new());
+            args.push("--strict-mcp-config".to_string());
+        }
         if let Some(path) = mcp_config {
             args.push("--mcp-config".to_string());
             args.push(path.display().to_string());
@@ -298,6 +305,17 @@ impl Adapter for ClaudeCodeAdapter {
             });
         }
         Ok(subprocess::probe_version(&self.binary).await)
+    }
+
+    fn own_config(&self) -> Vec<yunta_core::ScopeGlob> {
+        [
+            ".claude/settings.json",
+            ".claude/settings.local.json",
+            ".mcp.json",
+        ]
+        .into_iter()
+        .filter_map(|path| yunta_core::ScopeGlob::exact(std::path::Path::new(path)).ok())
+        .collect()
     }
 
     fn service_vars(&self) -> &'static [&'static str] {

@@ -68,6 +68,31 @@ async fn a_scoped_node_writing_a_denied_path_fails_without_a_grant_and_never_lan
     );
 }
 
+/// What an agent's CLI loads its own settings, hooks and MCP servers from
+/// no node writes, whichever CLI it runs on: a pooled checkout keeps the
+/// file for the next session that opens there, and what it says would run
+/// outside that session's sandbox.
+#[tokio::test]
+async fn a_node_writing_an_agent_s_own_config_fails_without_a_grant_and_never_lands() {
+    let bench = Bench::new();
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"mkdir -p .codex && echo x > .codex/hooks.json && echo y > notes.txt\" }\n";
+    let fixture = "own_config: [\".codex/hooks.json\"]\nsessions: []\n";
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, MOCK_CONFIG).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    let failed = failures(&bench.events(), "tidy");
+    assert_eq!(
+        failed,
+        vec![Failure::paths_denied(vec![".codex/hooks.json".into()])]
+    );
+    assert!(!failed[0].wants_scope(), "no grant widens it");
+    let landed = git_output(&bench.worktree, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(!landed.contains(".codex/hooks.json"), "{landed}");
+}
+
 /// The planner's plan and one task scoped to `scope` whose session writes
 /// `writes`, under an `ask` expansion mode.
 fn one_task(scope: &str, writes: &str, request: Option<&str>) -> (String, String) {

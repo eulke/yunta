@@ -16,6 +16,9 @@ use super::{RunCtx, RunError};
 pub(crate) struct Denied {
     project: Vec<ScopeGlob>,
     tests: Vec<ScopeGlob>,
+    /// The configuration files of every CLI the run can drive, which no
+    /// session writes whichever CLI it runs on.
+    agents: Vec<ScopeGlob>,
 }
 
 impl Denied {
@@ -27,15 +30,28 @@ impl Denied {
             .await?
             .map(|held| held.document.test_globs())
             .unwrap_or_default();
+        let mut agents: Vec<ScopeGlob> = ctx
+            .adapters
+            .values()
+            .flat_map(|adapter| adapter.own_config())
+            .collect();
+        agents.sort();
+        agents.dedup();
         Ok(Denied {
             project: ctx.manifest.config.denied_paths().to_vec(),
             tests,
+            agents,
         })
     }
 
     /// Everything no session may write.
     pub(crate) fn every(&self) -> Vec<ScopeGlob> {
-        self.project.iter().chain(&self.tests).cloned().collect()
+        self.project
+            .iter()
+            .chain(&self.agents)
+            .chain(&self.tests)
+            .cloned()
+            .collect()
     }
 
     /// What `node`'s close refuses in the run's tree. A loop lands its
@@ -44,7 +60,7 @@ impl Denied {
     /// the project denies.
     pub(crate) fn closing(&self, node: &Node) -> Vec<ScopeGlob> {
         match node.kind {
-            NodeKind::Loop { .. } => self.project.clone(),
+            NodeKind::Loop { .. } => self.project.iter().chain(&self.agents).cloned().collect(),
             _ => self.every(),
         }
     }

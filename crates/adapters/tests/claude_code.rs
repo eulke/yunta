@@ -834,6 +834,35 @@ async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing
     );
 }
 
+/// An isolated session loads none of the person's own settings and no MCP
+/// server but the run's; an inheriting one loads them as the CLI always
+/// does.
+#[tokio::test]
+async fn an_isolated_session_loads_no_setting_source_and_no_mcp_server_but_the_run_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.cli_config = yunta_core::CliConfig::Isolated;
+    let isolated = argv_for(dir.path(), req).await;
+    let sources = isolated
+        .iter()
+        .position(|arg| arg == "--setting-sources")
+        .expect("an isolated session names its setting sources");
+    assert_eq!(isolated[sources + 1], "", "and names none: {isolated:?}");
+    assert!(
+        isolated.contains(&"--strict-mcp-config".to_string()),
+        "{isolated:?}"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let inherited = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    assert!(
+        !inherited
+            .iter()
+            .any(|arg| arg == "--setting-sources" || arg == "--strict-mcp-config"),
+        "{inherited:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_fence_with_no_roots_widens_nothing() {
     let dir = tempfile::tempdir().unwrap();

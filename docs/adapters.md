@@ -47,6 +47,13 @@ says which:
 | `codex` | The sandbox the process itself runs under, by directory. | The worktree and the run's directories — by directory, never by glob. |
 | `mock` | The fixture says which of the three levels it builds; at the per-call level each scripted effect asks the engine the way a CLI's hook does. | Whatever the fixture declares. |
 
+Every session also loads its person's own configuration of the CLI — settings,
+extensions, MCP servers, hooks — unless its node says `cli_config: isolated`, which
+leaves it with only what the run mounts (`--setting-sources ""` and
+`--strict-mcp-config` for `claude-code`, `--ignore-user-config` and `--ignore-rules`
+for `codex`). The files a CLI loads that configuration from inside a checkout are
+never written by any session of any run.
+
 A refusal reaches the model with the reason and the way out — ask for more
 scope, or report the need as a finding — and reaches the log as
 `write_refused`. The fence is what keeps a write outside the scope from

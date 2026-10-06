@@ -54,6 +54,9 @@ pub struct SessionRequest {
     /// `capabilities().custom_agents`.
     pub agent: Option<AgentName>,
     pub permissions: PermissionProfile,
+    /// Whose configuration of the CLI the session loads beside what the
+    /// run mounts: the person's own, or none but the run's.
+    pub cli_config: crate::CliConfig,
     /// Secrets arrive here, already resolved from the manifest — never
     /// any other way — and stay wrapped until the child process is
     /// spawned.
@@ -327,6 +330,15 @@ pub trait Adapter: Send + Sync {
     /// never the agent's work. The engine's scope check leaves exactly
     /// these out. Default: nothing.
     fn staged_paths(&self, _req: &SessionRequest) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    /// The files of a checkout this adapter's CLI loads configuration from
+    /// that runs code or mounts tools — its settings with their hooks, its
+    /// MCP servers. No session of any run writes them: a pooled checkout
+    /// outlives the session that wrote one, and the next session to open
+    /// there would run what it says outside its sandbox. Default: none.
+    fn own_config(&self) -> Vec<crate::ScopeGlob> {
         Vec::new()
     }
 
