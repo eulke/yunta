@@ -236,3 +236,9 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   the next, here. Whether the Developer Tools exemption brings the first run
   down to the next, and what a suite then spends outside its tests, is still
   to be measured on a terminal a person exempts.
+- The suite after touching `yunta-core`, 228 test binaries: rebuilding takes
+  56 s; the first run 492 s, of which the tests take 252 s; the next run 246 s,
+  of which the tests take 244 s. The first run's assessment is about 240 s; the
+  binaries' own start costs about 2 s, and their links fit inside the 56 s
+  rebuild — under a fifth of the suite once the assessment is gone, so the
+  integration tests stay one binary per file.
