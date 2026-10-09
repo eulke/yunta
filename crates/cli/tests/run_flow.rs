@@ -2896,23 +2896,27 @@ fn codex_stub() -> PathBuf {
     yunta_testkit_core::stubs::codex()
 }
 
-/// `--adapter <real>` makes every role resolve to its candidate on that
-/// adapter, whatever `runners:` lists first — recorded as discards in
-/// the log, never silently.
-#[test]
-fn adapter_flag_overrides_runner_resolution() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-    let claude_args = root.path().join("claude-args.txt");
-    let codex_args = root.path().join("codex-args.txt");
+/// A repo whose only runner lists `codex` first and `claude-code`
+/// second, each a stub that records its last invocation's arguments in
+/// the file its `*_STUB_ARGS_FILE` names.
+struct Override {
+    _root: tempfile::TempDir,
+    repo: PathBuf,
+    home: PathBuf,
+    claude_args: PathBuf,
+    codex_args: PathBuf,
+}
 
-    write(
-        &repo.join(".yunta/config.yaml"),
-        &format!(
-            r#"
+impl Override {
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        write(
+            &repo.join(".yunta/config.yaml"),
+            &format!(
+                r#"
 runners:
   executor:
     - {{ adapter: codex, model: codex-model }}
@@ -2924,35 +2928,68 @@ adapters:
     binary: {claude}
 secrets: [CLAUDE_STUB_ARGS_FILE, CODEX_STUB_ARGS_FILE]
 "#,
-            codex = codex_stub().display(),
-            claude = claude_code_stub().display()
-        ),
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: override\nnodes:\n  - id: implement\n    kind: prompt\n    runner: executor\n    prompt: \"Do the thing.\"\n",
-    );
-    write(
-        &repo.join(".claude-stub-lines.jsonl"),
-        &format!(
-            "{}\n{}\n",
-            r#"{"type":"system","subtype":"init","session_id":"sess-cli","model":"claude-sonnet-5"}"#,
-            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":3,"output_tokens":2}}"#,
-        ),
-    );
-    git(&repo, &["add", ".claude-stub-lines.jsonl"]);
-    git(&repo, &["commit", "-q", "-m", "stub fixture"]);
+                codex = codex_stub().display(),
+                claude = claude_code_stub().display()
+            ),
+        );
+        write(
+            &repo.join("wf.yaml"),
+            "name: override\nnodes:\n  - id: implement\n    kind: prompt\n    runner: executor\n    prompt: \"Do the thing.\"\n",
+        );
+        write(
+            &repo.join(".claude-stub-lines.jsonl"),
+            &format!(
+                "{}\n{}\n",
+                r#"{"type":"system","subtype":"init","session_id":"sess-cli","model":"claude-sonnet-5"}"#,
+                r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":3,"output_tokens":2}}"#,
+            ),
+        );
+        git(&repo, &["add", ".claude-stub-lines.jsonl"]);
+        git(&repo, &["commit", "-q", "-m", "stub fixture"]);
+        Self {
+            home: root.path().join("state"),
+            claude_args: root.path().join("claude-args.txt"),
+            codex_args: root.path().join("codex-args.txt"),
+            repo,
+            _root: root,
+        }
+    }
 
-    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    hermetic(&mut command, &repo, &home);
-    command
-        .args(["run", "wf.yaml", "--adapter", "claude-code"])
-        .env("CLAUDE_STUB_ARGS_FILE", &claude_args)
-        .env("CODEX_STUB_ARGS_FILE", &codex_args);
-    let run = CliChild::spawn(command, None)
-        .expect("the yunta binary spawns")
-        .wait_with_output()
-        .expect("the adapter run finishes within the test deadline");
+    fn yunta(&self, args: &[&str]) -> std::process::Output {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+        hermetic(&mut command, &self.repo, &self.home);
+        command
+            .args(args)
+            .env("CLAUDE_STUB_ARGS_FILE", &self.claude_args)
+            .env("CODEX_STUB_ARGS_FILE", &self.codex_args);
+        CliChild::spawn(command, None)
+            .expect("the yunta binary spawns")
+            .wait_with_output()
+            .expect("yunta finishes within the test deadline")
+    }
+
+    /// Whether the session ran on `claude-code` and never on `codex`.
+    /// Both stubs record every invocation, the health probe
+    /// (`--version`) included: a session is the invocation that is not
+    /// the probe.
+    fn ran_on_claude_only(&self) -> (bool, bool) {
+        let ran_a_session = |args: &Path| {
+            std::fs::read_to_string(args).is_ok_and(|text| !text.contains("--version"))
+        };
+        (
+            ran_a_session(&self.claude_args),
+            ran_a_session(&self.codex_args),
+        )
+    }
+}
+
+/// `--adapter <real>` makes every role resolve to its candidate on that
+/// adapter, whatever `runners:` lists first — recorded as discards in
+/// the log, never silently.
+#[test]
+fn adapter_flag_overrides_runner_resolution() {
+    let repo = Override::new();
+    let run = repo.yunta(&["run", "wf.yaml", "--adapter", "claude-code"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -2960,17 +2997,40 @@ secrets: [CLAUDE_STUB_ARGS_FILE, CODEX_STUB_ARGS_FILE]
         String::from_utf8_lossy(&run.stderr)
     );
     assert!(stdout(&run).contains("finished"), "got: {}", stdout(&run));
-    // Both stubs record every invocation, the health probe (`--version`)
-    // included: a session is the invocation that is not the probe.
-    let ran_a_session =
-        |args: &Path| std::fs::read_to_string(args).is_ok_and(|text| !text.contains("--version"));
-    assert!(
-        ran_a_session(&claude_args),
-        "the override adapter must have run the session"
+    assert_eq!(
+        repo.ran_on_claude_only(),
+        (true, false),
+        "the override adapter runs the session, the first-listed candidate none"
     );
-    assert!(
-        !ran_a_session(&codex_args),
-        "the first-listed candidate must not have run a session"
+}
+
+/// A detached run is driven by a `yunta resume` of its own, which holds
+/// the adapter the run was started on rather than `runners:`'s first.
+#[test]
+fn a_detached_run_keeps_the_adapter_it_was_started_on() {
+    let repo = Override::new();
+    let detached = repo.yunta(&["run", "wf.yaml", "--detach", "--adapter", "claude-code"]);
+    assert!(detached.status.success(), "stderr: {}", stderr(&detached));
+    wait_until(
+        || repo.ran_on_claude_only() != (false, false),
+        || "the detached run never opened its session".into(),
+    );
+    assert_eq!(
+        repo.ran_on_claude_only(),
+        (true, false),
+        "the detached child runs the session on the adapter it was started on"
+    );
+    let run_id = run_id_from(&detached);
+    wait_until(
+        || {
+            let status = repo.yunta(&["status", &run_id, "--json"]);
+            serde_json::from_slice::<serde_json::Value>(&status.stdout).is_ok_and(|state| {
+                state["summary"]
+                    .as_str()
+                    .is_some_and(|summary| summary.ends_with("finished"))
+            })
+        },
+        || "the detached run never finished".into(),
     );
 }
 

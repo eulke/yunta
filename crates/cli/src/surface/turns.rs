@@ -174,6 +174,7 @@ mod tests {
             paths: None,
             pack: None,
             project: None,
+            adapter: None,
         }
     }
 

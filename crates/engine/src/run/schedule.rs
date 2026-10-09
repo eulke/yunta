@@ -916,6 +916,7 @@ mod tests {
             paths: None,
             pack: None,
             project: None,
+            adapter: None,
         };
         let bytes = PersistedDoc::of(manifest).write().expect("manifest writes");
         let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("manifest reads");

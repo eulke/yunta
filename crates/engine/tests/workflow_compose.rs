@@ -16,7 +16,7 @@ use yunta_core::events::{
     ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
 };
 use yunta_core::events::{ChildEvent, FindingEvent, RunEvent, TaskEvent};
-use yunta_core::{ContentHash, Manifest, NodeId, RunId, Workflow};
+use yunta_core::{AdapterId, ContentHash, Manifest, NodeId, RunId, Workflow};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{
     baselines, git, on_a_deep_stack, write, ApproveEverything, Bench, ScriptedInteraction,
@@ -172,6 +172,23 @@ nodes:
     );
     // The parent's own tree never saw the child's write.
     assert!(!bench.worktree.join("out.txt").exists());
+}
+
+#[tokio::test]
+async fn a_child_runs_on_the_adapter_its_parent_was_started_on() {
+    let bench = Bench::new().with_adapter("mock").with_workflow(
+        "child-wf",
+        "name: child-wf\nnodes:\n  - id: work\n    kind: bash\n    run: \"true\"\n",
+    );
+    let parent = "name: parent\nnodes:\n  - id: feat\n    kind: workflow\n    use: child-wf\n";
+    let RunReport { terminal, .. } = bench.run(parent, EMPTY_FIXTURE).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let (child_id, _) = &children_created(&bench.events())[0];
+    assert_eq!(
+        manifest_of(&bench.runs_root, child_id).adapter,
+        Some(AdapterId::from("mock"))
+    );
 }
 
 #[tokio::test]

@@ -396,7 +396,6 @@ impl Bench {
             human_interaction,
             forge: self.forge.as_deref(),
             cancel: &self.cancel,
-            adapter_override: None,
             ambient: self.ambient.as_ref(),
             secrets,
             // The bench runs no binary, so nothing can run a hook:
@@ -433,7 +432,7 @@ impl Bench {
         workflow: &Workflow,
         config: &ConfigLayer,
     ) -> yunta_engine::FrozenRun {
-        build_manifest(
+        let mut frozen = build_manifest(
             workflow,
             config,
             self.workflow_dir.as_deref().unwrap_or(&self.worktree),
@@ -442,7 +441,9 @@ impl Bench {
             self.supervision(),
         )
         .await
-        .expect("build manifest")
+        .expect("build manifest");
+        frozen.manifest.adapter = self.adapter.clone();
+        frozen
     }
 }
 

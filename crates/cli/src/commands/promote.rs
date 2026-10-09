@@ -102,9 +102,6 @@ pub(crate) async fn drive_promotions(
             human_interaction: env.human_interaction,
             forge: env.forge,
             cancel: env.ctx.cancellation(),
-            // A successor is the run carrying on, not a new invocation:
-            // the `--adapter` override belongs to whoever asked for it.
-            adapter_override: None,
             observer: env.observer.clone(),
             rail_command: env.ctx.rail_command.clone(),
             ambient: &env.ctx.env,
@@ -249,7 +246,6 @@ nodes:
             human_interaction: &AlwaysPromote,
             forge: None,
             cancel: ctx.cancellation(),
-            adapter_override: None,
             ambient: None,
             secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: Some(recorder.clone()),

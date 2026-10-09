@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hash::{sha256_hex, CommitSha, ContentHash};
 use crate::ids::InputName;
-use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
+use crate::{AdapterId, ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
 /// post config layers. Absolute by construction ([`FrozenPaths::new`] is
@@ -159,13 +159,22 @@ pub struct Manifest {
     /// git could not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectIdentity>,
+    /// The adapter every session of the run runs on (`yunta run
+    /// --adapter`): each runner resolves to its candidate on it and
+    /// passes over the rest. Frozen with the run, so whatever invocation
+    /// drives it — a detached child, a resume after a pause, a
+    /// successor, a child workflow — resolves the same way. `None`: each
+    /// runner takes its first available candidate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<AdapterId>,
 }
 
 impl crate::persisted::Persisted for Manifest {
-    /// 3 since `project` joined it, 2 since `paths` and `pack` did. A
-    /// manifest stamped lower is read as it is: the three fields are
-    /// optional and a run born without them still resumes.
-    const SCHEMA_VERSION: u32 = 3;
+    /// 4 since `adapter` joined it, 3 since `project` did, 2 since
+    /// `paths` and `pack` did. A manifest stamped lower is read as it is:
+    /// the four fields are optional and a run born without them still
+    /// resumes.
+    const SCHEMA_VERSION: u32 = 4;
     const NAME: &'static str = "run manifest";
 
     /// A manifest frozen while `inherit` was still a word reads as what

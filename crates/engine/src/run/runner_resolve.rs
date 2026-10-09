@@ -33,7 +33,7 @@ pub(super) async fn resolve_node_runner(
         role,
         &ctx.manifest.config,
         &|adapter| ctx.adapters.contains_key(adapter),
-        ctx.adapter_override,
+        ctx.manifest.adapter.as_ref(),
     ) {
         Ok(resolved) => {
             let mut chosen = resolved.chosen.clone();

@@ -23,8 +23,8 @@ space_runs_in_prod_strings 0
 src_files_over_500_lines 8
 sync_fs_in_async 211
 system_clock_outside_boundary 76
-tense_markers 97
+tense_markers 96
 test_files_over_500_lines 37
-test_fns_over_50_lines 129
+test_fns_over_50_lines 128
 token_count_formatted_outside_units 0
 wildcard_in_ledger_apply 0

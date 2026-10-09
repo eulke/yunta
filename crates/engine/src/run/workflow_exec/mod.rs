@@ -288,6 +288,8 @@ pub(super) async fn execute_workflow(
     // One word all the way down: what the node declares is what the
     // child's manifest freezes, with nothing in between to translate.
     child_manifest.isolation = isolation;
+    // A child runs on the adapter its parent was asked to run on.
+    child_manifest.adapter = ctx.manifest.adapter.clone();
     let runs = runs_root(ctx);
     let trees = worktrees_root(ctx);
     child_manifest.paths = match yunta_core::FrozenPaths::new(runs.clone(), trees.clone()) {
@@ -543,7 +545,6 @@ async fn drive_child(
                     human_interaction: ctx.human_interaction,
                     forge: ctx.forge,
                     cancel,
-                    adapter_override: ctx.adapter_override,
                     ambient: ctx.ambient,
                     secrets: ctx.secrets.clone(),
                     // A child run's sessions ask the same judge the

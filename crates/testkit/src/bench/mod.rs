@@ -56,6 +56,8 @@ pub struct Bench {
     /// it with one the test can trip.
     cancel: tokio_util::sync::CancellationToken,
     mode: yunta_core::ModeName,
+    /// The adapter the run is started on (`yunta run --adapter`).
+    adapter: Option<AdapterId>,
     /// What the invocation hands the workflow's `inputs:`.
     inputs: HashMap<yunta_core::InputName, String>,
     /// Where a `prompt: { file: … }` resolves from and where a pack's
@@ -122,6 +124,7 @@ impl Bench {
             forge: None,
             cancel: tokio_util::sync::CancellationToken::new(),
             mode: yunta_core::ModeName::default(),
+            adapter: None,
             inputs: HashMap::new(),
             workflow_dir: None,
             ambient: None,
@@ -152,6 +155,7 @@ impl Bench {
             forge: self.forge.clone(),
             cancel: self.cancel.clone(),
             mode: self.mode.clone(),
+            adapter: self.adapter.clone(),
             inputs: self.inputs.clone(),
             workflow_dir: self.workflow_dir.clone(),
             ambient: self.ambient.clone(),
@@ -190,6 +194,12 @@ impl Bench {
             .iter()
             .map(|(name, value)| ((*name).into(), (*value).to_string()))
             .collect();
+        self
+    }
+
+    /// Starts the run on `adapter`, as `yunta run --adapter` does.
+    pub fn with_adapter(mut self, adapter: &str) -> Self {
+        self.adapter = Some(AdapterId::from(adapter));
         self
     }
 

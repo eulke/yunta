@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use yunta_adapters::MOCK_ID;
 use yunta_core::{AdapterId, ModeName};
 use yunta_storage::AsyncStorage;
 
@@ -74,7 +73,6 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         manifest: &manifest,
         prepared: &prepared,
         adapters,
-        adapter_override: adapter.filter(|id| **id != MOCK_ID).cloned(),
         prior: preflight.prior,
         warnings: preflight.warnings,
         quiet,

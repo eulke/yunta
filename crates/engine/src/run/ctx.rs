@@ -67,7 +67,6 @@ pub(crate) struct RunCtx<'a> {
     /// The fence hook this invocation was given, handed to every
     /// session the run opens.
     pub rail_command: Option<yunta_core::rail::RailCommand>,
-    pub(crate) adapter_override: Option<&'a AdapterId>,
     /// The forge this invocation was given — on the ctx so a
     /// `kind: workflow` node can hand it down to its child run (whose
     /// own gates are as real as the parent's).
@@ -171,7 +170,6 @@ impl<'a> RunCtx<'a> {
             process_registry: self.process_registry.clone(),
             root_cancel: self.root_cancel.clone(),
             rail_command: self.rail_command.clone(),
-            adapter_override: self.adapter_override,
             forge: self.forge,
             depth: self.depth,
             run_tools_host: self.run_tools_host.clone(),
@@ -217,7 +215,6 @@ impl<'a> RunCtx<'a> {
             process_registry: self.process_registry.clone(),
             root_cancel: self.root_cancel.clone(),
             rail_command: self.rail_command.clone(),
-            adapter_override: self.adapter_override,
             forge: self.forge,
             depth: self.depth,
             run_tools_host: Arc::new(host),

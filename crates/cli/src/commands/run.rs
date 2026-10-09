@@ -177,8 +177,8 @@ fn mock_fixture<'a>(
 
 /// Everything a run settles before it exists: the workflow resolved and
 /// checked, git able to commit its work, every adapter it names present
-/// and healthy, and the manifest
-/// frozen — so what this refuses costs nothing, and what it returns is
+/// and healthy, and the manifest frozen, with the real adapter `--adapter`
+/// names — so what this refuses costs nothing, and what it returns is
 /// the very run the caller is about to create.
 ///
 /// Both shapes of a run come through here, which is what makes them
@@ -206,7 +206,8 @@ pub(super) async fn runnable(
             runnable_adapters(ctx, &workflow, adapter).await?
         }
     };
-    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs).await?;
+    let mut frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs).await?;
+    frozen.manifest.adapter = adapter.filter(|id| **id != MOCK_ID).cloned();
     Ok((frozen, adapters))
 }
 

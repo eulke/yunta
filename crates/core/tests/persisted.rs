@@ -36,6 +36,7 @@ fn manifest() -> yunta_core::Manifest {
         paths: None,
         pack: None,
         project: None,
+        adapter: None,
     }
 }
 

@@ -12,7 +12,7 @@ use watch::{watch, Watching};
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{AdapterId, Clock, Manifest, RunId};
+use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{PriorEstimation, RunEnv, RunReport, RunTerminal};
 use yunta_storage::AsyncStorage;
 
@@ -46,9 +46,6 @@ pub(crate) struct Driving<'a> {
     pub(crate) manifest: &'a Manifest,
     pub(crate) prepared: &'a Prepared,
     pub(crate) adapters: super::Adapters,
-    /// `--adapter <id>`: every runner resolves to its candidate on this
-    /// adapter, and the log records each candidate passed over.
-    pub(crate) adapter_override: Option<AdapterId>,
     pub(crate) prior: Option<PriorEstimation>,
     /// What was said before the first token, carried so the document
     /// this invocation prints says it too — stderr reaches the person
@@ -98,7 +95,6 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         human_interaction: &watching.asking,
         forge: forge.as_deref(),
         cancel: &root_cancel,
-        adapter_override: env.adapter_override.as_ref(),
         observer: watching.observer.clone(),
         rail_command: env.ctx.rail_command.clone(),
         ambient: &env.ctx.env,
@@ -142,11 +138,6 @@ pub(crate) struct Executing<'a> {
     pub(crate) human_interaction: &'a dyn yunta_engine::HumanInteraction,
     pub(crate) forge: Option<&'a dyn yunta_core::port::Forge>,
     pub(crate) cancel: &'a tokio_util::sync::CancellationToken,
-    /// `--adapter <id>`: every runner resolves to its candidate on this
-    /// adapter. A successor never carries one — the override belongs to
-    /// the invocation that asked for it, and a promotion is the run
-    /// carrying on, not a new invocation.
-    pub(crate) adapter_override: Option<&'a AdapterId>,
     pub(crate) observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
     pub(crate) rail_command: yunta_core::rail::RailCommand,
     pub(crate) ambient: &'a yunta_core::Env,
@@ -167,7 +158,6 @@ pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine
         human_interaction: on.human_interaction,
         forge: on.forge,
         cancel: on.cancel,
-        adapter_override: on.adapter_override,
         ambient: Some(on.ambient),
         secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
         observer: on.observer,

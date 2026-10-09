@@ -89,14 +89,7 @@ pub async fn build_manifest(
         freeze_prompt(node, workflow_dir, &mut prompts).await?;
     }
 
-    let base_commit: CommitSha = git_line(repo, &["rev-parse", "HEAD"], supervision)
-        .await?
-        .parse()
-        .map_err(|source| ManifestError::BaseCommit {
-            cwd: repo.to_path_buf(),
-            source,
-        })?;
-    let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await?;
+    let (base_commit, base_branch) = base_of(repo, supervision).await?;
 
     let manifest = Manifest {
         schema_version: <Manifest as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
@@ -122,11 +115,30 @@ pub async fn build_manifest(
             .await
             .ok()
             .map(|git_common_dir| yunta_core::ProjectIdentity { git_common_dir }),
+        // `yunta run --adapter` sets it, as the CLI sets `paths`.
+        adapter: None,
     };
     Ok(FrozenRun {
         manifest,
         documents: resolved.documents,
     })
+}
+
+/// The commit `repo`'s `HEAD` stands at and the branch it names
+/// (`"HEAD"` when detached): where a run of it starts from.
+async fn base_of(
+    repo: &Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(CommitSha, String), ManifestError> {
+    let commit = git_line(repo, &["rev-parse", "HEAD"], supervision)
+        .await?
+        .parse()
+        .map_err(|source| ManifestError::BaseCommit {
+            cwd: repo.to_path_buf(),
+            source,
+        })?;
+    let branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await?;
+    Ok((commit, branch))
 }
 
 /// Which pack (and exactly which version) the

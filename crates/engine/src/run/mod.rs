@@ -347,10 +347,6 @@ pub struct RunEnv<'a> {
     /// that started it owns. Every subprocess the run spawns is born
     /// under it, so a Ctrl-C reaches the whole tree.
     pub cancel: &'a CancellationToken,
-    /// `yunta run --adapter <id>`: every role resolves to its candidate
-    /// on this adapter, or fails naming what it tried. Invocation-scoped,
-    /// never frozen: the log's `runner_resolved` records the discards.
-    pub adapter_override: Option<&'a AdapterId>,
     /// The ambient environment this run executes in, captured once at the
     /// caller's boundary rather than read from the process below it: the
     /// user state root the user knowledge layer resolves against, and the

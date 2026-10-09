@@ -186,7 +186,6 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
         human_interaction: &yunta_engine::NoInteraction,
         forge: None,
         cancel: ctx.cancellation(),
-        adapter_override: None,
         observer: None,
         rail_command: ctx.rail_command.clone(),
         ambient: &ctx.env,

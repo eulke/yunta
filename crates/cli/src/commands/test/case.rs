@@ -215,7 +215,6 @@ pub(crate) async fn run_case(
         human_interaction: &yunta_engine::NoInteraction,
         forge,
         cancel: ctx.cancellation(),
-        adapter_override: None,
         // A case's verdict is its report, compared against `expect:` —
         // there is no live surface drawing it.
         observer: None,
@@ -374,7 +373,6 @@ async fn answered(
             human_interaction: &yunta_engine::NoInteraction,
             forge,
             cancel: ctx.cancellation(),
-            adapter_override: None,
             observer: None,
             rail_command: ctx.rail_command.clone(),
             ambient: &yunta_core::Env::default(),

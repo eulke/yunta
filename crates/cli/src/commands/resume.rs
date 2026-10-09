@@ -98,11 +98,9 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
         manifest: &manifest,
         prepared: &prepared,
         adapters,
-        // A resume never overrides the runners the run froze, and it
-        // reports what this run did rather than what a catalog of past
-        // runs cost: the history belongs to the invocation that chose to
-        // start one.
-        adapter_override: None,
+        // A resume reports what this run did rather than what a catalog
+        // of past runs cost: the history belongs to the invocation that
+        // chose to start one.
         prior: None,
         // The pre-run estimation is said to whoever creates a run; this
         // picks one up.
