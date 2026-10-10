@@ -125,9 +125,9 @@ fn the_suite_it_extends(kind: ArtifactKind, suite: Option<&yunta_core::Suite>) -
     match (kind, suite) {
         (ArtifactKind::Tasks | ArtifactKind::Spec, Some(suite)) => format!(
             "\n\nThis run measures its suite with `{command}`. A command of this document \
-             that runs the project's tests extends it — `{command}` followed by what selects \
-             its tests — so the build the suite leaves serves it; the engine refuses one that \
-             runs them another way.",
+             that runs the project's tests extends it — `{command} <selector>`, where \
+             `<selector>` picks its tests — so the build the suite leaves serves it; the engine \
+             refuses one that runs them another way.",
             command = suite.command()
         ),
         _ => String::new(),

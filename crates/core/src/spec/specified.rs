@@ -12,9 +12,9 @@ use crate::{SpecFile, SpecTest, Suite};
 pub(super) const SPECIFIED_RULES: &[Rule] = &[
     Rule {
         code: RuleCode::OutsideTheSuite,
-        demand: "a test that runs the project's tests extends the suite the run measures — its \
-                 command, followed by what selects the test — so the build the suite leaves \
-                 serves it",
+        demand: "a test that runs the project's tests extends the suite the run measures — \
+                 `<suite> <selector>`, where `<selector>` picks the test — so the build the \
+                 suite leaves serves it",
     },
     Rule {
         code: RuleCode::UnrunSpecFile,

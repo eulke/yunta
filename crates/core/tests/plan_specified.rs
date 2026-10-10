@@ -144,7 +144,7 @@ fn a_package_criterion_outside_the_suite_is_refused_naming_it() {
     let said = broken[0].to_string();
     assert!(
         said.contains("`cargo test -p engine --test retry`")
-            && said.contains("`cargo test --workspace` followed by"),
+            && said.contains("`cargo test --workspace <selector>`"),
         "{said}"
     );
 }

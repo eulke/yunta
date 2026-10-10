@@ -22,8 +22,8 @@ pub(super) const SPECIFIED_RULES: &[Rule] = &[
     Rule {
         code: RuleCode::OutsideTheSuite,
         demand: "a criterion that runs the project's tests extends the suite the run measures — \
-                 its command, followed by what selects the task's tests — so the build the \
-                 suite leaves serves it",
+                 `<suite> <selector>`, where `<selector>` picks the task's tests — so the build \
+                 the suite leaves serves it",
     },
     Rule {
         code: RuleCode::UsesItsOwnShape,

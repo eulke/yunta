@@ -51,8 +51,8 @@ impl Suite {
     pub fn outside_detail(&self, command: &str) -> String {
         format!(
             "`{command}` runs the project's tests outside the suite `{suite}`, so it builds them \
-             again beside the suite's build; extend the suite instead — `{suite}` followed by \
-             what selects this task's tests",
+             again beside the suite's build; extend the suite instead — `{suite} <selector>`, \
+             where `<selector>` picks this task's tests",
             suite = self.command()
         )
     }
