@@ -242,3 +242,42 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   binaries' own start costs about 2 s, and their links fit inside the 56 s
   rebuild — under a fifth of the suite once the assessment is gone, so the
   integration tests stay one binary per file.
+
+## F. Whole runs, before and after the session rail (2026-10-09)
+
+Fragua's `quick` mode on one idea ("add pack global installation support, not
+only project level as today"), every run stopped at `ship`. Claude Code runs
+the roles on `claude-opus-4-8`, `claude-sonnet-4-6` and `claude-haiku-4-5`;
+Codex on `gpt-6-luna` for all of them. "Before" is the binary at the commit
+the rail started from; "after" carries it.
+
+| run | person stops | lint | stops refused | writes refused / formatted | working | rails | checks |
+|---|---|---|---|---|---|---|---|
+| Claude before (4 earlier runs) | 4–5 each; 1 of 4 reached `ship` | red in all 3 that ran it | — | — | — | — | — |
+| Claude before | questions, `retry` blocked tasks, `retry` lint | red twice, 2 `fix-lint` sessions | — | 2 / — | 1h22m | — | 1h03m |
+| Claude after | `continue-work`, `grant` | green first time | 0 | 4 / 71 | 1h29m | 3 s | 38m |
+| Claude after | questions, `continue-work`, `retry` (account limit) | green first time | 1 | 3 / 110 | 1h16m | 10 s | 42m |
+| Codex before | `continue-work` | green first time | — | 0 / — | 7m | — | 43m |
+| Codex after | `grant` ×3 | green first time | 1 | 7 / 31 | 23m | 1 s | 26m |
+
+- The same causes give the same events on both CLIs: `stop_refused`
+  (`criteria_red`, `artifact_missing`, `outside_scope`), `write_refused`
+  naming the path, `write_formatted`, and each node's fence coverage.
+- The rail costs 0.06–0.2% of the time sessions work. `fmt` never ran red;
+  the held lint kept every task's work clean, so the `lint` node passed the
+  first time in every run after.
+- A refused stop sent the session back to work it would have left: a planner
+  whose tasks document had not been taken tried four more times before it
+  stopped.
+- What still stops for a person after: a scope a plan left too narrow (each
+  grant opens one more attempt), a scope request the loop's rules deny — the
+  session may stop while its request waits, and the denial blocks the task
+  instead of reaching the session — and an account limit.
+- A `read_only` Codex session cannot run `/usr/bin/git`: the Xcode shim writes
+  a cache to the temporary directory, which Codex's `read-only` sandbox
+  refuses, and a reviewer took the errors for a failed diff. Claude Code's
+  `read_only` sandbox only refuses the checkout, so the same reviewer reads the
+  diff there; Codex has no sandbox that leaves the temporary directory writable
+  and the checkout not.
+- Machine load differed between runs — up to three ran at once on 8 cores —
+  so `checks` compares only runs that ran side by side.
