@@ -14,7 +14,7 @@ use yunta_adapters::CodexAdapter;
 use yunta_core::events::SessionEnd;
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport};
 use yunta_core::Pid;
-use yunta_core::{AdapterSettings, SessionId};
+use yunta_core::{AdapterSettings, Secret, SessionId};
 use yunta_testkit_core::adapter::{
     child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, wait_until_gone, write_lines,
 };
@@ -85,9 +85,9 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
 
     let mut req = request(dir.path().to_path_buf());
     req.model = Some("gpt-5-codex".into());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -126,9 +126,9 @@ async fn a_failed_turn_ends_the_stream_with_failed_and_retryable() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -156,9 +156,9 @@ async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -185,9 +185,9 @@ async fn a_file_change_item_maps_to_tool_use_digesting_its_first_path() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -213,9 +213,9 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -244,9 +244,9 @@ async fn failed_run_tool_calls_report_only_a_known_tool_and_closed_cause() {
         ],
     );
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let events = drain(adapter().spawn(req).await.unwrap()).await;
     let failed: Vec<_> = events
@@ -289,9 +289,9 @@ async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -318,9 +318,9 @@ async fn a_reasoning_item_is_never_surfaced() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -338,9 +338,9 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -362,12 +362,13 @@ async fn a_session_that_dies_before_its_first_event_reports_its_exit_and_its_las
         "stderr.txt",
         &["url is not supported for stdio"],
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_STDERR_FILE".to_string(),
-        said.display().to_string().into(),
+        said.display().to_string(),
     );
     req.env
-        .insert("CODEX_STUB_EXIT".to_string(), "2".to_string().into());
+        .plain
+        .insert("CODEX_STUB_EXIT".to_string(), "2".to_string());
     let (events, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
         .await
         .unwrap();
@@ -385,21 +386,22 @@ async fn a_session_that_dies_before_its_first_event_reports_its_exit_and_its_las
 async fn a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env() {
     let dir = tempfile::tempdir().unwrap();
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.secret.insert(
         "YUNTA_RUN_TOOLS_TOKEN".to_string(),
-        "s3cr3t-token-value".to_string().into(),
+        Secret::new("s3cr3t-token-value".to_string()),
     );
     let said = write_lines(
         dir.path(),
         "stderr.txt",
         &["auth failed for bearer s3cr3t-token-value"],
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_STDERR_FILE".to_string(),
-        said.display().to_string().into(),
+        said.display().to_string(),
     );
     req.env
-        .insert("CODEX_STUB_EXIT".to_string(), "1".to_string().into());
+        .plain
+        .insert("CODEX_STUB_EXIT".to_string(), "1".to_string());
     let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
         .await
         .unwrap();
@@ -419,16 +421,17 @@ async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string().into(),
+        child_pid_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     req.env
-        .insert("CODEX_STUB_HANG".to_string(), "1".to_string().into());
+        .plain
+        .insert("CODEX_STUB_HANG".to_string(), "1".to_string());
     let mut session = adapter().spawn(req).await.unwrap();
     let grandchild: i32 = grandchild_pid(&child_pid_file).await.parse().unwrap();
 
@@ -451,13 +454,13 @@ async fn a_named_agent_s_instructions_reach_the_cli_as_developer_instructions() 
         name: "benito".into(),
         instructions: "Review like \"Benito\".".to_string(),
     });
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let _ = drain(adapter().spawn(req).await.unwrap()).await;
 
@@ -503,9 +506,9 @@ async fn a_session_reports_the_model_it_was_launched_with() {
 
     let mut req = request(dir.path().to_path_buf());
     req.model = Some("gpt-5-codex".parse().unwrap());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -531,13 +534,13 @@ async fn capability_permission_profiles_map_to_their_own_sandbox_modes() {
 
         let mut req = request(dir.path().to_path_buf());
         req.permissions = profile;
-        req.env.insert(
+        req.env.plain.insert(
             "CODEX_STUB_ARGS_FILE".to_string(),
-            args_file.display().to_string().into(),
+            args_file.display().to_string(),
         );
-        req.env.insert(
+        req.env.plain.insert(
             "CODEX_STUB_LINES_FILE".to_string(),
-            lines.display().to_string().into(),
+            lines.display().to_string(),
         );
         let session = adapter().spawn(req).await.unwrap();
         let _ = drain(session).await;
@@ -560,13 +563,13 @@ async fn model_is_passed_through_as_its_own_flag() {
 
     let mut req = request(dir.path().to_path_buf());
     req.model = Some("gpt-5-codex".into());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -587,13 +590,13 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     req.effort = Some(yunta_core::Effort::Xhigh);
     let session_id = SessionId::from("thread-to-resume");
@@ -627,13 +630,13 @@ async fn a_session_s_effort_reaches_the_cli_and_none_leaves_it_to_the_cli() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
     let mut req = request(dir.path().to_path_buf());
     req.effort = Some(yunta_core::Effort::Low);
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let _ = drain(adapter().spawn(req).await.unwrap()).await;
     let args = tokio::fs::read_to_string(&args_file).await.unwrap();
@@ -669,13 +672,13 @@ async fn resume_places_every_parent_option_before_the_subcommand() {
     req.model = Some("gpt-5-codex".into());
     req.permissions = PermissionProfile::Edit;
     req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter()
         .resume(&SessionId::from("thread-to-resume"), req)
@@ -772,12 +775,13 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     let child_pid_file = child_pid_fifo(dir.path());
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string().into(),
+        child_pid_file.display().to_string(),
     );
     req.env
-        .insert("CODEX_STUB_HANG".to_string(), "1".to_string().into());
+        .plain
+        .insert("CODEX_STUB_HANG".to_string(), "1".to_string());
     let mut session = adapter().spawn(req).await.unwrap();
 
     let grandchild_pid = grandchild_pid(&child_pid_file).await;
@@ -809,13 +813,13 @@ async fn prompt_travels_by_stdin_never_argv() {
     write_lines(dir.path(), ".codex-stub-lines.jsonl", &[]);
     let mut req = request(dir.path().to_path_buf());
     req.prompt = "the whole brief, with a --flag-looking line".to_string();
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.to_str().unwrap().to_string().into(),
+        args_file.to_str().unwrap().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_STDIN_FILE".to_string(),
-        stdin_file.to_str().unwrap().to_string().into(),
+        stdin_file.to_str().unwrap().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     drain(session).await;
@@ -882,13 +886,13 @@ async fn argv_of(
     req.permissions = profile;
     req.cli_config = cli_config;
     req.network = network;
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter.spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1013,9 +1017,9 @@ async fn events_with(
     lines: &[&str],
 ) -> Vec<AgentEvent> {
     let lines = write_lines(dir.path(), "lines.jsonl", lines);
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     drain(session).await
@@ -1068,9 +1072,9 @@ async fn a_codex_session_keeps_the_fence_roots_writable_beside_the_workspace() {
 
     let mut req = request(dir.path().to_path_buf());
     req.fence = Fence::everything(vec![artifacts.clone()], Advice::ReportFinding);
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1105,9 +1109,9 @@ async fn a_writable_root_with_toml_metacharacters_reaches_the_cli_whole() {
     let expected_dir = artifacts.clone();
     let mut req = request(dir.path().to_path_buf());
     req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1139,13 +1143,13 @@ async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environm
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
     });
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ENV_FILE".to_string(),
-        env_file.display().to_string().into(),
+        env_file.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1186,9 +1190,9 @@ async fn no_per_run_endpoint_configures_no_server() {
     let dir = tempfile::tempdir().unwrap();
     let args_file = dir.path().join("args.txt");
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1214,9 +1218,9 @@ async fn the_per_run_server_never_shares_the_control_planes_name() {
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
     });
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1246,9 +1250,9 @@ async fn no_dead_config_override_reaches_the_cli() {
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
     });
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -1305,9 +1309,9 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -1354,9 +1358,9 @@ async fn a_missing_token_count_is_absent_not_zero() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -1396,9 +1400,9 @@ async fn an_unknown_stream_line_is_tolerated_and_named() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;

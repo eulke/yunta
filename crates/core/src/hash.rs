@@ -9,6 +9,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::ids::{string_id, InvalidId};
@@ -143,6 +144,17 @@ pub fn sha256_hex(bytes: &[u8]) -> ContentHash {
     ContentHash::sha256(bytes)
 }
 
+/// The id git gives `bytes` as a blob: the SHA-1 of `blob <length>`, a NUL
+/// byte and the bytes, in lowercase hex. It is the `sha` the GitHub Contents
+/// API reports for a file, so a local copy of the content compares with that
+/// report directly.
+pub fn git_blob_id(bytes: &[u8]) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(format!("blob {}\0", bytes.len()).as_bytes());
+    hasher.update(bytes);
+    lower_hex(&hasher.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +225,10 @@ mod tests {
             CommitSha::from_bytes(&7u64.to_be_bytes()).as_str(),
             "0000000000000007"
         );
+    }
+
+    #[test]
+    fn the_empty_blob_has_the_id_git_gives_it() {
+        assert_eq!(git_blob_id(b""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
     }
 }

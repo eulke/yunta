@@ -19,7 +19,7 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
+use yunta_core::{git_blob_id, CommitSha, GitHubRepo, Responder, Secret};
 
 use yunta_core::port::{
     Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
@@ -224,10 +224,6 @@ impl GitHubForge {
         #[derive(Deserialize)]
         struct Contents {
             sha: String,
-            #[serde(default)]
-            encoding: Option<String>,
-            #[serde(default)]
-            content: Option<String>,
         }
         let action = "read an artifact's current version";
         let request = self.request(
@@ -244,22 +240,7 @@ impl GitHubForge {
                             action,
                             source: Box::new(source),
                         })?;
-                // A file too large to come inline says `none`: its bytes
-                // are unknown, never taken for empty.
-                let content = match (found.encoding.as_deref(), found.content) {
-                    (Some("base64"), Some(encoded)) => {
-                        let packed: String =
-                            encoded.chars().filter(|c| !c.is_whitespace()).collect();
-                        base64::engine::general_purpose::STANDARD
-                            .decode(packed)
-                            .ok()
-                    }
-                    _ => None,
-                };
-                Ok(Some(ExistingFile {
-                    sha: found.sha,
-                    content,
-                }))
+                Ok(Some(ExistingFile { sha: found.sha }))
             }
             Err(ForgeError::Http { status: 404, .. }) => Ok(None),
             Err(error) => Err(error),
@@ -277,9 +258,11 @@ impl GitHubForge {
         message: &str,
     ) -> Result<(), ForgeError> {
         let existing = self.existing_file(path, branch).await?;
+        // The forge reports the blob id git gives the bytes it holds, so
+        // equal ids are equal bytes at any size, even where it sends none.
         if existing
             .as_ref()
-            .is_some_and(|file| file.content.as_deref() == Some(content))
+            .is_some_and(|file| file.sha == git_blob_id(content))
         {
             return Ok(());
         }
@@ -422,11 +405,10 @@ fn rate_limit(status: u16, headers: &HeaderMap) -> Option<RateLimit> {
     })
 }
 
-/// A file a branch already holds: the blob id an update names, and its
-/// bytes when the forge sent them inline.
+/// A file a branch already holds: the blob id an update names, which also
+/// tells whether the branch holds given bytes.
 struct ExistingFile {
     sha: String,
-    content: Option<Vec<u8>>,
 }
 
 fn header(headers: &HeaderMap, name: &str) -> Option<String> {

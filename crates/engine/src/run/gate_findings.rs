@@ -7,6 +7,7 @@
 //! from the log alone, so a process that never asked the question — a
 //! `resolve_gate` from the control plane — rebuilds the identical one.
 
+use yunta_core::durable::{self, Durability};
 use yunta_core::events::findings::RunFindings;
 use yunta_core::events::{ArtifactId, EventPayload, FindingEvent, FindingSettledPayload, Shown};
 use yunta_core::{ArtifactContextRef, ArtifactKind, ContentHash, Node, Seq};
@@ -70,9 +71,8 @@ pub(crate) async fn keep(ctx: &RunCtx<'_>, state: &RunState) -> Result<(), RunEr
             .await
             .map_err(|source| io("written", source))?;
     }
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|source| io("written", source))
+    // blocking: the view is one small file, replaced whole.
+    durable::replace(&path, &bytes, Durability::Atomic).map_err(|source| io("written", source))
 }
 
 /// Settles every finding `shown` put before the person who went on past

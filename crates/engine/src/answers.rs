@@ -17,7 +17,7 @@ use yunta_core::events::{
     RecordedOrigin, StoredEvent,
 };
 use yunta_core::{
-    Answer, AnswersFile, ArtifactKind, Clock, ContentHash, Manifest, NodeId, QuestionsFile,
+    Answer, AnswersFile, ArtifactKind, Clock, ContentHash, NodeId, QuestionsFile, Redactor,
     Responder, RunId,
 };
 
@@ -195,8 +195,12 @@ pub enum AnswerQuestionsError {
 /// finishes the node is a later `resume`: the engine's own
 /// `FinishAnswered` step consumes the answer, so a reply recorded here
 /// and a reply typed at a console leave the run in the same state.
+///
+/// `redactor` is the run's own: nothing reads a secret back out of an
+/// answer a person typed, so the redactor the run appends through stands
+/// between this reply and the log.
 pub async fn answer_questions(
-    manifest: &Manifest,
+    redactor: &Redactor,
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     run_dir: &Path,
@@ -206,11 +210,7 @@ pub async fn answer_questions(
 ) -> Result<Recorded, AnswerQuestionsError> {
     let events = storage.events_for_run(run_id.clone()).await?;
     let (_, questions) = asked_from(run_dir, &events, node).await?;
-    // Nothing reads a secret back out of an answer a person typed, so
-    // the same redactor the run itself appends through stands between
-    // this reply and the log.
-    let redactor = yunta_core::Redactor::of(&manifest.config.secrets, None);
-    let log = RunLog::new(storage, run_id, clock, &redactor);
+    let log = RunLog::new(storage, run_id, clock, redactor);
     Ok(record(&log, run_dir, node, &questions, reply).await?)
 }
 

@@ -69,7 +69,7 @@ pub(crate) async fn resolve_setup(
         superseded: Default::default(),
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
-        env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
+        env: SessionSetup::secrets_env(&ctx.manifest.config, &*ctx.secrets),
         run_tools,
         rail_command: ctx.rail_command.clone(),
         agent,

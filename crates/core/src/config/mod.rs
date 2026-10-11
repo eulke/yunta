@@ -30,7 +30,8 @@ use env::expand_path;
 use merge::merge;
 
 pub use env::{
-    user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource, REDACTED,
+    user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource, ShortSecret,
+    MIN_SECRET_CHARS, REDACTED,
 };
 pub use keys::ConfigKey;
 pub use permissions::{
@@ -125,6 +126,35 @@ impl ConfigLayer {
             .as_ref()
             .and_then(|permissions| permissions.paths.as_ref())
             .map_or(&[], |paths| paths.deny.as_slice())
+    }
+
+    /// Every secret name this layer declares, each once, at its first place:
+    /// `secrets:` in order, then each MCP server's `auth_env`, then the forge's
+    /// GitHub `token_env`.
+    pub fn secret_names(&self) -> Vec<String> {
+        let declared = self
+            .secrets
+            .iter()
+            .cloned()
+            .chain(
+                self.mcp_servers
+                    .iter()
+                    .flatten()
+                    .filter_map(|(_, server)| server.auth_env.clone()),
+            )
+            .chain(
+                self.forge
+                    .as_ref()
+                    .and_then(|forge| forge.github.as_ref())
+                    .map(|github| github.token_env.clone()),
+            );
+        let mut names: Vec<String> = Vec::new();
+        for name in declared {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names
     }
 
     /// Every shared directory, and the variable it is exported under.

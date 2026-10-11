@@ -258,6 +258,39 @@ nodes:
     );
 }
 
+/// A run input equal to a declared secret is taken out of the birth
+/// event, which records every input the manifest froze.
+#[tokio::test]
+async fn a_secret_handed_in_as_a_run_input_never_reaches_the_birth_event() {
+    const VALUE: &str = "hunter2-the-whole-token";
+    let bench = Bench::new().with_inputs(&[("idea", VALUE)]);
+    let workflow = r#"
+name: leaky-input
+inputs:
+  idea:
+    type: string
+    required: true
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+"#;
+    let config = format!("{MOCK_CONFIG}\nsecrets: [YUNTA_TEST_TOKEN]\n");
+    bench
+        .run_with_secrets(
+            workflow,
+            "sessions: []\n",
+            &config,
+            &[("YUNTA_TEST_TOKEN", VALUE)],
+        )
+        .await;
+    let log = format!("{:?}", bench.events());
+    assert!(
+        !log.contains(VALUE),
+        "the input reached the birth event: {log}"
+    );
+}
+
 /// An adapter that says it judged every write before it happened, and
 /// a write that reached the diff anyway: that is something to look at in
 /// the adapter, filed beside the failure the violation causes either way.

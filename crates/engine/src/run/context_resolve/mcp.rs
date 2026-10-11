@@ -49,17 +49,15 @@ pub(super) async fn resolve_mcp(
         })?;
 
     let auth_header = match &server.auth_env {
-        Some(var) => Some(
-            ctx.secrets
-                .as_deref()
-                .and_then(|secrets| secrets.get(var))
-                .ok_or_else(|| ContextResolveError::MissingAuthEnv {
-                    node: node.id.clone(),
-                    source_id: source_id.to_string(),
-                    server: params.server.clone(),
-                    var: var.clone(),
-                })?,
-        ),
+        Some(var) => {
+            let missing = || ContextResolveError::MissingAuthEnv {
+                node: node.id.clone(),
+                source_id: source_id.to_string(),
+                server: params.server.clone(),
+                var: var.clone(),
+            };
+            Some(ctx.secrets.get(var).ok_or_else(missing)?)
+        }
         None => None,
     };
 

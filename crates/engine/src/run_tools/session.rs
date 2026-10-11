@@ -120,6 +120,12 @@ pub(super) enum RunToolError {
     /// account of itself.
     #[error("{text}")]
     Refused { text: String },
+    /// The call carries a value that the log cannot keep out of the typed
+    /// record it would become, so nothing was recorded.
+    #[error(
+        "nothing was recorded: a value this call carries cannot be kept out of the {kind} record"
+    )]
+    Unredactable { kind: String },
     #[error(
         "invalid submission — requires `document` (an object), the {names} document this node \
          declares: {detail}"
@@ -259,9 +265,25 @@ pub(super) enum RunToolError {
     UndeclaredArtifact { name: String, declared: String },
     #[error(transparent)]
     Accept {
-        #[from]
         source: crate::artifacts::AcceptError,
     },
+}
+
+impl From<crate::artifacts::AcceptError> for RunToolError {
+    /// A submission whose record the redaction refused is the call's own
+    /// refusal, as it is on every other tool write; any other failure of an
+    /// acceptance is the engine's.
+    fn from(source: crate::artifacts::AcceptError) -> Self {
+        match source {
+            crate::artifacts::AcceptError::Log {
+                source: yunta_storage::StorageError::Unredactable(unredactable),
+                ..
+            } => RunToolError::Unredactable {
+                kind: unredactable.kind,
+            },
+            source => RunToolError::Accept { source },
+        }
+    }
 }
 
 impl RunToolError {
@@ -288,7 +310,9 @@ impl RunToolError {
             | RunToolError::SettledFinding { .. }
             | RunToolError::NoSuchFinding { .. }
             | RunToolError::WithdrawnFinding { .. } => R::FindingNotAnswerable,
-            RunToolError::Refused { .. } | RunToolError::Superseded => R::Refused,
+            RunToolError::Refused { .. }
+            | RunToolError::Superseded
+            | RunToolError::Unredactable { .. } => R::Refused,
             RunToolError::NoStartingTree
             | RunToolError::Audit { .. }
             | RunToolError::Handover { .. }
@@ -303,6 +327,19 @@ impl RunToolError {
     }
 }
 
+impl From<yunta_storage::StorageError> for RunToolError {
+    /// A record the redaction refused is the call's own refusal; any other
+    /// failure of the log is the engine's.
+    fn from(source: yunta_storage::StorageError) -> Self {
+        match source {
+            yunta_storage::StorageError::Unredactable(unredactable) => RunToolError::Unredactable {
+                kind: unredactable.kind,
+            },
+            source => RunToolError::Storage { source },
+        }
+    }
+}
+
 impl SessionTools {
     /// The run's events, as every tool that derives state reads them.
     pub(super) async fn events(&self) -> Result<Vec<StoredEvent>, RunToolError> {
@@ -310,7 +347,7 @@ impl SessionTools {
             .storage
             .events_for_run(self.host.run_id.clone())
             .await
-            .map_err(|source| RunToolError::Storage { source })
+            .map_err(RunToolError::from)
     }
 
     /// The run's log as this listener reaches it: the host's own handle,
@@ -346,7 +383,7 @@ impl SessionTools {
             .record(Some(&self.node), payload)
             .await
             .map(|_| ())
-            .map_err(|source| RunToolError::Storage { source })
+            .map_err(RunToolError::from)
     }
 
     /// Records `runs` as the log keeps them, what each printed kept with

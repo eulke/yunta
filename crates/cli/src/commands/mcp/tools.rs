@@ -180,6 +180,7 @@ pub(super) async fn tool_answer_questions(
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
     let open = ctx.open_run(&run_id).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
+    let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
     let storage = ctx.async_storage().await?;
 
     // The engine's own door, under this server's injected clock: the
@@ -187,7 +188,7 @@ pub(super) async fn tool_answer_questions(
     // is judged against it, and either both the acceptance and the
     // `questions_answered` land or neither does.
     yunta_engine::answer_questions(
-        &manifest,
+        &redactor,
         &storage,
         &run_id,
         &run_dir,

@@ -110,6 +110,18 @@ fn a_file_stamped_with_no_version_is_read_as_the_oldest_one() {
 }
 
 #[test]
+fn a_version_that_is_not_a_whole_number_is_refused_not_read_as_zero() {
+    let text = PersistedDoc::<JsonDocument>::read(br#"{"schema_version":"2","name":"x"}"#);
+    assert!(text.is_err(), "a string version was read as {text:?}");
+    let overflow =
+        PersistedDoc::<JsonDocument>::read(br#"{"schema_version":4294967297,"name":"x"}"#);
+    assert!(
+        overflow.is_err(),
+        "an overflowing version was read as {overflow:?}"
+    );
+}
+
+#[test]
 fn a_file_that_is_not_the_document_is_refused_as_that_document() {
     let error = PersistedDoc::<PackLock>::read(b"packs: \"not a map\"\n")
         .expect_err("that is not a pack lock");

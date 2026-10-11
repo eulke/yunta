@@ -869,4 +869,6 @@ de archivo, prompt o respuesta del agente, ni valores de secretos. Donde el payl
 necesita referenciar contenido, lleva un hash o un resumen acotado — nunca el dato
 en sí. El engine redacta además cualquier valor de secreto conocido antes de
 persistir, como defensa en profundidad — no como excusa para ser menos
-cuidadoso en el diseño del payload.
+cuidadoso en el diseño del payload. El conjunto de secretos son los valores de
+`secret_names` más los tokens de sesión. Un payload que el redactor no puede leer
+de vuelta se rechaza y no se persiste.

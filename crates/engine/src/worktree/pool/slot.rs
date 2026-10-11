@@ -130,25 +130,18 @@ pub(super) async fn hold(
             at: now,
             unit,
         };
-        record(&held_path(home, number), &held).await;
+        record_held(home, number, &held);
     }
     Ok(Some(lease))
 }
 
-/// Writes `value` at `path` whole — through a file beside it, renamed
-/// into place, so a reader never meets half of it. What is not recorded
-/// only costs the pool a guess.
-async fn record(path: &Path, value: &impl Serialize) {
-    let Ok(json) = serde_json::to_vec(value) else {
-        return;
-    };
-    let mut partial = path.as_os_str().to_owned();
-    partial.push(".partial");
-    let written = match tokio::fs::write(&partial, json).await {
-        Ok(()) => tokio::fs::rename(&partial, path).await,
-        Err(error) => Err(error),
-    };
-    if let Err(error) = written {
+/// Writes `held` as checkout `number`'s record, under the hold its caller
+/// has. A failed write is logged and not raised: what is not recorded only
+/// costs the pool a guess.
+fn record_held(home: &Path, number: u32, held: &Held) {
+    let path = held_path(home, number);
+    // blocking: one small record, written whole while the caller holds the checkout.
+    if let Err(error) = super::record::write(&path, held) {
         tracing::debug!(%error, path = %path.display(), "a checkout's record went unwritten");
     }
 }
@@ -164,7 +157,7 @@ pub(super) async fn used(home: &Path, number: u32, holder: Option<&Path>, at: Da
         (None, None) => return,
     };
     let unit = last.and_then(|held| held.unit);
-    record(&held_path(home, number), &Held { by, at, unit }).await;
+    record_held(home, number, &Held { by, at, unit });
 }
 
 /// Records that checkout `number`, held by its caller, is kept for `unit`
@@ -174,7 +167,7 @@ pub(super) async fn owned(home: &Path, number: u32, unit: Option<&crate::worktre
         return;
     };
     held.unit = unit.map(|unit| unit.name().to_string());
-    record(&held_path(home, number), &held).await;
+    record_held(home, number, &held);
 }
 
 /// Who held checkout `number` last, when it says.

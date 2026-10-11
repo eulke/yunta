@@ -32,6 +32,7 @@ use yunta_core::{
 };
 
 use yunta_core::fence::Coverage;
+use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
@@ -155,17 +156,7 @@ impl CodexAdapter {
                     adapter: ID.clone(),
                     source,
                 })?;
-        // The credential the config names, placed where a secret is
-        // allowed to travel: the child's own environment.
-        let mut env = req.env.clone();
-        if let Some(endpoint) = &req.run_tools_endpoint {
-            env.insert(TOKEN_VAR.to_string(), endpoint.token.clone());
-        }
-        // Where the hooks reach the engine, inherited by every hook this
-        // CLI runs.
-        if let Some(rail) = &req.rail {
-            env.extend(rail.env().map(|(var, value)| (var.to_string(), value)));
-        }
+        let env = session_env(&req);
         let mode = fence::mode(
             &req.fence,
             req.permissions,
@@ -190,6 +181,26 @@ impl CodexAdapter {
         })
         .await
     }
+}
+
+/// The environment one session's CLI runs in: the request's own, the
+/// credential the config names, and where the hooks reach the engine.
+/// Credentials go in `secret`, which a log never carries; the rail's
+/// address is not one and goes in `plain`.
+fn session_env(req: &SessionRequest) -> SessionEnv {
+    let mut env = req.env.clone();
+    // The credential the config names, placed where a secret is allowed
+    // to travel: the child's own environment.
+    if let Some(endpoint) = &req.run_tools_endpoint {
+        env.secret
+            .insert(TOKEN_VAR.to_string(), endpoint.token.clone());
+    }
+    // Where the hooks reach the engine, inherited by every hook this CLI
+    // runs.
+    if let Some(rail) = &req.rail {
+        rail.hand_to(&mut env);
+    }
+    env
 }
 
 /// The `-c` overrides one request needs, in the order they are written.

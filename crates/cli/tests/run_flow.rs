@@ -72,6 +72,78 @@ nodes:
     assert!(stdout(&resume).contains("finished"));
 }
 
+#[cfg(unix)]
+#[test]
+fn the_run_files_are_private_to_their_owner() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join("wf.yaml"),
+        "name: private\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "stderr: {}", stderr(&run));
+    let run_dir = home.join("runs").join(run_id_from(&run));
+    for file in ["events.jsonl", "manifest.yaml"] {
+        let mode = std::fs::metadata(run_dir.join(file))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "{file} is readable by others");
+    }
+}
+
+#[test]
+fn a_short_declared_secret_refuses_the_run_before_its_directory_exists() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "secrets: [YUNTA_TEST_SHORT_TOKEN]\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: short-secret\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let run = command
+        .args(["run", "wf.yaml"])
+        .env("YUNTA_TEST_SHORT_TOKEN", "abc")
+        .output()
+        .unwrap();
+    assert!(
+        !run.status.success(),
+        "a 3-character secret must refuse the run"
+    );
+    assert!(
+        stderr(&run).contains("YUNTA_TEST_SHORT_TOKEN"),
+        "the refusal names the variable: {}",
+        stderr(&run)
+    );
+    assert!(
+        !home.join("runs").exists(),
+        "the refused run left its directory behind"
+    );
+    assert!(
+        yunta_testkit::pool_checkouts(&home).is_empty(),
+        "the refused run took a checkout"
+    );
+    assert!(
+        git_output(&repo, &["branch", "--list", "yunta/run/*"]).is_empty(),
+        "the refused run left a run branch"
+    );
+}
+
 #[test]
 fn a_workflow_needing_agents_is_refused_before_creating_any_run() {
     let root = tempfile::tempdir().unwrap();
@@ -435,7 +507,7 @@ nodes:
 "#,
     );
     // Read by the stub's fallback path (relative to the worktree it runs
-    // in, since a real run's SessionRequest.env carries only secrets).
+    // in, since a real run's session env holds only what the engine sets for it).
     // Isolation `worktree` checks out the run's own dedicated worktree
     // from the base commit, so the fixture must be committed to reach it.
     write(
@@ -670,6 +742,66 @@ nodes:
     );
     // `none` never creates a dedicated worktree.
     assert!(!home.join("worktrees").exists());
+}
+
+/// A workflow whose second node fails, so its run pauses after the first.
+const PAUSES_ON_A_FAILING_NODE: &str = r#"
+name: pauses-on-a-failing-node
+nodes:
+  - id: setup
+    kind: bash
+    run: "echo hello > marker.txt"
+  - id: always-fails
+    kind: bash
+    depends_on: [setup]
+    run: "touch attempt-marker.txt && exit 1"
+"#;
+
+#[test]
+fn a_short_declared_secret_refuses_a_resume_before_the_wake_writes_anything() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    // Declared but unset when the run is born and when it first wakes, so
+    // nothing refuses it then.
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "secrets: [YUNTA_TEST_SHORT_TOKEN]\n",
+    );
+    write(&repo.join("wf.yaml"), PAUSES_ON_A_FAILING_NODE);
+
+    let paused = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(
+        stdout(&paused).contains("needs you"),
+        "got: {}",
+        stdout(&paused)
+    );
+    let run_id = run_id_from(&paused);
+    let events = home.join("runs").join(&run_id).join("events.jsonl");
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let resume = command
+        .args(["resume", run_id.as_str()])
+        .env("YUNTA_TEST_SHORT_TOKEN", "abc")
+        .output()
+        .unwrap();
+    assert!(
+        !resume.status.success(),
+        "a 3-character secret must refuse the resume"
+    );
+    assert!(
+        stderr(&resume).contains("YUNTA_TEST_SHORT_TOKEN"),
+        "the refusal names the variable: {}",
+        stderr(&resume)
+    );
+    let log = std::fs::read_to_string(&events).unwrap();
+    assert!(
+        !log.contains("run_resumed"),
+        "the refused resume wrote into the log"
+    );
 }
 
 #[test]

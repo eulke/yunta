@@ -29,6 +29,7 @@ mod thresholds;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use yunta_core::durable::{self, Durability};
 
 use shape::{
     functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
@@ -414,7 +415,7 @@ fn wildcards_in_apply(source: &str) -> usize {
 pub fn write() -> Result<(), String> {
     let counts = measure();
     let path = baseline_path();
-    std::fs::write(&path, render(&counts))
+    durable::replace(&path, render(&counts).as_bytes(), Durability::Atomic)
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
     print!("{}", render(&counts));
     println!("wrote {}", path.display());

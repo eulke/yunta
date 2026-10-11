@@ -44,7 +44,12 @@ impl World {
     /// The project's pool, as the run whose directory is `run_dir` under
     /// `root` reaches it.
     pub fn pool_of(root: &Path, repo: &Path, run_dir: &str) -> Arc<CheckoutPool> {
-        CheckoutPool::new(&root.join("worktrees"), repo, &root.join(run_dir))
+        CheckoutPool::new(
+            &root.join("worktrees"),
+            repo,
+            &root.join(run_dir),
+            Arc::new(yunta_testkit_core::FixedClock),
+        )
     }
 
     /// The commit `checkout` stands on.

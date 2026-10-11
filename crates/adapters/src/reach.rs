@@ -39,15 +39,17 @@ pub(crate) async fn answers(
 }
 
 /// `name` as the session's environment sets it: what the run hands the
-/// session, then what it inherits from the shell.
+/// session in either of its maps, then what it inherits from the shell.
 pub(crate) fn var(
     req: &SessionRequest,
     shell: &BTreeMap<String, String>,
     name: &str,
 ) -> Option<String> {
     req.env
+        .plain
         .get(name)
-        .map(|value| value.expose().clone())
+        .cloned()
+        .or_else(|| req.env.secret.get(name).map(|value| value.expose().clone()))
         .or_else(|| shell.get(name).cloned())
         .filter(|value| !value.trim().is_empty())
 }

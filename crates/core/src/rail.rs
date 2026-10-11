@@ -183,12 +183,11 @@ pub struct RailEndpoint {
 }
 
 impl RailEndpoint {
-    /// The variables a session's CLI hands its hooks.
-    pub fn env(&self) -> [(&'static str, Secret<String>); 2] {
-        [
-            (URL_VAR, Secret::new(self.url.clone())),
-            (TOKEN_VAR, self.token.clone()),
-        ]
+    /// Puts the variables a session's CLI hands its hooks into `env`: the
+    /// address is not a secret, the token is.
+    pub fn hand_to(&self, env: &mut crate::port::session::SessionEnv) {
+        env.plain.insert(URL_VAR.to_string(), self.url.clone());
+        env.secret.insert(TOKEN_VAR.to_string(), self.token.clone());
     }
 
     /// Asks the engine about `call`, giving up after `deadline` — or

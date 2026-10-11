@@ -29,6 +29,7 @@
 //! friction, not a bug.
 
 use serde::Serialize;
+use yunta_core::durable::{self, Durability};
 use yunta_core::events::findings::effective;
 use yunta_core::events::ArtifactId;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
@@ -201,12 +202,13 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                             source,
                         })?;
                 }
-                tokio::fs::write(&dest, &bytes)
-                    .await
-                    .map_err(|source| RunError::Io {
+                // blocking: one distilled artifact, replaced whole.
+                durable::replace(&dest, &bytes, Durability::Atomic).map_err(|source| {
+                    RunError::Io {
                         context: format!("write `{}`", dest.display()),
                         source,
-                    })?;
+                    }
+                })?;
                 artifacts.push(ProvenanceArtifact {
                     name,
                     content_hash: Some(format!("sha256:{}", artifact.content_hash)),
@@ -257,12 +259,13 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         diagnostic: format!("failed to serialize distill provenance: {e}"),
     })?;
     let provenance_path = dest_dir.join("provenance.yaml");
-    tokio::fs::write(&provenance_path, yaml)
-        .await
-        .map_err(|source| RunError::Io {
+    // blocking: the provenance record, replaced whole.
+    durable::replace(&provenance_path, yaml.as_bytes(), Durability::Atomic).map_err(|source| {
+        RunError::Io {
             context: format!("write `{}`", provenance_path.display()),
             source,
-        })?;
+        }
+    })?;
 
     if ctx.manifest.isolation == Isolation::Worktree {
         commit_and_maybe_push(ctx).await?;

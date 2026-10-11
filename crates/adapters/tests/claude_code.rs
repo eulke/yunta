@@ -4,10 +4,11 @@
 //! is whether the real CLI's actual output matches what the stub
 //! scripts: a check run by hand against the real CLI covers that instead.
 //!
-//! Stub configuration travels through `SessionRequest.env` (the child
-//! process's own environment), never by mutating the process environment
-//! in a test — cargo runs tests concurrently in one process, and a
-//! process-global env var would race across them.
+//! Stub configuration travels through `SessionRequest.env.plain` (the
+//! child process's own environment), never by mutating the process
+//! environment in a test — cargo runs tests concurrently in one process,
+//! and a process-global env var would race across them. A credential
+//! travels through `env.secret`, whose values the stderr tail redacts.
 
 use std::error::Error as _;
 use std::path::PathBuf;
@@ -16,8 +17,10 @@ use yunta_core::fence::{Advice, Coverage, Fence};
 
 use yunta_adapters::ClaudeCodeAdapter;
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport, SessionRequest};
-use yunta_core::{AdapterSettings, SessionId};
-use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
+use yunta_core::{AdapterSettings, Secret, SessionId};
+use yunta_testkit_core::adapter::{
+    child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, write_lines,
+};
 
 fn stub_path() -> PathBuf {
     yunta_testkit_core::stubs::claude_code()
@@ -86,9 +89,9 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -128,9 +131,9 @@ async fn a_failed_result_ends_the_stream_with_failed_and_retryable() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -158,9 +161,9 @@ async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -178,15 +181,48 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[INIT_LINE]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
 
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
+}
+
+/// The child's environment is where this system puts its secrets, and a
+/// CLI that fails at startup is exactly the one liable to echo what it
+/// was handed straight back.
+#[tokio::test]
+async fn a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.env.secret.insert(
+        "YUNTA_RUN_TOOLS_TOKEN".to_string(),
+        Secret::new("s3cr3t-token-value".to_string()),
+    );
+    let said = write_lines(
+        dir.path(),
+        "stderr.txt",
+        &["auth failed for bearer s3cr3t-token-value"],
+    );
+    req.env.plain.insert(
+        "CLAUDE_STUB_STDERR_FILE".to_string(),
+        said.display().to_string(),
+    );
+    req.env
+        .plain
+        .insert("CLAUDE_STUB_EXIT".to_string(), "1".to_string());
+    let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
+        .await
+        .unwrap();
+
+    let tail = exit
+        .expect("the session ended with a process of its own")
+        .stderr_tail;
+    assert_eq!(tail, ["auth failed for bearer [redacted]"], "{tail:?}");
 }
 
 #[tokio::test]
@@ -197,13 +233,13 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
 
     let mut req = request(dir.path().to_path_buf());
     req.permissions = PermissionProfile::ReadOnly;
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -236,13 +272,13 @@ async fn capability_permission_profiles_leave_full_the_whole_tool_set_unattended
 
     let mut req = request(dir.path().to_path_buf());
     req.permissions = PermissionProfile::Full;
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -310,13 +346,13 @@ async fn capability_resume_session_passes_the_session_id_to_the_resume_flag() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     req.effort = Some(yunta_core::Effort::Xhigh);
     let session_id = SessionId::from("sess-to-resume");
@@ -361,12 +397,13 @@ async fn an_interrupted_session_that_leaves_ends_its_grace_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let child_pid_file = child_pid_fifo(dir.path());
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string().into(),
+        child_pid_file.display().to_string(),
     );
     req.env
-        .insert("CLAUDE_STUB_LINGER".to_string(), "1".to_string().into());
+        .plain
+        .insert("CLAUDE_STUB_LINGER".to_string(), "1".to_string());
     let mut session = adapter().spawn(req).await.unwrap();
     grandchild_pid(&child_pid_file).await;
 
@@ -385,12 +422,13 @@ async fn an_interrupted_session_that_stays_is_given_the_whole_grace() {
     let dir = tempfile::tempdir().unwrap();
     let child_pid_file = child_pid_fifo(dir.path());
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string().into(),
+        child_pid_file.display().to_string(),
     );
     req.env
-        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string().into());
+        .plain
+        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string());
     let mut session = adapter().spawn(req).await.unwrap();
     grandchild_pid(&child_pid_file).await;
 
@@ -409,12 +447,13 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     let child_pid_file = child_pid_fifo(dir.path());
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string().into(),
+        child_pid_file.display().to_string(),
     );
     req.env
-        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string().into());
+        .plain
+        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string());
     let mut session = adapter().spawn(req).await.unwrap();
     let grandchild_pid = grandchild_pid(&child_pid_file).await;
 
@@ -459,12 +498,13 @@ async fn dropping_a_session_kills_its_process_tree() {
     let child_pid_file = child_pid_fifo(dir.path());
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string().into(),
+        child_pid_file.display().to_string(),
     );
     req.env
-        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string().into());
+        .plain
+        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string());
     let session = adapter().spawn(req).await.unwrap();
     let grandchild_pid = grandchild_pid(&child_pid_file).await;
 
@@ -497,9 +537,9 @@ async fn non_utf8_output_does_not_end_the_session() {
     std::fs::write(&lines, scripted).unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -522,13 +562,13 @@ async fn prompt_travels_by_stdin_never_argv() {
     write_lines(dir.path(), ".claude-stub-lines.jsonl", &[]);
     let mut req = request(dir.path().to_path_buf());
     req.prompt = "the whole brief, with a --flag-looking line".to_string();
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.to_str().unwrap().to_string().into(),
+        args_file.to_str().unwrap().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_STDIN_FILE".to_string(),
-        stdin_file.to_str().unwrap().to_string().into(),
+        stdin_file.to_str().unwrap().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     drain(session).await;
@@ -552,13 +592,13 @@ async fn capability_permission_profiles_give_edit_a_bounded_tool_set() {
 
     let mut req = request(dir.path().to_path_buf());
     req.permissions = PermissionProfile::Edit;
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -651,13 +691,13 @@ async fn budget_max_turns_reaches_the_cli_as_a_flag() {
 
     let mut req = request(dir.path().to_path_buf());
     req.budget.max_turns = Some(7);
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -707,9 +747,9 @@ async fn spawn_with(
     lines: &[&str],
 ) -> Vec<AgentEvent> {
     let lines = write_lines(dir.path(), "lines.jsonl", lines);
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     drain(session).await
@@ -804,13 +844,13 @@ async fn an_event_before_the_session_opens_fails_the_session() {
 async fn argv_for(dir: &std::path::Path, mut req: SessionRequest) -> Vec<String> {
     let args_file = dir.join("args.txt");
     let lines = write_lines(dir, "lines.jsonl", &[]);
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string().into(),
+        args_file.display().to_string(),
     );
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let _ = drain(session).await;
@@ -874,9 +914,9 @@ async fn a_claude_session_asks_the_engine_before_it_stops() {
     let env_file = dir.path().join("env.txt");
     let mut req = request(dir.path().to_path_buf());
     req.budget.timeout = Some(std::time::Duration::from_secs(1500));
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_ENV_FILE".to_string(),
-        env_file.display().to_string().into(),
+        env_file.display().to_string(),
     );
     let args = argv_for(dir.path(), req).await;
 
@@ -970,6 +1010,14 @@ async fn a_read_only_claude_session_keeps_write_only_for_its_declared_files() {
     );
 }
 
+/// Asserts that the file at `path` is readable by its owner alone.
+#[cfg(unix)]
+fn assert_owner_only(path: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600, "{path} is readable by others");
+}
+
 #[tokio::test]
 async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_line() {
     let dir = tempfile::tempdir().unwrap();
@@ -990,6 +1038,9 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
         .expect("the per-run MCP server is mounted");
     let config: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&args[pos + 1]).unwrap()).unwrap();
+    // The config holds the bearer, so no other user may read it.
+    #[cfg(unix)]
+    assert_owner_only(&args[pos + 1]);
     assert!(
         config["mcpServers"]["yunta"].is_null(),
         "the per-run server never takes the name a person's own entry takes: {config:#}"
@@ -1137,9 +1188,9 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -1186,9 +1237,9 @@ async fn a_missing_token_count_is_absent_not_zero() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -1286,9 +1337,9 @@ async fn an_unknown_stream_line_is_tolerated_and_named() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.env.insert(
+    req.env.plain.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string().into(),
+        lines.display().to_string(),
     );
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;

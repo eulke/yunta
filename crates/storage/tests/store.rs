@@ -5,7 +5,7 @@
 //! connections append at once, and a reopened database keeps what it
 //! held. The chain verifies an untouched log intact and names the exact
 //! seq where a tampered payload, a deleted row or a single flipped byte
-//! breaks it.
+//! breaks it, and a log whose tail was deleted reads as broken.
 
 use std::sync::Arc;
 use std::thread;
@@ -348,6 +348,86 @@ fn a_deleted_event_breaks_the_chain_where_the_gap_starts() {
             assert!(!detail.is_empty());
         }
         other => panic!("expected a broken chain, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_deleted_tail_breaks_the_chain_at_the_stored_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("yunta.db");
+    let storage = Storage::open(&db).unwrap();
+    for draft in [
+        created_draft("run-1"),
+        paused_draft("run-1", "a"),
+        paused_draft("run-1", "b"),
+    ] {
+        storage
+            .append(&draft, &yunta_testkit_core::FixedClock)
+            .unwrap();
+    }
+    drop(storage);
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute("DELETE FROM events WHERE run_id = 'run-1' AND seq = 3", [])
+        .unwrap();
+    drop(conn);
+    let storage = Storage::open(&db).unwrap();
+    assert!(
+        matches!(
+            storage.verify_chain(&RunId::from("run-1")).unwrap(),
+            ChainVerification::Broken { .. }
+        ),
+        "a log that lost its tail reads as whole"
+    );
+}
+
+#[test]
+fn a_log_without_a_stored_head_reads_as_broken() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("yunta.db");
+    let storage = Storage::open(&db).unwrap();
+    for draft in [created_draft("run-1"), paused_draft("run-1", "a")] {
+        storage
+            .append(&draft, &yunta_testkit_core::FixedClock)
+            .unwrap();
+    }
+    drop(storage);
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute("DELETE FROM run_heads WHERE run_id = 'run-1'", [])
+        .unwrap();
+    drop(conn);
+    let storage = Storage::open(&db).unwrap();
+    match storage.verify_chain(&RunId::from("run-1")).unwrap() {
+        ChainVerification::Broken { detail, .. } => {
+            assert!(detail.contains("no stored head"), "{detail}");
+        }
+        intact => panic!("a log with no stored head reads as {intact:?}"),
+    }
+}
+
+#[test]
+fn a_stored_head_that_names_another_hash_reads_as_broken() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("yunta.db");
+    let storage = Storage::open(&db).unwrap();
+    for draft in [created_draft("run-1"), paused_draft("run-1", "a")] {
+        storage
+            .append(&draft, &yunta_testkit_core::FixedClock)
+            .unwrap();
+    }
+    drop(storage);
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE run_heads SET event_hash = 'not-the-last-hash' WHERE run_id = 'run-1'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let storage = Storage::open(&db).unwrap();
+    match storage.verify_chain(&RunId::from("run-1")).unwrap() {
+        ChainVerification::Broken { detail, .. } => {
+            assert!(detail.contains("does not name the last event"), "{detail}");
+        }
+        intact => panic!("a head naming another hash reads as {intact:?}"),
     }
 }
 

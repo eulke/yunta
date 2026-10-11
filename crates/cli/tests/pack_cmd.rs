@@ -174,6 +174,25 @@ fn list_with_nothing_installed_says_so_without_erroring() {
     );
 }
 
+/// A vendored file that cannot be read is reported as unreadable, not as a
+/// pack whose directory is missing.
+#[cfg(unix)]
+#[test]
+fn list_says_a_vendored_file_it_cannot_read_is_unreadable_not_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, upstream, repo, home) = setup();
+    let add = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add.status.success(), "{}", stderr(&add));
+    let file = repo.join(".yunta/packs/acme/review-pack/workflows/review.yaml");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let listed = stdout(&yunta_in!(&repo, &home, &["pack", "list"]));
+    let row = yunta_testkit::checked(&listed, "acme/review-pack").unwrap_or_default();
+    assert!(
+        row.contains("cannot be read") && !row.contains("missing"),
+        "{listed}"
+    );
+}
+
 #[test]
 fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
     let (_root, upstream, repo, home) = setup();
@@ -496,6 +515,38 @@ fn update_keeps_the_installed_tree_when_the_new_ref_cannot_be_vendored() {
     assert_eq!(
         std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap(),
         lock_before
+    );
+}
+
+/// A failed update leaves the installed pack in place when the lock cannot
+/// be written.
+#[cfg(unix)]
+#[test]
+fn update_restores_the_installed_pack_when_the_lock_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, upstream, repo, home) = setup();
+    let add = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add.status.success(), "{}", stderr(&add));
+
+    write_pack_v2(&upstream);
+    commit_all(&upstream, "v2");
+    git(&upstream, &["tag", "v2.0.0"]);
+    // The swap happens under packs/; the lock is written in .yunta/, which is read-only.
+    let yunta = repo.join(".yunta");
+    std::fs::set_permissions(&yunta, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = yunta_in!(
+        &repo,
+        &home,
+        &["pack", "update", "acme/review-pack", "v2.0.0"]
+    );
+    std::fs::set_permissions(&yunta, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(!out.status.success(), "{}", stdout(&out));
+    let installed =
+        std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap();
+    assert!(
+        installed.contains("description: v1"),
+        "the failed update left: {installed}"
     );
 }
 

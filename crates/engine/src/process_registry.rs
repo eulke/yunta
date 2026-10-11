@@ -14,7 +14,6 @@
 
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use yunta_core::persisted::Persisted;
@@ -65,168 +64,8 @@ pub struct Asked {
     pub since: DateTime<Utc>,
 }
 
-/// Handle the run's imperative shell holds for the registry file.
-pub struct ProcessRegistry {
-    path: PathBuf,
-    state: Mutex<EngineProcessFile>,
-}
-
-impl ProcessRegistry {
-    /// Writes the initial file for this invocation. An earlier
-    /// invocation's file (crash leftovers) is simply overwritten — the
-    /// new engine owns the run now.
-    pub fn create(
-        run_dir: &Path,
-        engine_pid: Pid,
-        started_at: DateTime<Utc>,
-    ) -> std::io::Result<ProcessRegistry> {
-        let state = EngineProcessFile {
-            schema_version: <EngineProcessFile as Persisted>::SCHEMA_VERSION,
-            engine_pid,
-            started_at,
-            process_groups: Vec::new(),
-            asking: None,
-        };
-        let registry = ProcessRegistry {
-            path: registry_path(run_dir),
-            state: Mutex::new(state),
-        };
-        registry.persist()?;
-        Ok(registry)
-    }
-
-    /// Registers a spawned process group. Failures warn, never fail the
-    /// run — see the module doc.
-    pub fn add(&self, pgid: Pid) {
-        let mut state = lock(&self.state);
-        if !state.process_groups.contains(&pgid) {
-            state.process_groups.push(pgid);
-        }
-        drop(state);
-        if let Err(e) = self.persist() {
-            tracing::warn!(pgid = %pgid, error = %e, "failed to register a process group in engine.json");
-        }
-    }
-
-    /// Unregisters a closed process group.
-    pub fn remove(&self, pgid: Pid) {
-        let mut state = lock(&self.state);
-        state.process_groups.retain(|existing| *existing != pgid);
-        drop(state);
-        if let Err(e) = self.persist() {
-            tracing::warn!(pgid = %pgid, error = %e, "failed to unregister a process group in engine.json");
-        }
-    }
-
-    /// Records that this engine is asking a person at its terminal, or,
-    /// with `None`, that it no longer is. Failures warn, never fail the
-    /// run.
-    pub fn asking(&self, asked: Option<Asked>) {
-        lock(&self.state).asking = asked;
-        if let Err(e) = self.persist() {
-            tracing::warn!(error = %e, "failed to record a live question in engine.json");
-        }
-    }
-
-    /// Deletes what the run's scratch directory holds about live
-    /// processes — the registry itself, and the MCP config a session's
-    /// adapter was pointed at, which carries that session's bearer.
-    ///
-    /// The run reached a terminal: there is nothing left for an outside
-    /// process to signal, and a credential nobody can use is a
-    /// credential nobody should still be able to read.
-    pub fn clear(&self) {
-        // blocking: the terminal's last act, on the thread that reached
-        // it, after the log is closed and nothing is left to schedule.
-        if let Err(e) = std::fs::remove_file(&self.path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(error = %e, "failed to delete engine.json at run terminal");
-            }
-        }
-        if let Some(scratch) = self.path.parent() {
-            delete_credentials_under(scratch);
-        }
-    }
-
-    fn persist(&self) -> std::io::Result<()> {
-        let state = lock(&self.state);
-        let json = yunta_core::persisted::PersistedDoc::of(state.clone())
-            .write()
-            .map_err(std::io::Error::other)?;
-        drop(state);
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, json)?;
-        std::fs::rename(&tmp, &self.path)
-    }
-}
-
-/// Deletes every `mcp.json` under `scratch/`: one per session that held
-/// the run's tools, each carrying that session's bearer. A directory
-/// that cannot be listed is left alone — the run already closed, and a
-/// warning about a file nobody can reach helps no one.
-fn delete_credentials_under(scratch: &Path) {
-    // blocking: see `clear`.
-    let Ok(entries) = std::fs::read_dir(scratch) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        match entry.file_type() {
-            Ok(kind) if kind.is_dir() => delete_credentials_under(&path),
-            Ok(_) if path.file_name().is_some_and(|name| name == "mcp.json") => {
-                if let Err(e) = std::fs::remove_file(&path) {
-                    tracing::warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "failed to delete a session's tool credentials at run terminal"
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// RAII registration: `add` on creation, `remove` on drop — one binding
-/// at the spawn site covers every exit path of the spawning function,
-/// cancellation and error included.
-pub struct PgidRegistration<'a> {
-    registry: &'a ProcessRegistry,
-    pgid: Pid,
-}
-
-impl Drop for PgidRegistration<'_> {
-    fn drop(&mut self) {
-        self.registry.remove(self.pgid);
-    }
-}
-
-/// Registers `pgid` for the guard's lifetime. `None` in either input —
-/// no registry (degraded run), no pgid (mock session) — registers
-/// nothing, so call sites never branch.
-pub fn register<'a>(
-    registry: Option<&'a ProcessRegistry>,
-    pgid: Option<Pid>,
-) -> Option<PgidRegistration<'a>> {
-    match (registry, pgid) {
-        (Some(registry), Some(pgid)) => {
-            registry.add(pgid);
-            Some(PgidRegistration { registry, pgid })
-        }
-        _ => None,
-    }
-}
-
-/// The file dies with the invocation that wrote it: every `execute_run`
-/// exit — terminal, pause, or error — drops the registry and deletes
-/// the file. A crash (SIGKILL) skips this, on purpose: the leftover
-/// file with its recorded pgids is exactly what a post-crash
-/// `yunta cancel` cleans up from.
-impl Drop for ProcessRegistry {
-    fn drop(&mut self) {
-        self.clear();
-    }
-}
+mod write;
+pub use write::{register, ProcessRegistry};
 
 /// Where a run's registry lives: `run.dir/scratch/engine.json`.
 pub fn registry_path(run_dir: &Path) -> PathBuf {
@@ -357,12 +196,6 @@ pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
     child.id().and_then(|id| Pid::try_from(id).ok())
 }
 
-fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EngineProcessFile> {
-    state
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +280,54 @@ mod tests {
             started: None,
         };
         assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Unknown);
+    }
+
+    #[test]
+    fn concurrent_registrations_leave_every_group_on_disk() {
+        let run = tempfile::tempdir().unwrap();
+        let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        // `create` writes under `scratch/`, which a run creates and a bare directory does not have.
+        std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
+        for round in 0..200u32 {
+            let registry =
+                ProcessRegistry::create(run.path(), Pid::try_from(1u32).unwrap(), started).unwrap();
+            let groups: Vec<Pid> = (1..=16u32)
+                .map(|n| Pid::try_from(round * 16 + n).unwrap())
+                .collect();
+            std::thread::scope(|scope| {
+                for &group in &groups {
+                    let registry = &registry;
+                    scope.spawn(move || registry.add(group));
+                }
+            });
+            let Registry::Read(doc) = read_registry(run.path()) else {
+                panic!("round {round}: unreadable")
+            };
+            assert_eq!(
+                doc.doc.process_groups.len(),
+                16,
+                "round {round}: an older snapshot is on disk"
+            );
+            assert!(
+                groups.iter().all(|g| doc.doc.process_groups.contains(g)),
+                "round {round}: a group is lost"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_registry_file_is_private_to_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let run = tempfile::tempdir().unwrap();
+        let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
+        let _registry =
+            ProcessRegistry::create(run.path(), Pid::try_from(1u32).unwrap(), started).unwrap();
+        let mode = std::fs::metadata(registry_path(run.path()))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "engine.json is readable by others");
     }
 }

@@ -7,13 +7,13 @@
 //! `claude_code` and `codex` differ only in the arguments they build,
 //! the lines they parse and the settings they read.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use crate::{AdapterError, AdapterId, Pid, Result, Secret};
+use crate::{AdapterError, AdapterId, Pid, Redactor, Result};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::process::Child;
@@ -22,6 +22,7 @@ use tokio::task::JoinHandle;
 
 use super::lines::LineReader;
 use crate::events::{SessionEnd, SessionExit, TAIL_LINES};
+use crate::port::session::SessionEnv;
 use crate::port::{AgentError, AgentEvent, AgentSession, ProbeReport};
 use crate::process::signal::{signal_group, Signal};
 
@@ -76,9 +77,9 @@ pub struct Launch<'a> {
     pub binary: &'a Path,
     pub args: Vec<String>,
     pub cwd: &'a Path,
-    /// Secrets included; they reach the child's environment and
-    /// nothing else.
-    pub env: &'a HashMap<String, Secret<String>>,
+    /// Both maps reach the child's environment; only the values of
+    /// `secret` are taken out of its stderr tail.
+    pub env: &'a SessionEnv,
     pub prompt: &'a str,
     pub parser: Box<dyn LineParser>,
 }
@@ -92,9 +93,11 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
     std_cmd
         .args(&launch.args)
         .current_dir(launch.cwd)
+        .envs(&launch.env.plain)
         .envs(
             launch
                 .env
+                .secret
                 .iter()
                 .map(|(name, value)| (name, value.expose())),
         )
@@ -174,17 +177,21 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
     // child speaks, and `exit` reads it once the child is gone, which is
     // the only moment anybody asks.
     let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(TAIL_LINES)));
-    let secrets: Vec<Secret<String>> = launch.env.values().cloned().collect();
+    // The child's environment is where this system puts its secrets, and a
+    // CLI that fails at startup is the one liable to echo what it was given
+    // back at stderr: the tail keeps no value of `secret`.
+    let redactor = Redactor::of_values(launch.env.secret.values().cloned());
     let tail = Arc::clone(&stderr_tail);
     let stderr_drain = tokio::spawn(async move {
         let mut lines = LineReader::new(stderr);
         while let Some(line) = lines.next_line().await {
+            let line = redactor.text(&line);
             tracing::debug!(adapter = %adapter, "stderr: {line}");
             let mut tail = tail.lock().unwrap_or_else(PoisonError::into_inner);
             if tail.len() == TAIL_LINES {
                 tail.pop_front();
             }
-            tail.push_back(redacted(line, &secrets));
+            tail.push_back(line);
         }
     });
     // Owned before the prompt goes out: a failed write drops the
@@ -246,23 +253,6 @@ pub struct SubprocessSession {
     /// The last [`TAIL_LINES`] lines the child wrote, redacted.
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
-}
-
-/// One stderr line as the log keeps it: every value this session's
-/// environment carried replaced by `[redacted]`.
-///
-/// The child's environment is where this system puts its secrets — the
-/// run tools' token among them — and a CLI that fails at startup is
-/// exactly the one liable to echo what it was given back at stderr.
-fn redacted(line: String, secrets: &[Secret<String>]) -> String {
-    secrets.iter().fold(line, |line, secret| {
-        let value = secret.expose();
-        if value.is_empty() {
-            line
-        } else {
-            line.replace(value, "[redacted]")
-        }
-    })
 }
 
 impl SubprocessSession {

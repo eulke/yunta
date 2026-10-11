@@ -133,7 +133,7 @@ fn a_project_whose_cli_dies(root: &Path, repo: &Path, runners: &str) {
         repo.join(".yunta/config.yaml"),
         format!(
             "runners:\n{runners}adapters:\n  codex:\n    binary: {stub}\nbaseline:\n  suite: \
-             \"touch {measured}\"\nsecrets: [CODEX_STUB_STDERR_FILE, CODEX_STUB_EXIT]\n",
+             \"touch {measured}\"\nsecrets: [CODEX_STUB_STDERR_FILE]\n",
             stub = yunta_testkit_core::stubs::codex().display(),
             measured = root.join("measured.txt").display(),
         ),

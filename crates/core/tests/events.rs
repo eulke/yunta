@@ -9,7 +9,7 @@
 
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
-use yunta_core::{Capability, NonEmpty, QuestionId, RunId};
+use yunta_core::{Capability, NonEmpty, QuestionId, Redactor, RunId, Secret};
 use yunta_testkit_core::all_kinds;
 
 /// A compile-time guard for [`all_kinds`], not a runtime check. Each domain's
@@ -302,6 +302,17 @@ fn every_kind_round_trips_through_json() {
 fn every_kind_starts_at_schema_version_1() {
     for payload in all_kinds() {
         assert_eq!(payload.schema_version(), 1);
+    }
+}
+
+#[test]
+fn a_payload_without_a_secret_passes_the_redactor_unchanged() {
+    let redactor = Redactor::of_values([Secret::new("a-value-no-payload-carries".to_string())]);
+    for payload in all_kinds() {
+        let event = redactor
+            .payload(payload.clone())
+            .expect("no secret is in the payload, so nothing is refused");
+        assert_eq!(event, payload);
     }
 }
 

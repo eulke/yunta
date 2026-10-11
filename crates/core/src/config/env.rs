@@ -205,28 +205,58 @@ pub struct Redactor {
 /// What stands in the log where a secret was.
 pub const REDACTED: &str = "[redacted]";
 
+/// The shortest declared secret. A shorter value cannot be kept out of a log
+/// without blanking unrelated text wherever it appears, so the run refuses it.
+pub const MIN_SECRET_CHARS: usize = 4;
+
+/// A declared secret whose bound value is too short to keep out of a log.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("secret `{name}` is shorter than {} characters", MIN_SECRET_CHARS)]
+pub struct ShortSecret {
+    pub name: String,
+}
+
 impl Redactor {
-    /// The redactor for the secrets `config` names, as `source` has
-    /// them. A name nothing binds contributes nothing: there is no value
-    /// to keep out.
-    ///
-    /// A value shorter than four characters is left alone — `true`, a
-    /// one-letter flag, an empty string. Replacing those would blank out
-    /// unrelated text everywhere it appeared, which hides more than it
-    /// protects.
-    pub fn of(names: &[String], source: Option<&dyn SecretSource>) -> Self {
-        let Some(source) = source else {
-            return Redactor::default();
-        };
-        let mut values: Vec<String> = names
-            .iter()
-            .filter_map(|name| source.get(name))
-            .map(|secret| secret.expose().to_string())
-            .filter(|value| value.chars().count() >= 4)
+    /// The redactor for the named secrets as `source` binds them. A name
+    /// nothing binds contributes nothing: there is no value to keep out.
+    /// A bound value under [`MIN_SECRET_CHARS`] is refused, naming the variable.
+    pub fn of(names: &[String], source: &dyn SecretSource) -> Result<Self, ShortSecret> {
+        let mut values = Vec::new();
+        for name in names {
+            let Some(secret) = source.get(name) else {
+                continue;
+            };
+            let value = secret.expose().to_string();
+            if value.chars().count() < MIN_SECRET_CHARS {
+                return Err(ShortSecret { name: name.clone() });
+            }
+            values.push(value);
+        }
+        Ok(Self::of_values(values.into_iter().map(Secret::new)))
+    }
+
+    /// The redactor for values the caller declares secret: a session's minted
+    /// tokens, which are not declared by name and so carry no length floor. An
+    /// empty value is dropped: replacing the empty string would mark every position.
+    pub fn of_values(values: impl IntoIterator<Item = Secret<String>>) -> Self {
+        let mut values: Vec<String> = values
+            .into_iter()
+            .map(|v| v.expose().to_string())
+            .filter(|value| !value.is_empty())
             .collect();
         values.sort_by_key(|value| std::cmp::Reverse(value.len()));
         values.dedup();
         Redactor { values }
+    }
+
+    /// This redactor with `values` added to what it already takes out.
+    pub fn extended(&self, values: impl IntoIterator<Item = Secret<String>>) -> Self {
+        Self::of_values(
+            self.values
+                .iter()
+                .map(|value| Secret::new(value.clone()))
+                .chain(values),
+        )
     }
 
     /// Whether this redactor has anything to take out.
@@ -241,13 +271,24 @@ impl Redactor {
         })
     }
 
-    /// `value` with every secret replaced wherever a string carries one
-    /// — at any depth, in a field name as well as a field value, since
-    /// neither is a place a secret belongs.
+    /// `value` with every secret replaced wherever a string carries one — at
+    /// any depth, in a field name as well as a field value, since neither is a
+    /// place a secret belongs. Scalars are compared by their text too: a secret
+    /// spelled `1234` in a number field becomes a string, which the typed field
+    /// refuses to read back.
     pub fn json(&self, value: serde_json::Value) -> serde_json::Value {
         use serde_json::Value;
         match value {
             Value::String(text) => Value::String(self.text(&text)),
+            other @ (Value::Number(_) | Value::Bool(_)) => {
+                let text = other.to_string();
+                let kept = self.text(&text);
+                if kept == text {
+                    other
+                } else {
+                    Value::String(kept)
+                }
+            }
             Value::Array(items) => {
                 Value::Array(items.into_iter().map(|item| self.json(item)).collect())
             }
@@ -257,7 +298,68 @@ impl Redactor {
                     .map(|(name, field)| (self.text(&name), self.json(field)))
                     .collect(),
             ),
-            other => other,
+            Value::Null => Value::Null,
         }
+    }
+
+    /// `bytes` with every secret taken out, byte for byte: output that is not
+    /// UTF-8 keeps every other byte unchanged.
+    pub fn bytes(&self, bytes: &[u8]) -> Vec<u8> {
+        self.values.iter().fold(bytes.to_vec(), |bytes, value| {
+            replace_bytes(&bytes, value.as_bytes(), REDACTED.as_bytes())
+        })
+    }
+}
+
+/// Every occurrence of `needle` in `haystack` replaced by `with`; `needle` is
+/// never empty.
+fn replace_bytes(haystack: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(haystack.len());
+    let mut rest = haystack;
+    while let Some(at) = rest
+        .windows(needle.len())
+        .position(|window| window == needle)
+    {
+        let (before, found) = rest.split_at(at);
+        out.extend_from_slice(before);
+        out.extend_from_slice(with);
+        rest = found.get(needle.len()..).unwrap_or_default();
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A source that binds every name to the same value.
+    struct Fixed(&'static str);
+    impl SecretSource for Fixed {
+        fn get(&self, _name: &str) -> Option<Secret<String>> {
+            Some(Secret::new(self.0.to_string()))
+        }
+    }
+
+    #[test]
+    fn a_secret_spelled_as_a_number_is_taken_out_of_the_number_field() {
+        let redactor = Redactor::of(&["PORT".to_string()], &Fixed("1234"))
+            .expect("four characters is the shortest a secret may be");
+        assert_eq!(
+            redactor.json(serde_json::json!({ "pid": 1234 })),
+            serde_json::json!({ "pid": REDACTED })
+        );
+    }
+
+    #[test]
+    fn a_secret_under_four_characters_is_refused_by_name() {
+        let refused = Redactor::of(&["PORT".to_string()], &Fixed("abc"))
+            .expect_err("three characters is shorter than the floor");
+        assert_eq!(
+            refused,
+            ShortSecret {
+                name: "PORT".to_string()
+            }
+        );
     }
 }

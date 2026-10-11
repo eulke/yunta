@@ -38,6 +38,7 @@ pub(crate) async fn resolve(
     let open = ctx.open_run(run_id).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
+    let redactor = yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
 
     yunta_engine::resolve_gate(
         &manifest,
@@ -50,6 +51,7 @@ pub(crate) async fn resolve(
             by: crate::identity::responder(resolved_by),
             free_text: free_text.map(str::to_string),
         },
+        &redactor,
     )
     .await
     .map_err(|refusal| CliError::gate_refused(run_id, refusal))?;

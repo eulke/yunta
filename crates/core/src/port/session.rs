@@ -13,7 +13,7 @@
 //! fields, not machinery, so an adapter can read what a workflow
 //! declares the day one does.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -69,10 +69,10 @@ pub struct SessionRequest {
     /// it closed when this says so; a read-only one never has it, and an
     /// unconfined one always does.
     pub network: bool,
-    /// Secrets arrive here, already resolved from the manifest — never
-    /// any other way — and stay wrapped until the child process is
-    /// spawned.
-    pub env: HashMap<String, Secret<String>>,
+    /// The environment, already resolved from the manifest — never any
+    /// other way — and its secrets stay wrapped until the child process
+    /// is spawned.
+    pub env: SessionEnv,
     /// What this session may write: the one source of write permission,
     /// always present. An adapter builds as much of it as its CLI can
     /// (`capabilities().fence`) and reports how much that was; an
@@ -133,6 +133,17 @@ pub struct SessionRequest {
     pub scratch_dir: PathBuf,
 }
 
+/// A session's environment, in two maps by what a log may carry: `plain`
+/// for shared directories and engine settings, `secret` for declared
+/// secrets and session tokens, which are never logged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionEnv {
+    /// Shared directories and engine settings: not secrets.
+    pub plain: BTreeMap<String, String>,
+    /// Declared secrets and session tokens: never logged.
+    pub secret: BTreeMap<String, Secret<String>>,
+}
+
 /// Where a session's per-run MCP server listens: a loopback URL plus
 /// the per-session bearer token that scopes every call to `(run_id,
 /// node_id, attempt)` by construction — no tool ever takes a run id as
@@ -146,6 +157,10 @@ pub struct RunToolsEndpoint {
 }
 
 impl RunToolsEndpoint {
+    /// The file a session's adapter writes its tool endpoint to; it carries
+    /// the session's bearer.
+    pub const CONFIG_FILE: &'static str = "mcp.json";
+
     /// The name a CLI's own configuration gives this server. Every
     /// adapter uses the one name: a CLI prefixes the tools it mounts
     /// with it, so this is also what an allow-rule names to admit all

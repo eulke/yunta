@@ -19,6 +19,7 @@ mod ids;
 mod kinds;
 mod log;
 pub mod persisted;
+pub mod repo;
 pub mod stubs;
 
 pub use capture::Captured;

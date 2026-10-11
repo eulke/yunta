@@ -70,23 +70,6 @@ impl<'a> RunLog<'a> {
         self.append(None, payload, at).await.map(|_| ())
     }
 
-    /// `payload` with every declared secret taken out of it.
-    ///
-    /// Through JSON rather than field by field: a secret can reach any
-    /// string of any payload — a note, a failure's outcome, a
-    /// diagnostic's detail, a task's title — and a rule that named the
-    /// fields would be a list somebody has to remember to extend. A run
-    /// that declares no secret pays nothing.
-    fn redacted(&self, payload: EventPayload) -> EventPayload {
-        if self.redactor.is_empty() {
-            return payload;
-        }
-        let Ok(value) = serde_json::to_value(&payload) else {
-            return payload;
-        };
-        serde_json::from_value(self.redactor.json(value)).unwrap_or(payload)
-    }
-
     /// The same log, mirroring every append it makes to `observer`.
     ///
     /// The mirror hangs here because this is the one way an event
@@ -124,10 +107,15 @@ impl<'a> RunLog<'a> {
         payload: EventPayload,
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<Seq, StorageError> {
+        // A payload that cannot be redacted is refused before the draft exists.
+        let payload = self
+            .redactor
+            .payload(payload)
+            .map_err(StorageError::Unredactable)?;
         let draft = EventDraft {
             run_id: self.run_id.clone(),
             node_id: node.cloned(),
-            payload: self.redacted(payload),
+            payload,
         };
         let Some(observer) = self.observer else {
             return self.storage.append(draft, at).await;
@@ -158,5 +146,60 @@ impl<'a> RunLog<'a> {
     /// a single writer.
     pub(crate) async fn events(&self) -> Result<Vec<StoredEvent>, StorageError> {
         self.storage.events_for_run(self.run_id.clone()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yunta_core::events::{FindingAnswer, FindingAnsweredPayload, FindingEvent, RunEvent};
+    use yunta_core::{FindingId, NodeId, RunId, Secret, SecretSource};
+    use yunta_testkit_core::FixedClock;
+
+    struct Known(&'static str);
+    impl SecretSource for Known {
+        fn get(&self, _name: &str) -> Option<Secret<String>> {
+            Some(Secret::new(self.0.to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_secret_in_a_typed_field_is_never_appended_raw() {
+        const VALUE: &str = "hunter2-the-whole-token";
+        let redactor = yunta_core::Redactor::of(&["TOKEN".to_string()], &Known(VALUE))
+            .expect("a secret of this length is accepted");
+        let payload = EventPayload::Findings(FindingEvent::Answered(FindingAnsweredPayload {
+            node: NodeId::try_from(format!("reviewer-{VALUE}")).unwrap(),
+            id: FindingId::try_from("f-1".to_string()).unwrap(),
+            answer: FindingAnswer::Fixed,
+            why: "fixed".into(),
+        }));
+        let dir = tempfile::tempdir().unwrap();
+        let storage = yunta_storage::AsyncStorage::open(dir.path().join("yunta.db"))
+            .await
+            .unwrap();
+        let run_id = RunId::try_from("run-1".to_string()).unwrap();
+        // Storage takes a run's first event only when it is the birth, so the
+        // run is born first. The birth holds no secret, so it needs no redactor.
+        let birth = yunta_testkit_core::all_kinds().remove(0);
+        assert!(matches!(birth, EventPayload::Run(RunEvent::Created(_))));
+        RunLog::new(
+            &storage,
+            &run_id,
+            &FixedClock,
+            &yunta_core::Redactor::default(),
+        )
+        .record(None, birth)
+        .await
+        .expect("the birth is stored");
+        let outcome = RunLog::new(&storage, &run_id, &FixedClock, &redactor)
+            .record(None, payload)
+            .await;
+        let stored = format!("{:?}", storage.events_for_run(run_id).await.unwrap());
+        assert!(
+            !stored.contains(VALUE),
+            "the secret reached the log: {stored}"
+        );
+        assert!(outcome.is_err(), "the append must be refused");
     }
 }

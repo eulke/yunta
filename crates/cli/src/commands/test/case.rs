@@ -347,6 +347,7 @@ async fn answered(
         let Some(option) = decisions.remove(&node) else {
             break;
         };
+        let redactor = yunta_engine::run_redactor(manifest, &yunta_core::ProcessSecrets)?;
         yunta_engine::resolve_gate(
             manifest,
             &prepared.run_dir,
@@ -358,6 +359,7 @@ async fn answered(
                 by: crate::identity::responder(None),
                 free_text: None,
             },
+            &redactor,
         )
         .await
         .map_err(|refusal| CliError::gate_refused(&prepared.run_id, refusal))?;

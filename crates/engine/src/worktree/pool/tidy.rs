@@ -26,8 +26,10 @@ pub struct Tidied {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolReport {
     pub checkouts: usize,
-    /// What their builds take together.
+    /// What their counted builds take together.
     pub builds: u64,
+    /// Builds nobody counted: they add nothing to `builds`, and are said apart.
+    pub uncounted: usize,
     pub budget: u64,
     /// What the disk has free.
     pub available: u64,
@@ -40,10 +42,21 @@ impl std::fmt::Display for PoolReport {
         use yunta_core::units::Bytes;
         write!(
             f,
-            "{}, builds {} of a {} budget; {} free, {} kept free",
+            "{}, builds {} of a {} budget",
             yunta_core::text::counted(self.checkouts, "checkout"),
             Bytes(self.builds),
-            Bytes(self.budget),
+            Bytes(self.budget)
+        )?;
+        if self.uncounted > 0 {
+            write!(
+                f,
+                " and {} not counted",
+                yunta_core::text::counted(self.uncounted, "build")
+            )?;
+        }
+        write!(
+            f,
+            "; {} free, {} kept free",
             Bytes(self.available),
             Bytes(self.keep_free)
         )
@@ -94,7 +107,7 @@ impl CheckoutPool {
 
     /// Counts the build of every free checkout nobody counted, and empties
     /// those unused for longer than `unused`. Answers the ones emptied,
-    /// with what each took.
+    /// with what each took. A build that cannot be counted is left as it is.
     async fn empty_idle(
         &self,
         home: &Path,
@@ -107,24 +120,26 @@ impl CheckoutPool {
             let Some(_lease) = self.upkeep_hold(home, slot.number, supervision).await? else {
                 continue;
             };
-            let bytes = match &slot.built {
+            let measured = match &slot.built {
                 Some(space::Built {
                     bytes: Some(bytes), ..
-                }) => *bytes,
+                }) => Some(*bytes),
                 Some(pending) => {
-                    let roots = pending.roots.clone();
-                    space::measure_now(home, slot.number, roots, pending.at).await
+                    space::measure_now(home, slot.number, pending.roots.clone(), pending.at).await
                 }
                 None => match space::ignored(&slot.path, supervision).await {
                     Some(roots) => space::measure_now(home, slot.number, roots, now).await,
-                    None => continue,
+                    None => None,
                 },
+            };
+            let Some(bytes) = measured else {
+                continue;
             };
             let used = slot.held.as_ref().map(|held| held.at);
             let idle = unused.is_some_and(|unused| used.is_none_or(|used| now - used > unused));
             if bytes > 0 && idle {
                 crate::git::output(&slot.path, &["clean", "-q", "-ffdX"], supervision).await?;
-                space::emptied(home, slot.number, now).await;
+                space::emptied(home, slot.number, now);
                 emptied.push((slot.path.clone(), bytes));
             }
         }
@@ -204,10 +219,16 @@ fn report(
     };
     let builds: u64 = counted().sum();
     let largest = counted().max().unwrap_or(0);
+    let uncounted = slots
+        .iter()
+        .filter_map(|slot| slot.built.as_ref())
+        .filter(|built| built.size() == space::Size::Uncounted)
+        .count();
     let limits = Limits::of(limits, space, largest);
     Ok(PoolReport {
         checkouts: slots.iter().filter(|slot| slot.standing.is_some()).count(),
         builds,
+        uncounted,
         budget: limits.budget,
         available: space.available,
         keep_free: limits.keep_free,

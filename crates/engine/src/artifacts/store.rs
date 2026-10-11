@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
+use yunta_core::durable::{self, Durability};
 use yunta_core::{sha256_hex, ContentHash, NodeId, ARTIFACTS_DIR};
 
 /// The run directory that holds every artifact's bytes, by hash.
@@ -66,22 +67,16 @@ impl<'a> ObjectStore<'a> {
     ///
     /// Idempotent: content already stored is left exactly as it is, so
     /// storing the same document twice is one object and never an error.
-    /// A new object is written through the run's `scratch/` and renamed
-    /// into place, which is atomic on one filesystem — nobody ever meets
-    /// half an object, and `objects/` never holds a name that is not a
-    /// hash.
+    /// The bytes are staged beside their name and linked under it only once
+    /// whole, so nobody meets half an object, and the object is synced to
+    /// disk before the hash is answered.
     pub async fn put(&self, bytes: &[u8]) -> std::io::Result<ContentHash> {
         let hash = sha256_hex(bytes);
         let path = self.path_of(&hash);
-        if path.exists() {
-            return Ok(hash);
-        }
-        let scratch = self.run_dir.join(crate::run_dir::SCRATCH_DIR);
-        tokio::fs::create_dir_all(&scratch).await?;
         tokio::fs::create_dir_all(path.parent().unwrap_or(self.run_dir)).await?;
-        let mut file = tempfile::NamedTempFile::new_in(&scratch)?;
-        std::io::Write::write_all(&mut file, bytes)?;
-        file.persist(&path).map_err(|e| e.error)?;
+        // blocking: one object, written whole under its name. `Ok(false)`:
+        // the name is taken, and a name is the hash of the bytes it holds.
+        durable::create_new(&path, bytes, Durability::Synced)?;
         Ok(hash)
     }
 
@@ -96,8 +91,7 @@ impl<'a> ObjectStore<'a> {
         if redactor.is_empty() {
             return self.put(bytes).await;
         }
-        self.put(redactor.text(&String::from_utf8_lossy(bytes)).as_bytes())
-            .await
+        self.put(&redactor.bytes(bytes)).await
     }
 
     /// This store as what a command printed is kept in it: with every
@@ -166,8 +160,8 @@ impl<'a> ObjectStore<'a> {
                 .await
                 .map_err(io(format!("create `{}`", parent.display())))?;
         }
-        tokio::fs::write(&path, bytes)
-            .await
+        // blocking: a view is one small file, replaced whole.
+        durable::replace(&path, bytes, Durability::Atomic)
             .map_err(io(format!("write `{}`", path.display())))
     }
 

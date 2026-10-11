@@ -8,6 +8,7 @@
 //! the owner, and an unreadable record refuses rather than guesses.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -25,6 +26,12 @@ fn head(dir: &Path) -> CommitSha {
         .trim()
         .parse()
         .unwrap()
+}
+
+/// The pool of `root`'s checkouts for the run `holder` is, reading time
+/// from a fixed clock.
+fn pool_of(root: &Path, repo: &Path, holder: &Path) -> Arc<yunta_engine::CheckoutPool> {
+    yunta_engine::CheckoutPool::new(root, repo, holder, Arc::new(yunta_testkit_core::FixedClock))
 }
 
 #[tokio::test]
@@ -599,7 +606,7 @@ async fn a_unit_works_detached_and_its_commits_are_kept_by_its_ref() {
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
     let run = yunta_core::RunId::from("01JUNITKEPTBYITSREF0000000");
-    let pool = yunta_engine::CheckoutPool::new(&root.path().join("worktrees"), &repo, root.path());
+    let pool = pool_of(&root.path().join("worktrees"), &repo, root.path());
     let home = UnitHome {
         repo: &repo,
         run_dir: root.path(),
@@ -641,7 +648,7 @@ async fn a_unit_at_odds_with_its_tree(root: &Path, run: &str) -> (std::path::Pat
     yunta_testkit::git(&repo, &["add", "-A"]);
     yunta_testkit::git(&repo, &["commit", "-q", "-m", "shared"]);
 
-    let (unit, _held) = yunta_engine::CheckoutPool::new(&root.join("worktrees"), &repo, root)
+    let (unit, _held) = pool_of(&root.join("worktrees"), &repo, root)
         .open(
             UnitHome {
                 repo: &repo,
@@ -727,21 +734,20 @@ async fn a_unit_that_lands_moves_the_tree_it_landed_in() {
     init_repo(&repo);
     let run = yunta_core::RunId::from("01JUNITLANDSCLEAN00000000A");
 
-    let (unit, _held) =
-        yunta_engine::CheckoutPool::new(&root.path().join("worktrees"), &repo, root.path())
-            .open(
-                UnitHome {
-                    repo: &repo,
-                    run_dir: root.path(),
-                    run_id: &run,
-                    base: &head(&repo),
-                },
-                UnitId::Node("build".into()),
-                1,
-                owner.supervision(),
-            )
-            .await
-            .expect("the unit opens in a tree of its own");
+    let (unit, _held) = pool_of(&root.path().join("worktrees"), &repo, root.path())
+        .open(
+            UnitHome {
+                repo: &repo,
+                run_dir: root.path(),
+                run_id: &run,
+                base: &head(&repo),
+            },
+            UnitId::Node("build".into()),
+            1,
+            owner.supervision(),
+        )
+        .await
+        .expect("the unit opens in a tree of its own");
     tokio::fs::write(unit.worktree.join("mine.txt"), "work\n")
         .await
         .unwrap();
@@ -779,21 +785,20 @@ async fn a_unit_that_changed_nothing_commits_nothing() {
     init_repo(&repo);
     let base_commit = head(&repo);
 
-    let (unit, _held) =
-        yunta_engine::CheckoutPool::new(&root.path().join("worktrees"), &repo, root.path())
-            .open(
-                UnitHome {
-                    repo: &repo,
-                    run_dir: root.path(),
-                    run_id: &yunta_core::RunId::from("01JUNITCHANGEDNOTHING0000A"),
-                    base: &base_commit,
-                },
-                UnitId::Task("T001".into()),
-                1,
-                owner.supervision(),
-            )
-            .await
-            .expect("the unit opens in a tree of its own");
+    let (unit, _held) = pool_of(&root.path().join("worktrees"), &repo, root.path())
+        .open(
+            UnitHome {
+                repo: &repo,
+                run_dir: root.path(),
+                run_id: &yunta_core::RunId::from("01JUNITCHANGEDNOTHING0000A"),
+                base: &base_commit,
+            },
+            UnitId::Task("T001".into()),
+            1,
+            owner.supervision(),
+        )
+        .await
+        .expect("the unit opens in a tree of its own");
 
     commit_work(&unit, "nothing at all", owner.supervision())
         .await

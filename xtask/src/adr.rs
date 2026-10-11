@@ -12,6 +12,8 @@ mod decision;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use yunta_core::durable::{self, Durability};
+
 use crate::Mode;
 use decision::{by_number, name, numbering, reciprocals, resolve, Decision, Status};
 
@@ -189,7 +191,7 @@ pub fn run(mode: Mode) -> Result<(), String> {
     let rendered = with_index(&register, &index(&decisions))?;
     match mode {
         Mode::Write => {
-            std::fs::write(&register_path, &rendered)
+            durable::replace(&register_path, rendered.as_bytes(), Durability::Atomic)
                 .map_err(|error| format!("cannot write `{}`: {error}", register_path.display()))?;
             println!("wrote {}", register_path.display());
             Ok(())

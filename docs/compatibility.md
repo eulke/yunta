@@ -522,10 +522,10 @@ status field keeps only the latest for the attempt.
 A node that failed because its session ended without ever reporting a terminal
 event carries `session_death`: the `adapter` whose session it was and, when that
 session had a process of its own, its `exit` — `end`, tagged `code`, `signal` or
-`unknown`, and `stderr_tail`, the last lines the process wrote, with every value
-its environment carried replaced by `[redacted]`. `detail` says the same thing in
-a sentence. `diagnostics` gains no entry for it: a dead session names no document,
-the same as a failure stated in one sentence.
+`unknown`, and `stderr_tail`, the last lines the process wrote, with every declared
+secret and every session token replaced by `[redacted]`. `detail` says the same
+thing in a sentence. `diagnostics` gains no entry for it: a dead session names no
+document, the same as a failure stated in one sentence.
 
 A parked run's `decision.evidence` is a list of the facts the engine attached,
 each `{label?, value}` — the escalation as the log holds it, not the lines a

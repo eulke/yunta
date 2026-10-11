@@ -44,7 +44,12 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         .storage
         .as_ref()
         .and_then(|storage| storage.pool.as_ref());
-    let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd, limits);
+    let pool = yunta_engine::CheckoutPool::upkeep(
+        &ctx.project.worktrees_root,
+        &ctx.cwd,
+        limits,
+        std::sync::Arc::new(ctx.clock),
+    );
     for run_id in &removed {
         forget_units(&ctx, &pool, run_id).await;
     }

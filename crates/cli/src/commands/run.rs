@@ -21,6 +21,7 @@ use yunta_storage::AsyncStorage;
 
 mod attached;
 mod detach;
+mod mode;
 
 pub(crate) use detach::start_detached;
 
@@ -29,6 +30,7 @@ use super::Adapters;
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
+use mode::resolve_mode;
 use yunta_core::events::RunEvent;
 
 /// Parses `--input name=value` entries into the raw map
@@ -383,24 +385,6 @@ async fn build_frozen_manifest(
     Ok(frozen)
 }
 
-/// The mode a run of `manifest` runs in. An explicit `--mode` is used as
-/// given (`create_run` itself refuses an unknown name); omitted with
-/// `modes:` declared defaults to the *first* declared mode — promotion
-/// only ever escalates forward, so starting at the floor is the one
-/// default that can never need walking back. A workflow with no `modes:`
-/// at all keeps running everything, unaffected.
-fn resolve_mode(manifest: &Manifest, mode: Option<&ModeName>) -> ModeName {
-    mode.cloned().unwrap_or_else(|| {
-        manifest
-            .workflow
-            .modes
-            .as_ref()
-            .and_then(|modes| modes.keys().next())
-            .cloned()
-            .unwrap_or_default()
-    })
-}
-
 /// Enforces the soft concurrency cap, mints the run id from the injected
 /// clock, prepares the isolation worktree and creates the run — the
 /// shared create step of an executed run and a detached one. Prints
@@ -431,6 +415,10 @@ pub(super) async fn create_run_from(
         }
     }
 
+    // Resolved before anything is made: a short declared secret refuses the
+    // run here, before its identifier is minted, a checkout is taken or a
+    // branch is made.
+    let redactor = yunta_engine::run_redactor(manifest, &yunta_core::ProcessSecrets)?;
     let run_id = ctx.ids.mint_run_id(ctx.clock.now());
     let worktree = match manifest.isolation {
         // A run of its own works in a checkout of the project's pool, on a
@@ -438,7 +426,9 @@ pub(super) async fn create_run_from(
         // or — for a run whose units build — the one holding the least.
         yunta_core::Isolation::Worktree => {
             let run_dir = ctx.project.runs_root.join(run_id.as_str());
-            let pool = ctx.project.pool_of(manifest, &ctx.cwd, &run_dir);
+            let pool =
+                ctx.project
+                    .pool_of(manifest, &ctx.cwd, &run_dir, std::sync::Arc::new(ctx.clock));
             let birth = yunta_engine::Birth::of(&manifest.workflow);
             let (checkout, _held) = pool
                 .open_run(&run_id, &manifest.base_commit, birth, ctx.supervision())
@@ -486,6 +476,7 @@ pub(super) async fn create_run_from(
             // measures on its first wake, if its config names a suite.
             baseline: None,
             environment: yunta_engine::process::execution_environment(Some(&ctx.env)),
+            redactor: &redactor,
         },
         storage,
         ctx.supervision(),

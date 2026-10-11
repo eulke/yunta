@@ -17,9 +17,9 @@ use super::DispatchOutcome;
 
 /// Everything about *how* one node's sessions open, resolved
 /// once by the engine and threaded through the cycle: the mounted
-/// skills, the adapter's opaque settings, and the env — which is ONLY
-/// the declared secret names present in the engine's own environment
-/// (values never touch the log, nothing undeclared leaks).
+/// skills, the adapter's opaque settings, and the env — the shared
+/// directories, and the declared secrets the engine's own environment
+/// binds (values never touch the log, nothing undeclared leaks).
 #[derive(Clone)]
 pub struct SessionSetup {
     /// What no session of the run may write: what the project denies to
@@ -46,7 +46,7 @@ pub struct SessionSetup {
     pub superseded: std::collections::BTreeMap<yunta_core::TaskId, Vec<PathBuf>>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
-    pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
+    pub env: yunta_core::port::session::SessionEnv,
     /// The per-run MCP host plus the loop node's own id, present
     /// ONLY when the resolved adapter declared `run_tools` (the caller
     /// gates on the capability — this module never re-checks it). Each
@@ -165,7 +165,7 @@ impl SessionSetup {
             superseded: Default::default(),
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
-            env: std::collections::HashMap::new(),
+            env: yunta_core::port::session::SessionEnv::default(),
             run_tools: None,
             rail_command: None,
             agent: None,
@@ -181,24 +181,27 @@ impl SessionSetup {
     }
 
     /// The env a session may see: each shared directory under its
-    /// variable, and the secret names the config declares, bound to
-    /// whatever `source` has for them. A name nothing binds simply does
-    /// not reach the session — a secret the run cannot produce is
-    /// absent, never empty.
+    /// variable, as plain text, and each name the config declares under
+    /// `secrets:` that `source` binds, as a secret under that name. The
+    /// credentials the engine itself uses (an MCP server's bearer, the
+    /// forge token) stay out of a session, which never receives them. A
+    /// name nothing binds simply does not reach the session — a secret the
+    /// run cannot produce is absent, never empty.
     pub fn secrets_env(
         config: &yunta_core::ConfigLayer,
-        source: Option<&dyn yunta_core::SecretSource>,
-    ) -> std::collections::HashMap<String, yunta_core::Secret<String>> {
-        let shared = config
-            .shared_dirs()
-            .map(|(var, dir)| (var.to_string(), dir.display().to_string().into()));
-        let secrets = source.into_iter().flat_map(|source| {
-            config
+        source: &dyn yunta_core::SecretSource,
+    ) -> yunta_core::port::session::SessionEnv {
+        yunta_core::port::session::SessionEnv {
+            plain: config
+                .shared_dirs()
+                .map(|(var, dir)| (var.to_string(), dir.display().to_string()))
+                .collect(),
+            secret: config
                 .secrets
                 .iter()
                 .filter_map(|name| source.get(name).map(|value| (name.clone(), value)))
-        });
-        shared.chain(secrets).collect()
+                .collect(),
+        }
     }
 }
 

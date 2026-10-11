@@ -126,7 +126,7 @@ pub(crate) struct SessionDeathJson {
 }
 
 /// What the process left behind: how it ended, and the last lines it
-/// wrote to stderr, redacted of every value its environment carried.
+/// wrote to stderr, redacted of every declared secret and session token.
 #[derive(serde::Serialize)]
 pub(crate) struct SessionExitJson {
     #[serde(flatten)]

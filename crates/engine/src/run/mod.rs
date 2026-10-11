@@ -86,7 +86,7 @@ use crate::task_cycle::TaskCycleError;
 pub use baseline::{BirthBaseline, Owed as OwedMeasurement};
 pub use budget::session_token_budget;
 pub use close::{close_run, CloseRunError};
-pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};
+pub use create::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
 pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
@@ -140,6 +140,12 @@ pub async fn read_manifest(
 pub enum RunError {
     #[error(transparent)]
     Storage(#[from] StorageError),
+
+    /// A declared secret too short to keep out of the log. The run is
+    /// refused before it takes a checkout or writes anything, and the
+    /// error names the variable.
+    #[error(transparent)]
+    Secret(#[from] yunta_core::ShortSecret),
 
     #[error("run `{run_id}` has no events — create it before executing it")]
     UnknownRun { run_id: RunId },
@@ -361,10 +367,9 @@ pub struct RunEnv<'a> {
     pub rail_command: Option<yunta_core::rail::RailCommand>,
     /// Where the values of the variables `secrets:` names come from. The
     /// config names them; only the shell that started the run may read
-    /// their values, so the engine asks here and never the process.
-    /// `None` is a run that can reach no secret at all — what a test
-    /// starts from, and what a run declaring none needs.
-    pub secrets: Option<Arc<dyn yunta_core::SecretSource>>,
+    /// their values, so the engine asks here and never the process. A run
+    /// that declares no secret passes a source that binds nothing.
+    pub secrets: Arc<dyn yunta_core::SecretSource>,
     /// Where every event this invocation appends is mirrored as it is
     /// written — this run's, its `kind: workflow` children's and its
     /// promotion successors' alike. Display only: it derives nothing and

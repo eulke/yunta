@@ -60,6 +60,9 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         return Ok(Outcome::Success);
     }
 
+    // Resolved before anything is signalled or written: a short declared
+    // secret leaves the run as it is.
+    let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
     let run_dir = ctx
         .project
         .run_dir(run_id.as_str())
@@ -154,7 +157,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     }
 
     // Case 2 — the engine crashed; its leftovers are ours to clean.
-    settle_crash(&ctx, &storage, run_id, &run_dir, &registry).await?;
+    settle_crash(&ctx, &storage, run_id, &run_dir, &registry, &redactor).await?;
     println!(
         "run {called}: engine (pid {}) was already dead — killed {}, recorded the pause",
         registry.engine_pid,
@@ -167,13 +170,15 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
 /// group the engine registered killed, the run's pause recorded, and the
 /// registry naming the dead engine removed. The `run_paused` is emitted
 /// through the engine, not hand-built here, so the CLI never stamps an
-/// event with a clock of its own.
+/// event with a clock of its own. `redactor` is the run's own, resolved by
+/// the caller before anything here runs.
 pub(crate) async fn settle_crash(
     ctx: &Context,
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     run_dir: &std::path::Path,
     registry: &yunta_engine::EngineProcessFile,
+    redactor: &yunta_core::Redactor,
 ) -> Result<(), CliError> {
     kill_groups(&registry.process_groups);
     yunta_engine::record_pause_after_crash(
@@ -181,6 +186,7 @@ pub(crate) async fn settle_crash(
         run_id,
         &yunta_core::events::PauseReason::CancelledAfterCrash,
         &ctx.clock,
+        redactor,
     )
     .await?;
     if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(run_dir)) {

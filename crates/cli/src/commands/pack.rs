@@ -12,22 +12,25 @@
 //! the install, and every write goes through a staging directory or a
 //! temporary file so a failure leaves the repository as it was.
 
-use yunta_core::text::problems;
 use yunta_core::{
-    ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher, Workflow,
+    ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher,
 };
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
 use crate::context::Context;
-use crate::error::{note, warn, CliError, Outcome};
+use crate::error::{CliError, Outcome};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
-    vendor_into_place,
+    vendor_into_place, with_cleanup, PackError, Swap,
 };
 use crate::render::blocks::{Checklist, Fields, Found};
 use crate::render::doc::Doc;
+
+mod scaffold;
+
+pub use scaffold::new_pack;
 
 /// The merged `permissions.packs` verdicts, with the layers that
 /// declare each restriction kept by name — a refusal that can't say
@@ -245,13 +248,10 @@ pub async fn add(
     let mut lock = load_lock(&cwd)?;
 
     let staging = staging_dir(&cwd, &pack);
-    vendor_into_place(clone_dir.path(), &staging, &dest)?;
+    let swap = vendor_into_place(clone_dir.path(), &staging, &dest)?;
     let content_hash = match hash_tree(&dest) {
         Ok(hash) => hash,
-        Err(e) => {
-            roll_back_vendored(&dest);
-            return Err(e.into());
-        }
+        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
     };
 
     lock.packs.insert(
@@ -265,10 +265,10 @@ pub async fn add(
             content_hash,
         },
     );
-    if let Err(e) = save_lock(&cwd, &lock) {
-        roll_back_vendored(&dest);
-        return Err(e.into());
+    if let Err(cause) = save_lock(&cwd, &lock) {
+        return Err(with_cleanup(cause, swap.undo()).into());
     }
+    swap.commit();
 
     println!(
         "installed {}/{} @ {} ({}) {} {}",
@@ -290,19 +290,6 @@ pub async fn add(
     };
     print_test_summary(&tests);
     Ok(Outcome::Success)
-}
-
-/// Removes a tree this command vendored moments ago, when a later step
-/// failed: an install that did not complete leaves nothing behind.
-fn roll_back_vendored(dest: &std::path::Path) {
-    if let Err(e) = std::fs::remove_dir_all(dest) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            warn(format!(
-                "could not remove the vendored tree at {} after the failed install: {e}",
-                dest.display()
-            ));
-        }
-    }
 }
 
 pub async fn update(
@@ -358,11 +345,15 @@ pub async fn update(
 
     // The new ref is vendored beside the installed tree and swapped in
     // only once it is complete: a ref that cannot be vendored leaves the
-    // installed pack, and the lock, exactly as they were.
+    // installed pack, and the lock, exactly as they were. A failure after
+    // the swap puts the installed pack back.
     let dest = vendor_dir(&cwd, pack);
     let staging = staging_dir(&cwd, pack);
-    vendor_into_place(clone_dir.path(), &staging, &dest)?;
-    let content_hash = hash_tree(&dest)?;
+    let swap = vendor_into_place(clone_dir.path(), &staging, &dest)?;
+    let content_hash = match hash_tree(&dest) {
+        Ok(hash) => hash,
+        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
+    };
 
     lock.packs.insert(
         pack.clone(),
@@ -375,7 +366,10 @@ pub async fn update(
             content_hash,
         },
     );
-    save_lock(&cwd, &lock)?;
+    if let Err(cause) = save_lock(&cwd, &lock) {
+        return Err(with_cleanup(cause, swap.undo()).into());
+    }
+    swap.commit();
 
     println!(
         "updated {pack} {} {new_ref} ({})",
@@ -392,16 +386,50 @@ pub fn remove(pack: &PackRef) -> Result<Outcome, CliError> {
         return Err(CliError::msg(format!("`{pack}` isn't installed")));
     }
 
+    // The tree moves aside and is deleted only once the lock without it is
+    // saved: a failed save puts it back.
     let dest = vendor_dir(&cwd, pack);
-    if let Err(source) = std::fs::remove_dir_all(&dest) {
-        if source.kind() != std::io::ErrorKind::NotFound {
-            return Err(CliError::io("remove", dest.display(), source));
-        }
+    let aside = Swap::aside(&dest)?;
+    if let Err(cause) = save_lock(&cwd, &lock) {
+        return Err(with_cleanup(cause, aside.map_or(Ok(()), Swap::undo)).into());
     }
-    save_lock(&cwd, &lock)?;
+    if let Some(swap) = aside {
+        swap.commit();
+    }
 
     println!("removed {pack}");
     Ok(Outcome::Success)
+}
+
+/// What a vendored tree says about its lock entry, as its `list` row states
+/// it: whether its files still hash to the recorded content, or why they
+/// cannot be read.
+fn vendored_verdict(
+    dest: &std::path::Path,
+    entry: &PackLockEntry,
+    installed: &str,
+) -> (Found, String) {
+    match hash_tree(dest) {
+        Ok(hash) if hash == entry.content_hash => {
+            (Found::Holds, format!("{installed}, as its lock records it"))
+        }
+        Ok(_) => (
+            Found::Caution,
+            format!("{installed}, modified: its files no longer match its lock"),
+        ),
+        // Only a directory that is not there counts as missing.
+        Err(PackError::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => (
+            Found::Problem,
+            format!("{installed}, missing: its directory is not there"),
+        ),
+        Err(error) => (
+            Found::Problem,
+            format!(
+                "{installed}, cannot be read: {}",
+                yunta_core::describe(&error)
+            ),
+        ),
+    }
 }
 
 pub fn list() -> Result<Outcome, CliError> {
@@ -423,19 +451,7 @@ pub fn list() -> Result<Outcome, CliError> {
     for (key, entry) in &lock.packs {
         let dest = vendor_dir(&cwd, key);
         let installed = format!("{} ({})", entry.r#ref, entry.commit.abbreviated());
-        let (found, said) = match hash_tree(&dest) {
-            Ok(hash) if hash == entry.content_hash => {
-                (Found::Holds, format!("{installed}, as its lock records it"))
-            }
-            Ok(_) => (
-                Found::Caution,
-                format!("{installed}, modified: its files no longer match its lock"),
-            ),
-            Err(_) => (
-                Found::Problem,
-                format!("{installed}, missing: its directory is not there"),
-            ),
-        };
+        let (found, said) = vendored_verdict(&dest, entry, &installed);
         checks.push(found, key.to_string(), said);
     }
     let look = crate::render::stdout_look();
@@ -450,153 +466,4 @@ pub fn list() -> Result<Outcome, CliError> {
         )
     );
     Ok(Outcome::Success)
-}
-
-// --- `yunta pack new` scaffolding -------------------------------------
-//
-// Written as literal templates (not built from the typed values) so the
-// generated files read exactly as an author would write them; `{{name}}`
-// and `{{publisher}}` are the only substitutions, and the manifest and
-// workflow are parsed back into their types before anything is written,
-// so a skeleton that does not parse never reaches disk.
-
-const PACK_MANIFEST_TEMPLATE: &str = r#"name: {{name}}
-publisher: {{publisher}}
-version: 0.1.0
-description: A yunta pack — one verified workflow to build on.
-license: Apache-2.0
-declares:
-  permissions: edit
-  network: false
-  executors: []
-requires:
-  runners:
-    - name: executor
-contents:
-  workflows:
-    - .yunta/workflows/example.yaml
-  docs:
-    - README.md
-"#;
-
-const PACK_WORKFLOW_TEMPLATE: &str = r#"name: example
-description: >-
-  The smallest verified shape: a prompt node with its own scope, checked
-  by a bash node before the work counts as done. Swap the marker check
-  for your own test suite.
-nodes:
-  - id: work
-    kind: prompt
-    runner: executor
-    scope: ["src/**"]
-    prompt: |
-      Do the work described here, editing only files under src/. When the
-      change is in place, create an empty file at src/.done.
-  - id: verify
-    kind: bash
-    invariant: true
-    depends_on: [work]
-    run: "test -f src/.done"
-"#;
-
-// Self-test config: never shipped in `contents:`, used only when this
-// pack's own `.yunta/tests/` run in isolation.
-const PACK_SELFTEST_CONFIG: &str = r#"# Self-test config only — runs this pack's own .yunta/tests/ under the
-# mock adapter. A project that installs this pack uses its own config.
-runners:
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
-
-const PACK_CASE_TEMPLATE: &str = r#"workflow: example
-fixture: fixtures/example.yaml
-expect:
-  final_state: finished
-  nodes:
-    work: finished
-    verify: finished
-"#;
-
-const PACK_FIXTURE_TEMPLATE: &str = r#"effects:
-  - { path: src/.done, content: "" }
-outcome: { type: completed, summary: "done" }
-"#;
-
-const PACK_README_TEMPLATE: &str = r#"# {{publisher}}/{{name}}
-
-A yunta pack scaffolded by `yunta pack new`. It ships one workflow,
-`example`, and a self-test that runs it under the mock adapter.
-
-## example
-
-A prompt node with a declared `scope`, checked by a bash node before the
-work counts as done. Swap the `verify` command for your own test suite.
-
-## Testing
-
-    yunta test --dir .
-"#;
-
-/// Scaffolds a new pack at `<cwd>/<name>`: a manifest, one verified
-/// workflow, a self-test config and case, and a README. The manifest
-/// and workflow are validated by parsing before any file is written,
-/// then the pack is checked and its case is run, so a freshly
-/// scaffolded pack passes from the first command. Refuses to write
-/// over an existing directory.
-pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let dir = cwd.join(pack.name().as_str());
-    if dir.exists() {
-        return Err(CliError::msg(format!(
-            "{} already exists — choose another name or remove it first",
-            dir.display()
-        )));
-    }
-
-    let fill = |template: &str| {
-        template
-            .replace("{{publisher}}", pack.publisher().as_str())
-            .replace("{{name}}", pack.name().as_str())
-    };
-    let manifest_yaml = fill(PACK_MANIFEST_TEMPLATE);
-    let workflow_yaml = fill(PACK_WORKFLOW_TEMPLATE);
-
-    // Parse the real types first: a skeleton that does not parse is a bug
-    // here, never a broken pack on disk.
-    let _: PackManifest = yunta_core::yaml::parse(&manifest_yaml)
-        .map_err(|e| CliError::msg(format!("the pack manifest skeleton does not parse: {e}")))?;
-    let workflow: Workflow = yunta_core::yaml::parse(&workflow_yaml)
-        .map_err(|e| CliError::msg(format!("the workflow skeleton does not parse: {e}")))?;
-
-    let write = |rel: &str, contents: &str| -> Result<(), CliError> {
-        let path = dir.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|s| CliError::io("create", parent.display(), s))?;
-        }
-        std::fs::write(&path, contents).map_err(|s| CliError::io("write", path.display(), s))
-    };
-    write("pack.yaml", &manifest_yaml)?;
-    write("README.md", &fill(PACK_README_TEMPLATE))?;
-    write(".yunta/config.yaml", PACK_SELFTEST_CONFIG)?;
-    write(".yunta/workflows/example.yaml", &workflow_yaml)?;
-    write(".yunta/tests/example.yaml", PACK_CASE_TEMPLATE)?;
-    write(".yunta/tests/fixtures/example.yaml", PACK_FIXTURE_TEMPLATE)?;
-    println!("wrote {}", dir.display());
-
-    // Verify against the pack's own self-test config, then run its case.
-    let config = ConfigLayer::merge_layers(
-        crate::project::load_named_layers(&dir)?
-            .into_iter()
-            .map(|(_, layer)| layer),
-    );
-    let errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
-    if !errors.is_empty() {
-        note(problems(
-            dir.join(".yunta/workflows/example.yaml").display(),
-            &errors,
-        ));
-        return Ok(Outcome::Reported);
-    }
-    super::test::test(Some(&dir)).await
 }

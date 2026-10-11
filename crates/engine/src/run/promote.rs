@@ -24,7 +24,7 @@ use yunta_storage::AsyncStorage;
 
 use crate::artifacts::ObjectError;
 
-use super::{create_run, BirthArtifact, BirthOrigin, CreateRunParams, RunError};
+use super::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRunParams, RunError};
 
 /// Everything the successor needs to be executed — the caller drives it
 /// through its own `execute_run` (with its own interaction surface,
@@ -71,6 +71,9 @@ pub struct CallerInfra<'a> {
     pub supervision: crate::process::Supervision<'a>,
     /// What the successor's commands will run with, recorded at its birth.
     pub environment: Option<yunta_core::events::ExecutionEnvironment>,
+    /// Where the values of the secrets the successor's config names come
+    /// from. Its redactor is resolved from them before its tree is taken.
+    pub secrets: &'a dyn yunta_core::SecretSource,
 }
 
 /// The successor works in the predecessor's own tree: under
@@ -89,6 +92,7 @@ pub async fn create_promotion_successor(
         ids,
         supervision,
         environment,
+        secrets,
     } = caller;
     let Predecessor {
         id: predecessor_id,
@@ -102,6 +106,9 @@ pub async fn create_promotion_successor(
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
     manifest.base_commit = crate::worktree::head_commit(predecessor_worktree, supervision).await?;
+    // Resolved before the checkout is handed over: a short declared secret
+    // refuses the successor with nothing taken.
+    let redactor = run_redactor(&manifest, secrets)?;
 
     // The successor carries on in the predecessor's own checkout, on a
     // branch of its own cut where that tree stands: nothing it built has to
@@ -143,6 +150,7 @@ pub async fn create_promotion_successor(
             )
             .as_ref(),
             environment,
+            redactor: &redactor,
         },
         storage,
         supervision,

@@ -1,5 +1,5 @@
-//! Giving a checkout back to the pool: its use recorded, its hold let go,
-//! and the build it leaves measured for the next user.
+//! Giving a checkout back to the pool: its use recorded, the build it
+//! leaves recorded, and its hold let go.
 
 use std::path::Path;
 
@@ -9,19 +9,20 @@ use crate::worktree::WorktreeError;
 
 impl CheckoutPool {
     /// Gives back the checkout `lease` holds, its user done with it: its
-    /// record says it was used until now, the hold goes, and what its
-    /// build takes is measured — out of the caller's way — so the next
-    /// user, who takes a checkout holding a build first, knows.
+    /// record says it was used until now, what its build leaves is recorded
+    /// while the hold still stands — and counted out of the caller's way,
+    /// so the next user, who takes a checkout holding a build first, knows —
+    /// and only then the hold goes.
     pub async fn give_back(&self, lease: Lease, supervision: Supervision<'_>) {
         let (home, number) = (lease.home.clone(), lease.number);
         let now = supervision.clock.now();
         let checkout = lease.checkout();
         let roots = space::ignored(&checkout, supervision).await;
         super::slot::used(&home, number, self.holder.as_deref(), now).await;
-        drop(lease);
         if let Some(roots) = roots {
-            space::given_back(&home, number, roots, now, &self.walking).await;
+            space::given_back(&home, number, roots, now, &self.walking);
         }
+        drop(lease);
     }
 
     /// Puts the checkout `lease` holds back to the commit it is on, with

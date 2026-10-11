@@ -5,6 +5,8 @@
 
 mod pool_world;
 
+use std::sync::Arc;
+
 use pool_world::{canonical, delete, write, World};
 
 /// A run whose units build its work is born in the free checkout holding
@@ -80,6 +82,7 @@ async fn a_run_whose_units_build_takes_a_checkout_the_budget_just_emptied() {
         &world.repo,
         &root.join("run"),
         &budget,
+        Arc::new(yunta_testkit_core::FixedClock),
     );
     let run = yunta_core::RunId::from("01JBORNWITHINITSBUDGET");
     let birth = yunta_engine::Birth::FollowsUnits;

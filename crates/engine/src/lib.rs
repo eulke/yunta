@@ -135,10 +135,10 @@ pub use replay::{
 pub use run::schedule::{decide, follows_build, Decision, Policy as SchedulingPolicy};
 pub use run::{
     awaits_decision, close_run, create_promotion_successor, create_run, current_escalation,
-    execute_run, read_manifest, record_pause_after_crash, resolve_gate, session_token_budget,
-    BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams, ManifestReadError,
-    OwedMeasurement, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError,
-    RunReport, RunRoots, RunTerminal,
+    execute_run, read_manifest, record_pause_after_crash, resolve_gate, run_redactor,
+    session_token_budget, BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams,
+    ManifestReadError, OwedMeasurement, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv,
+    RunError, RunReport, RunRoots, RunTerminal,
 };
 pub use run_tools::{
     consolidate_blackboard, open_session_listener, HostOf, NodeScopeAccess, RunTool,

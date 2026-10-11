@@ -920,8 +920,11 @@ pub async fn answer_parked(
     bench: &Bench,
     option: &str,
 ) -> Result<(), yunta_engine::ResolveGateError> {
+    let manifest = bench.manifest();
+    let redactor = yunta_engine::run_redactor(&manifest, &*yunta_testkit::no_secrets())
+        .expect("the bench's config names no secret too short to keep out of a log");
     yunta_engine::resolve_gate(
-        &bench.manifest(),
+        &manifest,
         &bench.run_dir(),
         &bench.storage.async_handle(),
         &bench.run_id,
@@ -931,6 +934,7 @@ pub async fn answer_parked(
             by: "mcp".into(),
             free_text: None,
         },
+        &redactor,
     )
     .await
 }

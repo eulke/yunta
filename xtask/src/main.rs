@@ -16,6 +16,8 @@ mod smells;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use yunta_core::durable::{self, Durability};
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let outcome = match args
@@ -77,7 +79,7 @@ fn schema(mode: Mode) -> Result<(), String> {
             Mode::Write => {
                 std::fs::create_dir_all(&dir)
                     .map_err(|error| format!("cannot create `{}`: {error}", dir.display()))?;
-                std::fs::write(&path, &rendered)
+                durable::replace(&path, rendered.as_bytes(), Durability::Atomic)
                     .map_err(|error| format!("cannot write `{}`: {error}", path.display()))?;
                 println!("wrote {}", path.display());
             }

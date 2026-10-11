@@ -1248,8 +1248,17 @@ nodes:
     assert_eq!(prompt.permissions, task.permissions);
     assert_eq!(prompt.skills, task.skills);
     assert_eq!(
-        prompt.env.keys().collect::<Vec<_>>(),
-        task.env.keys().collect::<Vec<_>>()
+        prompt
+            .env
+            .plain
+            .keys()
+            .chain(prompt.env.secret.keys())
+            .collect::<Vec<_>>(),
+        task.env
+            .plain
+            .keys()
+            .chain(task.env.secret.keys())
+            .collect::<Vec<_>>()
     );
     assert_eq!(prompt.budget, task.budget);
     assert_eq!(prompt.adapter_settings, task.adapter_settings);
@@ -1732,10 +1741,7 @@ sessions:
     let (write, read) = (&requests[0], &requests[1]);
     for request in [write, read] {
         assert_eq!(
-            request
-                .env
-                .get("SHARED_CACHE")
-                .map(|value| value.expose().as_str()),
+            request.env.plain.get("SHARED_CACHE").map(String::as_str),
             Some(dir.display().to_string().as_str()),
             "every session finds the directory under its variable"
         );

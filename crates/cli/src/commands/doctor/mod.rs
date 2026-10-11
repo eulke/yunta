@@ -93,7 +93,12 @@ async fn checkouts(ctx: &Context, checks: &mut Checklist) {
         .storage
         .as_ref()
         .and_then(|storage| storage.pool.as_ref());
-    let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd, limits);
+    let pool = yunta_engine::CheckoutPool::upkeep(
+        &ctx.project.worktrees_root,
+        &ctx.cwd,
+        limits,
+        std::sync::Arc::new(ctx.clock),
+    );
     let kept = match pool.report(ctx.supervision()).await {
         Ok(kept) => kept,
         Err(e) => return checks.push(Found::Caution, "checkouts", e.to_string()),

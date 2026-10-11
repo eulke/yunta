@@ -30,6 +30,7 @@ mod add;
 mod fit;
 mod follow;
 mod give;
+mod record;
 mod release;
 mod room;
 mod runs;
@@ -44,7 +45,7 @@ mod walk;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_core::CommitSha;
+use yunta_core::{Clock, CommitSha};
 
 use super::{head_tree, Unit, UnitHome, UnitId, WorktreeError};
 use crate::process::Supervision;
@@ -172,8 +173,8 @@ pub fn pool_home(root: &Path, common_dir: &Path) -> PathBuf {
 impl CheckoutPool {
     /// The pool of the project `repo` is a checkout of, kept under `root`,
     /// for the run whose directory is `holder`.
-    pub fn new(root: &Path, repo: &Path, holder: &Path) -> Arc<Self> {
-        Self::reached(root, repo, Some(holder.to_path_buf()), None, None)
+    pub fn new(root: &Path, repo: &Path, holder: &Path, clock: Arc<dyn Clock>) -> Arc<Self> {
+        Self::reached(root, repo, Some(holder.to_path_buf()), None, None, clock)
     }
 
     /// The pool of the project a run's manifest names, for that run: what
@@ -184,6 +185,7 @@ impl CheckoutPool {
         repo: &Path,
         holder: &Path,
         manifest: &yunta_core::Manifest,
+        clock: Arc<dyn Clock>,
     ) -> Arc<Self> {
         let known = manifest
             .project
@@ -194,7 +196,7 @@ impl CheckoutPool {
             .storage
             .as_ref()
             .and_then(|storage| storage.pool.as_ref());
-        Self::reached(root, repo, Some(holder.to_path_buf()), known, limits)
+        Self::reached(root, repo, Some(holder.to_path_buf()), known, limits, clock)
     }
 
     /// The pool of the project `repo` is a checkout of, for the run whose
@@ -204,22 +206,39 @@ impl CheckoutPool {
         repo: &Path,
         holder: &Path,
         limits: &yunta_core::PoolConfig,
+        clock: Arc<dyn Clock>,
     ) -> Arc<Self> {
-        Self::reached(root, repo, Some(holder.to_path_buf()), None, Some(limits))
+        Self::reached(
+            root,
+            repo,
+            Some(holder.to_path_buf()),
+            None,
+            Some(limits),
+            clock,
+        )
     }
 
     /// The same pool, for its own upkeep, kept within `limits`: what it
     /// holds to tidy is never recorded as used.
-    pub fn upkeep(root: &Path, repo: &Path, limits: Option<&yunta_core::PoolConfig>) -> Arc<Self> {
-        Self::reached(root, repo, None, None, limits)
+    pub fn upkeep(
+        root: &Path,
+        repo: &Path,
+        limits: Option<&yunta_core::PoolConfig>,
+        clock: Arc<dyn Clock>,
+    ) -> Arc<Self> {
+        Self::reached(root, repo, None, None, limits, clock)
     }
 
+    /// The pool the constructors build. `clock` is what the background walks
+    /// take their locks by: a walk outlives the supervision of its caller,
+    /// so the pool carries its own clock.
     fn reached(
         root: &Path,
         repo: &Path,
         holder: Option<PathBuf>,
         known: Option<PathBuf>,
         limits: Option<&yunta_core::PoolConfig>,
+        clock: Arc<dyn Clock>,
     ) -> Arc<Self> {
         Arc::new(Self {
             root: root.to_path_buf(),
@@ -227,7 +246,7 @@ impl CheckoutPool {
             holder,
             known,
             limits: limits.cloned().unwrap_or_default(),
-            walking: space::Walking::default(),
+            walking: space::Walking::new(clock),
             located: tokio::sync::OnceCell::new(),
         })
     }

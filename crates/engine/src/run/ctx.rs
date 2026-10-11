@@ -86,9 +86,9 @@ pub(crate) struct RunCtx<'a> {
     /// Every variable layered onto a subprocess of this run: the
     /// ambient ones, then each shared directory under its variable.
     pub(crate) subprocess_vars: Arc<[(String, String)]>,
-    /// Where a declared secret's value comes from. `None` reaches no
-    /// secret at all, which is what a run declaring none needs.
-    pub secrets: Option<std::sync::Arc<dyn yunta_core::SecretSource>>,
+    /// Where a declared secret's value comes from. A run declaring none
+    /// holds a source that binds nothing.
+    pub secrets: Arc<dyn yunta_core::SecretSource>,
     /// What those secrets' values are, for taking them back out of
     /// every event this run appends.
     pub redactor: yunta_core::Redactor,
@@ -300,13 +300,9 @@ impl<'a> RunCtx<'a> {
     /// fuller log, never appended to.
     pub(crate) async fn export_events_jsonl(&self) -> Result<(), RunError> {
         let events = self.load_events().await?;
-        let jsonl = crate::events_export::render_events_jsonl(&events)?;
-        tokio::fs::write(self.run_dir.join("events.jsonl"), jsonl)
-            .await
-            .map_err(|source| RunError::Io {
-                context: "write events.jsonl".to_string(),
-                source,
-            })
+        // blocking: `write_jsonl` replaces the whole file on this thread;
+        // `tokio::fs` would run the same write and rename on a pool thread.
+        Ok(crate::events_export::write_jsonl(self.run_dir, &events)?)
     }
 
     /// Records an engine-authored degradation as a `finding_posted`:

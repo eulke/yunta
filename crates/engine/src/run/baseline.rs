@@ -15,6 +15,7 @@
 
 use std::path::Path;
 
+use yunta_core::durable::{self, Durability};
 use yunta_core::events::{
     BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, BaselineResults, EventPayload,
     RunEvent,
@@ -333,12 +334,11 @@ pub(super) async fn keep_capture(run_dir: &Path, output: &[u8]) -> Result<(), Ru
             source,
         })?;
     let capture = crate::run_dir::baseline_capture(run_dir);
-    tokio::fs::write(&capture, output)
-        .await
-        .map_err(|source| RunError::Io {
-            context: format!("write `{}`", capture.display()),
-            source,
-        })
+    // blocking: one captured output, replaced whole.
+    durable::replace(&capture, output, Durability::Atomic).map_err(|source| RunError::Io {
+        context: format!("write `{}`", capture.display()),
+        source,
+    })
 }
 
 /// The tail of the suite's output a reader sees without opening what the

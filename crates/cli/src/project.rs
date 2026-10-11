@@ -55,17 +55,21 @@ impl Project {
 
     /// The pool of checkouts run `manifest` takes its trees from, for the
     /// run whose directory is `run_dir`, reached from the checkout `repo`.
+    /// `clock` is the invocation's own, so the pool reads time as the
+    /// command does.
     pub fn pool_of(
         &self,
         manifest: &Manifest,
         repo: &Path,
         run_dir: &Path,
+        clock: std::sync::Arc<dyn yunta_core::Clock>,
     ) -> std::sync::Arc<yunta_engine::CheckoutPool> {
         yunta_engine::CheckoutPool::of_run(
             &self.worktrees_root_for(manifest),
             repo,
             run_dir,
             manifest,
+            clock,
         )
     }
 

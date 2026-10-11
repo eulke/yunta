@@ -329,6 +329,7 @@ async fn successor_of(
             ids,
             supervision: bench.supervision(),
             environment: None,
+            secrets: &*yunta_testkit::no_secrets(),
         },
     )
     .await

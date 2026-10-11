@@ -5,8 +5,11 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use yunta_core::durable::{self, Durability};
 use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
-use yunta_core::{CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId};
+use yunta_core::{
+    CommitSha, InputName, Manifest, ModeName, NodeId, Redactor, RunId, SecretSource, TaskId,
+};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
@@ -97,6 +100,16 @@ pub struct CreateRunParams<'a> {
     /// What the run's commands will run with, recorded on `run_created`
     /// so a later wake can tell whether that changed.
     pub environment: Option<yunta_core::events::ExecutionEnvironment>,
+    /// What the run's log redacts with, resolved by the caller through
+    /// [`run_redactor`] before it takes anything a refused run would leave.
+    pub redactor: &'a Redactor,
+}
+
+/// The redactor a run of `manifest` works with: every secret its config
+/// names, as `secrets` binds them. A caller resolves it before it takes a
+/// checkout, so a run that a short secret refuses takes nothing.
+pub fn run_redactor(manifest: &Manifest, secrets: &dyn SecretSource) -> Result<Redactor, RunError> {
+    Ok(Redactor::of(&manifest.config.secret_names(), secrets)?)
 }
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
@@ -140,6 +153,7 @@ pub async fn create_run(
         artifacts,
         baseline,
         environment,
+        redactor,
     } = params;
     if *mode != ModeName::default() {
         match &manifest.workflow.modes {
@@ -208,20 +222,17 @@ pub async fn create_run(
             path: manifest_path.clone(),
             detail: e.to_string(),
         })?;
-    tokio::fs::write(&manifest_path, bytes)
-        .await
-        .map_err(|source| RunError::Io {
+    // blocking: one small file, replaced whole on this thread.
+    durable::replace(&manifest_path, &bytes, Durability::Atomic).map_err(|source| {
+        RunError::Io {
             context: format!("write `{}`", manifest_path.display()),
             source,
-        })?;
+        }
+    })?;
 
     let opens_on_base = manifest.isolation == yunta_core::Isolation::Worktree
         && holds_its_base(worktree, &manifest.base_commit, supervision).await;
-    // A birth is written before a run exists to declare secrets
-    // against: `run_created` carries the manifest's hash and the
-    // inputs the caller resolved, never a session's words.
-    let nothing_to_redact = yunta_core::Redactor::default();
-    let log = RunLog::new(storage, run_id, clock, &nothing_to_redact);
+    let log = RunLog::new(storage, run_id, clock, redactor);
     log.record(
         None,
         EventPayload::Run(RunEvent::Created(RunCreatedPayload {

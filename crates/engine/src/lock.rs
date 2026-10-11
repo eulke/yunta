@@ -7,13 +7,13 @@
 //! probe cannot tell counts as present: a run must never lose the
 //! exclusivity it still holds without a sound.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use yunta_core::durable::{self, Durability};
 use yunta_core::process::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
 
@@ -88,9 +88,8 @@ pub enum LockError {
         owner: LockOwner,
         liveness: Liveness,
     },
-    /// The file exists but names no holder: written by an older build,
-    /// corrupted, or caught between its holder's `create_new` and its
-    /// write.
+    /// The file exists but names no readable holder: it is corrupted, or a
+    /// build that died between creating it and writing it left it empty.
     #[error("`{lock_path}` exists but names no readable holder")]
     Unreadable { lock_path: PathBuf },
     /// The patience ran out while a holder kept the lock.
@@ -147,7 +146,8 @@ pub fn hand_over(
         .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
     // blocking: `hand_over` names a file's owner before the process it
     // names exists, on the caller's own thread and outside any run.
-    std::fs::write(lock_path, json).map_err(|source| io("write the holder of", source))
+    durable::replace(lock_path, &json, Durability::Atomic)
+        .map_err(|source| io("write the holder of", source))
 }
 
 /// Takes the lock at `lock_path` for this process, recording it as the
@@ -171,79 +171,69 @@ pub async fn acquire(
     };
     let mut stolen_from = None;
     loop {
+        let pid = Pid::current();
+        let record = LockOwner {
+            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
+            pid,
+            started_at: taken_at(pid, probe, clock),
+        };
+        // The record is whole before the lock's name exists, so no reader
+        // meets an empty lock.
+        let json = yunta_core::persisted::PersistedDoc::of(record)
+            .write()
+            .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
         // blocking: taking a lock is `create_new` — the one operation
         // whose atomicity is the whole mechanism, and which `tokio::fs`
         // would run on a pool thread without making any more atomic.
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(lock_path)
+        if durable::create_new(lock_path, &json, Durability::Atomic)
+            .map_err(|source| io("create", source))?
         {
-            Ok(mut file) => {
-                let pid = Pid::current();
-                let record = LockOwner {
-                    schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
-                    pid,
-                    started_at: taken_at(pid, probe, clock),
-                };
-                let json = yunta_core::persisted::PersistedDoc::of(record)
-                    .write()
-                    .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
-                file.write_all(&json)
-                    .map_err(|source| io("write the holder of", source))?;
-                return Ok(match stolen_from {
-                    Some(dead) => Acquired::Stolen { dead },
-                    None => Acquired::Fresh,
+            return Ok(match stolen_from {
+                Some(dead) => Acquired::Stolen { dead },
+                None => Acquired::Fresh,
+            });
+        }
+        // Another holder created the lock first: the present-or-stale check takes over.
+        let owner: Option<LockOwner> = tokio::fs::read(lock_path)
+            .await
+            .ok()
+            .and_then(|bytes| yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes).ok())
+            .map(|owner| owner.doc);
+        let liveness = owner.as_ref().map(|owner| holder_state(owner, probe));
+        if let (Some(owner), Some(Liveness::Dead)) = (&owner, liveness) {
+            // Remove, then retry: the atomic `create_new` above
+            // decides which of two concurrent stealers wins.
+            match tokio::fs::remove_file(lock_path).await {
+                Ok(()) => {}
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => return Err(io("remove the stale", source)),
+            }
+            stolen_from = Some(owner.clone());
+            continue;
+        }
+        // Alive, unknown, or unreadable: present.
+        match (deadline, contention) {
+            (Some(deadline), Contention::Wait { poll, .. }) if Instant::now() < deadline => {
+                tokio::time::sleep(poll).await;
+            }
+            (Some(_), _) => {
+                return Err(LockError::Timeout {
+                    lock_path: lock_path.to_path_buf(),
+                    owner,
                 });
             }
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                let owner: Option<LockOwner> = tokio::fs::read(lock_path)
-                    .await
-                    .ok()
-                    .and_then(|bytes| {
-                        yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes).ok()
-                    })
-                    .map(|owner| owner.doc);
-                let liveness = owner.as_ref().map(|owner| holder_state(owner, probe));
-                if let (Some(owner), Some(Liveness::Dead)) = (&owner, liveness) {
-                    // Remove, then retry: the atomic `create_new` above
-                    // decides which of two concurrent stealers wins.
-                    match tokio::fs::remove_file(lock_path).await {
-                        Ok(()) => {}
-                        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(source) => return Err(io("remove the stale", source)),
-                    }
-                    stolen_from = Some(owner.clone());
-                    continue;
-                }
-                // Alive, unknown, or unreadable: present.
-                match (deadline, contention) {
-                    (Some(deadline), Contention::Wait { poll, .. })
-                        if Instant::now() < deadline =>
-                    {
-                        tokio::time::sleep(poll).await;
-                    }
-                    (Some(_), _) => {
-                        return Err(LockError::Timeout {
-                            lock_path: lock_path.to_path_buf(),
-                            owner,
-                        });
-                    }
-                    (None, _) => {
-                        return Err(match (owner, liveness) {
-                            (Some(owner), Some(liveness)) => LockError::Held {
-                                lock_path: lock_path.to_path_buf(),
-                                owner,
-                                liveness,
-                            },
-                            _ => LockError::Unreadable {
-                                lock_path: lock_path.to_path_buf(),
-                            },
-                        });
-                    }
-                }
+            (None, _) => {
+                return Err(match (owner, liveness) {
+                    (Some(owner), Some(liveness)) => LockError::Held {
+                        lock_path: lock_path.to_path_buf(),
+                        owner,
+                        liveness,
+                    },
+                    _ => LockError::Unreadable {
+                        lock_path: lock_path.to_path_buf(),
+                    },
+                });
             }
-            Err(source) => return Err(io("create", source)),
         }
     }
 }

@@ -37,6 +37,11 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 sha2.workspace = true
+# Git's blob ids (`git_blob_id`) are SHA-1 digests of a header and the bytes.
+sha1.workspace = true
+# Staging files for `durable`: the temporary lives beside its target, so the
+# rename stays on one filesystem.
+tempfile.workspace = true
 # `modes:` is an ordered map, free in name and count — its
 # declaration order *is* the promotion ladder, so plain iteration order
 # has to survive parse. Already in the workspace's own dependency graph
@@ -82,4 +87,3 @@ yunta-testkit-core.workspace = true
 yunta-core = { path = ".", features = ["testkit"] }
 tokio = { workspace = true, features = ["macros"] }
 proptest.workspace = true
-tempfile.workspace = true

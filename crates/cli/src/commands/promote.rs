@@ -87,6 +87,7 @@ pub(crate) async fn drive_promotions(
                 ids: &env.ctx.ids,
                 supervision: env.ctx.supervision(),
                 environment: yunta_engine::process::execution_environment(Some(&env.ctx.env)),
+                secrets: &yunta_core::ProcessSecrets,
             },
         )
         .await?;
@@ -227,6 +228,7 @@ nodes:
                 artifacts: &[],
                 baseline: None,
                 environment: None,
+                redactor: &yunta_core::Redactor::default(),
             },
             &storage.async_handle(),
             ctx.supervision(),
@@ -247,7 +249,7 @@ nodes:
             forge: None,
             cancel: ctx.cancellation(),
             ambient: None,
-            secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
+            secrets: std::sync::Arc::new(yunta_core::ProcessSecrets),
             observer: Some(recorder.clone()),
             rail_command: Some(crate::context::rail_command()),
         })

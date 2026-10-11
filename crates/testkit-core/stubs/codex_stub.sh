@@ -12,8 +12,9 @@
 # - $CODEX_STUB_STDERR_FILE, if set: its contents go to stderr before
 #   the session streams anything — what a CLI that refuses its
 #   configuration says on its way out. A file rather than the text
-#   itself, because a session redacts every value its environment
-#   carried and a test asserting on the line needs it unredacted.
+#   itself, because a session redacts every declared secret and session
+#   token from its stderr tail, and a test asserting on the line needs it
+#   unredacted.
 # - $CODEX_STUB_EXIT, if set: the status to exit with.
 # - $CODEX_STUB_CHILD_PID_FILE, if set: spawns a background blocker of
 #   its own and records its pid — a grandchild kill() must also reach.

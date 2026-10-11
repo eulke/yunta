@@ -9,13 +9,17 @@ use yunta_core::{Clock, NodeId, RunId, Seq};
 use crate::error::{Cause, Result, StorageError};
 use yunta_core::events::RunEvent;
 
+mod chain;
+pub use chain::ChainVerification;
+
 /// The schema migration, embedded in the binary rather than shipped as a
-/// file — the whole schema is one append-only table, so there is nothing
-/// a migration runner would buy over `CREATE TABLE IF NOT EXISTS` today.
-/// `event_hash` is nullable at the SQL level only so the `ALTER TABLE`
-/// migration below can add it to databases created before the hash chain
-/// existed — every append since writes it, and `verify_chain` reports a
-/// NULL as a break, never skips it.
+/// file — the schema is a few tables, so there is nothing a migration runner
+/// would buy over `CREATE TABLE IF NOT EXISTS`. `event_hash` is nullable at
+/// the SQL level only so the `ALTER TABLE` migration below can add it to
+/// databases created before the hash chain existed — every append since
+/// writes it, and `verify_chain` reports a NULL as a break, never skips it.
+/// `run_heads` holds each run's last appended seq and hash, the anchor that
+/// shows a log whose tail was deleted.
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS events (
     run_id TEXT NOT NULL,
@@ -28,22 +32,12 @@ CREATE TABLE IF NOT EXISTS events (
     event_hash TEXT,
     PRIMARY KEY (run_id, seq)
 );
+CREATE TABLE IF NOT EXISTS run_heads (
+    run_id TEXT PRIMARY KEY,
+    seq INTEGER NOT NULL,
+    event_hash TEXT NOT NULL
+);
 ";
-
-/// `yunta verify` / receipt-time integrity: the chain covers integrity
-/// and order, never authenticity.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ChainVerification {
-    Intact {
-        events: usize,
-    },
-    /// The first event where the chain stops holding, with what exactly
-    /// stopped holding.
-    Broken {
-        seq: Seq,
-        detail: String,
-    },
-}
 
 /// One run as `list_runs` reports it: its id and when its first event
 /// was written.
@@ -292,113 +286,22 @@ impl Storage {
         )
         .map_err(append_err)?;
 
+        // The head moves with the row it names, in the same transaction, so a
+        // tail deleted afterwards reads as broken at this head.
+        tx.execute(
+            "INSERT INTO run_heads (run_id, seq, event_hash) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(run_id) DO UPDATE SET seq = excluded.seq, \
+             event_hash = excluded.event_hash",
+            params![draft.run_id.as_str(), seq, event_hash.as_str()],
+        )
+        .map_err(append_err)?;
+
         tx.commit().map_err(append_err)?;
 
         Seq::try_from(seq).map_err(|source| StorageError::CorruptSeq {
             run_id: draft.run_id.clone(),
             source,
         })
-    }
-
-    /// Walks the run's whole chain recomputing every hash from the bytes
-    /// as persisted, one row at a time: an altered payload, a deleted,
-    /// inserted or reordered event, an altered stored hash, or a missing
-    /// one all surface as [`ChainVerification::Broken`] naming the exact
-    /// seq. Runs automatically at receipt time and on demand via
-    /// `yunta verify <run_id>`.
-    pub fn verify_chain(&self, run_id: &RunId) -> Result<ChainVerification> {
-        let read_err = |error| StorageError::Read {
-            run_id: run_id.clone(),
-            source: cause(error),
-        };
-
-        let conn = lock(&self.conn);
-        let mut stmt = conn
-            .prepare(
-                "SELECT seq, ts, node_id, kind, payload_json, schema_version, event_hash
-                 FROM events WHERE run_id = ?1 ORDER BY seq ASC",
-            )
-            .map_err(read_err)?;
-        let rows = stmt
-            .query_map(params![run_id.as_str()], |row| {
-                Ok(StoredRow {
-                    seq: row.get(0)?,
-                    ts: row.get(1)?,
-                    node_id: row.get(2)?,
-                    kind: row.get(3)?,
-                    payload_json: row.get(4)?,
-                    schema_version: row.get(5)?,
-                    event_hash: row.get(6)?,
-                })
-            })
-            .map_err(read_err)?;
-
-        let mut prev_hash: Option<String> = None;
-        let mut verified = 0usize;
-        for row in rows {
-            let row = row.map_err(read_err)?;
-            let expected_seq = verified as i64 + 1;
-            let seq = Seq::try_from(row.seq).map_err(|source| StorageError::CorruptSeq {
-                run_id: run_id.clone(),
-                source,
-            })?;
-            if row.seq != expected_seq {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: format!(
-                        "expected seq {expected_seq} but found {} — an event was deleted, \
-                         inserted or reordered",
-                        row.seq
-                    ),
-                });
-            }
-            let Some(stored_hash) = &row.event_hash else {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: "event has no stored hash (written before the chain existed)"
-                        .to_string(),
-                });
-            };
-            let anchor = match &prev_hash {
-                Some(prev) => prev.clone(),
-                None => match genesis_from_first_row(run_id, &row) {
-                    Ok(anchor) => anchor,
-                    Err(error) => {
-                        return Ok(ChainVerification::Broken {
-                            seq,
-                            detail: error.to_string(),
-                        })
-                    }
-                },
-            };
-            let recomputed = chain_hash(ChainHashFields {
-                prev_hash: &anchor,
-                run_id: run_id.as_str(),
-                seq: row.seq,
-                ts: &row.ts,
-                node_id: row.node_id.as_deref(),
-                kind: &row.kind,
-                payload_json: &row.payload_json,
-                schema_version: row.schema_version,
-            });
-            if recomputed.as_str() != stored_hash.as_str() {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: "stored hash does not match the recomputed chain — the event or \
-                             its predecessor's hash was altered"
-                        .to_string(),
-                });
-            }
-            prev_hash = Some(stored_hash.clone());
-            verified += 1;
-        }
-
-        if verified == 0 {
-            return Err(StorageError::VerifyUnknownRun {
-                run_id: run_id.clone(),
-            });
-        }
-        Ok(ChainVerification::Intact { events: verified })
     }
 
     /// Test-support fault injection: alters the `seq`-th event's persisted
@@ -529,16 +432,27 @@ impl Storage {
     /// `events.jsonl` is the self-contained copy) is already gone — the
     /// database is never the first copy to die.
     pub fn purge_run(&self, run_id: &RunId) -> Result<Purge> {
-        let conn = lock(&self.conn);
-        let rows = conn
+        let purge_err = |error| StorageError::Read {
+            run_id: run_id.clone(),
+            source: cause(error),
+        };
+        let mut conn = lock(&self.conn);
+        // The head goes with the rows, so no anchor outlives its events.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(purge_err)?;
+        let rows = tx
             .execute(
                 "DELETE FROM events WHERE run_id = ?1",
                 params![run_id.as_str()],
             )
-            .map_err(|error| StorageError::Read {
-                run_id: run_id.clone(),
-                source: cause(error),
-            })?;
+            .map_err(purge_err)?;
+        tx.execute(
+            "DELETE FROM run_heads WHERE run_id = ?1",
+            params![run_id.as_str()],
+        )
+        .map_err(purge_err)?;
+        tx.commit().map_err(purge_err)?;
         Ok(Purge { rows })
     }
 
@@ -575,37 +489,4 @@ impl Storage {
         }
         Ok(runs)
     }
-}
-
-/// One persisted row as `verify_chain` reads it back.
-struct StoredRow {
-    seq: i64,
-    ts: String,
-    node_id: Option<String>,
-    kind: String,
-    payload_json: String,
-    schema_version: u32,
-    event_hash: Option<String>,
-}
-
-/// The chain's anchor for a run's first row: `run_created`'s own
-/// manifest hash, hashed.
-fn genesis_from_first_row(run_id: &RunId, row: &StoredRow) -> Result<String> {
-    if row.kind != "run_created" {
-        return Err(StorageError::GenesisMissing {
-            run_id: run_id.clone(),
-        });
-    }
-    let manifest_hash = serde_json::from_str::<serde_json::Value>(&row.payload_json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("manifest_hash")
-                .and_then(|hash| hash.as_str().map(String::from))
-        });
-    manifest_hash
-        .map(|hash| genesis_hash(&hash).to_string())
-        .ok_or_else(|| StorageError::CorruptGenesis {
-            run_id: run_id.clone(),
-        })
 }

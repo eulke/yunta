@@ -387,7 +387,7 @@ fn run_a_dying_session(root: &Path, repo: &Path, home: &Path) -> String {
         &repo.join(".yunta/config.yaml"),
         &format!(
             "runners:\n  executor:\n    - {{ adapter: codex, model: codex-model }}\nadapters:\n  \
-             codex:\n    binary: {stub}\nsecrets: [CODEX_STUB_STDERR_FILE, CODEX_STUB_EXIT]\n",
+             codex:\n    binary: {stub}\nsecrets: [CODEX_STUB_STDERR_FILE]\n",
             stub = yunta_testkit_core::stubs::codex().display()
         ),
     );

@@ -55,7 +55,7 @@ impl CheckoutPool {
             }
             make(repo, common_dir, &path, fresh, supervision).await?;
             // A checkout just added holds its source and no build.
-            super::space::emptied(&home, number, supervision.clock.now()).await;
+            super::space::emptied(&home, number, supervision.clock.now());
             let path = tokio::fs::canonicalize(&path).await.unwrap_or(path);
             return Ok((path, lease));
         }

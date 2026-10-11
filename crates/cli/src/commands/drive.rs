@@ -159,7 +159,7 @@ pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine
         forge: on.forge,
         cancel: on.cancel,
         ambient: Some(on.ambient),
-        secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
+        secrets: std::sync::Arc::new(yunta_core::ProcessSecrets),
         observer: on.observer,
         rail_command: Some(on.rail_command),
     })

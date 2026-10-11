@@ -103,7 +103,8 @@ pub struct RunToolsHost {
     pub(super) run_id: RunId,
     /// What the config named as a secret, taken out of every event this
     /// host's listeners append — the same door the run's own appends go
-    /// through.
+    /// through. Each session's listener works from a copy of this host
+    /// that also takes out its own token.
     pub(super) redactor: yunta_core::Redactor,
     /// The members of each `coordination: blackboard` group, by the
     /// group's own id and in declaration order — what the group

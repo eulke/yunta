@@ -16,11 +16,12 @@ use crate::task_cycle::Memo;
 /// cancellation, which the caller always brings, and the
 /// process-registry write error,
 /// carried past construction because a failed write has no log to record
-/// itself on until the context exists.
+/// itself on until the context exists. A run whose declared secrets refuse
+/// it is refused here, before the registry or the pool writes anything.
 pub(super) fn build_ctx(
     env: RunEnv<'_>,
     depth: u32,
-) -> (RunCtx<'_>, CancellationToken, Option<std::io::Error>) {
+) -> Result<(RunCtx<'_>, CancellationToken, Option<std::io::Error>), RunError> {
     let RunEnv {
         run_id,
         manifest,
@@ -38,11 +39,10 @@ pub(super) fn build_ctx(
         observer,
         rail_command,
     } = env;
-    // Resolved once, when the run wakes: every append this invocation
-    // makes takes the same values back out, and a run that declares no
-    // secret builds an empty one and pays nothing.
-    let redactor =
-        yunta_core::Redactor::of(&manifest.config.secrets, secrets.as_deref().map(|s| s as _));
+    // Resolved once, when the run wakes and before anything is written:
+    // every append this invocation makes takes the same values back out,
+    // and a run that declares no secret builds an empty one and pays nothing.
+    let redactor = yunta_core::Redactor::of(&manifest.config.secret_names(), &*secrets)?;
     let root_cancel = cancel.clone();
     let root_cancel_for_ctx = root_cancel.clone();
     let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
@@ -68,6 +68,7 @@ pub(super) fn build_ctx(
         worktree,
         run_dir,
         manifest,
+        clock.clone(),
     );
     let registry_for_host = registry.clone();
     let subprocess_vars = super::invocation::subprocess_vars(ambient, &manifest.config);
@@ -125,7 +126,7 @@ pub(super) fn build_ctx(
             },
         )),
     };
-    (ctx, root_cancel, registry_error)
+    Ok((ctx, root_cancel, registry_error))
 }
 
 /// Every variable layered onto a subprocess of the run: the ambient

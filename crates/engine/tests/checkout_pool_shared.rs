@@ -8,6 +8,7 @@
 mod pool_world;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use pool_world::{write, World};
@@ -161,6 +162,7 @@ async fn past_its_budget_the_pool_empties_the_least_recently_used_free_build() {
         &world.repo,
         &world.root.path().join("run"),
         &budget,
+        Arc::new(yunta_testkit_core::FixedClock),
     );
 
     let (taken, _held) = world.open_through(&pool, &world.run, "T003", 1).await;
@@ -190,6 +192,7 @@ async fn a_checkout_is_refused_when_it_would_leave_less_than_kept_free() {
         &world.repo,
         &world.root.path().join("run"),
         &everything,
+        Arc::new(yunta_testkit_core::FixedClock),
     );
 
     let refused = pool

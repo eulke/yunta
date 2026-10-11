@@ -16,11 +16,13 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, Secret, SessionId,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
     ToolNaming, Unbuildable,
 };
 
+use yunta_core::durable::{self, Durability};
 use yunta_core::fence::{Coverage, Fenced};
+use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
@@ -39,7 +41,9 @@ pub static ID: AdapterId = AdapterId::from_static("claude-code");
 /// what it is rather than for anything that makes it unique. The
 /// bearer token travels in the file rather than on the command line —
 /// `argv` is world-readable through `ps`, and the token is the only
-/// thing standing between any local process and this node's tools.
+/// thing standing between any local process and this node's tools. The
+/// file is written whole and private from its first byte: it is created
+/// 0600, so no other user reads the token, not even for a moment.
 fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
     let Some(endpoint) = &req.run_tools_endpoint else {
         return Ok(None);
@@ -59,7 +63,7 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
     });
     // The directory belongs to this session alone, so the file needs no
     // name of its own to stay clear of the other sessions of the run.
-    let path = scratch.join("mcp.json");
+    let path = scratch.join(RunToolsEndpoint::CONFIG_FILE);
     let io = |source: std::io::Error| AdapterError::Adapter {
         adapter: ID.clone(),
         message: format!(
@@ -72,12 +76,9 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
         message: format!("could not render the per-run tool config: {source}"),
     })?;
     std::fs::create_dir_all(scratch).map_err(io)?;
-    std::fs::write(&path, body).map_err(io)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(io)?;
-    }
+    // blocking: one small write by the launching task, before the CLI
+    // that reads the file starts.
+    durable::replace(&path, &body, Durability::Atomic).map_err(io)?;
     Ok(Some(path))
 }
 
@@ -98,7 +99,9 @@ fn write_agent(req: &SessionRequest) -> Result<Option<PathBuf>> {
         ),
     };
     std::fs::create_dir_all(&req.scratch_dir).map_err(io)?;
-    std::fs::write(&path, &agent.instructions).map_err(io)?;
+    // blocking: one small write by the launching task, before the CLI
+    // that reads the file starts.
+    durable::replace(&path, agent.instructions.as_bytes(), Durability::Atomic).map_err(io)?;
     Ok(Some(path))
 }
 
@@ -244,16 +247,7 @@ impl ClaudeCodeAdapter {
         let mcp_config = write_mcp_config(&req)?;
         let agent_file = write_agent(&req)?;
         let args = self.build_args(&req, resume, mcp_config.as_deref(), agent_file.as_deref());
-        // Where the hooks reach the engine travels in the child's own
-        // environment, which is how a hook this CLI runs inherits it.
-        let mut env = req.env.clone();
-        if let Some(rail) = &req.rail {
-            env.extend(rail.env().map(|(var, value)| (var.to_string(), value)));
-        }
-        // The engine sends a stop back at most once for one state of the
-        // work, so the CLI's own cap on how often a stop hook may do so
-        // would only cut that judgement short.
-        env.insert(STOP_BLOCK_CAP.to_string(), Secret::new("0".to_string()));
+        let env = session_env(&req);
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
@@ -268,6 +262,24 @@ impl ClaudeCodeAdapter {
         })
         .await
     }
+}
+
+/// The environment one session's CLI runs in: the request's own, where the
+/// hooks reach the engine, and the stop cap. The address is not a secret;
+/// the credential is, and goes in `secret`.
+fn session_env(req: &SessionRequest) -> SessionEnv {
+    let mut env = req.env.clone();
+    // Where the hooks reach the engine travels in the child's own
+    // environment, which is how a hook this CLI runs inherits it.
+    if let Some(rail) = &req.rail {
+        rail.hand_to(&mut env);
+    }
+    // The engine sends a stop back at most once for one state of the
+    // work, so the CLI's own cap on how often a stop hook may do so
+    // would only cut that judgement short.
+    env.plain
+        .insert(STOP_BLOCK_CAP.to_string(), "0".to_string());
+    env
 }
 
 /// The CLI's stream-json lines, one event list per line.

@@ -11,6 +11,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
+use yunta_core::durable::{self, Durability};
 use yunta_core::ScopeGlob;
 
 use super::catalog::RunTool;
@@ -79,17 +80,20 @@ impl SessionTools {
         let path = self
             .cwd
             .join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
-        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-            return Err(RunToolError::RequestPending);
-        }
         let yaml = yunta_core::yaml::to_string(&request)
             .map_err(|source| RunToolError::Yaml { source })?;
-        tokio::fs::write(&path, yaml)
-            .await
-            .map_err(|source| RunToolError::Write {
-                path: path.clone(),
-                source,
+        // blocking: `durable` is synchronous, and one small request file is
+        // the whole write, so it lands whole or not at all.
+        let written =
+            durable::create_new(&path, yaml.as_bytes(), Durability::Atomic).map_err(|source| {
+                RunToolError::Write {
+                    path: path.clone(),
+                    source,
+                }
             })?;
+        if !written {
+            return Err(RunToolError::RequestPending);
+        }
         let reply = match answered_by_a_person {
             true => Reply::new(
                 "request recorded — when this attempt ends a person decides whether to widen \

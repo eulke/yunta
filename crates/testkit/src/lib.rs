@@ -32,7 +32,7 @@ mod terminal;
 mod tools;
 mod wait;
 
-pub use bench::{Bench, MOCK_CONFIG};
+pub use bench::{no_secrets, Bench, MOCK_CONFIG};
 pub use bin::{
     checked, checks, full_run_id, handle, hermetic, pool_checkouts, pool_checkouts_in, run_id_from,
     run_id_in, run_yunta, stderr, stdout, Spawning,

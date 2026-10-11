@@ -4800,7 +4800,7 @@
       ]
     },
     "SessionExit": {
-      "description": "What a process left behind: how it ended, and the last lines it wrote\nto stderr, redacted of every value its environment carried.",
+      "description": "What a process left behind: how it ended, and the last lines it wrote\nto stderr, redacted of every declared secret and session token.",
       "type": "object",
       "properties": {
         "end": {

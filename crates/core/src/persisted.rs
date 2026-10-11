@@ -11,10 +11,9 @@
 //! it when a reader asks, and refuses only what its own version says it
 //! cannot read.
 //!
-//! One place, because the alternative is five files each deciding for
-//! itself: today the manifest carries a `schema_version` nobody
-//! compares, and the lock, the process registry, the isolation lock and
-//! the receipt carry none at all.
+//! One place, because the alternative is each file deciding for itself:
+//! the manifest, the pack lock, the process registry and the isolation
+//! lock each declare the version they write, and every read compares it.
 
 use std::collections::BTreeMap;
 
@@ -95,6 +94,11 @@ pub enum PersistedError {
         #[source]
         cause: crate::yaml::YamlError,
     },
+    #[error(
+        "this `{name}` declares schema version {found}, which is not a whole number \
+         that fits in a u32"
+    )]
+    UnreadableVersion { name: &'static str, found: String },
 }
 
 impl<T: Persisted> PersistedDoc<T> {
@@ -132,22 +136,17 @@ impl<T: Persisted> PersistedDoc<T> {
     }
 
     fn read_yaml(bytes: &[u8]) -> Result<Self, PersistedError> {
-        let value: crate::yaml::Value =
+        let mut value: crate::yaml::Value =
             crate::yaml::parse_bytes(bytes).map_err(Self::unreadable)?;
-        let schema_version = Self::check_version(
-            value
-                .get(T::VERSION_KEY)
-                .and_then(crate::yaml::Value::as_u64)
-                .unwrap_or(0) as u32,
-        )?;
-        let mut reconciled = value.clone();
-        T::reconcile(&mut reconciled);
-        let doc = crate::yaml::from_value(reconciled).map_err(Self::unreadable)?;
-        let json = serde_json::to_value(value).map_err(|error| {
+        let json = serde_json::to_value(&value).map_err(|error| {
             Self::unreadable(crate::yaml::YamlError::Serialize {
                 message: error.to_string(),
             })
         })?;
+        let version = declared_version(T::NAME, json.get(T::VERSION_KEY))?;
+        let schema_version = Self::check_version(version)?;
+        T::reconcile(&mut value);
+        let doc = crate::yaml::from_value(value).map_err(Self::unreadable)?;
         Ok(PersistedDoc {
             schema_version,
             unknown: unknown_beside(&json, &doc),
@@ -158,12 +157,8 @@ impl<T: Persisted> PersistedDoc<T> {
     fn read_json(bytes: &[u8]) -> Result<Self, PersistedError> {
         let mut value: serde_json::Value =
             crate::yaml::parse_bytes(bytes).map_err(Self::unreadable)?;
-        let schema_version = Self::check_version(
-            value
-                .get(T::VERSION_KEY)
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0) as u32,
-        )?;
+        let version = declared_version(T::NAME, value.get(T::VERSION_KEY))?;
+        let schema_version = Self::check_version(version)?;
         T::reconcile_json(&mut value);
         let doc = serde_json::from_value(value.clone()).map_err(|error| {
             Self::unreadable(crate::yaml::YamlError::Parse {
@@ -248,10 +243,27 @@ impl<T: Persisted> PersistedDoc<T> {
     }
 }
 
-/// Every top-level key in `written` that `read_back` does not account
-/// for: what this binary's own type did not declare.
 const VERSION_KEY_DEFAULT: &str = "schema_version";
 
+/// The version a document declares. A document that declares none is
+/// version 0. A whole number that fits `u32` is that version; anything
+/// else is refused and never read as another number.
+fn declared_version(
+    name: &'static str,
+    found: Option<&serde_json::Value>,
+) -> Result<u32, PersistedError> {
+    let Some(found) = found else { return Ok(0) };
+    found
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(|| PersistedError::UnreadableVersion {
+            name,
+            found: found.to_string(),
+        })
+}
+
+/// Every top-level key in `written` that `read_back` does not account
+/// for: what this binary's own type did not declare.
 fn unknown_beside<T: Serialize>(
     written: &serde_json::Value,
     read_back: &T,

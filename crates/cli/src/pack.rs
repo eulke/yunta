@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::CommitSha;
 use yunta_engine::process::Supervision;
 
+use crate::error::warn;
+use yunta_core::durable::{self, Durability};
 use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +48,12 @@ pub enum PackError {
     Symlink { path: PathBuf },
     #[error("pack.yaml: {detail}")]
     Manifest { detail: String },
+    #[error("{cause}; the cleanup also failed: {cleanup}")]
+    Cleanup {
+        #[source]
+        cause: Box<PackError>,
+        cleanup: Box<PackError>,
+    },
 }
 
 /// `<source>[@<ref>]` (e.g. `github.com/acme/review-pack@v1.2.0`) —
@@ -292,21 +300,101 @@ pub fn staging_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
         .join(format!(".staging-{}-{}", pack.name(), std::process::id()))
 }
 
-/// Vendors `src` into `dest` through a staging directory beside it:
-/// the whole tree is copied first and renamed into place last, so
-/// `dest` either does not exist or holds the complete pack. A failure
-/// leaves nothing behind; a `dest` that already exists is replaced only
-/// after the new tree is complete, and the old tree is dropped only
-/// once the new one is in place.
-pub fn vendor_into_place(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackError> {
-    let outcome = stage_and_swap(src, staging, dest);
-    if outcome.is_err() {
-        let _ = std::fs::remove_dir_all(staging);
-    }
-    outcome
+/// A tree moved into place. The tree it replaced stays on disk until the
+/// caller knows the whole install, the lock included, has landed.
+#[must_use]
+pub struct Swap {
+    dest: PathBuf,
+    previous: Option<PathBuf>,
 }
 
-fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackError> {
+impl Swap {
+    /// The install failed after the move: the installed tree is removed, and
+    /// the replaced tree, when there was one, goes back to `dest`.
+    pub fn undo(self) -> Result<(), PackError> {
+        // Nothing is there when the move never reached `dest`.
+        Swap::discard(&self.dest)?;
+        let Some(previous) = self.previous else {
+            return Ok(());
+        };
+        std::fs::rename(&previous, &self.dest).map_err(|source| PackError::Write {
+            path: self.dest,
+            source,
+        })
+    }
+
+    /// The install landed: the replaced tree is dropped. A failure here is a
+    /// warning, because the installed tree is already in place.
+    pub fn commit(self) {
+        if let Some(previous) = self.previous {
+            if let Err(error) = std::fs::remove_dir_all(&previous) {
+                warn(format!(
+                    "could not remove the replaced tree at {}: {error}",
+                    previous.display()
+                ));
+            }
+        }
+    }
+
+    /// Removes the tree at `staging` when there is one; a failure is the
+    /// caller's to report.
+    pub fn discard(staging: &Path) -> Result<(), PackError> {
+        match std::fs::remove_dir_all(staging) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(PackError::Write {
+                path: staging.to_path_buf(),
+                source,
+            }),
+        }
+    }
+
+    /// Moves the tree at `dest` aside for `remove`: nothing is deleted until
+    /// `commit`. `None` when there is no tree to move.
+    pub fn aside(dest: &Path) -> Result<Option<Swap>, PackError> {
+        let previous = dest.with_file_name(format!(
+            ".removed-{}-{}",
+            dest.file_name().and_then(|n| n.to_str()).unwrap_or("pack"),
+            std::process::id()
+        ));
+        match std::fs::rename(dest, &previous) {
+            Ok(()) => Ok(Some(Swap {
+                dest: dest.to_path_buf(),
+                previous: Some(previous),
+            })),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(PackError::Write {
+                path: dest.to_path_buf(),
+                source,
+            }),
+        }
+    }
+}
+
+/// The error of a step that failed, joined with the error of the cleanup
+/// that followed it when that cleanup failed too.
+pub fn with_cleanup(cause: PackError, cleanup: Result<(), PackError>) -> PackError {
+    match cleanup {
+        Ok(()) => cause,
+        Err(cleanup) => PackError::Cleanup {
+            cause: Box::new(cause),
+            cleanup: Box::new(cleanup),
+        },
+    }
+}
+
+/// Vendors `src` into `dest` through a staging directory beside it: the
+/// whole tree is copied first and renamed into place last, so `dest` either
+/// does not exist or holds the complete pack. A failure removes the staging
+/// tree and puts `dest` back as it was; a cleanup that fails too is joined to
+/// the error. A `dest` that already exists is replaced only after the new
+/// tree is complete, and the replaced tree stays on disk until the returned
+/// `Swap` is committed.
+pub fn vendor_into_place(src: &Path, staging: &Path, dest: &Path) -> Result<Swap, PackError> {
+    stage_and_swap(src, staging, dest).map_err(|cause| with_cleanup(cause, Swap::discard(staging)))
+}
+
+fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<Swap, PackError> {
     if let Some(parent) = staging.parent() {
         std::fs::create_dir_all(parent).map_err(|source| PackError::Write {
             path: parent.to_path_buf(),
@@ -326,22 +414,24 @@ fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackErr
             source,
         })?;
     }
-    if let Err(source) = std::fs::rename(staging, dest) {
-        if had_previous {
-            let _ = std::fs::rename(&previous, dest);
+    let swap = Swap {
+        dest: dest.to_path_buf(),
+        previous: had_previous.then_some(previous),
+    };
+    match std::fs::rename(staging, dest) {
+        Ok(()) => Ok(swap),
+        Err(source) => {
+            let cause = PackError::Write {
+                path: dest.to_path_buf(),
+                source,
+            };
+            // Without a replaced tree, `dest` was never this swap's to clear.
+            if !had_previous {
+                return Err(cause);
+            }
+            Err(with_cleanup(cause, swap.undo()))
         }
-        return Err(PackError::Write {
-            path: dest.to_path_buf(),
-            source,
-        });
     }
-    if had_previous {
-        std::fs::remove_dir_all(&previous).map_err(|source| PackError::Write {
-            path: previous,
-            source,
-        })?;
-    }
-    Ok(())
 }
 
 pub fn lock_path(cwd: &Path) -> PathBuf {
@@ -375,15 +465,8 @@ pub fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
         .map_err(|e| PackError::Manifest {
             detail: format!("cannot serialize yunta.lock: {}", yunta_core::describe(&e)),
         })?;
-    // Written beside the lock and renamed over it: a reader never sees
-    // a half-written file, and a failed write leaves the old lock intact.
-    let staging = path.with_extension("lock.tmp");
-    std::fs::write(&staging, yaml).map_err(|source| PackError::Write {
-        path: staging.clone(),
-        source,
-    })?;
-    std::fs::rename(&staging, &path).map_err(|source| {
-        let _ = std::fs::remove_file(&staging);
-        PackError::Write { path, source }
-    })
+    // Replaced whole and synced before the call returns: a reader never sees
+    // a half-written lock, and a failed write leaves the lock as it was.
+    durable::replace(&path, &yaml, Durability::Synced)
+        .map_err(|source| PackError::Write { path, source })
 }

@@ -23,6 +23,7 @@ use yunta_core::port::{
     PullRequestRequest, ReviewOutcome,
 };
 use yunta_core::{GitHubRepo, Secret};
+use yunta_testkit_core::repo::blob_id;
 
 #[derive(Clone)]
 struct StubPr {
@@ -52,6 +53,9 @@ struct StubState {
     refusal: Option<(u16, &'static str)>,
     /// What the branch holds, by path, as the Contents API serves it.
     files: HashMap<String, Vec<u8>>,
+    /// Answer a read of a file the way the API answers one too large to
+    /// come inline: its blob id, and no bytes.
+    over_inline_limit: bool,
 }
 
 #[derive(Clone, Default)]
@@ -269,7 +273,16 @@ async fn get_contents(
     Path((_owner, _repo, path)): Path<(String, String, String)>,
 ) -> Answer {
     record(&stub, "GET", &format!("/contents/{path}"), &HashMap::new());
-    match stub.with(|s| s.files.get(&path).cloned()) {
+    let (stored, over_inline_limit) =
+        stub.with(|s| (s.files.get(&path).cloned(), s.over_inline_limit));
+    match stored {
+        // Over the inline limit the file is named by its blob id, and no
+        // bytes come with it.
+        Some(content) if over_inline_limit => Ok(Json(json!({
+            "sha": blob_id(&content),
+            "encoding": "none",
+            "content": "",
+        }))),
         // Inline, base64 in lines, the way the Contents API sends it.
         Some(content) => {
             let encoded = STANDARD.encode(&content);
@@ -279,7 +292,7 @@ async fn get_contents(
                 .map(|chunk| std::str::from_utf8(chunk).unwrap())
                 .collect();
             Ok(Json(json!({
-                "sha": format!("blob-{}", content.len()),
+                "sha": blob_id(&content),
                 "encoding": "base64",
                 "content": lines.join("\n"),
             })))
@@ -461,6 +474,21 @@ async fn a_later_lap_commits_only_what_changed_to_the_pull_request_it_reuses() {
     assert_eq!(
         stub.with(|s| s.files["spec.md"].clone()),
         b"# spec, corrected"
+    );
+}
+
+#[tokio::test]
+async fn an_unchanged_file_over_the_inline_limit_is_not_committed_again() {
+    let stub = Stub::default();
+    stub.with(|s| s.over_inline_limit = true);
+    let forge = forge_at(serve(stub.clone()).await);
+    let lap = request("yunta/run-1/gate", "run-1");
+    forge.publish(&lap).await.unwrap();
+    forge.publish(&lap).await.unwrap();
+    assert_eq!(
+        commits(&stub).len(),
+        1,
+        "a file the branch holds is not committed again"
     );
 }
 

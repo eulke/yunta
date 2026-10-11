@@ -151,6 +151,12 @@ Se conservan para que nadie los reabra por accidente; el ADR citado manda.
   juzga cada efecto de su fixture por la misma función. Lo que el cerco no pudo
   evitar sigue atrapándolo el diff del post-check, y una escritura que cruza un
   cerco declarado exacto es además un `engine_finding`.
+- Durabilidad de las escrituras del engine → `core::durable`, con dos clases:
+  `Atomic` (un rename, sin fsync) para el estado que se reescribe, manifest de cada
+  run incluido, y `Synced` (fsync del archivo y de su directorio) para los objetos
+  por SHA-256 y el lock del pack. Costo: cada escritura `Synced` espera al disco
+  antes de existir; las demás no pagan ese fsync. Un corte de energía antes de que el
+  sistema de archivos confirme el rename puede dejar un run sin su `manifest.yaml`.
 
 ## Ideas estacionadas (no comprometidas)
 

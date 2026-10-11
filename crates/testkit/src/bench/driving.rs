@@ -57,7 +57,7 @@ impl Bench {
             fixture_yaml,
             config_yaml,
             &NoInteraction,
-            Some(std::sync::Arc::new(KnownSecrets(known))),
+            Arc::new(KnownSecrets(known)),
         )
         .await
     }
@@ -87,7 +87,7 @@ impl Bench {
             fixture_yaml,
             config_yaml,
             human_interaction,
-            None,
+            no_secrets(),
         )
         .await
     }
@@ -100,9 +100,17 @@ impl Bench {
         fixture_yaml: &str,
         config_yaml: &str,
         human_interaction: &dyn HumanInteraction,
-        secrets: Option<Arc<dyn yunta_core::SecretSource>>,
+        secrets: Arc<dyn yunta_core::SecretSource>,
     ) -> RunReport {
-        self.create(workflow_yaml, fixture_yaml, config_yaml).await;
+        self.try_create_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            || {},
+            secrets.clone(),
+        )
+        .await
+        .expect("create run");
         self.wake_with_all(human_interaction, secrets).await
     }
 
@@ -116,7 +124,7 @@ impl Bench {
     ) -> Result<RunReport, yunta_engine::RunError> {
         self.try_create(workflow_yaml, fixture_yaml, MOCK_CONFIG)
             .await?;
-        self.wake_through(&NoInteraction, None).await
+        self.wake_through(&NoInteraction, no_secrets()).await
     }
 
     /// Creates the run and stops there, answering with its directory or
@@ -133,7 +141,7 @@ impl Bench {
     /// Executes the run this bench already created, keeping the refusal
     /// a wake earns.
     pub async fn try_wake(&self) -> Result<RunReport, yunta_engine::RunError> {
-        self.wake_through(&NoInteraction, None).await
+        self.wake_through(&NoInteraction, no_secrets()).await
     }
 
     /// The same, with a human answering what the run asks.
@@ -141,7 +149,7 @@ impl Bench {
         &self,
         human_interaction: &dyn HumanInteraction,
     ) -> Result<RunReport, yunta_engine::RunError> {
-        self.wake_through(human_interaction, None).await
+        self.wake_through(human_interaction, no_secrets()).await
     }
 
     /// Runs `(workflow, fixture)` with `sabotage` handed the run
@@ -168,7 +176,7 @@ impl Bench {
     ) -> RunReport {
         let run_dir = self.create(workflow_yaml, fixture_yaml, MOCK_CONFIG).await;
         sabotage(&run_dir);
-        self.wake_with_all(human_interaction, None).await
+        self.wake_with_all(human_interaction, no_secrets()).await
     }
 
     /// The same, keeping the refusal the sabotaged wake earns.
@@ -182,7 +190,7 @@ impl Bench {
             .try_create(workflow_yaml, fixture_yaml, MOCK_CONFIG)
             .await?;
         sabotage(&run_dir);
-        self.wake_through(&NoInteraction, None).await
+        self.wake_through(&NoInteraction, no_secrets()).await
     }
 
     /// Executes the run this bench already created, again.
@@ -190,7 +198,7 @@ impl Bench {
     /// A fresh call, exactly like the separate `yunta resume` process
     /// that makes one: nothing carries across a wake but the log.
     pub async fn wake(&self) -> RunReport {
-        self.wake_with_all(&NoInteraction, None).await
+        self.wake_with_all(&NoInteraction, no_secrets()).await
     }
 
     /// The same wake, its sessions answering from a fresh fixture —
@@ -217,13 +225,13 @@ impl Bench {
                 .insert("mock".into(), mock.clone() as Arc<dyn Adapter>);
             driven.mock = mock;
         }
-        self.wake_with_all(human_interaction, None).await
+        self.wake_with_all(human_interaction, no_secrets()).await
     }
 
     /// The same wake, with a human answering — what resolves a gate
     /// instead of letting it degrade to a pause.
     pub async fn wake_answering(&self, human_interaction: &dyn HumanInteraction) -> RunReport {
-        self.wake_with_all(human_interaction, None).await
+        self.wake_with_all(human_interaction, no_secrets()).await
     }
 
     /// Creates the run and records what waking it takes, answering with
@@ -261,6 +269,27 @@ impl Bench {
         config_yaml: &str,
         between: impl FnOnce(),
     ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        self.try_create_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            between,
+            no_secrets(),
+        )
+        .await
+    }
+
+    /// The same creation, with the birth's redactor resolved from `secrets`:
+    /// a secret `secrets` binds stays out of the birth event, and one too
+    /// short to redact refuses the run before it takes a checkout.
+    async fn try_create_with(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        between: impl FnOnce(),
+        secrets: Arc<dyn yunta_core::SecretSource>,
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
         let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
         let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
         let frozen = self.freeze(&workflow, &config).await;
@@ -271,6 +300,7 @@ impl Bench {
             self.birth.iter().cloned().chain(frozen.documents).collect();
         let manifest = frozen.manifest;
         between();
+        let redactor = yunta_engine::run_redactor(&manifest, secrets.as_ref())?;
         let tree = self.tree_for(&manifest).await?;
 
         let run_dir = create_run(
@@ -287,6 +317,7 @@ impl Bench {
                 // suite.
                 baseline: None,
                 environment: yunta_engine::process::execution_environment(self.ambient.as_ref()),
+                redactor: &redactor,
             },
             &self.storage.async_handle(),
             self.supervision(),
@@ -336,6 +367,7 @@ impl Bench {
             &self.worktree,
             &run_dir,
             manifest,
+            self.clock.clone(),
         )
     }
 
@@ -363,7 +395,7 @@ impl Bench {
     async fn wake_through(
         &self,
         human_interaction: &dyn HumanInteraction,
-        secrets: Option<Arc<dyn yunta_core::SecretSource>>,
+        secrets: Arc<dyn yunta_core::SecretSource>,
     ) -> Result<RunReport, yunta_engine::RunError> {
         let (manifest, run_dir, adapters, named) = self.driven(|driven| {
             (
@@ -417,7 +449,7 @@ impl Bench {
     async fn wake_with_all(
         &self,
         human_interaction: &dyn HumanInteraction,
-        secrets: Option<Arc<dyn yunta_core::SecretSource>>,
+        secrets: Arc<dyn yunta_core::SecretSource>,
     ) -> RunReport {
         self.wake_through(human_interaction, secrets)
             .await
@@ -450,10 +482,17 @@ impl Bench {
 /// The secrets a test chose, instead of whatever the process happens to
 /// carry: a test that reached the real environment would assert about a
 /// machine rather than about the engine.
+#[derive(Default)]
 struct KnownSecrets(std::collections::HashMap<String, String>);
 
 impl yunta_core::SecretSource for KnownSecrets {
     fn get(&self, name: &str) -> Option<yunta_core::Secret<String>> {
         self.0.get(name).cloned().map(yunta_core::Secret::from)
     }
+}
+
+/// The source of a run that no test gives secrets. It binds nothing, so a
+/// declared secret stays unset rather than reading the process's own value.
+pub fn no_secrets() -> Arc<dyn yunta_core::SecretSource> {
+    Arc::new(KnownSecrets::default())
 }

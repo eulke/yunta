@@ -7,12 +7,11 @@
 
 use std::path::Path;
 
-use yunta_core::events::{
-    EventDraft, EventPayload, RunEvent, RunFinishedPayload, StoredEvent, TerminalState,
-};
-use yunta_core::{Clock, Responder, RunId};
+use yunta_core::events::{EventPayload, RunEvent, RunFinishedPayload, StoredEvent, TerminalState};
+use yunta_core::{Clock, Redactor, Responder, RunId};
 use yunta_storage::{AsyncStorage, StorageError};
 
+use crate::run_log::RunLog;
 use crate::EngineLiveness;
 
 /// Why a run cannot be closed.
@@ -42,7 +41,8 @@ pub enum CloseRunError {
 /// called it is stopped like any other.
 ///
 /// Nothing else of the run is touched: its branch and its worktree stay
-/// for a person to read, and for `gc` to remove.
+/// for a person to read, and for `gc` to remove. The closing event goes
+/// through the run's log, redacted with `redactor`.
 pub async fn close_run(
     storage: &AsyncStorage,
     run_id: &RunId,
@@ -50,6 +50,7 @@ pub async fn close_run(
     clock: &dyn Clock,
     engine: EngineLiveness,
     by: Responder,
+    redactor: &Redactor,
 ) -> Result<(), CloseRunError> {
     let events = storage.events_for_run(run_id.clone()).await?;
     if events.iter().any(finishes_the_run) {
@@ -70,22 +71,14 @@ pub async fn close_run(
         crate::stats::tasks_done(&state),
     )
     .closed_by(by);
-    storage
-        .append(
-            EventDraft {
-                run_id: run_id.clone(),
-                node_id: None,
-                payload: EventPayload::Run(RunEvent::Finished(closed)),
-            },
-            clock.now(),
-        )
+    RunLog::new(storage, run_id, clock, redactor)
+        .record(None, EventPayload::Run(RunEvent::Finished(closed)))
         .await?;
     let events = storage.events_for_run(run_id.clone()).await?;
-    let jsonl = crate::events_export::render_events_jsonl(&events)
-        .map_err(|error| CloseRunError::Export(yunta_core::describe(&error)))?;
-    tokio::fs::write(run_dir.join("events.jsonl"), jsonl)
-        .await
-        .map_err(|error| CloseRunError::Export(error.to_string()))
+    // blocking: `write_jsonl` replaces the whole file on this thread;
+    // `tokio::fs` would run the same write and rename on a pool thread.
+    crate::events_export::write_jsonl(run_dir, &events)
+        .map_err(|error| CloseRunError::Export(yunta_core::describe(&error)))
 }
 
 fn finishes_the_run(event: &StoredEvent) -> bool {

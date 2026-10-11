@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::host::{NodeScopeAccess, RunToolsAccess, TaskAccess};
+use super::host::{NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
 use super::session::SessionTools;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
@@ -102,7 +102,7 @@ pub async fn open_session_listener(
     (task, node_scope): (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>),
     cwd: PathBuf,
 ) -> std::io::Result<RunToolsSession> {
-    let token = mint_token();
+    let token = yunta_core::Secret::from(mint_token());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let url = format!("http://127.0.0.1:{port}/mcp");
@@ -111,6 +111,7 @@ pub async fn open_session_listener(
     let shutdown = task
         .as_ref()
         .map_or_else(CancellationToken::new, |t| t.cancel.child_token());
+    let access = redacting(access, &token);
 
     let naming = access.naming;
     let rails = Arc::new(super::rail::SessionRails::default());
@@ -124,9 +125,8 @@ pub async fn open_session_listener(
         Arc::clone(&listed),
     );
     let offered = super::catalog::offered(&tools);
-    let server = serve(listener, tools, &shutdown, &token);
+    let server = serve(listener, tools, &shutdown, token.expose());
 
-    let token = yunta_core::Secret::from(token);
     Ok(RunToolsSession {
         endpoint: RunToolsEndpoint {
             url,
@@ -143,6 +143,18 @@ pub async fn open_session_listener(
         shutdown,
         server,
     })
+}
+
+/// `access` with a host whose log also takes `token` out of what it
+/// records. Both endpoints of a session hold this one value, so the
+/// redactor takes it in once.
+fn redacting(access: RunToolsAccess, token: &yunta_core::Secret<String>) -> RunToolsAccess {
+    let mut host: RunToolsHost = (*access.host).clone();
+    host.redactor = host.redactor.extended([token.clone()]);
+    RunToolsAccess {
+        host: Arc::new(host),
+        ..access
+    }
 }
 
 /// Serves `tools` on `listener` until `shutdown`: the session's run

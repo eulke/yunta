@@ -14,10 +14,12 @@ use std::pin::Pin;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventDraft, EventPayload, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
+    EventPayload, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
 };
-use yunta_core::{Clock, ModeName, NodeId, RunId};
+use yunta_core::{Clock, ModeName, NodeId, Redactor, RunId};
 use yunta_storage::AsyncStorage;
+
+use crate::run_log::RunLog;
 
 use super::schedule::{self, Decision};
 use super::{baseline, gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
@@ -36,21 +38,17 @@ fn run_paused(reason: &PauseReason) -> EventPayload {
     EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason)))
 }
 
+/// Records the pause of a run whose engine is gone, with the redactor the
+/// caller resolved from the run's manifest before it wrote anything.
 pub async fn record_pause_after_crash(
     storage: &AsyncStorage,
     run_id: &RunId,
     reason: &PauseReason,
     clock: &dyn Clock,
+    redactor: &Redactor,
 ) -> Result<(), RunError> {
-    storage
-        .append(
-            EventDraft {
-                run_id: run_id.clone(),
-                node_id: None,
-                payload: run_paused(reason),
-            },
-            clock.now(),
-        )
+    RunLog::new(storage, run_id, clock, redactor)
+        .record(None, run_paused(reason))
         .await?;
     Ok(())
 }
@@ -354,7 +352,7 @@ async fn goes_on(
 /// finding, rechecks approved gates, and freezes the mode — everything
 /// that happens once per invocation, before the scheduler loop.
 async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
-    let (ctx, root_cancel, registry_error) = super::invocation::build_ctx(env, depth);
+    let (ctx, root_cancel, registry_error) = super::invocation::build_ctx(env, depth)?;
 
     let view = ctx.run_view().await?;
     if view.events.is_empty() {

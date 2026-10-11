@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
+use yunta_core::durable::{self, Durability};
 use yunta_core::events::{EventPayload, StoredEvent};
 use yunta_core::{ContentHash, Node, NodeId};
 
@@ -327,12 +328,11 @@ pub(in crate::run) async fn write_node_output(
     content.extend_from_slice(b"\n\nstderr:\n");
     content.extend_from_slice(stderr);
     content.push(b'\n');
-    tokio::fs::write(&path, content)
-        .await
-        .map_err(|source| RunError::Io {
-            context: format!("write captured output for node `{node_id}`"),
-            source,
-        })
+    // blocking: one node's captured output, replaced whole.
+    durable::replace(&path, &content, Durability::Atomic).map_err(|source| RunError::Io {
+        context: format!("write captured output for node `{node_id}`"),
+        source,
+    })
 }
 
 /// Puts a resolved source's bytes where the run keeps every artifact's

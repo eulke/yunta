@@ -8,7 +8,6 @@
 //! rendezvous that is a poll in one file and a fifo in another stops
 //! being possible.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use yunta_core::fence::{Advice, Fence};
@@ -16,6 +15,7 @@ use yunta_core::rail::{RailCommand, RailEndpoint};
 
 use futures::StreamExt;
 use yunta_core::events::SessionExit;
+use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{AgentEvent, AgentSession, Budget, PermissionProfile, SessionRequest};
 use yunta_core::process::signal::{liveness, Liveness};
 use yunta_core::Pid;
@@ -34,7 +34,7 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         formats: false,
         cli_config: yunta_core::CliConfig::Inherit,
         network: true,
-        env: HashMap::new(),
+        env: SessionEnv::default(),
         fence: Fence::everything(Vec::new(), Advice::ReportFinding),
         rail_command: Some(RailCommand::new(PathBuf::from("yunta"))),
         // Where a hook would reach the engine: nothing listens there, and

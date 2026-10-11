@@ -29,6 +29,11 @@ pub enum StorageError {
         source: serde_json::Error,
     },
 
+    /// An event whose secrets cannot be taken out of it while it still reads
+    /// back as the same event: refused, and never written in the clear.
+    #[error("the event cannot be stored with its secrets taken out: {0}")]
+    Unredactable(#[from] yunta_core::Unredactable),
+
     #[error("failed to read events for run `{run_id}`")]
     Read {
         run_id: RunId,

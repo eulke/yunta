@@ -11,8 +11,9 @@
 # - $CLAUDE_STUB_STDERR_FILE, if set: its contents go to stderr before
 #   the session streams anything — what a CLI that refuses its
 #   configuration says on its way out. A file rather than the text
-#   itself, because a session redacts every value its environment
-#   carried and a test asserting on the line needs it unredacted.
+#   itself, because a session redacts every declared secret and session
+#   token from its stderr tail, and a test asserting on the line needs it
+#   unredacted.
 # - $CLAUDE_STUB_ENV_FILE, if set: the environment it ran with, one
 #   `NAME=value` per line.
 # - $CLAUDE_STUB_EXIT, if set: the status to exit with.
@@ -22,9 +23,9 @@
 # - streams the JSON lines from $CLAUDE_STUB_LINES_FILE if set, else from
 #   .claude-stub-lines.jsonl relative to the working directory the
 #   adapter launched it in — real yunta runs don't route test scaffolding
-#   through SessionRequest.env (that field carries secrets only), so a
-#   caller that only controls the worktree still has a way to script a
-#   session.
+#   through SessionRequest.env (the engine fills that field with the
+#   session's shared directories and declared secrets), so a caller that
+#   only controls the worktree still has a way to script a session.
 # - (if $CLAUDE_STUB_HANG is set) ignores SIGINT and blocks afterwards —
 #   exercising the kill fallback a session that ignores interrupt needs.
 # - (if $CLAUDE_STUB_LINGER is set) blocks until interrupted, then exits —

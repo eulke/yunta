@@ -37,7 +37,7 @@ pub enum SessionEnd {
 }
 
 /// What a process left behind: how it ended, and the last lines it wrote
-/// to stderr, redacted of every value its environment carried.
+/// to stderr, redacted of every declared secret and session token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionExit {
     pub end: SessionEnd,

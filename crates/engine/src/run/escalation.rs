@@ -8,15 +8,16 @@
 //! that could drift apart.
 
 use yunta_core::events::{
-    Escalation, EscalationError, EventDraft, EventPayload, Fact, Failure, GateResolvedPayload,
+    Escalation, EscalationError, EventPayload, Fact, Failure, GateResolvedPayload,
     GateWaitingPayload, HumanChoice, Refusal, StoredEvent,
 };
-use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, OptionId, RunId, Workflow};
+use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Workflow};
 
 use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
 use crate::reserved::offers;
+use crate::run_log::RunLog;
 use yunta_core::events::{GateEvent, RerouteCause, RunEvent};
 
 /// Whether an event is the run-level `run_paused` marker — the one predicate
@@ -279,6 +280,7 @@ pub async fn resolve_gate(
     run_id: &RunId,
     clock: &dyn yunta_core::Clock,
     choice: HumanChoice,
+    redactor: &Redactor,
 ) -> Result<(), ResolveGateError> {
     let events = storage.events_for_run(run_id.clone()).await?;
     if !events.last().is_some_and(is_run_paused) {
@@ -302,26 +304,11 @@ pub async fn resolve_gate(
             Refusal::Withheld { chosen, because } => ResolveGateError::Withheld { chosen, because },
         })?;
     let resolution = GateResolvedPayload::Chosen(choice);
-    storage
-        .append(
-            EventDraft {
-                run_id: run_id.clone(),
-                node_id: Some(node.clone()),
-                payload: EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
-            },
-            clock.now(),
-        )
-        .await?;
-    storage
-        .append(
-            EventDraft {
-                run_id: run_id.clone(),
-                node_id: Some(node),
-                payload: EventPayload::Gates(GateEvent::Resolved(resolution)),
-            },
-            clock.now(),
-        )
-        .await?;
+    let log = RunLog::new(storage, run_id, clock, redactor);
+    let waiting = EventPayload::Gates(GateEvent::Waiting(escalation.into_payload()));
+    log.record(Some(&node), waiting).await?;
+    let resolved = EventPayload::Gates(GateEvent::Resolved(resolution));
+    log.record(Some(&node), resolved).await?;
     Ok(())
 }
 

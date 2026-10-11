@@ -41,6 +41,9 @@ async fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
     let open = ctx.open_run(run_id).await?;
     let bound = crate::project::bound_checkout(&open.events);
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
+    // Resolved before any checkout is taken, so a refused resume takes no
+    // checkout and writes nothing; the wake resolves the same redactor again.
+    yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
     let worktree = ctx
@@ -69,7 +72,9 @@ async fn still_or_again(
         return Ok(named);
     }
     let run_dir = ctx.project.runs_root.join(run_id.as_str());
-    let pool = ctx.project.pool_of(manifest, &ctx.cwd, &run_dir);
+    let pool = ctx
+        .project
+        .pool_of(manifest, &ctx.cwd, &run_dir, std::sync::Arc::new(ctx.clock));
     Ok(pool
         .wake_checkout(run_id, &named, ctx.supervision())
         .await?)

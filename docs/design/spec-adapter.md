@@ -287,7 +287,9 @@ telemetría, no evidencia.
 - **O3. Nada sensible en eventos**: los payloads llevan digests y resúmenes, jamás
   contenido de archivos, prompts completos ni valores de env. El engine además
   redacta todo valor de secreto conocido antes de persistir (I12): defensa en
-  profundidad, no permiso para descuidarse.
+  profundidad, no permiso para descuidarse. El conjunto de secretos son los valores
+  de `secret_names` más los tokens de sesión; un payload que el redactor no puede
+  leer de vuelta se rechaza y no se persiste.
 - **O4. El prompt viaja por stdin**: el adapter escribe el prompt en la entrada
   estándar del CLI y cierra el pipe; nunca lo pasa como argumento, donde cualquier
   proceso de la máquina lo leería en la lista de procesos. El CLI que termina antes

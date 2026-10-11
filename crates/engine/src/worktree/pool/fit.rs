@@ -7,6 +7,7 @@ use std::cmp::Reverse;
 
 use yunta_core::CommitSha;
 
+use super::space::{Built, Size};
 use super::survey::{Slot, Standing};
 
 /// Who takes a checkout of the pool.
@@ -118,12 +119,16 @@ impl Candidate {
     /// starts.
     pub(super) fn rank(&self, away: usize) -> Rank {
         let warmth = match self.builds {
-            true => (self.build, 0),
+            // A user that builds ignores the weight: its build alone ranks it.
+            true => (self.build, None),
             false => {
-                // What nobody has counted is not known to be light.
-                let built = self.slot.built.as_ref();
-                let bytes = built.and_then(|built| built.bytes).unwrap_or(u64::MAX);
-                (self.build.lightest_first(), bytes)
+                // What nobody has counted is not known to be light: it ranks heaviest.
+                let size = self
+                    .slot
+                    .built
+                    .as_ref()
+                    .map_or(Size::Uncounted, Built::size);
+                (self.build.lightest_first(), Some(size))
             }
         };
         Rank {
@@ -142,7 +147,7 @@ impl Candidate {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Rank {
     claim: Claim,
-    warmth: (Build, u64),
+    warmth: (Build, Option<Size>),
     away: usize,
     used: Reverse<Option<chrono::DateTime<chrono::Utc>>>,
     number: u32,

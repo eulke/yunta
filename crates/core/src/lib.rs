@@ -27,6 +27,7 @@ pub mod commit_message;
 mod config;
 pub mod diagnostic;
 pub mod disk;
+pub mod durable;
 mod error;
 pub mod events;
 pub mod fence;
@@ -71,13 +72,14 @@ pub use config::{
     HomeExpansionError, Isolation, LimitsConfig, McpServerConfig, NetworkPermissions,
     PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig, PoolConfig, PricingEntry,
     ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor, RunnerCandidate, SecretSource,
-    SkillsConfig, StorageConfig, REDACTED,
+    ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS, REDACTED,
 };
 pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
     Subject,
 };
 pub use error::{describe, with_causes, AdapterError, Result, Unbuildable};
+pub use events::Unredactable;
 pub use findings::{
     FindingEntry, FindingsFile, InvalidLocation, LineRange, Location, ProposedCriterionEntry,
     RelativePath, Withdrawal,
@@ -85,7 +87,7 @@ pub use findings::{
 pub use glob::{
     listed_globs, might_overlap, reaches_any, scope_globset, InvalidScopeGlob, ScopeGlob,
 };
-pub use hash::{sha256_hex, CommitSha, ContentHash, TreeId};
+pub use hash::{git_blob_id, sha256_hex, CommitSha, ContentHash, TreeId};
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
     is_path_segment, AdapterId, AgentName, CommandName, ExecutorName, FindingId, GitHubRepo,

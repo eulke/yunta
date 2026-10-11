@@ -71,6 +71,7 @@ impl ToolsHost {
                     &root.path().join("worktrees"),
                     &worktree,
                     &run_dir,
+                    clock.clone(),
                 ),
                 process_registry: None,
                 subprocess_vars: Vec::new(),

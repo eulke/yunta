@@ -10,6 +10,8 @@
 mod driving;
 mod reading;
 
+pub use driving::no_secrets;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
