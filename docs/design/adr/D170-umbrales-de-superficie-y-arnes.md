@@ -33,12 +33,13 @@ revised_by: [D216, D217, D220]
 | `GAP` | 4 celdas | `render/src/diagram/place.rs` | celdas entre dos cajas de un diagrama lado a lado: lugar para que un enlace pase entre ellas y se lea aparte de las dos (D228) |
 | stagger del blackboard | 60 ms | `engine/tests/blackboard.rs` | separación entre dos posteos para probar que la consolidación ordena por contenido y no por llegada; se reemplaza por una propiedad sobre permutaciones de llegada en M21 |
 
-Un `const` numérico nuevo en `src` lleva en su rustdoc la referencia a esta
-decisión o a la que lo fije; el ratchet `numeric_const_without_adr` lo mide.
+Un `const` numérico nuevo en `src` lleva, en una línea `///` junto a él, su razón
+escrita en prosa; el ratchet `numeric_const_without_reason` lo mide y lo sostiene en 0.
 
-Racional: cada uno de estos valores tenía rustdoc con su porqué y ninguno
-tenía decisión registrada; CLAUDE.md dice que un umbral sin decisión es una
-decisión que alguien tomó solo.
+Racional: cada uno de estos valores tenía rustdoc con su porqué y ninguno tenía
+decisión registrada. Lo que el ratchet pide es la razón escrita junto al valor. Una
+razón que es un compromiso transversal, costoso de revertir, sigue mereciendo su
+decisión propia.
 
 Descartados: un ADR por umbral (dispersa lo que se decide junto); dejar los
 valores solo en rustdoc (no es un registro).

@@ -1,7 +1,6 @@
-//! `render_events_jsonl` — pure rendering, plus the
-//! property test the acceptance criterion names verbatim:
-//! "derivar estado desde el JSONL produce el mismo `RunState` que el
-//! replay desde la DB."
+//! `render_events_jsonl` — pure rendering, plus a check that deriving the
+//! state from the JSONL produces the same `RunState` as replaying from the
+//! DB.
 
 use yunta_core::events::{
     EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, StoredEvent,
@@ -66,11 +65,11 @@ fn an_empty_log_renders_to_an_empty_string() {
 
 #[test]
 fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events() {
-    // The Plan's own ✓: "derivar estado desde el JSONL produce el mismo
-    // RunState que el replay desde la DB" — exercised here with several
-    // fixtures covering different event kinds, the same hand-fixture
-    // style `replay_is_deterministic_across_several_fixtures` already
-    // uses (no proptest/quickcheck dependency in this workspace).
+    // Deriving the state from the JSONL gives the same `RunState` as
+    // replaying from the DB. It is exercised here with several fixtures
+    // covering different event kinds, the same hand-fixture style
+    // `replay_is_deterministic_across_several_fixtures` already uses (no
+    // proptest/quickcheck dependency in this workspace).
     let fixtures: Vec<Vec<StoredEvent>> = vec![
         sample_events(),
         Log::for_run("run-1")

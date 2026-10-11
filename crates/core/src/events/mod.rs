@@ -1,5 +1,5 @@
 //! Event log types: every `kind` the engine emits, as the event schema
-//! (`docs/design/spec-events.md`) defines them.
+//! (`crates/core/schemas/events.json`) defines them.
 //!
 //! Versioning: `schema_version` is
 //! per `kind`, not global. Every kind starts at v1 here — there is no

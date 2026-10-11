@@ -294,7 +294,7 @@ adapter cuyo codec lee la llamada y el momento (`before-write`,
 `after-write`, `before-stop`); la respuesta la da el engine por el listener de
 esa sesión, con el mismo token que sus herramientas, y deja en el log lo que
 juzgó o hizo (D249, D254, D255).
-_Evitar_: hook del cerco, `yunta fence`.
+_Evitar_: fence hook, FenceHook, yunta fence.
 
 **Codec** (`RailCodec`):
 La traducción entre el riel y el hook de un CLI: qué pregunta la llamada que

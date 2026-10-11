@@ -9,7 +9,8 @@
 //! `pulls/.../comments`), and `crates/adapters/tests/forge_github.rs`
 //! drives this client against a local stub that answers in that shape.
 //! What no test here can tell is whether the live API still answers
-//! that way; that is the manual smoke test's job.
+//! that way; a check run by hand against the real forge covers it, and
+//! cargo test runs the stubs only.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use yunta_core::commit_message::CommitMessage;

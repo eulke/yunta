@@ -10,11 +10,11 @@ use yunta_core::events::{GateEvent, ScopeEvent, TaskEvent};
 #[tokio::test]
 async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_implicit_expansion()
 {
-    // ✓ del Plan: nada le da a un agente una vía para ampliar su propio
-    // scope salvo el protocolo de request — ni un `within` que
-    // técnicamente cubriría el path lo salva si nunca se escribió un
-    // request. `scope_expansion: { mode: rules, within: [b.txt] }` está
-    // declarado, pero el agente jamás escribe el archivo de request.
+    // Nothing but the request protocol lets an agent widen its own scope. A
+    // `within` that technically covers the path does not save the write when
+    // no request was ever written: the test declares
+    // `scope_expansion: { mode: rules, within: [b.txt] }`, but the agent
+    // never writes the request file.
     let bench = Bench::new();
 
     let workflow = scope_expansion_workflow("rules", &["b.txt"], None);
@@ -52,9 +52,9 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
 
 #[tokio::test]
 async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even_in_ask_mode() {
-    // ✓ del Plan: un criterio propuesto que ya pasa se rechaza sin
-    // consultar en NINGÚN modo — ni siquiera `ask`, que de otro modo
-    // escalaría y pausaría el run.
+    // A proposed criterion that already passes is rejected without consulting
+    // anyone, in every mode, not even `ask`, which would otherwise escalate
+    // and pause the run.
     let bench = Bench::new();
 
     let workflow = scope_expansion_workflow("ask", &[], None);
@@ -112,10 +112,9 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
 
 #[tokio::test]
 async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterion() {
-    // Toda denegación —acá, el default `deny` sin ningún
-    // bloque `scope_expansion:` en el workflow— se convierte en un
-    // finding que lleva el reason y el proposed_criterion del
-    // propio agente, no una explicación inventada por el engine.
+    // Every denial, here the default `deny` with no `scope_expansion:` block
+    // in the workflow, becomes a finding that carries the agent's own reason
+    // and proposed_criterion, not an explanation the engine made up.
     let bench = Bench::new();
 
     let workflow = no_scope_expansion_workflow();
@@ -177,9 +176,9 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
 
 #[tokio::test]
 async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
-    // ✓ del Plan: "el diff final se evalúa contra scope declarado más
-    // ampliaciones autorizadas" — mismo diff, mismo agente; sólo el modo
-    // cambia entre las dos corridas.
+    // The final diff is checked against the declared scope plus the
+    // expansions that were granted. The same diff from the same agent runs
+    // twice; only the mode changes between the two runs.
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-w", "w", "a.txt", "test -f a.txt")
@@ -227,11 +226,11 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
 
 #[tokio::test]
 async fn the_request_object_is_recorded_identically_across_all_three_modes() {
-    // ✓ del Plan: el request object es "idéntico en los tres modos" —
-    // mismo agente, mismos paths/reason/proposed_criterion; sólo el modo
-    // de la config cambia entre corridas. El evento `ScopeExpansionRequested`
-    // debe grabar exactamente lo mismo en los tres casos, incluso cuando
-    // el veredicto que sigue difiere.
+    // The request object is identical across the three modes: the same agent
+    // asks with the same paths, reason and proposed_criterion, and only the
+    // mode in the config changes between runs. The `ScopeExpansionRequested`
+    // event must record exactly the same content in all three cases, even
+    // when the verdict that follows differs.
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-g", "g", "a.txt", "test -f a.txt")
@@ -546,11 +545,11 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
 
 #[tokio::test]
 async fn a_replan_preserves_an_identical_task_and_resets_one_whose_criteria_changed() {
-    // ✓ del Plan (los tres): task-a se declara idéntica en ambos tasks documents
-    // y debe conservar `done` sin volver a correr; task-c cambia de
-    // criterio (mismo id) y debe volver a `pending`; el commit de task-a
-    // sigue en el worktree después del re-plan, y task-c corre sobre ese
-    // mismo estado, no sobre uno revertido.
+    // task-a is declared identically in both tasks documents, so it keeps
+    // `done` without running again. task-c changes its criterion under the
+    // same id, so it goes back to `pending`. task-a's commit stays in the
+    // worktree after the re-plan, and task-c runs on that same state, not on
+    // a reverted one.
     let bench = Bench::new();
 
     let workflow = r#"
@@ -852,11 +851,11 @@ nodes:
     );
 }
 
-// --- de qué árbol parte una auditoría (M32) ------------------------------
+// --- which tree an audit starts from ----------------------------------------
 
-/// Lo que un nodo escribió es lo que su propio árbol de partida dice que
-/// escribió. Un nodo anterior que dejó trabajo sin commitear es el estado
-/// del que este parte, no algo de lo que responda.
+/// What a node wrote is what its own starting tree says it wrote. A
+/// predecessor that left uncommitted work is part of the state this node
+/// starts from, not something it answers for.
 #[tokio::test]
 async fn a_node_is_not_blamed_for_what_a_predecessor_left_behind() {
     let bench = Bench::new();
@@ -878,7 +877,7 @@ nodes:
     assert_eq!(
         terminal,
         RunTerminal::Finished,
-        "`second` escribió sólo dentro de su scope: {terminal:?}"
+        "`second` wrote only inside its scope: {terminal:?}"
     );
     assert!(
         matches!(
@@ -890,9 +889,10 @@ nodes:
     );
 }
 
-/// Y el reverso, que es lo que un punto de partida por lista de paths
-/// —en vez de por árbol— dejaría pasar: un archivo que el predecesor dejó
-/// sucio y que este nodo *también* toca sigue siendo suyo.
+/// The reverse holds too, and it is what a starting point taken from a list
+/// of paths, rather than from the tree, would let through: a file the
+/// predecessor left dirty that this node *also* touches still belongs to
+/// this node.
 #[tokio::test]
 async fn a_node_that_touches_what_a_predecessor_left_is_still_judged_for_it() {
     let bench = Bench::new();
@@ -913,7 +913,7 @@ nodes:
 
     assert!(
         !matches!(terminal, RunTerminal::Finished),
-        "escribir fuera de scope sigue fallando aunque el archivo ya estuviera sucio: {terminal:?}"
+        "writing outside scope keeps failing even when the file was already dirty: {terminal:?}"
     );
     assert!(
         matches!(
@@ -925,9 +925,9 @@ nodes:
     );
 }
 
-/// El punto de partida es un hecho del log, no memoria de una
-/// invocación: un intento que reinicia se juzga desde donde arrancó el
-/// primero, porque su propio trabajo parcial es obra suya.
+/// The starting point is a fact of the log, not memory of one invocation: an
+/// attempt that restarts is judged from where the first attempt began,
+/// because the partial work left by earlier attempts is its own.
 #[tokio::test]
 async fn an_attempt_that_restarts_is_judged_from_where_its_first_attempt_began() {
     let bench = Bench::new();
@@ -942,8 +942,8 @@ nodes:
 
     let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
 
-    // La escritura fuera de scope es suya y falla, con `stray.txt`
-    // nombrado — no con el árbol entero del run.
+    // The write outside scope is its own and fails, naming `stray.txt`, not
+    // the whole tree of the run.
     assert!(!matches!(terminal, RunTerminal::Finished), "{terminal:?}");
     let scoped = bench
         .events()
@@ -954,7 +954,7 @@ nodes:
             )) => Some(p.clone()),
             _ => None,
         })
-        .expect("el nodo se auditó");
+        .expect("the node was audited");
     assert_eq!(
         scoped.violations,
         vec![std::path::PathBuf::from("stray.txt")],
@@ -967,7 +967,7 @@ nodes:
     ));
 }
 
-/// Y el árbol de partida queda en el log, donde un replay lo encuentra.
+/// The starting tree is recorded in the log, where a replay finds it.
 #[tokio::test]
 async fn a_start_records_the_tree_its_attempt_began_from() {
     let bench = Bench::new();
@@ -983,10 +983,10 @@ async fn a_start_records_the_tree_its_attempt_began_from() {
             )) => Some(p.clone()),
             _ => None,
         })
-        .expect("el nodo arrancó");
+        .expect("the node started");
     assert!(
         started.from_tree.is_some(),
-        "un arranque nombra el árbol del que parte: {started:?}"
+        "a start names the tree it starts from: {started:?}"
     );
 }
 

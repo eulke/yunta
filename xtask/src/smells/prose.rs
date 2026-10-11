@@ -41,14 +41,9 @@ fn tense_corpus(root: &Path) -> Vec<PathBuf> {
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
+    for path in super::corpus::entries(dir) {
         if path.is_dir() {
-            if name == "target" || name == ".git" {
+            if path.ends_with("target") || path.ends_with(".git") {
                 continue;
             }
             collect(&path, out, keep);
@@ -58,20 +53,16 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) {
     }
 }
 
-/// The documents that state the rule, or record the words it retired:
-/// the glossary that defines each term, the decisions that quote retired
-/// spellings, and their index, where a title can carry that spelling too.
-const VOCABULARY_EXEMPT: &[&str] = &["glosario.md", "docs/design/adr/", "adrs.md"];
-
-/// The documents whose subject is what the repository will do: the plan
-/// and its mechanisms, the debt it carries knowingly, the checklist of a
-/// release ahead, and the decisions, which cite the alternative they
-/// discarded. Everywhere else the text is in the present.
-const TENSE_EXEMPT: &[&str] = &[
+/// The documents the prose counters do not read. Each records a rule's
+/// history or work still ahead, so it quotes the words a rule retired and
+/// names what is still to do, rather than saying what the repository does now.
+const EXEMPT_DOCUMENTS: &[&str] = &[
+    "glosario.md",
+    "docs/design/adr/",
+    "adrs.md",
     "docs/design/plan-de-raiz/",
     "deuda-consciente.md",
     "smoke-checklist.md",
-    "docs/design/adr/",
 ];
 
 fn exempt(path: &Path, list: &[&str]) -> bool {
@@ -86,20 +77,19 @@ fn exempt(path: &Path, list: &[&str]) -> bool {
 /// the fold, is what the word is for. `role:` is the retired spelling of
 /// `runner:`; `driver` and `backend` are what an adapter is not, except
 /// in `crates/storage`, which really does choose between database
-/// backends; `plugin` is what a pack and an executor are not; and
-/// `subagente` is what a named agent is not.
+/// backends; `plugin` is what a pack and an executor are not; `subagente`
+/// is what a named agent is not; and `fence hook`, `fencehook` and
+/// `yunta fence` are the old names of the rail.
 pub fn banned_vocabulary(root: &Path) -> usize {
     vocabulary_corpus(root)
         .iter()
-        .filter(|path| !exempt(path, VOCABULARY_EXEMPT))
-        .filter_map(|path| {
-            let text = std::fs::read_to_string(path).ok()?;
+        .filter(|path| !exempt(path, EXEMPT_DOCUMENTS))
+        .map(|path| {
+            let text = super::read_corpus(path);
             let storage = exempt(path, &["crates/storage"]);
-            Some(
-                text.lines()
-                    .filter(|line| names_by_a_retired_word(line, storage))
-                    .count(),
-            )
+            text.lines()
+                .filter(|line| names_by_a_retired_word(line, storage))
+                .count()
         })
         .sum()
 }
@@ -109,7 +99,14 @@ fn names_by_a_retired_word(line: &str, in_storage: bool) -> bool {
     if low.contains("role:") || ledger_names_the_tasks(&low) {
         return true;
     }
-    let mut words = ["plugin", "subagente"].to_vec();
+    let mut words = [
+        "plugin",
+        "subagente",
+        "fence hook",
+        "fencehook",
+        "yunta fence",
+    ]
+    .to_vec();
     if !in_storage {
         words.extend(["driver", "backend"]);
     }
@@ -177,19 +174,17 @@ const MARKERS: &[&str] = &[
 pub fn tense_markers(root: &Path) -> usize {
     tense_corpus(root)
         .iter()
-        .filter(|path| !exempt(path, TENSE_EXEMPT))
-        .filter_map(|path| {
-            let text = std::fs::read_to_string(path).ok()?;
+        .filter(|path| !exempt(path, EXEMPT_DOCUMENTS))
+        .map(|path| {
+            let text = super::read_corpus(path);
             let prose_only = path.extension().is_some_and(|ext| ext == "rs");
-            Some(
-                text.lines()
-                    .filter(|line| !prose_only || line.trim_start().starts_with("//"))
-                    .filter(|line| {
-                        let low = line.to_lowercase();
-                        MARKERS.iter().any(|marker| low.contains(marker))
-                    })
-                    .count(),
-            )
+            text.lines()
+                .filter(|line| !prose_only || line.trim_start().starts_with("//"))
+                .filter(|line| {
+                    let low = line.to_lowercase();
+                    MARKERS.iter().any(|marker| low.contains(marker))
+                })
+                .count()
         })
         .sum()
 }
@@ -222,6 +217,18 @@ mod tests {
         // `runner:` is the spelling, and `roles` in prose is not `role:`.
         assert!(!names_by_a_retired_word("    runner: planner", false));
         assert!(!names_by_a_retired_word("dos roles y un adapter", false));
+    }
+
+    #[test]
+    fn a_retired_word_names_the_fence_hook() {
+        assert!(names_by_a_retired_word(
+            "the fence hook answers the write",
+            false
+        ));
+        assert!(names_by_a_retired_word(
+            "    FenceHook::command(adapter)",
+            false
+        ));
     }
 
     #[test]

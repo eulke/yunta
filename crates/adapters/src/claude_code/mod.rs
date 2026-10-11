@@ -4,7 +4,8 @@
 //! onto the CLI's own flags (`permissions.rs`). Never exercised by the
 //! automated suite — no real LLM in CI — covered instead by
 //! `crates/adapters/tests/claude_code.rs` against a scripted fake binary,
-//! plus one manual smoke test.
+//! plus one check run by hand against the real CLI; cargo test runs
+//! the stubs only.
 
 mod parse;
 mod permissions;

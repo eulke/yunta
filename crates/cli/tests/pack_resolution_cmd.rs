@@ -107,8 +107,8 @@ fn yunta_list_shows_both_the_repo_catalog_and_installed_pack_workflows() {
 fn a_repo_workflow_with_the_same_namespaced_name_shadows_the_pack() {
     let (_root, _upstream, repo, home) = setup();
 
-    // "un workflow local con el mismo nombre pisa al del pack" — a
-    // repo file at the same publisher/name path wins over the pack.
+    // A local workflow with the same name shadows the pack's: a repo file at
+    // the same publisher/name path wins over the pack.
     std::fs::create_dir_all(repo.join(".yunta/workflows/acme")).unwrap();
     std::fs::write(
         repo.join(".yunta/workflows/acme/review.yaml"),

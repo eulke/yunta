@@ -55,7 +55,7 @@ sessions:
     outcome: { type: completed, summary: "asked" }
 "#;
 
-// --- kind: questions → superficie interactiva ------------
+// --- kind: questions → interactive surface ---------------
 
 /// A test surface that answers questions from a script — `resolve`
 /// deliberately returns `None` so these tests prove `ask` alone drives
@@ -357,7 +357,7 @@ pub fn findings_posted(
         .collect()
 }
 
-// --- escalación de scope expansion → gate real ---------
+// --- scope expansion escalation → real gate ------------
 
 /// One `ask`-mode attempt that writes a.txt (in scope), b.txt (outside)
 /// and the request file asking for b.txt.
@@ -417,7 +417,7 @@ pub fn assert_materialized(
     );
 }
 
-// --- ensamblado estable-primero --------------------------------
+// --- stable-first assembly -------------------------------------
 
 pub fn stable_first_workflow(volatile_command_output: &str) -> String {
     format!(
@@ -521,7 +521,7 @@ sessions:
     outcome: { type: completed, summary: "actually fixed it this time" }
 "#;
 
-// --- gate interno genérico (message/options/on) --------
+// --- generic internal gate (message/options/on) --------
 
 /// Resolves gates from a scripted sequence, one per call — `None` once
 /// the script runs out (so an unexpected extra ask degrades to pause
@@ -589,8 +589,8 @@ nodes:
     depends_on: [plan]
     assignee: lead
     message: "Approve the plan?"
-    options: [aprobar, ajustar]
-    on: { ajustar: plan }
+    options: [proceed, revise]
+    on: { revise: plan }
   - id: ship
     kind: bash
     depends_on: [approve]
@@ -614,7 +614,7 @@ limits:
 "#;
 
 /// A compliant session can never push the run past its cap — its own
-/// equal-share `Budget` (etapa 3) stops it first — so the run-level
+/// equal-share `Budget` stops it first — so the run-level
 /// check's real scenario is an *overshoot*: one usage burst blows both
 /// the session share and the whole run cap at once, the session is
 /// killed, the node fails, and its `on_failure` re-route asks the

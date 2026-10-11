@@ -10,8 +10,8 @@
 //! later still says where the time went.
 //!
 //! Its first line names the downgrade. A surface that quietly did less
-//! than it can would be the silent degradation the contract's invariant
-//! I11 forbids, so the reason travels with the change.
+//! than it can would be the silent degradation that the rule that no
+//! degradation is silent forbids, so the reason travels with the change.
 
 use std::io::Write;
 

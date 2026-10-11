@@ -87,8 +87,8 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     let (tasks_heading, tasks_problems) = document_block(&text, &staged("tasks.yaml"));
     let (findings_heading, findings_problems) = document_block(&text, &staged("findings.yaml"));
 
-    // The §4 block counts what it lists, and says `errors` for more than
-    // one — never the `error(s)` hedge.
+    // The problems block counts what it lists, and says `errors` for more
+    // than one — never the `error(s)` hedge.
     for heading in [&tasks_heading, &findings_heading] {
         assert!(
             !heading.contains("error(s)"),

@@ -909,7 +909,7 @@ fn a_github_repo_is_owner_slash_name() {
 
 #[test]
 fn telemetry_is_not_a_config_key() {
-    // Retired until the OTel exporter exists (D121): a key the engine only
+    // Retired until the OTel exporter exists: a key the engine only
     // parsed and never acted on is a silent degradation. `deny_unknown_fields`
     // now rejects it, naming the key.
     let err = yunta_core::yaml::parse::<yunta_core::ConfigLayer>("telemetry:\n  enabled: false\n")

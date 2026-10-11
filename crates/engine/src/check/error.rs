@@ -267,7 +267,7 @@ pub enum CheckError {
     /// one step under it, and the scheduler pairs each node with the
     /// group that holds it — both are exact at one level and false at
     /// two. Nesting arrives the day somebody asks for it, with the
-    /// design it needs (D179).
+    /// design it needs.
     #[error("node `{node}`: `kind: parallel` can't be a `parallel` child (group `{group}`)")]
     ParallelInsideParallel { node: NodeId, group: NodeId },
 

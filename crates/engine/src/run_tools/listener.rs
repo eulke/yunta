@@ -91,7 +91,7 @@ impl Drop for RunToolsSession {
 }
 
 /// Starts the listener for one session attempt: fresh port, fresh
-/// single-use token. `task` is `Some` for task sessions — the only ones
+/// per-session token. `task` is `Some` for task sessions — the only ones
 /// the task tools exist for; `node_scope` is `Some` for a node's own
 /// session when the node declares a scope, which is what `yunta_check_scope`
 /// judges. Either can ask with `yunta_request_scope_expansion`; `cwd` is

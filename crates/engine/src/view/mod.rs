@@ -10,11 +10,10 @@
 //! the same frame, so no two of them can disagree about what a run's
 //! progress means.
 //!
-//! **Composition is a tree, never an average** (`contrato-del-run.md`
-//! §8.5): a child run's events live under their own `run_id`, in a log
-//! this frame never opens. A parent carries the [`ChildLink`]s its own
-//! log recorded, and the caller frames each child from the child's own
-//! log and manifest.
+//! **Composition is a tree, never an average**: a child run's events live
+//! under their own `run_id`, in a log this frame never opens. A parent
+//! carries the [`ChildLink`]s its own log recorded, and the caller frames
+//! each child from the child's own log and manifest.
 
 mod chronicle;
 mod node;
@@ -47,12 +46,11 @@ pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 /// ledger's tasks.
 ///
 /// **No method divides `done` by `total`.** A percentage lies the moment
-/// a re-route grows the denominator, which is why D45 and
-/// `contrato-del-run.md` §8.5 forbid one; leaving the division out of
-/// the type beats trusting every surface to remember.
+/// a re-route grows the denominator, so leaving the division out of the
+/// type beats trusting every surface to remember.
 ///
 /// **Nothing here drops in silence.** A task that fails at integration
-/// returns to `ready` (§5.5) and a re-routed node runs again, so a naive
+/// returns to `ready` and a re-routed node runs again, so a naive
 /// done-over-total walks backwards. Split into buckets, that same event
 /// reads as a move *between* them — `failed` down one, `running` up one
 /// — which a surface can show and attribute to the event that caused
@@ -139,7 +137,7 @@ pub struct RunFrame {
 }
 
 /// A child run this run gave birth to, as a link — never as numbers
-/// averaged into the parent's counters (`contrato-del-run.md` §8.5).
+/// averaged into the parent's counters.
 ///
 /// Derives one run's frame from its log, the workflow its manifest
 /// froze, the history the caller read, and the instant it is looked at.

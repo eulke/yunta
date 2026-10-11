@@ -22,6 +22,7 @@ use yunta_core::process::signal::Liveness;
 use yunta_core::{NodeId, Pid, RelativePath};
 
 impl Persisted for EngineProcessFile {
+    /// The version this binary writes; a newer one is refused, never guessed at.
     const SCHEMA_VERSION: u32 = 1;
     const NAME: &'static str = "process registry";
     // `engine.json` — the name is what a person opening it reads, and a

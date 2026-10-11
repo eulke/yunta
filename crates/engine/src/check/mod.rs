@@ -280,7 +280,7 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
     );
     // A node's `network: false` that its resolved adapter cannot enforce is
     // reported at run time, before the session, as `capability_degraded`
-    // (D119) — the record that survives on the log. D119's matching
+    // — the record that survives on the log. The matching
     // pre-flight warning ("no candidate of this runner declares network
     // isolation") waits for capability-aware `check`: this entry takes no
     // adapter registry, so it cannot yet tell which candidates enforce it.

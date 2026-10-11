@@ -178,7 +178,7 @@ impl crate::persisted::Persisted for Manifest {
     const NAME: &'static str = "run manifest";
 
     /// A manifest frozen while `inherit` was still a word reads as what
-    /// that word meant: this unit does not isolate (D183). The run's own
+    /// that word meant: this unit does not isolate. The run's own
     /// `isolation` and every `kind: workflow` node's alike, wherever
     /// that key sits in the document, because a frozen manifest is not
     /// rewritten to be readable.

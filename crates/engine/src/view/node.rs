@@ -33,7 +33,8 @@ pub struct NodeFrame {
     /// recorded it: the name, the candidate chosen (its adapter, model
     /// and agent), and every candidate passed over with the reason. A
     /// runner that fell back to a later candidate is therefore visible,
-    /// which is what invariant I17 demands of it. `None` until the node
+    /// which the rule that every runner fallback is frozen in the manifest
+    /// and recorded with its cause demands of it. `None` until the node
     /// resolves one.
     pub runner: Option<ResolvedRunner>,
     /// The highest attempt number the log reached for this node; `None`

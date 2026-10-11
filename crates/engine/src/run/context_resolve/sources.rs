@@ -20,7 +20,7 @@ use crate::run::{RunCtx, RunError};
 use yunta_core::events::{FindingEvent, NodeEvent, TaskEvent};
 
 /// What the session reads in place of an optional file that is not
-/// there: said, never left for the agent to guess at (D186).
+/// there: said, never left for the agent to guess at.
 const ABSENT_MARKER: &str = "[absent — declared optional; not in the run's tree]";
 
 pub(super) async fn resolve_files(

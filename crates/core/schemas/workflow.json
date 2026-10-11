@@ -308,7 +308,7 @@
       ]
     },
     "Coordination": {
-      "description": "`parallel.coordination` — see the field's own doc on\n[`NodeKind::Parallel`]. A closed enum, not a bool: a third\ncoordination shape (if one ever earns an ADR) lands as a variant\nwith exhaustive match-checking, same reasoning as `JoinPolicy`.",
+      "description": "`parallel.coordination` — see the field's own doc on\n[`NodeKind::Parallel`]. A closed enum, not a bool: a third\ncoordination shape lands as a variant\nwith exhaustive match-checking, same reasoning as `JoinPolicy`.",
       "type": "string",
       "enum": [
         "independent",
@@ -690,7 +690,7 @@
       ]
     },
     "Isolation": {
-      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike (D183):\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own for the sake of its\nown diff declares `scope:` instead, which is what asks for one:\nD184.)",
+      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike:\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own declares `scope:`,\nwhich is what asks for one.)",
       "type": "string",
       "enum": [
         "worktree",
@@ -1177,7 +1177,7 @@
           ]
         },
         {
-          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio. `executor` names an\nentry in `skills.executors:`; `with` is opaque, executor-defined\ninput. The contract fixes the high-level shape (JSON in, JSON out,\nexit code is the verdict); the field names are registered debt\nA-12 in `docs/design/deuda-consciente.md`.",
+          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio. `executor` names an\nentry in `skills.executors:`; `with` is opaque, executor-defined\ninput. The high-level shape is fixed (JSON in, JSON out,\nexit code is the verdict); the field names are open work.",
           "type": "object",
           "properties": {
             "executor": {
@@ -1237,14 +1237,14 @@
               ]
             },
             "on": {
-              "description": "Option → re-route target (`on: { ajustar: plan }`): choosing\na mapped option re-routes exactly like `on_failure.goto`\n— the target and its subgraph complete, then the\ngate returns to ready and asks again. Unbounded on purpose:\neach lap is human-driven, not an automatic cycle\n`max_reroutes` exists to cap. An unmapped option resolves\nthe gate and the DAG continues.",
+              "description": "Option → re-route target (`on: { adjust: plan }`): choosing\na mapped option re-routes exactly like `on_failure.goto`\n— the target and its subgraph complete, then the\ngate returns to ready and asks again. Unbounded on purpose:\neach lap is human-driven, not an automatic cycle\n`max_reroutes` exists to cap. An unmapped option resolves\nthe gate and the DAG continues.",
               "type": "object",
               "additionalProperties": {
                 "$ref": "#/$defs/NodeId"
               }
             },
             "options": {
-              "description": "Declared choices, free ids (reference: `[aprobar, ajustar,\nabortar]`). Empty means the single default option `approve`;\nthe engine always appends its own `abort` (aborting is\nalways a valid exit, the same convention every escalation uses).",
+              "description": "Declared choices, free ids (for example `[approve, adjust]`).\nEmpty means the single default option `approve`;\nthe engine always appends its own `abort` (aborting is\nalways a valid exit, the same convention every escalation uses).",
               "type": "array",
               "items": {
                 "$ref": "#/$defs/OptionId"

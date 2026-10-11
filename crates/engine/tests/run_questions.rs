@@ -9,13 +9,10 @@ use yunta_core::events::{GateEvent, NodeEvent};
 
 #[tokio::test]
 async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_closed() {
-    // "el nodo que pregunta cierra su sesión antes de que se
-    // renderice nada" (la sesión mock corre y cierra normalmente, y solo
-    // *después* de eso el engine actúa sobre las preguntas) y "sin TTY el
-    // run queda `waiting`, nunca cuelga ni falla" — en este recorte no
-    // existe ninguna superficie TTY/MCP/PR todavía, así que ese
-    // es el único camino: el run pausa citando las preguntas, no panickea
-    // ni queda colgado.
+    // The node that asks closes its session before anything is rendered: the
+    // mock session runs and closes normally, and only *after* that does the
+    // engine act on the questions. With no surface to answer them, as on this
+    // bench, the run pauses citing the questions; it never hangs or fails.
     let bench = Bench::new();
 
     let RunReport {
@@ -52,11 +49,11 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
 #[tokio::test]
 async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_without_a_new_session(
 ) {
-    // ✓ del Plan: "matar el engine durante la espera y reanudar rehace
-    // las preguntas sin estado conversacional" — el segundo despacho
-    // usa un fixture sin sesiones disponibles; si el resume intentara
-    // volver a despachar el nodo, fallaría por "fixture exhausted" en vez
-    // de devolver la misma pausa.
+    // Killing the engine while it waits and resuming re-asks the questions
+    // with no conversational state. The second dispatch uses a fixture with
+    // no sessions available; if the resume tried to dispatch the node again,
+    // it would fail with "fixture exhausted" instead of returning the same
+    // pause.
     let bench = Bench::new();
 
     let RunReport {

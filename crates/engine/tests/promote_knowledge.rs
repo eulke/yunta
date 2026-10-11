@@ -1,7 +1,7 @@
 //! `promote-knowledge`: the reference workflow
 //! for curating locally-distilled knowledge into a new version of the
-//! org knowledge pack — "no es automática y no la hace el engine, es
-//! un workflow de Yunta como cualquier otro." Runs end to end with
+//! org knowledge pack. It is not automatic, and the engine does not perform
+//! it: it is a Yunta workflow like any other. Runs end to end with
 //! mock, and never publishes without an actually-approved gate.
 
 use std::path::Path;

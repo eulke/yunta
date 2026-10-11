@@ -238,7 +238,7 @@ pub struct Opened {
 }
 
 /// Where this binary lives, for the child processes that run it back:
-/// the fence hook, and the detached `resume` a `--detach` run spawns. A
+/// the rail hook, and the detached `resume` a `--detach` run spawns. A
 /// host that will not say falls back to the name on `PATH`.
 pub fn own_binary() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta"))

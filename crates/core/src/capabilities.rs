@@ -40,7 +40,7 @@ pub struct Capabilities {
     pub run_tools: bool,
     /// Can confine a session's process to no network access, enforcing a
     /// node's `network: false`. Declarative policy is never an OS sandbox
-    /// Yunta core promises (D105): where this is absent, a node's
+    /// Yunta core promises: where this is absent, a node's
     /// `network: false` degrades with `capability_degraded` — recorded for
     /// policy and audit, never enforced.
     #[serde(default)]

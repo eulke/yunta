@@ -1,12 +1,12 @@
-# The reference `promote-knowledge` workflow:
-# "la promoción de conocimiento local a org no es automática y no la
-# hace el engine — es un workflow de Yunta como cualquier otro:
-# candidatos desde los `knowledge/` de los repos, gate con `assignee`
-# curador, nueva versión del pack." Runs inside the org knowledge
-# pack's own repository (the thing this workflow updates and re-tags);
-# gathering candidates *out of* the various source repos is a curator's
-# or a separate script's own job — not something one run, in one
-# worktree, can reach across repos to do itself.
+# The reference `promote-knowledge` workflow. Promoting local knowledge to
+# the org is not automatic, and the engine does not do it: it is a Yunta
+# workflow like any other. Candidates come from the repos' `knowledge/`
+# directories, a gate with the curator as `assignee` approves them, and a
+# new version of the pack is published. Runs inside the org knowledge pack's
+# own repository (the thing this workflow updates and re-tags); gathering
+# candidates *out of* the various source repos is a curator's or a separate
+# script's own job — not something one run, in one worktree, can reach across
+# repos to do itself.
 name: promote-knowledge
 description: >-
   Curates locally-distilled knowledge into a new version of the org

@@ -238,6 +238,49 @@ pub fn struct_fields(rust: &str, name: &str) -> Vec<String> {
         .collect()
 }
 
+/// The names `name_of` reads from the lines one level inside the block
+/// `opening` opens, up to its closing brace at column zero. Deeper lines
+/// are skipped.
+fn body_names(
+    rust: &str,
+    opening: &str,
+    name_of: impl Fn(&str) -> Option<String>,
+) -> BTreeSet<String> {
+    rust.lines()
+        .skip_while(|line| !line.starts_with(opening))
+        .skip(1)
+        .take_while(|line| *line != "}")
+        .filter_map(|line| name_of(line.strip_prefix("    ")?))
+        .collect()
+}
+
+/// The variants `pub enum name` declares in a Rust fence: the capitalized word
+/// that opens each line one level in. A doc line opens with a slash, and a
+/// struct variant's fields sit a level deeper, so neither is a variant.
+pub fn enum_variants(rust: &str, name: &str) -> BTreeSet<String> {
+    body_names(rust, &format!("pub enum {name} {{"), |line| {
+        let word = line.split(|c: char| !c.is_alphanumeric()).next()?;
+        word.starts_with(char::is_uppercase)
+            .then(|| word.to_string())
+    })
+}
+
+/// The methods `pub trait name` declares in a Rust fence: the identifier after
+/// `fn` or `async fn` on each line one level in. A method's body sits deeper.
+pub fn trait_methods(rust: &str, name: &str) -> BTreeSet<String> {
+    body_names(rust, &format!("pub trait {name}"), |line| {
+        let rest = line
+            .strip_prefix("async ")
+            .unwrap_or(line)
+            .strip_prefix("fn ")?;
+        Some(
+            rest.split(|c: char| !c.is_alphanumeric() && c != '_')
+                .next()?
+                .into(),
+        )
+    })
+}
+
 /// Whether `yaml` declares `key` at its top level.
 pub fn has_top_level_key(yaml: &str, key: &str) -> bool {
     yaml.lines()
@@ -406,4 +449,50 @@ pub fn rule_codes_named(text: &str) -> Vec<String> {
                 .any(|code| code.as_str() == span)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    //! Guards: these pass from their first commit. They fail for a reader
+    //! that counts a doc line, a field or a nested body as a name.
+
+    use super::*;
+
+    fn names(list: &[&str]) -> BTreeSet<String> {
+        list.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn enum_variants_names_the_named_enum_only() {
+        let rust = r"pub enum Other { Ignored }
+pub enum Event {
+    /// A doc line is not a variant.
+    SessionOpened {
+        session_id: String,
+    },
+    Completed(String),
+    Note,
+}
+";
+        assert_eq!(
+            enum_variants(rust, "Event"),
+            names(&["Completed", "Note", "SessionOpened"])
+        );
+    }
+
+    #[test]
+    fn trait_methods_names_sync_and_async_methods_only() {
+        let rust = r"pub trait Other { fn ignored(&self); }
+pub trait Adapter: Send + Sync {
+    /// A doc line is not a method.
+    fn id(&self) -> &'static str;
+    async fn probe(&self) -> bool {
+        let inner = true;
+        fn nested() {}
+        inner
+    }
+}
+";
+        assert_eq!(trait_methods(rust, "Adapter"), names(&["id", "probe"]));
+    }
 }

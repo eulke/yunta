@@ -31,7 +31,7 @@ pub(crate) enum Decision {
 ///
 /// A degradation is written here, once, before the answer comes back —
 /// so a caller cannot take the fallback and forget to say so. A fallback
-/// the whole run works under (`usage_reporting`, `edit_hooks`) is stated
+/// the whole run works under (`usage_reporting`, `fence`) is stated
 /// once per run rather than once per node: the second event says nothing
 /// the first did not.
 pub(crate) async fn require(

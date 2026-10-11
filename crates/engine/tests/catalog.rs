@@ -52,8 +52,8 @@ fn a_repo_workflow_shadows_a_pack_workflow_of_the_same_name() {
         "",
         &[("review.yaml", LEAF)],
     );
-    // The repo names its own "review" too: "un workflow local con
-    // el mismo nombre pisa al del pack."
+    // The repo names its own "review" too, and its local workflow with the
+    // same name shadows the pack's.
     write(
         &root.path().join(".yunta/workflows/acme/review.yaml"),
         "name: repo-review\nnodes: []\n",

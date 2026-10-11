@@ -450,7 +450,7 @@ pub(super) async fn undo_half_added(
 }
 
 /// How long the undo of a killed `worktree add` may take before it is
-/// abandoned, fixed by D170: long enough for a local git on a cold
+/// abandoned: long enough for a local git on a cold
 /// cache, short enough that a person who pressed Ctrl-C twice is not
 /// waiting on it.
 const UNDO_BOUND: std::time::Duration = std::time::Duration::from_secs(10);

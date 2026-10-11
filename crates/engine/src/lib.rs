@@ -22,17 +22,17 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
-// The run contract needs a process layer that owns whole process trees:
+// Process management needs a layer that owns whole process trees:
 // every subprocess in its own process group, interrupted and killed
 // with its descendants, and lock liveness by signal. That layer is
 // POSIX; a build for another platform would compile and then leave
-// orphans on cancellation, the one degradation the contract forbids.
+// orphans on cancellation, the one degradation that is never acceptable.
 #[cfg(not(unix))]
 compile_error!(
     "yunta-engine builds for unix targets only: its process management (process groups, \
-     signals, lock liveness) is POSIX, and a binary that cannot cancel a whole process tree \
-     cannot keep the run contract. Windows returns as a target once a process layer with the \
-     same guarantees exists and its cancellation tests pass there."
+     signals, lock liveness) is POSIX; a target without it could not cancel a whole \
+     process tree. Windows returns as a target once a process layer with the same \
+     guarantees exists and its cancellation tests pass there."
 );
 
 mod agents;

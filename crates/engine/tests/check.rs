@@ -345,7 +345,7 @@ fn internal_gate(id: &str, options: &[&str], on: &[(&str, &str)]) -> Node {
 
 #[test]
 fn an_internal_gate_never_requires_a_forge() {
-    let wf = workflow(vec![internal_gate("approve", &["aprobar"], &[])]);
+    let wf = workflow(vec![internal_gate("approve", &["proceed"], &[])]);
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         !errors
@@ -359,14 +359,14 @@ fn an_internal_gate_never_requires_a_forge() {
 fn a_gate_on_mapping_an_undeclared_option_is_reported() {
     let wf = workflow(vec![
         bash("plan", "true", &[]),
-        internal_gate("approve", &["aprobar"], &[("ajustar", "plan")]),
+        internal_gate("approve", &["proceed"], &[("revise", "plan")]),
     ]);
     let errors = check(&wf, &ConfigLayer::default());
     assert_eq!(
         errors,
         vec![CheckError::GateRouteNeverTaken {
             node: "approve".into(),
-            route: UntakenRoute::Undeclared("ajustar".into()),
+            route: UntakenRoute::Undeclared("revise".into()),
         }]
     );
 }
@@ -375,7 +375,7 @@ fn a_gate_on_mapping_an_undeclared_option_is_reported() {
 fn a_gate_that_routes_abort_somewhere_is_reported() {
     let wf = workflow(vec![
         bash("plan", "true", &[]),
-        internal_gate("approve", &["aprobar", "abort"], &[("abort", "plan")]),
+        internal_gate("approve", &["proceed", "abort"], &[("abort", "plan")]),
     ]);
     let errors = check(&wf, &ConfigLayer::default());
     assert_eq!(
@@ -396,7 +396,7 @@ fn a_gate_that_routes_abort_somewhere_is_reported() {
 fn a_gate_that_declares_abort_without_a_route_is_accepted() {
     let wf = workflow(vec![
         bash("plan", "true", &[]),
-        internal_gate("approve", &["aprobar", "abort"], &[]),
+        internal_gate("approve", &["proceed", "abort"], &[]),
     ]);
     assert_eq!(check(&wf, &ConfigLayer::default()), vec![]);
 }
@@ -1744,7 +1744,7 @@ nodes:
 #[test]
 fn a_mount_inside_a_parallel_group_is_refused() {
     // Parallel children run concurrently — there is no DAG order inside
-    // the group, so "hermanos terminados" (siblings having finished) cannot hold there.
+    // the group, so "siblings have finished" cannot hold there.
     let wf = parsed(
         r#"
 name: parent
@@ -2154,7 +2154,7 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
 
 /// A group inside a group. Every surface draws a group's children one
 /// step under it and the scheduler pairs each node with the group that
-/// holds it — both are exact at one level and false at two (D179).
+/// holds it — both are exact at one level and false at two.
 #[test]
 fn a_parallel_inside_a_parallel_is_refused() {
     let nested = r#"

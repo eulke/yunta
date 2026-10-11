@@ -173,7 +173,7 @@ fn a_workflow_command_denied_by_the_org_layer_fails_check() {
     );
 }
 
-/// The §4 block heads a file's problems with how many there are. It
+/// The problems block heads a file's problems with how many there are. It
 /// counts, and it says `error` or `errors` accordingly — one home for
 /// the block means every surface that lists a file's problems reads the
 /// same way.

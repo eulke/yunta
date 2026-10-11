@@ -11,7 +11,7 @@
 //! successor run that may not be on this host, so `/home/…/objects` is
 //! not a fact about anything — it is this machine's accident. What a
 //! location says instead is which of the run's two roots it is under:
-//! the work, or the run's own register (D175).
+//! the work, or the run's own register.
 
 use std::fmt;
 use std::path::{Component, Path, PathBuf};

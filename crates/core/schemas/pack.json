@@ -125,7 +125,7 @@
       "additionalProperties": false
     },
     "PackDeclares": {
-      "description": "The pack's own permissions **ceiling** — `check` rejects any\nnode, hook or criterion inside the pack that would exceed this,\nerror not warning; this type only carries the declared\nvalues, it enforces nothing itself.",
+      "description": "The pack's own permissions **ceiling**: `check` rejects any `prompt` or `loop`\nnode of the pack whose effective permissions exceed this, as an error.",
       "type": "object",
       "properties": {
         "executors": {

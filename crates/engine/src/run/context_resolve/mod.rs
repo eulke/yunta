@@ -19,15 +19,15 @@
 //!   layers merge by filename, `repo` overwriting `user` overwriting
 //!   `org` on a name collision, regardless of the order `layers:` names
 //!   them in. `org` is the union of every installed knowledge pack's
-//!   declared contents (RFC-0002 vendoring, via the pack catalog); two
+//!   declared contents (vendored contents, via the pack catalog); two
 //!   *packs* shipping the same filename is a typed error naming both —
 //!   between packs there is no precedence to fall back on.
 //! - `node-output:` only ever has something to read for `kind: bash`
 //!   nodes (`execute_bash` is the only place this module captures output
 //!   from, right after the process exits, success or failure alike —
 //!   exactly the lint→fix-lint→lint case a corrective node needs to
-//!   read back). An `executor` node's output is not captured for it:
-//!   registered debt A-11 in `docs/design/deuda-consciente.md`.
+//!   read back). An `executor` node's output is not captured for it: that
+//!   is open work.
 //! - Stable-first assembly: every source is classified
 //!   `stable | run-stable | volatile` (`stability_class`) and the final
 //!   text is always segment-ordered that way, regardless of `context:`'s
@@ -117,7 +117,7 @@ pub(super) struct StableContextMemo {
 }
 
 /// What one source resolved to: the bytes the session is given, and the
-/// optional `files:` paths it went without (D186) — which the bytes
+/// optional `files:` paths it went without — which the bytes
 /// already mark in place, and `context_assembled` names.
 #[derive(Clone)]
 pub(super) struct Resolved {

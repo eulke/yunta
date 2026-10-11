@@ -1,6 +1,6 @@
 //! A diagnostic names what is wrong in the vocabulary of the document,
-//! and a report renders every one of them the way `spec-tasks.md` §4
-//! fixes it. Nothing a deserializer says about its own internals
+//! and a report renders every one of them the way the problems block is
+//! rendered. Nothing a deserializer says about its own internals
 //! reaches either rendering.
 
 use yunta_core::diagnostic::{

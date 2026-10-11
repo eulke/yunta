@@ -82,8 +82,8 @@ fn percentiles(sorted: &[f64]) -> Option<Percentiles> {
 /// Prior estimation: median and p90 of tokens, wall-clock and task
 /// count over a workflow's own run history. `None` below
 /// [`MIN_SAMPLES_FOR_ESTIMATION`] samples: with too little history the
-/// engine says nothing at all (`contrato-del-run.md` §8.6), a floor this
-/// function reads rather than invents.
+/// engine says nothing at all, a floor this function reads rather than
+/// invents.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PriorEstimation {
     pub sample_count: usize,
@@ -94,6 +94,8 @@ pub struct PriorEstimation {
     pub tasks: Percentiles,
 }
 
+/// Runs of history a workflow needs before its estimate counts: one
+/// outlier decides a percentile of fewer.
 pub const MIN_SAMPLES_FOR_ESTIMATION: usize = 3;
 
 /// What a declared run budget sitting below what history says this

@@ -20,8 +20,8 @@
 //! estimate is an optional, additive line the CLI prints only when
 //! `pricing:` is configured — this module never converts to currency
 //! itself, so it can never be the thing that invents a number
-//! ("sin `pricing:` declarado, todo se expresa en tokens y nada se
-//! inventa").
+//! (with no `pricing:` declared, everything is expressed in tokens and
+//! nothing is invented).
 //!
 //! **Rework rate** is tokens spent on attempts beyond the first — a
 //! node's `attempt` field (`NodeStartedPayload`) already distinguishes a

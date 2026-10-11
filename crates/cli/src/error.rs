@@ -19,7 +19,7 @@ pub enum Outcome {
     /// already on its output. Exit non-zero, no error banner.
     Reported,
     /// The command's whole answer is its exit code, because the process
-    /// that ran it reads one: the fence hook, whose calling CLI takes
+    /// that ran it reads one: the rail hook, whose calling CLI takes
     /// `2` as a refusal and `0` as consent.
     Code(u8),
 }

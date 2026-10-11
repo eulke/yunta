@@ -123,7 +123,7 @@ pub struct ContextSourceRef {
     pub source_id: String,
     pub kind: String,
     pub content_hash: ContentHash,
-    /// The optional `files:` paths this source did not find (D186): the
+    /// The optional `files:` paths this source did not find: the
     /// session got a marker in each one's place, and the hash above
     /// covers that marker. Empty — and absent from the wire — for every
     /// source that found all it read.

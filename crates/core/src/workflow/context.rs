@@ -96,7 +96,7 @@ impl<'de> Deserialize<'de> for ContextSpec {
     }
 }
 
-/// One path a `files:` source reads (D186): the bare path when the node
+/// One path a `files:` source reads: the bare path when the node
 /// cannot do without the file, or `{ path, optional: true }` when it can.
 /// A missing required file fails the node; a missing optional one is
 /// marked in the session's context and recorded on `context_assembled`.

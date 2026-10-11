@@ -670,7 +670,7 @@
           "default": "none"
         },
         "network_isolation": {
-          "description": "Can confine a session's process to no network access, enforcing a\nnode's `network: false`. Declarative policy is never an OS sandbox\nYunta core promises (D105): where this is absent, a node's\n`network: false` degrades with `capability_degraded` — recorded for\npolicy and audit, never enforced.",
+          "description": "Can confine a session's process to no network access, enforcing a\nnode's `network: false`. Declarative policy is never an OS sandbox\nYunta core promises: where this is absent, a node's\n`network: false` degrades with `capability_degraded` — recorded for\npolicy and audit, never enforced.",
           "type": "boolean",
           "default": false
         },
@@ -1038,7 +1038,7 @@
       "type": "object",
       "properties": {
         "absent": {
-          "description": "The optional `files:` paths this source did not find (D186): the\nsession got a marker in each one's place, and the hash above\ncovers that marker. Empty — and absent from the wire — for every\nsource that found all it read.",
+          "description": "The optional `files:` paths this source did not find: the\nsession got a marker in each one's place, and the hash above\ncovers that marker. Empty — and absent from the wire — for every\nsource that found all it read.",
           "type": "array",
           "items": {
             "type": "string"

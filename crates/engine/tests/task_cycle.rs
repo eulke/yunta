@@ -1433,10 +1433,10 @@ outcome: { type: completed, summary: "wrote it" }
     .unwrap_err()
 }
 
-/// The verdict is a function of what ran, not of the order it ran in
-/// (D177): the pre-check evaluates the whole set and names every
-/// criterion that already passes and every guard already red, in the
-/// order the task declares them.
+/// The verdict is a function of what ran, not of the order it ran in.
+/// The pre-check evaluates the whole set and names every criterion that
+/// already passes and every guard already red, in the order the task
+/// declares them.
 #[test]
 fn surprises_names_every_trivial_criterion_and_every_broken_guard_in_declaration_order() {
     let t = task(

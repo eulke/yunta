@@ -85,7 +85,7 @@ pub struct SessionRequest {
     /// session rather than opening one that writes freely.
     pub rail_command: Option<RailCommand>,
     /// Where those hooks reach the engine: the rail route of this
-    /// session's own listener, with the same single-use token as its
+    /// session's own listener, with the same per-session token as its
     /// tools. `None` when the session has no listener.
     pub rail: Option<RailEndpoint>,
     pub budget: Budget,
@@ -134,7 +134,7 @@ pub struct SessionRequest {
 }
 
 /// Where a session's per-run MCP server listens: a loopback URL plus
-/// the single-use bearer token that scopes every call to `(run_id,
+/// the per-session bearer token that scopes every call to `(run_id,
 /// node_id, attempt)` by construction — no tool ever takes a run id as
 /// a caller argument. The token is secret material: it must never
 /// reach the event log — the engine's own audit events carry the URL

@@ -78,15 +78,6 @@ Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo
 rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
-**A-13 · El cerco en los adapters.** Cerrada por D172 (`plan-de-raiz/cerco.md`,
-ítem 3-08): `yunta_core::fence::Fence::judge` es el único juez, `yunta rail
-<adapter-id> before-write` el hook que los CLIs ejecutan para preguntarle al
-engine (D249), `claude-code` lo instala como
-`PreToolUse`, `codex` cerca por el sandbox de su proceso, y el mock juzga
-cada efecto de su fixture por la misma función. Lo que el cerco no pudo
-evitar sigue atrapándolo el diff del post-check, y una escritura que cruza un
-cerco declarado exacto es además un `engine_finding`.
-
 **A-14 · Preguntas respondibles por pull request.** `Channel` es `{tty, mcp}`;
 un `kind: questions` se responde por consola. Lo resolvería una forja que
 publique las preguntas y lea las respuestas, con su `Channel::Pr` (D167). El
@@ -152,6 +143,14 @@ Se conservan para que nadie los reabra por accidente; el ADR citado manda.
 - Política org sobre executors y publishers de packs → **D51 + D72**.
 - Prompt injection en packs de terceros → **D71** (audit inventaría, no juzga).
 - Paralelismo de tareas del documento de tareas → **D65** (§5.5).
+- **A-13 · El cerco en los adapters** → **D172** (`plan-de-raiz/cerco.md`):
+  `yunta_core::fence::Fence::judge` es el único juez, `yunta rail <adapter-id>
+  before-write` el hook que los CLIs ejecutan para preguntarle al engine (D249);
+  `claude-code` lo instala como `PreToolUse`, `codex` como `PreToolUse` sobre
+  `apply_patch` y cerca además sus comandos por el sandbox de su proceso, y el mock
+  juzga cada efecto de su fixture por la misma función. Lo que el cerco no pudo
+  evitar sigue atrapándolo el diff del post-check, y una escritura que cruza un
+  cerco declarado exacto es además un `engine_finding`.
 
 ## Ideas estacionadas (no comprometidas)
 

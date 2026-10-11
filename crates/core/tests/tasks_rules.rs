@@ -225,7 +225,7 @@ fn every_violation_names_the_task_the_field_and_what_to_do() {
 }
 
 #[test]
-fn parses_the_reference_tasks_document_from_the_spec() {
+fn a_tasks_document_with_dependencies_and_guards_parses_with_no_errors() {
     let yaml = r#"
 tasks:
   - id: context-sources
@@ -236,7 +236,7 @@ tasks:
       - cmd: "! grep -rn 'todo!()' crates/engine/src/context/"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
-    notes: "Materializar en context/<hash>/; fuente caída = nodo failed."
+    notes: "Materialize into context/<hash>/; a source that is down fails the node."
 
   - id: context-assembly
     title: "Stable-first context assembly with per-segment hashes"
@@ -246,7 +246,7 @@ tasks:
       - cmd: "cargo test -p yunta-engine --test context_stability"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
-    notes: "Ver Contrato del Run."
+    notes: "See the run's rules."
 "#;
     let tasks: TasksFile =
         yunta_core::yaml::parse(yaml).expect("reference tasks document should parse");

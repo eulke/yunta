@@ -106,7 +106,7 @@ fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
     super::ratchet_corpus(root)
         .iter()
         .filter(|path| !owned(path, owners))
-        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|path| super::read_corpus(path))
         .map(|text| {
             text.lines()
                 .filter(|line| marks.iter().any(|mark| mark.on(line)))

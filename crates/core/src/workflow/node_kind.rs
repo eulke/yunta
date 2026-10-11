@@ -76,9 +76,8 @@ pub enum NodeKind {
     /// structured input) nor `check`'s closed builtin list covers it —
     /// external code, a JSON contract over stdio. `executor` names an
     /// entry in `skills.executors:`; `with` is opaque, executor-defined
-    /// input. The contract fixes the high-level shape (JSON in, JSON out,
-    /// exit code is the verdict); the field names are registered debt
-    /// A-12 in `docs/design/deuda-consciente.md`.
+    /// input. The high-level shape is fixed (JSON in, JSON out,
+    /// exit code is the verdict); the field names are open work.
     Executor {
         executor: ExecutorName,
         #[serde(default)]
@@ -110,13 +109,13 @@ pub enum NodeKind {
         /// id is used.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-        /// Declared choices, free ids (reference: `[aprobar, ajustar,
-        /// abortar]`). Empty means the single default option `approve`;
+        /// Declared choices, free ids (for example `[approve, adjust]`).
+        /// Empty means the single default option `approve`;
         /// the engine always appends its own `abort` (aborting is
         /// always a valid exit, the same convention every escalation uses).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         options: Vec<OptionId>,
-        /// Option → re-route target (`on: { ajustar: plan }`): choosing
+        /// Option → re-route target (`on: { adjust: plan }`): choosing
         /// a mapped option re-routes exactly like `on_failure.goto`
         /// — the target and its subgraph complete, then the
         /// gate returns to ready and asks again. Unbounded on purpose:
@@ -361,7 +360,7 @@ impl CheckBuiltin {
 
 /// `parallel.coordination` — see the field's own doc on
 /// [`NodeKind::Parallel`]. A closed enum, not a bool: a third
-/// coordination shape (if one ever earns an ADR) lands as a variant
+/// coordination shape lands as a variant
 /// with exhaustive match-checking, same reasoning as `JoinPolicy`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,

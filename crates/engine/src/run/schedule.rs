@@ -198,8 +198,8 @@ fn is_gate(node: &Node) -> bool {
 /// out of this set — declaring no `depends_on` is not itself the signal
 /// (the workflow's own entry point never has one either): what marks a
 /// node as reroute-*only* is that it is also an otherwise-isolated dead
-/// end, so nothing in the ordinary DAG reaches it. `plan` in the
-/// reference `on: { ajustar: plan }` pattern fails that test: `approve`
+/// end, so nothing in the ordinary DAG reaches it. `plan` in the usual
+/// `on: { adjust: plan }` pattern fails that test: `approve`
 /// declares `depends_on: [plan]`, so `plan` is a real predecessor that
 /// also happens to be a valid re-route target later.
 fn reroute_only_targets(

@@ -167,6 +167,7 @@ pub const DURATION_WIDEST: usize = 6;
 /// days — `9s`, `59m59s`, `23h59m`, `99d23h`, `100d` — so a column that
 /// right-aligns to it never moves under the reader as a run ages.
 pub fn duration(duration: Duration) -> String {
+    /// Seconds in a minute: the base the wider units below are built from.
     const MINUTE: u64 = 60;
     const HOUR: u64 = 60 * MINUTE;
     const DAY: u64 = 24 * HOUR;

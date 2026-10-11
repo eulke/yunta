@@ -253,7 +253,7 @@ impl Report {
 }
 
 impl fmt::Display for Report {
-    /// The block `spec-tasks.md` §4 fixes: the file and the count, then
+    /// The problems block: the file and the count, then
     /// one violation per line.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&crate::text::problems(

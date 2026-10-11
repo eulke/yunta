@@ -68,7 +68,7 @@ pub struct CriterionRun {
     pub exit_code: i32,
     pub is_guard: bool,
     /// Whether this result came from the memoization cache instead of
-    /// an actual execution — `criteria_checked` records it so recibo/replay
+    /// an actual execution — `criteria_checked` records it so receipt/replay
     /// show what ran versus what was reused, nothing verified in silence.
     pub reused: bool,
     /// Wall-clock milliseconds the execution took — what the

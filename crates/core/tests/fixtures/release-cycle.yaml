@@ -1,5 +1,5 @@
 # The canonical composed reference workflow
-# (docs/design/referencia-schema.md) as a parse fixture — exercises the
+# as a parse fixture — exercises the
 # `kind: workflow` schema.
 name: release-cycle
 inputs:

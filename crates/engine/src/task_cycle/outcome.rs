@@ -15,8 +15,8 @@ use crate::scope::ScopeCheckResult;
 
 use super::CriterionRun;
 
-/// A criterion the pre-check found wrong before any work: "esta fase
-/// valida al validador" — a non-guard that already passes, or a guard
+/// A criterion the pre-check found wrong before any work: "this pre-check
+/// validates the validator" — a non-guard that already passes, or a guard
 /// that is already red, means the criteria themselves need fixing, not
 /// the task nobody has started.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +71,7 @@ impl std::fmt::Display for Surprise {
 ///
 /// A function of what ran and nothing else: the learned order decides
 /// when the evidence arrives, never what is verified or what is
-/// reported (D177), and a replay derives the same verdict from
+/// reported, and a replay derives the same verdict from
 /// `criteria_checked`.
 pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise> {
     task.criteria

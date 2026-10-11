@@ -217,7 +217,7 @@ fn within_scope(node: &Node, path: &str) -> bool {
 /// `(node, path)` for every literal, required `files:` entry of `node`
 /// and of the children a `parallel` group runs, each pair once. An
 /// optional entry is left out: its author already said the node goes on
-/// without it (D186).
+/// without it.
 fn literal_files(node: &Node, read: &mut Vec<(NodeId, String)>) {
     for source in &node.context {
         let ContextSpec::Files { files } = source else {

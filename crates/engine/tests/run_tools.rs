@@ -115,7 +115,7 @@ async fn call(
     (result.is_error.unwrap_or(false), text_of(&result))
 }
 
-// --- Auth (single-use bearer token) --------------------------------
+// --- Auth (per-session bearer token) -------------------------------
 
 #[tokio::test]
 async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
@@ -1051,7 +1051,7 @@ async fn the_task_tools_are_served_to_task_sessions_only() {
     client.cancel().await.unwrap();
 }
 
-// --- ✓ del plan: concurrent posts, no race -----------------------------------
+// --- concurrent posts, no race -----------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributing_any() {

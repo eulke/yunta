@@ -340,7 +340,7 @@ pub struct AgentMessagePayload {
 /// the same fallback reads the same way wherever it is recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Policy {
-    /// `edit_hooks` absent: the session edits freely and the diff is
+    /// `fence` is `None`: the session edits freely and the diff is
     /// judged afterwards.
     PostCheckOnly,
     /// `usage_reporting` absent: the run's token cap cannot be counted

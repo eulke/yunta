@@ -538,11 +538,11 @@ work counts as done. Swap the `verify` command for your own test suite.
 "#;
 
 /// Scaffolds a new pack at `<cwd>/<name>`: a manifest, one verified
-/// workflow, a self-test config and case, and a README — the shape
-/// `docs/packs.md` describes. The manifest and workflow are validated by
-/// parsing before any file is written, then the pack is checked and its
-/// case is run, so a freshly scaffolded pack passes from the first
-/// command. Refuses to write over an existing directory.
+/// workflow, a self-test config and case, and a README. The manifest
+/// and workflow are validated by parsing before any file is written,
+/// then the pack is checked and its case is run, so a freshly
+/// scaffolded pack passes from the first command. Refuses to write
+/// over an existing directory.
 pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let dir = cwd.join(pack.name().as_str());

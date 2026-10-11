@@ -86,8 +86,8 @@ nodes:
     depends_on: [plan]
     assignee: lead
     message: "Approve the plan?"
-    options: [aprobar, ajustar]
-    on: { ajustar: plan }
+    options: [proceed, revise]
+    on: { revise: plan }
 "#;
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     assert_eq!(node_id.as_str(), "approve");
     assert_eq!(escalation.summary(), "Approve the plan?");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
-    assert_eq!(ids, vec!["aprobar", "ajustar", "abort"]);
+    assert_eq!(ids, vec!["proceed", "revise", "abort"]);
     assert!(escalation.options().iter().all(|o| !o.tradeoff.is_empty()));
 }
 
@@ -228,8 +228,8 @@ nodes:
     depends_on: [plan]
     assignee: lead
     message: "Approve the plan?"
-    options: [aprobar, ajustar]
-    on: { ajustar: plan }
+    options: [proceed, revise]
+    on: { revise: plan }
   - id: ship
     kind: bash
     depends_on: [approve]
@@ -246,12 +246,12 @@ fn plan_runs(worktree: &std::path::Path) -> usize {
 async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume() {
     let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
 
-    answer_parked(&bench, "aprobar").await.unwrap();
+    answer_parked(&bench, "proceed").await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture("sessions: []\n").await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "aprobar"),
+        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "proceed"),
         other => panic!("expected the gate finished with the chosen option, got {other:?}"),
     }
     assert!(bench.worktree.join("shipped.txt").exists());
@@ -277,7 +277,7 @@ async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
     let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
     assert_eq!(plan_runs(&bench.worktree), 1);
 
-    answer_parked(&bench, "ajustar").await.unwrap();
+    answer_parked(&bench, "revise").await.unwrap();
     let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
 
     // A reroute through a pre-seeded choice: plan re-ran, the gate came

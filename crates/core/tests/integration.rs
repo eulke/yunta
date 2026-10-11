@@ -1,5 +1,5 @@
-//! The YAML the design corpus publishes, read by the types that consume
-//! it: the reference config, the reference workflow and the composed and
+//! The example YAML a reader copies, read by the types that consume it:
+//! the reference config, the reference workflow and the composed and
 //! promotion workflows beside it.
 //!
 //! Each one parses whole and serializes back to the same value, so an
@@ -145,9 +145,9 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
 
 #[test]
 fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
-    // "candidatos desde los knowledge/ de los repos → gate
-    // con assignee curador → nueva versión del pack" — a plain
-    // workflow, no engine mechanism of its own.
+    // Candidates from each repo's knowledge/ go to a gate assigned to a
+    // curator, and the result becomes a new version of the pack. This is a
+    // plain workflow, with no engine mechanism of its own.
     let yaml = include_str!("fixtures/promote-knowledge.yaml");
     let workflow: yunta_core::Workflow =
         yunta_core::yaml::parse(yaml).expect("promote-knowledge.yaml must parse whole");

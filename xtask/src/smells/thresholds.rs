@@ -1,45 +1,48 @@
-//! Reading a number a source file fixes, and the decision behind it.
+//! Reading a number a source file fixes, and the reason written beside it.
 //!
 //! A threshold is a choice about behaviour — how long a wait may take,
 //! how deep a queue is, how many samples an estimate needs — and the
-//! number alone says neither who chose it nor what it trades away. The
-//! rustdoc of such a constant cites the decision that fixes it, by its
-//! `Dnnn`, so changing the number is revising that decision rather than
-//! making a second choice alone.
+//! number alone says neither why it has that value nor what it trades
+//! away. The rustdoc of such a constant states that reason in prose, so
+//! a reader finds it beside the number, and changing the number means
+//! revising the reason rather than making a second choice alone.
 
 /// The integer types a threshold is written in.
 const INT_TYPES: &[&str] = &[
     "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
 ];
 
-/// How many integer constants in `source` fix their number here and
-/// cite no decision. A constant whose value names another constant takes
-/// its number from there, so the decision is the one that fixed it.
-pub fn numeric_consts_without_decision(source: &str) -> usize {
+/// How many integer constants in `source` fix their number here and state
+/// no reason for it. A constant whose value names another constant takes
+/// its number from there, so the reason belongs to that constant.
+pub fn numeric_consts_without_reason(source: &str) -> usize {
     let lines: Vec<&str> = source.lines().collect();
     lines
         .iter()
         .enumerate()
         .filter(|(_, line)| declares_numeric_const(line))
-        .filter(|(at, _)| !cites_a_decision(&lines[..*at]))
+        .filter(|(at, _)| !states_a_reason(&lines[..*at]))
         .count()
 }
 
-/// Whether the rustdoc block ending at `above`'s last line cites a
-/// decision. The block is the run of `///` lines and attributes directly
-/// over the declaration; a blank line or code ends it.
-fn cites_a_decision(above: &[&str]) -> bool {
+/// Whether the rustdoc above a constant has a `///` line of three or more
+/// prose words: letters only, the punctuation around them ignored. The
+/// block is the run of comment and attribute lines directly over the
+/// declaration; a blank line or code ends it.
+fn states_a_reason(above: &[&str]) -> bool {
     above
         .iter()
         .rev()
-        .take_while(|line| {
-            let text = line.trim_start();
-            text.starts_with("///") || text.starts_with("#[")
-        })
+        .take_while(|line| line.trim_start().starts_with(['/', '#']))
+        .filter(|line| line.trim_start().starts_with("///"))
         .any(|line| {
-            line.as_bytes()
-                .windows(2)
-                .any(|pair| pair[0] == b'D' && pair[1].is_ascii_digit())
+            line.trim_start()
+                .trim_start_matches('/')
+                .split_whitespace()
+                .map(|word| word.trim_matches(|c: char| !c.is_alphanumeric()))
+                .filter(|word| word.len() >= 2 && word.chars().all(char::is_alphabetic))
+                .count()
+                >= 3
         })
 }
 
@@ -48,8 +51,7 @@ fn cites_a_decision(above: &[&str]) -> bool {
 /// with or without the digit separators and the type suffix a literal
 /// may carry. Arithmetic over literals alone — `1024 * 1024` — fixes its
 /// number here too, and is read as one. A value naming another constant
-/// is not a number declared here: the decision is the one that fixed
-/// that constant.
+/// is not a number declared here: the reason belongs to that constant.
 fn declares_numeric_const(line: &str) -> bool {
     let mut code = line.trim();
     if let Some(rest) = code.strip_prefix("pub") {
@@ -103,30 +105,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_numeric_const_counts_until_its_rustdoc_cites_a_decision() {
-        let cited = "/// How long a wait may take (D170).\nconst WAIT: u64 = 10;\n";
-        assert_eq!(numeric_consts_without_decision(cited), 0);
-        let bare = "/// How long a wait may take.\nconst WAIT: u64 = 10;\n";
-        assert_eq!(numeric_consts_without_decision(bare), 1);
+    fn a_numeric_const_counts_until_its_rustdoc_states_a_reason() {
+        // A word with a digit in it is an identifier, not prose, so it
+        // states no reason on its own.
+        assert_eq!(
+            numeric_consts_without_reason("/// ED25519 signs it.\nconst WAIT: u64 = 10;\n"),
+            1
+        );
+        assert_eq!(
+            numeric_consts_without_reason("/// (ID2)\nconst WAIT: u64 = 10;\n"),
+            1
+        );
+        assert_eq!(
+            numeric_consts_without_reason("/// How long a wait may take.\nconst WAIT: u64 = 10;\n"),
+            0
+        );
+        assert_eq!(numeric_consts_without_reason("const WAIT: u64 = 10;\n"), 1);
         // A visibility, digit separators and a suffix are the same
         // declaration; a value naming another constant is not a number
         // declared here, and neither is a string.
         assert_eq!(
-            numeric_consts_without_decision("pub(crate) const N: usize = 1_024usize;\n"),
+            numeric_consts_without_reason("pub(crate) const N: usize = 1_024usize;\n"),
             1
         );
         // Arithmetic over literals alone fixes its number here; one
         // term naming another constant takes it from there.
         assert_eq!(
-            numeric_consts_without_decision("const N: usize = 1024 * 1024;\n"),
+            numeric_consts_without_reason("const N: usize = 1024 * 1024;\n"),
             1
         );
         assert_eq!(
-            numeric_consts_without_decision("const N: usize = OTHER + 1;\n"),
+            numeric_consts_without_reason("const N: usize = OTHER + 1;\n"),
             0
         );
         assert_eq!(
-            numeric_consts_without_decision("const NAME: &str = \"3\";\n"),
+            numeric_consts_without_reason("const NAME: &str = \"3\";\n"),
             0
         );
     }

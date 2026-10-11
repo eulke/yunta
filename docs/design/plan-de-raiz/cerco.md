@@ -1,16 +1,27 @@
-# El cerco — M25
+# El cerco y el riel
 
-Lo que una sesión puede escribir, dicho una sola vez, juzgado por una sola
-función, construido por cada adapter con el mecanismo que su CLI tiene, y
-reportado en el log con la cobertura real. Reemplaza cuatro formas de decir lo
-mismo: `edit_constraints` (globs como `String`), `edit_hooks: bool`,
-`artifact_dir` leído como permiso, y los marcadores `blocked:<path>` del mock.
-El post-check por diff (`scope_check`, se conserva; su archivo gana una
-función pura) sigue siendo la única garantía; el cerco es lo que evita que una
-escritura fuera de scope llegue a existir, y lo dice cuando no pudo evitarla.
+Lo que una sesión puede escribir se dice una sola vez, en un `Fence`, y lo
+juzga una sola función, `Fence::judge`. Antes de cada escritura de una
+herramienta de archivo, la CLI del agente pregunta al engine por medio de su
+hook, que es el riel: `yunta rail <adapter-id> <evento>`. El codec del adapter
+traduce lo que la CLI envía, el engine juzga la llamada contra el cerco de la
+sesión y registra cada rechazo antes de responderlo, y el codec escribe la
+respuesta en la forma que esa CLI lee. Lo que el riel decide deja su hecho en
+el log: `write_refused`, `stop_refused` o `write_formatted`.
 
-Decisión: D172 (revisa D13 y D167). Ítem: 3-08. Defectos: AD-D2, AD-D7,
-AD-D20, AD-D24, DO-D2; deuda A-13.
+**El riel no es un sandbox.** Juzga las rutas que una herramienta de archivo
+de la CLI declara. No confina procesos, comandos de shell, red ni escrituras
+que la llamada no nombra. Lo que escribe un comando lo confina el sandbox de la
+CLI cuando lo tiene, por directorio y nunca por glob; cuando no lo tiene, nada
+lo confina. La garantía es el post-check por diff (`scope_check`): el cerco
+evita que una escritura fuera de alcance ocurra cuando puede, y la cobertura
+dice cuánto pudo evitar.
+
+Decisiones: D172 (el cerco, revisada por D249, D250 y D251); D249 (los hooks
+preguntan al engine); D251 (una edición de Codex se juzga antes de aplicarse).
+Completan D252 (los comandos corren en el sandbox de la CLI), D254 (el engine
+juzga la parada antes de que la sesión termine) y D255 (lo que una sesión
+escribe se formatea al escribirlo).
 
 ---
 
@@ -18,19 +29,21 @@ AD-D20, AD-D24, DO-D2; deuda A-13.
 
 | término | qué es | dónde vive |
 |---|---|---|
-| **cerco** (`Fence`) | los globs que una sesión puede escribir bajo el worktree (los declarados más las ampliaciones ya concedidas) y las raíces absolutas fuera de él | `yunta_core::fence` |
-| **nivel** (`FenceLevel`) | lo que un adapter sabe construir: nada, un juicio por llamada de herramienta, o un sandbox de filesystem | `Capabilities::fence` |
-| **cobertura** (`Coverage`) | lo que la sesión concreta cercó, calculado de lo que el adapter construyó: exacta, ensanchada a raíces, o solo herramientas | `agent_session_opened.fence` |
-| **canal** | por dónde una sesión escribe: las herramientas de archivo del CLI, o todo lo demás (shell, MCP, tareas delegadas del CLI). Es prosa: el tipo `Channel` del código es el de los gates | `Fenced` y `Coverage::of` |
-| **cercado** (`Fenced`) | lo que un canal tiene: cerco exacto, o raíces | `Coverage::of` |
-| **juez** | la función pura que decide si un path está dentro del cerco | `Fence::judge` |
-| **hook** (`FenceHook`) | el comando que un CLI ejecuta antes de escribir y que invoca al juez | `core::fence`, construido por el CLI |
-| **codec** | la traducción entre el juez y el hook de un CLI: qué llega por stdin, qué se responde | `FenceCodec` por adapter |
-| **rechazo** (`write_refused`) | el hecho de que una escritura fue rechazada antes de ocurrir | kind del dominio `session` |
+| **cerco** (`Fence`) | lo que una sesión puede escribir: los globs bajo el worktree (`allowed`: `None` no pone techo, `Some([])` no admite nada), las raíces absolutas fuera de él (`roots`), lo que ninguna sesión escribe (`denied`) y el consejo que da un rechazo (`advice`) | `yunta_core::fence` |
+| **juez** (`Fence::judge`) | la función pura que decide si un path está dentro del cerco; no lee el disco | `yunta_core::fence` |
+| **nivel** (`FenceLevel`) | lo que un adapter sabe construir: `none`, `tool_calls` (un juicio por cada llamada de herramienta de archivo) o `filesystem` (un sandbox por directorio) | `Capabilities::fence` |
+| **canal** | por dónde escribe una sesión: las herramientas de archivo de la CLI, o todo lo demás (comandos, MCP, tareas delegadas). Es prosa; el código lo expresa como `Fenced` | `Coverage::of` |
+| **cobertura** (`Coverage`) | lo que la sesión quedó cercada, calculado de lo que el adapter construyó: `exact`, `widened_to_roots` o `tools_only`. Es la del canal más débil | `agent_session_opened.fence` |
+| **riel** | el hook de una CLI y la conversación que abre con el engine: la CLI pregunta antes de escribir, después de escribir y antes de parar | `yunta_core::rail` |
+| **evento** (`RailEvent`) | el momento en que la CLI pregunta: `before-write`, `after-write` o `before-stop` | `yunta_core::rail` |
+| **llamada y respuesta** (`RailCall`, `RailAnswer`) | lo que la CLI pregunta, con sus rutas; lo que el engine responde: `proceed`, `refuse` o `tell` | `yunta_core::rail` |
+| **codec** (`RailCodec`) | la traducción de una CLI al riel: lee la llamada de su stdin y escribe la respuesta en la forma que esa CLI lee | un codec por adapter; el trait está en `yunta_core::port` |
+| **comando del riel** (`RailCommand`) | la línea que la configuración de la CLI ejecuta: `yunta rail <adapter-id> <evento>` | `yunta_core::rail`, construido por el CLI |
+| **rechazo** (`write_refused`) | una escritura que el engine negó antes de que ocurriera; el evento queda en el log antes de que la CLI lo reciba | evento del dominio `session` |
 
-En prosa: cerco, nivel, cobertura, canal, cercado, juez, hook, codec,
-rechazo. En YAML, JSON y código: `fence`, `FenceLevel`, `Coverage`, `Fenced`,
-`Fence::judge`, `FenceHook`, `FenceCodec`, `write_refused`.
+En prosa: cerco, juez, nivel, canal, cobertura, riel, codec y rechazo. En
+código: `Fence`, `Fence::judge`, `FenceLevel`, `Coverage`, `RailEvent`,
+`RailAnswer`, `RailCodec` y `write_refused`.
 
 ---
 
@@ -38,428 +51,425 @@ rechazo. En YAML, JSON y código: `fence`, `FenceLevel`, `Coverage`, `Fenced`,
 
 ```rust
 // crates/core/src/capabilities.rs
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
 pub struct Capabilities {
-    pub resume_session: bool,
-    pub fence: FenceLevel,             // reemplaza `edit_hooks: bool`; un log viejo con `edit_hooks` lee `None`
-    pub permission_profiles: bool,
-    pub custom_agents: bool,
-    pub usage_reporting: bool,
-    pub skills: bool,
-    pub run_tools: bool,
-    pub network_isolation: bool,
+    pub fence: FenceLevel,   // un log escrito antes lleva `edit_hooks`, que se lee como `None`
+    /* ... */
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum FenceLevel { #[default] None, ToolCalls, Filesystem }      // "none" | "tool_calls" | "filesystem"
-pub enum Capability { ResumeSession, Fence, PermissionProfiles, CustomAgents, UsageReporting, Skills, RunTools, NetworkIsolation }
-impl Capability { pub fn as_str(&self) -> &'static str /* Fence => "fence" */ }
-impl Capabilities { pub fn declares(&self, cap: Capability) -> bool /* Fence => self.fence != FenceLevel::None */ }
+pub enum FenceLevel { #[default] None, ToolCalls, Filesystem }   // "none" | "tool_calls" | "filesystem"
 
-// crates/core/src/fence.rs — nuevo; el único juez del workspace
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Fence { pub allowed: Vec<ScopeGlob>, pub roots: Vec<PathBuf>, pub advice: Advice }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Advice { RequestExpansion, ReportFinding }   // qué le dice el rechazo al modelo: pedir ampliación (la tool está montada) o reportar un finding
-impl Fence {
-    pub fn everything(roots: Vec<PathBuf>, advice: Advice) -> Self;          // allowed = ["**"]
-    pub fn read_only(roots: Vec<PathBuf>, advice: Advice) -> Self;           // allowed = []
-    pub fn for_session(profile: PermissionProfile, scope: Option<&[ScopeGlob]>, granted: &[ScopeGlob], artifact_dir: Option<&Path>, advice: Advice) -> Self;
-        // ReadOnly → read_only; scope Some → allowed = scope ∪ granted; None → everything; roots = artifact_dir.into_iter().collect()
-    pub fn judge(&self, worktree: &Path, target: &Path) -> Verdict;   // pura: no toca disco
-    pub fn to_env(&self, worktree: &Path) -> (&'static str, String);  // (ENV_VAR, json de FenceEnv { fence, worktree })
-    pub fn from_env(value: &str) -> Result<(Self, PathBuf), FenceEnvError>;
+// crates/core/src/fence.rs
+pub struct Fence {
+    pub allowed: Option<Vec<ScopeGlob>>,   // None: sin techo bajo el worktree; Some([]): nada
+    pub roots: Vec<PathBuf>,               // absolutas, escribibles fuera del worktree
+    pub advice: Advice,                    // qué dice un rechazo: pedir ampliación o reportar
+    pub denied: Vec<ScopeGlob>,            // lo que ninguna sesión escribe bajo el worktree
+    pub naming: ToolNaming,                // cómo la CLI nombra las herramientas del run
 }
-pub const ENV_VAR: &str = "YUNTA_FENCE";
-pub enum FenceEnvError { Json(#[source] serde_json::Error) }
+pub enum Advice { RequestExpansion, ReportFinding }
 pub enum Verdict { Allowed, Refused(Refusal) }
-pub struct Refusal { pub target: PathBuf, pub worktree: PathBuf, pub allowed: Vec<ScopeGlob>, pub roots: Vec<PathBuf>, pub advice: Advice }
-impl Display for Refusal;                      // la única prosa del rechazo; empieza por REFUSAL_MARKER
-pub const REFUSAL_MARKER: &str = "yunta: write refused: ";
-pub fn refused_target(text: &str) -> Option<PathBuf>;   // reconoce un Display de Refusal; único parser del marcador
-pub fn lexical_absolute(base: &Path, path: &Path) -> PathBuf;   // resuelve `.`/`..` sin disco; relativo → contra base
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub target: PathBuf,
+    pub worktree: PathBuf,
+    pub allowed: Option<Vec<ScopeGlob>>,
+    pub roots: Vec<PathBuf>,
+    pub advice: Advice,
+    pub denied: bool,
+    pub naming: ToolNaming,
+}
 pub enum Fenced { Exact, Roots(Vec<PathBuf>) }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "coverage", rename_all = "snake_case")]
 pub enum Coverage { Exact, WidenedToRoots { roots: Vec<PathBuf> }, ToolsOnly }
-// wire, dentro de `agent_session_opened`: "fence": {"coverage": "exact"} · {"coverage": "widened_to_roots", "roots": [...]} · {"coverage": "tools_only"}
 impl Coverage {
     pub fn of(tools: Fenced, others: Option<Fenced>) -> Coverage;
-    // (Exact, Some(Exact)) → Exact · (_, None) → ToolsOnly · resto → WidenedToRoots { roots: unión ordenada, sin repetidos }
 }
+impl Fence {
+    pub fn everything(roots: Vec<PathBuf>, advice: Advice) -> Self;   // allowed = None
+    pub fn read_only(roots: Vec<PathBuf>, advice: Advice) -> Self;    // allowed = Some([])
+    pub fn for_session(
+        profile: PermissionProfile,
+        scope: Option<&[ScopeGlob]>,
+        granted: &[ScopeGlob],
+        artifact_dir: Option<&Path>,
+        advice: Advice,
+    ) -> Self;
+    pub fn sharing(self, dirs: &[PathBuf]) -> Self;   // las raíces que comparte el run
+    pub fn denying(self, denied: &[ScopeGlob]) -> Self;
+    pub fn naming(self, naming: ToolNaming) -> Self;
+    pub fn judge(&self, worktree: &Path, target: &Path) -> Verdict;   // pura: no lee el disco
+}
+pub const REFUSAL_MARKER: &str = "yunta: write refused: ";
+pub fn lexical_absolute(base: &Path, path: &Path) -> PathBuf;
 
-pub const SUBCOMMAND: &str = "fence";          // el nombre del subcomando vive acá; el CLI lo registra, los adapters lo embeben
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FenceHook { bin: PathBuf }
-impl FenceHook {
-    pub fn new(bin: PathBuf) -> Self;                          // el CLI: `std::env::current_exe()` una vez, en `Context`
-    pub fn command(&self, adapter: &AdapterId) -> Vec<String>; // ["<bin>", "fence", "<adapter-id>"]
+// crates/core/src/rail.rs
+pub const SUBCOMMAND: &str = "rail";
+pub const URL_VAR: &str = "YUNTA_RAIL_URL";
+pub const TOKEN_VAR: &str = "YUNTA_RAIL_TOKEN";
+pub const ROUTE: &str = "/rail";
+pub enum RailEvent { BeforeWrite, AfterWrite, BeforeStop }   // "before-write" | "after-write" | "before-stop"
+pub struct RailCall { pub session_id: SessionId, pub act: RailAct }
+pub enum RailAct {
+    BeforeWrite { paths: Vec<PathBuf> },
+    AfterWrite { paths: Vec<PathBuf> },
+    BeforeStop,
+}
+pub enum RailAnswer { Proceed, Refuse { reason: String }, Tell { context: String } }
+pub fn unasked(event: RailEvent, why: &str) -> RailAnswer;
+pub struct RailCommand { bin: PathBuf }   // RailCommand::new(bin); argv(&AdapterId, RailEvent) -> [bin, "rail", id, evento]
+pub struct RailEndpoint { pub url: String, pub token: Secret<String> }
+
+// crates/core/src/port/session.rs
+pub trait RailCodec: Send + Sync {
+    fn decode(&self, event: RailEvent, stdin: &[u8]) -> Result<Option<RailCall>, CodecError>;
+    fn encode(&self, event: RailEvent, answer: &RailAnswer) -> HookReply;
 }
 ```
 
-**Reglas del juez** (`Fence::judge`, en este orden; la primera que decide, decide):
+En el cable, `RailCall` lleva `{"session_id": …, "act": {"event": "before-write",
+"paths": [...]}}`; `RailAnswer`, `{"answer": "proceed"}`, `{"answer": "refuse",
+"reason": …}` o `{"answer": "tell", "context": …}`; `Coverage`, `{"coverage":
+"exact"}`, `{"coverage": "widened_to_roots", "roots": [...]}` o `{"coverage":
+"tools_only"}`.
 
-1. `target` se normaliza con `lexical_absolute(worktree, target)`: un path
-   relativo se resuelve contra el worktree; `.` y `..` se colapsan sin leer el
-   disco. Un CLI que entrega paths relativos los entrega relativos a su cwd, que
-   es el worktree.
-2. Bajo alguna `roots[i]` → `Allowed`.
-3. Bajo `worktree`: si el path relativo es `.git` o empieza por `.git/` →
-   `Refused` (el registro del run nunca es trabajo de una tarea; `.git` a
-   secas es el archivo que un `git worktree` deja); si
-   `scope_globset(allowed)` lo matchea → `Allowed`; si no → `Refused`.
-4. Fuera del worktree y de toda raíz → `Refused`.
+### Reglas del juez
 
-`allowed` vacío deja toda escritura bajo el worktree en `Refused`: ese es el
-perfil `read_only`, y las raíces siguen escribibles porque son el registro,
-no el trabajo.
+`Fence::judge` responde en este orden, y decide la primera regla que aplica:
 
-**El texto del rechazo** (`Refusal`'s `Display`), una sola vez, para el
-modelo y para el parser. Las listas vacías se imprimen como `none`:
+1. `target` se resuelve con `lexical_absolute(worktree, target)`: un path
+   relativo se resuelve contra el worktree, `.` y `..` se colapsan sin leer el
+   disco, y un symlink no se sigue. Un CLI que entrega paths relativos los
+   entrega relativos a su cwd, que es el worktree.
+2. Bajo alguna raíz: `Allowed`.
+3. Fuera del worktree: `Refused`.
+4. Bajo el worktree, si `denied` lo matchea: `Refused`, con `denied` en el
+   rechazo.
+5. Bajo el worktree, si la ruta relativa es `.git` o empieza por `.git/`:
+   `Refused`. El registro del run nunca es trabajo de una tarea. `.git` a secas
+   es el archivo que deja `git worktree`.
+6. Bajo el worktree: con `allowed` en `None`, `Allowed`; con `Some(globs)`,
+   `Allowed` solo si algún glob lo matchea; si no, `Refused`.
 
+`allowed = Some([])` es el perfil `read_only`: toda escritura bajo el worktree
+queda en `Refused`, y las raíces siguen escribibles, porque son el registro del
+run y no el trabajo.
+
+### El texto del rechazo
+
+`Refusal` tiene un único `Display`: es el texto que lee el modelo y el que la
+CLI muestra. Siempre empieza por `REFUSAL_MARKER`. Si `denied` lo causa:
+
+```text
+yunta: write refused: <ruta> is outside what this session may ever write: the project denies it to every run (permissions.paths.deny), or it holds a test a person approved, and no request widens that. Do not write here.
 ```
-yunta: write refused: <target> is outside this session's scope.
-Allowed under <worktree>: <globs separados por ", " | none>; also writable: <roots separados por ", " | none>.
+
+En otro caso:
+
+```text
+yunta: write refused: <ruta> is outside this session's scope.
+Allowed under <worktree>: <globs | everything | none>; also writable: <raíces | none>.
 <consejo>
 ```
 
-Con `Advice::RequestExpansion`: `Ask for more scope with the run tool
-yunta_request_scope_expansion; a granted expansion applies from the next
-attempt. Do not write here.` Con `Advice::ReportFinding`: `Report the need as
-a finding; do not write here.` `refused_target` lee el path entre
-`REFUSAL_MARKER` y ` is outside`; un texto sin el marcador devuelve `None`.
+El consejo depende de `advice`. `RequestExpansion` se da a una sesión que puede
+pedir más alcance con la herramienta de ampliación del run: dice que la
+ampliación rige desde el intento siguiente y que, si un criterio propio de la
+tarea falla señalando ese archivo como `path:line`, el engine la concede al
+terminar el intento. `ReportFinding` pide reportar la necesidad como hallazgo.
 
-**Las ampliaciones concedidas entran al cerco.** `allowed` es el scope
-declarado más lo ya concedido en intentos anteriores (`already_granted_paths`
-de `task_cycle/attempt.rs:32`), lo mismo que el post-check evalúa (Contrato
-§6.2). Una ampliación pedida durante el intento se evalúa después de la
-sesión, como hoy (`attempt.rs:94`); si se concede, el intento siguiente la
-tiene en su cerco. El flujo pedir→escribir en el mismo intento no existe con
-un cerco: la escritura se rechaza, el pedido queda registrado, y el reintento
-la hace.
+### Las ampliaciones concedidas
 
-**La cobertura es la del canal más débil.** Un CLI puede cercar sus
-herramientas de archivo por glob y su shell solo por sandbox de raíces, o no
-cercarlo. `Coverage::of(tools, others)` toma lo que el adapter construyó en
-cada canal y devuelve lo más débil; `Exact` solo cuando los dos canales son
-exactos. Con un solo valor el engine decide lo único que decide con él: una
-escritura que llega al diff bajo `Exact` es un `engine_finding` (§5).
+El alcance de una sesión de tarea es el declarado más lo concedido en intentos
+anteriores (`already_granted_paths`), y el cerco se arma con ese alcance. Una
+ampliación pedida durante un intento la evalúa el engine al terminar el
+intento; si la concede, la sesión siguiente la tiene dentro del cerco. No hay
+un flujo que pida y escriba en el mismo intento: la escritura se rechaza, el
+pedido queda registrado y el reintento lo usa.
 
 ---
 
 ## 3. Puerto y eventos
 
 ```rust
-// crates/core/src/port/mod.rs (M01)
+// crates/core/src/port/session.rs
 pub struct SessionRequest {
-    pub prompt: String, pub cwd: PathBuf, pub model: Option<ModelName>, pub agent: Option<AgentName>,
-    pub permissions: PermissionProfile,
-    pub env: HashMap<String, Secret<String>>,
-    pub fence: Fence,                       // siempre; reemplaza `edit_constraints: Option<Vec<Glob>>`; la única fuente de permisos de escritura
-    pub fence_hook: Option<FenceHook>,      // None solo en un arnés sin binario (Bench); un adapter que lo necesita y no lo tiene falla la sesión
-    pub budget: Budget,
-    pub adapter_settings: serde_json::Map<String, serde_json::Value>,
-    pub skills: Vec<PathBuf>,
-    pub run_tools_endpoint: Option<RunToolsEndpoint>,
-    pub artifact_dir: Option<PathBuf>,      // dónde van los archivos declarados (prompt y mount); ningún adapter lo lee como permiso
-    pub scratch_dir: PathBuf,               // siempre; deja de ser Option
+    /* ... */
+    pub fence: Fence,                       // siempre: la única fuente de permisos de escritura
+    pub rail_command: Option<RailCommand>,  // None solo en un arnés sin binario
+    pub rail: Option<RailEndpoint>,         // el riel del listener de la sesión, con su token
+    pub artifact_dir: Option<PathBuf>,      // dónde van los archivos declarados; ningún adapter lo lee como permiso
+    pub scratch_dir: PathBuf,               // andamiaje de la sesión, fuera de `cwd`
+    /* ... */
 }
 pub enum AgentEvent {
-    SessionOpened { session_id: SessionId, model: Option<ModelName>, fence: Option<Coverage> },   // None cuando el nivel es None
-    WriteRefused { target: ToolTarget },
-    RunToolsMounted { count: usize }, ToolUse { target: ToolTarget /* M11 */ }, Usage { … }, Note { … }, Completed { … }, Failed { … },
+    SessionOpened { session_id: SessionId, model: Option<ModelName>, fence: Option<Coverage> },   // None si el nivel es None
+    WriteRefused { target: ToolTarget },    // un rechazo que el adapter reporta desde su stream
+    RunToolsMounted { count: usize },
+    RunToolFailed { tool: RunTool, cause: RunToolFailureCause },
+    ToolUse { name: String, target: ToolTarget },
+    Usage { input_tokens: Option<u64>, output_tokens: Option<u64>, cached_input_tokens: Option<u64> },
+    Note { text: String },
+    Completed { result: AgentOutcome },
+    Failed { error: AgentError, cause: FailureCause },
 }
-pub enum AdapterError {
-    /* como hoy */
-    FenceUnbuildable(Unbuildable),          // antes de spawn; una capacidad ausente falla
-}
-pub enum Unbuildable { HookUnavailable, SealedRoots(Vec<PathBuf>) }   // Display en el borde: "this adapter cannot run its fence hook: no yunta binary was handed to the session" / "this adapter cannot keep <roots> writable under a read-only profile; hand the files over through the run tools or raise the profile to `edit`"
+pub enum Unbuildable { HookUnavailable }   // "this adapter cannot reach the rail: ..." (crates/core/src/error.rs)
+// AdapterError::FenceUnbuildable { adapter, source: Unbuildable }: falla antes de lanzar la CLI
 pub trait Adapter: Send + Sync {
-    /* como hoy */
-    fn fence_codec(&self) -> Option<&dyn FenceCodec> { None }   // Some solo si `capabilities().fence == ToolCalls`
+    fn capabilities(&self) -> Capabilities;
+    fn rail_codec(&self) -> Option<&dyn RailCodec> { None }   // Some solo con FenceLevel::ToolCalls
+    /* ... */
 }
-pub trait FenceCodec: Send + Sync {
-    fn decode(&self, stdin: &[u8]) -> Result<Option<PathBuf>, CodecError>;   // None: la llamada no escribe un path (se permite)
-    fn encode(&self, verdict: &Verdict) -> HookReply;
-}
-pub struct HookReply { pub stdout: Vec<u8>, pub stderr: Vec<u8>, pub exit: i32 }
-pub enum CodecError { Json(#[source] serde_json::Error), MissingField(&'static str) }
-pub type Glob = …;   // borrado
-
-// crates/core/src/events/session/kinds.rs (M02)
-pub enum SessionEvent { Opened(AgentSessionOpenedPayload), Message(AgentMessagePayload), Degraded(CapabilityDegradedPayload), WriteRefused(WriteRefusedPayload) }
-// KINDS = ["agent_session_opened", "agent_message", "capability_degraded", "write_refused"]; is_audit: write_refused = false (mueve NodeLedger, D175)
-// crates/core/src/events/session/payloads.rs (M03)
-pub struct AgentSessionOpenedPayload { pub session_id: SessionId, pub agent: Option<AgentName>, pub model: Option<ModelName>, pub capabilities: Capabilities, #[serde(default, skip_serializing_if = "Option::is_none")] pub fence: Option<Coverage> }
-impl AgentSessionOpenedPayload { pub fn new(session_id: SessionId, agent: Option<AgentName>, model: Option<ModelName>, capabilities: Capabilities, fence: Option<Coverage>) -> Self; }
-// el nivel viaja una vez, en `capabilities.fence`; `fence` es solo la cobertura
-pub struct WriteRefusedPayload { pub session_id: SessionId, pub target: ToolTarget }
-impl WriteRefusedPayload { pub fn new(session_id: SessionId, target: ToolTarget) -> Self; }
-// crates/core/src/events/node/ledger.rs (M04, D175): NodeLedger es el dueño de las sesiones, porque el intento las acota
-// OpenSession.fence: Option<Coverage>; NodeRecord.refused: Vec<RefusedWrite { session_id, target }>
-impl NodeLedger { pub fn coverage_of(&self, node: &NodeId, session: &SessionId) -> Option<&Coverage>; pub fn refused_by(&self, node: &NodeId, session: &SessionId) -> Vec<&ToolTarget>; }
-// crates/core/src/port/policy.rs (M09): la fila
-(Capability::Fence, Absence::DegradeWith(Policy::PostCheckOnly)),   // una vez por run
 ```
 
-`EventPayload::KINDS` pasa a 37 y `crates/core/schemas/events.json` se
-regenera con `cargo xtask schema`: sin tag (README §1) el reemplazo es en el
-lugar, con `schema_version` 1 (D141); el invariante "ni un byte" es del ítem
-2-01, no una congelación. Los tests de M02 que derivan de `KINDS`
-(`kind_names_match_the_spec_exactly`, `…every_kind`) pasan solos; spec-events
-§0 (conteo) y §5.5 (`fence`) cambian, y gana §5.x `write_refused`.
-`Capabilities` serializa `fence` como string y lee por `#[serde(default)]`,
-así que un log con `edit_hooks` sigue leyéndose (`fence = None`); los
-fixtures y el corpus que escriben `edit_hooks` se reescriben.
+El cerco deja cuatro hechos de sesión (`crates/core/src/events/session/`). Tres
+salen del riel, y el cuarto sale de la apertura de la sesión:
+
+- `write_refused { session_id, target }`: una escritura negada antes de que
+  ocurriera. El ledger del nodo lo pliega en `NodeRecord.refused`, por sesión.
+- `stop_refused { session_id, state, why, task_id }`: una parada devuelta.
+  `state` es el estado del trabajo; `why` lista lo que lo impedía
+  (`criteria_red`, `outside_scope`, `artifact_missing`, `artifact_refused`).
+- `write_formatted { session_id, run, paths, changed, exit_code, duration_ms }`:
+  un formateador que el engine corrió después de una escritura.
+- `agent_session_opened.fence`: la cobertura de la sesión, calculada por el
+  adapter.
+
+Un adapter sin nivel degrada con la política `(Capability::Fence,
+Absence::DegradeWith(Policy::PostCheckOnly))`: el run lo registra una vez, y la
+sesión escribe sin juicio previo. El post-check es entonces la única guarda.
 
 ---
 
-## 4. El comando `yunta fence <adapter-id>`
+## 4. El comando `yunta rail <adapter-id> <evento>`
 
-Oculto en `--help`; su nombre es `fence::SUBCOMMAND`. Es el hook: el CLI del
-agente lo ejecuta antes de cada escritura con la llamada en stdin y
-`YUNTA_FENCE` en el entorno.
+Oculto en `--help`; su nombre es `yunta_core::rail::SUBCOMMAND`. Ninguna persona
+lo invoca. La CLI del agente lo ejecuta antes de cada escritura de archivo,
+después de cada una y antes de parar, con la llamada en stdin y con
+`YUNTA_RAIL_URL` y `YUNTA_RAIL_TOKEN` en el entorno. El adapter que abrió la
+sesión es quien puso ese comando en la configuración de la CLI.
 
-```rust
-// crates/cli/src/commands/fence.rs
-pub fn run(codec: Option<&dyn FenceCodec>, fence_var: Option<&str>, stdin: &[u8]) -> HookReply;
-// 1. codec None → HookReply { exit: 2, stderr: "yunta: fence misconfigured: adapter `<id>` has no fence codec" }
-// 2. fence_var None / Fence::from_env error → exit 2, stderr "yunta: fence misconfigured: <causa>"
-// 3. codec.decode(stdin) → error → exit 2 "yunta: fence misconfigured: <causa>"; None → codec.encode(&Verdict::Allowed)
-// 4. codec.encode(&fence.judge(&worktree, &target))
-```
+`rail_hook` (`crates/cli/src/cli/dispatch.rs`) llama a `commands::rail::run`, en
+este orden:
 
-Un fallo nuestro rechaza; nunca permite. `main.rs` resuelve el codec en el
-registro de adapters de 1-04 (`registry.iter().find(|a| a.id() == id)`,
-construido sin `probe()`) y lee `YUNTA_FENCE` en el borde, por
-`config/env.rs` (`Env::fence_var()`; el ratchet `env_read_outside_boundary`
-de M22 no cambia). El cerco viaja por `YUNTA_FENCE` en el entorno del hijo
-(no es secreto: son globs y paths), puesto por el adapter en `spawn` con
-`Fence::to_env`. `FenceHook` lo construye `Context` una sola vez con
-`std::env::current_exe()` (hoy `commands/mod.rs:120` lo repite para
-`--detach`; pasa a consumir el mismo valor) y llega al engine por
-`RunEnv.fence_hook: Option<FenceHook>`. `Bench` pasa `None`: el mock juzga en
-proceso y no lo necesita; `yunta test` y `drive` reciben el de `Context`.
+1. Lee stdin completo.
+2. Construye el adapter sin `probe()` y toma su codec. Sin codec, sale con
+   código 2 y `yunta: rail misconfigured: this adapter has no rail codec` en
+   stderr.
+3. `decode` lee la llamada. Una sin nada que preguntar (`Ok(None)`) pasa sin
+   preguntar. Una que el codec no lee responde como `unasked`.
+4. Sin `YUNTA_RAIL_URL` y `YUNTA_RAIL_TOKEN` en el entorno, responde como
+   `unasked`.
+5. Pregunta por `POST /rail/<evento>` con `Authorization: Bearer` al listener de
+   la sesión. Espera 8 s en `before-write` y en `after-write`; en `before-stop`
+   espera lo que el engine tarde. Si la pregunta falla, responde como `unasked`.
+6. `encode` escribe la respuesta en la forma de esa CLI.
+
+`unasked` es la respuesta de un hook que no puede preguntar. Un `before-write`
+responde `refuse` con `yunta: write refused: the engine could not be asked
+(<motivo>).`; los demás eventos pasan. Nadie sabe qué puede escribir la sesión si no pregunta,
+por eso el rechazo es la respuesta segura.
+
+Lo que el codec devuelve a cada CLI. `crates/adapters/src/session.rs` comparte
+las dos formas de parada y de contexto:
+
+| respuesta | evento | forma |
+|---|---|---|
+| `refuse` | `before-write` | código 2; el motivo en stderr |
+| `refuse` | `before-stop` | stdout `{"decision":"block","reason":…}`; código 0 |
+| `tell` | `after-write` | stdout `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":…}}`; código 0 |
+| `proceed` | todos | código 0; sin salida |
+
+Codex lee un rechazo con stderr vacío como un hook roto y corre el parche de
+todos modos. Por eso su codec nunca deja el motivo vacío: pone `yunta: write
+refused`.
+
+Tiempos. La CLI corta su hook de escritura a los 10 s (`HOOK_TIMEOUT_SECONDS`);
+el hook se rinde a los 8 s y rechaza antes que la CLI. Si un hook no responde a
+tiempo, la CLI deja pasar la llamada, y el post-check diff la atrapa. El hook de
+parada espera al engine hasta el límite de la sesión
+(`RunToolsEndpoint::call_timeout`: el tiempo del presupuesto, o una hora).
 
 ---
 
 ## 5. El engine
 
-- **`open_session` (M08)** construye el cerco en un solo lugar:
-  `require(Capability::Fence)` (degrada `PostCheckOnly` una vez por run si el
-  nivel es `None`); `advice = RequestExpansion` si la sesión monta
-  `yunta_request_scope_expansion` (una sesión de tarea con run tools,
-  Contrato §6.4), `ReportFinding` si no; `fence = Fence::for_session(profile,
-  scope, granted, artifact_dir, advice)` con `scope` el de la tarea
-  (`Task.scope`) o el del nodo (`Node.scope`), ya `Vec<ScopeGlob>` (M12), y
-  `granted` las ampliaciones ya concedidas a esa tarea (`GrantLedger`);
-  `fence_hook = ctx.env.fence_hook.clone()`; `scratch_dir` lo crea
-  `SessionSlot` siempre.
-- **Cobertura en memoria.** `dispatch_session` (`task_cycle/session.rs:150`)
-  emite `agent_session_opened` con `fence` desde `AgentEvent::SessionOpened`
-  (`session.rs:290-302`, gana el campo) y lo devuelve en
-  `DispatchOutcome.fence: Option<Coverage>`: la cache de una invocación de lo
-  que el log ya tiene.
-- **Post-check.** `scope_check` no cambia. Después de cada llamada
-  (`node_close.rs:212`, `task_cycle/attempt.rs:112`, `loop_exec/integrate.rs:278`)
-  corre `fence_breach(coverage: Option<&Coverage>, result: &ScopeCheckResult) -> Option<Breach>`
-  (pura, `engine/src/scope.rs`): `Some(Breach { paths: result.violations.clone() })`
-  solo con `Coverage::Exact` y `violations` no vacías. `attempt.rs` no tiene
-  `RunCtx`: devuelve el `Breach` dentro de su resultado y lo registra el
-  llamador que sí lo tiene, el mismo que registra `scope_checked`. El
-  registro es el `engine_finding` que ya existe (`ctx.rs:190`) con
-  `node = Some(nodo)`, `id = "engine-fence-breach"` (el esquema `engine-*` de
-  `exec.rs:236,280`), `severity = FindingSeverity::Major` (la tarea ya falla
-  por la violación; el finding pide revisar el adapter, no bloquea más que
-  esa falla), `title = "the fence declared exact let a write through"`,
-  `location = <primer path>`, `detail = "fence exact on <adapter>; <n> paths reached the diff outside it: <paths separados por ", ">"`,
-  además de la falla que ya existe. Bajo `WidenedToRoots` o `ToolsOnly` una
-  violación es lo que siempre fue: la tarea falla con la lista.
-- **Nada más decide con el cerco.** `decide()` (M07) no lo mira; los
-  `write_refused` son crónica y conteo, no estado de nodo.
-- **Superficie.** Hasta 5-05, `cli/src/surface/lines.rs` gana la línea de
-  `write_refused` (`<nodo> — write refused: <display>`) y el sufijo de
-  `agent_session_opened` (`· fence exact` / `· fence widened to <n> roots` /
-  `· fence on tool calls`; nada sin `fence`). En 5-05 la crónica los dispone
-  desde `NodeLedger::coverage_of` y `NodeRecord.refused`; las filas ya están
-  en `cronica.md`, y son de 5-05, no de este ítem.
-- **`check` (M09).** Sin cambio: `Fence` degrada, no falla en `check`.
+- **Al abrir la sesión** (`crates/engine/src/run/session_plan.rs`).
+  `Fence::for_session` recibe el perfil, el alcance de la tarea o del nodo, el
+  directorio de archivos declarados y el consejo. Después, `denying` con lo que
+  ninguna sesión del run escribe: lo que el proyecto niega a toda corrida
+  (`permissions.paths.deny`) y los tests que una persona aprobó; `naming` con
+  cómo la CLI nombra las herramientas del run; y `sharing` con las raíces que
+  comparte el run, salvo en `read_only`. El consejo es `RequestExpansion` cuando
+  la sesión tiene herramientas del run y puede pedir alcance: siempre en una
+  tarea, y en un nodo cuando una persona puede ampliar su alcance. En los demás
+  casos es `ReportFinding`. El cerco entra en el riel de la sesión
+  (`SessionRails::fence`) antes de despachar; el primero que llega gana.
+- **Antes de escribir** (`crates/engine/src/run_tools/rail.rs`, `before_write`).
+  Juzga cada ruta con `Fence::judge`. Por cada rechazo registra `write_refused`
+  antes de responder; la ruta se guarda relativa al worktree, cuando está bajo
+  él. La respuesta es `refuse` con los textos de rechazo unidos por una línea en
+  blanco. Si ninguna ruta se rechaza, `proceed`.
+- **Después de escribir** (`crates/engine/src/run_tools/format.rs`). De las rutas
+  que el cerco permite y que son archivos, corre el comando de cada regla
+  `format:` que las cubre y registra `write_formatted`. Responde `tell` solo si
+  algo cambió o si el comando falló, para que la sesión vuelva a leer el archivo
+  antes de editarlo.
+- **Antes de parar** (`crates/engine/src/run_tools/stop.rs`). El trabajo de una
+  sesión de tarea se juzga como lo juzga `yunta_check_task`; el de una sesión de
+  nodo, como lo juzga su cierre: los documentos que entrega y su alcance. Si el
+  cierre no tomaría el trabajo, el engine registra `stop_refused` y responde
+  `refuse` con lo que falta.
+  Un mismo estado del trabajo se devuelve una sola vez. Tampoco se devuelve
+  mientras el fin del intento le debe a la sesión una respuesta sobre su alcance
+  (una ampliación que pidió, o un rechazo que un criterio rojo localiza), ni
+  cuando la sesión se está cortando: en esos casos la parada pasa.
+- **Post-check.** `scope_check` no cambia. `fence_breach`
+  (`crates/engine/src/scope.rs`) decide el caso exacto: bajo `Coverage::Exact`,
+  una violación en el diff es además un hallazgo del engine (`engine-fence-breach`,
+  severidad mayor), además de la falla de la tarea. Bajo `widened_to_roots` o
+  `tools_only`, la violación es solo la falla de siempre.
 
 ---
 
 ## 6. Adapters builtin
 
-Regla común: ningún adapter lee `artifact_dir` para permisos; `--add-dir`,
-`writable_roots` y todo equivalente salen de `fence.roots`. La configuración
-de sesión va bajo `scratch_dir`; nada bajo `cwd`.
+Reglas comunes:
 
-### claude-code — `FenceLevel::ToolCalls`
+- Un adapter con nivel `tool_calls` no abre una sesión sin riel. Si falta el
+  comando o el endpoint, falla antes de lanzar la CLI con
+  `FenceUnbuildable(HookUnavailable)`.
+- Ningún adapter lee `artifact_dir` como permiso. `--add-dir` y
+  `writable_roots` salen de `fence.roots`.
+- Los hooks del run se cargan con `cli_config` `inherit` o `isolated`. Los
+  archivos de configuración de la CLI que el adapter declara en `own_config` no
+  los escribe ninguna sesión (D250).
 
-- **Instala.** `--add-dir <root>` por cada `fence.roots`;
-  `--settings '<json>'` inline con
-  `{"hooks":{"PreToolUse":[{"matcher":"Edit|Write|MultiEdit|NotebookEdit","hooks":[{"type":"command","command":"<fence_hook.command(id) unido por espacios, cada parte entre comillas>","timeout":10}]}]}}`;
-  `YUNTA_FENCE` en el entorno del hijo. Sin `fence_hook` →
-  `AdapterError::FenceUnbuildable(HookUnavailable)` antes de spawn. Los
-  `10` segundos de timeout los fija D172.
-- **Perfiles.** `edit`: herramientas de lectura y escritura, sin `Bash`;
-  `full`: todas; `read_only`: las de lectura, y `Write`/`Edit` solo cuando
-  hay `artifact_dir` (los archivos declarados se escriben ahí y el cerco
-  rechaza todo lo demás bajo el worktree). Cierra AD-D7 sin perder los
-  archivos declarados; 3-07 toma esta forma.
-- **Codec** (`adapters/src/claude_code/fence.rs`): stdin es el JSON del
-  hook; `tool_input.file_path`, o `tool_input.notebook_path` para
-  `NotebookEdit`; sin ninguno → `MissingField`. `Refused` → `exit 2`,
-  `stderr = Refusal`'s `Display`; `Allowed` → `exit 0`, vacío.
-- **Cobertura.** `tools = Exact`; `others`: `edit` y `read_only` no exponen
-  `Bash` → `Some(Exact)`; `full` → `None`. Es decir: `edit`/`read_only`
-  reportan `Exact`, `full` reporta `ToolsOnly`.
-- **Parser** (`claude_code/parse.rs`): `ClaudeLine` gana el brazo
-  `User(UserLine)` (hoy `parse.rs:22-33` descarta `type: "user"`); un
-  `message.content[]` de `type: "tool_result"` con `is_error: true` cuyo
-  `content` `refused_target` reconoce →
-  `WriteRefused { target: ToolTarget::of_path(path relativo al worktree) }`.
-  El parser recibe el worktree al construirse (`ClaudeParser::new(cwd)`). Qué
-  parte del stderr del hook llega a `content` es lo que la verificación en
-  vivo (A-17) confirma.
-- **Límite declarado.** Si el hook no responde en el timeout, Claude Code
-  deja pasar la llamada; el post-check la atrapa y `fence_breach` la nombra.
+### claude-code: `FenceLevel::ToolCalls`
 
-### codex — `FenceLevel::Filesystem`
+- **Instala.** Con `--settings '<json>'` en la línea de comando va el JSON de los
+  hooks: `PreToolUse` con el matcher `Edit|Write|MultiEdit|NotebookEdit`
+  (`before-write`, 10 s); `Stop` (`before-stop`, con el límite de la sesión); y
+  `PostToolUse` con el mismo matcher (`after-write`), solo cuando el engine
+  formatea. El mismo JSON lleva el `sandbox` de los comandos. Cada raíz llega con
+  `--add-dir`, y `YUNTA_RAIL_URL` y `YUNTA_RAIL_TOKEN` van en el entorno del hijo.
+- **Perfiles.** `edit`: lectura, `Bash`, `Edit`, `Write`, `MultiEdit` y
+  `NotebookEdit`; los comandos corren bajo el sandbox `workspace-write`, o el que
+  diga `adapter_settings.sandbox`. `read_only`: lectura y `Bash` bajo un sandbox
+  `read-only` que niega escribir el worktree; `Write` y `Edit` solo si la sesión
+  tiene archivos declarados. `full`: todas las herramientas, sin sandbox.
+- **Codec** (`crates/adapters/src/claude_code/rail.rs`). La llamada es el JSON del
+  hook: `session_id` y, en una escritura, `tool_input.file_path`, o
+  `tool_input.notebook_path` en `NotebookEdit`. Sin ninguno de los dos, el codec
+  no la lee y el riel responde `unasked`.
+- **Cobertura.** Las herramientas son `exact`. Los comandos: con `read_only` y sin
+  raíces, `exact` (la sandbox no deja escribir nada); con `read_only` y raíces,
+  las raíces; con `edit`, el worktree y las raíces; con `full`, nada
+  (`tools_only`).
+- **Parser.** No lee rechazos de su stream. Los rechazos del riel los registra el
+  engine.
 
-- **Instala.** `--sandbox workspace-write` y
-  `-c 'sandbox_workspace_write.writable_roots=[<fence.roots>]'` (por
-  `ConfigOverride`, se conserva). Perfil `read_only` → `--sandbox read-only`;
-  si además `fence.roots` no está vacío, el adapter falla antes de spawn con
-  `AdapterError::FenceUnbuildable(SealedRoots(roots))`: el sandbox no puede
-  dejar el worktree de solo lectura y las raíces escribibles a la vez, y una
-  capacidad ausente falla en vez de gastar la sesión (cierra AD-D20; M09
-  toma esta forma en vez de una degradación).
-- **Cobertura.** `Coverage::of(Fenced::Roots(cwd ∪ roots), Some(Fenced::Roots(cwd ∪ roots)))`
-  = `WidenedToRoots { roots: [cwd, …fence.roots] }`: el sandbox es por
-  directorio en los dos canales. `.git` lo protege el sandbox mismo.
-- **Parser** (`codex/parse.rs`): el ítem de proceso terminado con la marca de
-  sandbox denegado → `WriteRefused { target: ToolTarget::opaque(command) }`.
-- **Límite declarado.** La política partida del sandbox (`/repo=write`,
-  `/repo/a=none`) no se usa: no expresa globs y el post-check ya cubre lo que
-  ella cubriría.
+### codex: `FenceLevel::ToolCalls`
 
-### mock — nivel del fixture
+- **Instala.** Con `-c` (`ConfigOverride`): el hook `PreToolUse` con el matcher
+  `apply_patch` (`before-write`), `Stop` (`before-stop`) y `PostToolUse`
+  (`after-write`), solo cuando el engine formatea. Cada hook queda confiado por su
+  propio hash en `hooks.state`: el adapter lo calcula como lo calcula Codex, en la
+  misma llamada, y no pasa `--dangerously-bypass-hook-trust` (D251). Además,
+  `--sandbox <modo>` y `sandbox_workspace_write.writable_roots` con las raíces.
+- **Perfiles.** `read_only` sin raíces: `read-only`. `read_only` con raíces:
+  `workspace-write`, y el riel rechaza toda edición que no caiga en una raíz.
+  `edit`: el modo de `adapter_settings.sandbox`, por defecto `workspace-write`.
+  `full`: `danger-full-access`.
+- **Codec** (`crates/adapters/src/codex/rail.rs`). La llamada lleva el parche en
+  `tool_input.command`. `patch_paths` saca las rutas de las cabeceras
+  `*** Add File:`, `*** Update File:`, `*** Delete File:` y `*** Move to:`. Un
+  parche se pregunta entero: una sola ruta fuera del cerco rechaza el parche
+  completo. Un parche que no nombra ningún archivo no se lee.
+- **Cobertura.** Las ediciones son `exact`. Los comandos: con `read-only`,
+  `exact`; con `workspace-write`, el worktree y las raíces; con
+  `danger-full-access`, nada.
+- **Parser** (`crates/adapters/src/codex/parse.rs`). Un comando con estado
+  `sandbox_denied` sale como `write_refused`, con el comando como objetivo
+  opaco. La versión medida de Codex (0.157.0) no emite ese estado.
 
-`capabilities: { fence: none | tool_calls | filesystem }` (twin
-`FixtureCapabilities.fence: FenceLevel`, M09) y `fence_coverage: exact |
-widened | tools_only` (opcional; default `exact` para `tool_calls`, `widened`
-para `filesystem`; `widened` reporta `roots = [cwd] ∪ fence.roots`). Cada
-`MockEffect { path, content }` de `effects:` (`fixture.rs:227-230`) pasa por
-`Fence::judge` con el cerco de la request en `apply_effects`
-(`mock/mod.rs:146-167`): `Refused` → el mock emite `WriteRefused` y no
-escribe; con nivel `filesystem` el juicio usa `Fence::everything(roots, …)`
-(el sandbox no sabe de globs); con nivel `none` escribe siempre.
-`is_blocked` (`mock/mod.rs:134-139`), `blocked_markers` y el
-`target_digest: "blocked:<path>"` se borran.
+### mock: nivel del fixture
+
+- `capabilities: { fence: none | tool_calls | filesystem }` y, opcional,
+  `fence_coverage: exact | widened | tools_only`. Sin `fence_coverage`, `tool_calls`
+  reporta `exact` y `filesystem` reporta `widened`.
+- Con `tool_calls` y riel, cada efecto del fixture se pregunta al engine por el
+  riel, como lo haría una CLI. Sin riel, o con otro nivel, `Fence::judge` decide
+  en proceso antes de escribir; con `filesystem`, el juicio usa
+  `Fence::everything(roots)`. Un efecto rechazado no se escribe y queda registrado.
+
+### Límites declarados
+
+- **No es un sandbox.** Un comando, un script o un servidor MCP escriben sin
+  pasar por el riel. Lo que cubre el canal de comandos lo dice la cobertura, y el
+  post-check por diff es la garantía.
+- **Rutas no nombradas.** El juicio cubre lo que el codec lee de la llamada. Una
+  herramienta que escribe una ruta que la llamada no nombra no se juzga.
+- **Symlinks.** El juicio es léxico: un symlink que apunta fuera del worktree no
+  se sigue. El post-check diff lo atrapa.
+- **Tiempo.** Si un hook no responde a tiempo, la CLI deja pasar la llamada. El
+  post-check diff la atrapa.
+- **Sandbox de la CLI.** Una negativa del sandbox de la CLI no pasa por el riel.
+  El parser de codex la registra solo si la CLI la informa en su stream, y la
+  versión medida no la informa.
 
 ---
 
-## 7. Adapters futuros: la muestra del mercado
+## 7. Adapters futuros
 
-Relevado el 2026-09-13 sobre los ocho CLIs más usados después de Claude Code
-y Codex (evidencia en `auditoria/09-mercado-de-clis.md`). La tabla dice qué
-construiría cada adapter y qué reportaría; no está construido y no es deuda:
-es la prueba de que los tipos de §2 alcanzan para cualquiera de ellos sin
-una variante nueva.
+Un CLI nuevo entra con el mismo riel si cumple lo que cumplen los dos adapters
+de arriba:
 
-| CLI | nivel | cómo llega el juez | cobertura `edit` / `full` | rechazo en el stream | inyección por sesión | raíces |
-|---|---|---|---|---|---|---|
-| Gemini CLI | ToolCalls | hook `BeforeTool` = `yunta fence gemini` en `settings.json` bajo `GEMINI_CLI_HOME=<scratch>`; `--policy` como segunda línea | Exact (`auto_edit` ya niega shell) / ToolsOnly | `tool_result.error.type = policy_violation` + marcador | `GEMINI_CLI_HOME`, `--policy`, `--include-directories` | `--include-directories` (≤5 con Seatbelt) |
-| Copilot CLI | ToolCalls | hook `preToolUse` bajo `COPILOT_HOME=<scratch>`; `--allow-tool='write(<glob>)'` y `--excluded-tools=bash,…` como segunda línea | Exact / ToolsOnly (o `WidenedToRoots` con `--sandbox`) | `tool.execution_complete.error.code = denied` + marcador | flags; `COPILOT_HOME` | `--add-dir` |
-| Cursor CLI | ToolCalls | hook `preToolUse` en `hooks.json` bajo `CURSOR_CONFIG_DIR=<scratch>` (si no lo reubica: bajo `cwd`, declarado en `staged_paths`); `Write(<glob>)` como segunda línea | Exact / ToolsOnly | sin campo documentado: marcador en la prosa del hook | `CURSOR_CONFIG_DIR` | `Write(/abs/**)` absoluto |
-| OpenCode | ToolCalls | extensión `tool.execute.before` que ejecuta `yunta fence opencode` y lanza su stderr, cargada por `OPENCODE_CONFIG_CONTENT`; `OPENCODE_PERMISSION` como segunda línea | Exact (bash deny) / ToolsOnly | `tool_use.part.state.status = error` + marcador | env inline | `external_directory: {"<root>/*":"allow"}` |
-| Aider | None | ninguno (`--yes-always` acepta cualquier path; sin salida estructurada) | — (post-check) | — | `--config <scratch>/aider.yml`, `AIDER_*` | — |
-| Goose | ToolCalls | extensión `PreToolUse` con `on_failure: block` bajo `GOOSE_PATH_ROOT=<scratch>` (si reubica `.agents/plugins`; si no, bajo `cwd` declarado en `staged_paths`) | Exact (hook también sobre `shell`) / ToolsOnly | `toolResponse.is_error` + prefijo fijo + marcador | `GOOSE_PATH_ROOT`, `GOOSE_MODE=auto` | ninguna (no confina) |
-| Amp | ToolCalls | `amp.permissions` con `action: delegate` a `yunta fence amp` (exit ≥2 rechaza) en `--settings-file <scratch>/settings.json`; `Bash` en `reject` | Exact / ToolsOnly | `result.permission_denials[]` + marcador | `--settings-file`, `--mcp-config` inline | paths absolutos en `matches.path` |
-| Kimi Code | ToolCalls | `[[hooks]] PreToolUse` en `KIMI_CODE_HOME=<scratch>/config.toml`; `Write(!{<globs>})` como segunda línea; o ACP con el harness como juez | Exact / ToolsOnly | prosa en la línea `tool` del JSONL + marcador | `KIMI_CODE_HOME`, `--add-dir` | `--add-dir` |
+1. **Tres niveles alcanzan.** `tool_calls` cuando su hook corre antes de cada
+   escritura de archivo, sea un hook, una extensión o un programa delegado;
+   `filesystem` cuando lo que confina es un sandbox por directorio; `none` cuando
+   no hay ninguno de los dos.
+2. **El juez es uno.** El adapter escribe el codec y la configuración que instala
+   el hook. Las reglas declarativas del CLI (un `write(<glob>)` o un
+   `permission.edit`) son una segunda línea, nunca la fuente de la cobertura: su
+   glob no es el del juez.
+3. **El engine registra el rechazo.** El codec traduce la respuesta; no lee
+   rechazos de la salida del CLI (D249).
+4. **La configuración de la sesión va bajo `scratch_dir`.** Lo que la CLI solo lee
+   del árbol del proyecto se planta bajo `cwd` y se declara en `staged_paths`,
+   como los skills.
+5. **La cobertura se calcula, no se declara.** `Coverage::of` la fija en core a
+   partir de lo que el adapter construyó.
 
-Lo que la muestra confirma y las cinco reglas que fija para todo adapter:
-
-1. **Tres niveles alcanzan.** Ocho de nueve son `ToolCalls`; Codex es
-   `Filesystem`; Aider es `None`. Un transporte distinto (hook, extensión,
-   programa delegado, ACP) es el mismo nivel: cada llamada de escritura se
-   juzga antes de ocurrir.
-2. **El juez es uno.** Los siete `ToolCalls` ejecutan `yunta fence <id>`
-   por su hook, extensión o programa delegado; el adapter escribe solo el
-   codec. Las reglas declarativas del CLI (`write(<glob>)`, `Write(!{…})`,
-   `permission.edit`) son una segunda línea, nunca la fuente de la cobertura:
-   su semántica de glob es ajena y no es el juez.
-3. **El rechazo se reconoce por el marcador**, y por el campo estructurado
-   donde existe. Cuatro CLIs tienen campo; cuatro solo prosa. El parser de
-   cada adapter emite `WriteRefused` por cualquiera de los dos; el marcador
-   es la fuente del path.
-4. **La configuración vive en `scratch_dir`.** Siete CLIs reubican su home de
-   config con una variable; el adapter la apunta a `scratch_dir` y nada cae
-   bajo `cwd`. Lo que un CLI solo lee desde el árbol del proyecto se planta
-   bajo `cwd` y se declara en `staged_paths` (se conserva), como los skills.
-5. **La cobertura se calcula, no se declara.** Ningún CLI cerca el shell por
-   path sin sandbox; `edit` sin shell es `Exact`, `full` es `ToolsOnly`, un
-   sandbox de raíces es `WidenedToRoots`. `Coverage::of` lo fija en core.
-
-Límites que la muestra hace explícitos y spec-adapter §6 declara: los hooks
-de Claude Code, Copilot, Kimi, Goose, Cursor y Gemini son fail-open ante
-timeout (la llamada pasa; el post-check la atrapa; `fence_breach` la nombra);
-el shell es ciego a paths en todos; Gemini con Seatbelt admite cinco
-directorios extra; en Cursor no está documentado si la lista `allow` es
-exclusiva bajo `-p --force`; Aider no tiene salida estructurada ni exit code
-significativo.
+La muestra de ocho CLIs del mercado (Gemini, Copilot, Cursor, OpenCode, Aider,
+Goose, Amp y Kimi) está en `auditoria/09-mercado-de-clis.md`, con lo no verificado
+marcado como tal. Ninguno tiene adapter en este repositorio.
 
 ---
 
 ## 8. Archivos
 
-- **nuevo:** `crates/core/src/fence.rs`, `crates/core/tests/fence.rs`,
-  `crates/cli/src/commands/fence.rs`, `crates/cli/tests/fence_cmd.rs`,
-  `crates/adapters/src/claude_code/fence.rs` (codec + JSON del `--settings`),
-  `crates/adapters/src/codex/fence.rs` (`sandbox_args(&Fence, PermissionProfile) -> Result<Vec<String>, Unbuildable>`, `coverage(&Fence, cwd) -> Coverage`),
-  `crates/adapters/tests/fence.rs`, `docs/design/adr/D172-el-cerco.md`,
-  `docs/design/plan-de-raiz/auditoria/09-mercado-de-clis.md`.
-- **modifica:** `crates/core/src/capabilities.rs` (`fence: FenceLevel`,
-  `Capability::Fence`, `as_str`, `declares`, derives); `crates/core/src/lib.rs`
-  (exporta `fence`); `crates/core/src/port/mod.rs` (`SessionRequest`,
-  `AgentEvent`, `AdapterError::FenceUnbuildable`, `Adapter::fence_codec`,
-  `FenceCodec`, `HookReply`, `CodecError`); `crates/core/src/port/policy.rs`
-  (fila `Fence`); `crates/core/src/events/session/{kinds,payloads,ledger,happening}.rs`;
-  `crates/core/src/events/wire.rs`; `crates/core/schemas/events.json`
-  (regenerado); `crates/engine/src/run/mod.rs` (`RunEnv.fence_hook`);
-  `crates/engine/src/run/session_plan.rs` (`Fence::for_session`, `advice`, `fence_hook`, `scratch_dir`);
-  `crates/engine/src/task_cycle/session.rs:150,290-302` (`DispatchOutcome.fence`, `SessionOpened.fence`, `WriteRefused` → `write_refused` con el `session_id` de la sesión abierta);
-  `crates/engine/src/scope.rs` (`fence_breach`); `crates/engine/src/run/node_close.rs:212`,
-  `crates/engine/src/task_cycle/attempt.rs:112` y su llamador, `crates/engine/src/run/loop_exec/integrate.rs:278`
-  (llaman `fence_breach`; registran por `engine_finding`);
-  `crates/cli/src/surface/lines.rs` (línea de `write_refused`, sufijo de `fence`);
-  `crates/cli/src/context.rs` y `crates/cli/src/commands/mod.rs:120`
-  (`FenceHook` una vez); `crates/cli/src/main.rs` y `crates/cli/src/config/env.rs`
-  (subcomando `fence::SUBCOMMAND`, `Env::fence_var()`); `crates/cli/src/commands/{drive,test}.rs`
-  (pasan el `fence_hook` de `Context` al `RunEnv`); `crates/testkit/src/bench.rs`
-  (`fence_hook: None`); `crates/adapters/src/claude_code/{mod,permissions,parse}.rs`;
-  `crates/adapters/src/codex/{mod,permissions,parse}.rs`;
-  `crates/adapters/src/mock/{mod,fixture}.rs`; los fixtures YAML y el corpus
-  que nombran `edit_hooks`; `docs/design/spec-adapter.md` (§2 `Capabilities`
-  y `SessionRequest`, §3 `WriteRefused`, O5 → el cerco, §5 fila `fence`,
-  §6 verdadero por adapter con nivel, cobertura y límite);
-  `docs/design/contrato-del-run.md` (§6 "en caliente" → el cerco con nivel y
-  cobertura; §6.1 el cerco como peldaño más fino; §6.2 la ampliación rige
-  desde el intento siguiente); `docs/design/spec-events.md` (§0 conteo, §5.5
-  `fence`, §5.x `write_refused`, `Capabilities` con `fence`);
-  `docs/design/glosario.md` (cerco, nivel, cobertura, canal, cercado, juez,
-  hook, codec, rechazo); `docs/adapters.md` (nivel por adapter);
-  `docs/design/status.md` (verificación en vivo de los dos hooks pendiente,
-  como A-17); `docs/design/deuda-consciente.md` (A-13 cerrado por D172 al
-  cerrar 3-08); `docs/design/adrs.md` (D13 revisada por D172; índice);
-  `docs/design/adr/D167-build-or-register.md` (`revised_by: [D172]`, nota).
-- **borra:** `edit_constraints`, `Glob`, `edit_hooks`, `Capability::EditHooks`,
-  la prosa de `edit_hooks` en `Policy`, `mock::is_blocked`, `blocked_markers`,
-  el `target_digest: "blocked:<path>"`, `spec-adapter` O5 viejo.
+- **Cerco y protocolo (core):** `crates/core/src/fence.rs` (cerco, juez,
+  cobertura, texto del rechazo); `crates/core/src/rail.rs` (eventos, llamada,
+  respuesta, `unasked`, comando, endpoint y la pregunta por loopback);
+  `crates/core/src/port/session.rs` (`SessionRequest`, `AgentEvent`,
+  `RailCodec`, `HookReply`); `crates/core/src/capabilities.rs` (`FenceLevel`,
+  `Capability::Fence`); `crates/core/src/port/policy.rs` (la política de
+  `Capability::Fence`); `crates/core/src/error.rs` (`Unbuildable::HookUnavailable`);
+  `crates/core/src/config/env.rs` (lee `YUNTA_RAIL_URL` y `YUNTA_RAIL_TOKEN` en el
+  borde); `crates/core/src/events/session/` (`write_refused`, `stop_refused`,
+  `write_formatted`).
+- **Hook (cli):** `crates/cli/src/cli/mod.rs` (el subcomando oculto);
+  `crates/cli/src/cli/dispatch.rs` (`rail_hook`); `crates/cli/src/commands/rail.rs`
+  (decodifica, pregunta, codifica); `crates/cli/src/context.rs` (el `RailCommand`
+  que el binario entrega a las sesiones).
+- **Juicio (engine):** `crates/engine/src/run_tools/rail.rs` (`before-write`);
+  `crates/engine/src/run_tools/format.rs` (`after-write`);
+  `crates/engine/src/run_tools/stop.rs` (`before-stop`);
+  `crates/engine/src/run_tools/listener.rs` (la ruta `/rail/<evento>` detrás del
+  mismo token que `/mcp`); `crates/engine/src/run/session_plan.rs` y
+  `crates/engine/src/run/session_plan/held_to.rs` (el cerco de cada sesión y el
+  alcance del que sale); `crates/engine/src/scope.rs` (`fence_breach`).
+- **Adapters:** `crates/adapters/src/claude_code/{mod,rail,permissions}.rs`;
+  `crates/adapters/src/codex/{mod,rail,fence,parse,config}.rs`;
+  `crates/adapters/src/session.rs` (las formas de respuesta de los hooks);
+  `crates/adapters/src/mock/{mod,effects}.rs`.
 
 ---
 
@@ -467,49 +477,38 @@ significativo.
 
 | test | archivo | prueba |
 |---|---|---|
-| `a_write_inside_an_allowed_glob_is_allowed` | core/tests/fence.rs | regla 3 |
-| `a_write_outside_every_glob_is_refused_naming_the_target` | core/tests/fence.rs | regla 3; `Refusal.target` es el path normalizado |
-| `a_write_under_a_root_is_allowed_whatever_the_globs_say` | core/tests/fence.rs | regla 2 antes que 3 |
-| `a_write_into_dot_git_is_refused` | core/tests/fence.rs | regla 3, `.git` y `.git/` |
-| `a_relative_target_is_judged_against_the_worktree` | core/tests/fence.rs | regla 1 |
-| `a_dot_dot_escape_is_refused_without_touching_disk` | core/tests/fence.rs | reglas 1 y 4; el path no existe |
-| `an_empty_allowed_set_refuses_every_worktree_write_and_keeps_the_roots` | core/tests/fence.rs | `read_only` |
-| `a_granted_expansion_is_inside_the_fence` | core/tests/fence.rs | `for_session` con `granted` |
-| `a_refusal_message_round_trips_its_target_and_says_its_advice` | core/tests/fence.rs | `Display` → `refused_target`; los dos `Advice` |
-| `text_without_the_marker_is_not_a_refusal` | core/tests/fence.rs | `refused_target` = `None` |
-| `coverage_is_the_weakest_channel` | core/tests/fence.rs | la tabla de `Coverage::of`, las seis combinaciones |
-| `a_fence_round_trips_through_the_environment` | core/tests/fence.rs | `to_env` → `from_env` |
-| `a_fence_hook_names_the_subcommand_and_the_adapter` | core/tests/fence.rs | `FenceHook::command` |
-| `write_refused_is_a_session_kind_that_moves_the_ledger` | core/tests/events.rs | KINDS, `is_audit = false`, `NodeRecord.refused` |
-| `an_old_log_without_a_fence_level_reads_as_none` | core/tests/events.rs | `Capabilities` con `edit_hooks` |
-| `the_fence_command_refuses_with_exit_two_and_the_reason_on_stderr` | cli/tests/fence_cmd.rs | codec claude-code, stdin real, binario real |
-| `the_fence_command_allows_with_exit_zero_and_nothing_on_stdout` | cli/tests/fence_cmd.rs | ídem |
-| `a_misconfigured_fence_refuses_rather_than_allows` | cli/tests/fence_cmd.rs | sin `YUNTA_FENCE` → exit 2 |
-| `a_write_refused_line_names_its_target` | cli/src/surface tests | `lines.rs` |
-| `a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing_under_cwd` | adapters/tests/claude_code.rs | args desde `fence.roots` y `fence_hook`; `staged_paths` |
-| `a_claude_session_without_a_hook_fails_before_spawning` | adapters/tests/claude_code.rs | `HookUnavailable` |
-| `a_refused_write_in_the_stream_becomes_write_refused` | adapters/tests/claude_code.rs | brazo `User` del parser |
-| `an_edit_profile_reports_exact_coverage_and_full_reports_tools_only` | adapters/tests/claude_code.rs | `SessionOpened.fence` |
-| `a_read_only_claude_session_keeps_write_only_for_its_declared_files` | adapters/tests/claude_code.rs | perfiles |
-| `a_codex_session_reports_widened_coverage_with_its_roots` | adapters/tests/codex.rs | `WidenedToRoots { [cwd, …roots] }` |
-| `a_sandbox_denial_becomes_write_refused` | adapters/tests/codex.rs | parser |
-| `a_read_only_codex_session_with_declared_files_fails_before_spawning` | adapters/tests/codex.rs | `SealedRoots` |
-| `a_fixture_effect_outside_the_fence_is_refused_and_recorded` | adapters/tests/mock.rs | mock por `Fence::judge` |
-| `every_capability_round_trips_through_a_fixture` | adapters/tests/mock.rs | M09, ahora con `fence` |
-| `a_run_on_an_adapter_without_a_fence_says_so_once` | engine/tests/degradation.rs | reemplaza `…without_edit_hooks…` |
-| `a_write_that_escapes_an_exact_fence_is_an_engine_finding` | engine/tests/degradation.rs | `fence_breach` en un nodo |
-| `a_task_write_that_escapes_an_exact_fence_is_an_engine_finding` | engine/tests/degradation.rs | `fence_breach` en una tarea |
-| `a_write_inside_widened_roots_is_a_scope_violation_and_nothing_more` | engine/tests/degradation.rs | sin finding |
-| `every_session_carries_its_fence_and_read_only_allows_nothing_under_the_worktree` | engine/tests/run_sessions.rs | `open_session` |
-| `a_task_session_advises_expansion_and_a_prompt_session_advises_a_finding` | engine/tests/run_sessions.rs | `Advice` |
-| `write_refused_carries_the_session_that_refused_it` | engine/tests/run_sessions.rs | `session_id` |
-| `docs_sync`: `Capability::ALL` ↔ spec-adapter §2 (ya en M23) cubre `fence`; `KINDS` ↔ spec-events (ya en M23) cubre `write_refused` | xtask | M23 |
-
-Rojo primero: `a_write_outside_every_glob_is_refused_naming_the_target` es
-el primer test del ítem y falla porque `yunta_core::fence` no existe.
+| `a_write_outside_every_glob_is_refused_naming_the_target` | `crates/core/tests/fence.rs` | regla 3; el objetivo del rechazo es el path normalizado |
+| `a_write_into_dot_git_is_refused` | `crates/core/tests/fence.rs` | regla 5, `.git` y `.git/` |
+| `a_relative_target_is_judged_against_the_worktree` | `crates/core/tests/fence.rs` | regla 1 |
+| `a_dot_dot_escape_is_refused_without_touching_disk` | `crates/core/tests/fence.rs` | reglas 1 y 3; el path no existe |
+| `an_empty_allowed_set_refuses_every_worktree_write_and_keeps_the_roots` | `crates/core/tests/fence.rs` | `read_only` |
+| `a_granted_expansion_is_inside_the_fence` | `crates/core/tests/fence.rs` | `for_session` con `granted` |
+| `a_refusal_message_names_its_target_and_says_its_advice` | `crates/core/tests/fence.rs` | el texto del rechazo, con sus dos consejos |
+| `coverage_is_the_weakest_channel` | `crates/core/tests/fence.rs` | `Coverage::of` |
+| `a_denied_path_is_refused_where_the_scope_allows_it` | `crates/core/tests/fence.rs` | `denied` dentro del alcance |
+| `an_unscoped_fence_still_refuses_denied_paths` | `crates/core/tests/fence.rs` | `denied` sin alcance declarado |
+| `write_refused_is_a_session_kind_that_moves_the_ledger` | `crates/core/tests/events.rs` | el kind y su pliegue en el ledger |
+| `an_old_log_without_a_fence_level_reads_as_none` | `crates/core/tests/events.rs` | un log con `edit_hooks` |
+| `a_refused_write_is_exit_two_with_the_engine_s_reason_on_stderr` | `crates/cli/tests/rail_cmd.rs` | el hook con su codec, código 2 y motivo |
+| `a_hook_that_cannot_ask_the_engine_refuses` | `crates/cli/tests/rail_cmd.rs` | `unasked` en `before-write` |
+| `a_codex_patch_with_one_path_outside_is_refused_whole` | `crates/cli/tests/rail_cmd.rs` | un parche con varias rutas |
+| `a_refused_stop_is_a_block_decision_on_stdout_for_every_adapter` | `crates/cli/tests/rail_cmd.rs` | parada devuelta, en stdout |
+| `a_stop_hook_that_cannot_ask_lets_the_session_stop` | `crates/cli/tests/rail_cmd.rs` | `unasked` en `before-stop` |
+| `a_red_stop_is_sent_back_once_and_the_same_session_closes_its_task` | `crates/engine/tests/stop_judgment.rs` | la parada devuelta una vez |
+| `a_stop_on_the_same_work_is_sent_back_only_once` | `crates/engine/tests/stop_judgment.rs` | un mismo estado, una sola parada |
+| `a_session_whose_refused_write_its_red_output_locates_is_never_sent_back` | `crates/engine/tests/stop_judgment.rs` | la parada no se juzga cuando el intento le debe una respuesta |
+| `every_session_carries_its_fence_and_read_only_allows_nothing_under_the_worktree` | `crates/engine/tests/run_sessions.rs` | el cerco de `open_session` |
+| `a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing_under_cwd` | `crates/adapters/tests/claude_code.rs` | hooks en `--settings`, `--add-dir` |
+| `a_claude_session_without_a_hook_or_an_engine_to_ask_fails_before_spawning` | `crates/adapters/tests/claude_code.rs` | `HookUnavailable` antes de lanzar |
+| `coverage_follows_what_the_sandbox_leaves_commands` | `crates/adapters/tests/claude_code.rs` | cobertura por modo de sandbox |
+| `a_codex_session_installs_its_write_hook_trusted_and_nothing_more` | `crates/adapters/tests/codex.rs` | hooks confiados por hash |
+| `a_codex_session_reports_widened_coverage_with_its_roots` | `crates/adapters/tests/codex.rs` | cobertura ampliada a raíces |
+| `a_sandbox_denial_becomes_write_refused` | `crates/adapters/tests/codex.rs` | la rama del parser de codex |
+| `a_fixture_effect_outside_the_fence_is_refused_and_recorded` | `crates/adapters/tests/mock.rs` | el mock por `Fence::judge` |
 
 ---
 
 ## 10. Cierra
 
-AD-D2, AD-D7, AD-D20, AD-D24, DO-D2, A-13.
+El riel: las decisiones D249 a D251 están en el registro, y la deuda A-13 queda
+cerrada en `deuda-consciente.md`.

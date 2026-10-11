@@ -169,8 +169,8 @@ nodes:
     kind: gate
     depends_on: [plan]
     assignee: lead
-    options: [aprobar, abort, ajustar]
-    on: { ajustar: plan }
+    options: [proceed, abort, revise]
+    on: { revise: plan }
   - id: ship
     kind: bash
     depends_on: [approve]
@@ -211,10 +211,10 @@ nodes:
     assert_eq!(
         offered,
         vec![
-            ("aprobar", "resolves this gate; `ship` runs next"),
+            ("proceed", "resolves this gate; `ship` runs next"),
             ("abort", "Pauses here; nothing further executes"),
             (
-                "ajustar",
+                "revise",
                 "re-routes to `plan` and asks again once it completes"
             ),
         ],
@@ -250,7 +250,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
 #[tokio::test]
 async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     let bench = Bench::new();
-    let interaction = SequencedInteraction::choosing(&["aprobar"]);
+    let interaction = SequencedInteraction::choosing(&["proceed"]);
     let RunReport { terminal, state } = bench
         .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
         .await;
@@ -258,7 +258,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
-            assert_eq!(outcome, "aprobar")
+            assert_eq!(outcome, "proceed")
         }
         other => panic!("expected the gate finished with the chosen option, got {other:?}"),
     }
@@ -275,7 +275,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
         })
         .expect("the resolved interaction must be on the log");
     let ids: Vec<&str> = waiting.options().iter().map(|o| o.id.as_str()).collect();
-    assert_eq!(ids, vec!["aprobar", "ajustar", "abort"]);
+    assert_eq!(ids, vec!["proceed", "revise", "abort"]);
     assert!(waiting.options().iter().all(|o| !o.tradeoff.is_empty()));
     assert_eq!(waiting.summary(), "Approve the plan?");
 }
@@ -303,7 +303,7 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         panic!("expected the answer refused as off the menu, got {error:?}");
     };
     assert_eq!(chosen, "whatever");
-    assert_eq!(offered, "aprobar, ajustar, abort");
+    assert_eq!(offered, "proceed, revise, abort");
     let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
@@ -363,7 +363,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         )),
     );
 
-    let interaction = SequencedInteraction::choosing(&["aprobar"]);
+    let interaction = SequencedInteraction::choosing(&["proceed"]);
     let report = bench.wake_answering(&interaction).await;
 
     assert_eq!(
@@ -372,7 +372,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         "the crashed gate is re-asked and resolved, not left stuck"
     );
     match report.state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "aprobar"),
+        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "proceed"),
         other => panic!("expected the gate resolved after the resume, got {other:?}"),
     }
     assert!(
@@ -386,11 +386,11 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
 
 #[tokio::test]
 async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
-    // Re-route semantics through a human choice: `ajustar` re-routes to
+    // Re-route semantics through a human choice: `revise` re-routes to
     // `plan`, plan re-runs, and the gate asks AGAIN — the second answer
-    // (`aprobar`) lets the DAG continue.
+    // (`proceed`) lets the DAG continue.
     let bench = Bench::new();
-    let interaction = SequencedInteraction::choosing(&["ajustar", "aprobar"]);
+    let interaction = SequencedInteraction::choosing(&["revise", "proceed"]);
     let RunReport { terminal, state } = bench
         .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
         .await;
@@ -403,7 +403,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
     assert_eq!(
         plan_run_count(&bench.worktree),
         2,
-        "`ajustar` must re-run plan before the gate asks again"
+        "`revise` must re-run plan before the gate asks again"
     );
 
     let events = bench.events();
@@ -412,7 +412,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
 
 #[tokio::test]
 async fn what_lies_between_a_gate_and_the_node_it_sends_back_to_is_made_again_first() {
-    // `outline` reads what `plan` made: after `ajustar`, the gate asks
+    // `outline` reads what `plan` made: after `revise`, the gate asks
     // about the second plan only once `outline` has been made from it.
     let workflow = r#"
 name: outlined
@@ -429,11 +429,11 @@ nodes:
     depends_on: [outline]
     assignee: lead
     message: "Approve the plan?"
-    options: [aprobar, ajustar]
-    on: { ajustar: plan }
+    options: [proceed, revise]
+    on: { revise: plan }
 "#;
     let bench = Bench::new();
-    let interaction = SequencedInteraction::choosing(&["ajustar", "aprobar"]);
+    let interaction = SequencedInteraction::choosing(&["revise", "proceed"]);
     let RunReport { terminal, .. } = bench
         .run_with_interaction(workflow, "sessions: []\n", &interaction)
         .await;
@@ -452,7 +452,7 @@ async fn gate_reroute_records_its_origin_without_fake_counters() {
     // its `node_rerouted` says so (`origin: gate_choice`) and carries no
     // fabricated `attempt`/`max_reroutes`, unlike an `on_failure` reroute.
     let bench = Bench::new();
-    let interaction = SequencedInteraction::choosing(&["ajustar", "aprobar"]);
+    let interaction = SequencedInteraction::choosing(&["revise", "proceed"]);
     let RunReport { terminal, state: _ } = bench
         .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
         .await;
@@ -500,7 +500,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         )))
     )));
 
-    let interaction = SequencedInteraction::choosing(&["aprobar"]);
+    let interaction = SequencedInteraction::choosing(&["proceed"]);
     let resumed = bench.wake_answering(&interaction).await;
     assert_eq!(resumed.terminal, RunTerminal::Finished);
 }

@@ -92,10 +92,8 @@ pub struct RequiredRunner {
     pub permissions: Option<NodePermissions>,
 }
 
-/// The pack's own permissions **ceiling** — `check` rejects any
-/// node, hook or criterion inside the pack that would exceed this,
-/// error not warning; this type only carries the declared
-/// values, it enforces nothing itself.
+/// The pack's own permissions **ceiling**: `check` rejects any `prompt` or `loop`
+/// node of the pack whose effective permissions exceed this, as an error.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackDeclares {

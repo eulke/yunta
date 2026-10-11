@@ -28,7 +28,7 @@ futures.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-util", "net"] }
 # Signals to processes and process groups (`process::signal`): the
 # kernel's own `errno` instead of a `kill` binary's exit status, with no
-# unsafe code of ours (D118).
+# unsafe code of ours.
 nix = { workspace = true, features = ["event"] }
 rustix.workspace = true
 # A subprocess's stderr is drained to the trace log rather than dropped.

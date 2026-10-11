@@ -1,7 +1,7 @@
 //! `yunta status` on the nodes of a run: which ones it lists, in what
 //! order, and what it says each of them is doing.
 //!
-//! One derivation for the whole page (D179): the frame the live view
+//! One derivation for the whole page: the frame the live view
 //! draws is the frame `status` prints and the frame `--json` carries,
 //! so the three never disagree about what a run has or where a node
 //! sits.

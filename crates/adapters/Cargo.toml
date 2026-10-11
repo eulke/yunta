@@ -46,7 +46,7 @@ reqwest = { workspace = true, features = [
 base64.workspace = true
 # Signals to processes and process groups (`signal.rs`): the kernel's
 # own `errno` instead of a `kill` binary's exit status, with no unsafe
-# code of ours (D118). Already in the tree through `rmcp`.
+# code of ours. Already in the tree through `rmcp`.
 nix.workspace = true
 # The mock's `run_tool` fixture step: the mock acts as a real MCP client
 # against the engine's per-run listener, over the same streamable-HTTP

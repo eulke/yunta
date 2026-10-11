@@ -173,7 +173,7 @@ impl RailCommand {
 }
 
 /// Where a session's hooks reach the engine: the rail route of the
-/// session's own listener, and the single-use token that scopes every
+/// session's own listener, and the per-session token that scopes every
 /// call to that session. The token is secret material and never reaches
 /// the log.
 #[derive(Debug, Clone, PartialEq, Eq)]

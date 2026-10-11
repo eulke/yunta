@@ -28,8 +28,8 @@ fn request(paths: &[&str], criterion: Option<&str>) -> ScopeExpansionRequest {
 #[tokio::test]
 async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_any_mode() {
     let owner = Owner::new();
-    // ✓ del Plan: "criterio propuesto que ya pasa → rechazo automático sin
-    // consultar" — cierto incluso en `ask`, que de otro modo escalaría.
+    // A proposed criterion that already passes is denied without consulting
+    // anyone, even in `ask`, which would otherwise escalate.
     let dir = repo();
     let req = request(&["src/x.rs"], Some("true"));
     let (precheck, decision) = evaluate(

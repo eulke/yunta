@@ -57,7 +57,7 @@ rmcp = { workspace = true, features = [
 # middleware in front of it — promoted from dev-only now that the
 # listener is engine code, not just a test's toy server.
 axum = { workspace = true, features = ["tokio", "http1"] }
-# The per-session bearer token — a single-use, high-entropy credential.
+# The per-session bearer token — a high-entropy credential no other session shares.
 # Already in the dependency tree via rmcp's own `server` feature — `v4`
 # adds the RNG-backed constructor, the one entropy this crate uses,
 # confined to `run_tools.rs` and never written to the log.

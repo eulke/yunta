@@ -135,7 +135,7 @@ pub struct SessionRequest {
 #[async_trait]
 pub trait Adapter: Send + Sync {
     /// Identidad del adapter ("claude-code", "codex", "mock", ...).
-    fn id(&self) -> &'static str;
+    fn id(&self) -> &'static AdapterId;
 
     /// Capacidades. Debe ser constante durante el proceso; el engine
     /// la consulta en `yunta check` y al planificar cada nodo.
@@ -151,13 +151,36 @@ pub trait Adapter: Send + Sync {
     /// esas rutas y ninguna otra. Default: ninguna.
     fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf>;
 
+    /// Archivos del checkout de los que la CLI del adapter toma configuración
+    /// que ejecuta código o monta herramientas (sus settings con hooks, sus
+    /// servidores MCP). Ninguna sesión de ningún run los escribe. Default: ninguno.
+    fn own_config(&self) -> Vec<ScopeGlob>;
+
     /// Retira lo que una sesión abierta para `req` montó por su propia
     /// mecánica, una vez terminada: nunca fue trabajo del agente, y no
     /// debe quedar en el árbol que el run conserva. Default: nada.
     fn unstage(&self, req: &SessionRequest) -> Result<()>;
 
+    /// Cómo traduce este adapter entre los hooks de su CLI y el riel del engine.
+    /// `Some` exactamente cuando `capabilities().fence` es `ToolCalls`: un cerco por
+    /// sandbox no necesita codec. Default: `None`.
+    fn rail_codec(&self) -> Option<&dyn RailCodec>;
+
     /// Abre una sesión nueva. Contrato de eventos en §4.
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
+
+    /// Variables de entorno con las que la CLI del adapter alcanza su servicio
+    /// (un proxy, una URL base), que la shell captura para `reachable`. Default: ninguna.
+    fn service_vars(&self) -> &'static [&'static str];
+
+    /// Si el servicio con el que habla una sesión abierta para `req` responde desde
+    /// esta máquina ahora; `None` cuando el adapter no puede saber dónde está. `shell`
+    /// son las variables que la shell tenía para `service_vars`. Default: no puede saberlo.
+    async fn reachable(
+        &self,
+        req: &SessionRequest,
+        shell: &BTreeMap<String, String>,
+    ) -> Option<bool>;
 
     /// Reanuda una conversación previa. Default: no soportado.
     /// Solo se invoca si `capabilities().resume_session`.
@@ -165,9 +188,7 @@ pub trait Adapter: Send + Sync {
         &self,
         session: &SessionId,
         req: SessionRequest,
-    ) -> Result<Box<dyn AgentSession>> {
-        Err(AdapterError::Unsupported { adapter: self.id().into(), what: "resume_session" })
-    }
+    ) -> Result<Box<dyn AgentSession>>;
 }
 
 #[async_trait]
@@ -185,6 +206,19 @@ pub trait AgentSession: Send {
     /// sesión (process group / job object). Nunca deja zombies:
     /// es la garantía sobre la que se construye `yunta cancel`.
     async fn kill(&mut self) -> Result<()>;
+
+    /// Da al proceso de la sesión hasta `grace` para salir solo después de un
+    /// `interrupt`, y responde en cuanto sale. Default: responde de inmediato.
+    async fn allow_exit(&mut self, grace: Duration);
+
+    /// Grupo de procesos (pgid) del árbol de la sesión, cuando el adapter corre uno:
+    /// lo que el engine registra en `run.dir/scratch/engine.json` para que un proceso
+    /// aparte (`yunta cancel` tras un crash) pueda exterminarlo. Default: `None`.
+    fn pgid(&self) -> Option<Pid>;
+
+    /// Cómo terminó el proceso de la sesión. Solo se pregunta a una sesión cuyo
+    /// stream terminó sin evento terminal. Default: `None`.
+    async fn exit(&mut self) -> Result<Option<SessionExit>>;
 }
 ```
 
@@ -201,25 +235,35 @@ pub enum AgentEvent {
     /// Una escritura que el cerco rechazó antes de ocurrir. Crónica y
     /// conteo, nunca estado del nodo: la sesión siguió.
     WriteRefused { target: ToolTarget },
+    /// Cuántas herramientas del run tiene de verdad la sesión, según las
+    /// reportó su CLI. Solo lo emite un adapter cuyo CLI nombra el conjunto
+    /// de herramientas de la sesión: el silencio significa que no lo sabe,
+    /// nunca que el conteo sea cero.
+    RunToolsMounted { count: usize },
+    /// Falló una herramienta conocida del servidor `yunta-run` de la sesión.
+    /// Ningún argumento ni texto de error del CLI cruza esta frontera.
+    RunToolFailed { tool: RunTool, cause: RunToolFailureCause },
     /// Actividad resumida: qué herramienta usó, sobre qué. `display`
     /// solo cuando el argumento nombra el repositorio; el digest,
     /// siempre. Nunca contenido completo ni secretos (§4, O3).
     ToolUse { name: String, target: ToolTarget },
     /// Uso acumulable de tokens. Frecuencia: al menos al cierre;
-    /// idealmente incremental. Requerido si `usage_reporting`.
+    /// idealmente incremental. Requerido si `usage_reporting`. Cada cuenta
+    /// es opcional: ausente significa no informada, nunca cero.
     /// `input_tokens` es todo lo que la llamada leyó, caché incluida, y
-    /// `cached_input_tokens` la parte leída de la caché —opcional: se
-    /// puebla solo si el CLI distingue lectura de caché (Contrato §8.4)—,
-    /// así que `cached_input_tokens ≤ input_tokens` en todo adapter.
+    /// `cached_input_tokens` la parte leída de la caché —se puebla solo si
+    /// el CLI distingue lectura de caché (Contrato §8.4)—, así que
+    /// `cached_input_tokens ≤ input_tokens` en todo adapter.
     /// `claude-code` informa cada mensaje una vez y concilia el resto con
     /// el `result`; `codex`, cada `turn.completed`.
-    Usage { input_tokens: u64, output_tokens: u64, cached_input_tokens: Option<u64> },
+    Usage { input_tokens: Option<u64>, output_tokens: Option<u64>, cached_input_tokens: Option<u64> },
     /// Texto final o resumen de progreso significativo (acotado).
     Note { text: String },
     /// Cierre exitoso de la sesión (el agente terminó su turno).
     Completed { result: AgentOutcome },
-    /// Cierre con error. `retryable` guía la política del engine.
-    Failed { error: AgentError, retryable: bool },
+    /// Cierre con error. `cause` dice si otra sesión con el mismo pedido puede
+    /// hacerlo mejor: el engine lo registra como `retryable`.
+    Failed { error: AgentError, cause: FailureCause },
 }
 ```
 
@@ -236,33 +280,37 @@ telemetría, no evidencia.
   `Failed`. Un stream que termina sin ninguno de los dos no es un error del
   agente: el adapter nunca inventa un terminal, el engine le pregunta a esa
   sesión —y sólo a esa— cómo salió su proceso (`AgentSession::exit`) y registra
-  la muerte con esa salida, `retryable: true`. Preguntar es matar primero: el
-  grupo muere, las cañerías se cierran y recién después se recoge la salida, de
-  modo que la espera está acotada y nada sobrevive al run. Una sesión sin
-  proceso propio responde `None` (D180).
+  la muerte con esa salida (`SessionDeath`: el adapter y cómo salió el proceso).
+  Preguntar es matar primero: el grupo muere, las cañerías se cierran y recién
+  después se recoge la salida, de modo que la espera está acotada y nada
+  sobrevive al run. Una sesión sin proceso propio responde `None` (D180).
 - **O3. Nada sensible en eventos**: los payloads llevan digests y resúmenes, jamás
   contenido de archivos, prompts completos ni valores de env. El engine además
   redacta todo valor de secreto conocido antes de persistir (I12): defensa en
   profundidad, no permiso para descuidarse.
-- **O5. El prompt viaja por stdin**: el adapter escribe el prompt en la entrada
+- **O4. El prompt viaja por stdin**: el adapter escribe el prompt en la entrada
   estándar del CLI y cierra el pipe; nunca lo pasa como argumento, donde cualquier
   proceso de la máquina lo leería en la lista de procesos. El CLI que termina antes
   de leerlo cierra el pipe de su lado y su stream lo reporta (O2); la escritura no
   es un fallo del adapter.
-- **O4. Presupuesto colaborativo, enforcement del engine**: el adapter pasa los
+- **O5. Presupuesto colaborativo, enforcement del engine**: el adapter pasa los
   límites al CLI si el CLI los soporta; el engine corta por `interrupt → kill`
   cuando el conteo de `Usage` o el timeout lo exigen, tenga o no ayuda del CLI. El
   timeout cuenta tiempo en que el host está despierto: una máquina suspendida no lo
   gasta, y el log registra la suspensión.
-- **O5. El cerco se construye o se declara ausente**: el adapter instala tanto del
+- **O6. El cerco se construye o se declara ausente**: el adapter instala tanto del
   cerco como su CLI permita antes de la primera escritura posible, calcula la
   cobertura de lo que construyó (nunca la declara) y la reporta en `SessionOpened`;
-  cada rechazo viaja como `WriteRefused`. Un adapter con nivel `None` ignora el
-  campo sin error. Un adapter que necesita un mecanismo que no tiene —el hook, o
-  raíces escribibles bajo un sandbox de solo lectura— falla la sesión antes de
-  spawn con `AdapterError::FenceUnbuildable`, porque una capacidad ausente falla
-  en vez de gastar la sesión (D172).
-- **O6. Sin estado propio**: un adapter no persiste nada entre sesiones fuera de lo
+  el riel del engine registra `write_refused` cuando juzga una escritura y la
+  rechaza (`crates/engine/src/run_tools/rail.rs`). El parser de Codex traduce un
+  ítem `command_execution` con estado `sandbox_denied` a `WriteRefused`, con el
+  comando como objetivo; Codex 0.157.0 no emite ese estado cuando su sandbox niega
+  un comando, y Claude no informa ninguna negativa de su sandbox. Un adapter con
+  nivel `None` ignora el campo sin error. Un adapter que
+  necesita un mecanismo que no tiene —el hook, o raíces escribibles bajo un sandbox
+  de solo lectura— falla la sesión antes de spawn con `AdapterError::FenceUnbuildable`,
+  porque una capacidad ausente falla en vez de gastar la sesión (D172).
+- **O7. Sin estado propio**: un adapter no persiste nada entre sesiones fuera de lo
   que el CLI ya persiste. Todo lo que el engine necesita recordar viaja en eventos.
 
 ## 5. Degradación

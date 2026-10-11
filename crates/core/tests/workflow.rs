@@ -136,9 +136,7 @@ nodes:
 
 #[test]
 fn an_internal_gate_parses_the_reference_approve_plan_shape_round_trip() {
-    // The exact fragment `build-feature.yaml` (Config y
-    // workflows de referencia) declares; the reference YAML doubles as
-    // the parse fixture.
+    // The exact fragment `build-feature.yaml` declares.
     let yaml = r#"
 name: fixture
 nodes:
@@ -149,9 +147,9 @@ nodes:
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan registrado. Do you approve?"
-    options: [aprobar, ajustar, abortar]
-    on: { ajustar: plan }
+    message: "Plan recorded. Do you approve?"
+    options: [approve, adjust]
+    on: { adjust: plan }
     shows: [{ node: plan, kind: tasks }]
 "#;
     let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
@@ -167,9 +165,9 @@ nodes:
         panic!("expected a gate");
     };
     assert_eq!(assignee, "lead");
-    assert_eq!(message.as_deref(), Some("Plan registrado. Do you approve?"));
-    assert_eq!(options, &["aprobar", "ajustar", "abortar"]);
-    assert_eq!(on.get("ajustar").map(|t| t.as_str()), Some("plan"));
+    assert_eq!(message.as_deref(), Some("Plan recorded. Do you approve?"));
+    assert_eq!(options, &["approve", "adjust"]);
+    assert_eq!(on.get("adjust").map(|t| t.as_str()), Some("plan"));
     assert_eq!(
         shows,
         &[yunta_core::ArtifactContextRef {
@@ -716,7 +714,7 @@ fn a_files_entry_that_is_neither_shape_is_refused_by_name() {
 }
 
 #[test]
-fn every_context_builtin_parses_from_its_own_contrato_example() {
+fn every_context_builtin_parses_from_its_example() {
     let yaml = r#"
 id: plan
 kind: prompt

@@ -402,10 +402,9 @@ impl MockStep {
 }
 
 /// A file the session writes under the request's `cwd`, simulating the
-/// agent's own edits. Whether it lands is the request's business: with
-/// `edit_hooks` declared, a path outside the request's
-/// the fence refuses is never written, exactly as a
-/// hook-capable CLI would; without the capability every effect lands
+/// agent's own edits. Whether it lands is the request's business: with a
+/// fence declared, a path the request's fence refuses is never written,
+/// exactly as a hook-capable CLI would; without one every effect lands
 /// and the engine's post-check scope diff is what catches it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

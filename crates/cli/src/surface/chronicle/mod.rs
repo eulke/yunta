@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn what_a_watched_terminal_keeps_is_what_closed_or_asked() {
-        // P6, stated once: a terminal keeps above its region what
+        // Stated once: a terminal keeps above its region what
         // closed something or asked something of a person. Everything
         // else is the run working, and the region shows that while it
         // is true.

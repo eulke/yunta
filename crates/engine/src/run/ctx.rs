@@ -64,7 +64,7 @@ pub(crate) struct RunCtx<'a> {
     /// `on_interrupt`) apart from a `join: any` sibling race
     /// (record the loss as failed so the group can close).
     pub root_cancel: CancellationToken,
-    /// The fence hook this invocation was given, handed to every
+    /// The rail hook this invocation was given, handed to every
     /// session the run opens.
     pub rail_command: Option<yunta_core::rail::RailCommand>,
     /// The forge this invocation was given — on the ctx so a

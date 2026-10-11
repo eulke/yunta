@@ -19,6 +19,9 @@ project:
   base_branch: main
   branch_prefix: yunta/
 
+forge:                              # la forja del equipo; token_env nombra la variable, nunca el token
+  github: { repo: acme/web, token_env: GITHUB_TOKEN }
+
 # Runners: bindings que los nodos piden vía nombre de rol.
 # Cada rol resuelve a una lista ordenada de candidatos.
 runners:
@@ -50,7 +53,7 @@ defaults:
   timeout_minutes: 45
   max_parallel_nodes: 4
   on_failure: pause                 # pause | abort | continue
-  on_interrupt: restart_node        # restart_node | resume_session
+  on_interrupt: restart_node        # restart_node | fail_if_uncertain | resume_session
 
 skills:
   paths: [.yunta/skills, ~/.yunta/skills]
@@ -92,6 +95,7 @@ paths:                              # dónde vive el estado (§2.2); `YUNTA_HOME
 
 permissions:                        # techo; las capas inferiores solo estrechan (§6.1)
   commands:
+    allow: []                       # vacía: todo lo no denegado corre; no vacía: lista blanca estricta
     deny: ["curl * | *", "sudo *"]
   paths:
     deny: [".github/**"]            # ningún run los escribe, sea cual sea el scope
@@ -100,6 +104,7 @@ permissions:                        # techo; las capas inferiores solo estrechan
     publishers: { allow: [acme] }
   network:
     default: true
+  scope_expansion: { max_mode: ask }   # rules | ask | deny: lo más permisivo que un nodo puede pedir
 
 limits:
   max_tokens_per_run: 2000000
@@ -121,13 +126,13 @@ secrets:                            # nombres de env vars; valores JAMÁS acá
 
 ```yaml
 name: build-feature
-description: Feature completa con grill, documento de tareas verificado, review multi-runner y PR
+description: Complete feature with grill, verified tasks document, multi-runner review and PR
 yunta_schema: ">=1 <2"              # opcional (§2.1); sin declarar, se infiere del binario
 inputs:
   idea:
     type: string
     required: true
-    description: "Qué construir — se convierte en el brief"
+    description: "What to build — it becomes the brief"
 
 modes:                              # nombres y cantidad libres del autor (§10.1);
                                     # el orden declara la escalera de promoción
@@ -151,8 +156,8 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     runner: planner
     skills: [grill]
     prompt: |
-      Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
-      necesarias como artifact; no converses.
+      Identify the ambiguities in "{{inputs.idea}}" and write the questions
+      needed as an artifact; do not converse.
     artifacts:
       produces: [questions]         # §4.1 — un nodo que pregunta no declara nada más
                                     # ask: always | required — solo en un nodo que pregunta
@@ -165,8 +170,8 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       - artifact: { node: grill, kind: questions }
       - artifact: { node: grill, kind: answers }
     prompt: |
-      Escribí el brief de "{{inputs.idea}}" a partir de las preguntas y sus
-      respuestas.
+      Write the brief for "{{inputs.idea}}" from the questions and their
+      answers.
     artifacts:
       produces: [brief.md]
 
@@ -190,9 +195,9 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan registrado. ¿Aprobás?"
-    options: [aprobar, ajustar, abortar]
-    on: { ajustar: plan }             # pide qué cambiar y retoma la sesión de `plan` con eso (D194)
+    message: "Plan recorded. Do you approve?"
+    options: [approve, adjust]
+    on: { adjust: plan }              # pide qué cambiar y retoma la sesión de `plan` con eso (D194)
     shows: [{ node: plan, kind: tasks }]   # el plan que se aprueba, atado a su hash en `gate_waiting`
 
   - id: implement
@@ -206,7 +211,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       mode: ask
       max_per_run: 3
     prompt: |
-      Leé tu tarea del documento de tareas. Implementala dentro de su scope.
+      Read your task in the tasks document. Implement it within its scope.
 
   - id: lint
     kind: bash
@@ -220,7 +225,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: prompt
     runner: mechanical
     context: [{ node-output: { node: lint } }]
-    prompt: "Corregí exclusivamente los errores del reporte."
+    prompt: "Fix only the errors in the report."
     scope: run                     # lo que el run cambió hasta acá (D205)
 
   - id: tests
@@ -234,7 +239,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Auditá los cambios y reportá cada hallazgo."
+    prompt: "Audit the changes and report each finding."
     artifacts:
       produces: [findings]
 
@@ -244,13 +249,13 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [review]
     context:
       - run-events: { filter: findings }   # hallazgos como datos, no como prosa
-    prompt: "Corregí hallazgos bloqueantes; documentá los descartados con motivo."
+    prompt: "Fix the blocking findings; document each dismissed one with its reason."
 
   - id: ship
     kind: gate
     depends_on: [fix-findings]
     assignee: lead
-    message: "¿Creo el PR?"
+    message: "Create the PR?"
 
   - id: pr
     kind: pull_request     # push de la rama del run + PR por el forge (D207)

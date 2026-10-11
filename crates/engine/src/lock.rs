@@ -54,6 +54,7 @@ pub struct LockOwner {
 }
 
 impl yunta_core::persisted::Persisted for LockOwner {
+    /// The version this binary writes; a newer one is refused, never guessed at.
     const SCHEMA_VERSION: u32 = 1;
     const NAME: &'static str = "isolation lock";
     const ENCODING: yunta_core::persisted::Encoding = yunta_core::persisted::Encoding::Json;

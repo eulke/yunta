@@ -86,7 +86,7 @@ pub(super) async fn run_finished(
 /// Closes the run as failed: a node failed and `defaults.on_failure`
 /// (`abort`/`continue`) ended the run rather than pausing it. Nothing is
 /// distilled and no worktree is cleaned up — a failed close is not a
-/// real finish (D107), it expects no resume, and its knowledge is not
+/// real finish, it expects no resume, and its knowledge is not
 /// the attempt's knowledge to keep. The `node_failed` events already on
 /// the log name every failed node; `reason` names one for the report.
 pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport, RunError> {

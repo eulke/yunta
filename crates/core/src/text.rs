@@ -205,7 +205,7 @@ pub fn asked_questions(asked: &[crate::QuestionId]) -> String {
     )
 }
 
-/// The block `spec-tasks.md` §4 fixes: a heading naming what was read
+/// The problems block: a heading naming what was read
 /// and how many problems it has, then one indented line per problem.
 ///
 /// ```text

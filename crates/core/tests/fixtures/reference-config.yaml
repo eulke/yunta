@@ -1,4 +1,4 @@
-# The canonical reference config (docs/design/referencia-schema.md) as
+# The canonical reference config as
 # a parse fixture — exercises the full round-trip criterion. Deltas
 # from the reference text:
 #   - limits use plain integers: YAML 1.2 resolves `2_000_000` as a

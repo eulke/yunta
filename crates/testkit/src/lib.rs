@@ -40,9 +40,10 @@ pub use bin::{
 pub use checkout::Checkout;
 pub use child::{CliChild, ProcessGroupCleanup};
 pub use corpus::{
-    backticked, bullets, fenced_blocks, field_tables, fixed_consts, has_top_level_key, json_schema,
-    markdown_files, names_after, number_before, numbered_items, rule_codes_named, section,
-    sentence_after, struct_fields, table_rows, tagged_variants, Block,
+    backticked, bullets, enum_variants, fenced_blocks, field_tables, fixed_consts,
+    has_top_level_key, json_schema, markdown_files, names_after, number_before, numbered_items,
+    rule_codes_named, section, sentence_after, struct_fields, table_rows, tagged_variants,
+    trait_methods, Block,
 };
 pub use events::{
     accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,

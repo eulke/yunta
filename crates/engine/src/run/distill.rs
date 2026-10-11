@@ -1,8 +1,8 @@
 //! `on_finish.distill`: a **deterministic
 //! transform**, never an agent session — an LLM-written distillate at
 //! close would be unverifiable content entering the knowledge layer
-//! past every criterion and scope, the exact back door "la palabra del
-//! agente no es evidencia" exists to close. A team that wants a
+//! past every criterion and scope, the exact back door that "an agent's word
+//! is not evidence" exists to close. A team that wants a
 //! narrated summary produces it with a `prompt` node (its own runner,
 //! budget and verification) and names *that artifact* here —
 //! composition, not a new mechanism.

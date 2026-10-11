@@ -1,8 +1,9 @@
-//! Factory packs must stay "borrables sin afectar capacidades del engine" —
-//! none of `yunta/starter`/`yunta/fragua`'s names appear anywhere in the
-//! engine's own source, since a workspace crate special-casing a pack
-//! by name would be exactly the kind of embedded workflow the engine
-//! must never depend on. Pure text scan, no build or run involved.
+//! Factory packs must stay removable without affecting the engine's
+//! capabilities: none of `yunta/starter`/`yunta/fragua`'s names appear
+//! anywhere in the engine's own source, since a workspace crate
+//! special-casing a pack by name would be exactly the kind of embedded
+//! workflow the engine must never depend on. Pure text scan, no build or
+//! run involved.
 
 use std::path::Path;
 

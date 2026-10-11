@@ -396,7 +396,7 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
 }
 
 #[test]
-fn finding_severity_uses_the_contrato_wire_values() {
+fn finding_severity_serializes_to_its_wire_values() {
     for (severity, expected) in [
         (FindingSeverity::Blocking, "\"blocking\""),
         (FindingSeverity::Major, "\"major\""),
@@ -576,9 +576,9 @@ fn pr_is_not_a_questions_channel() {
 
 #[test]
 fn a_capability_outside_capabilities_fields_is_not_an_event() {
-    // `capability_degraded.capability` names a field of `Capabilities`
-    // (spec-events §5.24); a name no adapter can declare is a payload that
-    // does not fit its kind, reported like any other misshapen body.
+    // `capability_degraded.capability` names a field of `Capabilities`;
+    // a name no adapter can declare is a payload that does not fit its
+    // kind, reported like any other misshapen body.
     let mut object = serde_json::Map::new();
     object.insert("kind".to_string(), serde_json::json!("capability_degraded"));
     object.insert("capability".to_string(), serde_json::json!("teleport"));

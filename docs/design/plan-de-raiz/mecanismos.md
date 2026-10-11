@@ -999,11 +999,10 @@ decide la confirma dejando la fila, o la cambia.
 
 Especificación completa en [`cerco.md`](cerco.md): vocabulario, tipos
 (`Fence`, `FenceLevel`, `Coverage`, `Fenced`, `Verdict`, `Refusal`,
-`FenceHook`), las reglas del juez, el texto del rechazo, el comando
-`yunta fence`, el engine (`Fence::for_session`, `fence_breach`), los tres
-adapters builtin, la
-muestra de ocho CLIs del mercado con las cinco reglas de escalado, archivos,
-tests y ADR D172.
+`RailCommand`), las reglas del juez, el texto del rechazo, el comando
+`yunta rail`, el engine (`Fence::for_session`, `fence_breach`), los tres
+adapters builtin, la muestra de ocho CLIs del mercado con las cinco reglas
+de escalado, archivos, tests y ADR D172.
 
 **Cierra.** AD-D2, AD-D7, AD-D20, AD-D24, DO-D2, A-13.
 

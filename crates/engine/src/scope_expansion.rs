@@ -1,6 +1,6 @@
-//! Scope expansion: the agent proposes, the engine disposes. Between
-//! "esto no me corresponde" (a finding) and "esto excede el modo" (a
-//! promotion), a task may need a small, adjacent fix outside its own
+//! Scope expansion: the agent proposes, the engine disposes. Between a
+//! finding (the work is not the task's to do) and a promotion (the work
+//! exceeds the mode), a task may need a small, adjacent fix outside its own
 //! declared scope — it never widens its own scope by itself; it
 //! requests, and this module decides.
 //!
@@ -9,17 +9,14 @@
 //! whose exhaustion escalates), and rests on two mechanics:
 //!
 //! - **Transport**: how the agent's request reaches the engine at all.
-//!   No MCP tool surface exists anywhere in this codebase yet (`skills`/
-//!   `mcp_servers` config is out of scope). This module reuses the exact
-//!   pattern already established for `kind: findings`: a
-//!   structured file the agent writes, the engine reads once the session
-//!   ends — here, a single well-known path inside the task's own
-//!   isolated worktree (`SCOPE_EXPANSION_REQUEST_FILE`), since a request
-//!   is one object per task attempt, not a list.
-//! - **"Bounded size"** (no number given in the wording it comes from):
-//!   bounded by file count rather than changed lines — simpler and
-//!   robust across a mix of tracked and untracked files, still faithful
-//!   to "a small, adjacent fix". The ceiling is
+//!   The session calls `yunta_request_scope_expansion`, which writes the
+//!   request to a single well-known path inside the task's own isolated
+//!   worktree (`SCOPE_EXPANSION_REQUEST_FILE`); the engine reads it once
+//!   the session ends ([`load_request`]). A request is one object per
+//!   task attempt, not a list.
+//! - **Bounded size**: bounded by file count rather than changed lines —
+//!   simpler and robust across a mix of tracked and untracked files, so a
+//!   grant stays a small, adjacent fix. The ceiling is
 //!   `limits.max_expansion_files`.
 //!
 //! A third boundary, a consequence of how pausing is wired
@@ -239,8 +236,8 @@ pub(crate) fn refuse_what_is_denied(
 
 /// Decides one request: the proposed criterion's own pre-check
 /// runs first, in every mode — a criterion that already passes is
-/// trivial and rejected without consulting anyone, the same "pre-check
-/// en rojo" logic already applies to task criteria. Then the mode
+/// trivial and rejected without consulting anyone, the same red-before-work
+/// logic already applies to task criteria. Then the mode
 /// evaluates (still outside any lock), and the cap's atomic window
 /// (`GrantLedger::commit`) has the last word.
 // The mode, the `within` ceiling, the per-run cap and the file bound are

@@ -2536,12 +2536,12 @@ fn parse_pid(text: &str) -> Pid {
         .unwrap_or_else(|| panic!("`{text}` is not a pid"))
 }
 
-/// §8.6 of the run contract hands the prior distribution — and the budget
-/// warning derived from it — to the invocation that *creates* a run, and
-/// `yunta resume` picks a run up instead of creating one. `--detach`
-/// creates the run and gives it straight to such a child, so this is the
-/// only invocation either can reach a person in, and a warning that asks
-/// whether to spend is worth nothing once the child is already spending.
+/// The prior distribution and the budget warning derived from it go to the
+/// invocation that *creates* a run, and `yunta resume` picks a run up
+/// instead of creating one. `--detach` creates the run and gives it straight
+/// to such a child, so this is the only invocation either can reach a person
+/// in, and a warning that asks whether to spend is worth nothing once the
+/// child is already spending.
 #[test]
 fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_run_off() {
     let root = tempfile::tempdir().unwrap();
@@ -3524,7 +3524,7 @@ fn spawn_yunta(project: &Checkout, args: &[&str], log: PathBuf) -> CliChild {
     CliChild::spawn(command, Some(&log)).expect("the binary runs")
 }
 
-/// Two Ctrl-C, two stages (D181): the first stops the work, and what
+/// Two Ctrl-C, two stages: the first stops the work, and what
 /// gives the checkout back runs *because* it fired — so it answers to
 /// the second, which is what lets a person who really means it out.
 #[test]

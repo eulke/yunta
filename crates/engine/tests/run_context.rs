@@ -102,7 +102,7 @@ nodes:
 
 #[tokio::test]
 async fn a_missing_artifact_reference_fails_the_node_never_silently_empty() {
-    // ✓ del Plan: "fuente caída = nodo failed" — referencing a real,
+    // A source that is down fails the node. The reference points at a real,
     // already-run node whose artifact was simply never produced.
     let bench = Bench::new();
     let workflow = r#"
@@ -493,10 +493,9 @@ nodes:
 #[tokio::test]
 async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_different_volatile_content(
 ) {
-    // "comparar hashes entre sesiones es la
-    // verificación mecánica de que el prefijo se mantuvo estable" —
-    // `command:` (volatile) cambia entre las dos corridas; `files:`
-    // (stable) y `artifact:` (run-stable) no.
+    // Comparing the hashes across the two runs checks that the prefix stayed
+    // stable. `command:` (volatile) changes between the runs; `files:`
+    // (stable) and `artifact:` (run-stable) do not.
     let bench_a = Bench::new();
     let (stable_a, run_stable_a, segments_a) = run_stable_first(&bench_a, "VOLATILE-A").await;
 
@@ -614,9 +613,8 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
 
 #[tokio::test]
 async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
-    // The org layer is the union of installed knowledge packs —
-    // "knowledge pack instalado se resuelve
-    // como capa org sin config extra".
+    // The org layer is the union of installed knowledge packs, and each one
+    // resolves as that layer with no extra config.
     let bench = Bench::new();
     write_org_pack(
         &bench.worktree,

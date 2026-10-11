@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-/// The stack a deeply composed run needs, fixed by D170. A debug
+/// The stack a deeply composed run needs. A debug
 /// build's futures are several times the size of a release build's, and
 /// the margin is free: a thread's stack is reserved address space,
 /// committed page by page as it is used.

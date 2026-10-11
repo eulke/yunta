@@ -289,8 +289,8 @@ nodes:
         assert_eq!(created.unwrap().mode, "full");
 
         // And on the parent's own log — already asserted at the engine
-        // level (promotion.rs), reconfirmed here as the visible half of
-        // "cadena auditada en ambos logs".
+        // level (promotion.rs), reconfirmed here as the visible half of the
+        // audited chain in both logs.
         let parent_events = storage.events_for_run(&run_id).unwrap();
         assert!(parent_events.iter().any(|e| matches!(
             e.payload(),

@@ -148,13 +148,12 @@ pub struct PathsConfig {
 /// works directly in the checkout it was given — legitimate for watching
 /// an agent edit live, or for CI already inside an ephemeral container.
 ///
-/// One word for every level, run and `kind: workflow` node alike (D183):
+/// One word for every level, run and `kind: workflow` node alike:
 /// `none` is true wherever it is written, while a word naming a parent
 /// would not be — a first-level run has no parent unit, it has a
 /// person's checkout. `container` is not a value at all; it is not
-/// designed. (A node that wants a tree of its own for the sake of its
-/// own diff declares `scope:` instead, which is what asks for one:
-/// D184.)
+/// designed. (A node that wants a tree of its own declares `scope:`,
+/// which is what asks for one.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {

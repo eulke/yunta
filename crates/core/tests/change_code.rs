@@ -30,7 +30,7 @@ tasks:
     title: "Add the global store"
     description: "Adds the store."
     outcome: "A global pack installs for the user"
-    scope: [crates/cli/src/pack.rs, crates/cli/src/cli/mod.rs, crates/cli/src/commands/pack.rs, crates/cli/src/commands/list/mod.rs, docs/packs.md]
+    scope: [crates/cli/src/pack.rs, crates/cli/src/cli/mod.rs, crates/cli/src/commands/pack.rs, crates/cli/src/commands/list/mod.rs, packs/fragua/README.md]
     criteria:
       - {{ cmd: "cargo test -p yunta --test global_pack_management_cmd", proves: "it installs for the user" }}
     changes:
@@ -70,7 +70,7 @@ fn a_change_whose_code_shows_every_name_it_gives_is_accepted() {
           pub enum PackAction {
               Add { source: String, #[arg(long)] global: bool },
           }
-      - { at: docs/packs.md, what: "the guide", code: "# Global packs" }
+      - { at: packs/fragua/README.md, what: "the guide", code: "# Global packs" }
       - { at: src/lib.rs, what: "an empty library", code: "//! The demo library." }"##;
 
     assert_eq!(broken(&plan(changes, "")), Vec::<String>::new());

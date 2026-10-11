@@ -13,7 +13,7 @@ fn the_reference_pack_parses_and_round_trips() {
     assert_eq!(pack.version, "1.2.0");
     assert_eq!(
         pack.description.as_deref(),
-        Some("Review multi-runner con consolidación de hallazgos")
+        Some("Multi-runner review with consolidated findings")
     );
     assert_eq!(pack.license.as_deref(), Some("MIT"));
     assert_eq!(

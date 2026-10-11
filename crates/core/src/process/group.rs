@@ -37,6 +37,7 @@ pub fn child_has_exited_unreaped(pid: Pid) -> io::Result<bool> {
 }
 
 const OBSERVATION_INTERVAL: Duration = Duration::from_millis(10);
+/// How many observations of a group's members a kill waits for, one tick apart.
 const MAX_OBSERVATIONS: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

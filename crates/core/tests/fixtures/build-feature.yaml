@@ -1,14 +1,14 @@
-# The canonical reference workflow (docs/design/referencia-schema.md)
+# The canonical reference workflow
 # as a parse fixture — exercises the full round-trip criterion,
 # including `runners:`.
 name: build-feature
-description: Feature completa con grill, documento de tareas verificado, review multi-runner y PR
+description: Complete feature with grill, verified tasks document, multi-runner review and PR
 yunta_schema: ">=1 <2"
 inputs:
   idea:
     type: string
     required: true
-    description: "Qué construir — se convierte en el brief"
+    description: "What to build — it becomes the brief"
 
 modes:
   quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
@@ -26,8 +26,8 @@ nodes:
     runner: planner
     skills: [grill]
     prompt: |
-      Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
-      necesarias como artifact; no converses.
+      Identify the ambiguities in "{{inputs.idea}}" and write the questions
+      needed as an artifact; do not converse.
     artifacts:
       produces: [questions]
 
@@ -39,8 +39,8 @@ nodes:
       - artifact: { node: grill, kind: questions }
       - artifact: { node: grill, kind: answers }
     prompt: |
-      Escribí el brief de "{{inputs.idea}}" a partir de las preguntas y sus
-      respuestas.
+      Write the brief for "{{inputs.idea}}" from the questions and their
+      answers.
     artifacts:
       produces: [brief.md]
 
@@ -63,9 +63,9 @@ nodes:
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan registrado. ¿Aprobás?"
-    options: [aprobar, ajustar, abortar]
-    on: { ajustar: plan }
+    message: "Plan recorded. Do you approve?"
+    options: [approve, adjust]
+    on: { adjust: plan }
     shows: [{ node: plan, kind: tasks }]
 
   - id: implement
@@ -79,7 +79,7 @@ nodes:
       mode: ask
       max_per_run: 3
     prompt: |
-      Leé tu tarea del documento de tareas. Implementala dentro de su scope.
+      Read your task in the tasks document. Implement it within its scope.
 
   - id: lint
     kind: bash
@@ -93,7 +93,7 @@ nodes:
     kind: prompt
     runner: mechanical
     context: [{ node-output: { node: lint } }]
-    prompt: "Corregí exclusivamente los errores del reporte."
+    prompt: "Fix only the errors in the report."
     scope: run
 
   - id: tests
@@ -107,7 +107,7 @@ nodes:
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Auditá los cambios y reportá cada hallazgo."
+    prompt: "Audit the changes and report each finding."
     artifacts:
       produces: [findings]
 
@@ -117,13 +117,13 @@ nodes:
     depends_on: [review]
     context:
       - run-events: { filter: findings }
-    prompt: "Corregí hallazgos bloqueantes; documentá los descartados con motivo."
+    prompt: "Fix the blocking findings; document each dismissed one with its reason."
 
   - id: ship
     kind: gate
     depends_on: [fix-findings]
     assignee: lead
-    message: "¿Creo el PR?"
+    message: "Create the PR?"
 
   - id: pr
     kind: pull_request

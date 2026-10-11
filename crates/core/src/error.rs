@@ -66,7 +66,7 @@ pub enum AdapterError {
 #[derive(Debug, thiserror::Error)]
 pub enum Unbuildable {
     #[error(
-        "this adapter cannot run its fence hook: the session was handed no yunta binary to run, \
+        "this adapter cannot reach the rail: the session was handed no yunta binary to run, \
          or no engine listener to ask"
     )]
     HookUnavailable,

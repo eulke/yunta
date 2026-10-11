@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 54 tipos de evento, campo por campo
+## 5. Los 57 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,

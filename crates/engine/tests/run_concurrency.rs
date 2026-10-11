@@ -455,8 +455,8 @@ async fn a_task_green_in_isolation_but_broken_by_a_sibling_s_integration_returns
     // Task A always integrates cleanly. Task B's own criterion is
     // satisfied in isolation (its own worktree predates A's integration)
     // but is re-checked false once A's file exists on the tree B rebases
-    // onto — exactly "pasa en su worktree pero rompe tras la integración
-    // de otra". B must go back to `ready` without touching A.
+    // onto: it passes in its own worktree but breaks after another task's
+    // integration. B must go back to `ready` without touching A.
     let bench = Bench::new();
 
     let workflow = r#"
@@ -1050,7 +1050,7 @@ nodes:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
 }
 
-// --- quién recibe un árbol propio (M32 · D184) ----------------------------
+// --- who receives a tree of its own -----------------------------------------
 
 /// Two nodes that run at once meet here before either writes, so both
 /// capture their starting tree before the other has touched anything —

@@ -197,7 +197,7 @@ pub(crate) fn run_tools_allowed(
 }
 
 /// Records that a node's `network: false` is declarative only when the
-/// session's resolved adapter cannot enforce it (D105/D119): before the
+/// session's resolved adapter cannot enforce it: before the
 /// session, the engine states it will not sandbox the network — it never
 /// emulates isolation it does not have. A node that declares no network
 /// policy (`None`) or one whose adapter isolates the network records nothing.

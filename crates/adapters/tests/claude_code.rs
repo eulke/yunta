@@ -2,7 +2,7 @@
 //! `claude` binary (`yunta_testkit_core::stubs::claude_code`) — no network, no
 //! API cost, no real LLM in CI. The one thing this suite cannot cover
 //! is whether the real CLI's actual output matches what the stub
-//! scripts: that is what the manual smoke test covers instead.
+//! scripts: a check run by hand against the real CLI covers that instead.
 //!
 //! Stub configuration travels through `SessionRequest.env` (the child
 //! process's own environment), never by mutating the process environment
@@ -1379,7 +1379,7 @@ async fn a_claude_session_without_a_hook_or_an_engine_to_ask_fails_before_spawni
             .expect("a session never opens without a fence to build");
         let said = yunta_core::describe(&refused);
         assert!(
-            said.contains("fence hook"),
+            said.contains("reach the rail"),
             "the refusal names what it could not build ({unset}): {said}"
         );
     }

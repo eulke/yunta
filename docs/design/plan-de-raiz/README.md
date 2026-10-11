@@ -17,7 +17,7 @@ por archivo y línea, reducidos a doce vicios y treinta y un mecanismos.
 | [`README.md`](README.md) (este) | el plan: régimen, diagnóstico, vicios, arquitectura, flujos, decisiones, fases, tablero, levantamientos, índice | todos, entero, antes de tocar nada |
 | [`mecanismos.md`](mecanismos.md) | los 31 mecanismos con firmas exactas, archivos que tocan (nuevo · modifica · borra), tests y defectos que cierran | quien implementa un ítem, la sección del mecanismo que el ítem nombra |
 | [`cronica.md`](cronica.md) | M19 completo: tipos, tabla kind→momento→kept, palabras, disposiciones, pase del pintor, archivos, tests, ADR D164 | quien implementa 5-05 |
-| [`cerco.md`](cerco.md) | M25 completo: vocabulario, tipos, juez, codec, `yunta fence`, engine, adapters builtin, la muestra del mercado, archivos, tests, ADR D172 | quien implementa 3-08 |
+| [`cerco.md`](cerco.md) | el riel de la sesión y el cerco que juzga: vocabulario, tipos, juez, codec, `yunta rail`, engine, adapters builtin, la muestra del mercado, archivos, tests, decisiones D172 y D249 a D251 | quien implementa 3-08 |
 | [`preguntas.md`](preguntas.md) | M26 completo: la regla en el tipo, el par `questions_asked`/`questions_answered`, el cierre y la ronda, las superficies, el corte del pack, archivos, tests, W-11, ADR D173 | quien implementa W-11 o un ítem que M26 nombra |
 | [`artefactos/yunta-de-raiz.html`](artefactos/yunta-de-raiz.html), [`artefactos/cronica-del-run.html`](artefactos/cronica-del-run.html) | las dos propuestas tal como fueron aprobadas, con sus diagramas; el README y `mecanismos.md` son su forma normativa | quien quiera la versión legible |
 | [`auditoria/01-eventos.md`](auditoria/01-eventos.md) … [`08-docs.md`](auditoria/08-docs.md) | las ocho auditorías, textuales, con toda la evidencia archivo:línea; están en inglés porque son evidencia y se conservan como se produjeron | quien implementa un ítem, la auditoría de su frente, para no re-auditar ni adivinar |
@@ -370,9 +370,9 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   juez de lo que una sesión escribe; `Capabilities::fence: FenceLevel { None,
   ToolCalls, Filesystem }` reemplaza `edit_hooks`; `Coverage { Exact,
   WidenedToRoots, ToolsOnly }` en `agent_session_opened`, el canal más
-  débil; kind `write_refused { session_id, target }`; `FenceHook` lo arma el
-  CLI y `yunta fence <adapter>` es el hook, cada adapter escribe solo el
-  `FenceCodec`; las raíces salen de `fence.roots`; el cerco vive en
+  débil; kind `write_refused { session_id, target }`; el riel (`RailCommand`)
+  lo arma el CLI y `yunta rail <adapter> <evento>` es el hook; cada adapter
+  escribe solo el `RailCodec`; las raíces salen de `fence.roots`; el cerco vive en
   `scratch_dir`, nunca bajo `cwd`; `read_only` = `allowed` vacío con raíces;
   una escritura que llega al diff bajo `Exact` es `engine_finding`.
   `edit_constraints`, `Glob`, `blocked:<path>` se borran. Especificación
@@ -867,7 +867,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 3-05 | Shell: `tokio::fs` ×15+, `Clock` en worktree, `SecretSource`, spans, `get()`, degradaciones como `engine_finding`; `build_manifest` async y la pareja sincrónica de `git.rs` por `spawn_governed`; `cancel` compara el arranque del pid con `started_at` (M24 I-06) | 2-02 | cerrado (be698b2) |
 | 3-06 | `ToolTarget`; pase de redacción; `mcp.json` limpiado; bearer constante | 3-05 | cerrado (a3793e4) |
 | 3-07 | parsers tagged con `Unknown`; `AgentError` con causa; codex falla en settings; cada adapter lee `adapter_settings` (M24 I-10) | 1-01 | cerrado (a84dcd0) |
-| 3-08 | el cerco (`cerco.md`): `core::fence`, `FenceLevel`, `Coverage`, `FenceHook`, `write_refused`, `yunta fence`, codec claude-code, sandbox codex, claude `read_only` con `Write`/`Edit` solo si hay archivos declarados (§6), mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | cerrado (9c3a0d1) |
+| 3-08 | el cerco (`cerco.md`): `core::fence`, `FenceLevel`, `Coverage`, `RailCommand`, `write_refused`, `yunta rail`, codec claude-code, sandbox codex, claude `read_only` con `Write`/`Edit` solo si hay archivos declarados (§6), mock por el juez, `fence_breach`, docs y glosario | 3-03, 3-04, 3-06, 3-07, 4-01 | cerrado: el riel; decisiones D249 a D251 en el registro |
 | 4-01 | `ScopeGlob`, `SchemaRange`, `WorkflowName`, `SkillName`, `InputName`, `McpServerName`, `CommitSha`, `DateTime`; `pack add` rechaza un rango que excluye la versión (M24 I-04) | 2-01 | cerrado (4f124c7) |
 | 4-02 | `ReservedIdentity`, `TemplateVar`, `ArtifactKind::Answers` (con `declarable`, `AnswersFile::against`, el montaje `kind: answers` y sus dos reglas de `check`, M26), `RecordedOrigin` (cerrado en `51a259c`), `Location` (con los findings del engine por la misma puerta, L-45), `QuestionId`, `DiagnosticCode`, `StagedHash` | 4-01, P11 | cerrado (`6c095f8`, `60a9b6c`, `89d8b59`, `18b6704`, `67fd28d`) |
 | 4-03 | `workflow::read`; `Document` para `FindingEntry`/`Withdrawal`; `text::counted`; `Answerer`; `RunTool`; `run_dir::*`; `steps.rs:256` por canonical | 4-01 | cerrado (`d843f37`, `c707dbb`, `e8a446b`) |

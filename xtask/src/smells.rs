@@ -12,15 +12,17 @@
 //!
 //! Beside them it counts the rules this repository states about itself:
 //! the words it retired, the tense its texts are written in, the sites
-//! that own a capability ([`sites`]), the shape of a test, and a
-//! threshold with no decision behind it. A rule nothing measures is a
-//! rule a change is free to break.
+//! that own a capability ([`sites`]), the shape of a test, the documents
+//! its code names, and a threshold with no reason written beside it. A
+//! rule nothing measures is a rule a change is free to break.
 //!
 //! Counting is line-based (a line matching the pattern), the same measure
 //! the rebuild's own acceptance commands used, so a contributor and CI see
 //! the same number `grep -c` would.
 
+mod corpus;
 mod prose;
+mod references;
 mod shape;
 mod sites;
 mod thresholds;
@@ -32,7 +34,7 @@ use shape::{
     functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
     production_only, strip_noise, sync_fs_in_async,
 };
-use thresholds::numeric_consts_without_decision;
+use thresholds::numeric_consts_without_reason;
 
 /// Where the committed baseline lives, next to this crate.
 fn baseline_path() -> PathBuf {
@@ -57,11 +59,7 @@ fn rs_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for path in corpus::entries(dir) {
         if path.is_dir() {
             collect_rs(&path, out);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
@@ -94,25 +92,26 @@ pub(super) fn ratchet_corpus(root: &Path) -> Vec<PathBuf> {
 }
 
 fn crate_subdirs(root: &Path, name: &str) -> Vec<PathBuf> {
-    let crates = root.join("crates");
-    let mut dirs = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&crates) {
-        for entry in entries.flatten() {
-            let sub = entry.path().join(name);
-            if sub.is_dir() {
-                dirs.push(sub);
-            }
-        }
-    }
+    let mut dirs: Vec<PathBuf> = corpus::entries(&root.join("crates"))
+        .into_iter()
+        .map(|entry| entry.join(name))
+        .filter(|sub| sub.is_dir())
+        .collect();
     dirs.sort();
     dirs
+}
+
+/// A file the ratchet cannot read stops the measure, never reads clean.
+pub(super) fn read_corpus(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("the ratchet cannot read `{}`: {error}", path.display()))
 }
 
 /// Lines across `files` that satisfy `matches`.
 fn count_lines(files: &[PathBuf], matches: impl Fn(&str) -> bool) -> usize {
     files
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|path| read_corpus(path))
         .map(|text| text.lines().filter(|line| matches(line)).count())
         .sum()
 }
@@ -140,8 +139,7 @@ fn measure() -> BTreeMap<String, usize> {
     // measured outside tests.
     let prod: Vec<String> = src_files
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .map(|text| production_only(&text))
+        .map(|path| production_only(&read_corpus(path)))
         .collect();
 
     let mut counts = BTreeMap::new();
@@ -171,11 +169,7 @@ fn measure() -> BTreeMap<String, usize> {
         "src_files_over_500_lines".to_string(),
         src_files
             .iter()
-            .filter(|path| {
-                std::fs::read_to_string(path)
-                    .map(|text| text.lines().count() > 500)
-                    .unwrap_or(false)
-            })
+            .filter(|path| read_corpus(path).lines().count() > 500)
             .count(),
     );
     // The CLI has one error translator; `main` maps the exit code.
@@ -210,7 +204,7 @@ fn measure() -> BTreeMap<String, usize> {
         drawn_src
             .iter()
             .filter(|path| !path.ends_with("render/src/glyphs.rs") && !path.ends_with("tests.rs"))
-            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .map(|path| read_corpus(path))
             .map(|text| {
                 production_only(&text)
                     .lines()
@@ -271,7 +265,7 @@ fn measure() -> BTreeMap<String, usize> {
                 let shown = path.to_string_lossy();
                 !shown.contains("crates/testkit") && !shown.ends_with("tests.rs")
             })
-            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .map(|path| read_corpus(path))
             .map(|text| {
                 production_only(&text)
                     .lines()
@@ -282,8 +276,9 @@ fn measure() -> BTreeMap<String, usize> {
     );
 
     // The shape of a test, the thread an async body holds, the threshold
-    // with no decision behind it, and every capability written outside the
-    // site that owns it. Each of these is a function of the tree alone.
+    // with no reason written beside it, and every capability written
+    // outside the site that owns it. Each of these is a function of the
+    // tree alone.
     for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
         counts.insert((*name).to_string(), count(&root));
     }
@@ -294,10 +289,14 @@ fn measure() -> BTreeMap<String, usize> {
 /// The counters that read the corpus of code and nothing else, beside the
 /// ones [`sites`] declares.
 const COUNTERS: &[sites::Counter] = &[
+    ("doc_reference", references::count_doc_references),
     ("sync_fs_in_async", count_sync_fs_in_async),
     ("test_files_over_500_lines", count_test_files_over_500_lines),
     ("test_fns_over_50_lines", count_test_fns_over_50_lines),
-    ("numeric_const_without_adr", count_numeric_const_without_adr),
+    (
+        "numeric_const_without_reason",
+        count_numeric_const_without_reason,
+    ),
 ];
 
 /// A synchronous file call inside an async body: it holds the thread the
@@ -305,8 +304,7 @@ const COUNTERS: &[sites::Counter] = &[
 fn count_sync_fs_in_async(root: &Path) -> usize {
     ratchet_corpus(root)
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .map(|text| sync_fs_in_async(&text))
+        .map(|path| sync_fs_in_async(&read_corpus(path)))
         .sum()
 }
 
@@ -315,11 +313,7 @@ fn count_sync_fs_in_async(root: &Path) -> usize {
 fn count_test_files_over_500_lines(root: &Path) -> usize {
     test_files(root)
         .iter()
-        .filter(|path| {
-            std::fs::read_to_string(path)
-                .map(|text| text.lines().count() > 500)
-                .unwrap_or(false)
-        })
+        .filter(|path| read_corpus(path).lines().count() > 500)
         .count()
 }
 
@@ -329,21 +323,20 @@ fn count_test_files_over_500_lines(root: &Path) -> usize {
 fn count_test_fns_over_50_lines(root: &Path) -> usize {
     test_files(root)
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .map(|text| functions_over(&text, 50))
+        .map(|path| functions_over(&read_corpus(path), 50))
         .sum()
 }
 
-/// A threshold with no decision behind it, over `src`, which is where
-/// D170 states the rule: a number a test writes is read beside the
-/// assertion it serves, while a number the code carries governs what the
-/// binary does to somebody's run.
-fn count_numeric_const_without_adr(root: &Path) -> usize {
+/// A threshold with no reason written beside it, over the production `src`
+/// of each crate but the test harnesses.
+/// The rule: a number a test writes is read beside its assertion, while a
+/// number the code carries says in prose why it has its value.
+fn count_numeric_const_without_reason(root: &Path) -> usize {
     crate_src_dirs(root)
         .iter()
+        .filter(|dir| !dir.to_string_lossy().contains("/testkit"))
         .flat_map(|dir| rs_files(dir))
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .map(|text| numeric_consts_without_decision(&text))
+        .map(|path| numeric_consts_without_reason(&production_only(&read_corpus(&path))))
         .sum()
 }
 
@@ -375,21 +368,16 @@ fn parse_baseline(text: &str) -> BTreeMap<String, usize> {
 /// derivation. A `_ =>` there is a kind that derives nothing with
 /// nothing saying so.
 fn wildcards_in_folds(root: &Path) -> usize {
-    let mut folds: Vec<PathBuf> = Vec::new();
-    if let Ok(domains) = std::fs::read_dir(root.join("crates/core/src/events")) {
-        for domain in domains.flatten() {
-            let ledger = domain.path().join("ledger.rs");
-            if ledger.is_file() {
-                folds.push(ledger);
-            }
-        }
-    }
+    let mut folds: Vec<PathBuf> = corpus::entries(&root.join("crates/core/src/events"))
+        .into_iter()
+        .map(|domain| domain.join("ledger.rs"))
+        .filter(|ledger| ledger.is_file())
+        .collect();
     folds.push(root.join("crates/engine/src/replay.rs"));
     folds.sort();
     folds
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .map(|text| wildcards_in_apply(&text))
+        .map(|path| wildcards_in_apply(&read_corpus(path)))
         .sum()
 }
 
@@ -494,5 +482,18 @@ mod tests {
             "a counter enters with the number it measures when it lands — one with no line in \
              the baseline gates nothing, and a line with no counter gates a pattern nobody reads"
         );
+    }
+
+    #[test]
+    fn the_ratchet_holds_doc_references_and_bare_numeric_consts_at_zero() {
+        let counts = measure();
+        assert_eq!(counts.get("doc_reference"), Some(&0));
+        assert_eq!(counts.get("numeric_const_without_reason"), Some(&0));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot read")]
+    fn an_unreadable_corpus_file_stops_the_ratchet() {
+        count_lines(&[PathBuf::from("/nonexistent/yunta-ratchet.rs")], |_| true);
     }
 }

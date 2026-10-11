@@ -59,7 +59,7 @@ pub struct AlwaysFirstTryTasks {
     pub sample_count: usize,
 }
 
-/// A declared mode no historical run ever chose ("modo sin uso") —
+/// A declared mode no historical run ever chose ("unused mode") —
 /// evidence is "enough runs happened and none picked it", never "it has
 /// existed a long time".
 #[derive(Debug, Clone, PartialEq)]
@@ -99,7 +99,7 @@ pub fn analyze(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> Verificatio
     }
 }
 
-/// "modo sin uso": every declared mode against the mode
+/// "unused mode": every declared mode against the mode
 /// each historical run actually recorded in its own `run_created`.
 fn unused_modes(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> Vec<UnusedMode> {
     let Some(modes) = &workflow.modes else {

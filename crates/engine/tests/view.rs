@@ -454,9 +454,8 @@ fn tasks_are_absent_until_a_ledger_registers_one() {
 
 #[test]
 fn a_task_that_returns_to_ready_moves_back_into_to_go_and_the_total_holds() {
-    // A task that fails at integration returns to `ready`
-    // (`contrato-del-run.md` §5.5): the counter shows the move, and the
-    // denominator does not budge.
+    // A task that fails at integration returns to `ready`: the counter
+    // shows the move, and the denominator does not budge.
     let workflow = chain();
     let events = log(vec![
         (0, None, created("standard")),

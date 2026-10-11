@@ -2,7 +2,7 @@
 //! `codex` binary (`yunta_testkit_core::stubs::codex`) — no network, no
 //! API cost, no real LLM in CI. What this suite cannot cover — whether the
 //! real CLI's actual output matches what the stub scripts — has no
-//! manual smoke test to fall back on either: no `codex` binary or
+//! check run by hand to fall back on either: no `codex` binary or
 //! credentials exist in this environment. See `codex/mod.rs`'s own doc
 //! comment for the details.
 
@@ -1590,7 +1590,7 @@ async fn a_codex_session_without_a_hook_or_an_engine_to_ask_fails_before_spawnin
             .err()
             .expect("a session never opens without a fence to build");
         assert!(
-            yunta_core::describe(&refused).contains("fence hook"),
+            yunta_core::describe(&refused).contains("reach the rail"),
             "{unset}"
         );
     }

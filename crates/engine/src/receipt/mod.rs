@@ -1,6 +1,6 @@
 //! Verified Work Receipt: a PR-attachable
 //! certificate derived **entirely** from the event log — never a summary
-//! an agent wrote. "El recibo ES la evidencia": every number here traces
+//! an agent wrote. "The receipt IS the evidence": every number here traces
 //! back to a specific event kind, the same discipline [`crate::stats`]
 //! and [`crate::progress`] already hold to. No new bookkeeping — this
 //! module only reads what the engine already recorded. Drawing it for a

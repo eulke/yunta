@@ -331,7 +331,7 @@ async fn resolve_from_poll(
 /// Re-checks every already-`Finished` `kind: gate` node against its
 /// forge's current state — detected by comparing SHAs — run once per
 /// `execute_run` invocation, before the scheduling loop, so
-/// "al despertar" (`resume`, `status`, a scheduled job) means once per
+/// "on wake" (`resume`, `status`, a scheduled job) means once per
 /// wake, not once per scheduling iteration. A node whose approval no
 /// longer covers the PR's current head is re-opened (`node_started` at
 /// the next attempt) so the ordinary dispatch path re-resolves it fresh
