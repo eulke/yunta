@@ -96,7 +96,7 @@ impl CheckoutPool {
     }
 
     /// Lets go of a task's `unit`, its checkout still held by `lease`, once
-    /// its work landed: its attempts' refs go ([`forget_attempts`]) and the
+    /// its work landed: its attempts' refs go (`forget_attempts`) and the
     /// checkout is kept for nobody.
     pub async fn retire(
         &self,

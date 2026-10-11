@@ -281,3 +281,79 @@ the rail started from; "after" carries it.
   and the checkout not.
 - Machine load differed between runs — up to three ran at once on 8 cores —
   so `checks` compares only runs that ran side by side.
+
+## G. Live measurements: sandboxes, hooks, limits and the rail's cost (2026-10-11)
+
+Claude Code 2.1.296, its sessions on `claude-haiku-5-5`; codex-cli 0.157.0,
+its sessions on `gpt-6-luna` at low effort (the account refuses the
+configured `gpt-6.1-sol`). Each live session ran in a throwaway repository.
+
+**Codex permission profiles in `codex exec`.** A profile is passed with
+`-c default_permissions=<name>`,
+`-c permissions.<name>.extends=":read-only"`,
+`-c 'permissions.<name>.filesystem={":tmpdir"="write",":slash_tmp"="write","<checkout>"="read"}'`
+and `-c permissions.<name>.network.enabled=false`, without `--sandbox`.
+
+| profile | checkout | temp | root | `.codex/x` | `git status` | network |
+|---|---|---|---|---|---|---|
+| read-only, no roots | refused | written | refused | refused | 0 | closed |
+| read-only, one root | refused | written | written | refused | 0 | closed |
+| edit (checkout `write`, `.codex` and `.git` `read`) | written | written | refused | refused | 0 | closed |
+| full (`danger-full-access`) | written | written | written | written | 0 | open |
+
+- A nested `read` wins over the checkout's `write`.
+- `:slash_tmp` covers the whole `/private/tmp` tree: anything there is
+  writable unless a nested entry names it.
+- A shell write the sandbox refuses leaves no item in the `--json` stream:
+  no event carries the denial, and the status `sandbox_denied` never appears.
+
+**Codex hooks.** Every hook's stdin carries `session_id` and `model`. Hooks
+passed with `-c hooks.<Event>` and trusted by hash in `-c hooks.state` run; an
+untrusted hook does not run, and the stream says nothing about it. A `Stop`
+hook that blocks twice with two different reasons keeps the turn going after
+each block: each reason reaches the model as a user message, and the stream
+carries no event for a block.
+
+**Claude Code's sandbox.** A `Bash` write the sandbox refuses comes back as a
+`tool_result` with `is_error` and the shell's own `operation not permitted:
+<path>`, the same shape as any failing command; `PreToolUse` runs before the
+sandbox and knows nothing of it. Each key applied in a `-p` session:
+`filesystem.allowWrite` (temp, a root), `filesystem.denyWrite` (the checkout,
+and a protected tree inside an allowed root) and `network.allowLocalBinding`.
+The read-only shape the adapter writes today (`denyWrite` on the checkout,
+`network: {}`, roots as `--add-dir`) leaves temp and loopback binds refused.
+
+**Account limits**, measured against a local stub that answers 429 (no model
+call):
+
+| CLI | 429 | channel | gave up after | what it says |
+|---|---|---|---|---|
+| Claude | reset headers | stream, exit 1 | 5 s, no retry | `API Error: Server is temporarily limiting requests (not your usage limit) · status code (no body)`, and `rate_limit_event` with `status: rejected` and `resetsAt` |
+| Claude | no headers | stream, exit 1 | about 3 min, 10 retries | the same text; `rate_limit_event` without `resetsAt` |
+| Claude | provider's error body | stream, exit 1 | about 3 min, 10 retries | `… · Your account has reached its usage limit.` |
+| Codex | headers or none | stderr, exit 1 | 2.5 s | `ERROR: exceeded retry limit, last status: 429 Too Many Requests` |
+| Codex | `usage_limit_reached` body | stderr, exit 1 | 2.5 s | `ERROR: You’ve hit your usage limit. Try again later.` |
+
+- Claude names "usage limit" in every form, so its text cannot tell a usage
+  limit from a throttle; `assistant.error: rate_limit` and
+  `result.api_error_status: 429` can, and the reset comes only as
+  `rate_limit_event.resetsAt`.
+- Codex prints no reset time in any form.
+
+**The rail and format on write**, 200 calls each through the release binary,
+spawned the way a CLI runs its hook:
+
+| call | p50 | p95 |
+|---|---|---|
+| `before-write` | 3.96 ms | 4.13 ms |
+| `after-write`, formatting a 298-line file | 39.69 ms | 40.39 ms |
+| `before-stop` | 4.20 ms | 4.35 ms |
+| spawning `/usr/bin/true` | 1.92 ms | 2.05 ms |
+| `sh -c true` | 3.91 ms | 4.08 ms |
+| `rustfmt` through the rustup proxy | 30.70 ms | 31.37 ms |
+| the toolchain's own `rustfmt` | 15.52 ms | 16.00 ms |
+| the engine's command, `sh -c 'rustfmt --edition 2021 "$@"'` | 34.06 ms | 34.98 ms |
+
+- The rustup proxy adds about 15 ms per write; the engine's whole command
+  stays under 45 ms per write, so the project's format rule keeps running
+  `rustfmt` from `PATH`.
