@@ -4,6 +4,7 @@ use thiserror::Error;
 use yunta_core::{AdapterError, TaskId};
 use yunta_storage::StorageError;
 
+use crate::git::GitError;
 use crate::scope::ScopeCheckError;
 
 /// What stopped a task's cycle.
@@ -68,15 +69,8 @@ pub enum TaskCycleError {
         #[source]
         source: crate::process::SpawnError,
     },
-    #[error(
-        "failed to compute the working tree's hash for memoization: {}",
-        crate::git::failed(.args, .cwd, .detail)
-    )]
-    TreeHash {
-        args: String,
-        cwd: std::path::PathBuf,
-        detail: String,
-    },
+    #[error(transparent)]
+    Git(#[from] GitError),
     #[error("failed to stage what the working tree holds for memoization")]
     TreeIndex(#[source] std::io::Error),
     #[error("failed to read what the working tree holds for memoization")]

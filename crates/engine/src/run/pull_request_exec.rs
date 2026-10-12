@@ -36,6 +36,9 @@ pub(super) async fn execute_pull_request(
     if let Err(error) =
         crate::git::push_branch(ctx.worktree, remote, &head, ctx.root_supervision()).await
     {
+        if error.cancelled() {
+            return Err(error.into());
+        }
         let said = format!("pushing `{head}` to `{remote}`: {}", error.detail());
         return fail(ctx, node, said, false).await;
     }

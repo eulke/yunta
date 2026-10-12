@@ -16,6 +16,7 @@ use super::attempt::AttemptParams;
 use super::judge::{judge, Judgement, Work};
 use super::record::Recorder;
 use super::{BlockedCause, CriterionRun, TaskCycleError, TaskOutcome};
+use crate::git::{Cause, GitError};
 use crate::worktree::{carry_work, Carried};
 
 /// What judging the carried work settled.
@@ -47,10 +48,13 @@ pub(super) async fn continue_from(
             task: task.id.clone(),
             source: Box::new(source),
         })?;
-    if let Carried::NoLongerApplies { paths } = carried {
+    if let Carried::NoLongerApplies { stopped, paths } = carried {
         return Ok(Carry::Settled {
             last_check: recorder
-                .criteria(Phase::Post, std::slice::from_ref(&stopped_on(left, &paths)))
+                .criteria(
+                    Phase::Post,
+                    std::slice::from_ref(&stopped_on(&stopped, &paths)),
+                )
                 .await?,
             outcome: TaskOutcome::Blocked {
                 cause: BlockedCause::CarriedWorkNoLongerApplies { paths },
@@ -134,21 +138,86 @@ fn settled(judgement: &Judgement) -> Option<TaskOutcome> {
 }
 
 /// The check a pick that stopped on conflicts is recorded as — the way a
-/// replay that stopped on conflicts is: the git command and the paths it
-/// stopped on, as a criterion that did not pass.
-fn stopped_on(left: &CommitSha, paths: &[std::path::PathBuf]) -> CriterionRun {
+/// replay that stopped on conflicts is: the git command that stopped, as it
+/// was run, and the paths it stopped on, as a criterion that did not pass.
+fn stopped_on(stopped: &GitError, paths: &[std::path::PathBuf]) -> CriterionRun {
     let listed: Vec<String> = paths
         .iter()
         .map(|path| path.display().to_string())
         .collect();
     CriterionRun {
-        cmd: format!("git cherry-pick {left}: conflicts in {}", listed.join(", ")),
+        cmd: format!(
+            "git {}: conflicts in {}",
+            stopped.invocation.args.join(" "),
+            listed.join(", ")
+        ),
         output: None,
-        exit_code: 1,
+        // git's own exit when it gave one. A cut drain gives none, and a pick
+        // that left paths unmerged exits 1, as a conflict does.
+        exit_code: match &stopped.cause {
+            Cause::Exit {
+                code: Some(code), ..
+            } => *code,
+            _ => 1,
+        },
         is_guard: false,
         reused: false,
         duration_ms: None,
         tree: None,
         head: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::stopped_on;
+    use crate::git::{Cause, GitError, Invocation};
+
+    #[test]
+    fn the_finding_names_the_pick_and_every_path_it_stopped_on() {
+        let stopped = GitError {
+            invocation: Invocation {
+                dir: PathBuf::from("unit"),
+                args: ["cherry-pick", "--no-commit", "abc123"]
+                    .map(String::from)
+                    .to_vec(),
+            },
+            cause: Cause::Exit {
+                code: Some(1),
+                stderr: String::new(),
+            },
+        };
+
+        let run = stopped_on(
+            &stopped,
+            &[PathBuf::from("a.txt"), PathBuf::from("dir/b.txt")],
+        );
+
+        assert_eq!(
+            run.cmd,
+            "git cherry-pick --no-commit abc123: conflicts in a.txt, dir/b.txt"
+        );
+        assert_eq!(run.exit_code, 1);
+    }
+
+    #[test]
+    fn a_cut_drain_records_the_exit_a_conflicted_pick_has() {
+        let stopped = GitError {
+            invocation: Invocation {
+                dir: PathBuf::from("unit"),
+                args: ["cherry-pick", "--no-commit", "abc123"]
+                    .map(String::from)
+                    .to_vec(),
+            },
+            cause: Cause::Truncated {
+                stderr: String::new(),
+            },
+        };
+
+        let run = stopped_on(&stopped, &[PathBuf::from("a.txt")]);
+
+        assert_eq!(run.exit_code, 1);
     }
 }

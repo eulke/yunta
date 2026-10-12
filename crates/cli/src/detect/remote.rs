@@ -4,10 +4,20 @@ use std::path::Path;
 
 use yunta_core::GitHubRepo;
 use yunta_engine::process::Supervision;
+use yunta_engine::GitError;
 
-pub(super) async fn github_repo(repo: &Path, supervision: Supervision<'_>) -> Option<GitHubRepo> {
-    let url = yunta_engine::git::remote_url(repo, "origin", supervision).await?;
-    parse(&url)
+/// Detection only proposes, so a remote git could not read is no proposal
+/// here: it answers the same as a remote that is not there. A stop the
+/// token made is not an answer, and it reaches the caller as the error.
+pub(super) async fn github_repo(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Option<GitHubRepo>, GitError> {
+    match yunta_engine::git::remote_url(repo, "origin", supervision).await {
+        Ok(url) => Ok(url.as_deref().and_then(parse)),
+        Err(stopped) if stopped.cancelled() => Err(stopped),
+        Err(_) => Ok(None),
+    }
 }
 
 /// `owner/name` out of an https, ssh or scp-style GitHub URL; `None` for

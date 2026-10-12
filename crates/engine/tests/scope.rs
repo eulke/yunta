@@ -8,7 +8,7 @@
 //! What was already there when the unit began belongs to whoever left
 //! it, which is what the starting tree is for.
 
-use yunta_engine::{audit, head_tree, ScopeCheckError};
+use yunta_engine::{audit, head_tree, ScopeCheckError, WorktreeError};
 use yunta_testkit::Owner;
 
 /// The audit every case here runs: from the tree the checkout stands at
@@ -27,14 +27,12 @@ async fn from_here(
     // A directory git will not answer about fails here first, and the
     // case that asserts on it wants the audit's own error: the starting
     // point is the audit's to establish, whichever call establishes it.
-    let from =
-        head_tree(dir, owner.supervision())
-            .await
-            .map_err(|_| ScopeCheckError::GitFailed {
-                command: "rev-parse HEAD^{tree}".to_string(),
-                status: 128,
-                stderr: String::new(),
-            })?;
+    let from = head_tree(dir, owner.supervision())
+        .await
+        .map_err(|error| match error {
+            WorktreeError::Git(git) => ScopeCheckError::Git(git),
+            error => ScopeCheckError::Worktree(error),
+        })?;
     let scratch = tempfile::tempdir().expect("a scratch outside the checkout");
     let index = scratch.path().join("index");
     audit(
@@ -119,7 +117,7 @@ async fn a_non_git_directory_surfaces_a_typed_git_failure() {
     // deliberately no `git init`
 
     let result = from_here(dir.path(), &["**".into()], &[], &owner).await;
-    assert!(matches!(result, Err(ScopeCheckError::GitFailed { .. })));
+    assert!(matches!(result, Err(ScopeCheckError::Git(_))));
 }
 
 #[tokio::test]

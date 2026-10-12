@@ -74,6 +74,7 @@ async fn found(
         Supervision::outside_any_run(&cancel, &clock),
     )
     .await
+    .unwrap()
 }
 
 /// `(node, path, how)` for every path the check warns about in [`READS`],
@@ -204,7 +205,8 @@ nodes:
         },
         Supervision::outside_any_run(&cancel, &clock),
     )
-    .await;
+    .await
+    .unwrap();
     assert!(
         found.warnings.is_empty() && found.errors.is_empty(),
         "{found:?}"

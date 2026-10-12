@@ -3,10 +3,11 @@
 //!
 //! Holding a checkout is a lock file beside it, `slot-N.lock`, taken with
 //! the same protocol as every other lock of the engine: it lasts as long as
-//! the process, and a gone holder's lock is taken over. Beside it,
-//! `slot-N.held` says which run held it last and when, which is how a
-//! takeover asks whether that run's agents still work there, and how the
-//! pool tells its recently used checkouts from the rest.
+//! the process, and a gone holder's lock is taken over unless the agents it
+//! left still work there. Beside it, `slot-N.held` says which run held it
+//! last and when, which is how a takeover asks whether that run's agents
+//! still work there, and how the pool tells its recently used checkouts
+//! from the rest.
 
 use std::path::{Path, PathBuf};
 
@@ -16,8 +17,9 @@ use yunta_core::process::signal::Liveness;
 
 use super::super::WorktreeError;
 use super::Lease;
-use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
+use crate::lock::{self, Acquired, Contention, LockError, LockOwner, SystemProbe};
 use crate::process::Supervision;
+use crate::process_registry::{self, EngineLiveness};
 
 /// What every checkout of the pool is called, followed by its number.
 pub(super) const SLOT: &str = "slot-";
@@ -92,35 +94,8 @@ pub(super) async fn hold(
     holder: Option<&Path>,
     supervision: Supervision<'_>,
 ) -> Result<Option<Lease>, WorktreeError> {
-    let lock_path = home.join(format!("{SLOT}{number}.lock"));
-    let lease = match lock::acquire(&lock_path, contention, &SystemProbe, supervision.clock).await {
-        Ok(Acquired::Fresh) => Lease::of(home, number),
-        Ok(Acquired::Stolen { dead }) => {
-            let lease = Lease::of(home, number);
-            if agents_still_work(home, number).await {
-                return Ok(None);
-            }
-            tracing::info!(
-                pid = %dead.pid,
-                checkout = number,
-                "took over a checkout a process that is gone held"
-            );
-            lease
-        }
-        Err(LockError::Held { .. } | LockError::Unreadable { .. } | LockError::Timeout { .. }) => {
-            return Ok(None);
-        }
-        Err(LockError::Io {
-            action,
-            lock_path,
-            source,
-        }) => {
-            return Err(WorktreeError::Io {
-                action: format!("{action} the checkout lock"),
-                path: lock_path,
-                source,
-            });
-        }
+    let Some(owner) = claim(home, number, contention, supervision).await? else {
+        return Ok(None);
     };
     if let Some(holder) = holder {
         let now = supervision.clock.now();
@@ -132,7 +107,56 @@ pub(super) async fn hold(
         };
         record_held(home, number, &held);
     }
-    Ok(Some(lease))
+    Ok(Some(Lease::of(home, number, owner)))
+}
+
+/// Takes the lock of checkout `number` as `acquire` decides it: the record
+/// this process wrote, or `None` when the checkout is somebody else's to
+/// keep.
+async fn claim(
+    home: &Path,
+    number: u32,
+    contention: Contention,
+    supervision: Supervision<'_>,
+) -> Result<Option<LockOwner>, WorktreeError> {
+    let lock_path = home.join(format!("{SLOT}{number}.lock"));
+    let keep = |_: &LockOwner| agents_still_work(home, number);
+    let taken = lock::acquire(
+        &lock_path,
+        contention,
+        &SystemProbe,
+        supervision.clock,
+        supervision.cancel,
+        &keep,
+    )
+    .await;
+    match taken {
+        Ok(Acquired::Fresh(owner)) => Ok(Some(owner)),
+        Ok(Acquired::Stolen { owner, dead }) => {
+            tracing::info!(
+                pid = %dead.pid,
+                checkout = number,
+                "took over a checkout a process that is gone held"
+            );
+            Ok(Some(owner))
+        }
+        Err(
+            LockError::Kept { .. }
+            | LockError::Held { .. }
+            | LockError::Unreadable { .. }
+            | LockError::Timeout { .. },
+        ) => Ok(None),
+        Err(cancelled @ LockError::Cancelled { .. }) => Err(WorktreeError::Lock(cancelled)),
+        Err(LockError::Io {
+            action,
+            lock_path,
+            source,
+        }) => Err(WorktreeError::Io {
+            action: format!("{action} the checkout lock"),
+            path: lock_path,
+            source,
+        }),
+    }
 }
 
 /// Writes `held` as checkout `number`'s record, under the hold its caller
@@ -182,13 +206,31 @@ fn held_path(home: &Path, number: u32) -> PathBuf {
 
 /// Whether the run that held checkout `number` last still has agents at
 /// work: an engine killed outright leaves its sessions running, and
-/// they write where they were started.
-async fn agents_still_work(home: &Path, number: u32) -> bool {
-    let Some(held) = last_held(home, number).await else {
+/// they write where they were started. A registry naming a live engine
+/// keeps the checkout, and so does one this binary cannot read. One naming
+/// a gone engine keeps it only while one of the run's process groups still
+/// answers; no registry at all keeps nothing.
+fn agents_still_work(home: &Path, number: u32) -> bool {
+    // blocking: one small record, read while the takeover that asks holds
+    // the checkout's lock.
+    let Some(held) = std::fs::read(held_path(home, number))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Held>(&bytes).ok())
+    else {
         return false;
     };
-    match crate::process_registry::read_registry(&held.by) {
-        crate::process_registry::Registry::Read(registry) => registry
+    match process_registry::engine_liveness(&held.by, &SystemProbe) {
+        EngineLiveness::Alive | EngineLiveness::Unknown => true,
+        EngineLiveness::Unrecorded => false,
+        EngineLiveness::Dead => groups_at_work(&held.by),
+    }
+}
+
+/// Whether one of the process groups the registry under `run_dir` names
+/// still answers.
+fn groups_at_work(run_dir: &Path) -> bool {
+    match process_registry::read_registry(run_dir) {
+        process_registry::Registry::Read(registry) => registry
             .doc
             .process_groups
             .iter()
@@ -197,8 +239,32 @@ async fn agents_still_work(home: &Path, number: u32) -> bool {
     }
 }
 
+/// Whether checkout `number`, at `checkout`, may be cleared: no unit keeps
+/// it, and its `.git` is missing or names an admin directory that is gone.
+pub(super) async fn clearable(home: &Path, number: u32, checkout: &Path) -> bool {
+    if last_held(home, number)
+        .await
+        .is_some_and(|held| held.unit.is_some())
+    {
+        return false;
+    }
+    match tokio::fs::read_to_string(checkout.join(".git")).await {
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        Ok(pointer) => match pointer.strip_prefix("gitdir:") {
+            Some(admin) => {
+                matches!(
+                    tokio::fs::try_exists(checkout.join(admin.trim())).await,
+                    Ok(false)
+                )
+            }
+            None => false,
+        },
+    }
+}
+
 /// Takes away what is left at `checkout` of a checkout a crash left half
-/// added, so its number can be used again.
+/// added, so its number can be used again, then prunes the git records of
+/// the checkouts that are gone. The caller checked `clearable` first.
 pub(super) async fn clear(
     repo: &Path,
     checkout: &Path,
@@ -214,9 +280,5 @@ pub(super) async fn clear(
         }
         _ => {}
     }
-    let common_dir = super::super::common_git_dir(repo, supervision).await?;
-    let _mutation_lock =
-        super::super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-    super::super::run_git(repo, &["worktree", "prune"], supervision).await?;
-    Ok(())
+    super::super::prune_worktrees(repo, supervision).await
 }

@@ -3,8 +3,10 @@
 //! can find it, bounded by a timeout and by the run's cancellation, and
 //! killed with its whole tree on either — or when its caller stops
 //! waiting and drops it mid-flight. Its pipes are read to the end
-//! on every path, so the outcome always carries what the child wrote —
-//! whether it exited, timed out or was cancelled.
+//! on every path, so the outcome carries what the child wrote — whether
+//! it exited, timed out or was cancelled. A pipe a process outside the
+//! group still holds is not waited for, and an exit says so when that
+//! cut what it could read.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -171,14 +173,35 @@ impl GovernedCommand {
     }
 }
 
+/// The `PATH` the process itself runs under. A child inherits it unless
+/// its command sets its own, so it is where a program is looked up when
+/// the command's variables do not set one.
+pub(crate) fn inherited_path() -> String {
+    std::env::var("PATH").unwrap_or_default()
+}
+
+/// Whether an exited command's collected streams were read to their end.
+/// A pipe still held when the drain bound passes belongs to a process
+/// that left the command's group, and reading stops there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drain {
+    /// Every collected stream was read to its end.
+    Complete,
+    /// The drain bound stopped reading while a pipe was still held open:
+    /// the output may lack what the holder wrote.
+    Truncated,
+}
+
 /// How a governed subprocess ended. `stdout` and `stderr` hold what the
-/// child wrote to a collected stream, and are empty otherwise.
+/// child wrote to a collected stream, and are empty otherwise. `drain`
+/// says whether an exit read both streams to their end.
 #[derive(Debug)]
 pub enum Outcome {
     Exited {
         status: ExitStatus,
         stdout: Vec<u8>,
         stderr: Vec<u8>,
+        drain: Drain,
     },
     /// The timeout elapsed; the whole process group was killed.
     TimedOut {
@@ -311,6 +334,7 @@ pub async fn spawn_governed(
     let drained_by = tokio::time::Instant::now() + Duration::from_secs(2);
     let mut pipe_failure = None;
     let mut abort_pipes = cleanup_result.is_err();
+    let mut drain = Drain::Complete;
     while !pipes.is_empty() && !abort_pipes {
         tokio::select! {
             biased;
@@ -336,6 +360,7 @@ pub async fn spawn_governed(
             _ = wait_for_deadline(Some(drained_by)) => {
                 tracing::debug!(command = %described, "a process outside the command's group still holds its output; reading stops here");
                 abort_pipes = true;
+                drain = Drain::Truncated;
             }
         }
     }
@@ -415,6 +440,7 @@ pub async fn spawn_governed(
             status,
             stdout: captured_stdout,
             stderr: captured_stderr,
+            drain,
         },
         Waited::TimedOut | Waited::Failed => Outcome::TimedOut {
             pgid,

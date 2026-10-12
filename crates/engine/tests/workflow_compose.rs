@@ -78,7 +78,7 @@ fn manifest_of(runs_root: &Path, run_id: &RunId) -> Manifest {
 /// stays once its checkout went back to the project's pool.
 async fn on_its_branch(bench: &Bench, run: &RunId, file: &str) -> Option<String> {
     let named = format!("yunta/run/{run}:{file}");
-    yunta_engine::git::output(&bench.worktree, &["show", &named], bench.supervision())
+    yunta_engine::git::read(&bench.worktree, &["show", &named], bench.supervision())
         .await
         .ok()
 }

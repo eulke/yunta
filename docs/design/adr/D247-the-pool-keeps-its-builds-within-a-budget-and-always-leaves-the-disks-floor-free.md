@@ -45,6 +45,8 @@ run that fills the disk fails in the middle of whatever it was doing.
    nobody drives kept before the pool. It says in one line what the pool
    keeps, and `doctor` checks the same.
 
+Nota 2026-10-11. `gc` quita los checkouts bajo el lock de mutación de git, el mismo que toma el pool para agregar uno. Los checkouts de esquemas anteriores al pool se quitan solo si están limpios; uno con trabajo sin commitear se conserva.
+
 ## Rationale
 
 The disk is shared with everything else the person does, and a build is the

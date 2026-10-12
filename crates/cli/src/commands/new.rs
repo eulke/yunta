@@ -263,6 +263,6 @@ pub async fn new_workflow(
         super::verdict::layer_conflicts(&cwd)?,
         super::verdict::Reach::Workflow,
     )
-    .await;
-    Ok(verdict.report(&ctx, path.display()).await)
+    .await?;
+    verdict.report(&ctx, path.display()).await
 }

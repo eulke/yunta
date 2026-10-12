@@ -13,13 +13,14 @@
 # pid and a watcher needs no interval to be sure of that.
 #
 # `YUNTA_STUB_GIT_LOG` names a file each invocation is appended to, for
-# a test that counts how often the engine asks git.
+# a test that counts how often the engine asks git. When
+# `YUNTA_STUB_GIT_LOCK_PROBE` also names a path, a `worktree remove` or
+# `worktree prune` line ends in `locked` while that path exists and in
+# `free` once it does not, for a test that checks whether the lock was
+# held when git ran.
 #
 # The subcommand is read as git reads it: after the `-c name=value`
 # pairs a caller sets ahead of it.
-if [ -n "$YUNTA_STUB_GIT_LOG" ]; then
-    echo "$*" >> "$YUNTA_STUB_GIT_LOG"
-fi
 first=""
 second=""
 setting=""
@@ -35,6 +36,18 @@ for arg in "$@"; do
         break
     fi
 done
+if [ -n "$YUNTA_STUB_GIT_LOG" ]; then
+    line="$*"
+    if [ -n "$YUNTA_STUB_GIT_LOCK_PROBE" ] &&
+        { [ "$first $second" = "worktree remove" ] || [ "$first $second" = "worktree prune" ]; }; then
+        if [ -e "$YUNTA_STUB_GIT_LOCK_PROBE" ]; then
+            line="$line locked"
+        else
+            line="$line free"
+        fi
+    fi
+    echo "$line" >> "$YUNTA_STUB_GIT_LOG"
+fi
 if [ -n "$YUNTA_STUB_GIT_BLOCK_ON" ] &&
     { [ "$first" = "$YUNTA_STUB_GIT_BLOCK_ON" ] || [ "$first $second" = "$YUNTA_STUB_GIT_BLOCK_ON" ]; } &&
     { [ -z "$YUNTA_STUB_GIT_BLOCK_WHEN" ] || [ -f "$YUNTA_STUB_GIT_BLOCK_WHEN" ]; }; then

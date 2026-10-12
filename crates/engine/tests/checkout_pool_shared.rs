@@ -1,18 +1,21 @@
 //! The project's checkouts across runs and processes. A checkout is held
 //! by a lock file that lasts as long as its process: another run's live
-//! hold is respected, a gone holder's is taken back, and a checkout a
-//! crash left half added is made again. A second run finds the first
+//! hold is respected, a gone holder's is taken back unless the run it held
+//! for still has agents at work, and a checkout a crash left half added is
+//! made again. A second run finds the first
 //! run's checkouts where they were, with their builds, and the pool keeps
 //! no more free checkouts than its runs had busy at once.
 
 mod pool_world;
 
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use pool_world::{write, World};
+use pool_world::{register_group, write, World};
 use yunta_core::{Pid, RunId};
+use yunta_engine::{UnitHome, UnitId};
 
 /// Hands checkout 1's lock to the process `pid`, as if it held it.
 fn lock_slot_one_for(home: &Path, pid: u32) {
@@ -64,6 +67,70 @@ async fn a_slot_whose_holder_died_is_taken_back() {
 
     assert_eq!(second.worktree, first.worktree);
     assert_eq!(world.slots().await, vec!["slot-1"]);
+}
+
+/// A dead holder whose registered agents still work keeps its checkout: the
+/// takeover is refused and the lock file is left as it was.
+#[tokio::test]
+async fn a_dead_holders_checkout_whose_agents_still_work_is_not_taken() {
+    let world = World::new();
+    let (first, held) = world.open("T001").await;
+    drop(held);
+    let home = world.pool.home(world.owner.supervision()).await.unwrap();
+    let mut gone = std::process::Command::new("true").spawn().unwrap();
+    gone.wait().unwrap();
+    lock_slot_one_for(&home, gone.id());
+    let mut agent = std::process::Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    register_group(&world.root.path().join("run"), gone.id(), agent.id());
+    let before = tokio::fs::read(home.join("slot-1.lock")).await.unwrap();
+
+    let (second, _held) = world.open("T002").await;
+
+    agent.kill().unwrap();
+    agent.wait().unwrap();
+    assert_ne!(second.worktree, first.worktree);
+    assert_eq!(
+        tokio::fs::read(home.join("slot-1.lock")).await.unwrap(),
+        before
+    );
+}
+
+/// A checkout a unit still keeps is not cleared when its git pointer is
+/// broken, so the work in it survives.
+#[tokio::test]
+async fn a_checkout_a_unit_keeps_survives_a_broken_git_pointer() {
+    let world = World::new();
+    let (first, held) = world.open("T001").await;
+    drop(held);
+    write(
+        &first.worktree.join("draft.txt"),
+        "a unit's uncommitted work",
+    );
+    tokio::fs::remove_dir_all(world.repo.join(".git/worktrees/slot-1"))
+        .await
+        .unwrap();
+    write(&first.worktree.join(".git"), "gitdir: /nowhere/gone\n");
+    let home = UnitHome {
+        repo: &world.repo,
+        run_dir: &world.root.path().join("run"),
+        run_id: &world.run,
+        base: &world.head(),
+    };
+    // Whether the open succeeds does not matter here: the draft must survive it.
+    let _ = world
+        .pool
+        .open(
+            home,
+            UnitId::Task("T002".into()),
+            1,
+            world.owner.supervision(),
+        )
+        .await;
+    assert!(first.worktree.join("draft.txt").exists());
 }
 
 /// A checkout a crash left half added — a directory git does not know as
@@ -132,6 +199,33 @@ async fn a_checkout_whose_work_landed_is_free_with_its_branch() {
 
     assert_eq!(next.worktree, first.worktree);
     assert_eq!(world.slots().await, vec!["slot-1"]);
+}
+
+/// A clean checkout that a live process holds is not offered as a unit's
+/// branch, though nothing in it is uncommitted.
+#[tokio::test]
+async fn a_clean_checkout_a_live_process_holds_is_not_adopted() {
+    let world = World::new();
+    let (first, held) = world.open("T001").await;
+    drop(held);
+    let branch = format!("yunta/unit/{}/T001/1", world.run);
+    yunta_testkit::git(&first.worktree, &["switch", "-c", branch.as_str()]);
+    let home = world.pool.home(world.owner.supervision()).await.unwrap();
+    let mut alive = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    lock_slot_one_for(&home, alive.id());
+    let adoptable =
+        yunta_engine::adoptable_unit_branches(&world.pool, &world.repo, world.owner.supervision())
+            .await
+            .unwrap();
+    alive.kill().unwrap();
+    alive.wait().unwrap();
+    assert!(
+        !adoptable.contains(&branch),
+        "adopted a checkout a live process holds: {adoptable:?}"
+    );
 }
 
 /// Past its budget, the pool empties the build of the free checkout used
@@ -262,7 +356,9 @@ async fn resume_continues_on_a_persons_branch_in_the_bound_checkout() {
         .unwrap();
 
     yunta_testkit::git(&tree, &["switch", "-q", "-c", "my-fix"]);
-    let a_persons = yunta_engine::still_the_runs(&tree, &run, supervision).await;
+    let a_persons = yunta_engine::still_the_runs(&tree, &run, supervision)
+        .await
+        .unwrap();
     yunta_testkit::git(
         &tree,
         &[
@@ -272,7 +368,9 @@ async fn resume_continues_on_a_persons_branch_in_the_bound_checkout() {
             "yunta/run/01JPOOLSOMEBODYELSE0000000A",
         ],
     );
-    let another_runs = yunta_engine::still_the_runs(&tree, &run, supervision).await;
+    let another_runs = yunta_engine::still_the_runs(&tree, &run, supervision)
+        .await
+        .unwrap();
 
     assert!(a_persons);
     assert!(!another_runs);

@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::git::GitError;
 use crate::process::Supervision;
 use yunta_core::fence::Coverage;
 use yunta_core::{Location, NodeScope, RelativePath, ScopeGlob, TreeId};
@@ -19,18 +20,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ScopeCheckError {
-    #[error("failed to {action}")]
-    Io {
-        action: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("{}", crate::git::exited_with(.command, .status, .stderr))]
-    GitFailed {
-        command: String,
-        status: i32,
-        stderr: String,
-    },
+    /// git could not say what changed: it failed, or the token stopped it.
+    #[error(transparent)]
+    Git(#[from] GitError),
     /// Every pattern compiled on its own when it was parsed, so the
     /// only failure left is the set's own limit on how many it holds.
     #[error("this scope has more globs than one set can hold")]
@@ -43,6 +35,17 @@ pub enum ScopeCheckError {
     /// came back.
     #[error(transparent)]
     Worktree(#[from] crate::worktree::WorktreeError),
+}
+
+impl ScopeCheckError {
+    /// Whether the token stopped the git or the checkout this audit asked.
+    pub fn cancelled(&self) -> bool {
+        match self {
+            ScopeCheckError::Git(git) => git.cancelled(),
+            ScopeCheckError::Worktree(worktree) => worktree.cancelled(),
+            ScopeCheckError::GlobSet { .. } => false,
+        }
+    }
 }
 
 /// What a unit of work changed between the tree it started from and the
@@ -176,26 +179,6 @@ pub fn denied(
         .collect())
 }
 
-async fn git_bytes(
-    cwd: &Path,
-    args: &[&str],
-    supervision: Supervision<'_>,
-) -> Result<Vec<u8>, ScopeCheckError> {
-    crate::git::output_bytes(cwd, args, supervision)
-        .await
-        .map_err(|e| match e.source {
-            Some(source) => ScopeCheckError::Io {
-                action: format!("run `git {}`", e.args),
-                source,
-            },
-            None => ScopeCheckError::GitFailed {
-                command: e.args,
-                status: e.code.unwrap_or(-1),
-                stderr: e.stderr,
-            },
-        })
-}
-
 /// The paths from a `-z` git listing: NUL-separated, and — because `-z`
 /// turns off git's own path quoting — byte-for-byte, so a non-ASCII path
 /// reaches the globs unescaped instead of as a `"caf\303\251.rs"` string
@@ -259,7 +242,8 @@ pub async fn changed_between(
     to: &str,
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let bytes = git_bytes(cwd, &["diff", "--name-only", "-z", from, to], supervision).await?;
+    let bytes =
+        crate::git::read_bytes(cwd, &["diff", "--name-only", "-z", from, to], supervision).await?;
     Ok(nul_separated_paths(&bytes))
 }
 

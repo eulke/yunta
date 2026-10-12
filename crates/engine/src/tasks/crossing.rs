@@ -111,17 +111,22 @@ pub(crate) async fn carried_into(
     Ok(carried)
 }
 
-/// Whether `head` descends from `commit`. A non-zero exit is the answer
-/// "no", not a failure: git says the same when the commit is on a branch
-/// this tree never took and when this repository does not have it at
-/// all, and either way the work is not here.
+/// Whether `head` descends from `commit`. A commit this repository does not
+/// have is the answer "no", and so is one `head` does not descend from: the
+/// work is not here either way. Any other failure of git is an error.
 async fn has_commit(
     tree: &Path,
     commit: &CommitSha,
     head: &CommitSha,
     supervision: Supervision<'_>,
 ) -> Result<bool, RunError> {
-    crate::git::success(
+    if crate::git::verify(tree, commit.as_str(), supervision)
+        .await?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    let descends = crate::git::ask(
         tree,
         &[
             "merge-base",
@@ -129,10 +134,11 @@ async fn has_commit(
             commit.as_str(),
             head.as_str(),
         ],
+        crate::git::IS_ANCESTOR,
         supervision,
     )
-    .await
-    .map_err(RunError::Git)
+    .await?;
+    Ok(descends)
 }
 
 #[cfg(test)]

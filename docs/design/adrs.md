@@ -263,3 +263,4 @@ lista.
 **D254 — A session's stop is judged before it ends, once for one state of its work.** `accepted` → [`adr/D254-a-session-s-stop-is-judged-before-it-ends.md`](adr/D254-a-session-s-stop-is-judged-before-it-ends.md)
 **D255 — What a session writes is formatted the moment it writes it.** `accepted` → [`adr/D255-what-a-session-writes-is-formatted-as-it-writes-it.md`](adr/D255-what-a-session-writes-is-formatted-as-it-writes-it.md)
 **D256 — A project command held beside the suite holds every task, as the suite does.** `accepted` → [`adr/D256-a-project-command-held-beside-the-suite-holds-every-task.md`](adr/D256-a-project-command-held-beside-the-suite-holds-every-task.md)
+**D257 — Git has one owner, and each call names its answer, its lock and its failure.** `accepted` → [`adr/D257-git-has-one-owner-and-each-call-names-its-answer-its-lock-and-its-failure.md`](adr/D257-git-has-one-owner-and-each-call-names-its-answer-its-lock-and-its-failure.md)

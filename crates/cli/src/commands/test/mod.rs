@@ -293,16 +293,9 @@ pub(crate) async fn init_git(
         vec!["add", "-A"],
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {
-        let ran = yunta_engine::git::success(dir, &args, supervision)
+        yunta_engine::git::change(dir, yunta_engine::git::Effect::Checkout, &args, supervision)
             .await
-            .map_err(|e| CliError::msg(format!("`git {}`: {}", args.join(" "), e.detail())))?;
-        if !ran {
-            return Err(CliError::msg(format!(
-                "`git {}` failed in `{}`",
-                args.join(" "),
-                dir.display()
-            )));
-        }
+            .map_err(yunta_engine::RunError::from)?;
     }
     Ok(())
 }

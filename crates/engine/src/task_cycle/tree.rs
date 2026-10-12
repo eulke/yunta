@@ -33,19 +33,12 @@ impl Tree {
         with_head: bool,
         supervision: Supervision<'_>,
     ) -> Result<Self, TaskCycleError> {
-        let git = |args: &'static [&'static str]| async move {
-            crate::git::output(cwd, args, supervision)
-                .await
-                .map_err(|e| {
-                    let detail = e.detail();
-                    TaskCycleError::TreeHash {
-                        args: e.args,
-                        cwd: e.cwd,
-                        detail,
-                    }
-                })
-        };
-        let own = git(&["rev-parse", "--path-format=absolute", "--git-path", "index"]).await?;
+        let own = crate::git::read(
+            cwd,
+            &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+            supervision,
+        )
+        .await?;
         let staging = tempfile::tempdir().map_err(TaskCycleError::TreeIndex)?;
         let index = staging.path().join("index");
         if let Err(source) = tokio::fs::copy(own.trim(), &index).await {
@@ -58,7 +51,10 @@ impl Tree {
             .await
             .map_err(|source| TaskCycleError::TreeContent(Box::new(source)))?;
         let head = match with_head {
-            true => Some(git(&["rev-parse", "HEAD"]).await?.trim().to_string()),
+            true => {
+                let head = crate::git::read(cwd, &["rev-parse", "HEAD"], supervision).await?;
+                Some(head.trim().to_string())
+            }
             false => None,
         };
         Ok(Tree { content, head })

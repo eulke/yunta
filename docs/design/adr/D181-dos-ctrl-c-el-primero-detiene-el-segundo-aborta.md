@@ -30,6 +30,14 @@ inyecta en el `Context` —la real en `Context::load`, ninguna en un test,
 la del servidor en cada pedido de `yunta mcp`— y el stream se instala
 antes de que `load` devuelva.
 
+Nota 2026-10-11. Liberar un checkout en lugar propio (`isolation: none`) no
+corre git: el lock vive en el directorio común, que se lee de `.git` sin
+preguntarle a git. Así, la parada de un run en su propio repositorio no deja
+ningún git corriendo que el segundo Ctrl-C tenga que abortar. El segundo
+Ctrl-C sigue abortando el git que la liberación sí spawnee: cuando `.git` no
+nombra el directorio común (apunta a un directorio de git aparte, sin
+`commondir`) o no se puede leer, git tiene que responder.
+
 ## Racional
 
 Es el mismo «interrupt, then kill» que el repo aplica a una sesión

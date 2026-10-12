@@ -242,10 +242,10 @@ pub enum RunError {
     Process(#[from] crate::process::SpawnError),
 
     #[error(transparent)]
-    TaskCycle(#[from] TaskCycleError),
+    TaskCycle(TaskCycleError),
 
     #[error(transparent)]
-    ScopeCheck(#[from] ScopeCheckError),
+    ScopeCheck(ScopeCheckError),
 
     #[error(transparent)]
     EventsExport(#[from] crate::events_export::EventsExportError),
@@ -267,12 +267,27 @@ pub enum RunError {
 
 /// A git the caller's token stopped is not a failure of anything: it is
 /// the invocation being cancelled, and it says so wherever it surfaces.
-/// One conversion, so no call site has to remember to ask.
+/// One conversion, so no call site has to remember to ask. A lock the git
+/// waited on is the worktree's, unless the token stopped that wait.
 impl From<crate::git::GitError> for RunError {
     fn from(git: crate::git::GitError) -> Self {
-        match git.cancelled() {
-            true => RunError::Cancelled,
-            false => RunError::Git(git),
+        if git.cancelled() {
+            return RunError::Cancelled;
+        }
+        match git.cause {
+            crate::git::Cause::Lock(lock) => RunError::from(*lock),
+            _ => RunError::Git(git),
+        }
+    }
+}
+
+/// A lock wait the token stopped is the run's cancellation; any other lock
+/// the run could not take is a worktree failure, which names its holder.
+impl From<crate::lock::LockError> for RunError {
+    fn from(lock: crate::lock::LockError) -> Self {
+        match lock {
+            crate::lock::LockError::Cancelled { .. } => RunError::Cancelled,
+            lock => RunError::Worktree(crate::worktree::WorktreeError::Lock(lock)),
         }
     }
 }
@@ -284,6 +299,43 @@ impl From<crate::worktree::WorktreeError> for RunError {
             (false, crate::worktree::WorktreeError::NoRoom { .. }) => RunError::NoRoom(worktree),
             (false, _) => RunError::Worktree(worktree),
         }
+    }
+}
+
+/// A scope check is cancelled when the git or the checkout it read was
+/// stopped; any other failure of the check stays a scope failure.
+impl From<ScopeCheckError> for RunError {
+    fn from(error: ScopeCheckError) -> Self {
+        match error {
+            ScopeCheckError::Git(git) => RunError::from(git),
+            error if error.cancelled() => RunError::Cancelled,
+            error => RunError::ScopeCheck(error),
+        }
+    }
+}
+
+/// A task cycle is cancelled when a git or a checkout it asked was stopped,
+/// whichever variant carries that error; any other failure stays the task's.
+impl From<TaskCycleError> for RunError {
+    fn from(error: TaskCycleError) -> Self {
+        match error {
+            TaskCycleError::Git(git) => RunError::from(git),
+            error if cancelled_within(&error) => RunError::Cancelled,
+            error => RunError::TaskCycle(error),
+        }
+    }
+}
+
+/// Whether the token stopped a git or a checkout that a task cycle's error
+/// carries.
+fn cancelled_within(error: &TaskCycleError) -> bool {
+    match error {
+        TaskCycleError::ScopeCheck(scope) => scope.cancelled(),
+        TaskCycleError::ScopeExpansion { source, .. } => source.cancelled(),
+        TaskCycleError::Carry { source, .. }
+        | TaskCycleError::Spec { source, .. }
+        | TaskCycleError::TreeContent(source) => source.cancelled(),
+        _ => false,
     }
 }
 

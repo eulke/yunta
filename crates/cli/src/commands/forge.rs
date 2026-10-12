@@ -120,18 +120,20 @@ fn opens_a_pull_request(workflow: &Workflow, config: &ConfigLayer) -> bool {
 /// What `doctor` finds of the forge the config declares: whether it
 /// answers and its token can push, and whether this checkout's remote
 /// is the repository it names. Nothing for a config that declares none.
-pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Vec<Check> {
+/// A remote lookup the token stopped is the command's cancellation, not a
+/// finding about the remote.
+pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Result<Vec<Check>, CliError> {
     let config = &ctx.project.config;
     let Some(github) = config
         .forge
         .as_ref()
         .and_then(|forge| forge.github.as_ref())
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let named = format!("github {}", github.repo);
     let Some(forge) = forge_for(config, &yunta_core::ProcessSecrets) else {
-        return vec![unset_token(ctx, &named, &github.token_env)];
+        return Ok(vec![unset_token(ctx, &named, &github.token_env)]);
     };
     let mut checks = vec![match forge.probe().await {
         Ok(yunta_core::port::ForgeProbe {
@@ -145,17 +147,27 @@ pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Vec<Check> {
     }];
     let remote = github.remote();
     match yunta_engine::git::remote_url(&ctx.cwd, remote, ctx.supervision()).await {
-        Some(url) if url.contains(&github.repo.to_string()) => {}
-        Some(url) => checks.push(check(
+        Ok(Some(url)) if url.contains(&github.repo.to_string()) => {}
+        Ok(Some(url)) => checks.push(check(
             Found::Problem,
             format!("remote `{remote}` is {url}, not {}", github.repo),
         )),
-        None => checks.push(check(
+        Ok(None) => checks.push(check(
             Found::Problem,
             format!("no remote `{remote}` to push a run's branch to"),
         )),
+        Err(stopped) if stopped.cancelled() => {
+            return Err(yunta_engine::RunError::from(stopped).into());
+        }
+        Err(unread) => checks.push(check(
+            Found::Problem,
+            format!(
+                "the remote `{remote}` could not be read: {}",
+                unread.detail()
+            ),
+        )),
     }
-    checks
+    Ok(checks)
 }
 
 #[cfg(test)]

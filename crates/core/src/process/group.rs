@@ -211,15 +211,21 @@ fn inspect(pgid: Pid) -> io::Result<Vec<Member>> {
         let info = match pidinfo::<BSDInfo>(pid as i32, 0) {
             Ok(info) => info,
             Err(error) => {
+                // libproc reads the errno of the failed `proc_pidinfo` into
+                // its message and leaves it set. It is read here before any
+                // other call can replace it.
+                let answer = errno::errno();
                 let process = Pid::try_from(pid).ok();
                 if process.is_some_and(|pid| liveness(pid) == Liveness::Dead) {
                     continue;
                 }
                 // libproc can list a process immediately before it becomes
-                // a zombie and then fail `proc_pidinfo` with ESRCH. It no
-                // longer executes; keep that fact in the snapshot so the
-                // next observation still has to confirm stable membership.
-                if error.contains("No such process") {
+                // a zombie, and then `proc_pidinfo` answers ESRCH. A zombie
+                // still answers `kill`, so the errno of `proc_pidinfo` is
+                // what says it no longer executes. Keep that fact in the
+                // snapshot so the next observation still has to confirm
+                // stable membership.
+                if answer == errno::Errno(libc::ESRCH) {
                     members.push(Member {
                         pid: pid as i32,
                         state: State::Terminated,
@@ -436,5 +442,15 @@ mod tests {
             "the child remains waitable"
         );
         child.wait().unwrap();
+    }
+
+    /// A reaped pid reads as dead through errno. The macOS inspection takes the
+    /// same answer instead of matching libproc's error text.
+    #[test]
+    fn a_reaped_pid_reads_as_dead_by_errno() {
+        let mut child = Command::new("true").spawn().unwrap();
+        let pid = Pid::try_from(child.id()).unwrap();
+        child.wait().unwrap();
+        assert_eq!(liveness(pid), Liveness::Dead);
     }
 }

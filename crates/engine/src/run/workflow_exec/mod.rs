@@ -275,6 +275,9 @@ pub(super) async fn execute_workflow(
     .await
     {
         Ok(frozen) => frozen,
+        // A freeze the token cut ends the node the way a birth cut does
+        // below: a stop is not a failed child.
+        Err(e) if e.cancelled() => return crate::run::node_exec::cancelled_end(ctx, node).await,
         Err(e) => {
             return fail(
                 ctx,

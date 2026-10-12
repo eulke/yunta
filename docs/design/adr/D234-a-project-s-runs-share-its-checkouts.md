@@ -66,6 +66,8 @@ path again, never from sharing or copying what a path built.
 7. **The pool keeps what it uses.** `gc` keeps as many free checkouts as were busy
    at once in the last 30 days, the most recently used, and takes the rest away.
 
+Nota 2026-10-11. El lock de un proceso muerto cuyos agentes siguen en marcha no se toma de vuelta ni se borra: `slot-N.lock` queda como está hasta que ningún grupo de agentes registrado siga vivo. `gc` quita los checkouts bajo el lock de mutación de git, el mismo que toma el pool para agregar un checkout o borrar una rama.
+
 ## Rationale
 
 The same checkout used again is a developer's checkout across branches: git

@@ -361,13 +361,12 @@ async fn already_held(
     let mut found = Vec::new();
     for (index, one) in spec.specs.iter().enumerate().filter(|(_, one)| asked(one)) {
         for file in &one.files {
-            let at = format!("{}:{}", base.as_str(), file.in_repo());
-            let held = crate::git::success(checkout, &["cat-file", "-e", at.as_str()], supervision)
+            let path = file.in_repo();
+            let args = ["ls-tree", "-z", "--name-only", base.as_str(), "--", &path];
+            let listed = crate::git::read(checkout, &args, supervision)
                 .await
-                .map_err(|failed| RunToolError::Handover {
-                    detail: failed.detail(),
-                })?;
-            if held {
+                .map_err(RunToolError::handover_git)?;
+            if !listed.is_empty() {
                 found.push(Diagnostic::new(
                     Subject::Spec(Named::new(one.task.clone(), index)),
                     Problem::rule(

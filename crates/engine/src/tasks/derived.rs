@@ -126,7 +126,7 @@ async fn calling(
     let mut calling = Vec::new();
     for file in files {
         let blob = format!("{}:{file}", at.as_str());
-        let source = crate::git::output(tree, &["show", &blob], supervision).await?;
+        let source = crate::git::read(tree, &["show", &blob], supervision).await?;
         if super::code_words::names_in_code(&source, kind, name) {
             calling.push(file);
         }

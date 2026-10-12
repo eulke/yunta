@@ -45,6 +45,8 @@ which D234 explains is wrong.
    goes back to it; only a checkout a run made before its project kept checkouts is
    removed.
 
+Nota 2026-10-11. Los agentes de un engine muerto mantienen reservado el checkout del run: mientras alguno siga vivo, el lock del checkout no cambia y el checkout no se entrega a otra unidad ni a otro run.
+
 ## Rationale
 
 The run's own checkout is the one every workflow builds in last — lint and tests

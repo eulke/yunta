@@ -33,11 +33,6 @@ use yunta_core::events::RunEvent;
 
 pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let Reclaimed {
-        removed,
-        given_back,
-        idle,
-    } = reclaim(&ctx, dry_run)?;
     let limits = ctx
         .project
         .config
@@ -50,6 +45,11 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         limits,
         std::sync::Arc::new(ctx.clock),
     );
+    let Reclaimed {
+        removed,
+        given_back,
+        idle,
+    } = reclaim(&ctx, &pool, dry_run).await?;
     for run_id in &removed {
         forget_units(&ctx, &pool, run_id).await;
     }
@@ -97,7 +97,7 @@ async fn give_back(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: &Ru
 /// The project's checkouts stay, with no branch, for the runs to come.
 async fn forget_units(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: &RunId) {
     let supervision = ctx.supervision();
-    if let Err(e) = yunta_engine::git::output(&ctx.cwd, &["worktree", "prune"], supervision).await {
+    if let Err(e) = yunta_engine::prune_worktrees(&ctx.cwd, supervision).await {
         warn(format!("run {}: {e}", run_id.handle()));
         return;
     }
@@ -193,7 +193,11 @@ async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf]) {
 /// its rows on a later one — and answers the runs whose files went, with
 /// the checkouts of the project's pool to give back: a collected run's,
 /// and that of a parked run nobody came back to within retention.
-fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
+async fn reclaim(
+    ctx: &Context,
+    pool: &yunta_engine::CheckoutPool,
+    dry_run: bool,
+) -> Result<Reclaimed, CliError> {
     let Some(retention_days) = ctx
         .project
         .config
@@ -235,7 +239,7 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
                 )
             });
         if !is_terminal {
-            if let Some(places) = old_layouts(&ctx.project, &run_id, &state) {
+            if let Some(places) = old_layouts(ctx, pool, &run_id, &state).await {
                 collected.idle.push((run_id.clone(), places));
             }
         }
@@ -244,7 +248,7 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
             continue;
         }
         if !is_terminal {
-            if let Some(tree) = parked_checkout(&state) {
+            if let Some(tree) = parked_checkout(ctx, pool, &state).await {
                 collected.given_back.push((run_id.clone(), tree));
             }
             continue;
@@ -258,10 +262,12 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
             Some(run_dir) => {
                 let bound = state.run.checkout();
                 let tree = worktree_of(&ctx.project, &run_dir, &run_id, bound);
-                if let Some(tree) = tree.as_ref().filter(|tree| in_the_pool(tree)) {
-                    collected.given_back.push((run_id.clone(), tree.clone()));
+                if let Some(tree) = &tree {
+                    if pool_owns(pool, ctx, tree).await == Some(true) {
+                        collected.given_back.push((run_id.clone(), tree.clone()));
+                    }
                 }
-                if remove_run(ctx, &run_dir, &run_id, bound, dry_run) {
+                if remove_run(ctx, pool, &run_dir, &run_id, bound, dry_run).await {
                     reclaimed += 1;
                     if !dry_run {
                         collected.removed.push(run_id.clone());
@@ -306,12 +312,13 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
 /// Where a run nothing drives kept checkouts before the project's pool:
 /// its units' directory under its own, and its own tree when the pool
 /// does not keep it. `None` for a run an engine drives now, or may.
-fn old_layouts(
-    project: &Project,
+async fn old_layouts(
+    ctx: &Context,
+    pool: &yunta_engine::CheckoutPool,
     run_id: &RunId,
     state: &yunta_engine::RunState,
 ) -> Option<Vec<PathBuf>> {
-    let run_dir = project.run_dir(run_id.as_str())?;
+    let run_dir = ctx.project.run_dir(run_id.as_str())?;
     let liveness = yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe);
     if !matches!(
         liveness,
@@ -321,28 +328,37 @@ fn old_layouts(
     }
     let mut places = vec![yunta_engine::run_dir::unit_worktrees(&run_dir)];
     let bound = state.run.checkout();
-    places.extend(worktree_of(project, &run_dir, run_id, bound).filter(|tree| !in_the_pool(tree)));
+    if let Some(tree) = worktree_of(&ctx.project, &run_dir, run_id, bound) {
+        if pool_owns(pool, ctx, &tree).await == Some(false) {
+            places.push(tree);
+        }
+    }
     Some(places)
 }
 
-/// Whether `tree` is a checkout of a project's pool — `pool/<project>/slot-N`
-/// under whichever worktrees root the run froze — which a run gives back
-/// rather than takes away.
-fn in_the_pool(tree: &Path) -> bool {
-    let named = |path: Option<&Path>, what: &dyn Fn(&str) -> bool| {
-        path.and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-            .is_some_and(what)
-    };
-    named(Some(tree), &|name| name.starts_with("slot-"))
-        && named(tree.parent().and_then(Path::parent), &|name| name == "pool")
+/// Whether `tree` is a checkout of the project's pool, which a run gives
+/// back rather than takes away. `None` when the pool cannot say: the
+/// checkout is then left where it is, and the reason is said.
+async fn pool_owns(pool: &yunta_engine::CheckoutPool, ctx: &Context, tree: &Path) -> Option<bool> {
+    match pool.owns(tree, ctx.supervision()).await {
+        Ok(owned) => Some(owned),
+        Err(e) => {
+            let shown = crate::render::paths::shown(tree, &ctx.cwd, ctx.env.home.as_deref());
+            warn(format!("left {shown} alone: {e}"));
+            None
+        }
+    }
 }
 
 /// The checkout of the project's pool a parked run works in, when nobody
 /// would lose anything if it went back: no session the run left open is
 /// waiting to be picked up there. Its work stays on its branch, and a wake
 /// takes a checkout again.
-fn parked_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
+async fn parked_checkout(
+    ctx: &Context,
+    pool: &yunta_engine::CheckoutPool,
+    state: &yunta_engine::RunState,
+) -> Option<PathBuf> {
     let tree = state.run.checkout()?;
     let continued = state.nodes.iter().any(|(_, record)| {
         matches!(
@@ -350,7 +366,10 @@ fn parked_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
             Some(yunta_core::events::OrphanedSession::Open(_))
         )
     });
-    (!continued && in_the_pool(tree)).then(|| tree.to_path_buf())
+    if continued {
+        return None;
+    }
+    (pool_owns(pool, ctx, tree).await == Some(true)).then(|| tree.to_path_buf())
 }
 
 /// Removes a terminal run's on-disk footprint — its `run.dir` and, for a
@@ -360,35 +379,51 @@ fn parked_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
 /// is never counted as reclaimed while some of its disk survives. Under
 /// `dry_run` nothing is removed and every present directory counts as if
 /// it had been.
-fn remove_run(
+async fn remove_run(
     ctx: &Context,
+    pool: &yunta_engine::CheckoutPool,
     run_dir: &Path,
     run_id: &RunId,
     bound: Option<&Path>,
     dry_run: bool,
 ) -> bool {
-    let worktree = worktree_of(&ctx.project, run_dir, run_id, bound);
     let shown = |dir: &Path| crate::render::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
     let mut removed_any = false;
     let mut all_removed = true;
 
-    // A checkout of the project's pool is given back, never taken away.
-    let worktree = worktree.filter(|tree| !in_the_pool(tree));
-    for dir in [Some(run_dir.to_path_buf()), worktree]
-        .into_iter()
-        .flatten()
+    // The worktree goes through git, which unregisters it as well. A
+    // checkout of the project's pool is given back, never taken away.
+    if let Some(tree) =
+        worktree_of(&ctx.project, run_dir, run_id, bound).filter(|tree| tree.exists())
     {
-        if !dir.exists() {
-            continue;
+        match pool_owns(pool, ctx, &tree).await {
+            Some(true) => {}
+            None => all_removed = false,
+            Some(false) if dry_run => {
+                println!("would remove {}", shown(&tree));
+                removed_any = true;
+            }
+            Some(false) => match yunta_engine::remove_checkout(&tree, ctx.supervision()).await {
+                Ok(()) => {
+                    println!("removed {}", shown(&tree));
+                    removed_any = true;
+                }
+                Err(e) => {
+                    warn(format!("failed to remove {}: {e}", shown(&tree)));
+                    all_removed = false;
+                }
+            },
         }
+    }
+    if run_dir.exists() {
         if dry_run {
-            println!("would remove {}", shown(&dir));
+            println!("would remove {}", shown(run_dir));
             removed_any = true;
-        } else if let Err(e) = std::fs::remove_dir_all(&dir) {
-            warn(format!("failed to remove {}: {e}", shown(&dir)));
+        } else if let Err(e) = std::fs::remove_dir_all(run_dir) {
+            warn(format!("failed to remove {}: {e}", shown(run_dir)));
             all_removed = false;
         } else {
-            println!("removed {}", shown(&dir));
+            println!("removed {}", shown(run_dir));
             removed_any = true;
         }
     }

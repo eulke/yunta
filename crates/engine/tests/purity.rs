@@ -51,21 +51,13 @@ fn sources(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) {
 /// whole point — an exception nobody can take without saying why.
 const JUSTIFIED: &str = "// blocking:";
 
-/// Every line of engine source outside `exempt`, as `(file, line no, line)`.
-fn lines_outside(exempt: &[&str]) -> Vec<(String, usize, String)> {
+/// Every Rust file of engine source, as `(label, production text)`, the
+/// label being the path under `src`.
+fn engine_files() -> Vec<(String, String)> {
     let root = engine_src();
     let mut files = Vec::new();
     sources(&root, &root, &mut files);
     files
-        .into_iter()
-        .filter(|(path, _)| !exempt.iter().any(|allowed| path.starts_with(allowed)))
-        .flat_map(|(path, text)| {
-            text.lines()
-                .enumerate()
-                .map(|(index, line)| (path.clone(), index + 1, line.to_string()))
-                .collect::<Vec<_>>()
-        })
-        .collect()
 }
 
 /// `text` with every `#[cfg(test)]` module blanked out: what a test
@@ -103,39 +95,65 @@ const SHELL: [&str; 3] = ["process.rs", "process/", "process_registry.rs"];
 /// is born. Blocking there blocks nothing but the caller that asked.
 const NO_RUNTIME: [&str; 3] = ["catalog.rs", "check/", "pack_audit.rs"];
 
+/// The spelling of a git spawn through the door. The governed command takes
+/// a working directory after the program name, so the needle stops before
+/// the closing parenthesis.
+const GIT_SPAWN: &str = "GovernedCommand::new(\"git\"";
+
+/// Sites of `needle` in one file, outside a justified exception. `label` is
+/// the file's path under `src`; `text` is its production text.
+fn sites_in(needle: &str, label: &str, text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    // A marker covers the first line of code under it, however many
+    // lines the justification itself takes.
+    let mut justified = std::collections::HashSet::new();
+    let mut pending = false;
+    for (index, line) in lines.iter().enumerate() {
+        if line.contains(JUSTIFIED) {
+            pending = true;
+        } else if !line.trim_start().starts_with("//") {
+            if pending {
+                justified.insert(index);
+            }
+            pending = false;
+        }
+    }
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(index, line)| {
+            !line.trim_start().starts_with("//")
+                && line.contains(needle)
+                && !justified.contains(index)
+        })
+        .map(|(index, line)| format!("{label}:{}: {}", index + 1, line.trim()))
+        .collect()
+}
+
 /// Sites of `needle` outside the shell and outside a justified
 /// exception, rendered for a failure message.
 fn offenders(needle: &str) -> Vec<String> {
     offenders_outside(needle, &SHELL)
 }
 
-/// Sites of `needle` outside `exempt` and outside a justified
-/// exception. The clock has no exemption at all: even the shell tells
-/// the time by what it is handed.
+/// Sites of `needle` in every engine file outside `exempt`, outside a
+/// justified exception. The clock has no exemption at all: even the shell
+/// tells the time by what it is handed.
 fn offenders_outside(needle: &str, exempt: &[&str]) -> Vec<String> {
-    let lines = lines_outside(exempt);
-    // A marker covers the first line of code under it, however many
-    // lines the justification itself takes.
-    let mut justified: std::collections::HashSet<(String, usize)> =
-        std::collections::HashSet::new();
-    let mut pending: Option<String> = None;
-    for (path, number, line) in &lines {
-        if line.contains(JUSTIFIED) {
-            pending = Some(path.clone());
-        } else if !line.trim_start().starts_with("//") {
-            if pending.as_deref() == Some(path.as_str()) {
-                justified.insert((path.clone(), *number));
-            }
-            pending = None;
-        }
-    }
-    lines
+    engine_files()
         .iter()
-        .filter(|(_, _, line)| !line.trim_start().starts_with("//"))
-        .filter(|(_, _, line)| line.contains(needle))
-        .filter(|(path, number, _)| !justified.contains(&(path.clone(), *number)))
-        .map(|(path, number, line)| format!("{path}:{number}: {}", line.trim()))
+        .filter(|(label, _)| !exempt.iter().any(|allowed| label.starts_with(allowed)))
+        .flat_map(|(label, text)| sites_in(needle, label, text))
         .collect()
+}
+
+/// Git spawns in one engine file. The door is the one place a spawn is
+/// written, so the files under `git/` have none.
+fn offenders_in(label: &str, text: &str) -> Vec<String> {
+    if label.starts_with("git/") {
+        return Vec::new();
+    }
+    sites_in(GIT_SPAWN, label, text)
 }
 
 /// The clock is injected. A module that reads the process clock derives
@@ -188,17 +206,35 @@ fn no_engine_module_blocks_the_executor_on_disk() {
     );
 }
 
-/// Every git the engine runs is a subprocess the caller owns: born in
-/// its own process group, registered, killed with its whole tree when
-/// the token fires. `git.rs` is the one door, so a `Command::new("git")`
-/// anywhere else is a git nobody governs.
+/// Every git the engine runs is a subprocess the caller owns: born in its
+/// own process group, registered, and killed with its whole tree when the
+/// token fires. `git/` is the one door, so a governed spawn that names `git`
+/// anywhere else skips the door's program lookup.
 #[test]
 fn no_engine_module_spawns_git_outside_the_shell() {
-    let found = offenders_outside("Command::new(\"git\")", &["git.rs"]);
+    let found: Vec<String> = engine_files()
+        .iter()
+        .flat_map(|(label, text)| offenders_in(label, text))
+        .collect();
     assert!(
         found.is_empty(),
-        "git goes through `git::{{output, success, output_bytes}}`, which spawn it \
-         governed:\n  {}",
+        "git goes through the `git` module, which spawns it governed:\n  {}",
         found.join("\n  ")
+    );
+}
+
+#[test]
+fn the_git_spawn_needle_sees_a_governed_spawn() {
+    // Written with escaped quotes, so this source does not contain the
+    // spelling it searches for.
+    let planted = "let git = GovernedCommand::new(\"git\", cwd);";
+    assert_eq!(
+        offenders_in("run/bash_exec.rs", planted).len(),
+        1,
+        "the needle misses `{planted}`"
+    );
+    assert!(
+        offenders_in("git/mod.rs", planted).is_empty(),
+        "files under `git/` are the door and are exempt"
     );
 }

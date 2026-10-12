@@ -15,9 +15,14 @@ pub const GIT_PID: &str = "YUNTA_STUB_GIT_PID";
 /// A file whose existence arms the hold — for a test that wants the
 /// second time a run asks git the same question and not the first.
 pub const GIT_BLOCK_WHEN: &str = "YUNTA_STUB_GIT_BLOCK_WHEN";
-const GIT_REAL: &str = "YUNTA_STUB_GIT_REAL";
+/// Where the real git lives, set by [`git`] for the script to run it.
+pub const GIT_REAL: &str = "YUNTA_STUB_GIT_REAL";
 /// A file every invocation of the stub is appended to, one line each.
 pub const GIT_LOG: &str = "YUNTA_STUB_GIT_LOG";
+/// A path the stub checks as it logs a `worktree remove` or `worktree
+/// prune` to [`GIT_LOG`]: the line ends in `locked` while the path exists,
+/// and in `free` once it does not.
+pub const GIT_LOCK_PROBE: &str = "YUNTA_STUB_GIT_LOCK_PROBE";
 
 /// Writes the `git` stub into `dir/bin` and answers with the variables
 /// a run must carry for it to be the `git` its subprocesses find:

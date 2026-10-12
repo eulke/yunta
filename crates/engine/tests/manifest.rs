@@ -224,7 +224,7 @@ async fn a_non_git_directory_is_a_typed_error_not_a_panic() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, ManifestError::Git { .. }));
+    assert!(matches!(err, ManifestError::Git(_)));
 }
 
 #[tokio::test]

@@ -6,7 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{checkouts, common_git_dir, is_clean, lock_worktree_mutations, run_git, WorktreeError};
+use super::{checkouts, WorktreeError};
+use crate::git;
 use crate::process::Supervision;
 
 /// What became of one checkout of the earlier layouts.
@@ -28,7 +29,7 @@ pub async fn remove_old_checkouts(
     let Ok(under) = tokio::fs::canonicalize(under).await else {
         return Ok(Vec::new());
     };
-    let listing = run_git(repo, &["worktree", "list", "--porcelain"], supervision).await?;
+    let listing = git::read(repo, &["worktree", "list", "--porcelain"], supervision).await?;
     let mut done = Vec::new();
     // The first checkout git lists is the repository's own, never a run's.
     for listed in checkouts(&listing).into_iter().skip(1) {
@@ -38,14 +39,19 @@ pub async fn remove_old_checkouts(
         if !path.starts_with(&under) || listed.prunable {
             continue;
         }
-        if !is_clean(&path, supervision).await? {
+        let common_dir = git::common_dir(repo, supervision).await?;
+        let held = git::mutation_lock(&common_dir, supervision)
+            .await
+            .map_err(WorktreeError::Lock)?;
+        // Judged under the lock the removal takes: what is uncommitted
+        // then is what the removal would lose.
+        if !git::tree_state(&path, &[], supervision).await?.clean {
             done.push(OldCheckout::Kept(path));
             continue;
         }
-        let common_dir = common_git_dir(repo, supervision).await?;
-        let _mutation_lock = lock_worktree_mutations(&common_dir, supervision.clock).await?;
         let shown = path.display().to_string();
-        run_git(
+        git::change_held(
+            &held,
             repo,
             &["worktree", "remove", "--force", &shown],
             supervision,

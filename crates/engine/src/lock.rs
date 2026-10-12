@@ -5,7 +5,9 @@
 //! stealers racing both go through `create_new` again, and exactly one
 //! wins. "Gone" is the probe's answer, and a holder whose state the
 //! probe cannot tell counts as present: a run must never lose the
-//! exclusivity it still holds without a sound.
+//! exclusivity it still holds without a sound. A gone holder whose work
+//! still runs is kept as well: the caller's `keep` is asked before the
+//! file is touched.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -13,6 +15,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use yunta_core::durable::{self, Durability};
 use yunta_core::process::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
@@ -72,11 +75,11 @@ pub enum Contention {
 /// How the lock was taken.
 #[derive(Debug)]
 pub enum Acquired {
-    Fresh,
-    /// The previous holder was gone; its record, for the report.
-    Stolen {
-        dead: LockOwner,
-    },
+    /// The lock was free; the record this process wrote is its holder.
+    Fresh(LockOwner),
+    /// The previous holder was gone: `owner` is the record this process
+    /// wrote, and `dead` the record it replaced, for the report.
+    Stolen { owner: LockOwner, dead: LockOwner },
 }
 
 #[derive(Debug, Error)]
@@ -108,6 +111,19 @@ pub enum LockError {
         #[source]
         source: std::io::Error,
     },
+    /// A dead holder whose agents still work: its lock is neither taken
+    /// nor removed.
+    #[error(
+        "`{lock_path}` is kept: its holder pid {} is gone, but its agents still work",
+        owner.pid
+    )]
+    Kept {
+        lock_path: PathBuf,
+        owner: LockOwner,
+    },
+    /// The cancellation token stopped the wait.
+    #[error("the wait for `{lock_path}` was cancelled")]
+    Cancelled { lock_path: PathBuf },
 }
 
 /// Hands the lock at `lock_path` to `pid`, which takes over as its
@@ -153,68 +169,53 @@ pub fn hand_over(
 /// Takes the lock at `lock_path` for this process, recording it as the
 /// holder with the clock's time. A gone holder (dead, or a live process
 /// that started after the lock was taken and so merely reuses the pid)
-/// is stolen; a present one is refused or waited on per `contention`.
+/// is stolen, unless `keep` says the work it left is still going on. A
+/// present one is refused or waited on per `contention`; a wait ends when
+/// `cancel` fires.
 pub async fn acquire(
     lock_path: &Path,
     contention: Contention,
     probe: &dyn OwnerProbe,
     clock: &dyn Clock,
+    cancel: &CancellationToken,
+    keep: &(dyn Fn(&LockOwner) -> bool + Sync),
 ) -> Result<Acquired, LockError> {
-    let io = |action: &'static str, source| LockError::Io {
-        action,
-        lock_path: lock_path.to_path_buf(),
-        source,
-    };
     let deadline = match contention {
         Contention::Refuse => None,
         Contention::Wait { patience, .. } => Some(Instant::now() + patience),
     };
     let mut stolen_from = None;
     loop {
-        let pid = Pid::current();
-        let record = LockOwner {
-            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
-            pid,
-            started_at: taken_at(pid, probe, clock),
-        };
-        // The record is whole before the lock's name exists, so no reader
-        // meets an empty lock.
-        let json = yunta_core::persisted::PersistedDoc::of(record)
-            .write()
-            .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
-        // blocking: taking a lock is `create_new` — the one operation
-        // whose atomicity is the whole mechanism, and which `tokio::fs`
-        // would run on a pool thread without making any more atomic.
-        if durable::create_new(lock_path, &json, Durability::Atomic)
-            .map_err(|source| io("create", source))?
-        {
+        let record = this_process(probe, clock);
+        if create_record(lock_path, &record)? {
             return Ok(match stolen_from {
-                Some(dead) => Acquired::Stolen { dead },
-                None => Acquired::Fresh,
+                Some(dead) => Acquired::Stolen {
+                    owner: record,
+                    dead,
+                },
+                None => Acquired::Fresh(record),
             });
         }
         // Another holder created the lock first: the present-or-stale check takes over.
-        let owner: Option<LockOwner> = tokio::fs::read(lock_path)
-            .await
-            .ok()
-            .and_then(|bytes| yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes).ok())
-            .map(|owner| owner.doc);
+        let owner = read_holder(lock_path).await;
         let liveness = owner.as_ref().map(|owner| holder_state(owner, probe));
         if let (Some(owner), Some(Liveness::Dead)) = (&owner, liveness) {
+            if keep(owner) {
+                return Err(LockError::Kept {
+                    lock_path: lock_path.to_path_buf(),
+                    owner: owner.clone(),
+                });
+            }
             // Remove, then retry: the atomic `create_new` above
             // decides which of two concurrent stealers wins.
-            match tokio::fs::remove_file(lock_path).await {
-                Ok(()) => {}
-                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
-                Err(source) => return Err(io("remove the stale", source)),
-            }
+            remove_stale(lock_path).await?;
             stolen_from = Some(owner.clone());
             continue;
         }
         // Alive, unknown, or unreadable: present.
         match (deadline, contention) {
             (Some(deadline), Contention::Wait { poll, .. }) if Instant::now() < deadline => {
-                tokio::time::sleep(poll).await;
+                pause(lock_path, poll, cancel).await?;
             }
             (Some(_), _) => {
                 return Err(LockError::Timeout {
@@ -222,25 +223,120 @@ pub async fn acquire(
                     owner,
                 });
             }
-            (None, _) => {
-                return Err(match (owner, liveness) {
-                    (Some(owner), Some(liveness)) => LockError::Held {
-                        lock_path: lock_path.to_path_buf(),
-                        owner,
-                        liveness,
-                    },
-                    _ => LockError::Unreadable {
-                        lock_path: lock_path.to_path_buf(),
-                    },
-                });
-            }
+            (None, _) => return Err(refusal(lock_path, owner, liveness)),
         }
     }
 }
 
-/// Dead when the probe says so, or when the live process with that pid
-/// started after the lock was taken: a newcomer that got the holder's
-/// pid, not the holder.
+/// The record this process writes as a lock's holder: its pid, and when
+/// it started.
+fn this_process(probe: &dyn OwnerProbe, clock: &dyn Clock) -> LockOwner {
+    let pid = Pid::current();
+    LockOwner {
+        schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
+        pid,
+        started_at: taken_at(pid, probe, clock),
+    }
+}
+
+/// Creates the lock at `lock_path` holding `record`. The record is whole
+/// before the lock's name exists, so no reader meets an empty lock. `false`
+/// means another holder created the lock first.
+fn create_record(lock_path: &Path, record: &LockOwner) -> Result<bool, LockError> {
+    let json = yunta_core::persisted::PersistedDoc::of(record.clone())
+        .write()
+        .map_err(|e| io_error(lock_path, "encode the holder of", std::io::Error::other(e)))?;
+    // blocking: taking a lock is `create_new` — the one operation
+    // whose atomicity is the whole mechanism, and which `tokio::fs`
+    // would run on a pool thread without making any more atomic.
+    durable::create_new(lock_path, &json, Durability::Atomic)
+        .map_err(|source| io_error(lock_path, "create", source))
+}
+
+/// The record a lock file names, when the file reads as one.
+async fn read_holder(lock_path: &Path) -> Option<LockOwner> {
+    tokio::fs::read(lock_path)
+        .await
+        .ok()
+        .and_then(|bytes| yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes).ok())
+        .map(|owner| owner.doc)
+}
+
+/// Removes the file of a gone holder, so the next `create_new` takes the lock.
+async fn remove_stale(lock_path: &Path) -> Result<(), LockError> {
+    match tokio::fs::remove_file(lock_path).await {
+        Err(source) if source.kind() != std::io::ErrorKind::NotFound => {
+            Err(io_error(lock_path, "remove the stale", source))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Waits one `poll` for the holder to let go; `cancel` ends the wait at once.
+async fn pause(
+    lock_path: &Path,
+    poll: Duration,
+    cancel: &CancellationToken,
+) -> Result<(), LockError> {
+    tokio::select! {
+        _ = tokio::time::sleep(poll) => Ok(()),
+        _ = cancel.cancelled() => Err(LockError::Cancelled {
+            lock_path: lock_path.to_path_buf(),
+        }),
+    }
+}
+
+/// Why a present lock cannot be taken: the holder it names, when the file
+/// names one that reads.
+fn refusal(lock_path: &Path, owner: Option<LockOwner>, liveness: Option<Liveness>) -> LockError {
+    match (owner, liveness) {
+        (Some(owner), Some(liveness)) => LockError::Held {
+            lock_path: lock_path.to_path_buf(),
+            owner,
+            liveness,
+        },
+        _ => LockError::Unreadable {
+            lock_path: lock_path.to_path_buf(),
+        },
+    }
+}
+
+/// An operation on the lock file at `lock_path` that failed.
+fn io_error(lock_path: &Path, action: &'static str, source: std::io::Error) -> LockError {
+    LockError::Io {
+        action,
+        lock_path: lock_path.to_path_buf(),
+        source,
+    }
+}
+
+/// Removes the lock at `lock_path`, but only while it still names `owner`.
+///
+/// Safe because nobody takes the lock of a live owner: a file that names
+/// `owner` is the lock this process took and still holds, and a file that
+/// names anybody else has moved on, so it is left alone.
+pub fn release(lock_path: &Path, owner: &LockOwner) -> Result<(), LockError> {
+    // blocking: a release is one read and at most one removal, and it runs
+    // from a `Drop`, which has no `await` to give.
+    let bytes = match std::fs::read(lock_path) {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(io_error(lock_path, "remove", source)),
+    };
+    let names_owner = yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes)
+        .is_ok_and(|record| &record.doc == owner);
+    if !names_owner {
+        return Ok(());
+    }
+    // blocking: the same removal as the read above, from the same `Drop`.
+    match std::fs::remove_file(lock_path) {
+        Err(source) if source.kind() != std::io::ErrorKind::NotFound => {
+            Err(io_error(lock_path, "remove", source))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// When the process a lock names started, as the record has to state
 /// it: read from the same process table [`holder_state`] compares it
 /// against.
@@ -256,7 +352,9 @@ fn taken_at(pid: Pid, probe: &dyn OwnerProbe, clock: &dyn Clock) -> DateTime<Utc
 }
 
 /// Whether the process a record names is still the process that wrote
-/// the record.
+/// the record: dead when the probe says so, or when the live process with
+/// that pid started after the lock was taken, a newcomer that got the
+/// holder's pid, not the holder.
 ///
 /// A live pid is not enough: pids are reused, so a process that started
 /// *after* the record was written is a different process wearing the

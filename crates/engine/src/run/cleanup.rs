@@ -110,8 +110,17 @@ pub(super) async fn worktrees(ctx: &RunCtx<'_>) -> Result<(), RunError> {
 async fn let_branch_go(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let branch = crate::worktree::run_branch(ctx.run_id);
     let args = ["branch", "-d", branch.as_str()];
-    let deleted = crate::git::output(ctx.worktree, &args, ctx.root_supervision()).await;
+    let deleted = crate::git::change(
+        ctx.worktree,
+        crate::git::Effect::Metadata,
+        &args,
+        ctx.root_supervision(),
+    )
+    .await;
     if let Err(e) = deleted {
+        if e.cancelled() {
+            return Err(e.into());
+        }
         ctx.engine_finding(
             None,
             "cleanup-failed",

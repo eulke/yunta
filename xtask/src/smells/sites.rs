@@ -193,16 +193,19 @@ fn count_create_run_outside_testkit(root: &Path) -> usize {
     )
 }
 
-/// A git subprocess spawned outside the module that owns git.
+/// A git subprocess spawned outside the git module, which is the one door
+/// to git.
 ///
 /// Every git call needs the same answers — which directory, which
 /// environment, which failure is a diagnostic — and a call written
 /// somewhere else answers them again, usually with one of them missing.
+/// The needle ends before the closing parenthesis, so it counts a spawn
+/// through `std::process::Command` and through `GovernedCommand` alike.
 fn count_git_command_outside_git_rs(root: &Path) -> usize {
     outside(
         root,
-        &[Text("Command::new(\"git\")")],
-        &["crates/engine/src/git.rs", "crates/testkit*/src/repo.rs"],
+        &[Text("Command::new(\"git\"")],
+        &["crates/engine/src/git/", "crates/testkit*/src/repo.rs"],
     )
 }
 
@@ -244,6 +247,10 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             // Blessing a golden is what a person asks of a test run, and
             // reading that request is what the module is for.
             "crates/testkit-core/src/golden.rs",
+            // The engine's shell reads the `PATH` a child inherits, where it
+            // looks a program up at spawn: the same module the engine's own
+            // purity rule names as the one that touches the machine.
+            "crates/engine/src/process.rs",
         ],
     )
 }
@@ -394,6 +401,8 @@ mod tests {
         assert!(Text("} tok").on("        \"{INDENT}{}  {total:>8} tok\\n\","));
         assert!(Text("} tok").on("    \"CPTV: {cptv:.1} tokens/task\""));
         assert!(!Text("} tok").on("    \"tokens: {} in / {} out\""));
+        assert!(Text("Command::new(\"git\"").on("    std::process::Command::new(\"git\")"));
+        assert!(Text("Command::new(\"git\"").on("    GovernedCommand::new(\"git\", cwd)"));
     }
 
     #[test]

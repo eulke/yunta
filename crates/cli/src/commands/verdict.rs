@@ -45,7 +45,8 @@ pub(crate) struct Verdict {
 
 /// What `workflow`, read from `path`, gets here under `config`.
 /// `conflicts` are what the config's own layers refuse, which only a
-/// caller that read the layers one by one knows.
+/// caller that read the layers one by one knows. A stop while the files
+/// the workflow reads are checked is the command's stop, not a verdict.
 pub(crate) async fn verdict(
     ctx: &Context,
     workflow: &Workflow,
@@ -53,7 +54,7 @@ pub(crate) async fn verdict(
     config: &ConfigLayer,
     conflicts: Vec<String>,
     reach: Reach,
-) -> Verdict {
+) -> Result<Verdict, CliError> {
     let mut errors = yunta_engine::check(workflow, config, &super::declared_capabilities);
     let mut warnings: Vec<String> = yunta_engine::check_warnings(workflow, config)
         .iter()
@@ -77,17 +78,18 @@ pub(crate) async fn verdict(
     errors.extend(unprovided);
     warnings.extend(missing_programs.iter().map(ToString::to_string));
     if reach == Reach::Workflow {
-        let files = super::context_files_at_head(ctx, workflow, config.resolved_isolation()).await;
+        let files =
+            super::context_files_at_head(ctx, workflow, config.resolved_isolation()).await?;
         errors.extend(files.errors);
         warnings.extend(files.warnings.iter().map(ToString::to_string));
     }
-    Verdict {
+    Ok(Verdict {
         conflicts,
         errors,
         warnings,
         path: path.to_path_buf(),
         in_file: Vec::new(),
-    }
+    })
 }
 
 /// A workflow reference resolved to its file and loaded, refused if it
@@ -110,10 +112,10 @@ pub(crate) async fn resolve_runnable(
         layer_conflicts(&ctx.cwd)?,
         Reach::RunFront,
     )
-    .await;
+    .await?;
     verdict.warn();
     if !verdict.passes() {
-        return Err(verdict.refusal(ctx).await);
+        return Err(verdict.refusal(ctx).await?);
     }
     Ok((resolved, workflow))
 }
@@ -155,25 +157,33 @@ impl Verdict {
     /// The verdict as a command that reports it says it: the warnings,
     /// then `<subject>: OK` on stdout, or every problem on stderr with
     /// what this project could declare to fix it.
-    pub(crate) async fn report(&self, ctx: &Context, subject: impl Display) -> Outcome {
+    pub(crate) async fn report(
+        &self,
+        ctx: &Context,
+        subject: impl Display,
+    ) -> Result<Outcome, CliError> {
         self.warn();
         if self.passes() {
             println!("{subject}: OK");
-            return Outcome::Success;
+            return Ok(Outcome::Success);
         }
-        note(self.problems(ctx, subject).await);
-        Outcome::Reported
+        note(self.problems(ctx, subject).await?);
+        Ok(Outcome::Reported)
     }
 
-    /// The verdict as a run is refused with it.
-    pub(crate) async fn refusal(&self, ctx: &Context) -> CliError {
-        CliError::msg(self.problems(ctx, "the workflow fails `yunta check`").await)
+    /// The verdict as a run is refused with it. A stop while the project's
+    /// remote is read is the outer `Err`, not a refusal.
+    pub(crate) async fn refusal(&self, ctx: &Context) -> Result<CliError, CliError> {
+        Ok(CliError::msg(
+            self.problems(ctx, "the workflow fails `yunta check`")
+                .await?,
+        ))
     }
 
     /// Every problem under `heading`, each refusal about the workflow
     /// quoted from its file, then what this project could declare for the
     /// ones a declaration fixes.
-    async fn problems(&self, ctx: &Context, heading: impl Display) -> String {
+    async fn problems(&self, ctx: &Context, heading: impl Display) -> Result<String, CliError> {
         let text = tokio::fs::read_to_string(&self.path).await.ok();
         let map = text.as_deref().map(SourceMap::read).unwrap_or_default();
         let mut all: Vec<(String, Option<Location>)> = self
@@ -199,12 +209,12 @@ impl Verdict {
         let shown = self.path.display().to_string();
         let mut said = located(&heading.to_string(), &all, &shown, text.as_deref());
         let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())
-            .await
+            .await?
             .for_errors(&self.errors)
             .await;
         for line in crate::detect::suggestions(&self.errors, &detected) {
             said.push_str(&format!("\n  {line}"));
         }
-        said
+        Ok(said)
     }
 }

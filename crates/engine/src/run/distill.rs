@@ -283,19 +283,22 @@ const DISTILLED_DIR: &str = ".yunta/knowledge/distilled";
 async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     // Best-effort: a git that can't spawn or exits non-zero is a `false`,
     // recorded as a finding — never a hard error that would un-close the
-    // run the log is about to close.
+    // run the log is about to close. A cancelled git is the close being
+    // stopped, which is an error.
     async fn ran(
         worktree: &std::path::Path,
         args: &[&str],
         supervision: crate::process::Supervision<'_>,
-    ) -> bool {
-        crate::git::success(worktree, args, supervision)
-            .await
-            .unwrap_or(false)
+    ) -> Result<bool, RunError> {
+        match crate::git::change(worktree, crate::git::Effect::Checkout, args, supervision).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.cancelled() => Err(error.into()),
+            Err(_) => Ok(false),
+        }
     }
     let supervision = ctx.root_supervision();
 
-    if !ran(ctx.worktree, &["add", DISTILLED_DIR], supervision).await {
+    if !ran(ctx.worktree, &["add", DISTILLED_DIR], supervision).await? {
         return ctx
             .engine_finding(
                 None,
@@ -312,7 +315,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
         ctx.run_id,
     )
     .text();
-    if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await {
+    if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await? {
         return ctx
             .engine_finding(
                 None,
@@ -327,13 +330,8 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     // Push only where an upstream already exists (a `pr` node's own
     // `push -u`); otherwise the commit rides the local branch, which
     // cleanup's `-d` refuses to delete unmerged.
-    let has_upstream = ran(
-        ctx.worktree,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        supervision,
-    )
-    .await;
-    if has_upstream && !ran(ctx.worktree, &["push"], supervision).await {
+    let upstream = has_upstream(ctx.worktree, supervision).await?;
+    if upstream && !ran(ctx.worktree, &["push"], supervision).await? {
         return ctx
             .engine_finding(
                 None,
@@ -346,6 +344,36 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
             .await;
     }
     Ok(())
+}
+
+/// Whether the branch HEAD names has an upstream. A git that cannot answer
+/// means none, as a branch without one does, and the commit stays on the
+/// local branch; a cancelled git is the close being stopped.
+async fn has_upstream(
+    worktree: &std::path::Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<bool, RunError> {
+    match upstream_of_head(worktree, supervision).await {
+        Ok(upstream) => Ok(!upstream.trim().is_empty()),
+        Err(error) if error.cancelled() => Err(error.into()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// The upstream of the ref HEAD names, as `for-each-ref` prints it: empty
+/// when that ref has none. A detached HEAD names no ref, which
+/// `symbolic-ref` answers with an error.
+async fn upstream_of_head(
+    worktree: &std::path::Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<String, crate::git::GitError> {
+    let head = crate::git::read(worktree, &["symbolic-ref", "-q", "HEAD"], supervision).await?;
+    crate::git::read(
+        worktree,
+        &["for-each-ref", "--format=%(upstream)", head.trim()],
+        supervision,
+    )
+    .await
 }
 
 #[cfg(test)]

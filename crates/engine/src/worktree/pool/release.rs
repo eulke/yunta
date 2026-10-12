@@ -5,27 +5,29 @@
 use std::path::{Path, PathBuf};
 
 use super::super::WorktreeError;
-use super::{slot, survey, CheckoutPool};
+use super::{slot, CheckoutPool};
+use crate::git::{self, Effect};
 use crate::lock::Contention;
 use crate::process::Supervision;
+use crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
 
-/// Gives back every checkout the units of `run_id` were kept in, as the
-/// run ends: a clean one is kept for nobody, and the refs whose work is
-/// in `into` — the run's tree as it closes — go. A blocked task's ref
-/// stays, holding what it left, until the run is collected; a checkout
-/// with something uncommitted in it stays its unit's.
+/// Gives back every checkout the units of `run_id` were kept in, as the run
+/// ends: a clean one is kept for nobody, and the refs whose work is in
+/// `into` — the run's tree as it closes — go. A blocked task's ref stays,
+/// holding what it left, until the run is collected; a checkout with
+/// something uncommitted in it stays its unit's.
 ///
-/// What a run made before its project kept checkouts is taken in first:
-/// the checkouts it kept under its own directory are taken away, and its
-/// units' branches become their refs.
+/// What a run made before its project kept checkouts is taken in first: its
+/// units' branches become their refs. The checkouts it kept under its own
+/// directory are not removed here; `gc` takes away the clean ones of a run
+/// nothing drives.
 pub async fn release_unit_checkouts(
     pool: &CheckoutPool,
     into: &Path,
-    run_dir: &Path,
+    _run_dir: &Path,
     run_id: &yunta_core::RunId,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    remove_own_checkouts(into, run_dir, supervision).await?;
     adopt_unit_branches(pool, into, Some(run_id), supervision).await?;
     pool.free_units_of(into, run_id, supervision).await
 }
@@ -50,13 +52,18 @@ pub async fn release_run_checkout(
         return Ok(());
     };
     let branch = super::super::run_branch(run_id);
-    let lets_go = survey::look(&tree, supervision)
-        .await
-        .is_some_and(|look| look.clean && look.standing.branch.as_deref() == Some(branch.as_str()));
+    let status = git::tree_state(&tree, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    let lets_go = status.clean && status.branch.as_deref() == Some(branch.as_str());
     if lets_go {
-        super::mutating(&tree, &["switch", "--detach", "-q"], supervision).await?;
+        git::change(
+            &tree,
+            Effect::Metadata,
+            &["switch", "--detach", "-q"],
+            supervision,
+        )
+        .await?;
     }
-    pool.give_back(lease, supervision).await;
+    pool.give_back(lease, supervision).await?;
     Ok(())
 }
 
@@ -67,14 +74,12 @@ pub async fn still_the_runs(
     tree: &Path,
     run_id: &yunta_core::RunId,
     supervision: Supervision<'_>,
-) -> bool {
-    let Some(look) = survey::look(tree, supervision).await else {
-        return false;
-    };
-    let on = look.standing.branch.as_deref().unwrap_or_default();
-    on == super::super::run_branch(run_id)
+) -> Result<bool, WorktreeError> {
+    let status = git::tree_state(tree, &[], supervision).await?;
+    let on = status.branch.as_deref().unwrap_or_default();
+    Ok(on == super::super::run_branch(run_id)
         || !(on.is_empty() || on.starts_with(&format!("{}/", super::super::RUN_BRANCHES)))
-            && !super::super::is_legacy_unit_branch(on)
+            && !super::super::is_legacy_unit_branch(on))
 }
 
 /// Hands the checkout a run worked in to the run that carries on from it:
@@ -86,7 +91,13 @@ pub async fn hand_over_run_checkout(
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     let branch = super::super::run_branch(successor);
-    super::mutating(tree, &["switch", "-q", "-c", &branch], supervision).await?;
+    git::change(
+        tree,
+        Effect::Metadata,
+        &["switch", "-q", "-c", &branch],
+        supervision,
+    )
+    .await?;
     Ok(())
 }
 
@@ -131,8 +142,20 @@ pub async fn adopt_unit_branches(
             }
         }
         let tip = format!("refs/heads/{branch}");
-        crate::git::output(repo, &["update-ref", unit.name(), &tip], supervision).await?;
-        super::mutating(repo, &["branch", "-D", &branch], supervision).await?;
+        git::change(
+            repo,
+            Effect::Refs,
+            &["update-ref", unit.name(), &tip],
+            supervision,
+        )
+        .await?;
+        git::change(
+            repo,
+            Effect::Metadata,
+            &["branch", "-D", &branch],
+            supervision,
+        )
+        .await?;
         taken.push(branch);
     }
     Ok(taken)
@@ -154,17 +177,36 @@ pub async fn adoptable_unit_branches(
         }
         let free = match &checked_out {
             None => true,
-            Some(path) => {
-                let in_the_pool = slot::number_of(&home, path).await.is_some();
-                let look = survey::look(path, supervision).await;
-                in_the_pool && look.is_some_and(|look| look.clean)
-            }
+            Some(path) => free_pool_checkout(pool, &home, path, supervision).await?,
         };
         if free {
             adoptable.push(branch);
         }
     }
     Ok(adoptable)
+}
+
+/// Whether `path` is a checkout of the pool that no process holds and
+/// nothing in which is uncommitted. The hold is taken for the check and let
+/// go after it.
+async fn free_pool_checkout(
+    pool: &CheckoutPool,
+    home: &Path,
+    path: &Path,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    if !pool.owns(path, supervision).await? {
+        return Ok(false);
+    }
+    let Some((number, path)) = slot::number_of(home, path).await else {
+        return Ok(false);
+    };
+    let held = slot::hold(home, number, Contention::Refuse, None, supervision).await?;
+    let Some(_lease) = held else {
+        return Ok(false);
+    };
+    let status = git::tree_state(&path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    Ok(status.clean)
 }
 
 /// The legacy unit branches — `run`'s, or every run's — each with the
@@ -179,7 +221,7 @@ async fn legacy_branches(
         None => format!("{}/", super::super::LEGACY_UNIT_BRANCHES),
     };
     let names = format!("refs/heads/{prefix}");
-    let listed = crate::git::output(
+    let listed = git::read(
         repo,
         &["for-each-ref", "--format=%(refname:short)", &names],
         supervision,
@@ -189,8 +231,7 @@ async fn legacy_branches(
     if branches.is_empty() {
         return Ok(Vec::new());
     }
-    let listing =
-        crate::git::output(repo, &["worktree", "list", "--porcelain"], supervision).await?;
+    let listing = git::read(repo, &["worktree", "list", "--porcelain"], supervision).await?;
     let mut checked_out = std::collections::HashMap::new();
     for listed in super::super::checkouts(&listing) {
         if let Some(branch) = listed.branch {
@@ -227,40 +268,17 @@ async fn let_go(
     let Some(lease) = held.await? else {
         return Ok(false);
     };
-    if !survey::look(&path, supervision)
-        .await
-        .is_some_and(|look| look.clean)
-    {
+    let status = git::tree_state(&path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    if !status.clean {
         return Ok(false);
     }
-    super::mutating(&path, &["switch", "--detach", "-q"], supervision).await?;
+    git::change(
+        &path,
+        Effect::Metadata,
+        &["switch", "--detach", "-q"],
+        supervision,
+    )
+    .await?;
     lease.keep_for(Some(unit)).await;
     Ok(true)
-}
-
-/// Takes away the checkouts a run made under its own directory before its
-/// project kept checkouts.
-async fn remove_own_checkouts(
-    repo: &Path,
-    run_dir: &Path,
-    supervision: Supervision<'_>,
-) -> Result<(), WorktreeError> {
-    let own = crate::run_dir::unit_worktrees(run_dir);
-    if !tokio::fs::try_exists(&own).await.unwrap_or(false) {
-        return Ok(());
-    }
-    let own = tokio::fs::canonicalize(&own).await.unwrap_or(own);
-    let listing =
-        super::super::run_git(repo, &["worktree", "list", "--porcelain"], supervision).await?;
-    let common_dir = super::super::common_git_dir(repo, supervision).await?;
-    let _mutation_lock =
-        super::super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-    for listed in super::super::checkouts(&listing) {
-        if listed.path.starts_with(&own) {
-            let path = listed.path.display().to_string();
-            super::super::run_git(repo, &["worktree", "remove", "--force", &path], supervision)
-                .await?;
-        }
-    }
-    Ok(())
 }

@@ -48,6 +48,8 @@ use std::sync::Arc;
 use yunta_core::{Clock, CommitSha};
 
 use super::{head_tree, Unit, UnitHome, UnitId, WorktreeError};
+use crate::git::Effect;
+use crate::lock::{self, LockOwner};
 use crate::process::Supervision;
 
 pub use give::clear_work;
@@ -110,6 +112,9 @@ pub struct Lease {
     home: PathBuf,
     /// Its number there.
     number: u32,
+    /// The record this process wrote into the checkout's lock: the lock is
+    /// removed only while it still names this record.
+    owner: LockOwner,
 }
 
 impl Lease {
@@ -123,10 +128,11 @@ impl Lease {
         self.home.join(format!("{SLOT}{}", self.number))
     }
 
-    fn of(home: &Path, number: u32) -> Self {
+    fn of(home: &Path, number: u32, owner: LockOwner) -> Self {
         Lease {
             home: home.to_path_buf(),
             number,
+            owner,
         }
     }
 }
@@ -134,10 +140,10 @@ impl Lease {
 impl Drop for Lease {
     fn drop(&mut self) {
         let lock = self.home.join(format!("{SLOT}{}.lock", self.number));
-        // blocking: a `Drop` has no `await` to give, and removing one
-        // lock file is a single syscall. Doing it here is what makes an
-        // early `?` unable to leak the hold.
-        if let Err(error) = std::fs::remove_file(&lock) {
+        // blocking: a `Drop` has no `await` to give, and releasing one
+        // lock file is a read and at most one removal. Doing it here is
+        // what makes an early `?` unable to leak the hold.
+        if let Err(error) = lock::release(&lock, &self.owner) {
             tracing::debug!(%error, lock = %lock.display(), "a checkout's hold outlived it");
         }
     }
@@ -271,6 +277,34 @@ impl CheckoutPool {
         Ok(self.located(supervision).await?.home.clone())
     }
 
+    /// Whether `path` is a checkout of this pool: a slot of the repository's
+    /// pool under the root it is kept in now, or under the root it was kept in
+    /// before the configuration moved. The directory is named for the
+    /// repository, so it reads the same under either root.
+    pub async fn owns(
+        &self,
+        path: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<bool, WorktreeError> {
+        let located = self.located(supervision).await?;
+        if slot::number_of(&located.home, path).await.is_some() {
+            return Ok(true);
+        }
+        let Some(dir) = path.parent() else {
+            return Ok(false);
+        };
+        let named = pool_home(Path::new(""), &located.common_dir);
+        let kept_in_a_pool = dir.file_name() == named.file_name()
+            && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("pool"));
+        if !kept_in_a_pool {
+            return Ok(false);
+        }
+        let dir = tokio::fs::canonicalize(dir)
+            .await
+            .unwrap_or_else(|_| dir.to_path_buf());
+        Ok(slot::number_of(&dir, path).await.is_some())
+    }
+
     async fn located(&self, supervision: Supervision<'_>) -> Result<&Located, WorktreeError> {
         self.located
             .get_or_try_init(|| async {
@@ -281,7 +315,7 @@ impl CheckoutPool {
                 let common_dir = match recorded {
                     Some(recorded) => recorded,
                     None => {
-                        let asked = super::common_git_dir(&self.repo, supervision).await?;
+                        let asked = crate::git::common_dir(&self.repo, supervision).await?;
                         tokio::fs::canonicalize(&asked).await.unwrap_or(asked)
                     }
                 };
@@ -346,8 +380,14 @@ impl CheckoutPool {
                     "--detach",
                     base.as_str(),
                 ];
-                mutating(&checkout, &detach, supervision).await?;
-                crate::git::output(&checkout, &["clean", "-q", "-ffd"], supervision).await?;
+                crate::git::change(&checkout, Effect::Metadata, &detach, supervision).await?;
+                crate::git::change(
+                    &checkout,
+                    Effect::Checkout,
+                    &["clean", "-q", "-ffd"],
+                    supervision,
+                )
+                .await?;
                 Ok((checkout, lease))
             }
             Taken::Nothing { listed } => {
@@ -383,39 +423,6 @@ async fn settled(path: &Path) -> PathBuf {
     }
 }
 
-/// Runs git `args` in `cwd` with every worktree mutation of its repository
-/// held off. A switch that cuts, moves or lets go of a branch, and a
-/// branch deletion, read every checkout's metadata — which an `add` beside
-/// them may have half written, and git then fails to read — so they take
-/// the lock an `add` takes.
-pub(super) async fn mutating(
-    cwd: &Path,
-    args: &[&str],
-    supervision: Supervision<'_>,
-) -> Result<String, WorktreeError> {
-    let common_dir = match common_dir_of(cwd).await {
-        Some(found) => found,
-        None => super::common_git_dir(cwd, supervision).await?,
-    };
-    let _mutation_lock = super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-    Ok(crate::git::output(cwd, args, supervision).await?)
-}
-
-/// The common git directory of the checkout at `cwd`, read off its `.git`
-/// as git reads it — `None` when that does not answer, and git is asked.
-async fn common_dir_of(cwd: &Path) -> Option<PathBuf> {
-    let dot_git = cwd.join(".git");
-    if tokio::fs::metadata(&dot_git).await.ok()?.is_dir() {
-        return Some(dot_git);
-    }
-    let pointer = tokio::fs::read_to_string(&dot_git).await.ok()?;
-    let admin = cwd.join(pointer.strip_prefix("gitdir:")?.trim());
-    let common = tokio::fs::read_to_string(admin.join("commondir"))
-        .await
-        .ok()?;
-    Some(admin.join(common.trim()))
-}
-
 /// Puts `checkout` at `base` — on `branch`, cut anew there, or on none —
 /// with nothing of whoever worked there before but what git ignores.
 async fn reset(
@@ -430,8 +437,14 @@ async fn reset(
         None => switch.push("--detach"),
     }
     switch.push(base.as_str());
-    mutating(checkout, &switch, supervision).await?;
-    crate::git::output(checkout, &["clean", "-q", "-ffd"], supervision).await?;
+    crate::git::change(checkout, Effect::Metadata, &switch, supervision).await?;
+    crate::git::change(
+        checkout,
+        Effect::Checkout,
+        &["clean", "-q", "-ffd"],
+        supervision,
+    )
+    .await?;
     let request = checkout.join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
     match tokio::fs::remove_file(&request).await {
         Err(source) if source.kind() != std::io::ErrorKind::NotFound => Err(WorktreeError::Io {

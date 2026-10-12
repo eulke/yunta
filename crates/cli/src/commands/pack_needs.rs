@@ -9,11 +9,16 @@ use yunta_core::{ConfigKey, NodeId, PackManifest, Workflow};
 
 use crate::context::Context;
 use crate::detect::Detected;
+use crate::error::CliError;
 
 /// Prints what `manifest`'s workflows, vendored at `pack_dir`, need and
 /// the project lacks; nothing when they need nothing.
-pub(crate) async fn report(ctx: &Context, pack_dir: &Path, manifest: &PackManifest) {
-    let detected = Detected::in_repo(&ctx.cwd, ctx.supervision()).await;
+pub(crate) async fn report(
+    ctx: &Context,
+    pack_dir: &Path,
+    manifest: &PackManifest,
+) -> Result<(), CliError> {
+    let detected = Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
     let mut lines: Vec<String> = Vec::new();
     for declared in &manifest.contents.workflows {
         let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {
@@ -26,12 +31,13 @@ pub(crate) async fn report(ctx: &Context, pack_dir: &Path, manifest: &PackManife
         }
     }
     if lines.is_empty() {
-        return;
+        return Ok(());
     }
     println!("\n{} needs from this project:", manifest.reference());
     for line in lines {
         println!("  {line}");
     }
+    Ok(())
 }
 
 /// One line per key `workflow` needs and `config` leaves unset — saying

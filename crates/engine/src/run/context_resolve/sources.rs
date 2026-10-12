@@ -117,6 +117,7 @@ pub(super) async fn resolve_command(
             status,
             stdout,
             stderr,
+            ..
         } => (status, stdout, stderr),
         Outcome::TimedOut { .. } => {
             return Err(ContextResolveError::CommandTimedOut {

@@ -38,7 +38,7 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
         conflicts,
         super::verdict::Reach::Workflow,
     )
-    .await
+    .await?
     .with_file_problems(in_file.diagnostics);
 
     // Verification-effectiveness findings, surfaced here too — right when
@@ -49,7 +49,7 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     let opened = super::stats::history(&ctx, &workflow.name).await;
     let (history, _) = super::stats::raw_history(&opened);
     let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-    let outcome = verdict.report(&ctx, workflow_path.display()).await;
+    let outcome = verdict.report(&ctx, workflow_path.display()).await?;
     // Advice after the verdict, which is what was asked for.
     if let Some(advice) = super::stats::verification_findings(&findings) {
         let look = crate::render::stdout_look();

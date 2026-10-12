@@ -1,12 +1,12 @@
 //! Committing the run's own tree: what a node left in it, or what a node
 //! found in it when it started, as a commit on the run's branch.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use yunta_core::{CommitSha, InvalidId, TreeId};
 
-use super::{capture_tree, head_commit, head_tree, run_git, WorktreeError};
+use super::{capture_tree, head_commit, head_tree, WorktreeError};
+use crate::git::{self, Effect};
 use crate::process::Supervision;
 
 /// What a checkout held when it was committed: the tree, read once, and
@@ -39,19 +39,15 @@ pub async fn commit_tree(
         return Ok(Captured { tree, commit: None });
     }
     let head = head_commit(repo, supervision).await?;
-    let printed = run_git(
-        repo,
-        &[
-            "commit-tree",
-            tree.as_str(),
-            "-p",
-            head.as_str(),
-            "-m",
-            message,
-        ],
-        supervision,
-    )
-    .await?;
+    let create = [
+        "commit-tree",
+        tree.as_str(),
+        "-p",
+        head.as_str(),
+        "-m",
+        message,
+    ];
+    let printed = git::change(repo, Effect::Objects, &create, supervision).await?;
     let commit: CommitSha =
         printed
             .trim()
@@ -61,20 +57,16 @@ pub async fn commit_tree(
                 cwd: repo.to_path_buf(),
                 source,
             })?;
-    run_git(
-        repo,
-        &[
-            "update-ref",
-            "-m",
-            message,
-            "HEAD",
-            commit.as_str(),
-            head.as_str(),
-        ],
-        supervision,
-    )
-    .await?;
-    run_git(repo, &["reset", "-q"], supervision).await?;
+    let moved = [
+        "update-ref",
+        "-m",
+        message,
+        "HEAD",
+        commit.as_str(),
+        head.as_str(),
+    ];
+    git::change(repo, Effect::Refs, &moved, supervision).await?;
+    git::change(repo, Effect::Checkout, &["reset", "-q"], supervision).await?;
     Ok(Captured {
         tree,
         commit: Some(commit),
@@ -93,18 +85,20 @@ pub async fn restore(
     if paths.is_empty() {
         return Ok(());
     }
-    let mut listing: Vec<OsString> = ["ls-tree", "-r", "-z", "--name-only", "HEAD", "--"]
-        .map(OsString::from)
-        .to_vec();
-    listing.extend(paths.iter().map(|path| path.as_os_str().to_owned()));
-    let bytes = crate::git::output_bytes(repo, &listing, supervision).await?;
-    let tracked = crate::scope::nul_separated_paths(&bytes);
+    let names = as_arguments(paths)?;
+    let mut listing = vec!["ls-tree", "-r", "-z", "--name-only", "HEAD", "--"];
+    listing.extend(names.iter().copied());
+    let listed = git::read(repo, &listing, supervision).await?;
+    let tracked: Vec<&str> = listed.split('\0').filter(|name| !name.is_empty()).collect();
     if !tracked.is_empty() {
-        let mut checkout: Vec<OsString> = ["checkout", "HEAD", "--"].map(OsString::from).to_vec();
-        checkout.extend(tracked.iter().map(|path| path.as_os_str().to_owned()));
-        crate::git::output(repo, &checkout, supervision).await?;
+        let mut checkout = vec!["checkout", "HEAD", "--"];
+        checkout.extend(tracked.iter().copied());
+        git::change(repo, Effect::Checkout, &checkout, supervision).await?;
     }
-    for path in paths.iter().filter(|path| !tracked.contains(path)) {
+    for (path, name) in paths.iter().zip(&names) {
+        if tracked.contains(name) {
+            continue;
+        }
         match tokio::fs::remove_file(repo.join(path)).await {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -118,4 +112,22 @@ pub async fn restore(
         }
     }
     Ok(())
+}
+
+/// The paths as the text git takes on its command line. A path that is not
+/// UTF-8 cannot be named to git, so it is an error and not a different path.
+fn as_arguments(paths: &[PathBuf]) -> Result<Vec<&str>, WorktreeError> {
+    paths
+        .iter()
+        .map(|path| {
+            path.to_str().ok_or_else(|| WorktreeError::Io {
+                action: "name a path to git".to_string(),
+                path: path.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "the path is not UTF-8",
+                ),
+            })
+        })
+        .collect()
 }

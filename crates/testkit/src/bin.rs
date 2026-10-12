@@ -102,14 +102,25 @@ impl Spawning for tokio::process::Command {
 }
 
 /// Runs the compiled `yunta` binary at `bin` in `dir` with `YUNTA_HOME`
-/// pointed at `home` and stdin closed, returning its captured output. Use
-/// the [`yunta_in!`](crate::yunta_in) macro rather than calling this
-/// directly — it fills in the binary path from the calling crate's
-/// `CARGO_BIN_EXE_yunta`.
-pub fn run_yunta(bin: &Path, dir: &Path, home: &Path, args: &[&str]) -> Output {
+/// pointed at `home` and stdin closed, returning its captured output.
+/// `vars` are set after [`hermetic`], so they take precedence over what it
+/// sets; `hermetic` leaves `PATH` alone, so a `PATH` in `vars` is the one the
+/// binary runs with. Use the [`yunta_in!`](crate::yunta_in) macro rather than
+/// calling this directly — it fills in the binary path from the calling
+/// crate's `CARGO_BIN_EXE_yunta`.
+pub fn run_yunta(
+    bin: &Path,
+    dir: &Path,
+    home: &Path,
+    args: &[&str],
+    vars: &[(String, String)],
+) -> Output {
     let mut cmd = Command::new(bin);
     hermetic(&mut cmd, dir, home);
     cmd.args(args).stdin(Stdio::null());
+    for (name, value) in vars {
+        cmd.env(name, value);
+    }
     CliChild::spawn(cmd, None)
         .expect("failed to spawn the yunta binary")
         .wait_with_output()

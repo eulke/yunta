@@ -21,6 +21,7 @@ use yunta_core::Clock;
 use super::slot::{self, SLOT};
 use crate::lock::Contention;
 use crate::process::Supervision;
+use crate::worktree::WorktreeError;
 
 /// The build a checkout was last given back with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,13 +108,14 @@ pub(super) fn given_back(
 /// listed once and recorded as of its last use, its bytes counted off the
 /// caller's way. Until then its next user could not tell a warm checkout
 /// from an empty one. A checkout somebody holds is left as it is: its
-/// holder records its build.
+/// holder records its build. A cancelled listing is an error; any other
+/// failure to list leaves that checkout unlearned.
 pub(super) async fn learn(
     home: &Path,
     slots: &mut [super::survey::Slot],
     walking: &Walking,
     supervision: Supervision<'_>,
-) {
+) -> Result<(), WorktreeError> {
     let now = supervision.clock.now();
     for slot in slots.iter_mut() {
         if slot.built.is_some() || slot.standing.is_none() {
@@ -132,13 +134,23 @@ pub(super) async fn learn(
                 continue;
             }
         };
-        let Some(roots) = ignored(&slot.path, supervision).await else {
-            continue;
+        let roots = match ignored(&slot.path, supervision).await {
+            Ok(roots) => roots,
+            Err(error) if error.cancelled() => return Err(error),
+            Err(error) => {
+                tracing::debug!(
+                    %error,
+                    checkout = slot.number,
+                    "a checkout's build was not learned"
+                );
+                continue;
+            }
         };
         let used = slot.held.as_ref().map_or(now, |held| held.at);
         slot.built = Some(given_back(home, slot.number, roots, used, walking));
         drop(lease);
     }
+    Ok(())
 }
 
 /// Counts every build the survey `slots` found recorded and not counted,
@@ -258,9 +270,12 @@ pub(super) fn emptied(home: &Path, number: u32, at: DateTime<Utc>) {
     record(&built_path(home, number), &Built::empty(at));
 }
 
-/// The paths git ignores in `checkout`, whole directories named once —
-/// `None` when git could not say.
-pub(super) async fn ignored(checkout: &Path, supervision: Supervision<'_>) -> Option<Vec<PathBuf>> {
+/// The paths git ignores in `checkout`, whole directories named once — an
+/// error when git could not say.
+pub(super) async fn ignored(
+    checkout: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<PathBuf>, WorktreeError> {
     let ignored = [
         "ls-files",
         "--others",
@@ -269,16 +284,12 @@ pub(super) async fn ignored(checkout: &Path, supervision: Supervision<'_>) -> Op
         "--directory",
         "--no-empty-directory",
     ];
-    let listed = crate::git::output(checkout, &ignored, supervision)
-        .await
-        .ok()?;
-    Some(
-        listed
-            .lines()
-            .filter(|line| !line.is_empty())
-            .map(|line| checkout.join(line.trim_end_matches('/')))
-            .collect(),
-    )
+    let listed = crate::git::read(checkout, &ignored, supervision).await?;
+    Ok(listed
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| checkout.join(line.trim_end_matches('/')))
+        .collect())
 }
 
 async fn recorded_at(path: &Path) -> Option<DateTime<Utc>> {

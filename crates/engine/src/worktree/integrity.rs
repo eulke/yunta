@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 use yunta_core::{CommitSha, Isolation, RunId};
 
 use super::{head_commit, run_branch, WorktreeError};
+use crate::git::{self, IS_ANCESTOR};
 use crate::process::Supervision;
 
 /// The worktree a run works in, exactly as the run's manifest froze it.
@@ -89,22 +90,28 @@ impl WorktreeIntegrity {
     ) -> Result<Self, WorktreeError> {
         require_working_tree(run, supervision).await?;
         let head = head_commit(run.path, supervision).await?;
-        // A non-zero exit is the answer "no", not a failure: git says the
-        // same when the base commit is not an ancestor and when this
-        // repository does not have that commit at all, and both mean the
-        // run's history is not behind this HEAD.
-        let descends_from_base = crate::git::success(
-            run.path,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                run.base_commit.as_str(),
-                head.as_str(),
-            ],
-            supervision,
-        )
-        .await
-        .map_err(WorktreeError::Git)?;
+        // git exits 128 for a commit it does not have and 1 for a commit
+        // that is not an ancestor. A base commit this repository lacks is
+        // behind no HEAD here, so its presence is asked first and an absent
+        // one answers no.
+        let descends_from_base =
+            match git::verify(run.path, run.base_commit.as_str(), supervision).await? {
+                None => false,
+                Some(_) => {
+                    git::ask(
+                        run.path,
+                        &[
+                            "merge-base",
+                            "--is-ancestor",
+                            run.base_commit.as_str(),
+                            head.as_str(),
+                        ],
+                        IS_ANCESTOR,
+                        supervision,
+                    )
+                    .await?
+                }
+            };
         Ok(WorktreeIntegrity {
             run_id: run.run_id.clone(),
             path: run.path.to_path_buf(),
@@ -185,7 +192,7 @@ async fn require_working_tree(
             source,
         })?;
     let detail = if present {
-        match crate::git::output(
+        match git::read(
             run.path,
             &["rev-parse", "--is-inside-work-tree"],
             supervision,
@@ -194,7 +201,8 @@ async fn require_working_tree(
         {
             Ok(answer) if answer.trim() == "true" => return Ok(()),
             Ok(answer) => format!("git answers `{}` there, not `true`", answer.trim()),
-            Err(e) => e.detail(),
+            Err(error) if error.cancelled() => return Err(error.into()),
+            Err(error) => error.detail(),
         }
     } else {
         "there is nothing at that path".to_string()

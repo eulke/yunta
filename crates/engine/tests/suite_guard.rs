@@ -457,12 +457,7 @@ async fn the_suite_is_measured_aside_while_the_nodes_before_its_readers_run() {
         RunTerminal::Finished,
         "`wait` saw the suite start"
     );
-    let order = starts_and_measurement(&bench);
-    let at = |what: &str| order.iter().position(|said| said == what);
-    assert!(
-        at("measured: exit 0") < at("implement started"),
-        "the loop holds its task to the suite, so it waits for it: {order:?}"
-    );
+    judged_after_the_measurement(&starts_and_measurement(&bench));
     let ran = tokio::fs::read_to_string(&ran_in).await.unwrap();
     let measured_in = ran.lines().next().unwrap().to_string();
     assert!(
@@ -471,7 +466,16 @@ async fn the_suite_is_measured_aside_while_the_nodes_before_its_readers_run() {
     );
 }
 
-/// Each node's start and the measurement, in the order the log has them.
+/// A loop starts beside the measurement, so only the judgment of its guard
+/// waits for the suite: the task is done after the measurement.
+fn judged_after_the_measurement(order: &[String]) {
+    let at = |what: &str| order.iter().position(|said| said == what).expect(what);
+    let measured = at("measured: exit 0");
+    assert!(measured < at("task done"), "the guard waits: {order:?}");
+}
+
+/// Each node's start, the measurement, and each task's judgment, in the
+/// order the log has them.
 fn starts_and_measurement(bench: &Bench) -> Vec<String> {
     bench
         .events()
@@ -482,6 +486,11 @@ fn starts_and_measurement(bench: &Bench) -> Vec<String> {
             }
             (Some(EventPayload::Node(NodeEvent::Started(_))), Some(node)) => {
                 Some(format!("{node} started"))
+            }
+            (Some(EventPayload::Tasks(yunta_core::events::TaskEvent::StatusChanged(p))), _)
+                if matches!(p.new_status, TaskStatus::Done) =>
+            {
+                Some("task done".to_string())
             }
             _ => None,
         })

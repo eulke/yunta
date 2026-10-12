@@ -56,6 +56,7 @@ pub(super) async fn execute_bash(
         status,
         stdout,
         stderr,
+        ..
     } = &outcome
     else {
         // A bash node has no timeout of its own: the only way it stops

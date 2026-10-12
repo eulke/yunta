@@ -40,6 +40,8 @@ build, not the work, was most of what each task's checks cost.
    up removes its checkouts and every unit branch whose work its tree holds;
    `yunta gc` takes the rest when it collects the run.
 
+Nota 2026-10-11. Un checkout cuyo proceso murió con agentes todavía en marcha no es libre: su lock se conserva y el checkout no se toma mientras alguno de esos agentes siga vivo. El cierre de un run ya no quita los checkouts de los esquemas anteriores al pool del proyecto: uno con trabajo sin commitear se conserva, y `gc` se lleva los limpios, bajo el lock de mutación de git.
+
 ## Rationale
 
 Isolation while working is what D65 needed, and it holds: two units at work at

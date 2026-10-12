@@ -18,7 +18,12 @@ use std::path::{Path, PathBuf};
 use yunta_core::{CommitSha, NodeId, RunId, TaskId, TreeId};
 
 use super::{head_commit, WorktreeError};
+use crate::git::{self, Effect, Exits, GitError, IS_ANCESTOR};
 use crate::process::Supervision;
+
+/// What `diff --cached --quiet` exits with when nothing is staged: 0. A
+/// staged change exits 1.
+const NOTHING_STAGED: Exits = Exits { yes: 0, no: 1 };
 
 /// Whether `node`'s work is done by units of its own — a loop's tasks,
 /// or an audited node — and lands on the run's tree once it passes.
@@ -102,8 +107,9 @@ pub async fn snapshot_commit(
 ) -> Result<CommitSha, WorktreeError> {
     let tree = super::capture_tree(repo, index, supervision).await?;
     let head = head_commit(repo, supervision).await?;
-    let printed = crate::git::output(
+    let printed = git::change(
         repo,
+        Effect::Objects,
         &[
             "commit-tree",
             tree.as_str(),
@@ -134,70 +140,82 @@ pub(super) async fn back_to_base(
     supervision: Supervision<'_>,
 ) -> Result<CommitSha, WorktreeError> {
     let parent = format!("{}^", left.as_str());
-    let base: CommitSha =
-        crate::git::output(worktree, &["rev-parse", parent.as_str()], supervision)
-            .await?
-            .trim()
-            .parse()
-            .map_err(|source| WorktreeError::NotACommit {
-                args: format!("rev-parse {parent}"),
-                cwd: worktree.to_path_buf(),
-                source,
-            })?;
-    crate::git::output(worktree, &["reset", "-q", base.as_str()], supervision).await?;
+    let base: CommitSha = git::read(worktree, &["rev-parse", parent.as_str()], supervision)
+        .await?
+        .trim()
+        .parse()
+        .map_err(|source| WorktreeError::NotACommit {
+            args: format!("rev-parse {parent}"),
+            cwd: worktree.to_path_buf(),
+            source,
+        })?;
+    git::change(
+        worktree,
+        Effect::Checkout,
+        &["reset", "-q", base.as_str()],
+        supervision,
+    )
+    .await?;
     Ok(base)
 }
 
 /// What putting a blocked task's work back into a fresh unit came to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Carried {
     /// The work is in the checkout, as uncommitted changes.
     Applied,
-    /// It no longer applies on the tree the unit began from: these are
-    /// the paths it stopped on. The checkout is back as it began.
-    NoLongerApplies { paths: Vec<PathBuf> },
+    /// It no longer applies on the tree the unit began from: `stopped` is
+    /// the pick git stopped on, and `paths` are the paths it could not
+    /// reconcile. The checkout is back as it began.
+    NoLongerApplies {
+        stopped: GitError,
+        paths: Vec<PathBuf>,
+    },
 }
 
 /// Puts the work `left` holds into `unit`'s checkout as uncommitted
 /// changes on top of the tree the unit began from — exactly where an
 /// attempt's own edits sit, so the unit's audit answers for all of it.
 /// When it no longer applies there, the checkout is put back as it
-/// began and the paths it stopped on are named.
+/// began and the paths it stopped on are named. A pick git refuses
+/// without leaving a path unmerged is an error, and the checkout is
+/// left as it was.
 pub async fn carry_work(
     unit: &Unit,
     left: &CommitSha,
     supervision: Supervision<'_>,
 ) -> Result<Carried, WorktreeError> {
     let tree = unit.worktree.as_path();
-    if crate::git::success(
-        tree,
-        &["cherry-pick", "--no-commit", left.as_str()],
-        supervision,
-    )
-    .await?
-    {
-        crate::git::output(tree, &["reset", "-q"], supervision).await?;
-        return Ok(Carried::Applied);
+    let picked = ["cherry-pick", "--no-commit", left.as_str()];
+    match git::change(tree, Effect::Checkout, &picked, supervision).await {
+        Ok(_) => {
+            git::change(tree, Effect::Checkout, &["reset", "-q"], supervision).await?;
+            Ok(Carried::Applied)
+        }
+        Err(refused) if refused.cancelled() => Err(refused.into()),
+        Err(stopped) => {
+            // Read while the pick is still stopped on them: the undo below is
+            // what puts the tree back, and it takes the evidence with it.
+            let paths = conflicted_paths(tree, supervision).await?;
+            if paths.is_empty() {
+                // git refused the pick before it applied anything: nothing to
+                // undo, and the checkout is as it was.
+                return Err(stopped.into());
+            }
+            // `--no-commit` records no pick in progress, so there is no
+            // `cherry-pick --abort` to run. The reset puts the index and the
+            // tree back on the base, which clears the conflict, and the clean
+            // removes what the pick added; each must succeed for the checkout
+            // to be back as it began.
+            for undo in [
+                ["reset", "-q", "--hard", unit.base.as_str()].as_slice(),
+                ["clean", "-q", "-fd"].as_slice(),
+            ] {
+                git::change(tree, Effect::Checkout, undo, supervision).await?;
+            }
+            Ok(Carried::NoLongerApplies { stopped, paths })
+        }
     }
-    let stopped = crate::git::output(
-        tree,
-        &["diff", "--name-only", "--diff-filter=U"],
-        supervision,
-    )
-    .await?;
-    for undo in [
-        ["cherry-pick", "--abort"].as_slice(),
-        ["reset", "-q", "--hard", unit.base.as_str()].as_slice(),
-        ["clean", "-q", "-fd"].as_slice(),
-    ] {
-        // The abort has nothing to do when git never started the pick,
-        // and its answer is not the point: the reset and the clean are
-        // what leave the checkout as it began.
-        crate::git::success(tree, undo, supervision).await?;
-    }
-    Ok(Carried::NoLongerApplies {
-        paths: stopped.lines().map(PathBuf::from).collect(),
-    })
 }
 
 /// Commits everything the unit did, under `message`, and points the
@@ -212,26 +230,32 @@ pub async fn commit_work(
     message: &str,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    crate::git::output(&unit.worktree, &["add", "-A"], supervision).await?;
-    // `diff --cached --quiet` exits 0 with nothing staged, 1 with staged
-    // changes — both are answers, not failures.
-    if crate::git::success(
+    git::change(
+        &unit.worktree,
+        Effect::Checkout,
+        &["add", "-A"],
+        supervision,
+    )
+    .await?;
+    if git::ask(
         &unit.worktree,
         &["diff", "--cached", "--quiet"],
+        NOTHING_STAGED,
         supervision,
     )
     .await?
     {
         return Ok(());
     }
-    crate::git::output(
+    git::change(
         &unit.worktree,
+        Effect::Checkout,
         &["commit", "-q", "-m", message],
         supervision,
     )
     .await?;
     let keep = ["update-ref", unit.keeps.name(), "HEAD"];
-    crate::git::output(&unit.worktree, &keep, supervision).await?;
+    git::change(&unit.worktree, Effect::Refs, &keep, supervision).await?;
     Ok(())
 }
 
@@ -267,23 +291,34 @@ pub async fn rebase_onto(
     supervision: Supervision<'_>,
 ) -> Result<Rebase, WorktreeError> {
     let onto = head_commit(into, supervision).await?;
-    if crate::git::success(
-        &unit.worktree,
-        &["rebase", "--onto", onto.as_str(), unit.base.as_str()],
-        supervision,
-    )
-    .await?
-    {
-        // Asked of `into` and not of the rebased checkout: what the unit
-        // now sits on is that tree, while its own `HEAD` already carries
-        // the work a later diff has to find.
-        return Ok(Rebase::Onto(super::head_tree(into, supervision).await?));
+    let rebase = ["rebase", "--onto", onto.as_str(), unit.base.as_str()];
+    match git::change(&unit.worktree, Effect::Checkout, &rebase, supervision).await {
+        Ok(_) => {
+            // Asked of `into` and not of the rebased checkout: what the unit
+            // now sits on is that tree, while its own `HEAD` already carries
+            // the work a later diff has to find.
+            Ok(Rebase::Onto(super::head_tree(into, supervision).await?))
+        }
+        Err(refused) if refused.cancelled() => Err(refused.into()),
+        Err(refused) => {
+            // Read while the rebase is still stopped on them: an abort is
+            // what puts the tree back, and it takes the evidence with it.
+            let paths = conflicted_paths(&unit.worktree, supervision).await?;
+            if paths.is_empty() {
+                // git refused before it started: a dirty tree, or an index
+                // lock held by someone else. Nothing conflicts.
+                return Err(refused.into());
+            }
+            git::change(
+                &unit.worktree,
+                Effect::Checkout,
+                &["rebase", "--abort"],
+                supervision,
+            )
+            .await?;
+            Ok(Rebase::Conflicts(paths))
+        }
     }
-    // Read while the rebase is still stopped on them: an abort is what
-    // puts the tree back, and it takes the evidence with it.
-    let conflicts = conflicted_paths(&unit.worktree, supervision).await;
-    let _ = crate::git::success(&unit.worktree, &["rebase", "--abort"], supervision).await;
-    Ok(Rebase::Conflicts(conflicts?))
 }
 
 /// Moves `into` onto the work the unit rebased there, and says where it
@@ -299,13 +334,42 @@ pub async fn land(
     supervision: Supervision<'_>,
 ) -> Result<CommitSha, WorktreeError> {
     let head = head_commit(&unit.worktree, supervision).await?;
-    if !crate::git::success(into, &["merge", "--ff-only", head.as_str()], supervision).await? {
-        return Err(WorktreeError::NotFastForward {
-            unit: unit.who.to_string(),
-            path: into.to_path_buf(),
-        });
+    if git::verify(into, head.as_str(), supervision)
+        .await?
+        .is_none()
+    {
+        return Err(WorktreeError::UnknownCommit { commit: head });
     }
-    Ok(head)
+    let merge = ["merge", "--ff-only", head.as_str()];
+    match git::change(into, Effect::Checkout, &merge, supervision).await {
+        Ok(_) => Ok(head),
+        Err(refused) if refused.cancelled() => Err(refused.into()),
+        Err(refused) => {
+            // A refused fast-forward has two causes that look alike. When
+            // `into`'s head is not behind the unit's head, `into` moved off
+            // the commit the unit grew from. When it is, the merge failed
+            // for another reason, such as a dirty checkout.
+            let into_head = head_commit(into, supervision).await?;
+            let ancestry = [
+                "merge-base",
+                "--is-ancestor",
+                into_head.as_str(),
+                head.as_str(),
+            ];
+            match git::ask(into, &ancestry, IS_ANCESTOR, supervision).await {
+                Ok(false) => Err(WorktreeError::NotFastForward {
+                    unit: unit.who.to_string(),
+                    path: into.to_path_buf(),
+                }),
+                Err(asked) if asked.cancelled() => Err(asked.into()),
+                Ok(true) => Err(refused.into()),
+                Err(asked) => {
+                    tracing::debug!(%asked, "the ancestry of a refused landing could not be asked");
+                    Err(refused.into())
+                }
+            }
+        }
+    }
 }
 
 /// The paths a stopped rebase could not reconcile, as git lists them
@@ -314,7 +378,7 @@ async fn conflicted_paths(
     worktree: &Path,
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, WorktreeError> {
-    let bytes = crate::git::output_bytes(
+    let bytes = git::read_bytes(
         worktree,
         &["diff", "--name-only", "--diff-filter=U", "-z"],
         supervision,

@@ -13,7 +13,9 @@ use std::path::Path;
 
 use yunta_core::{InvalidId, TestFile, TreeId};
 
-use super::{private_index, WorktreeError};
+use super::capture::private_index;
+use super::WorktreeError;
+use crate::git::{self, Effect};
 use crate::process::Supervision;
 
 /// `from` with `files` laid over it, as a tree of `repo`'s object
@@ -32,37 +34,14 @@ pub async fn tree_with(
     let mut env: Vec<(String, String)> = supervision.env.to_vec();
     env.push(("GIT_INDEX_FILE".to_string(), index.display().to_string()));
     let private = supervision.with_env(&env);
-    crate::git::output(repo, &["read-tree", from.as_str()], private).await?;
+    let read_tree = ["read-tree", from.as_str()];
+    git::change(repo, Effect::Objects, &read_tree, private).await?;
     let scratch = index.with_extension("blob");
     for file in files {
-        let path = file.in_repo();
-        tokio::fs::write(&scratch, &file.content)
-            .await
-            .map_err(|source| WorktreeError::Io {
-                action: format!("stage the content of `{path}`"),
-                path: scratch.clone(),
-                source,
-            })?;
-        let blob = crate::git::output(
-            repo,
-            &[
-                "hash-object".to_string(),
-                "-w".to_string(),
-                format!("--path={path}"),
-                scratch.display().to_string(),
-            ],
-            supervision,
-        )
-        .await?;
-        let entry = format!("100644,{},{path}", blob.trim());
-        crate::git::output(
-            repo,
-            &["update-index", "--add", "--cacheinfo", entry.as_str()],
-            private,
-        )
-        .await?;
+        lay_file(repo, &scratch, file, supervision, private).await?;
     }
-    let printed = crate::git::output(repo, &["write-tree"], private).await?;
+    let write_tree = ["write-tree"];
+    let printed = git::change(repo, Effect::Objects, &write_tree, private).await?;
     printed
         .trim()
         .parse()
@@ -71,6 +50,33 @@ pub async fn tree_with(
             cwd: repo.to_path_buf(),
             source,
         })
+}
+
+/// Hashes `file` at its own path and puts the entry in the private index.
+/// The blob is written through `scratch`, a file beside the index.
+async fn lay_file(
+    repo: &Path,
+    scratch: &Path,
+    file: &TestFile,
+    supervision: Supervision<'_>,
+    private: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let path = file.in_repo();
+    tokio::fs::write(scratch, &file.content)
+        .await
+        .map_err(|source| WorktreeError::Io {
+            action: format!("stage the content of `{path}`"),
+            path: scratch.to_path_buf(),
+            source,
+        })?;
+    let scratch_arg = scratch.display().to_string();
+    let name = format!("--path={path}");
+    let hash = ["hash-object", "-w", name.as_str(), scratch_arg.as_str()];
+    let blob = git::change(repo, Effect::Objects, &hash, supervision).await?;
+    let entry = format!("100644,{},{path}", blob.trim());
+    let cache = ["update-index", "--add", "--cacheinfo", entry.as_str()];
+    git::change(repo, Effect::Objects, &cache, private).await?;
+    Ok(())
 }
 
 /// Takes `paths` out of `worktree`; one already gone is out.

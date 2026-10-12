@@ -5,7 +5,8 @@
 
 use std::path::Path;
 
-use yunta_core::{AdapterId, ModeName, RunId};
+use yunta_core::{AdapterId, Isolation, ModeName, Pid, RunId};
+use yunta_engine::process::Supervision;
 use yunta_engine::FrozenRun;
 use yunta_storage::AsyncStorage;
 
@@ -143,12 +144,69 @@ async fn create_and_detach(
     // checkout the child is still working in.
     match spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd).await {
         Ok(child) => {
-            yunta_engine::hand_over_worktree(&ctx.cwd, isolation, child, ctx.teardown()).await?;
+            hand_off(child, isolation, &ctx.cwd, ctx.teardown()).await?;
             Ok(prepared.run_id)
         }
         Err(source) => {
             yunta_engine::release_worktree(&ctx.cwd, isolation, ctx.teardown()).await?;
             Err(DetachedResumeError::new(&prepared.run_id, source).into())
         }
+    }
+}
+
+/// Hands the claim to the child just spawned. When the hand-over fails, the
+/// child is ended before the claim is released, so nothing keeps working in
+/// the tree while the claim names nobody.
+async fn hand_off(
+    child: Pid,
+    isolation: Isolation,
+    cwd: &Path,
+    teardown: Supervision<'_>,
+) -> Result<(), CliError> {
+    let Err(error) = yunta_engine::hand_over_worktree(cwd, isolation, child, teardown).await else {
+        return Ok(());
+    };
+    if let Err(kill) = yunta_core::process::group::force_kill_group(child).await {
+        tracing::warn!(%kill, "the detached child outlived a failed hand-over");
+    }
+    if let Err(release) = yunta_engine::release_worktree(cwd, isolation, teardown).await {
+        tracing::warn!(%release, "the claim could not be released after a failed hand-over");
+    }
+    Err(error.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::CommandExt;
+
+    use tokio_util::sync::CancellationToken;
+    use yunta_testkit_core::FixedClock;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_failed_hand_off_ends_the_child_before_the_claim_is_released() {
+        // No common git directory here, so the hand-over cannot write its lock.
+        let not_a_repo = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = Pid::try_from(child.id()).unwrap();
+        let cancel = CancellationToken::new();
+        let refused = hand_off(
+            pid,
+            Isolation::None,
+            not_a_repo.path(),
+            Supervision::outside_any_run(&cancel, &FixedClock),
+        )
+        .await;
+        assert!(refused.is_err());
+        yunta_testkit::wait_until_async(
+            || std::future::ready(matches!(child.try_wait(), Ok(Some(_)))),
+            || "the child outlived the failed hand-over".into(),
+        )
+        .await;
     }
 }

@@ -57,12 +57,16 @@ impl Detected {
         }
     }
 
-    /// What `repo` says, the forge its `origin` is on included.
-    pub(crate) async fn in_repo(repo: &Path, supervision: Supervision<'_>) -> Self {
-        Detected {
-            forge: remote::github_repo(repo, supervision).await,
+    /// What `repo` says, the forge its `origin` is on included. A stop while
+    /// git read the remote is the caller's stop, not a Detected without one.
+    pub(crate) async fn in_repo(
+        repo: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Self, yunta_engine::GitError> {
+        Ok(Detected {
+            forge: remote::github_repo(repo, supervision).await?,
             ..Detected::in_files(repo)
-        }
+        })
     }
 
     /// The same, with the adapters this machine answers for when

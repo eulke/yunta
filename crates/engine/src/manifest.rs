@@ -12,6 +12,7 @@ use yunta_core::{
     PromptSource, Workflow,
 };
 
+use crate::git::GitError;
 use crate::inputs::{resolve_inputs, InputsError};
 use crate::run::BirthArtifact;
 
@@ -26,12 +27,10 @@ pub enum ManifestError {
         #[source]
         source: std::io::Error,
     },
-    #[error("failed to resolve the base commit: {}", crate::git::failed(.args, .cwd, .detail))]
-    Git {
-        args: String,
-        cwd: PathBuf,
-        detail: String,
-    },
+    /// git could not answer for the base commit: it failed, or the token
+    /// stopped it.
+    #[error("failed to resolve the base commit: {0}")]
+    Git(GitError),
     #[error("the base commit of `{cwd}` is not a commit id: {source}")]
     BaseCommit {
         cwd: PathBuf,
@@ -40,6 +39,13 @@ pub enum ManifestError {
     },
     #[error(transparent)]
     Inputs(#[from] InputsError),
+}
+
+impl ManifestError {
+    /// Whether the token stopped the git this freeze asked.
+    pub fn cancelled(&self) -> bool {
+        matches!(self, ManifestError::Git(git) if git.cancelled())
+    }
 }
 
 /// Everything a run is frozen with before it exists: the manifest it
@@ -111,10 +117,7 @@ pub async fn build_manifest(
         // path, which is also the tolerant reading of old manifests.
         paths: None,
         pack: pack_provenance(repo, workflow_dir).await,
-        project: crate::git::common_dir(repo, supervision)
-            .await
-            .ok()
-            .map(|git_common_dir| yunta_core::ProjectIdentity { git_common_dir }),
+        project: project_identity(repo, supervision).await?,
         // `yunta run --adapter` sets it, as the CLI sets `paths`.
         adapter: None,
     };
@@ -139,6 +142,20 @@ async fn base_of(
         })?;
     let branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await?;
     Ok((commit, branch))
+}
+
+/// The git directory the repository's checkouts share, which names the
+/// project. A git that cannot name it leaves the project unknown; a git the
+/// token stopped stops the freeze, as every other git the run asks does.
+async fn project_identity(
+    repo: &Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<Option<yunta_core::ProjectIdentity>, ManifestError> {
+    match crate::git::common_dir(repo, supervision).await {
+        Ok(git_common_dir) => Ok(Some(yunta_core::ProjectIdentity { git_common_dir })),
+        Err(error) if error.cancelled() => Err(ManifestError::Git(error)),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Which pack (and exactly which version) the
@@ -221,15 +238,8 @@ async fn git_line(
     args: &[&str],
     supervision: crate::process::Supervision<'_>,
 ) -> Result<String, ManifestError> {
-    crate::git::output(repo, args, supervision)
+    crate::git::read(repo, args, supervision)
         .await
         .map(|stdout| stdout.trim().to_string())
-        .map_err(|e| {
-            let detail = e.detail();
-            ManifestError::Git {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })
+        .map_err(ManifestError::Git)
 }

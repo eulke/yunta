@@ -2134,15 +2134,8 @@ on_finish:
     );
     // The run branch pointed at the base commit (nothing was committed),
     // so `git branch -d` agreed to delete it.
-    let branches = std::process::Command::new("git")
-        .args(["branch", "--list", &format!("yunta/{run_id}")])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    assert!(
-        String::from_utf8_lossy(&branches.stdout).trim().is_empty(),
-        "a merged run branch is deleted"
-    );
+    let branches = git_output(&repo, &["branch", "--list", &format!("yunta/{run_id}")]);
+    assert!(branches.is_empty(), "a merged run branch is deleted");
 }
 
 #[test]
@@ -2187,13 +2180,9 @@ on_finish:
 
     let distilled = repo.join(".yunta/knowledge/distilled/distill-none");
     assert!(distilled.exists(), "the files land in the user's checkout");
-    let status = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
+    let status = git_output(&repo, &["status", "--porcelain"]);
     assert!(
-        String::from_utf8_lossy(&status.stdout).contains(".yunta/knowledge"),
+        status.contains(".yunta/knowledge"),
         "uncommitted — the engine never commits the user's branch"
     );
 
@@ -3656,28 +3645,69 @@ fn spawn_yunta(project: &Checkout, args: &[&str], log: PathBuf) -> CliChild {
     CliChild::spawn(command, Some(&log)).expect("the binary runs")
 }
 
-/// Two Ctrl-C, two stages: the first stops the work, and what
-/// gives the checkout back runs *because* it fired — so it answers to
-/// the second, which is what lets a person who really means it out.
+/// A first Ctrl-C ends a run that works in the person's own checkout, and
+/// the stop releases the checkout's lock on the way out: nothing is left
+/// running or held, and the stop asks git for nothing.
+#[test]
+fn a_first_interrupt_ends_an_in_place_run_and_releases_its_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let git_log = root.path().join("git.log");
+    let project = Checkout::under(root.path())
+        .with_stubs(yunta_testkit::stubs::git_counting(root.path(), &git_log))
+        .working_in_place()
+        .workflow("wf", HOLDS_OPEN)
+        .committed();
+    let lock = project.repo.join(".git/yunta-none.lock");
+
+    let mut yunta = spawn_yunta(&project, &["run", "wf.yaml"], root.path().join("run.log"));
+    wait_until(
+        || marker_written(&root.path().join("started.txt")),
+        || "the node never started".into(),
+    );
+    assert!(lock.exists(), "the run holds its checkout while it runs");
+    let asked_before_the_stop = std::fs::read_to_string(&git_log).unwrap_or_default();
+    assert!(
+        !asked_before_the_stop.is_empty(),
+        "the run's own git calls reach the log, so the stop's silence is measured"
+    );
+
+    signal_process(pid_of(&yunta), Signal::SIGINT).expect("the run is alive");
+    wait_until(
+        || matches!(yunta.try_wait(), Ok(Some(_))),
+        || "the first interrupt left the run alive".into(),
+    );
+    assert!(!lock.exists(), "the stop released the checkout");
+    assert_eq!(
+        std::fs::read_to_string(&git_log).unwrap_or_default(),
+        asked_before_the_stop,
+        "the stop asked git for nothing"
+    );
+}
+
+/// Two Ctrl-C, two stages: the first stops the work, and what gives the
+/// checkout back runs *because* it fired, so it answers to the second, which
+/// is what lets a person who really means it out. The release asks git
+/// only when `.git` does not name the common directory itself, so the
+/// checkout here keeps its git directory apart.
 #[test]
 fn a_second_interrupt_aborts_a_release_the_first_left_running() {
     let root = tempfile::tempdir().unwrap();
     let held = root.path().join("release.pid");
     let armed = root.path().join("armed");
-    // Armed only once the run is under way, so the git the release runs
-    // is held and the gits the birth ran are not.
+    // Armed only once the run is under way, so the git the release runs is
+    // held and the gits the birth ran are not.
     let stubs = yunta_testkit::stubs::git_holding(
         root.path(),
         "rev-parse --git-common-dir",
         &held,
         Some(&armed),
     );
-
     let project = Checkout::under(root.path())
         .with_stubs(stubs)
         .working_in_place()
         .workflow("wf", HOLDS_OPEN)
         .committed();
+    with_a_git_dir_of_its_own(&project, root.path());
 
     let yunta = spawn_yunta(&project, &["run", "wf.yaml"], root.path().join("run.log"));
     wait_until(
@@ -3685,14 +3715,9 @@ fn a_second_interrupt_aborts_a_release_the_first_left_running() {
         || "the node never started".into(),
     );
     std::fs::write(&armed, "now").expect("arm the stub");
-
-    // The first stops the work; the release it triggers meets the held
-    // git and stays there.
+    // The first stops the work; the release it triggers meets the held git.
     signal_process(pid_of(&yunta), Signal::SIGINT).expect("the run is alive");
-    let git_pid = holding_git(
-        &held,
-        "the release never reached the git that gives the checkout back",
-    );
+    let git_pid = holding_git(&held, "the release never reached its git");
     // The second aborts it.
     signal_process(pid_of(&yunta), Signal::SIGINT).expect("the invocation is still alive");
     let output = yunta
@@ -3702,11 +3727,21 @@ fn a_second_interrupt_aborts_a_release_the_first_left_running() {
         || liveness(git_pid) == Liveness::Dead,
         || {
             format!(
-                "the second interrupt left the release's git alive (pid {git_pid}): {}",
+                "the release's git outlived the second interrupt: {}",
                 stderr(&output)
             )
         },
     );
+}
+
+/// Moves the checkout's git directory beside it and leaves `.git` as a
+/// pointer to it. That directory holds no `commondir` file, since it is
+/// the common directory, so a release asks git which directory is common.
+fn with_a_git_dir_of_its_own(project: &Checkout, root: &Path) {
+    let apart = root.join("apart.git");
+    std::fs::rename(project.repo.join(".git"), &apart).expect("move the git directory");
+    let pointer = format!("gitdir: {}\n", apart.display());
+    std::fs::write(project.repo.join(".git"), pointer).expect("point the checkout at it");
 }
 
 /// A workflow whose one node announces itself beside the checkout and

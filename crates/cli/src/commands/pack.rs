@@ -279,7 +279,7 @@ pub async fn add(
         crate::render::glyphs().arrow(),
         crate::render::paths::shown(&dest, &cwd, None)
     );
-    super::pack_needs::report(&ctx, &dest, &manifest).await;
+    super::pack_needs::report(&ctx, &dest, &manifest).await?;
 
     // The pack's own cases run last, on the vendored copy, and only on
     // request — after the confirmation, never as part of deciding it.

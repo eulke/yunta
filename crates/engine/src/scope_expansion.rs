@@ -42,6 +42,7 @@ use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
 use yunta_core::ScopeGlob;
 
+use crate::git::GitError;
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 
 /// The well-known path, relative to a task's own isolated worktree, an
@@ -77,12 +78,17 @@ pub enum ScopeExpansionError {
         #[source]
         source: std::io::Error,
     },
-    #[error("{}", crate::git::exited_with(.command, .status, .stderr))]
-    GitFailed {
-        command: String,
-        status: i32,
-        stderr: String,
-    },
+    /// git could not say what the task's tree holds: it failed, or the
+    /// token stopped it.
+    #[error(transparent)]
+    Git(#[from] GitError),
+}
+
+impl ScopeExpansionError {
+    /// Whether the token stopped the git this evaluation asked.
+    pub fn cancelled(&self) -> bool {
+        matches!(self, ScopeExpansionError::Git(git) if git.cancelled())
+    }
 }
 
 /// The request object required to be identical across all three
@@ -335,38 +341,18 @@ fn build_globset(patterns: &[ScopeGlob]) -> Result<globset::GlobSet, ScopeExpans
     yunta_core::scope_globset(patterns).map_err(|source| ScopeExpansionError::GlobSet { source })
 }
 
-async fn run_git(
-    cwd: &Path,
-    args: &[&str],
-    supervision: Supervision<'_>,
-) -> Result<String, ScopeExpansionError> {
-    crate::git::output(cwd, args, supervision)
-        .await
-        .map_err(|e| match e.source {
-            Some(source) => ScopeExpansionError::Io {
-                action: format!("run `git {}`", e.args),
-                source,
-            },
-            None => ScopeExpansionError::GitFailed {
-                command: e.args,
-                status: e.code.unwrap_or(-1),
-                stderr: e.stderr,
-            },
-        })
-}
-
 async fn diff_paths(
     cwd: &Path,
     supervision: Supervision<'_>,
 ) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
     let mut paths: Vec<std::path::PathBuf> =
-        run_git(cwd, &["diff", "--name-only", "HEAD"], supervision)
+        crate::git::read(cwd, &["diff", "--name-only", "HEAD"], supervision)
             .await?
             .lines()
             .map(std::path::PathBuf::from)
             .collect();
     paths.extend(
-        run_git(
+        crate::git::read(
             cwd,
             &["ls-files", "--others", "--exclude-standard"],
             supervision,

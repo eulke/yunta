@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 
 use super::room::{Builds, Limits};
 use super::{slot, space, survey, CheckoutPool};
+use crate::git::{self, Effect};
 use crate::lock::Contention;
 use crate::process::Supervision;
+use crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
 use crate::worktree::WorktreeError;
 
 /// What tidying the pool did, and what it keeps after.
@@ -93,8 +95,12 @@ impl CheckoutPool {
             let Some(_lease) = self.upkeep_hold(&home, slot.number, supervision).await? else {
                 continue;
             };
-            self.remove(&slot.path, supervision).await?;
-            removed.push(slot.path);
+            if self
+                .remove(&home, slot.number, &slot.path, supervision)
+                .await?
+            {
+                removed.push(slot.path);
+            }
         }
         let slots = survey::survey(&home, &self.repo, supervision).await?;
         let kept = report(&self.limits, &home, &slots)?;
@@ -120,6 +126,9 @@ impl CheckoutPool {
             let Some(_lease) = self.upkeep_hold(home, slot.number, supervision).await? else {
                 continue;
             };
+            if !still_free(home, slot.number, &slot.path, supervision).await? {
+                continue;
+            }
             let measured = match &slot.built {
                 Some(space::Built {
                     bytes: Some(bytes), ..
@@ -127,10 +136,10 @@ impl CheckoutPool {
                 Some(pending) => {
                     space::measure_now(home, slot.number, pending.roots.clone(), pending.at).await
                 }
-                None => match space::ignored(&slot.path, supervision).await {
-                    Some(roots) => space::measure_now(home, slot.number, roots, now).await,
-                    None => None,
-                },
+                None => {
+                    let roots = space::ignored(&slot.path, supervision).await?;
+                    space::measure_now(home, slot.number, roots, now).await
+                }
             };
             let Some(bytes) = measured else {
                 continue;
@@ -138,7 +147,13 @@ impl CheckoutPool {
             let used = slot.held.as_ref().map(|held| held.at);
             let idle = unused.is_some_and(|unused| used.is_none_or(|used| now - used > unused));
             if bytes > 0 && idle {
-                crate::git::output(&slot.path, &["clean", "-q", "-ffdX"], supervision).await?;
+                git::change(
+                    &slot.path,
+                    Effect::Checkout,
+                    &["clean", "-q", "-ffdX"],
+                    supervision,
+                )
+                .await?;
                 space::emptied(home, slot.number, now);
                 emptied.push((slot.path.clone(), bytes));
             }
@@ -167,10 +182,9 @@ impl CheckoutPool {
             if kept || !detached {
                 continue;
             }
-            if survey::look(&slot.path, supervision)
-                .await
-                .is_some_and(|look| look.clean)
-            {
+            let status =
+                git::tree_state(&slot.path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+            if status.clean {
                 free.push(slot);
             }
         }
@@ -186,20 +200,55 @@ impl CheckoutPool {
         slot::hold(home, number, Contention::Refuse, None, supervision).await
     }
 
-    /// Takes the checkout at `path` away from the project.
-    async fn remove(&self, path: &Path, supervision: Supervision<'_>) -> Result<(), WorktreeError> {
+    /// Takes the checkout at `path`, number `number` of the pool at `home`,
+    /// away from the project, when it is still free. The caller holds the
+    /// checkout; the mutation lock taken here covers both the check and the
+    /// removal, so nothing lands in the metadata between them. Answers
+    /// whether it went.
+    async fn remove(
+        &self,
+        home: &Path,
+        number: u32,
+        path: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<bool, WorktreeError> {
         let common_dir = &self.located(supervision).await?.common_dir;
-        let _mutation_lock =
-            crate::worktree::lock_worktree_mutations(common_dir, supervision.clock).await?;
+        let held = git::mutation_lock(common_dir, supervision)
+            .await
+            .map_err(WorktreeError::Lock)?;
+        if !still_free(home, number, path, supervision).await? {
+            return Ok(false);
+        }
         let shown = path.display().to_string();
-        crate::worktree::run_git(
+        git::change_held(
+            &held,
             &self.repo,
             &["worktree", "remove", "--force", &shown],
             supervision,
         )
         .await?;
-        Ok(())
+        Ok(true)
     }
+}
+
+/// Whether the checkout at `path`, number `number` of the pool at `home`,
+/// is still free: nothing uncommitted in it, and no unit keeps it. Asked
+/// under the hold of the checkout, so nothing changes it in between.
+async fn still_free(
+    home: &Path,
+    number: u32,
+    path: &Path,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    let kept = slot::last_held(home, number)
+        .await
+        .and_then(|held| held.unit)
+        .is_some();
+    if kept {
+        return Ok(false);
+    }
+    let status = git::tree_state(path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    Ok(status.clean)
 }
 
 fn report(

@@ -183,6 +183,8 @@ pub async fn create_run(
     // it exists: a source whose log cannot be read leaves no run
     // directory and no `run_created` behind.
     let documents = birth_registrations(artifacts, worktree, storage, supervision).await?;
+    let opens_on_base = manifest.isolation == yunta_core::Isolation::Worktree
+        && holds_its_base(worktree, &manifest.base_commit, supervision).await?;
 
     let run_dir = runs_root.join(run_id.as_str());
     tokio::fs::create_dir_all(runs_root)
@@ -230,8 +232,6 @@ pub async fn create_run(
         }
     })?;
 
-    let opens_on_base = manifest.isolation == yunta_core::Isolation::Worktree
-        && holds_its_base(worktree, &manifest.base_commit, supervision).await;
     let log = RunLog::new(storage, run_id, clock, redactor);
     log.record(
         None,
@@ -438,17 +438,25 @@ async fn register_birth_documents(
 
 /// Whether `worktree` holds exactly what `base` does: nothing a person
 /// left uncommitted in it, nothing a birth brought with it. A tree that
-/// cannot be read answers no, and the run measures in it.
+/// cannot be read answers no, and so does a base the repository does not
+/// have, since its tree cannot be read either; the run measures in it. A
+/// cancelled read is the run's cancellation, not an answer.
 async fn holds_its_base(
     worktree: &std::path::Path,
     base: &yunta_core::CommitSha,
     supervision: crate::process::Supervision<'_>,
-) -> bool {
-    let holds = crate::task_cycle::content_of(worktree, supervision).await;
+) -> Result<bool, RunError> {
+    let holds = match crate::task_cycle::content_of(worktree, supervision).await {
+        Ok(holds) => holds,
+        Err(error) => match RunError::from(error) {
+            RunError::Cancelled => return Err(RunError::Cancelled),
+            _ => return Ok(false),
+        },
+    };
     let base_tree = format!("{base}^{{tree}}");
-    let committed = crate::git::output(worktree, &["rev-parse", &base_tree], supervision).await;
-    match (holds, committed) {
-        (Ok(holds), Ok(committed)) => holds.as_str() == committed.trim(),
-        _ => false,
+    match crate::git::read(worktree, &["rev-parse", &base_tree], supervision).await {
+        Ok(committed) => Ok(holds.as_str() == committed.trim()),
+        Err(error) if error.cancelled() => Err(error.into()),
+        Err(_) => Ok(false),
     }
 }

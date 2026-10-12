@@ -7,18 +7,28 @@
 
 use std::path::PathBuf;
 
+use tokio_util::sync::CancellationToken;
 use yunta_core::describe;
+use yunta_engine::git::{Cause, GitError, Invocation};
+use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::ScopeExpansionError;
-use yunta_engine::{GitError, RunError, ScopeCheckError, WorktreeError};
+use yunta_engine::{RunError, ScopeCheckError, WorktreeError};
+
+/// A git run in `/repo` with the given arguments.
+fn invocation(args: &[&str]) -> Invocation {
+    Invocation {
+        dir: PathBuf::from("/repo"),
+        args: args.iter().map(|arg| arg.to_string()).collect(),
+    }
+}
 
 fn exited_non_zero(stderr: &str) -> GitError {
     GitError {
-        args: "status --porcelain".to_string(),
-        cwd: PathBuf::from("/repo"),
-        stderr: stderr.to_string(),
-        code: Some(128),
-        stopped: None,
-        source: None,
+        invocation: invocation(&["status", "--porcelain"]),
+        cause: Cause::Exit {
+            code: Some(128),
+            stderr: stderr.to_string(),
+        },
     }
 }
 
@@ -43,35 +53,40 @@ fn a_git_failure_that_said_nothing_carries_no_colon_promising_a_reason() {
 }
 
 #[test]
-fn a_scope_check_git_failure_that_said_nothing_names_the_command_and_status_alone() {
-    let error = ScopeCheckError::GitFailed {
-        command: "diff --name-only HEAD".to_string(),
-        status: 128,
-        stderr: String::new(),
-    };
+fn a_scope_check_git_failure_that_said_nothing_names_the_command_alone() {
+    let error = ScopeCheckError::Git(GitError {
+        invocation: invocation(&["diff", "--name-only", "HEAD"]),
+        cause: Cause::Exit {
+            code: Some(128),
+            stderr: String::new(),
+        },
+    });
     assert_eq!(
         error.to_string(),
-        "`git diff --name-only HEAD` exited with status 128"
+        "git diff --name-only HEAD in `/repo` failed"
     );
 }
 
 #[test]
 fn a_scope_expansion_git_failure_reads_exactly_as_a_scope_check_one() {
-    let command = "diff --name-only HEAD".to_string();
-    let expansion = ScopeExpansionError::GitFailed {
-        command: command.clone(),
-        status: 128,
-        stderr: "fatal: bad revision".to_string(),
-    };
-    let check = ScopeCheckError::GitFailed {
-        command,
-        status: 128,
-        stderr: "fatal: bad revision".to_string(),
-    };
+    let expansion = ScopeExpansionError::Git(GitError {
+        invocation: invocation(&["diff", "--name-only", "HEAD"]),
+        cause: Cause::Exit {
+            code: Some(128),
+            stderr: "fatal: bad revision".to_string(),
+        },
+    });
+    let check = ScopeCheckError::Git(GitError {
+        invocation: invocation(&["diff", "--name-only", "HEAD"]),
+        cause: Cause::Exit {
+            code: Some(128),
+            stderr: "fatal: bad revision".to_string(),
+        },
+    });
     assert_eq!(expansion.to_string(), check.to_string());
     assert_eq!(
         expansion.to_string(),
-        "`git diff --name-only HEAD` exited with status 128: fatal: bad revision"
+        "git diff --name-only HEAD in `/repo` failed: fatal: bad revision"
     );
 }
 
@@ -90,18 +105,14 @@ fn a_git_failure_keeps_its_cause() {
     assert_eq!(describe(&worktree), sentence);
 }
 
-/// The spawn that never ran keeps the `io::Error` that stopped it: a
-/// reader who follows the chain reaches the real cause rather than a
-/// sentence somebody retyped.
+/// The spawn that never ran keeps the `io::Error` that stopped it as its
+/// cause: the sentence is written once, from the error itself, rather than
+/// retyped by whoever reports it.
 #[test]
 fn a_git_that_never_ran_keeps_the_io_error_under_it() {
     let run: RunError = GitError {
-        args: "status --porcelain".to_string(),
-        cwd: PathBuf::from("/repo"),
-        stderr: String::new(),
-        code: None,
-        stopped: None,
-        source: Some(std::io::Error::new(
+        invocation: invocation(&["status", "--porcelain"]),
+        cause: Cause::Spawn(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "no such file or directory",
         )),
@@ -168,4 +179,42 @@ async fn run_branches_lists_every_run_branch_in_one_call() {
         .await
         .unwrap();
     assert_eq!(runs.into_iter().collect::<Vec<_>>(), vec![first, second]);
+}
+
+#[tokio::test]
+async fn a_git_that_cannot_start_keeps_its_spawn_error_as_the_cause() {
+    let empty = tempfile::tempdir().unwrap();
+    let env = [("PATH".to_string(), empty.path().display().to_string())];
+    let cancel = CancellationToken::new();
+    let supervision = Supervision {
+        env: &env,
+        ..Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock)
+    };
+    let err = yunta_engine::git::read(empty.path(), &["status"], supervision)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.cause, Cause::Spawn(ref e) if e.kind() == std::io::ErrorKind::NotFound),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_scope_check_is_not_a_git_failure() {
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let err = yunta_engine::changed_between(
+        repo.path(),
+        "HEAD",
+        "HEAD",
+        Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, ScopeCheckError::Git(ref e) if e.cancelled()),
+        "got {err:?}"
+    );
 }

@@ -10,8 +10,10 @@ use std::sync::Arc;
 use yunta_core::{CommitSha, RunId};
 
 use super::{slot, survey, CheckoutPool, Lease};
+use crate::git::{self, Effect};
 use crate::lock::Contention;
 use crate::process::Supervision;
+use crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
 use crate::worktree::{head_commit, head_tree, Unit, UnitId, UnitRef, WorktreeError};
 
 impl CheckoutPool {
@@ -131,9 +133,9 @@ impl CheckoutPool {
             let Some(lease) = held.await? else {
                 continue;
             };
-            if survey::look(&slot.path, supervision)
-                .await
-                .is_some_and(|look| look.clean)
+            if git::tree_state(&slot.path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision)
+                .await?
+                .clean
             {
                 lease.keep_for(None).await;
             }
@@ -141,7 +143,8 @@ impl CheckoutPool {
         let landed = head_commit(into, supervision).await?;
         let merged = format!("--merged={}", landed.as_str());
         for unit in refs(into, &ours, Some(&merged), supervision).await? {
-            crate::git::output(into, &["update-ref", "-d", unit.name()], supervision).await?;
+            let forget = ["update-ref", "-d", unit.name()];
+            git::change(into, Effect::Refs, &forget, supervision).await?;
         }
         Ok(())
     }
@@ -167,15 +170,16 @@ impl CheckoutPool {
             let Some(lease) = held.await? else {
                 continue;
             };
-            if survey::look(&slot.path, supervision)
-                .await
-                .is_some_and(|look| look.clean)
+            if git::tree_state(&slot.path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision)
+                .await?
+                .clean
             {
                 lease.keep_for(None).await;
             }
         }
         for unit in refs(repo, &ours, None, supervision).await? {
-            crate::git::output(repo, &["update-ref", "-d", unit.name()], supervision).await?;
+            let forget = ["update-ref", "-d", unit.name()];
+            git::change(repo, Effect::Refs, &forget, supervision).await?;
         }
         Ok(())
     }
@@ -192,7 +196,7 @@ pub async fn forget_attempts(
     let prefix = unit.keeps.every_attempt();
     for kept in refs(&unit.worktree, prefix, None, supervision).await? {
         let forget = ["update-ref", "-d", kept.name()];
-        crate::git::output(&unit.worktree, &forget, supervision).await?;
+        git::change(&unit.worktree, Effect::Refs, &forget, supervision).await?;
     }
     Ok(())
 }
@@ -208,6 +212,6 @@ async fn refs(
     let mut args = vec!["for-each-ref", "--format=%(refname)"];
     args.extend(merged);
     args.push(prefix);
-    let listed = crate::git::output(repo, &args, supervision).await?;
+    let listed = git::read(repo, &args, supervision).await?;
     Ok(listed.lines().filter_map(UnitRef::named).collect())
 }

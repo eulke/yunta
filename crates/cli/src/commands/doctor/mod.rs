@@ -44,13 +44,13 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
         Ok(who) => checks.push(Found::Holds, "git", format!("commits as {who}")),
         Err(why) => checks.push(Found::Problem, "git", why.to_string()),
     }
-    checks.extend(super::forge::forge_checks(&ctx).await);
+    checks.extend(super::forge::forge_checks(&ctx).await?);
     checkouts(&ctx, &mut checks).await;
     if let Some((found, said)) = first_run::first_run().await {
         checks.push(found, "first run", said);
     }
     check_installed_pack_requires(&ctx.cwd, &ctx.project.config, &mut checks, &mut steps);
-    check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await;
+    check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await?;
     if session {
         probe_sessions(&ctx, &healthy, &mut checks).await;
     }
@@ -298,10 +298,10 @@ async fn check_installed_pack_workflows(
     ctx: &Context,
     checks: &mut Checklist,
     steps: &mut Vec<String>,
-) {
+) -> Result<(), CliError> {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();
-    let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await;
+    let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
             yunta_engine::packs_for_publisher(&ctx.cwd, &publisher).installed
@@ -326,7 +326,7 @@ async fn check_installed_pack_workflows(
                         )
                         .errors,
                     );
-                let found = super::context_files_at_head(ctx, &workflow, isolation).await;
+                let found = super::context_files_at_head(ctx, &workflow, isolation).await?;
                 let errors: Vec<yunta_engine::CheckError> = refused.chain(found.errors).collect();
                 let pack = format!("pack {}", manifest.reference());
                 for error in &errors {
@@ -339,6 +339,7 @@ async fn check_installed_pack_workflows(
             }
         }
     }
+    Ok(())
 }
 
 /// Opens one session per binding whose adapter probed healthy, a check

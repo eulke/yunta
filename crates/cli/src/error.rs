@@ -74,11 +74,20 @@ pub enum CliError {
     #[error(transparent)]
     Run(#[from] yunta_engine::RunError),
 
+    /// A git call the command made that did not answer. A stop the token
+    /// made is the command's cancellation, not a failed git: see the
+    /// conversion below.
+    #[error(transparent)]
+    Git(yunta_engine::GitError),
+
     #[error(transparent)]
     ManifestRead(#[from] yunta_engine::ManifestReadError),
 
+    /// A manifest that could not be frozen. A stop the token made while git
+    /// answered it is the command's cancellation, not a failed manifest: see
+    /// the conversion below.
     #[error(transparent)]
-    Manifest(#[from] yunta_engine::ManifestError),
+    Manifest(yunta_engine::ManifestError),
 
     #[error(transparent)]
     DetachedResume(#[from] crate::commands::DetachedResumeError),
@@ -239,6 +248,29 @@ impl CliError {
             | yunta_engine::ResolveGateError::Withheld { .. }
             | yunta_engine::ResolveGateError::Storage(_)
             | yunta_engine::ResolveGateError::Documents(_) => refusal.into(),
+        }
+    }
+}
+
+/// A git the token stopped is the command's cancellation, the one a run's
+/// own git reaches; any other git failure is a git failure.
+impl From<yunta_engine::GitError> for CliError {
+    fn from(error: yunta_engine::GitError) -> Self {
+        match error.cancelled() {
+            true => CliError::Run(yunta_engine::RunError::Cancelled),
+            false => CliError::Git(error),
+        }
+    }
+}
+
+/// A manifest the token stopped while git answered it is the run's
+/// cancellation, the same one a run's own git reaches; any other manifest
+/// failure stays a manifest failure.
+impl From<yunta_engine::ManifestError> for CliError {
+    fn from(error: yunta_engine::ManifestError) -> Self {
+        match error.cancelled() {
+            true => CliError::Run(yunta_engine::RunError::Cancelled),
+            false => CliError::Manifest(error),
         }
     }
 }

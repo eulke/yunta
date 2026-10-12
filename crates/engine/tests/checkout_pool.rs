@@ -8,8 +8,13 @@
 mod pool_world;
 
 use pool_world::{canonical, delete, ignore_builds, write, World};
-use yunta_engine::UnitId;
+use tokio_util::sync::CancellationToken;
+use yunta_engine::git::Effect;
+use yunta_engine::process::Supervision;
+use yunta_engine::{Birth, UnitId};
+use yunta_testkit::stubs::{GIT_LOCK_PROBE, GIT_LOG};
 use yunta_testkit::{git, git_output};
+use yunta_testkit_core::FixedClock;
 
 /// A unit whose work landed leaves its checkout to the next, which finds
 /// what git ignores where the first left it and nothing else of its work.
@@ -196,10 +201,10 @@ async fn a_seeded_private_index_captures_what_a_fresh_one_does() {
     let fresh = scratch.path().join("fresh-index");
     let env = vec![("GIT_INDEX_FILE".to_string(), fresh.display().to_string())];
     let from_nothing = world.owner.supervision().with_env(&env);
-    yunta_engine::git::output(&world.repo, &["add", "-A"], from_nothing)
+    yunta_engine::git::change(&world.repo, Effect::Objects, &["add", "-A"], from_nothing)
         .await
         .unwrap();
-    let expected = yunta_engine::git::output(&world.repo, &["write-tree"], from_nothing)
+    let expected = yunta_engine::git::read(&world.repo, &["write-tree"], from_nothing)
         .await
         .unwrap();
 
@@ -365,4 +370,85 @@ async fn a_landed_nodes_unit_leaves_no_ref() {
         &["for-each-ref", "--format=%(refname)", "refs/yunta/unit/"],
     );
     assert_eq!(kept.trim(), "", "the node's work landed");
+}
+
+/// A checkout's creation that is cancelled while `worktree add` runs is
+/// undone under the mutation lock: the `worktree remove` and `prune` that
+/// undo it find the lock held, so no other process can interleave with them.
+#[tokio::test]
+async fn a_cancelled_checkout_creation_undoes_it_under_the_mutation_lock() {
+    let world = World::new();
+    let log = world.root.path().join("git.log");
+    let pid = world.root.path().join("add.pid");
+    let mut env = yunta_testkit::stubs::git_holding(world.root.path(), "worktree add", &pid, None);
+    env.extend([
+        (GIT_LOG.to_string(), log.display().to_string()),
+        (
+            GIT_LOCK_PROBE.to_string(),
+            world
+                .repo
+                .join(".git/yunta-worktree.lock")
+                .display()
+                .to_string(),
+        ),
+    ]);
+    let cancel = CancellationToken::new();
+    let firing = cancel.clone();
+    tokio::spawn(async move {
+        yunta_testkit::wait_until_async(
+            || std::future::ready(pid.exists()),
+            || "the worktree add never started".to_string(),
+        )
+        .await;
+        firing.cancel();
+    });
+    let supervision = Supervision::outside_any_run(&cancel, &FixedClock).with_env(&env);
+    let _ = world
+        .pool
+        .open_run(&world.run, &world.head(), Birth::Builds, supervision)
+        .await;
+    let undone: Vec<String> = tokio::fs::read_to_string(&log)
+        .await
+        .unwrap()
+        .lines()
+        .filter(|line| line.contains("worktree remove") || line.contains("worktree prune"))
+        .map(String::from)
+        .collect();
+    assert!(
+        !undone.is_empty() && undone.iter().all(|line| line.ends_with("locked")),
+        "{undone:?}"
+    );
+}
+
+/// A legacy checkout a run left with uncommitted work is kept when the run's
+/// checkouts are released: only a clean checkout is taken away.
+#[tokio::test]
+async fn a_legacy_checkout_with_uncommitted_work_is_kept_at_run_end() {
+    let world = World::new();
+    let run_dir = world.root.path().join("run");
+    let legacy = yunta_engine::run_dir::unit_worktrees(&run_dir).join("task-T001");
+    let head = world.head();
+    git(
+        &world.repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            legacy.to_str().unwrap(),
+            head.as_str(),
+        ],
+    );
+    write(&legacy.join("draft.txt"), "uncommitted");
+
+    yunta_engine::release_unit_checkouts(
+        &world.pool,
+        &world.repo,
+        &run_dir,
+        &world.run,
+        world.owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    assert!(legacy.join("draft.txt").exists());
 }

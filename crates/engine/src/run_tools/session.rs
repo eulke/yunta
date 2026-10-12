@@ -238,6 +238,11 @@ pub(super) enum RunToolError {
          the checkout holds now — its answer is the one that counts"
     )]
     Superseded,
+    /// The run stopped while the call was being answered. Nothing about the
+    /// call was refused, so it gets no refusal text and no refusal is
+    /// recorded for it.
+    #[error("cancelled by user")]
+    Cancelled,
     #[error("the run's log cannot be reached")]
     Storage {
         #[source]
@@ -287,10 +292,24 @@ impl From<crate::artifacts::AcceptError> for RunToolError {
 }
 
 impl RunToolError {
-    /// Why this call was refused, in the closed word the log keeps.
-    fn refusal(&self) -> yunta_core::events::RunToolRefusal {
+    /// The error a handover gives for a git call that did not answer: a call
+    /// the run stopped is the run's cancellation, and any other failure means
+    /// the document could not be proven, and says what git said.
+    pub(super) fn handover_git(failed: crate::git::GitError) -> Self {
+        match failed.cancelled() {
+            true => RunToolError::Cancelled,
+            false => RunToolError::Handover {
+                detail: failed.detail(),
+            },
+        }
+    }
+
+    /// Why this call was refused, in the closed word the log keeps. A call
+    /// the run stopped was refused by nothing, so it has no word.
+    fn refusal(&self) -> Option<yunta_core::events::RunToolRefusal> {
         use yunta_core::events::RunToolRefusal as R;
-        match self {
+        let refusal = match self {
+            RunToolError::Cancelled => return None,
             RunToolError::RequestPending => R::RequestPending,
             RunToolError::InvalidSubmission { .. }
             | RunToolError::InvalidRequest { .. }
@@ -323,7 +342,8 @@ impl RunToolError {
             | RunToolError::Yaml { .. }
             | RunToolError::Write { .. }
             | RunToolError::Accept { .. } => R::EngineFailed,
-        }
+        };
+        Some(refusal)
     }
 }
 
@@ -367,11 +387,11 @@ impl SessionTools {
     /// Records that this binary refused a call to `tool`, and why: the log
     /// says what the session was answered, in a word a reader can count.
     async fn refused(&self, tool: RunTool, error: &RunToolError) {
+        let Some(reason) = error.refusal() else {
+            return;
+        };
         let payload = EventPayload::Session(yunta_core::events::SessionEvent::RunToolRefused(
-            yunta_core::events::RunToolRefusedPayload {
-                tool,
-                reason: error.refusal(),
-            },
+            yunta_core::events::RunToolRefusedPayload { tool, reason },
         ));
         if let Err(error) = self.append(payload).await {
             tracing::debug!(%error, "a refused run tool call went unrecorded");
@@ -457,6 +477,11 @@ impl ServerHandler for SessionTools {
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
+            // A call the run stopped is not a refusal: the protocol reports it
+            // as unanswered, and the log keeps no refusal for it.
+            Err(stopped @ RunToolError::Cancelled) => {
+                return Err(McpError::internal_error(stopped.to_string(), None))
+            }
             Err(error) => {
                 self.refused(tool, &error).await;
                 CallToolResult::error(vec![ContentBlock::text(yunta_core::describe(&error))]).into()

@@ -57,7 +57,7 @@ pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
 pub use tools::{tools_environment, ToolsHost};
-pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
+pub use wait::{after, wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 pub use yunta_testkit_core::golden::{assert_golden, visible, Environment, ENVIRONMENTS};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that
@@ -74,10 +74,12 @@ macro_rules! yunta_at {
 }
 
 /// Runs the `yunta` binary from an integration test: `yunta_in!(dir, home,
-/// &["run", "wf.yaml"])`. The binary path comes from `CARGO_BIN_EXE_yunta`,
-/// which Cargo sets only for the tests of the crate that builds the binary
-/// — so `env!` is expanded here, at the call site, where that variable
-/// exists.
+/// &["run", "wf.yaml"])`. `yunta_in!(dir, home, &["run"], &vars)` sets `vars`
+/// on the command as well, after the hermetic environment, which leaves
+/// `PATH` alone, so a `PATH` in `vars` is the one the binary runs with. The
+/// binary path comes from `CARGO_BIN_EXE_yunta`, which Cargo sets only for
+/// the tests of the crate that builds the binary — so `env!` is expanded
+/// here, at the call site, where that variable exists.
 #[macro_export]
 macro_rules! yunta_in {
     ($dir:expr, $home:expr, $args:expr) => {
@@ -86,6 +88,16 @@ macro_rules! yunta_in {
             $dir,
             $home,
             $args,
+            &[],
+        )
+    };
+    ($dir:expr, $home:expr, $args:expr, $vars:expr) => {
+        $crate::run_yunta(
+            ::std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+            $dir,
+            $home,
+            $args,
+            $vars,
         )
     };
 }

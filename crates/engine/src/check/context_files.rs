@@ -16,6 +16,7 @@ use yunta_core::template::template_variables;
 use yunta_core::{CommitSha, ContextSpec, Isolation};
 
 use super::*;
+use crate::git::{GitError, CHECK_IGNORE};
 use crate::process::Supervision;
 
 /// How a `files:` path that the run would not find is missing.
@@ -60,14 +61,14 @@ pub(super) enum Reach {
 /// Every literal `files:` path a node of `workflow` would read and the run
 /// would not find, among the nodes `mode_nodes` includes (every node when
 /// `None`). A path built from a template is only known once the run
-/// renders it, and is left to the run; so is anything git cannot answer
-/// here.
+/// renders it, and is left to the run. A git that cannot answer is an
+/// error, not a finding.
 pub async fn check_context_files(
     workflow: &Workflow,
     mode_nodes: Option<&HashSet<NodeId>>,
     origin: RunTreeOrigin<'_>,
     supervision: Supervision<'_>,
-) -> ContextFilesCheck {
+) -> Result<ContextFilesCheck, GitError> {
     let mut read = Vec::new();
     for node in workflow
         .nodes
@@ -78,11 +79,11 @@ pub async fn check_context_files(
     }
     let mut found = ContextFilesCheck::default();
     if read.is_empty() {
-        return found;
+        return Ok(found);
     }
-    let root = repository_root(origin.checkout, supervision).await;
+    let root = repository_root(origin.checkout, supervision).await?;
     for (node, path) in read {
-        if let Some(missing) = missing(&path, root.as_deref(), origin, supervision).await {
+        if let Some(missing) = missing(&path, &root, origin, supervision).await? {
             let base = (origin.isolation == Isolation::Worktree && !Path::new(&path).is_absolute())
                 .then(|| origin.base.abbreviated().to_string());
             match reach(workflow, &node, &path, mode_nodes) {
@@ -101,7 +102,7 @@ pub async fn check_context_files(
             }
         }
     }
-    found
+    Ok(found)
 }
 
 /// Whether something that can run before `reader` might write `path`: a
@@ -240,47 +241,61 @@ fn literal_files(node: &Node, read: &mut Vec<(NodeId, String)>) {
 
 /// The top of the working tree `checkout` belongs to, which is what a
 /// run's relative paths are relative to.
-async fn repository_root(checkout: &Path, supervision: Supervision<'_>) -> Option<PathBuf> {
-    crate::git::output(checkout, &["rev-parse", "--show-toplevel"], supervision)
-        .await
-        .ok()
-        .map(|printed| PathBuf::from(printed.trim()))
+async fn repository_root(
+    checkout: &Path,
+    supervision: Supervision<'_>,
+) -> Result<PathBuf, GitError> {
+    let printed =
+        crate::git::read(checkout, &["rev-parse", "--show-toplevel"], supervision).await?;
+    Ok(PathBuf::from(printed.trim()))
 }
 
 /// How `path` is missing from the tree the run would read, or `None` when
-/// it is there — or when git cannot say, which is the run's to find out.
+/// it is there. Git's own failure to answer is the error, never a guess.
 async fn missing(
     path: &str,
-    root: Option<&Path>,
+    root: &Path,
     origin: RunTreeOrigin<'_>,
     supervision: Supervision<'_>,
-) -> Option<MissingContextFile> {
+) -> Result<Option<MissingContextFile>, GitError> {
     if Path::new(path).is_absolute() {
-        return (!Path::new(path).exists()).then_some(MissingContextFile::Nowhere);
+        return Ok((!Path::new(path).exists()).then_some(MissingContextFile::Nowhere));
     }
-    let root = root?;
     let on_disk = root.join(path).exists();
     if origin.isolation == Isolation::None {
-        return (!on_disk).then_some(MissingContextFile::Nowhere);
+        return Ok((!on_disk).then_some(MissingContextFile::Nowhere));
     }
-    let spec = format!("{}:{path}", origin.base.as_str());
-    let committed = crate::git::success(root, &["cat-file", "-e", spec.as_str()], supervision)
-        .await
-        .ok()?;
-    if committed {
-        return None;
+    let listed = crate::git::read(
+        root,
+        &[
+            "ls-tree",
+            "-z",
+            "--name-only",
+            origin.base.as_str(),
+            "--",
+            path,
+        ],
+        supervision,
+    )
+    .await?;
+    if !listed.is_empty() {
+        return Ok(None);
     }
     if !on_disk {
-        return Some(MissingContextFile::Nowhere);
+        return Ok(Some(MissingContextFile::Nowhere));
     }
-    let ignored = crate::git::success(root, &["check-ignore", "-q", path], supervision)
-        .await
-        .ok()?;
-    Some(if ignored {
+    let ignored = crate::git::ask(
+        root,
+        &["check-ignore", "-q", path],
+        CHECK_IGNORE,
+        supervision,
+    )
+    .await?;
+    Ok(Some(if ignored {
         MissingContextFile::Ignored
     } else {
         MissingContextFile::Uncommitted
-    })
+    }))
 }
 
 /// The sentence for a missing `files:` path: what is missing, why the run

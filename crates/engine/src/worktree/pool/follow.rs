@@ -50,25 +50,38 @@ impl CheckoutPool {
             return Ok(None);
         };
         let branch = crate::worktree::run_branch(run_id);
-        let Some(at) = on_branch(&tree, &branch, supervision).await else {
+        let Some(at) = on_branch(&tree, &branch, supervision).await? else {
             return Ok(None);
         };
         let Some(built) = self.last_built_at(&home, own, &at, supervision).await? else {
             return Ok(None);
         };
-        if !holds_every_kind(&tree, &built.path, supervision).await {
+        if !holds_every_kind(&tree, &built.path, supervision).await? {
             return Ok(None);
         }
-        super::mutating(&tree, &["switch", "--detach", "-q"], supervision).await?;
+        crate::git::change(
+            &tree,
+            crate::git::Effect::Metadata,
+            &["switch", "--detach", "-q"],
+            supervision,
+        )
+        .await?;
         let take = ["switch", "-q", branch.as_str()];
-        if let Err(error) = super::mutating(&built.path, &take, supervision).await {
-            super::mutating(&tree, &take, supervision).await?;
+        if let Err(error) = crate::git::change(
+            &built.path,
+            crate::git::Effect::Metadata,
+            &take,
+            supervision,
+        )
+        .await
+        {
+            crate::git::change(&tree, crate::git::Effect::Metadata, &take, supervision).await?;
             tracing::warn!(%error, checkout = %built.path.display(), "the run stays in its tree");
             return Ok(None);
         }
         let now = supervision.clock.now();
         slot::used(&home, built.number, self.holder.as_deref(), now).await;
-        self.give_back(tree_lease, supervision).await;
+        self.give_back(tree_lease, supervision).await?;
         Ok(Some(built.path))
     }
 
@@ -105,9 +118,17 @@ impl CheckoutPool {
             let free = slot::last_held(home, slot.number)
                 .await
                 .is_none_or(|held| held.unit.is_none());
-            let still = survey::look(&slot.path, supervision)
-                .await
-                .is_some_and(|look| look.clean && look.standing == detached_at);
+            let status = crate::git::tree_state(
+                &slot.path,
+                &[crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE],
+                supervision,
+            )
+            .await?;
+            let still = status.clean
+                && Standing {
+                    head: status.head,
+                    branch: status.branch,
+                } == detached_at;
             if free && still {
                 return Ok(Some(Built {
                     number: slot.number,
@@ -121,24 +142,33 @@ impl CheckoutPool {
 }
 
 /// Where `tree` stands when it is clean on `branch`.
-async fn on_branch(tree: &Path, branch: &str, supervision: Supervision<'_>) -> Option<CommitSha> {
-    let look = survey::look(tree, supervision).await?;
-    let on = look.standing.branch.as_deref() == Some(branch);
-    (look.clean && on).then_some(look.standing.head?)
+async fn on_branch(
+    tree: &Path,
+    branch: &str,
+    supervision: Supervision<'_>,
+) -> Result<Option<CommitSha>, WorktreeError> {
+    let status = crate::git::tree_state(
+        tree,
+        &[crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE],
+        supervision,
+    )
+    .await?;
+    let on = status.clean && status.branch.as_deref() == Some(branch);
+    Ok(status.head.filter(|_| on))
 }
 
 /// Whether `built` holds every kind of build `tree` holds — everything git
 /// ignores in `tree`, by its top-level name — and git can say so of both.
-async fn holds_every_kind(tree: &Path, built: &Path, supervision: Supervision<'_>) -> bool {
-    let (Some(ours), Some(theirs)) = (
-        space::ignored(tree, supervision).await,
-        space::ignored(built, supervision).await,
-    ) else {
-        return false;
-    };
+async fn holds_every_kind(
+    tree: &Path,
+    built: &Path,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    let ours = space::ignored(tree, supervision).await?;
+    let theirs = space::ignored(built, supervision).await?;
     let theirs: HashSet<&Path> = names(&theirs, built).collect();
     let every = names(&ours, tree).all(|name| theirs.contains(name));
-    every
+    Ok(every)
 }
 
 /// `roots` as named inside `checkout`.

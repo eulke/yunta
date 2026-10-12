@@ -321,7 +321,7 @@ pub(crate) async fn context_files(
     mode_nodes: Option<&std::collections::HashSet<yunta_core::NodeId>>,
     isolation: yunta_core::Isolation,
     base: &yunta_core::CommitSha,
-) -> yunta_engine::ContextFilesCheck {
+) -> Result<yunta_engine::ContextFilesCheck, CliError> {
     yunta_engine::check_context_files(
         workflow,
         mode_nodes,
@@ -333,19 +333,24 @@ pub(crate) async fn context_files(
         ctx.supervision(),
     )
     .await
+    .map_err(CliError::from)
 }
 
 /// [`context_files`] for a run started here now, from the commit
 /// `ctx.cwd` is on. Every node counts, since nothing has chosen a mode.
 /// Nothing to say outside a repository with a commit, where no run starts
-/// either.
+/// either; a stop while asking for that commit is the command's stop.
 pub(crate) async fn context_files_at_head(
     ctx: &crate::context::Context,
     workflow: &Workflow,
     isolation: yunta_core::Isolation,
-) -> yunta_engine::ContextFilesCheck {
-    let Ok(base) = yunta_engine::head_commit(&ctx.cwd, ctx.supervision()).await else {
-        return Default::default();
+) -> Result<yunta_engine::ContextFilesCheck, CliError> {
+    let base = match yunta_engine::head_commit(&ctx.cwd, ctx.supervision()).await {
+        Ok(base) => base,
+        Err(stopped) if stopped.cancelled() => {
+            return Err(yunta_engine::RunError::from(stopped).into())
+        }
+        Err(_) => return Ok(Default::default()),
     };
     context_files(ctx, workflow, None, isolation, &base).await
 }

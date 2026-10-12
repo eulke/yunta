@@ -25,7 +25,7 @@ impl CheckoutPool {
     ) -> Result<Taken, WorktreeError> {
         let home = self.home(supervision).await?;
         let mut slots = survey::survey(&home, &self.repo, supervision).await?;
-        space::learn(&home, &mut slots, &self.walking, supervision).await;
+        space::learn(&home, &mut slots, &self.walking, supervision).await?;
         let listed = slots
             .iter()
             .filter(|slot| slot.standing.is_some())
@@ -35,7 +35,7 @@ impl CheckoutPool {
         let ranked = self
             .ranked_with_room(slots, user, target, supervision)
             .await?;
-        let ordered = nearest_first(ranked, target, supervision).await;
+        let ordered = nearest_first(ranked, target, supervision).await?;
         for candidate in ordered {
             let held = slot::hold(
                 &home,
@@ -48,7 +48,7 @@ impl CheckoutPool {
                 continue;
             };
             let (number, path) = (candidate.slot.number, candidate.slot.path);
-            if still_fits(&home, number, &path, user, target, supervision).await {
+            if still_fits(&home, number, &path, user, target, supervision).await? {
                 slot::owned(&home, number, None).await;
                 return Ok(Taken::Held(path, lease));
             }
@@ -64,7 +64,7 @@ async fn nearest_first(
     mut ranked: Vec<fit::Candidate>,
     target: &CommitSha,
     supervision: Supervision<'_>,
-) -> impl Iterator<Item = fit::Candidate> {
+) -> Result<impl Iterator<Item = fit::Candidate>, WorktreeError> {
     let best = match ranked.len() {
         0 | 1 => 0,
         many => many.min(3),
@@ -73,21 +73,22 @@ async fn nearest_first(
     for candidate in ranked.drain(..best) {
         let away = match candidate.at_target() {
             true => 0,
-            false => distance(&candidate.slot.path, target, supervision).await,
+            false => distance(&candidate.slot.path, target, supervision).await?,
         };
         nearest.push((candidate, away));
     }
     nearest.sort_by_key(|(candidate, away)| candidate.rank(*away));
-    nearest
+    Ok(nearest
         .into_iter()
         .map(|(candidate, _)| candidate)
-        .chain(ranked)
+        .chain(ranked))
 }
 
 /// Whether `checkout` — checkout `number` of the pool at `home`, held —
 /// is still one `user` may take: clean, and its user's own, free, or
 /// kept for another unit whose work is in `target`, which only here is
-/// asked of git.
+/// asked of git. What git cannot answer is an error, not a checkout that
+/// does not fit.
 async fn still_fits(
     home: &Path,
     number: u32,
@@ -95,37 +96,50 @@ async fn still_fits(
     user: fit::User<'_>,
     target: &CommitSha,
     supervision: Supervision<'_>,
-) -> bool {
-    let Some(look) = survey::look(checkout, supervision).await else {
-        return false;
-    };
-    if !look.clean {
-        return false;
+) -> Result<bool, WorktreeError> {
+    let status = crate::git::tree_state(
+        checkout,
+        &[crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE],
+        supervision,
+    )
+    .await?;
+    if !status.clean {
+        return Ok(false);
     }
+    let standing = survey::Standing {
+        head: status.head,
+        branch: status.branch,
+    };
     let unit = slot::last_held(home, number)
         .await
         .and_then(|held| held.unit);
-    match fit::claim(&look.standing, unit.as_deref(), user) {
+    Ok(match fit::claim(&standing, unit.as_deref(), user) {
         Some(fit::Claim::Own | fit::Claim::Free) => true,
-        Some(fit::Claim::Landed) => crate::git::success(
-            checkout,
-            &["merge-base", "--is-ancestor", "HEAD", target.as_str()],
-            supervision,
-        )
-        .await
-        .unwrap_or(false),
+        Some(fit::Claim::Landed) => {
+            crate::git::ask(
+                checkout,
+                &["merge-base", "--is-ancestor", "HEAD", target.as_str()],
+                crate::git::IS_ANCESTOR,
+                supervision,
+            )
+            .await?
+        }
         None => false,
-    }
+    })
 }
 
 /// How many paths differ between what `checkout` holds and `target`: what
 /// a build there has to redo.
-async fn distance(checkout: &Path, target: &CommitSha, supervision: Supervision<'_>) -> usize {
-    crate::git::output(
+async fn distance(
+    checkout: &Path,
+    target: &CommitSha,
+    supervision: Supervision<'_>,
+) -> Result<usize, WorktreeError> {
+    let names = crate::git::read(
         checkout,
         &["diff", "--name-only", "HEAD", target.as_str()],
         supervision,
     )
-    .await
-    .map_or(usize::MAX, |names| names.lines().count())
+    .await?;
+    Ok(names.lines().count())
 }

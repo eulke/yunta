@@ -42,8 +42,7 @@ pub(super) async fn survey(
     repo: &Path,
     supervision: Supervision<'_>,
 ) -> Result<Vec<Slot>, WorktreeError> {
-    let listing =
-        crate::git::output(repo, &["worktree", "list", "--porcelain"], supervision).await?;
+    let listing = crate::git::read(repo, &["worktree", "list", "--porcelain"], supervision).await?;
     let mut listed = HashMap::new();
     for checkout in crate::worktree::checkouts(&listing) {
         if checkout.prunable {
@@ -72,79 +71,7 @@ pub(super) async fn survey(
     Ok(slots)
 }
 
-/// A checkout as one look at it shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Look {
-    pub(super) standing: Standing,
-    /// Whether nothing in it is uncommitted beyond the request a session
-    /// writes for the engine to read.
-    pub(super) clean: bool,
-}
-
-/// One look at `checkout`: where it stands and whether it is clean —
-/// `None` when git sees no working tree there.
-pub(super) async fn look(checkout: &Path, supervision: Supervision<'_>) -> Option<Look> {
-    let request = format!(
-        ":(exclude){}",
-        crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
-    );
-    let status = [
-        "status",
-        "--porcelain=v2",
-        "--branch",
-        "--",
-        ".",
-        request.as_str(),
-    ];
-    let printed = crate::git::output(checkout, &status, supervision)
-        .await
-        .ok()?;
-    Some(read_status(&printed))
-}
-
-/// What `git status --porcelain=v2 --branch` printed, read.
-fn read_status(printed: &str) -> Look {
-    let mut head = None;
-    let mut branch = None;
-    let mut clean = true;
-    for line in printed.lines() {
-        if let Some(oid) = line.strip_prefix("# branch.oid ") {
-            head = oid.parse().ok();
-        } else if let Some(named) = line.strip_prefix("# branch.head ") {
-            branch = (named != "(detached)").then(|| named.to_string());
-        } else if !line.starts_with('#') && !line.is_empty() {
-            clean = false;
-        }
-    }
-    Look {
-        standing: Standing { head, branch },
-        clean,
-    }
-}
-
 /// A branch's short name: `refs/heads/` taken off.
 fn short(branch: &str) -> &str {
     branch.strip_prefix("refs/heads/").unwrap_or(branch)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const AT: &str = "1111111111111111111111111111111111111111";
-
-    #[test]
-    fn a_look_reads_where_a_checkout_stands_and_whether_it_is_clean() {
-        let detached = format!("# branch.oid {AT}\n# branch.head (detached)\n");
-        let dirty = format!("# branch.oid {AT}\n# branch.head yunta/run/r\n? new.txt\n");
-
-        let detached = read_status(&detached);
-        let dirty = read_status(&dirty);
-
-        assert_eq!(detached.standing.head.unwrap().as_str(), AT);
-        assert_eq!(detached.standing.branch, None);
-        assert!(detached.clean);
-        assert_eq!(dirty.standing.branch.as_deref(), Some("yunta/run/r"));
-        assert!(!dirty.clean);
-    }
 }

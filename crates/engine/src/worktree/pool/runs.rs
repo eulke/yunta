@@ -78,7 +78,7 @@ impl CheckoutPool {
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         let branch = crate::worktree::run_branch(run_id);
-        let head = crate::git::output(&self.repo, &["rev-parse", &branch], supervision).await?;
+        let head = crate::git::read(&self.repo, &["rev-parse", &branch], supervision).await?;
         let head: CommitSha = head
             .trim()
             .parse()
@@ -96,12 +96,24 @@ impl CheckoutPool {
         };
         match Box::pin(self.take(user, &head, supervision)).await? {
             Taken::Held(checkout, lease) => {
-                let on = crate::git::output(&checkout, &["branch", "--show-current"], supervision)
-                    .await?;
+                let on =
+                    crate::git::read(&checkout, &["branch", "--show-current"], supervision).await?;
                 if on.trim() != branch {
                     let switch = ["switch", "--discard-changes", "-q", branch.as_str()];
-                    super::mutating(&checkout, &switch, supervision).await?;
-                    crate::git::output(&checkout, &["clean", "-q", "-ffd"], supervision).await?;
+                    crate::git::change(
+                        &checkout,
+                        crate::git::Effect::Metadata,
+                        &switch,
+                        supervision,
+                    )
+                    .await?;
+                    crate::git::change(
+                        &checkout,
+                        crate::git::Effect::Checkout,
+                        &["clean", "-q", "-ffd"],
+                        supervision,
+                    )
+                    .await?;
                 }
                 Ok((checkout, lease))
             }
@@ -123,7 +135,7 @@ impl CheckoutPool {
         named: &Path,
         supervision: Supervision<'_>,
     ) -> Result<PathBuf, WorktreeError> {
-        if super::release::still_the_runs(named, run_id, supervision).await {
+        if super::release::still_the_runs(named, run_id, supervision).await? {
             return Ok(named.to_path_buf());
         }
         let (checkout, _held) = self.reopen_run(run_id, supervision).await?;

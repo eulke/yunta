@@ -869,7 +869,7 @@ workflows generados de 1–4 nodos bash con fixture determinista);
 |---|---|---|
 | `execute_run_outside_testkit` | líneas con `execute_run(` | `crates/testkit/`, `crates/cli/src/commands/drive.rs` |
 | `create_run_outside_testkit` | líneas con `create_run(` | `crates/testkit/`, `crates/cli/src/commands/run.rs` |
-| `git_command_outside_git_rs` | líneas con `Command::new("git")` | `crates/engine/src/git.rs`, `crates/testkit*/src/repo.rs` |
+| `git_command_outside_git_rs` | líneas con `Command::new("git"` (también `GovernedCommand::new("git"`) | `crates/engine/src/git/`, `crates/testkit*/src/repo.rs` |
 | `system_clock_outside_boundary` | líneas con `SystemClock` o `Utc::now` | `crates/core/src/clock.rs`, `crates/cli/src/main.rs`, `crates/cli/src/context.rs` |
 | `env_read_outside_boundary` | líneas con `std::env::var` | `crates/cli/src/main.rs`, `crates/core/src/config/env.rs` |
 | `env_mutation_in_tests` | `env::set_var` / `env::remove_var` | — |
@@ -1040,11 +1040,7 @@ lleva) y `:398` (el git de `carried_into`); `cli/src/commands/run.rs:355`
 `promote.rs:98` (`CallerInfra` de `drive_promotions`: `head_commit`,
 `prepare_worktree` y el `create_run` del sucesor), `pack.rs:82` (`run_git`,
 que sirven `clone_pack`, `head_commit` y `current_branch` para `pack add` y
-`pack update`). La pareja sincrónica de git —`output_blocking` y
-`success_blocking`, `git.rs:212-230`— lanza `Command::new("git")` sin
-gobierno alguno desde `build_manifest` (`manifest.rs:203`, `git_line`; corre
-también dentro de `workflow_exec` para el manifest del hijo), `init.rs:90,98`
-y `test/mod.rs:201`. El token de Ctrl-C del CLI nace en `drive.rs:221`
+`pack update`). El token de Ctrl-C del CLI nace en `drive.rs:221`
 (`cancel_on_ctrl_c`), después del worktree y del nacimiento; `RunEnv.cancel`
 es `Option` (`run/mod.rs:284`) y `build_ctx` inventa un token que nadie
 dispara (`exec.rs:378`); `Executing.cancel` (`drive.rs:159`) y
@@ -1195,7 +1191,7 @@ verde: el log del padre termina en `run_paused` y el hijo no tiene
 `no_engine_module_reads_the_process_clock` sin la excepción de `process.rs`
 (rojo hasta borrar el respaldo) y `no_engine_module_spawns_git_outside_the_shell`
 (grep sobre `crates/engine/src` por `Command::new("git")` fuera de `git.rs`,
-rojo por la pareja sincrónica); `cli/src/interrupt.rs` (unit):
+rojo entonces por la pareja sincrónica); `cli/src/interrupt.rs` (unit):
 `a_fired_interrupt_cancels_the_contexts_token` (una fuente falsa, disparada,
 y `ctx.cancellation().is_cancelled()`); `cli/tests/run_flow.rs`:
 `an_interrupt_while_the_worktree_is_being_prepared_kills_the_git_and_frees_the_lock`

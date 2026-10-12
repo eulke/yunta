@@ -55,12 +55,12 @@ pub async fn graph(
                 verdict::layer_conflicts(&ctx.cwd)?,
                 verdict::Reach::Workflow,
             )
-            .await;
+            .await?;
             verdict.warn();
             let outcome = match verdict.passes() {
                 true => Outcome::Success,
                 false => {
-                    crate::error::note(verdict.refusal(&ctx).await);
+                    crate::error::note(verdict.refusal(&ctx).await?);
                     Outcome::Reported
                 }
             };

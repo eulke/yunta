@@ -132,7 +132,7 @@ impl Inbox {
             .map(|runs| runs.into_iter().map(|run| run.run_id).collect())?;
         let here = match all || run_ids.is_empty() {
             true => None,
-            false => Here::of(ctx).await,
+            false => Here::of(ctx).await?,
         };
         let now = ctx.clock.now();
         let mut inbox = Inbox {
@@ -199,18 +199,28 @@ struct Here {
 
 impl Here {
     /// The repository `ctx.cwd` is in, or `None` outside one — where every
-    /// run is listed, since there is no project to narrow to.
-    async fn of(ctx: &Context) -> Option<Self> {
-        let git_common_dir = yunta_engine::git::common_dir(&ctx.cwd, ctx.supervision())
-            .await
-            .ok()?;
-        let branches = yunta_engine::git::run_branches(&ctx.cwd, ctx.supervision())
-            .await
-            .unwrap_or_default();
-        Some(Here {
+    /// run is listed, since there is no project to narrow to. Only git's own
+    /// non-zero exit says so: a cancelled or unstartable git is an error.
+    async fn of(ctx: &Context) -> Result<Option<Self>, CliError> {
+        let common = yunta_engine::git::common_dir(&ctx.cwd, ctx.supervision()).await;
+        let git_common_dir = match common {
+            Ok(dir) => dir,
+            Err(error) if matches!(error.cause, yunta_engine::git::Cause::Exit { .. }) => {
+                return Ok(None);
+            }
+            Err(error) => return Err(yunta_engine::RunError::from(error).into()),
+        };
+        let branches = match yunta_engine::git::run_branches(&ctx.cwd, ctx.supervision()).await {
+            Ok(branches) => branches,
+            Err(error) if matches!(error.cause, yunta_engine::git::Cause::Exit { .. }) => {
+                BTreeSet::new()
+            }
+            Err(error) => return Err(yunta_engine::RunError::from(error).into()),
+        };
+        Ok(Some(Here {
             git_common_dir,
             branches,
-        })
+        }))
     }
 
     /// Whether the run `run_id`, created in the repository whose git

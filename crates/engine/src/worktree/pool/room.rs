@@ -193,7 +193,13 @@ impl CheckoutPool {
         let Some(_lease) = held.await? else {
             return Ok(false);
         };
-        crate::git::output(&build.path, &["clean", "-q", "-ffdX"], supervision).await?;
+        crate::git::change(
+            &build.path,
+            crate::git::Effect::Checkout,
+            &["clean", "-q", "-ffdX"],
+            supervision,
+        )
+        .await?;
         space::emptied(home, build.number, supervision.clock.now());
         Ok(true)
     }

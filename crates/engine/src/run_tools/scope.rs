@@ -58,7 +58,10 @@ impl SessionTools {
             self.host.supervision(&self.stop),
         )
         .await
-        .map_err(|source| RunToolError::Audit { source })
+        .map_err(|source| match source.cancelled() {
+            true => RunToolError::Cancelled,
+            false => RunToolError::Audit { source },
+        })
     }
 
     pub(super) async fn request_scope_expansion(

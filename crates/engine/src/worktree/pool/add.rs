@@ -3,8 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::slot::{self, SLOT};
-use super::{survey, CheckoutPool, Fresh, Lease, Located};
+use super::slot::{self, clearable, SLOT};
+use super::{CheckoutPool, Fresh, Lease, Located};
+use crate::git::{self, MutationLock};
 use crate::lock::Contention;
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
@@ -21,13 +22,7 @@ impl CheckoutPool {
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         let Located { home, common_dir } = self.located(supervision).await?;
         let home = home.clone();
-        tokio::fs::create_dir_all(&home)
-            .await
-            .map_err(|source| WorktreeError::Io {
-                action: "create the project's checkouts directory".to_string(),
-                path: home.clone(),
-                source,
-            })?;
+        create_home(&home).await?;
         let mut number = 0;
         loop {
             number += 1;
@@ -48,10 +43,16 @@ impl CheckoutPool {
             if tokio::fs::try_exists(&path).await.unwrap_or(false) {
                 // Added by another process since the survey, or left half
                 // added by one that crashed.
-                if survey::look(&path, supervision).await.is_some() {
-                    continue;
+                match git::tree_state(&path, &[], supervision).await {
+                    Ok(_) => continue, // another process added it after the survey
+                    Err(error) if error.cancelled() => return Err(error.into()),
+                    // Cleared only when no unit keeps it and its `.git` is
+                    // missing or names an admin directory that is gone.
+                    Err(_) if clearable(&home, number, &path).await => {
+                        slot::clear(repo, &path, supervision).await?
+                    }
+                    Err(error) => return Err(error.into()),
                 }
-                slot::clear(repo, &path, supervision).await?;
             }
             make(repo, common_dir, &path, fresh, supervision).await?;
             // A checkout just added holds its source and no build.
@@ -62,10 +63,22 @@ impl CheckoutPool {
     }
 }
 
+/// Creates the pool's directory at `home`, where its checkouts are added.
+async fn create_home(home: &Path) -> Result<(), WorktreeError> {
+    tokio::fs::create_dir_all(home)
+        .await
+        .map_err(|source| WorktreeError::Io {
+            action: "create the project's checkouts directory".to_string(),
+            path: home.to_path_buf(),
+            source,
+        })
+}
+
 /// Makes the checkout of `repo` at `path` that `fresh` says, every other
 /// change to the project's checkouts — whose common git directory is
-/// `common_dir` — held off while it is added. One cut on a new branch
-/// that is stopped half way leaves neither the checkout nor the branch.
+/// `common_dir` — held off while it is added, and while a cut stopped half
+/// way is undone. One cut on a new branch that is stopped half way leaves
+/// neither the checkout nor the branch.
 async fn make(
     repo: &Path,
     common_dir: &Path,
@@ -73,30 +86,34 @@ async fn make(
     fresh: Fresh<'_>,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
+    let held = git::mutation_lock(common_dir, supervision)
+        .await
+        .map_err(WorktreeError::Lock)?;
     match fresh {
         Fresh::Cut { branch, base } => {
             let cut = ["-b", branch, base.as_str()];
-            match add(repo, common_dir, path, &cut, supervision).await {
+            match add(repo, &held, path, &cut, supervision).await {
                 Err(stopped) if stopped.cancelled() => {
-                    crate::worktree::undo_half_added(repo, path, branch, supervision).await;
+                    crate::worktree::undo_half_added(&held, repo, path, branch, supervision).await;
                     Err(stopped)
                 }
                 added => added,
             }
         }
-        Fresh::On { branch } => add(repo, common_dir, path, &[branch], supervision).await,
+        Fresh::On { branch } => add(repo, &held, path, &[branch], supervision).await,
         Fresh::Detached { base } => {
             let detached = ["--detach", base.as_str()];
-            add(repo, common_dir, path, &detached, supervision).await
+            add(repo, &held, path, &detached, supervision).await
         }
     }
 }
 
 /// Adds a checkout of `repo` at `checkout`, on what `on` names: a branch,
-/// or `--detach` and a commit.
+/// or `--detach` and a commit. `held` is the mutation lock the caller takes
+/// for it.
 async fn add(
     repo: &Path,
-    common_dir: &Path,
+    held: &MutationLock,
     checkout: &Path,
     on: &[&str],
     supervision: Supervision<'_>,
@@ -110,11 +127,9 @@ async fn add(
                 source,
             })?;
     }
-    let _mutation_lock =
-        crate::worktree::lock_worktree_mutations(common_dir, supervision.clock).await?;
     let path = checkout.display().to_string();
     let mut args = vec!["worktree", "add", path.as_str()];
     args.extend_from_slice(on);
-    crate::worktree::run_git(repo, &args, supervision).await?;
+    git::change_held(held, repo, &args, supervision).await?;
     Ok(())
 }

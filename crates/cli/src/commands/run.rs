@@ -297,7 +297,7 @@ async fn context_files(
         manifest.isolation,
         &manifest.base_commit,
     )
-    .await;
+    .await?;
     if !found.errors.is_empty() {
         return Err(CliError::msg(yunta_core::text::problems(
             "the workflow fails `yunta check`",

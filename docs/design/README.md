@@ -7,6 +7,7 @@ the current behavior and intended contract before changing either.
 | Area | Reference |
 |---|---|
 | Run behavior and replay | [Run contract](contrato-del-run.md), [event specification](spec-events.md) |
+| Git calls and checkout locks | [Git owner decision](adr/D257-git-has-one-owner-and-each-call-names-its-answer-its-lock-and-its-failure.md) |
 | Adapters and tasks | [Adapter specification](spec-adapter.md), [task specification](spec-tasks.md) |
 | Configuration examples | [Schema reference](referencia-schema.md) |
 | Terms | [Glossary](glosario.md) |

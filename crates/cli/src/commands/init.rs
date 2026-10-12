@@ -22,32 +22,41 @@ use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
-async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> String {
-    // Both probes are best-effort: a git that can't answer (no remote
-    // HEAD, detached head, no repo) falls through to the next, then to
-    // the conventional default.
-    if let Ok(raw) = yunta_engine::git::output(
+/// The base branch a project starts from: the remote's default, else the
+/// branch checked out here, else `main`. Only git's "no remote HEAD" answer
+/// falls through to the next probe. Any other failure stops `init`, since a
+/// base read from a git that never answered would be written as if found.
+async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> Result<String, CliError> {
+    // `-q` makes git exit 1, silently, when there is no remote HEAD to read.
+    let remote = yunta_engine::git::read(
         repo,
-        &["symbolic-ref", "refs/remotes/origin/HEAD"],
+        &["symbolic-ref", "-q", "refs/remotes/origin/HEAD"],
         supervision,
     )
-    .await
-    {
-        if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
-            if !branch.is_empty() {
-                return branch.to_string();
+    .await;
+    match remote {
+        Ok(raw) => {
+            if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
+                if !branch.is_empty() {
+                    return Ok(branch.to_string());
+                }
             }
         }
+        Err(error)
+            if matches!(
+                error.cause,
+                yunta_engine::git::Cause::Exit { code: Some(1), .. }
+            ) => {}
+        Err(error) => return Err(yunta_engine::RunError::from(error).into()),
     }
-    if let Ok(name) =
-        yunta_engine::git::output(repo, &["branch", "--show-current"], supervision).await
-    {
-        let name = name.trim();
-        if !name.is_empty() {
-            return name.to_string();
-        }
+    let current = yunta_engine::git::read(repo, &["branch", "--show-current"], supervision)
+        .await
+        .map_err(|error| CliError::from(yunta_engine::RunError::from(error)))?;
+    let name = current.trim();
+    if name.is_empty() {
+        return Ok("main".to_string());
     }
-    "main".to_string()
+    Ok(name.to_string())
 }
 
 fn render_config_yaml(
@@ -278,8 +287,8 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "workflow-project".to_string());
-    let default_branch = detect_base_branch(&repo, supervision).await;
-    let detected = crate::detect::Detected::in_repo(&repo, supervision).await;
+    let default_branch = detect_base_branch(&repo, supervision).await?;
+    let detected = crate::detect::Detected::in_repo(&repo, supervision).await?;
 
     let (project_name, base_branch) = match &console {
         Some(console) => {

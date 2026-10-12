@@ -168,7 +168,7 @@ pub(super) async fn integrate_batch(
             // Handled by the early return above.
             TaskOutcome::Interrupted => None,
         };
-        ctx.pool.give_back(lease, ctx.supervision(cancel)).await;
+        ctx.pool.give_back(lease, ctx.supervision(cancel)).await?;
         // A task a departure blocks is reopened by its answer, never by
         // the answer to a scope request its done work also made.
         let was_blocked = blocked_cause

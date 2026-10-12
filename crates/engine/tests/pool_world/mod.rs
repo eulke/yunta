@@ -9,8 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_core::{CommitSha, RunId};
-use yunta_engine::{CheckoutPool, Unit, UnitHome, UnitId};
+use yunta_core::{Clock, CommitSha, Pid, RunId};
+use yunta_engine::{CheckoutPool, EngineProcessFile, Unit, UnitHome, UnitId};
 use yunta_testkit::{git, git_output, init_repo, Owner};
 
 pub const RUN: &str = "01JPOOLEDCHECKOUTS0000000A";
@@ -125,7 +125,10 @@ impl World {
     /// Gives back `unit`'s checkout, done with it, and waits until the pool
     /// recorded the build it leaves.
     pub async fn give_back(&self, unit: &Unit, lease: yunta_engine::Lease) {
-        self.pool.give_back(lease, self.owner.supervision()).await;
+        self.pool
+            .give_back(lease, self.owner.supervision())
+            .await
+            .expect("the checkout is given back");
         self.wait_for_build(unit).await;
     }
 
@@ -137,7 +140,10 @@ impl World {
             clock: &clock,
             ..self.owner.supervision()
         };
-        self.pool.give_back(lease, supervision).await;
+        self.pool
+            .give_back(lease, supervision)
+            .await
+            .expect("the checkout is given back");
         self.wait_for_build(unit).await;
     }
 
@@ -161,6 +167,24 @@ impl World {
         let home = self.pool.home(self.owner.supervision()).await.unwrap();
         checkouts_in(&home)
     }
+}
+
+/// Writes the registry a crashed engine leaves in `run_dir`: the engine
+/// `engine` is named as the one that ran the work, and `group` as one of
+/// the process groups its agents run in.
+pub fn register_group(run_dir: &Path, engine: u32, group: u32) {
+    let file = EngineProcessFile {
+        schema_version: 1,
+        engine_pid: Pid::try_from(engine).unwrap(),
+        started_at: yunta_testkit_core::FixedClock.now(),
+        process_groups: vec![Pid::try_from(group).unwrap()],
+        asking: None,
+    };
+    std::fs::create_dir_all(run_dir.join(yunta_engine::run_dir::SCRATCH_DIR)).unwrap();
+    let bytes = yunta_core::persisted::PersistedDoc::of(file)
+        .write()
+        .unwrap();
+    std::fs::write(yunta_engine::registry_path(run_dir), bytes).unwrap();
 }
 
 /// Commits a `.gitignore` that ignores `target/` in `repo`.

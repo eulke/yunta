@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use yunta_core::CommitSha;
 use yunta_engine::process::Supervision;
+use yunta_engine::GitError;
 
 use crate::error::warn;
 use yunta_core::durable::{self, Durability};
@@ -15,8 +16,8 @@ use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
-    #[error("{}", yunta_core::text::detailed(format!("git {args}"), .detail))]
-    Git { args: String, detail: String },
+    #[error(transparent)]
+    Git(GitError),
     #[error("failed to read `{path}`: {source}")]
     Read {
         path: PathBuf,
@@ -92,16 +93,10 @@ async fn run_git(
     args: &[&str],
     supervision: Supervision<'_>,
 ) -> Result<String, PackError> {
-    yunta_engine::git::output(cwd, args, supervision)
+    yunta_engine::git::read(cwd, args, supervision)
         .await
         .map(|stdout| stdout.trim().to_string())
-        .map_err(|e| {
-            let detail = e.detail();
-            PackError::Git {
-                args: e.args,
-                detail,
-            }
-        })
+        .map_err(PackError::Git)
 }
 
 /// Clones `url` into `dest` (a fresh, empty directory), checking out

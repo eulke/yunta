@@ -195,6 +195,7 @@ async fn a_finished_command_reports_its_status_and_both_streams() {
         status,
         stdout,
         stderr,
+        drain: _,
     } = outcome
     else {
         panic!("expected an exit, got {outcome:?}");
@@ -225,6 +226,7 @@ async fn a_finished_shell_does_not_leave_a_descendant_holding_its_pipes_open() {
         status,
         stdout,
         stderr,
+        drain: _,
     } = outcome
     else {
         panic!("expected the shell's successful exit, got {outcome:?}");
@@ -298,6 +300,7 @@ async fn large_input_and_both_output_streams_are_drained_concurrently() {
         status,
         stdout,
         stderr,
+        drain: _,
     } = outcome
     else {
         panic!("expected a successful exit, got {outcome:?}");
@@ -423,7 +426,7 @@ async fn a_cancelled_run_kills_the_git_it_spawned() {
         trigger.cancel();
     });
 
-    let error = yunta_engine::git::output(dir.path(), &["status"], supervision)
+    let error = yunta_engine::git::read(dir.path(), &["status"], supervision)
         .await
         .expect_err("a cancelled git never answers");
     killer.await.unwrap();

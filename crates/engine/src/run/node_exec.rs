@@ -106,7 +106,7 @@ pub(super) async fn execute_node(
     let (unit, lease, continuing) = node_unit(ctx, node, attempt).await?;
     let in_unit = ctx.in_unit(&unit, continuing.as_ref());
     let ended = Box::pin(execute_in_its_tree(&in_unit, node, attempt, cancel)).await;
-    ctx.pool.give_back(lease, ctx.supervision(cancel)).await;
+    ctx.pool.give_back(lease, ctx.supervision(cancel)).await?;
     ended
 }
 
