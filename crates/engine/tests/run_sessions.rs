@@ -10,6 +10,7 @@ use yunta_core::events::{
     SessionEvent,
 };
 use yunta_core::port::{Policy, PolicyApplied};
+use yunta_core::Capabilities;
 
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
@@ -24,6 +25,7 @@ fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
 async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() {
     let bench = Bench::new();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -52,6 +54,7 @@ sessions:
 async fn agent_messages_are_bounded_summaries_that_never_carry_note_content() {
     let bench = Bench::new();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - steps:
       - { type: note, text: "thinking about SECRET-TOKEN-123 carefully" }
@@ -115,7 +118,7 @@ async fn resolved_skills_reach_the_session_request_always_first() {
     install_skill(&bench.worktree, "conventions");
     install_skill(&bench.worktree, "grill");
     let fixture = r#"
-capabilities: { skills: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -142,7 +145,7 @@ async fn a_missing_skill_name_fails_the_node_with_where_it_looked() {
     install_skill(&bench.worktree, "conventions");
     // `grill` is never installed.
     let fixture = r#"
-capabilities: { skills: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
@@ -171,11 +174,17 @@ sessions:
 
 #[tokio::test]
 async fn an_adapter_without_the_skills_capability_degrades_with_an_event() {
-    let bench = Bench::new();
+    // Only skills are absent. Run tools stay declared: a session's hook
+    // reaches the engine through the run's listener, and without one the
+    // session opens nothing.
+    let bench = Bench::new().with_capabilities(Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     install_skill(&bench.worktree, "conventions");
     install_skill(&bench.worktree, "grill");
-    // Default capabilities: `skills: false`.
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -286,6 +295,7 @@ on_finish:
     );
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{artifacts}/plan.md", content: "plan\n" }}
@@ -377,6 +387,7 @@ nodes:
     prompt: "Use what the team learned."
 "#;
     let second_fixture = r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "DISTILLED-MARKER"
     outcome: { type: completed, summary: "informed" }
@@ -416,6 +427,7 @@ runners:
     // directory of its own.
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Audit as reviewer;"
     effects:
@@ -482,7 +494,7 @@ runners:
     - { adapter: mock, model: mock-model }
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Audit as reviewer and"
     steps:
@@ -557,7 +569,7 @@ runners:
     - { adapter: mock, model: mock-model, agent: benito }
 "#;
     let fixture = r#"
-capabilities: { custom_agents: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "audited" }
 "#;
@@ -593,6 +605,7 @@ runners:
     - { adapter: mock, model: mock-model, effort: medium }
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "thought" }
   - outcome: { type: completed, summary: "done" }
@@ -627,7 +640,8 @@ sessions:
 async fn an_agent_without_a_definition_fails_its_node_before_any_session() {
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: audit, kind: prompt, runner: executor, agent: nobody, prompt: \"Audit.\" }\n";
-    let fixture = "capabilities: { custom_agents: true }\nsessions:\n  - outcome: { type: completed, summary: done }\n";
+    let fixture =
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n";
 
     let RunReport { terminal, state } = bench.run(workflow, fixture).await;
 
@@ -684,13 +698,13 @@ nodes:
 
     let mut fixture = plan_session(&tasks);
     for n in 1..=4 {
-        let request_yaml = format!(
-            "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"
-        );
         fixture.push_str(&format!(
-            "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: a{n}.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-{n} }}\n",
-            yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-            request_yaml,
+            "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: a{n}.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-{n} }}\n",
+            request_step(serde_json::json!({
+                "paths": [format!("extra-{n}.txt")],
+                "reason": "needs the extra file",
+                "proposed_criterion": { "cmd": format!("test -f extra-{n}.txt") },
+            })),
         ));
     }
 
@@ -748,7 +762,7 @@ nodes:
     // wake: a node_finished with no node_started — exactly the class of
     // inconsistency `derive` refuses to guess over.
     let result = bench
-        .try_run_sabotaged(workflow, "sessions: []\n", |_| {
+        .try_run_sabotaged(workflow, "dialect: claude-code\nsessions: []\n", |_| {
             bench
                 .storage
                 .append(
@@ -798,7 +812,7 @@ nodes:
 #[tokio::test]
 async fn an_orphaned_prompt_with_resume_session_continues_the_same_session() {
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "picked up where it left off" }
 "#;
@@ -807,6 +821,7 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: &[],
+        capabilities: None,
     })
     .await;
 
@@ -828,6 +843,7 @@ sessions:
 #[tokio::test]
 async fn resume_session_without_the_capability_degrades_to_restart_with_an_event() {
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
@@ -836,6 +852,10 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: &[],
+        capabilities: Some(yunta_core::Capabilities {
+            run_tools: true,
+            ..Default::default()
+        }),
     })
     .await;
 
@@ -854,7 +874,7 @@ sessions:
 #[tokio::test]
 async fn resume_session_with_no_recorded_session_restarts_with_an_event() {
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
@@ -863,6 +883,7 @@ sessions:
         fixture,
         session: None,
         staged: &[],
+        capabilities: None,
     })
     .await;
 
@@ -881,7 +902,7 @@ sessions:
 #[tokio::test]
 async fn a_clean_first_run_under_resume_session_spawns_normally_without_events() {
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "first run" }
 "#;
@@ -922,7 +943,7 @@ async fn a_continued_session_keeps_the_artifact_it_had_already_written() {
     // file is work it did. It does not write it again, and the node
     // closes on it.
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "finished what it had started" }
 "#;
@@ -931,6 +952,7 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+        capabilities: None,
     })
     .await;
 
@@ -967,6 +989,7 @@ async fn a_fresh_session_replacing_an_interrupted_one_opens_on_an_empty_staging(
     // what the one before it left is not its work, and the node owes an
     // artifact it never produced.
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "started over" }
 "#;
@@ -975,6 +998,10 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+        capabilities: Some(yunta_core::Capabilities {
+            run_tools: true,
+            ..Default::default()
+        }),
     })
     .await;
 
@@ -1012,9 +1039,13 @@ async fn network_false_is_reported_as_declarative_only() {
     // On an adapter that declares no network isolation, `network: false` is
     // a declared policy it cannot keep. The engine records the gap before
     // the session with a `capability_degraded`, never consolidating it into
-    // silence.
-    let bench = Bench::new();
+    // silence. Run tools stay declared, as the session's hook needs them.
+    let bench = Bench::new().with_capabilities(Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -1045,7 +1076,7 @@ sessions:
 async fn network_false_closes_the_network_of_the_session_s_commands() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { network_isolation: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -1072,6 +1103,7 @@ async fn a_node_that_declares_no_network_policy_records_no_isolation_degradation
     // there is nothing to degrade.
     let bench = Bench::new();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -1096,7 +1128,7 @@ async fn an_adapter_that_isolates_the_network_records_no_degradation() {
     // nothing — the policy is applied, not degraded.
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { network_isolation: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -1186,6 +1218,7 @@ nodes:
     let staging = bench.staging("plan");
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "{staging}/plan.md"
     effects:
@@ -1312,7 +1345,8 @@ async fn a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_cl
         .expect("the task session's brief");
     assert!(brief.contains("Your task: `task-1` — Write a1."), "{brief}");
     assert!(
-        brief.contains("`yunta_task`") && brief.contains("`yunta_check_task`"),
+        brief.contains("`mcp__yunta-run__yunta_task`")
+            && brief.contains("`mcp__yunta-run__yunta_check_task`"),
         "the brief says where the task is read and how the work is judged: {brief}"
     );
     assert!(
@@ -1375,7 +1409,7 @@ async fn a_plan_refused_for_a_criterion_that_cannot_run_is_fixed_in_its_own_sess
         )
     };
     let fixture = format!(
-        "capabilities: {{ run_tools: true }}\nsessions:\n  - steps:\n\
+        "dialect: claude-code\nsessions:\n  - steps:\n\
          \x20     - {{ type: run_tool, tool: yunta_submit_tasks, expect: refused, arguments: {{ document: {} }} }}\n\
          \x20     - {{ type: run_tool, tool: yunta_submit_tasks, arguments: {{ document: {} }} }}\n\
          \x20   outcome: {{ type: completed, summary: planned }}\n\
@@ -1411,7 +1445,7 @@ async fn a_plan_refused_for_a_criterion_that_cannot_run_is_fixed_in_its_own_sess
 /// task asks, and a session working blind is what the refusal prevents.
 #[tokio::test]
 async fn a_loop_on_a_runner_without_run_tools_fails_before_any_session_opens() {
-    let bench = Bench::new();
+    let bench = Bench::new().with_capabilities(Capabilities::default());
     let workflow = r#"
 name: no-tools
 nodes:
@@ -1427,7 +1461,9 @@ nodes:
     until: all_tasks_complete
     prompt: "Implement your task."
 "#;
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("the loop is refused, and the run waits on it: {terminal:?}");
@@ -1487,7 +1523,7 @@ nodes:
     answer_parked(&bench, "retry").await.unwrap();
     let RunReport { terminal, state: _ } = bench
         .wake_on_fixture(
-            "capabilities: { run_tools: true }\nsessions:\n  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+            "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
         )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -1546,6 +1582,7 @@ nodes:
     prompt: "Read the thing."
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "scoped" }
   - outcome: { type: completed, summary: "reading" }
@@ -1622,7 +1659,7 @@ async fn a_node_whose_session_died_fails_naming_the_adapter_and_the_exit() {
     let RunReport { terminal, state } = bench
         .run(
             SESSION_EVENTS_WORKFLOW,
-            "sessions:\n  - outcome: { type: crash }\n",
+            "dialect: claude-code\nsessions:\n  - outcome: { type: crash }\n",
         )
         .await;
     assert!(
@@ -1670,7 +1707,7 @@ async fn a_session_that_finished_its_turn_is_never_asked_how_it_exited() {
     let RunReport { terminal, state: _ } = bench
         .run(
             SESSION_EVENTS_WORKFLOW,
-            "sessions:\n  - outcome: { type: completed, summary: \"done\" }\n",
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: \"done\" }\n",
         )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -1708,7 +1745,7 @@ nodes:
 "#;
 
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []", &config)
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []", &config)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -1737,6 +1774,7 @@ nodes:
     prompt: "Read."
 "#;
     let fixture = "\
+dialect: claude-code
 sessions:
   - match_prompt_contains: \"Write.\"
     outcome: { type: completed, summary: wrote }

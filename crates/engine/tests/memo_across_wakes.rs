@@ -27,7 +27,7 @@ nodes:
 "#;
 
 const MAKES_IT: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: made.txt, content: made }

@@ -36,7 +36,7 @@ const WORKFLOWS: &str = concat!(
 /// worktree. `grill` asks nothing, so the case runs to its end with
 /// nobody to answer.
 const FIXTURE: &str = r##"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

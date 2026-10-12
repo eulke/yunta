@@ -22,12 +22,13 @@
 
 mod claude_code;
 mod codex;
+mod dialect;
 pub mod failure;
 mod forge;
 mod mock;
+mod mount;
 mod reach;
 mod session;
-mod skills;
 
 pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
 pub use codex::{CodexAdapter, ID as CODEX_ID};

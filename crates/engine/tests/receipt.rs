@@ -295,7 +295,7 @@ nodes:
 /// session names no path at all; every other session's `path` is
 /// relative to the worktree, which is a session's own cwd.
 const FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Write the tasks document"
     steps:
@@ -403,7 +403,7 @@ nodes:
     run: "false"
 "#;
     let RunReport { .. } = bench
-        .run_with_config(workflow, "sessions: []\n", CONFIG)
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", CONFIG)
         .await;
 
     let manifest = bench.manifest();

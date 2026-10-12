@@ -24,6 +24,14 @@
 # - streams the JSON lines from $CODEX_STUB_LINES_FILE if set, else from
 #   .codex-stub-lines.jsonl relative to the working directory.
 # - (if $CODEX_STUB_HANG is set) ignores SIGINT and blocks afterwards.
+# - (if $CODEX_STUB_LINGER is set) blocks until interrupted, then exits —
+#   a session that honours SIGINT.
+
+# How SIGINT is met is settled before anything else, so a test that waits
+# for the grandchild's pid interrupts a stub that already meets it so.
+if [ -n "$CODEX_STUB_LINGER" ]; then
+  trap 'exit 0' INT
+fi
 
 if [ -n "$CODEX_STUB_ARGS_FILE" ]; then
   printf '%s\n' "$@" > "$CODEX_STUB_ARGS_FILE"
@@ -38,7 +46,7 @@ if [ -n "$CODEX_STUB_STDIN_FILE" ]; then
 fi
 
 if [ "$1" = "--version" ]; then
-  echo "codex-cli 0.47.0"
+  echo "codex-cli 0.157.0"
   exit 0
 fi
 
@@ -87,6 +95,10 @@ fi
 if [ -n "$CODEX_STUB_HANG" ]; then
   trap '' INT
   tail -f /dev/null
+fi
+
+if [ -n "$CODEX_STUB_LINGER" ]; then
+  while :; do sleep 1; done
 fi
 
 exit "${CODEX_STUB_EXIT:-0}"

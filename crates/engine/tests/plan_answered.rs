@@ -44,7 +44,7 @@ nodes:
 /// The grill's one question, and a plan whose decision restates its
 /// answer.
 const SESSIONS: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

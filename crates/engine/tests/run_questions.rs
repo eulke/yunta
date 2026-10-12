@@ -73,7 +73,9 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
     let RunReport {
         terminal: resumed_terminal,
         ..
-    } = bench.wake_on_fixture("sessions: []").await;
+    } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []")
+        .await;
 
     assert_eq!(
         resumed_terminal, first_terminal,
@@ -229,7 +231,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         terminal: resumed_terminal,
         state: resumed_state,
     } = bench
-        .wake_on_fixture_answering("sessions: []", &interaction)
+        .wake_on_fixture_answering("dialect: claude-code\nsessions: []", &interaction)
         .await;
 
     assert_eq!(resumed_terminal, RunTerminal::Finished);

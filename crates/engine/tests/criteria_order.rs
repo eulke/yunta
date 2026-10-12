@@ -48,8 +48,7 @@ nodes:
 fn plans_then_hangs() -> String {
     format!(
         "\
-capabilities:
-  run_tools: true
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -94,8 +93,7 @@ sessions:
 /// What the resumed run's one session does: the work the second task's
 /// criteria are about.
 const FINISHES_THE_SECOND_TASK: &str = "\
-capabilities:
-  run_tools: true
+dialect: claude-code
 sessions:
   - effects:
       - path: world.txt

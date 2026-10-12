@@ -31,7 +31,7 @@ async fn a_project_command_runs_as_written() {
     let RunReport { terminal, .. } = bench
         .run_with_config(
             "name: w\nnodes:\n  - { id: make, kind: bash, run: { command: stamp } }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config("commands:\n  stamp: \"printf '%s' '{{run.branch}}' > stamp.txt\"\n"),
         )
         .await;
@@ -50,7 +50,7 @@ async fn a_hook_runs_a_project_command() {
     let RunReport { terminal, .. } = bench
         .run_with_config(
             workflow,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config("commands:\n  note: \"echo noted > noted.txt\"\n"),
         )
         .await;
@@ -76,7 +76,7 @@ async fn a_command_the_frozen_config_lacks_fails_unset_and_not_retryably() {
     let RunReport { terminal, .. } = bench
         .run_with_config(
             "name: w\nnodes:\n  - { id: lint, kind: bash, run: { command: lint } }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config(""),
         )
         .await;
@@ -107,7 +107,7 @@ async fn no_reroute_is_spent_on_a_command_the_frozen_config_lacks() {
             "name: w\nnodes:\n  \
              - { id: lint, kind: bash, run: { command: lint }, on_failure: { goto: fix, max_reroutes: 1 } }\n  \
              - { id: fix, kind: bash, run: \"true\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config(""),
         )
         .await;
@@ -136,7 +136,7 @@ async fn permissions_commands_govern_a_project_command() {
     let RunReport { terminal, .. } = bench
         .run_with_config(
             "name: w\nnodes:\n  - { id: clean, kind: bash, run: { command: wipe } }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config(
                 "commands:\n  wipe: \"rm -rf build\"\npermissions:\n  commands:\n    deny: [\"rm -rf*\"]\n",
             ),

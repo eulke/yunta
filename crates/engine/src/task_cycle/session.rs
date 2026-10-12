@@ -77,9 +77,9 @@ pub struct SessionSetup {
     /// listener that fails to bind for such a node fails the node; for
     /// any other node it degrades and the session runs on.
     pub run_tools_required: Option<RunToolsNeed>,
-    /// The hook a CLI runs to ask the engine about one write. `None` in a
-    /// harness with no binary to run; an adapter whose fence needs it
-    /// and does not have it fails the session.
+    /// The hook a CLI runs to ask the engine about one write. `None` leaves
+    /// an adapter whose fence needs a hook without one, and it fails the
+    /// session; a harness whose sessions never run the hook names it anyway.
     pub rail_command: Option<yunta_core::rail::RailCommand>,
     /// The agent this node's sessions work as, resolved from the name the
     /// runner or the node gave.
@@ -145,7 +145,8 @@ impl SessionSetup {
     /// A setup that carries nothing but the run it belongs to, the node
     /// its sessions are of and the runner they run on: no skills, no
     /// settings, no secrets, no per-run tools, no declared files and no
-    /// denied paths.
+    /// denied paths. Its hook is named `yunta`, as a harness names it, and
+    /// no session of a harness runs it.
     ///
     /// The run directory is not among what a bare setup leaves out: a
     /// session writes its working files under it, and a path that names
@@ -167,7 +168,7 @@ impl SessionSetup {
             adapter_settings: serde_json::Map::new(),
             env: yunta_core::port::session::SessionEnv::default(),
             run_tools: None,
-            rail_command: None,
+            rail_command: Some(yunta_core::rail::RailCommand::new(PathBuf::from("yunta"))),
             agent: None,
             cli_config: yunta_core::CliConfig::Inherit,
             network: true,
@@ -320,9 +321,6 @@ pub(super) async fn stream_session(
     // refuses this one — opens fresh on what the caller gave for that, and
     // the log says so; with nothing given, the caller already verified
     // the capability and not resuming is its failure to report.
-    // What the adapter staged for this session is taken back once it
-    // ends, which needs the request the opening consumes.
-    let staging = request.clone();
     let (mut session, continues) = match opening.resume {
         None => (adapter.spawn(request).await?, None),
         Some(resume) => {
@@ -448,7 +446,7 @@ pub(super) async fn stream_session(
         session.allow_exit(INTERRUPT_GRACE_PERIOD).await;
         let _ = session.kill().await;
     }
-    adapter.unstage(&staging)?;
+    session.release().await?;
 
     if cancelled {
         let cancelled = Dispatched {

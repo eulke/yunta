@@ -137,7 +137,7 @@ nodes:
 "#;
 
 const CORRECTED_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -227,7 +227,7 @@ nodes:
 "#;
 
 const ASKING_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -285,7 +285,7 @@ nodes:
 "#;
 
 const REPLANNED_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

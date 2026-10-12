@@ -39,12 +39,7 @@ async fn a_session_s_share_of_the_cap_counts_what_an_open_attempt_reported() {
         task_yaml("T002", "b", "b.txt", "test -f b.txt"),
     );
     // The adapter reports usage, so the run hands its sessions a cap.
-    let planned = plan_session(&tasks).replacen(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, usage_reporting: true }",
-        1,
-    );
-    let fixture = planned + TASK_SESSIONS;
+    let fixture = plan_session(&tasks) + TASK_SESSIONS;
 
     let bench = Bench::new();
     bench

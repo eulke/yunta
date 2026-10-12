@@ -36,7 +36,11 @@ async fn an_unscoped_node_writing_a_denied_path_fails_and_head_never_holds_it() 
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, run: \"mkdir -p .github && echo x > .github/ci.yml && echo y > notes.txt\" }\n";
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []\n", &denying_ci())
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &denying_ci(),
+        )
         .await;
 
     assert!(
@@ -64,7 +68,11 @@ async fn a_failing_node_names_the_denied_paths_its_close_refused() {
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, run: \"mkdir -p .github && echo x > .github/ci.yml; exit 3\" }\n";
     bench
-        .run_with_config(workflow, "sessions: []\n", &denying_ci())
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &denying_ci(),
+        )
         .await;
 
     let failed = failures(&bench.events(), "tidy");
@@ -87,7 +95,11 @@ async fn a_persons_edit_to_a_denied_path_is_committed_as_found() {
         "name: w\nnodes:\n  - { id: check, kind: bash, run: \"test -f .github/ci.yml\" }\n";
     let bench = Bench::new();
     let paused = bench
-        .run_with_config(workflow, "sessions: []\n", &denying_ci())
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &denying_ci(),
+        )
         .await;
     assert!(matches!(paused.terminal, RunTerminal::Paused { .. }));
     write(
@@ -96,7 +108,9 @@ async fn a_persons_edit_to_a_denied_path_is_committed_as_found() {
     );
 
     answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(at_head(&bench).contains(".github/ci.yml"));
@@ -117,7 +131,11 @@ nodes:
       - { id: b, kind: bash, run: "mkdir -p .github && echo b > .github/b.yml" }
 "#;
     bench
-        .run_with_config(workflow, "sessions: []\n", &denying_ci())
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &denying_ci(),
+        )
         .await;
 
     let events = bench.events();

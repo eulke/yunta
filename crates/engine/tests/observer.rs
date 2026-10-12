@@ -28,6 +28,7 @@ nodes:
 "#;
 
 const COMPLETES: &str = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -36,7 +37,7 @@ sessions:
 /// engine's own per-run listener — the append site reached over the wire
 /// rather than from the scheduler's task.
 const POSTS_A_FINDING: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - { type: run_tool, tool: yunta_post_finding, arguments: { id: seen-it, severity: minor, title: "a smell", location: "src/x.rs", detail: "spotted mid-session" } }
@@ -192,7 +193,9 @@ async fn a_child_run_reports_under_its_own_run_id() {
         .with_workflow("child-wf", CHILD)
         .with_observer(recorder.clone());
 
-    let RunReport { terminal, state } = bench.run(PARENT, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench
+        .run(PARENT, "dialect: claude-code\nsessions: []\n")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let frames = recorder.frames();

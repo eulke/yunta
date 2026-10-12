@@ -118,7 +118,7 @@ mcp_servers:
 #[tokio::test]
 async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
     let (url, ct) = start_toy_server().await;
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-MCP-RESPONSE for: MARKER-MCP-QUERY\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-MCP-RESPONSE for: MARKER-MCP-QUERY\"\n    outcome: { type: completed, summary: ok }\n";
 
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
@@ -153,7 +153,9 @@ async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
     // No sessions declared — if the node somehow tried to dispatch a
     // session before failing, the mock would error loudly instead. The
     // config behind `run` declares no `mcp_servers:` at all.
-    let RunReport { terminal, .. } = Bench::new().run(CONTEXT_WORKFLOW, "sessions: []").await;
+    let RunReport { terminal, .. } = Bench::new()
+        .run(CONTEXT_WORKFLOW, "dialect: claude-code\nsessions: []")
+        .await;
     match terminal {
         RunTerminal::Paused {
             reason:
@@ -177,7 +179,12 @@ async fn a_missing_auth_env_var_fails_the_node_before_any_connection_attempt() {
     // The run carries no secrets, so the variable the server names is
     // one nothing can answer with.
     let RunReport { terminal, .. } = Bench::new()
-        .run_with_secrets(CONTEXT_WORKFLOW, "sessions: []", &config, &[])
+        .run_with_secrets(
+            CONTEXT_WORKFLOW,
+            "dialect: claude-code\nsessions: []",
+            &config,
+            &[],
+        )
         .await;
     match terminal {
         RunTerminal::Paused {

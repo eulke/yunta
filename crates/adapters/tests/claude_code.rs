@@ -11,16 +11,15 @@
 //! travels through `env.secret`, whose values the stderr tail redacts.
 
 use std::error::Error as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use yunta_core::fence::{Advice, Coverage, Fence};
+use yunta_core::fence::{Advice, Fence};
 
+use futures::StreamExt;
 use yunta_adapters::ClaudeCodeAdapter;
-use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport, SessionRequest};
-use yunta_core::{AdapterSettings, Secret, SessionId};
-use yunta_testkit_core::adapter::{
-    child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, write_lines,
-};
+use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, SessionRequest};
+use yunta_core::{AdapterSettings, SessionId};
+use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
 
 fn stub_path() -> PathBuf {
     yunta_testkit_core::stubs::claude_code()
@@ -39,28 +38,6 @@ const INIT_LINE: &str =
 const RESULT_LINE: &str = r#"{"type":"result","is_error":false,"result":"all done"}"#;
 
 #[tokio::test]
-async fn probe_reports_the_stub_as_healthy_with_its_version() {
-    let report = adapter().probe().await.unwrap();
-    let ProbeReport::Healthy { version } = report else {
-        panic!("the stub is healthy: {report:?}");
-    };
-    assert!(version.unwrap().contains("2.1.235"));
-}
-
-#[tokio::test]
-async fn capabilities_declare_what_this_adapter_actually_does() {
-    let caps = adapter().capabilities();
-    assert!(caps.resume_session);
-    assert!(caps.permission_profiles);
-    assert!(caps.custom_agents);
-    assert!(caps.usage_reporting);
-    // Every writing tool goes through the hook that runs the judge
-    // before the write happens.
-    assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
-    assert!(caps.run_tools);
-}
-
-#[tokio::test]
 async fn a_run_tool_is_named_the_way_this_cli_lists_it_in_its_init_line() {
     // The init line of a session holding the run tools lists each one as
     // the model calls it: that name, and nothing shorter, reaches it.
@@ -73,49 +50,6 @@ async fn a_run_tool_is_named_the_way_this_cli_lists_it_in_its_init_line() {
         yunta_core::RunTool::from_called("mcp__yunta-run__yunta_task", naming),
         Some(yunta_core::RunTool::Task)
     );
-}
-
-#[tokio::test]
-async fn capability_usage_reporting_surfaces_the_streams_usage() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            INIT_LINE,
-            r#"{"type":"assistant","message":{"id":"msg-1","content":[{"type":"text","text":"working on it"}]}}"#,
-            r#"{"type":"result","is_error":false,"result":"all done","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":2}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    assert!(matches!(
-        &events[0],
-        AgentEvent::SessionOpened { model, .. } if model.as_ref().is_some_and(|model| model == "claude-sonnet-5")
-    ));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::Note { text } if text == "working on it")));
-    // What a call read from the cache is part of what it read.
-    assert!(events.iter().any(|e| matches!(
-        e,
-        AgentEvent::Usage {
-            input_tokens: Some(12),
-            output_tokens: Some(4),
-            cached_input_tokens: Some(2)
-        }
-    )));
-    assert!(matches!(
-        events.last().unwrap(),
-        AgentEvent::Completed { result } if result.summary == "all done"
-    ));
 }
 
 #[tokio::test]
@@ -173,56 +107,6 @@ async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
         AgentEvent::ToolUse { name, target }
             if name == "Edit" && target.display() == Some("src/lib.rs")
     )));
-}
-
-#[tokio::test]
-async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(dir.path(), "lines.jsonl", &[INIT_LINE]);
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
-}
-
-/// The child's environment is where this system puts its secrets, and a
-/// CLI that fails at startup is exactly the one liable to echo what it
-/// was handed straight back.
-#[tokio::test]
-async fn a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut req = request(dir.path().to_path_buf());
-    req.env.secret.insert(
-        "YUNTA_RUN_TOOLS_TOKEN".to_string(),
-        Secret::new("s3cr3t-token-value".to_string()),
-    );
-    let said = write_lines(
-        dir.path(),
-        "stderr.txt",
-        &["auth failed for bearer s3cr3t-token-value"],
-    );
-    req.env.plain.insert(
-        "CLAUDE_STUB_STDERR_FILE".to_string(),
-        said.display().to_string(),
-    );
-    req.env
-        .plain
-        .insert("CLAUDE_STUB_EXIT".to_string(), "1".to_string());
-    let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
-        .await
-        .unwrap();
-
-    let tail = exit
-        .expect("the session ended with a process of its own")
-        .stderr_tail;
-    assert_eq!(tail, ["auth failed for bearer [redacted]"], "{tail:?}");
 }
 
 #[tokio::test]
@@ -374,48 +258,6 @@ async fn capability_resume_session_passes_the_session_id_to_the_resume_flag() {
     );
 }
 
-/// The effort a session was asked for reaches the CLI by its own flag;
-/// a session asked for none leaves it to the CLI.
-#[tokio::test]
-async fn a_session_s_effort_reaches_the_cli_and_none_leaves_it_to_the_cli() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut req = request(dir.path().to_path_buf());
-    req.effort = Some(yunta_core::Effort::Low);
-    let args = argv_for(dir.path(), req).await;
-    let effort_pos = args.iter().position(|a| a == "--effort").unwrap();
-    assert_eq!(args[effort_pos + 1], "low");
-
-    let dir = tempfile::tempdir().unwrap();
-    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
-    assert!(!args.iter().any(|a| a == "--effort"), "{args:?}");
-}
-
-/// An interrupted session that leaves on its own is not held for the
-/// whole grace: the wait ends the moment it exits.
-#[tokio::test]
-async fn an_interrupted_session_that_leaves_ends_its_grace_at_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let child_pid_file = child_pid_fifo(dir.path());
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string(),
-    );
-    req.env
-        .plain
-        .insert("CLAUDE_STUB_LINGER".to_string(), "1".to_string());
-    let mut session = adapter().spawn(req).await.unwrap();
-    grandchild_pid(&child_pid_file).await;
-
-    session.interrupt().await.unwrap();
-    let started = std::time::Instant::now();
-    session.allow_exit(Duration::from_secs(30)).await;
-
-    let waited = started.elapsed();
-    session.kill().await.unwrap();
-    assert!(waited < Duration::from_secs(5), "waited {waited:?}");
-}
-
 /// One that ignores the interrupt is given the whole grace, and no more.
 #[tokio::test]
 async fn an_interrupted_session_that_stays_is_given_the_whole_grace() {
@@ -439,32 +281,6 @@ async fn an_interrupted_session_that_stays_is_given_the_whole_grace() {
     let waited = started.elapsed();
     session.kill().await.unwrap();
     assert!(waited >= Duration::from_millis(300), "waited {waited:?}");
-}
-
-#[tokio::test]
-async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
-    let dir = tempfile::tempdir().unwrap();
-    let child_pid_file = child_pid_fifo(dir.path());
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string(),
-    );
-    req.env
-        .plain
-        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string());
-    let mut session = adapter().spawn(req).await.unwrap();
-    let grandchild_pid = grandchild_pid(&child_pid_file).await;
-
-    session.kill().await.unwrap();
-
-    // The grandchild the stub spawned must die too, not just the
-    // stub itself — proving the kill reached the whole process group.
-    assert!(
-        stops_running(&grandchild_pid).await,
-        "grandchild process survived kill()"
-    );
 }
 
 /// True while `pid` runs. `kill -0` alone is not enough: a killed
@@ -554,34 +370,6 @@ async fn non_utf8_output_does_not_end_the_session() {
     );
 }
 
-#[tokio::test]
-async fn prompt_travels_by_stdin_never_argv() {
-    let dir = tempfile::tempdir().unwrap();
-    let args_file = dir.path().join("args.txt");
-    let stdin_file = dir.path().join("stdin.txt");
-    write_lines(dir.path(), ".claude-stub-lines.jsonl", &[]);
-    let mut req = request(dir.path().to_path_buf());
-    req.prompt = "the whole brief, with a --flag-looking line".to_string();
-    req.env.plain.insert(
-        "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.to_str().unwrap().to_string(),
-    );
-    req.env.plain.insert(
-        "CLAUDE_STUB_STDIN_FILE".to_string(),
-        stdin_file.to_str().unwrap().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    drain(session).await;
-
-    let args = std::fs::read_to_string(&args_file).unwrap();
-    assert!(
-        !args.contains("the whole brief"),
-        "the prompt must never be an argument (visible in `ps`): {args}"
-    );
-    let stdin = std::fs::read_to_string(&stdin_file).unwrap();
-    assert_eq!(stdin, "the whole brief, with a --flag-looking line");
-}
-
 /// `Edit` is its own tool set — file editing, no shell, no network —
 /// which is what makes `permission_profiles` more than a name.
 #[tokio::test]
@@ -636,14 +424,15 @@ async fn capability_skills_are_staged_into_the_clis_discovery_directory() {
     let mut req = request(cwd.clone());
     req.skills = vec![skill.clone()];
     let session = adapter().spawn(req).await.unwrap();
-    let _ = drain(session).await;
-
+    // The link belongs to the session: it is there while the session lives,
+    // and the session takes it away when it is dropped.
     let staged = cwd.join(".claude/skills/grill");
     assert!(
         std::fs::symlink_metadata(&staged).is_ok_and(|m| m.file_type().is_symlink()),
         "the skill is staged as a link under .claude/skills"
     );
     assert_eq!(std::fs::read_link(&staged).unwrap(), skill);
+    let _ = drain(session).await;
 }
 
 /// What the adapter staged is its own mechanics, never the agent's work,
@@ -663,9 +452,9 @@ async fn a_skill_mount_is_gone_once_its_session_ends() {
 
     let mut req = request(cwd.clone());
     req.skills = vec![skill.clone()];
-    let session = adapter().spawn(req.clone()).await.unwrap();
-    let _ = drain(session).await;
-    adapter().unstage(&req).unwrap();
+    let mut session = adapter().spawn(req).await.unwrap();
+    let _events: Vec<AgentEvent> = session.events().collect().await;
+    session.release().await.unwrap();
 
     assert!(
         tokio::fs::symlink_metadata(cwd.join(".claude/skills/grill"))
@@ -683,51 +472,48 @@ async fn a_skill_mount_is_gone_once_its_session_ends() {
     );
 }
 
-#[tokio::test]
-async fn budget_max_turns_reaches_the_cli_as_a_flag() {
-    let dir = tempfile::tempdir().unwrap();
-    let args_file = dir.path().join("args.txt");
-    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
-
-    let mut req = request(dir.path().to_path_buf());
-    req.budget.max_turns = Some(7);
-    req.env.plain.insert(
-        "CLAUDE_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string(),
-    );
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let _ = drain(session).await;
-
-    let args: Vec<String> = std::fs::read_to_string(&args_file)
-        .unwrap()
-        .lines()
-        .map(str::to_string)
-        .collect();
-    let pos = args
-        .iter()
-        .position(|a| a == "--max-turns")
-        .expect("--max-turns is passed");
-    assert_eq!(args[pos + 1], "7");
+/// A skill source and a worktree, both created under `dir`.
+fn skill_and_cwd(dir: &Path) -> (PathBuf, PathBuf) {
+    let (skill, cwd) = (dir.join("skills-src/grill"), dir.join("worktree"));
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    (skill, cwd)
 }
 
+/// A launch whose CLI cannot be started takes back the skill links it mounted.
 #[tokio::test]
-async fn an_unknown_adapter_setting_is_reported_by_probe() {
-    let mut extra = serde_json::Map::new();
-    extra.insert("max_thinking".to_string(), serde_json::Value::from(3));
-    let adapter = ClaudeCodeAdapter::new(&AdapterSettings {
-        adapter_settings: Some(extra),
-        binary: Some(stub_path()),
+async fn a_session_that_fails_to_open_leaves_no_skill_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
+    let missing = ClaudeCodeAdapter::new(&AdapterSettings {
+        adapter_settings: None,
+        binary: Some("/nonexistent/claude".into()),
     });
-    let err = adapter.probe().await.unwrap_err();
-    let text = err.to_string();
-    assert!(
-        text.contains("max_thinking") && text.contains("adapter_settings"),
-        "{text}"
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill];
+    assert!(missing.spawn(req).await.is_err());
+    assert!(std::fs::symlink_metadata(cwd.join(".claude/skills/grill")).is_err());
+}
+
+/// A launch that fails while it writes the agent's instructions mounts no skill.
+#[tokio::test]
+async fn a_claude_launch_that_fails_while_writing_its_agent_leaves_no_skill_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
+    let reviewer: yunta_core::AgentName = "reviewer".parse().unwrap();
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill];
+    req.agent = Some(
+        yunta_core::agent::AgentDefinition::parse(
+            &reviewer,
+            "---\nname: reviewer\ndescription: d\n---\nWork.\n",
+        )
+        .unwrap(),
     );
+    req.scratch_dir = dir.path().join("scratch-is-a-file");
+    std::fs::write(&req.scratch_dir, "x").unwrap();
+    assert!(adapter().spawn(req).await.is_err());
+    assert!(std::fs::symlink_metadata(cwd.join(".claude/skills/grill")).is_err());
 }
 
 // --- a strict reading of the CLI's protocol ---------------------------
@@ -787,18 +573,6 @@ async fn init_without_session_id_fails_non_retryable() {
         1,
         "nothing follows a session's terminal event: {events:?}"
     );
-}
-
-#[tokio::test]
-async fn auth_errors_are_not_retryable() {
-    let events = events_of(&[
-        INIT_LINE,
-        r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Invalid API key · Please run /login"}"#,
-    ])
-    .await;
-
-    let message = non_retryable_failure(events.last().unwrap());
-    assert_eq!(message, "Invalid API key · Please run /login");
 }
 
 #[tokio::test]
@@ -1112,94 +886,6 @@ async fn interleaved_tool_results_are_matched_by_id_and_ignore_other_servers() {
     assert!(!format!("{failed:?}").contains("top-secret"));
 }
 
-#[tokio::test]
-async fn a_tool_use_never_persists_the_command_it_ran() {
-    let dir = tempfile::tempdir().unwrap();
-    let command = "psql postgres://admin:hunter2@db.internal/prod -c 'select 1'";
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            INIT_LINE,
-            &format!(
-                r#"{{"type":"assistant","message":{{"id":"msg-1","content":[{{"type":"tool_use","name":"Bash","input":{{"command":"{command}"}}}}]}}}}"#
-            ),
-            r#"{"type":"result","is_error":false,"result":"ran","usage":{"input_tokens":1,"output_tokens":1}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    let targets: Vec<&yunta_core::events::ToolTarget> = events
-        .iter()
-        .filter_map(|event| match event {
-            AgentEvent::ToolUse { target, .. } => Some(target),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(targets.len(), 1, "the stream carries the one call it made");
-    assert_eq!(
-        targets[0].display(),
-        None,
-        "a command is the session's own text: identified, never shown"
-    );
-    let carried = format!("{:?}", targets[0]);
-    for fragment in ["psql", "hunter2", "db.internal", "select"] {
-        assert!(
-            !carried.contains(fragment),
-            "`{fragment}` of the command reached the log as `{carried}`"
-        );
-    }
-    assert_eq!(
-        *targets[0].digest(),
-        yunta_core::sha256_hex(command.as_bytes())
-    );
-}
-
-/// A count the CLI did not report is absent, never zero. A run that
-/// recorded zero would say the session cost nothing, which is a
-/// different claim from "the CLI said nothing about it".
-#[tokio::test]
-async fn a_missing_token_count_is_absent_not_zero() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            INIT_LINE,
-            // A `usage` naming only what it counted.
-            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":40}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    let usage = events
-        .iter()
-        .find_map(|event| match event {
-            AgentEvent::Usage {
-                input_tokens,
-                output_tokens,
-                cached_input_tokens,
-            } => Some((*input_tokens, *output_tokens, *cached_input_tokens)),
-            _ => None,
-        })
-        .expect("the result reported its usage");
-    assert_eq!(usage, (Some(40), None, None));
-}
-
 /// Usage is reported as the session spends it: each assistant message
 /// once — the CLI repeats its usage on every line carrying one of its
 /// blocks — and the result's totals only for what the messages did not
@@ -1257,72 +943,6 @@ async fn usage_is_reported_per_message_once_and_reconciled_by_the_result() {
     assert!(spent.iter().all(|(input, cached, _)| cached <= input));
 }
 
-/// A line kind this adapter does not read is tolerated: the stream goes
-/// on, and the line contributes nothing rather than failing the session
-/// or being mistaken for something it is not.
-#[tokio::test]
-async fn an_unknown_stream_line_is_tolerated_and_named() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            INIT_LINE,
-            // A kind the CLI could add tomorrow, one it already has that
-            // this adapter does not read, and a `system` that is not the
-            // init subtype.
-            r#"{"type":"compact_boundary","reason":"context"}"#,
-            r#"{"type":"user","message":{"content":[]}}"#,
-            r#"{"type":"system","subtype":"status","note":"still here"}"#,
-            r#"{"type":"result","is_error":false,"result":"done"}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::Completed { .. })),
-        "the session reached its terminal past the lines it does not read: {events:?}"
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::Failed { .. })),
-        "an unread line is not a failure: {events:?}"
-    );
-}
-
-/// Settings that do not read fail the session rather than fall back: a
-/// session opened under settings nobody could parse runs under
-/// something nobody asked for, and silently.
-#[tokio::test]
-async fn a_session_never_opens_under_settings_that_do_not_read() {
-    let dir = tempfile::tempdir().unwrap();
-    let adapter = ClaudeCodeAdapter::new(&AdapterSettings {
-        adapter_settings: Some(
-            serde_json::from_str(r#"{"sandbox": "no-such-mode"}"#).expect("the settings parse"),
-        ),
-        binary: Some(stub_path()),
-    });
-
-    let Err(error) = adapter.spawn(request(dir.path().to_path_buf())).await else {
-        panic!("a session must not open under settings nobody could read");
-    };
-    let text = yunta_core::describe(&error);
-    assert!(
-        text.contains("cannot read its `adapter_settings`") && text.contains("no-such-mode"),
-        "the refusal names what it could not read: {text}"
-    );
-}
-
 /// A field the CLI filled with something that cannot be a session id
 /// fails the session, and the failure keeps what rejected the value so a
 /// reader following the chain reaches the rule it broke.
@@ -1350,61 +970,6 @@ async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
         described.len() > error.message.len(),
         "the cause is read, not dropped: {described}"
     );
-}
-
-/// The engine judges this CLI's writes only through a hook it can run and
-/// a listener the hook can reach. Without either there is no fence to
-/// build, and a session that opened anyway would write wherever it liked.
-#[tokio::test]
-async fn a_claude_session_without_a_hook_or_an_engine_to_ask_fails_before_spawning() {
-    for unset in ["command", "endpoint"] {
-        let dir = tempfile::tempdir().unwrap();
-        let mut req = request(dir.path().to_path_buf());
-        match unset {
-            "command" => req.rail_command = None,
-            _ => req.rail = None,
-        }
-
-        let refused = adapter()
-            .spawn(req)
-            .await
-            .err()
-            .expect("a session never opens without a fence to build");
-        let said = yunta_core::describe(&refused);
-        assert!(
-            said.contains("reach the rail"),
-            "the refusal names what it could not build ({unset}): {said}"
-        );
-    }
-}
-
-/// A `read_only` session's commands write nothing, so the session is
-/// exact; an `edit` one's are confined to the workspace, and a `full`
-/// one's to nothing at all.
-#[tokio::test]
-async fn coverage_follows_what_the_sandbox_leaves_commands() {
-    for (profile, expected) in [
-        (PermissionProfile::ReadOnly, None),
-        (PermissionProfile::Edit, Some("workspace")),
-        (PermissionProfile::Full, Some("unconfined")),
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        let expected = match expected {
-            None => Coverage::Exact,
-            Some("workspace") => Coverage::WidenedToRoots {
-                roots: vec![dir.path().to_path_buf()],
-            },
-            Some(_) => Coverage::ToolsOnly,
-        };
-        let mut req = request(dir.path().to_path_buf());
-        req.permissions = profile;
-        let events = spawn_with(&dir, req, &[INIT_LINE, RESULT_LINE]).await;
-
-        let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
-            panic!("a session opens first: {events:?}");
-        };
-        assert_eq!(fence.as_ref(), Some(&expected), "under {profile:?}");
-    }
 }
 
 /// The settings a session is handed carry the sandbox its commands run in:

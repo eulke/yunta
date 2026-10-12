@@ -37,10 +37,8 @@ nodes:
 "#;
 
 /// Two planner sessions: the first plan, and the one after a correction.
-fn planner(resume: bool) -> String {
-    format!(
-        r#"
-capabilities: {{ run_tools: true, resume_session: {resume} }}
+const PLANNER: &str = r#"
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -50,8 +48,8 @@ sessions:
             summary: "Make it"
             description: "Writes the file the run is about."
             tasks:
-              - {{ id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{{ at: made.txt, what: "the file", code: "the file's first line" }}], outcome: "made.txt exists", criteria: [{{ cmd: "test -f made.txt", proves: "the file exists" }}] }}
-    outcome: {{ type: completed, summary: "planned" }}
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+    outcome: { type: completed, summary: "planned" }
   - steps:
       - type: run_tool
         tool: yunta_submit_tasks
@@ -60,12 +58,10 @@ sessions:
             summary: "Make it"
             description: "Writes the file the run is about."
             tasks:
-              - {{ id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{{ at: made.txt, what: "the file", code: "the file's first line" }}], outcome: "made.txt exists", criteria: [{{ cmd: "test -f made.txt", proves: "the file exists" }}] }}
-              - {{ id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], changes: [{{ at: said.txt, what: "the file", code: "the file's first line" }}], outcome: "said.txt exists", criteria: [{{ cmd: "test -f said.txt", proves: "it was said" }}] }}
-    outcome: {{ type: completed, summary: "planned again" }}
-"#
-    )
-}
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+              - { id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], changes: [{ at: said.txt, what: "the file", code: "the file's first line" }], outcome: "said.txt exists", criteria: [{ cmd: "test -f said.txt", proves: "it was said" }] }
+    outcome: { type: completed, summary: "planned again" }
+"#;
 
 const SAID: &str = "split the greeting into its own task";
 
@@ -115,7 +111,7 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
     let bench = Bench::new();
     let interaction = SequencedInteraction::choosing(&["approve"]);
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(REVIEWED_PLAN, &planner(true), &interaction)
+        .run_with_interaction(REVIEWED_PLAN, PLANNER, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -147,7 +143,7 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
 
 #[tokio::test]
 async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
-    let bench = parked(REVIEWED_PLAN, &planner(true)).await;
+    let bench = parked(REVIEWED_PLAN, PLANNER).await;
 
     let (_, escalation) = current_escalation(
         &bench.manifest(),
@@ -179,7 +175,7 @@ async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
 
 #[tokio::test]
 async fn a_correction_without_words_is_refused_wherever_it_comes_from() {
-    let bench = parked(REVIEWED_PLAN, &planner(true)).await;
+    let bench = parked(REVIEWED_PLAN, PLANNER).await;
     let refused = answer_parked(&bench, "adjust").await;
     assert!(
         matches!(refused, Err(yunta_engine::ResolveGateError::Unsaid { .. })),
@@ -187,9 +183,7 @@ async fn a_correction_without_words_is_refused_wherever_it_comes_from() {
     );
 
     let bench = Bench::new();
-    bench
-        .create(REVIEWED_PLAN, &planner(true), MOCK_CONFIG)
-        .await;
+    bench.create(REVIEWED_PLAN, PLANNER, MOCK_CONFIG).await;
     let error = bench
         .try_wake_answering(&SequencedInteraction::choosing(&["adjust"]))
         .await
@@ -212,7 +206,7 @@ async fn a_correction_resumes_the_planner_with_the_persons_words() {
     let interaction =
         SequencedInteraction::answering(vec![("adjust", Some(SAID)), ("approve", None)]);
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(REVIEWED_PLAN, &planner(true), &interaction)
+        .run_with_interaction(REVIEWED_PLAN, PLANNER, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -244,11 +238,15 @@ async fn a_correction_resumes_the_planner_with_the_persons_words() {
 
 #[tokio::test]
 async fn without_a_resumable_session_a_fresh_planner_reads_the_review_and_its_plan() {
-    let bench = Bench::new();
+    // A CLI that runs tools and cannot resume a session: the run starts a fresh one.
+    let bench = Bench::new().with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     let interaction =
         SequencedInteraction::answering(vec![("adjust", Some(SAID)), ("approve", None)]);
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(REVIEWED_PLAN, &planner(false), &interaction)
+        .run_with_interaction(REVIEWED_PLAN, PLANNER, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -309,7 +307,7 @@ fn unexplained_then_explained(refused: bool) -> String {
         false => unexplained.replace("        EXPECT\n", ""),
     };
     format!(
-        "\ncapabilities: {{ run_tools: true }}\nsessions:\n  - steps:{steps}\n    outcome: \
+        "\ndialect: claude-code\nsessions:\n  - steps:{steps}\n    outcome: \
          {{ type: completed, summary: \"planned\" }}\n"
     )
 }

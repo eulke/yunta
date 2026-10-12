@@ -45,7 +45,7 @@ nodes:
 fn fixture(staging: &std::path::Path, required: bool) -> String {
     format!(
         r##"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

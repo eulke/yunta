@@ -45,7 +45,9 @@ nodes:
         remote.display()
     );
 
-    let RunReport { terminal, .. } = bench.run(&workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     let pushed = git_output(
@@ -64,7 +66,9 @@ nodes:
   - { id: first, kind: bash, run: "echo one > one.txt" }
   - { id: second, kind: bash, depends_on: [first], run: "echo two > two.txt" }
 "#;
-    bench.run(workflow, "sessions: []\n").await;
+    bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     let events = bench.events();
     assert!(matches!(commits(&events, "first")[..], [Some(_)]));
@@ -88,7 +92,7 @@ async fn an_unscoped_node_that_changed_nothing_makes_no_commit() {
     bench
         .run(
             "name: quiet\nnodes:\n  - { id: look, kind: bash, run: \"true\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
         )
         .await;
 
@@ -105,7 +109,7 @@ async fn a_failed_attempts_work_is_committed_naming_that_attempt() {
     let RunReport { terminal, .. } = bench
         .run(
             "name: fails\nnodes:\n  - { id: broke, kind: bash, run: \"echo half > half.txt; exit 1\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
         )
         .await;
 
@@ -146,7 +150,9 @@ nodes:
         meet("a", "b"),
         meet("b", "a")
     );
-    let RunReport { terminal, .. } = bench.run(&workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();
@@ -174,7 +180,7 @@ async fn what_git_ignores_stays_out_of_the_commit() {
     bench
         .run(
             "name: builds\nnodes:\n  - { id: make, kind: bash, run: \"mkdir -p build && echo bin > build/out.bin && echo src > src.txt\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
         )
         .await;
 
@@ -197,7 +203,7 @@ async fn a_run_without_isolation_commits_none_of_its_nodes_work() {
     bench
         .run_with_config(
             "name: in-place\nnodes:\n  - { id: fix, kind: bash, run: \"echo fixed > fixed.txt\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config,
         )
         .await;

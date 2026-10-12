@@ -49,10 +49,11 @@ fn every_capability_is_a_field_an_adapter_can_declare() {
 }
 
 /// Only what a workflow's own declarations need is refused, and at
-/// `check`: a permission profile, an agent, and the run tools a document,
-/// a task or a blackboard reaches the engine through. Everything else has
-/// a stated fallback, so a missing capability never stops a run that
-/// already started.
+/// `check`: a permission profile, an agent, the run tools a document, a
+/// task or a blackboard reaches the engine through, and a session's stop,
+/// which a node that opens a session needs the CLI to keep going through
+/// after two refused stops. Everything else has a stated fallback, so a
+/// missing capability never stops a run that already started.
 #[test]
 fn the_only_capabilities_a_check_refuses_are_the_ones_a_workflow_declares_a_need_for() {
     let refused: Vec<Capability> = POLICY
@@ -65,9 +66,12 @@ fn the_only_capabilities_a_check_refuses_are_the_ones_a_workflow_declares_a_need
         vec![
             Capability::PermissionProfiles,
             Capability::CustomAgents,
-            Capability::RunTools
+            Capability::RunTools,
+            Capability::StopRefusals,
         ],
         "a workflow that names a permission profile, an agent, or what only \
-         the run tools carry says so before a run is born; everything else degrades"
+         the run tools carry says so before a run is born; a session whose \
+         CLI does not keep going after two refused stops is refused at check \
+         the same way; everything else degrades"
     );
 }

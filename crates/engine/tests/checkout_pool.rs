@@ -136,7 +136,7 @@ nodes:
 "#;
 
 const BUILDS_THEN_WRITES: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: target/marker, content: built }
@@ -149,7 +149,11 @@ sessions:
 
 #[tokio::test]
 async fn a_loop_s_tasks_build_in_one_warm_checkout() {
-    let bench = yunta_testkit::Bench::new();
+    // No fence judges the build marker a session writes outside its task's scope.
+    let bench = yunta_testkit::Bench::new().with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     ignore_builds(&bench.worktree);
 
     let report = bench
@@ -164,7 +168,11 @@ async fn a_loop_s_tasks_build_in_one_warm_checkout() {
 /// work landed — without being asked to clean anything up.
 #[tokio::test]
 async fn a_finished_runs_units_leave_no_branch() {
-    let bench = yunta_testkit::Bench::new();
+    // No fence judges the build marker a session writes outside its task's scope.
+    let bench = yunta_testkit::Bench::new().with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     ignore_builds(&bench.worktree);
 
     let report = bench
@@ -362,7 +370,9 @@ async fn a_landed_nodes_unit_leaves_no_ref() {
     let workflow = "name: writes\nnodes:\n  - { id: write, kind: bash, scope: [x.txt], run: \"echo x > x.txt\" }\n";
     write(&bench.worktree.join("leftover.txt"), "found in the tree");
 
-    let report = bench.run(workflow, "sessions: []\n").await;
+    let report = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(report.terminal, yunta_engine::RunTerminal::Finished);
     let kept = git_output(

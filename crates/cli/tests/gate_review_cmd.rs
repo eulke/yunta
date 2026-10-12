@@ -26,7 +26,7 @@ nodes:
 
 /// The first plan, and the one after the correction.
 const PLANNER: &str = r#"
-capabilities: { run_tools: true, resume_session: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -240,7 +240,7 @@ nodes:
 
 /// The brief, then the plan.
 const BRIEFED: &str = r##"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Write the brief"
     effects:

@@ -18,7 +18,7 @@ use yunta_testkit_core::{Log, SeqIdSource};
 
 /// The fixture every run of this suite is driven on: no session is
 /// scripted, because every node of these workflows runs a command.
-const NO_SESSIONS: &str = "sessions: []\n";
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 /// `lint` fails immediately (`test -f` on a file nothing ever creates)
 /// with `max_reroutes: 0` — its very first failure already exhausts

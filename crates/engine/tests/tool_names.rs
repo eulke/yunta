@@ -34,10 +34,8 @@ fn fixture() -> String {
         "tasks:\n{}",
         task_yaml("greet", "greet", "a.txt", "test -f a.txt")
     );
-    plan_session(&tasks).replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, tool_naming: mcp_prefixed }",
-    ) + "  - match_prompt_contains: \"Implement your task\"
+    plan_session(&tasks)
+        + "  - match_prompt_contains: \"Implement your task\"
     effects:
       - { path: a.txt, content: a }
     outcome: { type: completed, summary: built }

@@ -12,7 +12,7 @@ use common::*;
 
 const WORKFLOW: &str = "name: retried\ninputs:\n  tasks: { type: document, kind: tasks }\nnodes:\n  - id: implement\n    kind: loop\n    runner: executor\n    until: all_tasks_complete\n    prompt: \"Do your task.\"\n";
 
-const FIXTURE: &str = "capabilities: { run_tools: true }\nsessions:\n  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-h }\n";
+const FIXTURE: &str = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-h }\n";
 
 /// A run whose one task is held to a guard that reads `ready`, outside
 /// its tree, and to one that always passes; it parks with the first red.

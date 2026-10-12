@@ -239,7 +239,7 @@ nodes:
     write(
         &repo.join(".yunta/tests/fixtures/happy.yaml"),
         r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -307,7 +307,7 @@ fn a_case_expecting_a_node_its_mode_leaves_out_to_be_skipped_passes() {
     );
     write(
         &repo.join(".yunta/tests/fixtures/none.yaml"),
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     );
     write(
         &repo.join(".yunta/tests/short-skips-second.yaml"),
@@ -378,7 +378,7 @@ tasks:
     write(
         &repo.join(".yunta/tests/fixtures/one-task.yaml"),
         r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: made.txt, content: "made" }
@@ -438,7 +438,7 @@ nodes:
     );
     write(
         &repo.join(".yunta/tests/fixtures/empty.yaml"),
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     );
     write(
         &repo.join(".yunta/tests/wrong-expect.yaml"),
@@ -2455,7 +2455,7 @@ nodes:
     );
     write(
         &repo.join("fixture.yaml"),
-        "sessions:\n  - outcome: { type: completed, summary: done }\n",
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n",
     );
 
     for args in [
@@ -3175,7 +3175,7 @@ fn adapter_mock_with_fixture_runs() {
     );
     write(
         &repo.join("fixture.yaml"),
-        "sessions:\n  - effects:\n      - { path: \"{{run.staging}}/implement/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - { path: \"{{run.staging}}/implement/note.md\", content: \"done\\n\" }\n    outcome: { type: completed, summary: \"noted\" }\n",
     );
 
     let refused = yunta_in!(&repo, &home, &["run", "wf.yaml", "--adapter", "mock"]);
@@ -3300,7 +3300,7 @@ nodes:
     );
     write(
         &repo.join(".yunta/tests/fixtures/none.yaml"),
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     );
 
     let out = yunta_in!(&repo, &home, &["test"]);
@@ -3395,7 +3395,7 @@ fn a_case_answers_a_gate_and_reaches_the_promotion_it_expects() {
     write(&repo.join(".yunta/workflows/promotable.yaml"), PROMOTABLE);
     write(
         &repo.join(".yunta/tests/fixtures/none.yaml"),
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     );
     write(
         &repo.join(".yunta/tests/promotes.yaml"),
@@ -3441,7 +3441,8 @@ fn a_case_whose_fixture_describes_a_session_nobody_opened_fails() {
     );
     write(
         &repo.join(".yunta/tests/fixtures/spare.yaml"),
-        "sessions:\n  - outcome: { type: completed, summary: \"nobody asked\" }\n",
+        "dialect: claude-code\nsessions:\n  - outcome: \
+         { type: completed, summary: \"nobody asked\" }\n",
     );
     write(
         &repo.join(".yunta/tests/spare.yaml"),
@@ -3476,7 +3477,7 @@ fn yunta_test_and_yunta_run_execute_the_same_recipe() {
     );
     write(
         &repo.join(".yunta/tests/fixtures/none.yaml"),
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     );
     write(
         &repo.join(".yunta/tests/recipe.yaml"),

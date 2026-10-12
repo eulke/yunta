@@ -197,7 +197,6 @@ impl RunCtx<'_> {
                 self.nodes_still_owed(&state),
             )),
             timeout,
-            ..Default::default()
         })
     }
 

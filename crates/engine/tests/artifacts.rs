@@ -738,7 +738,9 @@ nodes:
       produces: ["{{node.artifacts}}/report.md"]
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert!(matches!(terminal, yunta_engine::RunTerminal::Paused { .. }));
     match state.nodes.state("write") {

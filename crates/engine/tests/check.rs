@@ -2039,6 +2039,7 @@ fn only(capability: yunta_core::Capability) -> yunta_core::Capabilities {
         yunta_core::Capability::Skills => declared.skills = true,
         yunta_core::Capability::RunTools => declared.run_tools = true,
         yunta_core::Capability::NetworkIsolation => declared.network_isolation = true,
+        yunta_core::Capability::StopRefusals => declared.stop_refusals = true,
     }
     declared
 }
@@ -2067,7 +2068,10 @@ fn check_refuses_read_only_on_an_adapter_without_permission_profiles() {
     );
 
     let allowed = check_against(&wf, &config, &|_| {
-        Some(only(yunta_core::Capability::PermissionProfiles))
+        Some(yunta_core::Capabilities {
+            stop_refusals: true,
+            ..only(yunta_core::Capability::PermissionProfiles)
+        })
     });
     assert!(
         allowed.is_empty(),
@@ -2093,9 +2097,39 @@ fn check_refuses_an_agent_on_an_adapter_without_custom_agents() {
     );
 
     let allowed = check_against(&wf, &config, &|_| {
-        Some(only(yunta_core::Capability::CustomAgents))
+        Some(yunta_core::Capabilities {
+            stop_refusals: true,
+            ..only(yunta_core::Capability::CustomAgents)
+        })
     });
     assert!(allowed.is_empty(), "{allowed:?}");
+}
+
+/// A prompt node runs a session whose stop the engine can refuse. An adapter
+/// whose CLI does not keep that session going past the refusal cannot serve
+/// the node, and one that does can.
+#[test]
+fn a_prompt_node_is_refused_by_an_adapter_that_cannot_keep_a_refused_stop_going() {
+    let wf = asking_node("{ id: audit, kind: prompt, runner: planner, prompt: \"look\" }");
+    let config = config_with_runner("planner", 1);
+
+    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CapabilityUnsupported { capability, .. }
+                if *capability == yunta_core::Capability::StopRefusals
+        )),
+        "an adapter that cannot keep a refused stop going cannot run a prompt: {errors:?}"
+    );
+
+    let allowed = check_against(&wf, &config, &|_| {
+        Some(only(yunta_core::Capability::StopRefusals))
+    });
+    assert!(
+        allowed.is_empty(),
+        "an adapter that keeps the session going runs the same workflow: {allowed:?}"
+    );
 }
 
 /// A binary that does not build the adapter judges nothing: a capability
@@ -2138,7 +2172,10 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
 
     let one_can = check_against(&wf, &config, &|adapter| {
         Some(if adapter.as_str() == "fancy" {
-            only(yunta_core::Capability::PermissionProfiles)
+            yunta_core::Capabilities {
+                stop_refusals: true,
+                ..only(yunta_core::Capability::PermissionProfiles)
+            }
         } else {
             yunta_core::Capabilities::default()
         })
@@ -2148,7 +2185,12 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
         "one candidate can, so the run can: {one_can:?}"
     );
 
-    let neither_can = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    let neither_can = check_against(&wf, &config, &|_| {
+        Some(yunta_core::Capabilities {
+            stop_refusals: true,
+            ..Default::default()
+        })
+    });
     assert_eq!(neither_can.len(), 1, "{neither_can:?}");
 }
 
@@ -2764,11 +2806,15 @@ fn check_refuses_a_document_or_a_loop_on_an_adapter_without_run_tools() {
     ] {
         let wf = asking_node(node);
         let config = config_with_runner("planner", 1);
-        let refused: Vec<CheckError> =
-            check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()))
-                .into_iter()
-                .filter(|e| matches!(e, CheckError::CapabilityUnsupported { .. }))
-                .collect();
+        let refused: Vec<CheckError> = check_against(&wf, &config, &|_| {
+            Some(yunta_core::Capabilities {
+                stop_refusals: true,
+                ..Default::default()
+            })
+        })
+        .into_iter()
+        .filter(|e| matches!(e, CheckError::CapabilityUnsupported { .. }))
+        .collect();
         assert!(
             matches!(
                 refused.as_slice(),
@@ -2779,7 +2825,10 @@ fn check_refuses_a_document_or_a_loop_on_an_adapter_without_run_tools() {
         );
 
         let allowed = check_against(&wf, &config, &|_| {
-            Some(only(yunta_core::Capability::RunTools))
+            Some(yunta_core::Capabilities {
+                stop_refusals: true,
+                ..only(yunta_core::Capability::RunTools)
+            })
         });
         assert!(
             !allowed

@@ -33,7 +33,8 @@ nodes:
       - files: ["docs/architecture.md"]
 "#;
 
-const ONE_SESSION: &str = "sessions:\n  - outcome: { type: completed, summary: planned }\n";
+const ONE_SESSION: &str =
+    "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: planned }\n";
 
 #[test]
 fn run_refuses_a_file_nothing_before_its_reader_can_write_and_creates_no_run() {

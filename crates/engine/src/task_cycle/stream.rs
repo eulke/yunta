@@ -57,7 +57,7 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) max_tokens: Option<u64>,
     pub(super) audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     pub(super) tokens: &'a mut TokenUsage,
-    /// The session the stream opened, once it has. A write refused
+    /// The session the stream opened, once it has. A run tool failure
     /// before that belongs to no session and is not recorded.
     pub(super) opened: &'a mut Option<yunta_core::SessionId>,
     /// How much of this session's writes its adapter's fence covered,
@@ -123,22 +123,6 @@ pub(super) async fn apply_agent_event(
             )
             .await
             .map_err(DispatchError::Audit)?;
-        }
-        AgentEvent::WriteRefused { target } => {
-            // A refusal belongs to the session that refused it. A CLI
-            // that reported one before opening a session reported
-            // something this adapter cannot place, and nothing is
-            // recorded for it.
-            if let Some(session_id) = opened.clone() {
-                emit_audit(
-                    audit,
-                    EventPayload::Session(SessionEvent::WriteRefused(
-                        yunta_core::events::WriteRefusedPayload::new(session_id, target),
-                    )),
-                )
-                .await
-                .map_err(DispatchError::Audit)?;
-            }
         }
         AgentEvent::RunToolFailed { tool, cause } => {
             if let Some(session_id) = opened.clone() {

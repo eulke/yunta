@@ -45,6 +45,7 @@ async fn a_node_that_writes_over_another_nodes_name_reaches_nothing() {
     let beta = bench.staging("beta");
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
@@ -134,6 +135,7 @@ nodes:
 "#;
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}

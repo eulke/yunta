@@ -32,7 +32,7 @@ async fn a_person_at_the_terminal_is_asked_on_the_log_before_the_answer() {
     let interaction = ScriptedInteraction::choose("approve");
 
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(GATED, "sessions: []", &interaction)
+        .run_with_interaction(GATED, "dialect: claude-code\nsessions: []", &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -48,7 +48,7 @@ async fn a_run_with_nobody_to_ask_opens_no_asking() {
     let answerer = ApproveEverything::new("bot");
 
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(GATED, "sessions: []", &answerer)
+        .run_with_interaction(GATED, "dialect: claude-code\nsessions: []", &answerer)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);

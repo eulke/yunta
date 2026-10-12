@@ -13,8 +13,8 @@ use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, EventPayload, NodeEvent, Phase, TaskLedger,
 };
 use yunta_core::port::{Budget, PermissionProfile};
-use yunta_core::Criterion;
 use yunta_core::Task;
+use yunta_core::{Capabilities, Criterion};
 use yunta_engine::scope_expansion::GrantLedger;
 use yunta_engine::{
     run_task, surprises, AttemptEnv, BlockedCause, CriterionRun, DispatchOutcome, Memo,
@@ -39,6 +39,15 @@ fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
             effort: None,
         },
     )
+}
+
+/// A scripted CLI that answers with no capability at all, as a fixture that
+/// declares none did: its session opens without a hook, and its effects land
+/// as the fixture writes them.
+fn scripted(yaml: &str) -> MockAdapter {
+    MockAdapter::from_yaml(yaml)
+        .unwrap()
+        .narrowed(Capabilities::default())
 }
 
 /// A unit to work in — an initialised checkout and the tree it starts
@@ -171,14 +180,13 @@ async fn a_session_that_makes_the_criterion_pass_reaches_done() {
         &["output.txt"],
         vec![cmd("test -f output.txt")],
     );
-    let adapter = MockAdapter::from_yaml(
-        r#"
+    let adapter = scripted(
+        r#"dialect: claude-code
 effects:
   - { path: output.txt, content: "hello\n" }
 outcome: { type: completed, summary: "wrote it" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
@@ -227,9 +235,10 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
     // The mock reports Completed but its fixture never writes output.txt —
     // this proves the engine, not the
     // agent's self-report, decides done.
-    let adapter =
-        MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "all done, trust me" }"#)
-            .unwrap();
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "all done, trust me" }"#,
+    );
 
     let report = run_task(
         &t,
@@ -266,7 +275,10 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
 
     // `true` always exits 0 — a non-guard criterion that already passes.
     let t = task("trivial", &["output.txt"], vec![cmd("true")]);
-    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "ok" }"#,
+    );
 
     let report = run_task(
         &t,
@@ -315,7 +327,10 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         &["output.txt"],
         vec![cmd("test -f output.txt"), guard("false")],
     );
-    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "ok" }"#,
+    );
 
     let report = run_task(
         &t,
@@ -357,23 +372,23 @@ async fn an_edit_outside_scope_is_a_violation_even_if_criteria_pass() {
     let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    // The criterion only cares about marker.txt (in scope) — but the
-    // fixture also writes elsewhere.txt (outside scope). Criteria go
-    // green; the task must still not succeed.
+    // The criterion reads marker.txt, which is in scope; the fixture also
+    // writes elsewhere.txt. The criteria go green, but the task must not succeed.
+    // This session has no rail, so nothing refuses the edit before the scope
+    // audit judges the diff.
     let t = task(
         "narrow-scope",
         &["marker.txt"],
         vec![cmd("test -f marker.txt")],
     );
-    let adapter = MockAdapter::from_yaml(
-        r#"
+    let adapter = scripted(
+        r#"dialect: claude-code
 effects:
   - { path: marker.txt, content: "in scope\n" }
   - { path: elsewhere.txt, content: "not allowed here\n" }
 outcome: { type: completed, summary: "done" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
@@ -417,15 +432,15 @@ async fn a_red_attempt_blocks_the_task_without_opening_another_session() {
         vec![cmd("test -f output.txt")],
     );
     // Three scripted, so a cycle that opened more would find them.
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "attempt 1" }
   - outcome: { type: completed, summary: "attempt 2" }
   - outcome: { type: completed, summary: "attempt 3" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
@@ -469,13 +484,13 @@ async fn a_blocked_task_says_what_its_red_criterion_printed_last() {
             "echo checking; echo 'output.txt is missing' >&2; test -f output.txt",
         )],
     );
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "attempt 1" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
@@ -517,20 +532,20 @@ async fn a_non_retryable_failure_ends_the_cycle() {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // Criteria stay red (nothing writes the file) and the session reports a
-    // failure it marks non-retryable: the task blocks on what the session
-    // said, after the one attempt.
+    // refused credential, which no retry cures: the task blocks on what the
+    // session said, after the one attempt.
     let t = task("gives-up", &["output.txt"], vec![cmd("test -f output.txt")]);
     // Scripts more sessions than it needs, so a cycle that opened another
     // would find one.
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 sessions:
-  - outcome: { type: failed, message: "unrecoverable", retryable: false }
-  - outcome: { type: failed, message: "unrecoverable", retryable: false }
-  - outcome: { type: failed, message: "unrecoverable", retryable: false }
+  - outcome: { type: failed, message: "Invalid API key" }
+  - outcome: { type: failed, message: "Invalid API key" }
+  - outcome: { type: failed, message: "Invalid API key" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
@@ -576,7 +591,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
+    let adapter = scripted("dialect: claude-code\noutcome: { type: crash }");
 
     let report = run_task(
         &t,
@@ -618,7 +633,7 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
     let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
+    let adapter = scripted("dialect: claude-code\noutcome: { type: crash }");
 
     let report = run_task(
         &t,
@@ -1009,7 +1024,7 @@ async fn a_hung_session_is_cut_by_its_timeout() {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("timeout", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let adapter = scripted("dialect: claude-code\noutcome: { type: hang }");
     let budget = Budget {
         timeout: Some(std::time::Duration::from_secs(1)),
         ..Default::default()
@@ -1065,15 +1080,15 @@ async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
     );
     // Two usage steps totalling 150 tokens, then a completion that
     // dispatch must never see because the budget is 100.
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 steps:
   - { type: usage, input_tokens: 60, output_tokens: 20 }
   - { type: usage, input_tokens: 50, output_tokens: 20 }
 outcome: { type: completed, summary: "should never be reached" }
 "#,
-    )
-    .unwrap();
+    );
     let budget = Budget {
         max_tokens: Some(100),
         ..Default::default()
@@ -1412,14 +1427,14 @@ async fn a_cycle_with_its_store_down(down: Down) -> yunta_engine::TaskCycleError
 
     // A check that prints, which leaves something to keep.
     let t = task("write-output", &["output.txt"], vec![cmd("cat output.txt")]);
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 effects:
   - { path: output.txt, content: "hello\n" }
 outcome: { type: completed, summary: "wrote it" }
 "#,
-    )
-    .unwrap();
+    );
 
     let node = yunta_core::NodeId::from("build");
     let observer = FailingObserver(down);
@@ -1554,7 +1569,10 @@ async fn a_criterion_that_cannot_run_blocks_before_any_attempt() {
         &["output.txt"],
         vec![cmd("yunta-no-such-tool --version")],
     );
-    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "ok" }"#,
+    );
 
     let report = cycle(&owner, &unit, run.path(), &t, &adapter).await;
 
@@ -1602,8 +1620,9 @@ async fn a_criterion_that_cannot_run_after_an_attempt_ends_the_cycle() {
             "if [ -f made.txt ]; then yunta-no-such-tool; else exit 1; fi",
         )],
     );
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - { path: made.txt, content: "made" }
@@ -1611,8 +1630,7 @@ sessions:
   - outcome: { type: completed, summary: "attempt 2" }
   - outcome: { type: completed, summary: "attempt 3" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = cycle(&owner, &unit, run.path(), &t, &adapter).await;
 
@@ -1675,7 +1693,7 @@ async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_
     let repo = dir.path();
     let (unit, left) = a_unit_the_left_work_no_longer_fits(&owner, repo).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
+    let adapter = scripted("dialect: claude-code\nsessions: []\n");
 
     let report = run_task(
         &task("carried", &["a.txt"], vec![cmd("grep -q left a.txt")]),

@@ -59,7 +59,7 @@ nodes:
     );
 
     let RunReport { terminal, .. } = bench
-        .run_with_config(&workflow, "sessions: []", &config)
+        .run_with_config(&workflow, "dialect: claude-code\nsessions: []", &config)
         .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
@@ -94,7 +94,7 @@ nodes:
 ";
 
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []", &config)
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []", &config)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -130,7 +130,9 @@ nodes:
 "#,
         finished = finished.display()
     );
-    bench.create(&workflow, "sessions: []", &config).await;
+    bench
+        .create(&workflow, "dialect: claude-code\nsessions: []", &config)
+        .await;
 
     let woke = bench.try_wake().await;
 

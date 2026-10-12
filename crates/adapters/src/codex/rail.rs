@@ -35,7 +35,7 @@ const WRITING_TOOL: &str = "apply_patch";
 /// as their trust keys name it.
 const SESSION_FLAGS: &str = "/<session-flags>/config.toml";
 
-pub(super) struct CodexRailCodec;
+pub(crate) struct CodexRailCodec;
 
 impl RailCodec for CodexRailCodec {
     fn decode(&self, event: RailEvent, stdin: &[u8]) -> Result<Option<RailCall>, CodecError> {
@@ -94,6 +94,22 @@ impl RailCodec for CodexRailCodec {
                 exit: 0,
             },
         }
+    }
+}
+
+/// The answer the `codex` CLI takes from a hook's reply: exit 2 refuses a
+/// patch only when stderr gives the reason, because a refusal with nothing
+/// on stderr is a hook that failed, and the patch runs anyway.
+pub(crate) fn read_reply(event: RailEvent, reply: &HookReply) -> RailAnswer {
+    match event {
+        RailEvent::BeforeWrite if reply.exit == 2 && !reply.stderr.is_empty() => {
+            RailAnswer::Refuse {
+                reason: String::from_utf8_lossy(&reply.stderr).into_owned(),
+            }
+        }
+        RailEvent::BeforeWrite => RailAnswer::Proceed,
+        RailEvent::BeforeStop => crate::session::stop_answer(reply),
+        RailEvent::AfterWrite => crate::session::after_write_answer(reply),
     }
 }
 

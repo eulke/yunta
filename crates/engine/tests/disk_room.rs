@@ -13,7 +13,7 @@ async fn a_run_that_would_fill_the_disk_pauses_saying_how_to_make_room() {
     let config = format!("{MOCK_CONFIG}storage:\n  pool:\n    keep_free: \"100%\"\n");
 
     let RunReport { terminal, state } = bench
-        .run_with_config(ONE_STEP, "sessions: []\n", &config)
+        .run_with_config(ONE_STEP, "dialect: claude-code\nsessions: []\n", &config)
         .await;
 
     let RunTerminal::Paused { reason } = terminal else {

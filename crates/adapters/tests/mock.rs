@@ -3,21 +3,29 @@
 //!
 //! Every behavior a real adapter is asked for is exercised here against
 //! a script — the terminal event a session always pays, the effects the
-//! fence lets through, resume under one session id, the capabilities the
-//! fixture declares, and a gate published to a pull request — so the
-//! engine's own suites can trust the adapter they run on.
+//! fence lets through, resume under one session id, the capabilities of
+//! the CLI a fixture's dialect names, and a gate published to a pull
+//! request — so the engine's own suites can trust the adapter they run on.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use yunta_core::fence::{Advice, Fence};
+use yunta_core::fence::{Advice, Fence, Verdict};
+use yunta_core::rail::{RailAct, RailAnswer, RailCall, RailEndpoint};
 
+use axum::extract::State;
+use axum::routing::post;
+use axum::{Json, Router};
 use futures::StreamExt;
-use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
-use yunta_core::port::{
-    Adapter, AgentEvent, Forge, ForgeError, GateDecision, ProbeReport, PublishRequest,
-    PullRequestRef, ReviewOutcome, SessionRequest,
+use yunta_adapters::{
+    ClaudeCodeAdapter, MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths,
 };
-use yunta_core::{Capabilities, SessionId};
+use yunta_core::port::{
+    Adapter, AgentEvent, FailureCause, Forge, ForgeError, GateDecision, ProbeReport,
+    PublishRequest, PullRequestRef, ReviewOutcome, RunToolsEndpoint, SessionRequest,
+};
+use yunta_core::{
+    AdapterSettings, Capabilities, Capability, FenceLevel, Secret, SessionId, ToolNaming,
+};
 use yunta_testkit_core::adapter::{drain, request};
 
 #[tokio::test]
@@ -25,6 +33,7 @@ async fn a_successful_session_opens_then_completes() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 outcome: { type: completed, summary: "all good" }
 steps:
   - { type: usage, input_tokens: 10, output_tokens: 5 }
@@ -54,35 +63,54 @@ steps:
 }
 
 #[tokio::test]
-async fn a_failed_session_ends_with_failed_and_its_retryable_flag() {
+async fn a_failed_session_ends_with_the_cause_its_message_classifies_to() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture = MockAdapter::from_yaml(
+    let mock = MockAdapter::from_yaml(
         r#"
-outcome: { type: failed, message: "criteria still red", retryable: true }
+dialect: claude-code
+outcome: { type: failed, message: "401 Unauthorized" }
 "#,
     )
     .unwrap();
 
-    let session = fixture
-        .spawn(request(dir.path().to_path_buf()))
-        .await
-        .unwrap();
-    let events = drain(session).await;
+    let events = drain(mock.spawn(request(dir.path().to_path_buf())).await.unwrap()).await;
 
-    assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
-    match events.last().unwrap() {
-        AgentEvent::Failed { error, cause } => {
-            assert_eq!(error.message, "criteria still red");
-            assert!(cause.retryable());
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
+    let Some(AgentEvent::Failed { cause, .. }) = events.last() else {
+        panic!("a failed session: {events:?}")
+    };
+    assert_eq!(*cause, FailureCause::Final);
+}
+
+/// A fixture has no retryable flag, so it cannot call an auth failure retryable.
+#[test]
+fn a_fixture_cannot_call_an_auth_failure_retryable() {
+    let yaml = "dialect: claude-code\nsessions:\n  - outcome: {type: failed, message: \"401 Unauthorized\", retryable: true}";
+    assert!(MockFixture::parse_without_a_run(yaml).is_err());
+}
+
+/// A declared cause the message does not classify to is refused, and the
+/// refusal names both causes.
+#[test]
+fn a_declared_cause_the_message_does_not_classify_to_is_refused() {
+    let refused = MockFixture::parse_without_a_run(
+        r#"
+dialect: claude-code
+sessions:
+  - outcome: { type: failed, message: "401 Unauthorized", cause: retryable }
+"#,
+    )
+    .expect_err("a retryable cause on an auth failure is refused");
+    let message = refused.to_string();
+    assert!(
+        message.contains("retryable") && message.contains("final"),
+        "the refusal names both causes: {message}"
+    );
 }
 
 #[tokio::test]
 async fn a_hung_session_never_produces_a_second_event_on_its_own() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let fixture = MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: hang }").unwrap();
 
     let mut session = fixture
         .spawn(request(dir.path().to_path_buf()))
@@ -104,7 +132,7 @@ async fn a_hung_session_never_produces_a_second_event_on_its_own() {
 #[tokio::test]
 async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal_event() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let fixture = MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: hang }").unwrap();
 
     let mut session = fixture
         .spawn(request(dir.path().to_path_buf()))
@@ -122,15 +150,70 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
     ));
 }
 
-/// With no engine to ask, the mock judges by the same function the engine
-/// asks, so a fixture exercises the rule rather than a second
-/// implementation of it.
+/// A `/rail` that rules as the engine's rail does: a write is judged by
+/// `fence` under `worktree`, and each path it refuses is answered with the
+/// fence's own refusal.
+async fn judging_rail(fence: Fence, worktree: PathBuf) -> RailEndpoint {
+    let app = Router::new()
+        .route("/rail/{moment}", post(rule))
+        .with_state(Judge { fence, worktree });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    RailEndpoint {
+        url: format!("http://{addr}/rail"),
+        token: Secret::new("judge-token".to_string()),
+    }
+}
+
+/// What a `/rail` judge decides by.
+#[derive(Clone)]
+struct Judge {
+    fence: Fence,
+    worktree: PathBuf,
+}
+
+/// The engine's answer to one hook call: a write is refused when the fence
+/// refuses any path it names; every other moment goes on.
+async fn rule(State(judge): State<Judge>, Json(call): Json<RailCall>) -> Json<RailAnswer> {
+    let RailAct::BeforeWrite { paths } = call.act else {
+        return Json(RailAnswer::Proceed);
+    };
+    let reasons: Vec<String> = paths
+        .iter()
+        .filter_map(|path| match judge.fence.judge(&judge.worktree, path) {
+            Verdict::Refused(refusal) => Some(refusal.to_string()),
+            Verdict::Allowed => None,
+        })
+        .collect();
+    Json(if reasons.is_empty() {
+        RailAnswer::Proceed
+    } else {
+        RailAnswer::Refuse {
+            reason: reasons.join("\n\n"),
+        }
+    })
+}
+
+/// The request with its hooks pointed at a judge of its own fence. A session
+/// scripted to write asks before each write, as a CLI's write hook does, and
+/// a write the fence refuses is not made.
+async fn judged(mut req: SessionRequest) -> SessionRequest {
+    req.rail = Some(judging_rail(req.fence.clone(), req.cwd.clone()).await);
+    req
+}
+
+/// The session asks `/rail` before each write, and that judge applies the
+/// fence's own function as the engine's rail does, so the fixture exercises
+/// the rule rather than a second implementation of it.
 #[tokio::test]
-async fn a_fixture_effect_outside_the_fence_is_refused_and_recorded() {
+async fn a_fixture_effect_outside_the_fence_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
-capabilities: { fence: tool_calls }
+dialect: claude-code
 effects:
   - { path: src/lib.rs, content: "pub fn hello() {}\n" }
   - { path: outside/scope.rs, content: "should never land" }
@@ -145,24 +228,59 @@ outcome: { type: completed, summary: "done" }
         roots: Vec::new(),
         advice: Advice::ReportFinding,
         denied: Vec::new(),
-        naming: yunta_core::ToolNaming::Bare,
+        naming: ToolNaming::Bare,
     };
-    req.rail = None;
-    let session = fixture.spawn(req).await.unwrap();
-    let events = drain(session).await;
+    let session = fixture.spawn(judged(req).await).await.unwrap();
+    drain(session).await;
 
     assert!(dir.path().join("src/lib.rs").exists());
     assert!(!dir.path().join("outside/scope.rs").exists());
+}
 
-    // The refused path reaches the log as the path it is: a path names
-    // the repository, which is what a reader needs to see.
-    let refused = events.iter().any(|e| {
-        matches!(e, AgentEvent::WriteRefused { target }
-            if target.display() == Some("outside/scope.rs"))
-    });
+/// The same refusal under the codex dialect, whose hook refuses a patch only
+/// when its reply gives the reason on stderr: a reply that loses the reason
+/// lets the write through, as it would under the CLI.
+#[tokio::test]
+async fn a_codex_fixture_effect_outside_the_fence_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = MockAdapter::from_yaml(
+        r#"
+dialect: codex
+effects:
+  - { path: src/lib.rs, content: "pub fn hello() {}\n" }
+  - { path: outside/scope.rs, content: "should never land" }
+outcome: { type: completed, summary: "done" }
+"#,
+    )
+    .unwrap();
+
+    let mut req = request(dir.path().to_path_buf());
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: Advice::ReportFinding,
+        denied: Vec::new(),
+        naming: ToolNaming::Bare,
+    };
+    let session = fixture.spawn(judged(req).await).await.unwrap();
+    drain(session).await;
+
+    assert!(dir.path().join("src/lib.rs").exists());
+    assert!(!dir.path().join("outside/scope.rs").exists());
+}
+
+#[tokio::test]
+async fn mock_refuses_a_tool_call_fence_it_cannot_build() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockAdapter::from_yaml(
+        "dialect: claude-code\nsessions:\n  - outcome: {type: completed, summary: ok}",
+    )
+    .unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.rail = None;
     assert!(
-        refused,
-        "the refused write is recorded, naming the path: {events:?}"
+        mock.spawn(req).await.is_err(),
+        "a tool-call fence without a hook opens nothing"
     );
 }
 
@@ -176,14 +294,18 @@ async fn a_filesystem_fence_leaves_the_denied_effect_unwritten_and_unreported() 
     let denied = outside.path().join("scope.rs");
     let fixture = MockAdapter::from_yaml(&format!(
         r#"
-capabilities: {{ fence: filesystem }}
+dialect: claude-code
 effects:
   - {{ path: "{}", content: "should never land" }}
 outcome: {{ type: completed, summary: "done" }}
 "#,
         denied.display()
     ))
-    .unwrap();
+    .unwrap()
+    .narrowed(Capabilities {
+        fence: FenceLevel::Filesystem,
+        ..Capabilities::default()
+    });
 
     let session = fixture
         .spawn(request(dir.path().to_path_buf()))
@@ -193,9 +315,10 @@ outcome: {{ type: completed, summary: "done" }}
 
     assert!(!denied.exists(), "the denied write landed: {denied:?}");
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::WriteRefused { .. })),
+        events.iter().all(|e| matches!(
+            e,
+            AgentEvent::SessionOpened { .. } | AgentEvent::Completed { .. }
+        )),
         "the sandbox reports nothing for the write it kept out: {events:?}"
     );
     assert!(matches!(
@@ -205,37 +328,10 @@ outcome: {{ type: completed, summary: "done" }}
 }
 
 #[tokio::test]
-async fn without_a_fence_the_adapter_builds_none_and_the_effect_lands() {
-    let dir = tempfile::tempdir().unwrap();
-    let fixture = MockAdapter::from_yaml(
-        r#"
-capabilities: { fence: none }
-effects:
-  - { path: outside/scope.rs, content: "lands anyway" }
-outcome: { type: completed, summary: "done" }
-"#,
-    )
-    .unwrap();
-
-    let mut req = request(dir.path().to_path_buf());
-    req.fence = Fence {
-        allowed: Some(vec!["src/**".into()]),
-        roots: Vec::new(),
-        advice: Advice::ReportFinding,
-        denied: Vec::new(),
-        naming: yunta_core::ToolNaming::Bare,
-    };
-    let session = fixture.spawn(req).await.unwrap();
-    let _ = drain(session).await;
-
-    // With no fence to build, the adapter writes what it scripted —
-    // the engine's own post-check scope diff is what catches it later.
-    assert!(dir.path().join("outside/scope.rs").exists());
-}
-
-#[tokio::test]
 async fn probe_reports_healthy() {
-    let fixture = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
+    let fixture =
+        MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: completed, summary: ok }")
+            .unwrap();
     let report = fixture.probe().await.unwrap();
     assert!(matches!(report, ProbeReport::Healthy { .. }), "{report:?}");
 }
@@ -245,7 +341,9 @@ async fn resume_serves_the_next_script_under_the_same_session_id() {
     // The mock's resume is scripted like spawn, but the stream
     // reports the identity being continued — and records the ask, so
     // engine tests can prove the right conversation was picked up.
-    let fixture = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
+    let fixture =
+        MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: completed, summary: ok }")
+            .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let mut session = fixture
         .resume(
@@ -269,10 +367,10 @@ async fn resume_serves_the_next_script_under_the_same_session_id() {
 }
 
 #[tokio::test]
-async fn declared_capabilities_come_straight_from_the_fixture() {
+async fn declared_capabilities_come_straight_from_the_dialect() {
     let fixture = MockAdapter::from_yaml(
         r#"
-capabilities: { resume_session: true, run_tools: true }
+dialect: claude-code
 outcome: { type: completed, summary: ok }
 "#,
     )
@@ -280,7 +378,8 @@ outcome: { type: completed, summary: ok }
     let caps: Capabilities = fixture.capabilities();
     assert!(caps.resume_session);
     assert!(caps.run_tools);
-    assert_eq!(caps.fence, yunta_core::FenceLevel::None);
+    assert_eq!(caps.fence, FenceLevel::ToolCalls);
+    assert_eq!(caps.tool_naming, ToolNaming::McpPrefixed);
 }
 
 #[tokio::test]
@@ -288,9 +387,10 @@ async fn a_multi_session_fixture_scripts_each_spawn_in_order() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "first session" }
-  - outcome: { type: failed, message: "second session", retryable: false }
+  - outcome: { type: failed, message: "second session" }
 "#,
     )
     .unwrap();
@@ -316,7 +416,7 @@ sessions:
     .await;
     assert!(matches!(
         second.last().unwrap(),
-        AgentEvent::Failed { error, cause: yunta_core::port::FailureCause::Final } if error.message == "second session"
+        AgentEvent::Failed { error, cause: yunta_core::port::FailureCause::Retryable } if error.message == "second session"
     ));
 }
 
@@ -325,6 +425,7 @@ async fn an_exhausted_fixture_refuses_further_spawns_explicitly() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "only one" }
 "#,
@@ -346,6 +447,7 @@ async fn each_scripted_session_applies_only_its_own_effects() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 sessions:
   - effects: [{ path: first.txt, content: "1" }]
     outcome: { type: completed, summary: "one" }
@@ -355,24 +457,32 @@ sessions:
     )
     .unwrap();
 
-    let _ = adapter
-        .spawn(request(dir.path().to_path_buf()))
-        .await
-        .unwrap();
+    drain(
+        adapter
+            .spawn(judged(request(dir.path().to_path_buf())).await)
+            .await
+            .unwrap(),
+    )
+    .await;
     assert!(dir.path().join("first.txt").exists());
     assert!(!dir.path().join("second.txt").exists());
 
-    let _ = adapter
-        .spawn(request(dir.path().to_path_buf()))
-        .await
-        .unwrap();
+    drain(
+        adapter
+            .spawn(judged(request(dir.path().to_path_buf())).await)
+            .await
+            .unwrap(),
+    )
+    .await;
     assert!(dir.path().join("second.txt").exists());
 }
 
 #[tokio::test]
 async fn a_single_session_fixture_still_scripts_exactly_one_spawn() {
     let dir = tempfile::tempdir().unwrap();
-    let adapter = MockAdapter::from_yaml("outcome: { type: completed, summary: ok }").unwrap();
+    let adapter =
+        MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: completed, summary: ok }")
+            .unwrap();
 
     let _ = adapter
         .spawn(request(dir.path().to_path_buf()))
@@ -401,6 +511,7 @@ async fn match_prompt_contains_picks_the_right_script_out_of_call_order() {
     let dir_a = tempfile::tempdir().unwrap();
     let dir_b = tempfile::tempdir().unwrap();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "task-b"
     effects:
@@ -415,12 +526,12 @@ sessions:
 
     // Spawned in the OPPOSITE order the fixture declares them.
     let session_a = adapter
-        .spawn(prompt_request(dir_a.path().to_path_buf(), "do task-a now"))
+        .spawn(judged(prompt_request(dir_a.path().to_path_buf(), "do task-a now")).await)
         .await
         .unwrap();
     drain(session_a).await;
     let session_b = adapter
-        .spawn(prompt_request(dir_b.path().to_path_buf(), "do task-b now"))
+        .spawn(judged(prompt_request(dir_b.path().to_path_buf(), "do task-b now")).await)
         .await
         .unwrap();
     drain(session_b).await;
@@ -441,6 +552,7 @@ sessions:
 async fn a_matched_script_is_never_consumed_twice() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "task-a"
     outcome: { type: completed, summary: did-a }
@@ -468,6 +580,7 @@ async fn unmatched_scripts_still_serve_in_declaration_order() {
     // behavior — this field is additive, not a breaking change.
     let dir = tempfile::tempdir().unwrap();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - effects:
       - { path: first.txt, content: "1" }
@@ -480,7 +593,7 @@ sessions:
 
     drain(
         adapter
-            .spawn(request(dir.path().to_path_buf()))
+            .spawn(judged(request(dir.path().to_path_buf())).await)
             .await
             .unwrap(),
     )
@@ -488,7 +601,7 @@ sessions:
     assert!(dir.path().join("first.txt").exists());
     drain(
         adapter
-            .spawn(request(dir.path().to_path_buf()))
+            .spawn(judged(request(dir.path().to_path_buf())).await)
             .await
             .unwrap(),
     )
@@ -590,12 +703,16 @@ async fn the_mock_forge_reports_a_merged_pr() {
 
 // --- a mock that proves what it says it proves -------------------------
 
+/// One scripted session per call, which ignores an ordered stop: each stop
+/// the test tries is tried on a fresh one.
+fn stubborn() -> MockAdapter {
+    MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: hang, on_interrupt: ignore }")
+        .unwrap()
+}
+
 #[tokio::test]
 async fn interrupt_and_kill_are_observably_different() {
     let dir = tempfile::tempdir().unwrap();
-    // One scripted session per adapter: each stop is tried on a fresh one.
-    let stubborn =
-        || MockAdapter::from_yaml("outcome: { type: hang, on_interrupt: ignore }").unwrap();
 
     // An ordered stop the session ignores: the stream stays open.
     let mut session = stubborn()
@@ -625,7 +742,7 @@ async fn interrupt_and_kill_are_observably_different() {
     ));
 
     // A session that honors the ordered stop ends on interrupt alone.
-    let obedient = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let obedient = MockAdapter::from_yaml("dialect: claude-code\noutcome: { type: hang }").unwrap();
     let mut session = obedient
         .spawn(request(dir.path().to_path_buf()))
         .await
@@ -645,6 +762,7 @@ async fn an_ambiguous_prompt_match_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: review
     outcome: { type: completed, summary: "first" }
@@ -674,6 +792,7 @@ async fn scripts_sharing_one_needle_serve_a_request_s_attempts_in_order() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: review
     outcome: { type: completed, summary: "first" }
@@ -701,7 +820,7 @@ sessions:
 #[tokio::test]
 async fn session_ids_count_per_adapter_not_per_process() {
     let dir = tempfile::tempdir().unwrap();
-    let fixture = "outcome: { type: completed, summary: \"done\" }";
+    let fixture = "dialect: claude-code\noutcome: { type: completed, summary: \"done\" }";
     for _ in 0..2 {
         let adapter = MockAdapter::from_yaml(fixture).unwrap();
         let events = drain(
@@ -723,10 +842,11 @@ async fn session_ids_count_per_adapter_not_per_process() {
 
 #[test]
 fn a_script_naming_an_agent_is_refused() {
-    let error =
-        MockAdapter::from_yaml("agent: benito\noutcome: { type: completed, summary: \"done\" }")
-            .err()
-            .expect("`agent` is not a script's field: the request names the agent");
+    let error = MockAdapter::from_yaml(
+        "dialect: claude-code\nagent: benito\noutcome: { type: completed, summary: \"done\" }",
+    )
+    .err()
+    .expect("`agent` is not a script's field: the request names the agent");
     assert!(error.to_string().contains("agent"), "{error}");
 }
 
@@ -735,6 +855,7 @@ async fn unconsumed_names_the_scripts_no_spawn_claimed() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = MockAdapter::from_yaml(
         r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "first" }
   - outcome: { type: completed, summary: "second" }
@@ -764,7 +885,7 @@ async fn a_dropped_session_stops_its_player() {
     // One step scheduled far enough ahead that the player is still
     // waiting for it when the session goes away.
     let adapter = MockAdapter::from_yaml(
-        "sessions:\n  - steps:\n      - { type: note, text: later, after_ms: 3600000 }\n    \
+        "dialect: claude-code\nsessions:\n  - steps:\n      - { type: note, text: later, after_ms: 3600000 }\n    \
          outcome: { type: completed, summary: done }\n",
     )
     .unwrap();
@@ -802,6 +923,70 @@ async fn a_dropped_session_stops_its_player() {
     panic!("a dropped session leaves its player waiting on a step nobody will read");
 }
 
+#[tokio::test]
+async fn a_mock_session_stages_the_skill_its_cli_would() {
+    let dir = tempfile::tempdir().unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
+    let mock = MockAdapter::from_yaml(
+        "dialect: claude-code\nsessions:\n  - outcome: {type: completed, summary: ok}",
+    )
+    .unwrap();
+    let mut req = request(cwd);
+    req.skills = vec![skill];
+    let staged = mock.staged_paths(&req);
+    assert!(
+        !staged.is_empty(),
+        "the mock declares the mount its CLI would"
+    );
+    let link = req.cwd.join(&staged[0]);
+    let session = mock.spawn(req).await.unwrap();
+    assert!(
+        link.symlink_metadata().is_ok(),
+        "linked while the session lives"
+    );
+    drop(session);
+    assert!(link.symlink_metadata().is_err(), "taken back when it ends");
+}
+
+/// A skill source and a worktree, both created under `dir`.
+fn skill_and_cwd(dir: &Path) -> (PathBuf, PathBuf) {
+    let (skill, cwd) = (dir.join("skills-src/grill"), dir.join("worktree"));
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    (skill, cwd)
+}
+
+#[tokio::test]
+async fn a_mock_run_tool_call_ends_within_the_call_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let mock = MockAdapter::from_yaml(
+        "dialect: claude-code\nsessions:\n  - steps: [{type: run_tool, tool: yunta_check_artifact}]\n    outcome: {type: completed, summary: ok}",
+    )
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _held = listener.accept().await;
+        std::future::pending::<()>().await;
+    });
+    let mut req = request(dir.path().to_path_buf());
+    req.budget.timeout = Some(Duration::from_millis(300));
+    req.run_tools_endpoint = Some(RunToolsEndpoint {
+        url: format!("http://{addr}/mcp"),
+        token: Secret::new("token".to_string()),
+    });
+    let events = tokio::time::timeout(
+        Duration::from_secs(20),
+        drain(mock.spawn(req).await.unwrap()),
+    )
+    .await
+    .expect("ends within the call timeout");
+    assert!(
+        matches!(events.last(), Some(AgentEvent::Failed { .. })),
+        "{events:?}"
+    );
+}
+
 /// A fixture names the run's own directories — where a session writes
 /// the file its node declares, above all — and it has to mean the same
 /// thing whichever caller parses it. The `yunta test` harness rendered
@@ -810,6 +995,7 @@ async fn a_dropped_session_stops_its_player() {
 #[test]
 fn a_fixture_renders_its_run_paths_wherever_it_is_parsed() {
     let yaml = "\
+dialect: claude-code
 sessions:
   - effects:
       - path: \"{{run.staging}}/grill/brief.md\"
@@ -839,6 +1025,7 @@ sessions:
 #[test]
 fn a_fixture_naming_a_run_directory_is_refused_where_there_is_no_run() {
     let yaml = "\
+dialect: claude-code
 sessions:
   - effects:
       - path: \"{{run.staging}}/grill/brief.md\"
@@ -852,45 +1039,62 @@ sessions:
     );
 }
 
-/// The fixture's capability twin names the same eight fields the port
-/// does, and each one a fixture declares reaches the adapter. A twin
-/// that drifted would let a test claim a capability the engine never
-/// saw — or hide one it did.
+/// A fixture declares no capabilities of its own: the mock answers with the
+/// set of the CLI its dialect names, flag for flag. A second copy beside the
+/// fixture could drift from the adapter's, and a test would then claim a
+/// capability the engine never saw.
 #[test]
-fn every_capability_round_trips_through_a_fixture() {
-    for capability in yunta_core::Capability::ALL {
-        // The fence is a level, not a flag: a fixture names which of
-        // the three it builds, and the other seven stay booleans.
-        let declares = match capability {
-            yunta_core::Capability::Fence => "tool_calls",
-            _ => "true",
-        };
-        let fixture = MockFixture::parse_without_a_run(&format!(
-            "capabilities: {{ {}: {declares} }}\nsessions:\n  - outcome: {{ type: completed, summary: ok }}\n",
-            capability.as_str()
-        ))
-        .unwrap_or_else(|e| panic!("a fixture declaring `{capability}` parses: {e}"));
-        let declared = MockAdapter::new(fixture).capabilities();
-        for other in yunta_core::Capability::ALL {
-            assert_eq!(
-                declared.declares(other),
-                other == capability,
-                "a fixture declaring `{capability}` declares it and nothing else"
-            );
-        }
+fn every_capability_comes_from_the_dialect() {
+    let fixture = MockFixture::parse_without_a_run(
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: ok }\n",
+    )
+    .unwrap();
+    let declared = MockAdapter::new(fixture).capabilities();
+    let cli = ClaudeCodeAdapter::new(&AdapterSettings::default()).capabilities();
+    for capability in Capability::ALL {
+        assert_eq!(
+            declared.declares(capability),
+            cli.declares(capability),
+            "`{capability}` is declared as the CLI declares it"
+        );
     }
+    assert_eq!(
+        declared, cli,
+        "the whole set, naming included, is the CLI's"
+    );
 }
 
-/// And a flag the twin does not know is refused, naming it: a fixture is
-/// authored, so a typo is a mistake and never a silent `false`.
+/// And a key the fixture does not know is refused, naming it: a fixture is
+/// authored, so a typo is a mistake and never a silent default.
 #[test]
-fn a_fixture_that_declares_an_unknown_capability_is_refused() {
+fn a_fixture_with_an_unknown_top_level_key_is_refused() {
     let error = MockFixture::parse_without_a_run(
-        "capabilities: { teleportation: true }\nsessions:\n  - outcome: { type: completed, summary: ok }\n",
+        "dialect: claude-code\nteleportation: true\nsessions:\n  - outcome: { type: completed, summary: ok }\n",
     )
-    .expect_err("an unknown capability flag is refused");
+    .expect_err("an unknown top-level key is refused");
     assert!(
         error.to_string().contains("teleportation"),
-        "the refusal names the flag: {error}"
+        "the refusal names the key: {error}"
+    );
+}
+
+/// A bare protocol name is not a call a CLI makes: a run tool is named the
+/// way the dialect's CLI names it, and a step that writes the bare name is
+/// refused when the fixture is read.
+#[test]
+fn a_mock_names_run_tools_the_way_its_cli_does() {
+    let mock = MockAdapter::from_yaml(
+        "dialect: claude-code\nsessions:\n  - outcome: {type: completed, summary: ok}",
+    )
+    .unwrap();
+    assert_ne!(
+        mock.capabilities().tool_naming,
+        ToolNaming::Bare,
+        "a run-tool fixture names tools the way its CLI does"
+    );
+    let bare = "dialect: claude-code\nsessions:\n  - steps: [{type: tool_use, name: yunta_task, target: x}]\n    outcome: {type: completed, summary: ok}";
+    assert!(
+        MockFixture::parse_without_a_run(bare).is_err(),
+        "a bare run-tool name is refused on a prefixed CLI"
     );
 }

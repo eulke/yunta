@@ -24,12 +24,11 @@ fn bench() -> Bench {
 
 /// `task-h` may write `a.rs`; its first session does `first`, and the
 /// session picked back up once `b.rs` is granted writes it.
-fn fixture(capabilities: &str, first: &str) -> String {
+fn fixture(first: &str) -> String {
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("task-h", "h", "a.rs", "sh check.sh")
-    ))
-    .replace("capabilities: { run_tools: true }", capabilities);
+    ));
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.rs, content: \"a\" }}\n{first}    outcome: {{ type: completed, summary: did-h }}\n\
          \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.rs, content: \"b\" }}\n    outcome: {{ type: completed, summary: did-b }}\n"
@@ -53,10 +52,7 @@ fn granted_by(bench: &Bench) -> Option<Decider> {
 #[tokio::test]
 async fn refused_write_named_with_a_location_in_red_output_is_granted_and_session_continues() {
     let bench = bench();
-    let fixture = fixture(
-        "capabilities: { run_tools: true, resume_session: true, fence: tool_calls }",
-        "      - { path: b.rs, content: \"b\" }\n",
-    );
+    let fixture = fixture("      - { path: b.rs, content: \"b\" }\n");
 
     let RunReport { terminal, state } = bench
         .run(&scope_expansion_workflow("ask", &[], None), &fixture)
@@ -78,14 +74,12 @@ async fn refused_write_named_with_a_location_in_red_output_is_granted_and_sessio
 #[tokio::test]
 async fn a_request_citing_a_red_criterion_is_granted() {
     let bench = bench();
-    let request = format!(
-        "      - {{ path: {:?}, content: \"paths: [b.rs]\\nreason: the caller breaks\\nevidence: sh check.sh\\n\" }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
-    );
-    let fixture = fixture(
-        "capabilities: { run_tools: true, resume_session: true }",
-        &request,
-    );
+    let request = request_step(serde_json::json!({
+        "paths": ["b.rs"],
+        "reason": "the caller breaks",
+        "evidence": "sh check.sh",
+    }));
+    let fixture = fixture(&request);
 
     let RunReport { terminal, state } = bench
         .run(&scope_expansion_workflow("ask", &[], None), &fixture)
@@ -102,14 +96,11 @@ async fn a_request_citing_a_red_criterion_is_granted() {
 #[tokio::test]
 async fn a_request_citing_nothing_is_granted_on_the_red_criterion_that_locates_it() {
     let bench = bench();
-    let request = format!(
-        "      - {{ path: {:?}, content: \"paths: [b.rs]\\nreason: the caller breaks\\n\" }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
-    );
-    let fixture = fixture(
-        "capabilities: { run_tools: true, resume_session: true }",
-        &request,
-    );
+    let request = request_step(serde_json::json!({
+        "paths": ["b.rs"],
+        "reason": "the caller breaks",
+    }));
+    let fixture = fixture(&request);
 
     let RunReport { terminal, state } = bench
         .run(&scope_expansion_workflow("ask", &[], None), &fixture)
@@ -130,14 +121,11 @@ async fn a_request_citing_nothing_is_granted_on_the_red_criterion_that_locates_i
 #[tokio::test]
 async fn a_request_citing_nothing_with_a_path_no_red_output_locates_goes_to_a_person() {
     let bench = bench();
-    let request = format!(
-        "      - {{ path: {:?}, content: \"paths: [b.rs, c.rs]\\nreason: the caller breaks\\n\" }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
-    );
-    let fixture = fixture(
-        "capabilities: { run_tools: true, resume_session: true }",
-        &request,
-    );
+    let request = request_step(serde_json::json!({
+        "paths": ["b.rs", "c.rs"],
+        "reason": "the caller breaks",
+    }));
+    let fixture = fixture(&request);
 
     let RunReport { terminal, .. } = bench
         .run(&scope_expansion_workflow("ask", &[], None), &fixture)
@@ -165,21 +153,22 @@ async fn a_request_citing_nothing_with_a_path_no_red_output_locates_goes_to_a_pe
 #[tokio::test]
 async fn a_request_the_rules_refuse_is_granted_on_a_red_guard_that_locates_it() {
     let bench = Bench::new();
-    let guard = "if [ -f a.rs ] && [ ! -f b.rs ]; then echo 'error[E0308]: mismatched types'; echo '  --> b.rs:3:9'; exit 1; fi\n";
+    let guard ="if [ -f a.rs ] && [ ! -f b.rs ]; then echo 'error[E0308]: mismatched types'; echo '  --> b.rs:3:9'; exit 1; fi\n";
     tokio::fs::write(bench.worktree.join("guard.sh"), guard)
         .await
         .unwrap();
     git(&bench.worktree, &["add", "-A"]);
     git(&bench.worktree, &["commit", "-q", "-m", "guard"]);
     let tasks = "tasks:\n  - id: task-g\n    title: \"g\"\n    scope: [\"a.rs\"]\n    criteria:\n      - cmd: \"test -f a.rs\"\n      - { cmd: \"sh guard.sh\", type: guard }\n";
-    let mut fixture = plan_session(tasks).replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, resume_session: true }",
-    );
+    let mut fixture = plan_session(tasks);
     fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-g\"\n    effects:\n      - {{ path: a.rs, content: \"a\" }}\n      - {{ path: {:?}, content: \"paths: [b.rs]\\nreason: its caller breaks\\nproposed_criterion:\\n  cmd: \\\"true\\\"\\n\" }}\n    outcome: {{ type: completed, summary: did-g }}\n\
+        "  - match_prompt_contains: \"task-g\"\n    effects:\n      - {{ path: a.rs, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-g }}\n\
          \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.rs, content: \"b\" }}\n    outcome: {{ type: completed, summary: did-b }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
+        request_step(serde_json::json!({
+            "paths": ["b.rs"],
+            "reason": "its caller breaks",
+            "proposed_criterion": { "cmd": "true" },
+        })),
     ));
 
     let RunReport { terminal, state } = bench

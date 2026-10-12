@@ -6,6 +6,7 @@ use yunta_testkit::{git, git_output, Bench};
 mod common;
 use common::*;
 use yunta_core::events::{ArtifactEvent, Failure, NodeEvent, PauseReason, RunEvent, TaskEvent};
+use yunta_core::Capabilities;
 
 #[tokio::test]
 async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
@@ -32,7 +33,7 @@ nodes:
     let RunReport { terminal, .. } = bench
         .run_with_config(
             workflow,
-            "sessions: []",
+            "dialect: claude-code\nsessions: []",
             "defaults:\n  max_parallel_nodes: 2\n",
         )
         .await;
@@ -60,7 +61,9 @@ nodes:
     run: "true"
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
@@ -102,7 +105,7 @@ nodes:
 "#;
 
     let RunReport { terminal, .. } = bench
-        .run_sabotaged(workflow, "sessions: []", |_run_dir| {
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
             orphan_a_node(&bench, "only");
             yunta_testkit::write(&bench.worktree.join("present.txt"), "here");
         })
@@ -142,7 +145,7 @@ nodes:
 "#;
 
     let RunReport { terminal, .. } = bench
-        .run_sabotaged(workflow, "sessions: []", |_run_dir| {
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
             orphan_a_node(&bench, "only");
         })
         .await;
@@ -226,7 +229,9 @@ nodes:
         run: "touch load.txt"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["pre-launch", "write-docs", "load-test"] {
         assert!(
@@ -258,7 +263,9 @@ nodes:
         run: "exit 1"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     match terminal {
         RunTerminal::Paused {
             reason:
@@ -297,7 +304,9 @@ nodes:
         run: "tail -f /dev/null; touch slow-finished-fully.txt"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -331,7 +340,7 @@ nodes:
 "#;
 
     let RunReport { terminal, .. } = bench
-        .run_sabotaged(workflow, "sessions: []", |_run_dir| {
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
             // Simulate a crash mid-group: the parallel node and one child
             // (write-docs) finished; the other child (load-test) never started.
             for event in [
@@ -632,7 +641,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     let bench = Bench::new();
 
     let workflow = concurrency_workflow(2);
-    let fixture = "capabilities: { run_tools: true }\nsessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
 
     let RunReport { terminal, state } = bench
         .run_sabotaged(&workflow, fixture, |run_dir| {
@@ -885,7 +894,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state } = bench
-        .run_with_config(workflow, "sessions: []\n", config)
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("slow-check") {
@@ -930,7 +939,7 @@ nodes:
     prompt: "Implement your task."
 "#;
     let fixture = format!(
-        "capabilities: {{ run_tools: true, custom_agents: true }}\nsessions:\n{}{}",
+        "dialect: claude-code\nsessions:\n{}{}",
         tasks_session(
             &format!(
                 "tasks:\n{}",
@@ -961,7 +970,8 @@ nodes:
 
 #[tokio::test]
 async fn a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools() {
-    let bench = Bench::new();
+    // The adapter declares no capabilities at all, so no run tools either.
+    let bench = Bench::new().with_capabilities(Capabilities::default());
 
     // The document a `findings` artifact holds reaches the engine
     // through the run tools and nowhere else, so a loop node that
@@ -980,10 +990,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state } = bench
-        .run(
-            workflow,
-            "capabilities: { run_tools: false }\nsessions: []\n",
-        )
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
         .await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
@@ -1023,7 +1030,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state } = bench
-        .run_sabotaged(workflow, "sessions: []", |_run_dir| {
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
             // A crash mid-group: the group and `audit` both started, and
             // nothing recorded how `audit` ended.
             for node in ["pre-launch", "audit"] {
@@ -1103,7 +1110,9 @@ nodes:
         meet_then_write("b", "b"),
     );
 
-    let RunReport { terminal, state } = bench.run(&workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -1147,7 +1156,7 @@ nodes:
     let RunReport { terminal, state } = bench
         .run_with_config(
             &workflow,
-            "sessions: []",
+            "dialect: claude-code\nsessions: []",
             "defaults:\n  max_parallel_nodes: 2\n",
         )
         .await;
@@ -1184,7 +1193,9 @@ nodes:
         run: "mkdir -p b && echo x > b/out.txt"
 "#;
 
-    let RunReport { state, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { state, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert!(
         matches!(state.nodes.state("tidy"), Some(NodeState::Failed { .. })),
         "the node that wrote outside its scope fails, got {:?}",
@@ -1227,7 +1238,9 @@ nodes:
         meet_then_write("b", "b"),
     );
 
-    let RunReport { terminal, .. } = bench.run(&workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let log = git_output(&bench.worktree, &["log", "--oneline", "--first-parent"]);
@@ -1268,7 +1281,9 @@ nodes:
     run: "test -f build/out.bin"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(
         matches!(
@@ -1299,7 +1314,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state } = bench
-        .run_sabotaged(workflow, "sessions: []", |_run_dir| {
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
             orphan_a_node(&bench, "only");
         })
         .await;

@@ -9,6 +9,7 @@
 //! - **single-session**: the script's fields at the top level — sugar
 //!   for a one-entry `sessions:`.
 //!
+//! Both forms name the CLI the fixture stands for with `dialect:`.
 //! Spawning past the end of the script is an explicit adapter error,
 //! never a silent replay of the last session. A person writes fixtures,
 //! so every shape here refuses a key it does not know.
@@ -17,29 +18,27 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use yunta_core::fence::{Coverage, Fenced};
+use yunta_core::port::FailureCause;
 use yunta_core::template::TemplateVar;
 use yunta_core::yaml::{self, Value};
-use yunta_core::{Capabilities, FenceLevel, ModelName, ToolNaming};
+use yunta_core::ModelName;
 
-/// A parsed fixture: adapter-level capabilities plus one script per
-/// expected `spawn()`, in order.
+use super::check;
+use crate::dialect::DialectName;
+
+/// A parsed fixture: the CLI it stands for and one script per expected
+/// `spawn()`, in order.
 #[derive(Debug, Clone)]
 pub struct MockFixture {
-    pub capabilities: Capabilities,
-    /// How much of a session this fixture's adapter reports it fenced.
-    /// A fixture that says nothing gets what its level implies: a
-    /// judgement per tool call is exact, a filesystem sandbox is widened
-    /// to the directories it confines.
-    pub fence_coverage: Option<FixtureCoverage>,
+    /// The CLI this fixture stands for. Its launch, its fence, its hooks
+    /// and how it names tools all come from it, so a fixture scripts what
+    /// that CLI does and declares none of its own.
+    dialect: DialectName,
     pub sessions: Vec<SessionScript>,
     /// How many times the service the mock stands for answers that it
     /// cannot be reached before it answers that it can — what a session
     /// cut off from it waits on.
     pub service_down_for: u32,
-    /// The files the CLI this fixture stands for loads its configuration
-    /// from, as a real adapter declares them.
-    pub own_config: Vec<yunta_core::ScopeGlob>,
     /// Whether a session lists its run tools before its first turn, as
     /// every real CLI does. `false` stands for one whose tools never
     /// reached it.
@@ -83,9 +82,33 @@ pub enum FixtureError {
     /// fixture needs.
     #[error(transparent)]
     Shape(#[from] yunta_core::yaml::YamlError),
+    /// A usage step a codex session cannot print where the script puts it.
+    #[error(
+        "a codex session reports its usage on the line that completes its turn, so a usage \
+         step must be the last step of a session that completes"
+    )]
+    UsageNotLast,
+    /// A declared cause the outcome's message does not classify to.
+    #[error("the outcome declares the cause {declared}, but its message classifies as {actual}")]
+    Cause {
+        declared: &'static str,
+        actual: &'static str,
+    },
+    /// A `tool_use` names a run tool by its protocol name, which the CLI
+    /// does not call it by.
+    #[error(
+        "a tool_use names the run tool `{tool}` by its protocol name: this CLI calls it \
+         `{called}`, so write that"
+    )]
+    ProtocolRunTool { tool: &'static str, called: String },
 }
 
 impl MockFixture {
+    /// The CLI this fixture stands for.
+    pub(crate) fn dialect(&self) -> DialectName {
+        self.dialect
+    }
+
     /// Reads one fixture, resolving the run directories it names against
     /// `paths` before the YAML is parsed.
     ///
@@ -114,7 +137,25 @@ impl MockFixture {
 
     fn render(yaml: &str, vars: BTreeMap<TemplateVar, String>) -> Result<Self, FixtureError> {
         let rendered = yunta_core::template::render_template(yaml, &vars)?;
-        Ok(yunta_core::yaml::parse(&rendered)?)
+        let fixture: Self = yunta_core::yaml::parse(&rendered)?;
+        fixture.check()?;
+        Ok(fixture)
+    }
+
+    /// Refuses what a fixture states that its CLI would not do: a declared
+    /// cause its message does not classify to, and a run tool named by its
+    /// protocol name where the CLI prefixes the names of its tools.
+    fn check(&self) -> Result<(), FixtureError> {
+        let naming = self.dialect.capabilities().tool_naming;
+        for session in &self.sessions {
+            session.outcome.check()?;
+            check::names(&session.steps, naming)?;
+            if let Some(stop) = &session.before_stop {
+                check::names(&stop.steps, naming)?;
+            }
+            check::usage(self.dialect, session)?;
+        }
+        Ok(())
     }
 }
 
@@ -123,154 +164,71 @@ impl<'de> Deserialize<'de> for MockFixture {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::Error;
-
         // The two forms are told apart structurally — by the presence of
         // a `sessions` key — never by guessing from what parses.
         let value = Value::deserialize(deserializer)?;
         let has_sessions = value
             .as_mapping()
             .is_some_and(|m| m.contains_key("sessions"));
-
         if has_sessions {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Multi {
-                #[serde(default)]
-                capabilities: FixtureCapabilities,
-                #[serde(default)]
-                fence_coverage: Option<FixtureCoverage>,
-                sessions: Vec<SessionScript>,
-                #[serde(default)]
-                service_down_for: u32,
-                #[serde(default)]
-                own_config: Vec<yunta_core::ScopeGlob>,
-                #[serde(default = "lists")]
-                lists_tools: bool,
-            }
-            let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
-            let capabilities: Capabilities = multi.capabilities.into();
-            Ok(MockFixture {
-                fence_coverage: multi
-                    .fence_coverage
-                    .or_else(|| FixtureCoverage::of(capabilities.fence)),
-                capabilities,
-                sessions: multi.sessions,
-                service_down_for: multi.service_down_for,
-                own_config: multi.own_config,
-                lists_tools: multi.lists_tools,
-            })
+            multi_session(value)
         } else {
-            // The single-session form is a script with `capabilities`
-            // alongside it: that key is taken out first, so the script
-            // itself is read as strictly as in the `sessions:` form.
-            let Value::Mapping(mut mapping) = value else {
-                return Err(D::Error::custom(
-                    "a fixture is a mapping: `sessions:` with one script per session, or \
-                     one session's own fields",
-                ));
-            };
-            let capabilities: FixtureCapabilities = match mapping.remove("capabilities") {
-                Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
-                None => FixtureCapabilities::default(),
-            };
-            let lists_tools: bool = match mapping.remove("lists_tools") {
-                Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
-                None => true,
-            };
-            let own_config: Vec<yunta_core::ScopeGlob> = match mapping.remove("own_config") {
-                Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
-                None => Vec::new(),
-            };
-            let declared: Option<FixtureCoverage> = match mapping.remove("fence_coverage") {
-                Some(value) => Some(yaml::from_value(value).map_err(D::Error::custom)?),
-                None => None,
-            };
-            let script: SessionScript =
-                yaml::from_value(Value::Mapping(mapping)).map_err(D::Error::custom)?;
-            let capabilities: Capabilities = capabilities.into();
-            Ok(MockFixture {
-                fence_coverage: declared.or_else(|| FixtureCoverage::of(capabilities.fence)),
-                capabilities,
-                sessions: vec![script],
-                service_down_for: 0,
-                own_config,
-                lists_tools,
-            })
+            single_session(value)
         }
     }
 }
 
-/// What a fixture says its adapter's fence covered. The shapes of
-/// [`Coverage`] as a fixture spells them; the roots of a widened one are
-/// the session's own, so a fixture names the shape and never the paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FixtureCoverage {
-    Exact,
-    Widened,
-    ToolsOnly,
+/// The `sessions:` form: the fixture's own keys, and one script per session.
+fn multi_session<E: serde::de::Error>(value: Value) -> Result<MockFixture, E> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Multi {
+        dialect: DialectName,
+        sessions: Vec<SessionScript>,
+        #[serde(default)]
+        service_down_for: u32,
+        #[serde(default = "lists")]
+        lists_tools: bool,
+    }
+    let multi: Multi = yaml::from_value(value).map_err(E::custom)?;
+    Ok(MockFixture {
+        dialect: multi.dialect,
+        sessions: multi.sessions,
+        service_down_for: multi.service_down_for,
+        lists_tools: multi.lists_tools,
+    })
 }
 
-impl FixtureCoverage {
-    /// What a fixture's level reports when it names no coverage.
-    pub fn of(level: FenceLevel) -> Option<Self> {
-        match level {
-            FenceLevel::None => None,
-            FenceLevel::ToolCalls => Some(FixtureCoverage::Exact),
-            FenceLevel::Filesystem => Some(FixtureCoverage::Widened),
+/// The single-session form: the script's fields alongside the fixture's own
+/// keys. Those keys are taken out first, so the script itself is read as
+/// strictly as in the `sessions:` form.
+fn single_session<E: serde::de::Error>(value: Value) -> Result<MockFixture, E> {
+    let Value::Mapping(mut mapping) = value else {
+        return Err(E::custom(
+            "a fixture is a mapping: `sessions:` with one script per session, or one \
+             session's own fields",
+        ));
+    };
+    let dialect: DialectName = match mapping.remove("dialect") {
+        Some(value) => yaml::from_value(value).map_err(E::custom)?,
+        None => {
+            return Err(E::custom(
+                "a fixture names the CLI it stands for: `dialect: claude-code` or \
+                 `dialect: codex`",
+            ))
         }
-    }
-
-    /// This coverage for a session confined to `directories`.
-    pub fn resolve(self, directories: Vec<std::path::PathBuf>) -> Coverage {
-        match self {
-            FixtureCoverage::Exact => Coverage::of(Fenced::Exact, Some(Fenced::Exact)),
-            FixtureCoverage::Widened => Coverage::of(
-                Fenced::Roots(directories.clone()),
-                Some(Fenced::Roots(directories)),
-            ),
-            FixtureCoverage::ToolsOnly => Coverage::of(Fenced::Exact, None),
-        }
-    }
-}
-
-/// The capabilities a fixture declares — [`Capabilities`] flag for
-/// flag. The event log embeds `Capabilities` and reads what a later
-/// writer adds; a fixture is authored, so this twin refuses a flag it
-/// does not know.
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct FixtureCapabilities {
-    pub resume_session: bool,
-    pub fence: FenceLevel,
-    pub permission_profiles: bool,
-    pub custom_agents: bool,
-    pub usage_reporting: bool,
-    pub skills: bool,
-    pub run_tools: bool,
-    pub network_isolation: bool,
-    /// How the scripted session's CLI names tools, for a test about the
-    /// names the engine shows a session. A scripted step calls a run
-    /// tool by its own name whatever this says: the mock is the engine's
-    /// client, not a model reading a prompt.
-    pub tool_naming: ToolNaming,
-}
-
-impl From<FixtureCapabilities> for Capabilities {
-    fn from(fixture: FixtureCapabilities) -> Self {
-        Capabilities {
-            resume_session: fixture.resume_session,
-            fence: fixture.fence,
-            permission_profiles: fixture.permission_profiles,
-            custom_agents: fixture.custom_agents,
-            usage_reporting: fixture.usage_reporting,
-            skills: fixture.skills,
-            run_tools: fixture.run_tools,
-            network_isolation: fixture.network_isolation,
-            tool_naming: fixture.tool_naming,
-        }
-    }
+    };
+    let lists_tools: bool = match mapping.remove("lists_tools") {
+        Some(value) => yaml::from_value(value).map_err(E::custom)?,
+        None => true,
+    };
+    let script: SessionScript = yaml::from_value(Value::Mapping(mapping)).map_err(E::custom)?;
+    Ok(MockFixture {
+        dialect,
+        sessions: vec![script],
+        service_down_for: 0,
+        lists_tools,
+    })
 }
 
 /// What one spawned session does: the model it announces, the events
@@ -348,6 +306,19 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// The lines of every kind the CLI prints that its reader does not read,
+    /// as the CLI writes them, which the reader tolerates.
+    UnknownLine {
+        #[serde(default)]
+        after_ms: u64,
+    },
+    /// A text line the CLI prints before it opens its session. The player
+    /// prints it ahead of the open line, where the stream guard refuses it.
+    BeforeOpen {
+        text: String,
+        #[serde(default)]
+        after_ms: u64,
+    },
     /// Performs a REAL MCP `tools/call` against the session's own
     /// `run_tools_endpoint` — the mock as a genuine client of the
     /// engine's per-run listener, over the wire. A fixture using this
@@ -385,6 +356,8 @@ impl MockStep {
             MockStep::ToolUse { after_ms, .. }
             | MockStep::Usage { after_ms, .. }
             | MockStep::Note { after_ms, .. }
+            | MockStep::UnknownLine { after_ms }
+            | MockStep::BeforeOpen { after_ms, .. }
             | MockStep::RunTool { after_ms, .. } => *after_ms,
         }
     }
@@ -402,6 +375,25 @@ pub struct MockEffect {
     pub content: String,
 }
 
+/// The causes a fixture may state: the port's three, as a person writes them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeclaredCause {
+    Retryable,
+    Final,
+    Unreachable,
+}
+
+impl From<DeclaredCause> for FailureCause {
+    fn from(declared: DeclaredCause) -> Self {
+        match declared {
+            DeclaredCause::Retryable => FailureCause::Retryable,
+            DeclaredCause::Final => FailureCause::Final,
+            DeclaredCause::Unreachable => FailureCause::Unreachable,
+        }
+    }
+}
+
 /// How the session's stream ends. `Crash` and `Hang` exist to exercise
 /// the engine's side of detecting a session that ends with no terminal
 /// event, and of interrupt/kill — a mock terminal `Completed`/`Failed`
@@ -414,7 +406,11 @@ pub enum MockOutcome {
     },
     Failed {
         message: String,
-        retryable: bool,
+        /// The cause the message must classify to, when the fixture states
+        /// one. A fixture whose message classifies otherwise is refused
+        /// when it is read.
+        #[serde(default)]
+        cause: Option<DeclaredCause>,
     },
     /// The stream ends with no terminal event at all — a real crash.
     Crash,
@@ -425,6 +421,37 @@ pub enum MockOutcome {
         #[serde(default)]
         on_interrupt: OnInterrupt,
     },
+}
+
+impl MockOutcome {
+    /// Refuses a declared cause that the message does not classify to.
+    pub(crate) fn check(&self) -> Result<(), FixtureError> {
+        let MockOutcome::Failed {
+            message,
+            cause: Some(declared),
+        } = self
+        else {
+            return Ok(());
+        };
+        let declared = FailureCause::from(*declared);
+        let actual = crate::failure::classify(message).cause();
+        if declared == actual {
+            return Ok(());
+        }
+        Err(FixtureError::Cause {
+            declared: word(declared),
+            actual: word(actual),
+        })
+    }
+}
+
+/// The word a fixture writes a cause as.
+fn word(cause: FailureCause) -> &'static str {
+    match cause {
+        FailureCause::Retryable => "retryable",
+        FailureCause::Final => "final",
+        FailureCause::Unreachable => "unreachable",
+    }
 }
 
 /// What a hung session does with an ordered stop.

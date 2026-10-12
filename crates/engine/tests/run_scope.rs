@@ -1,15 +1,50 @@
 //! Scope expansion — plain violations, requests across the three modes, and human escalation to a real gate — plus re-plan.
 
+use std::path::Path;
+
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
 use common::*;
-use yunta_core::events::{GateEvent, ScopeEvent, TaskEvent};
+use yunta_core::events::{
+    EventPayload, GateEvent, ScopeEvent, SessionEvent, StoredEvent, TaskEvent, ToolTarget,
+};
+use yunta_core::{Capabilities, FenceLevel};
+
+/// A bench whose CLI runs tools and cannot resume, and whose writes the rail
+/// judges: the attempt after a grant opens fresh, on the work it left.
+fn non_resuming_bench() -> Bench {
+    Bench::new().with_capabilities(Capabilities {
+        run_tools: true,
+        fence: FenceLevel::ToolCalls,
+        ..Default::default()
+    })
+}
+
+/// A bench whose CLI runs tools and declares no fence, so a write outside
+/// the scope lands as scripted and the final scope check is what judges it.
+/// Only a CLI without a fence behaves so.
+fn fenceless_bench() -> Bench {
+    Bench::new().with_capabilities(Capabilities {
+        run_tools: true,
+        ..Default::default()
+    })
+}
+
+/// Every write the log says a session was refused, by its target.
+fn refused_targets(events: &[StoredEvent]) -> Vec<ToolTarget> {
+    events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Session(SessionEvent::WriteRefused(p))) => Some(p.target.clone()),
+            _ => None,
+        })
+        .collect()
+}
 
 #[tokio::test]
-async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_implicit_expansion()
-{
+async fn writing_outside_scope_without_a_request_is_refused_never_an_implicit_expansion() {
     // Nothing but the request protocol lets an agent widen its own scope. A
     // `within` that technically covers the path does not save the write when
     // no request was ever written: the test declares
@@ -30,17 +65,22 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
 
     let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
+    assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
         state.tasks.status("task-s"),
-        Some(yunta_core::events::TaskStatus::Blocked),
-        "an out-of-scope write with no request must block the task, never silently pass"
+        Some(yunta_core::events::TaskStatus::Done),
+        "the write outside the scope is refused, so the task closes on the work that landed"
     );
-    match terminal {
-        RunTerminal::Paused { .. } => {}
-        other => panic!("expected the run to pause on task-s, got {other:?}"),
-    }
+    assert!(
+        !bench.worktree.join("b.txt").exists(),
+        "a refused write never lands"
+    );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert_eq!(
+        refused_targets(&events),
+        vec![ToolTarget::of_path(Path::new("b.txt"))]
+    );
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
@@ -63,12 +103,14 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         task_yaml("task-p", "p", "a.txt", "test -f a.txt")
     );
 
-    let request_yaml = "paths:\n  - c.txt\nreason: \"already fine, no work needed\"\nproposed_criterion:\n  cmd: \"true\"\n";
     let mut fixture = plan_session(&tasks);
     fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-p\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-p }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: \"task-p\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-p }}\n",
+        request_step(serde_json::json!({
+            "paths": ["c.txt"],
+            "reason": "already fine, no work needed",
+            "proposed_criterion": { "cmd": "true" },
+        })),
     ));
 
     let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
@@ -123,12 +165,14 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
         task_yaml("task-d", "d", "a.txt", "test -f a.txt")
     );
 
-    let request_yaml = "paths:\n  - b.txt\nreason: \"need an adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f b.txt\"\n";
     let mut fixture = plan_session(&tasks);
     fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-d\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-d }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: \"task-d\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-d }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "need an adjacent fix in b.txt",
+            "proposed_criterion": { "cmd": "test -f b.txt" },
+        })),
     ));
 
     let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
@@ -183,15 +227,19 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
         "tasks:\n{}",
         task_yaml("task-w", "w", "a.txt", "test -f a.txt")
     );
-    let request_yaml = "paths:\n  - b.txt\nreason: \"small adjacent fix\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    // The final scope check judges b.txt only if the write reaches the diff,
+    // so the session writing it runs without a fence.
     let session = format!(
-        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-w }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n{}    outcome: {{ type: completed, summary: did-w }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "small adjacent fix",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     );
 
     // Granted: `rules` mode, `within` covers b.txt.
-    let granted_bench = Bench::new();
+    let granted_bench = fenceless_bench();
     let granted_workflow = scope_expansion_workflow("rules", &["b.txt"], None);
     let mut granted_fixture = plan_session(&tasks);
     granted_fixture.push_str(&session);
@@ -209,7 +257,7 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     // Denied: same diff, `deny` mode — b.txt is never granted, so the
     // same write is now a real violation and the task never satisfies
     // its own scope check.
-    let denied_bench = Bench::new();
+    let denied_bench = fenceless_bench();
     let denied_workflow = scope_expansion_workflow("deny", &[], None);
     let mut denied_fixture = plan_session(&tasks);
     denied_fixture.push_str(&session);
@@ -235,11 +283,13 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         "tasks:\n{}",
         task_yaml("task-g", "g", "a.txt", "test -f a.txt")
     );
-    let request_yaml = "paths:\n  - c.txt\nreason: \"golden request\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
     let session = format!(
-        "  - match_prompt_contains: \"task-g\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-g }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: \"task-g\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-g }}\n",
+        request_step(serde_json::json!({
+            "paths": ["c.txt"],
+            "reason": "golden request",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     );
 
     let mut requested_payloads = Vec::new();
@@ -312,13 +362,15 @@ async fn an_engine_granted_expansion_is_followed_by_the_one_attempt_it_makes_dif
         "tasks:\n{}",
         task_yaml("task-w", "w", "a.txt", "test -f a.txt && test -f b.txt")
     );
-    let request_yaml = "paths:\n  - b.txt\nreason: \"the criterion needs it\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
     // The attempt that asks writes what its scope allows and the request;
     // the write to b.txt is what a fence would have refused.
     let asks = format!(
-        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "the criterion needs it",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     );
     let writes = "  - match_prompt_contains: \"task-w\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote }\n";
     let bench = Bench::new();
@@ -447,11 +499,13 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
     // Attempt 1 writes what its scope allows and asks for b.txt, which a
     // fence would have refused; the human denies. The work it left already
     // closes the task within its scope, so no second session opens.
-    let request = "paths:\n  - b.txt\nreason: \"adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
     fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request,
+        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "adjacent fix in b.txt",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     ));
 
     let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
@@ -872,7 +926,9 @@ nodes:
     run: "mkdir -p bar && echo two > bar/x.txt"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     assert_eq!(
         terminal,
@@ -909,7 +965,9 @@ nodes:
     run: "mkdir -p bar && echo two > bar/x.txt && echo mine > loose.txt"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     assert!(
         !matches!(terminal, RunTerminal::Finished),
@@ -940,7 +998,9 @@ nodes:
     run: "mkdir -p ok && echo a > ok/a.txt && echo stray > stray.txt"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     // The write outside scope is its own and fails, naming `stray.txt`, not
     // the whole tree of the run.
@@ -972,7 +1032,9 @@ nodes:
 async fn a_start_records_the_tree_its_attempt_began_from() {
     let bench = Bench::new();
     let workflow = "name: recorded\nnodes:\n  - id: work\n    kind: bash\n    run: \"true\"\n";
-    bench.run(workflow, "sessions: []").await;
+    bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     let started = bench
         .events()
@@ -993,22 +1055,20 @@ async fn a_start_records_the_tree_its_attempt_began_from() {
 /// A task whose session asks for `b.txt` and, as a fence would have it,
 /// writes only `a.txt`; its criterion needs both. After a person grants,
 /// `answered` scripts what the session does next.
-fn asks_then(answered: &str, resumable: bool) -> (String, String) {
+fn asks_then(answered: &str) -> (String, String) {
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-h", "h", "a.txt", "test -f a.txt && test -f b.txt")
     );
-    let request = "paths:\n  - b.txt\nreason: \"the criterion needs b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
     let asks = format!(
-        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request,
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "the criterion needs b.txt",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     );
-    let fixture = plan_session(&tasks).replace(
-        "capabilities: { run_tools: true }",
-        &format!("capabilities: {{ run_tools: true, resume_session: {resumable} }}"),
-    ) + &asks
-        + answered;
+    let fixture = plan_session(&tasks) + &asks + answered;
     (scope_expansion_workflow("ask", &[], None), fixture)
 }
 
@@ -1027,7 +1087,6 @@ fn grants() -> ScriptedInteraction {
 async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
     let (workflow, fixture) = asks_then(
         "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
-        true,
     );
     let bench = Bench::new();
     let RunReport { terminal, state } = bench
@@ -1068,9 +1127,8 @@ async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
 async fn an_adapter_that_cannot_resume_opens_fresh_on_the_same_work() {
     let (workflow, fixture) = asks_then(
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
-        false,
     );
-    let bench = Bench::new();
+    let bench = non_resuming_bench();
     let RunReport { terminal, .. } = bench
         .run_with_interaction(&workflow, &fixture, &grants())
         .await;
@@ -1112,7 +1170,6 @@ fn task_sessions(bench: &Bench, task: &str) -> Vec<yunta_core::events::AgentSess
 async fn the_attempt_after_an_engine_grant_resumes_the_session_that_asked() {
     let (_, fixture) = asks_then(
         "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
-        true,
     );
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench

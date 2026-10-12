@@ -28,9 +28,8 @@
 //! happens. Where a command writes, and whether it reaches the network, is
 //! the CLI's own sandbox, enforced by the operating system.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use yunta_core::fence::Fenced;
 use yunta_core::port::PermissionProfile;
 
 use crate::session::Sandbox;
@@ -55,21 +54,6 @@ pub(super) fn tools(profile: PermissionProfile, has_declared_files: bool) -> Opt
     }
 }
 
-/// What a session's commands are left fenced by under `mode`: nothing
-/// written but the roots, the workspace and the roots, or anything.
-pub(super) fn other_channels(mode: Sandbox, cwd: &Path, roots: &[PathBuf]) -> Option<Fenced> {
-    match mode {
-        Sandbox::ReadOnly if roots.is_empty() => Some(Fenced::Exact),
-        Sandbox::ReadOnly => Some(Fenced::Roots(roots.to_vec())),
-        Sandbox::WorkspaceWrite => Some(Fenced::Roots(
-            std::iter::once(cwd.to_path_buf())
-                .chain(roots.iter().cloned())
-                .collect(),
-        )),
-        Sandbox::DangerFullAccess => None,
-    }
-}
-
 /// The CLI's `sandbox` settings for a session's commands under `mode`, or
 /// `None` for one left unconfined. The sandbox fails the session rather
 /// than run unconfined, and never lets a command leave it. A command
@@ -77,12 +61,13 @@ pub(super) fn other_channels(mode: Sandbox, cwd: &Path, roots: &[PathBuf]) -> Op
 /// roots the CLI was handed with `--add-dir`; it reaches the network,
 /// loopback included, only where `network` says so and the mode lets it.
 pub(super) fn sandbox(mode: Sandbox, cwd: &Path, network: bool) -> Option<serde_json::Value> {
-    let network = match (mode, network) {
-        (Sandbox::WorkspaceWrite, true) => serde_json::json!({
+    let network = if mode.opens_network(network) {
+        serde_json::json!({
             "allowLocalBinding": true,
             "allowedDomains": ["*"],
-        }),
-        _ => serde_json::json!({}),
+        })
+    } else {
+        serde_json::json!({})
     };
     let mut settings = serde_json::Map::from_iter([
         ("enabled".to_string(), serde_json::Value::Bool(true)),

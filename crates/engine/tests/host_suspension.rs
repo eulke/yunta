@@ -28,7 +28,8 @@ nodes:
 const THEN_ASKS: &str =
     "  - { id: ask, kind: prompt, runner: executor, prompt: ask, depends_on: [work] }\n";
 
-const COMPLETES: &str = "sessions:\n  - { outcome: { type: completed, summary: done } }\n";
+const COMPLETES: &str =
+    "dialect: claude-code\nsessions:\n  - { outcome: { type: completed, summary: done } }\n";
 
 /// Where the node meets the test.
 fn meeting(bench: &Bench) -> PathBuf {
@@ -68,8 +69,9 @@ async fn a_suspension_during_a_node_is_on_the_log_before_the_node_closes() {
     let bench = Bench::new().with_clock(host.clone());
     let meet = meeting(&bench);
 
-    let (RunReport { terminal, .. }, ()) =
-        tokio::join!(bench.run(HOLDS, "sessions: []\n"), async {
+    let (RunReport { terminal, .. }, ()) = tokio::join!(
+        bench.run(HOLDS, "dialect: claude-code\nsessions: []\n"),
+        async {
             let ready = meet.join("ready");
             wait_until_async(
                 || {
@@ -81,7 +83,8 @@ async fn a_suspension_during_a_node_is_on_the_log_before_the_node_closes() {
             .await;
             host.suspend(Duration::from_secs(3_600));
             tokio::fs::write(meet.join("go"), "").await.unwrap();
-        });
+        }
+    );
 
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();
@@ -107,7 +110,9 @@ nodes:
   - { id: first, kind: bash, run: "sleep 1.2" }
   - { id: second, kind: bash, run: "true", depends_on: [first] }
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(suspensions(&bench.events()), vec![]);
@@ -193,7 +198,7 @@ async fn a_command_runs_while_sessions_wait_for_the_host_to_settle() {
         format!("{HOLDS}  - {{ id: after, kind: bash, run: \"true\", depends_on: [work] }}\n");
 
     let (RunReport { terminal, .. }, ()) = tokio::join!(
-        bench.run(&workflow, "sessions: []\n"),
+        bench.run(&workflow, "dialect: claude-code\nsessions: []\n"),
         sleep_through_the_meeting(&bench, &host)
     );
 

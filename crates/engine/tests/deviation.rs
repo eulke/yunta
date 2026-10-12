@@ -61,16 +61,12 @@ fn departs(from: &str) -> String {
     )
 }
 
-fn fixture(resumable: bool, then: &str) -> String {
-    fixture_of(PLAN, resumable, then)
+fn fixture(then: &str) -> String {
+    fixture_of(PLAN, then)
 }
 
-fn fixture_of(plan: &str, resumable: bool, then: &str) -> String {
-    plan_session(plan).replace(
-        "capabilities: { run_tools: true }",
-        &format!("capabilities: {{ run_tools: true, resume_session: {resumable} }}"),
-    ) + &departs("{ shape: Greeting }")
-        + then
+fn fixture_of(plan: &str, then: &str) -> String {
+    plan_session(plan) + &departs("{ shape: Greeting }") + then
 }
 
 const WORKFLOW: &str = r#"
@@ -117,7 +113,7 @@ fn task_sessions(bench: &Bench) -> usize {
 async fn a_departure_accepted_closes_the_task_on_its_work_without_another_session() {
     let bench = Bench::new();
     let RunReport { terminal, state } = bench
-        .run_with_interaction(WORKFLOW, &fixture(true, ""), &answering("accept", None))
+        .run_with_interaction(WORKFLOW, &fixture(""), &answering("accept", None))
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -162,7 +158,7 @@ async fn a_departure_sent_back_resumes_the_session_with_what_the_person_said() {
     let RunReport { terminal, state } = bench
         .run_with_interaction(
             WORKFLOW,
-            &fixture(true, then),
+            &fixture(then),
             &answering("send-back", Some("say good night without the clock")),
         )
         .await;
@@ -182,7 +178,7 @@ async fn a_departure_sent_back_resumes_the_session_with_what_the_person_said() {
 #[tokio::test]
 async fn a_departure_no_one_answers_parks_the_run_owing_it() {
     let bench = Bench::new();
-    let RunReport { terminal, state } = bench.run(WORKFLOW, &fixture(true, "")).await;
+    let RunReport { terminal, state } = bench.run(WORKFLOW, &fixture("")).await;
 
     match terminal {
         RunTerminal::Paused {
@@ -239,7 +235,7 @@ async fn a_node_reading_the_departures_sees_each_one_and_its_answer_and_nothing_
 ";
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(&workflow, &fixture(true, then), &answering("accept", None))
+        .run_with_interaction(&workflow, &fixture(then), &answering("accept", None))
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -281,18 +277,28 @@ async fn a_departure_declared_beside_a_scope_request_is_still_owed_once_the_scop
         "    until: all_tasks_complete\n",
         "    until: all_tasks_complete\n    scope_expansion: { mode: ask }\n",
     );
+    // The session writes extra.txt, which the rail refuses, and then asks for it.
     let asks = format!(
-        "      - {{ path: extra.txt, content: \"x\" }}
-      - {{ path: {:?}, content: {:?} }}
+        "      - type: run_tool
+        tool: yunta_request_scope_expansion
+        arguments: {}
 ",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        "paths:\n  - extra.txt\nreason: \"the greeting needs a second file\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n",
+        serde_json::json!({
+            "paths": ["extra.txt"],
+            "reason": "the greeting needs a second file",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        }),
     );
     let fixture = plan_session(PLAN)
-        + &departs("{ shape: Greeting }").replace(
-            "      - { path: greeting.txt, content: \"Hello\" }\n",
-            &format!("      - {{ path: greeting.txt, content: \"Hello\" }}\n{asks}"),
-        )
+        + &departs("{ shape: Greeting }")
+            .replace(
+                "      - { path: greeting.txt, content: \"Hello\" }\n",
+                "      - { path: greeting.txt, content: \"Hello\" }\n      - { path: extra.txt, content: \"x\" }\n",
+            )
+            .replace(
+                "    outcome: { type: completed, summary: wrote-hello }\n",
+                &format!("{asks}    outcome: {{ type: completed, summary: wrote-hello }}\n"),
+            )
         + "  - match_prompt_contains: \"`greet`\"
     effects:
       - { path: greeting.txt, content: \"Hello\" }
@@ -337,11 +343,7 @@ async fn a_plan_shown_after_its_work_carries_the_departures_a_person_accepted() 
     ]);
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(
-            &workflow,
-            &fixture_of(REVIEWED_PLAN, true, ""),
-            &interaction,
-        )
+        .run_with_interaction(&workflow, &fixture_of(REVIEWED_PLAN, ""), &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);

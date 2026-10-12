@@ -136,7 +136,7 @@ fn planning(plans: &[&str]) -> String {
             ) + &spec_session()
         })
         .collect();
-    format!("capabilities: {{ run_tools: true }}\nsessions:\n{sessions}")
+    format!("dialect: claude-code\nsessions:\n{sessions}")
 }
 
 /// A person at the run's terminal who reads each escalation and walks

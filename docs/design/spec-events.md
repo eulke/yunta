@@ -107,15 +107,16 @@ historial previo — es la primera implementación.
 
 ## 4. Mapeo `AgentEvent` (Spec Adapter) → `kind` del event log
 
-El trait `Adapter` emite 8 variantes de `AgentEvent` (`SessionOpened`, `WriteRefused`,
-`RunToolFailed`, `ToolUse`, `Usage`, `Note`, `Completed`, `Failed`). El adapter informa
-lo que vio en el stream de su CLI; el engine decide qué `kind` escribe con cada una, en
-la sesión que las abrió (`task_cycle/stream.rs`):
+El trait `Adapter` emite 7 variantes de `AgentEvent` (`SessionOpened`, `RunToolFailed`,
+`ToolUse`, `Usage`, `Note`, `Completed`, `Failed`). El adapter informa lo que vio en el
+stream de su CLI; el engine decide qué `kind` escribe con cada una, en la sesión que las
+abrió (`task_cycle/stream.rs`). El puerto no tiene variante para una escritura
+rechazada: la registra el engine desde el riel de la sesión.
 
 | `AgentEvent` | `kind` resultante | Razón |
 |---|---|---|
 | `SessionOpened` | `agent_session_opened` | mapeo directo — obligatorio y siempre primero |
-| `WriteRefused` | `write_refused` | lo emite solo el mock, que juzga en local las escrituras de su cerco; con un CLI real, el riel escribe la negativa antes de responderle al hook |
+| ninguna: el riel de la sesión | `write_refused` | la registra el engine cuando el cerco rechaza una escritura por la que preguntó el hook de la sesión, antes de responderle; ningún adapter la informa |
 | `RunToolFailed` | `run_tool_failed` | una run tool que falló, con su causa cerrada |
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
@@ -749,8 +750,8 @@ tuvo el artifact y el log no dice cómo.
 engine cuando el hook de la sesión le pregunta antes de escribir y el cerco
 rechaza, antes de responderle (D249). Es juicio del engine: ningún adapter informa
 que el sandbox de su CLI negó una escritura, así que una escritura que el sandbox
-niega no llega aquí. El mock sin riel escribe por la vía del stream sus rechazos de
-efectos `ToolCalls`, hasta que esos efectos pasen por el riel.
+niega no llega aquí. El mock pide al riel cada escritura de su fixture, como su
+CLI, así que sus rechazos también los escribe el engine.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|

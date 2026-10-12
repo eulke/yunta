@@ -83,7 +83,7 @@ async fn on_its_branch(bench: &Bench, run: &RunId, file: &str) -> Option<String>
         .ok()
 }
 
-const EMPTY_FIXTURE: &str = "sessions: []\n";
+const EMPTY_FIXTURE: &str = "dialect: claude-code\nsessions: []\n";
 
 /// The `runners:` every mock-backed run resolves against, plus a suite
 /// for the lineage to measure.
@@ -251,6 +251,7 @@ nodes:
     use: spender
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - steps:
       - { type: usage, input_tokens: 100, output_tokens: 20 }
@@ -473,6 +474,7 @@ nodes:
     // feat-a/feat-b race in parallel, so fixture order between them is
     // not deterministic).
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "worked" }
   - outcome: { type: completed, summary: "worked" }
@@ -897,6 +899,7 @@ nodes:
       - artifact: { node: plan, name: plan.yaml, as: brief.md }
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "read it" }
 "#;
@@ -1131,7 +1134,7 @@ nodes:
     artifacts: { produces: [findings] }
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -1224,7 +1227,7 @@ const WRITES_ONE_TASK: &str = r#"
 /// The one executor session the loop dispatches for `T001`: it writes
 /// what the task's criterion checks for.
 const DOES_ONE_TASK: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "T001"
     effects:

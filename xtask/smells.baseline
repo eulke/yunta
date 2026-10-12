@@ -10,10 +10,10 @@ event_builder_outside_testkit 0
 execute_run_outside_testkit 2
 exit_failure_in_cli 2
 git_command_outside_git_rs 0
-let_underscore_in_prod 13
+let_underscore_in_prod 10
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
-prod_fns_over_50_lines 72
+prod_fns_over_50_lines 71
 reason_built_by_format 2
 run_tool_named_outside_vocabulary 1
 separator_literal_outside_glyphs 2
@@ -24,7 +24,7 @@ space_runs_in_prod_strings 0
 src_files_over_500_lines 3
 sync_fs_in_async 210
 system_clock_outside_boundary 75
-tense_markers 81
+tense_markers 80
 test_files_over_500_lines 35
 test_fns_over_50_lines 127
 token_count_formatted_outside_units 0

@@ -3,11 +3,11 @@
 # at that gate, so neither ever opens the executor's task — which is
 # why they read this fixture and not `build-feature.yaml`.
 #
-# The planner hands its interpreted artifacts over through run tools, so
-# the fixture declares that capability; only `brief.md`, an opaque
-# artifact, is a file a session writes itself. `grill` asks nothing, so
-# nobody has to answer for the case to run to its end.
-capabilities: { run_tools: true }
+# The planner hands its interpreted artifacts over through run tools, which
+# the claude-code dialect declares; only `brief.md`, an opaque artifact, is
+# a file a session writes itself. `grill` asks nothing, so nobody has to
+# answer for the case to run to its end.
+dialect: claude-code
 sessions:
   - match_prompt_contains: "only a person can decide"
     steps:

@@ -17,7 +17,9 @@ const GATED: &str = "name: gated\nnodes:\n  - { id: approve, kind: gate, assigne
 async fn a_pooled_bench_runs_in_a_checkout_of_the_projects_pool() {
     let bench = Bench::new().pooled();
 
-    let RunReport { terminal, .. } = bench.run(MAKES, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(MAKES, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     let tree = tokio::fs::canonicalize(bench.tree()).await.unwrap();
@@ -30,7 +32,9 @@ async fn a_pooled_bench_runs_in_a_checkout_of_the_projects_pool() {
 #[tokio::test]
 async fn a_pooled_benchs_wake_takes_a_checkout_again_on_the_runs_branch() {
     let bench = Bench::new().pooled();
-    let RunReport { terminal, .. } = bench.run(GATED, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(GATED, "dialect: claude-code\nsessions: []\n")
+        .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"

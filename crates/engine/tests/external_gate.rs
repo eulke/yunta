@@ -15,6 +15,9 @@ use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::golden::assert_golden;
 
+/// A claude-code fixture that scripts no session, so a run reaches only its gates.
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
+
 const GATE_ONLY_WORKFLOW: &str = r#"
 name: gate-scenario
 nodes:
@@ -66,7 +69,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     let (bench, forge_state) = bench_on_a_forge();
 
     // Person A's machine: first wake reaches the gate, publishes, pauses.
-    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "got {terminal:?}"
@@ -121,9 +124,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // reaching `run_finished` once the gate resolves.
     let (bench, forge_state) = bench_on_a_forge();
 
-    let RunReport { terminal, .. } = bench
-        .run(GATE_THEN_UNRESOLVED_WORKFLOW, "sessions: []\n")
-        .await;
+    let RunReport { terminal, .. } = bench.run(GATE_THEN_UNRESOLVED_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     forge_state.approve(bench.run_id.as_str(), &"person-b".into());
     let RunReport { terminal, state } = bench.wake().await;
@@ -184,7 +185,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
     let (bench, forge_state) = bench_on_a_forge();
 
-    bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
+    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     forge_state.request_changes(
         bench.run_id.as_str(),
         &"person-b".into(),
@@ -225,7 +226,7 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
 async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
     let (bench, forge_state) = bench_on_a_forge();
 
-    bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
+    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     // Person B merges the PR outright: an approval that also landed.
     let merge_sha = forge_state.merge(bench.run_id.as_str(), &"person-b".into());
 
@@ -259,9 +260,7 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
     // drift recheck only runs while the run is open.
     let (bench, forge_state) = bench_on_a_forge();
 
-    bench
-        .run(GATE_THEN_UNRESOLVED_WORKFLOW, "sessions: []\n")
-        .await;
+    bench.run(GATE_THEN_UNRESOLVED_WORKFLOW, NO_SESSIONS).await;
     forge_state.merge(bench.run_id.as_str(), &"person-b".into());
     let RunReport { terminal, state } = bench.wake().await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
@@ -301,7 +300,7 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
 async fn a_closed_pr_fails_the_node_non_retryably() {
     let (bench, forge_state) = bench_on_a_forge();
 
-    bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
+    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     forge_state.close(bench.run_id.as_str());
 
     let RunReport { state, .. } = bench.wake().await;
@@ -319,7 +318,7 @@ async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
     // A bench with no forge and no human answering: the gate takes the
     // same degrade-to-pause path a headless console already takes.
     let bench = Bench::with_run_id("run-gate-1");
-    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
         !state.nodes.has_state("approve"),
@@ -364,7 +363,7 @@ nodes:
 
 /// The first plan, and the one the review's comments correct it into.
 const PLANNER: &str = r#"
-capabilities: { run_tools: true, resume_session: false }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -429,9 +428,14 @@ async fn a_published_gate_asks_its_question_and_publishes_the_plan_to_read() {
     assert_golden(&goldens.join("gate-tasks.md"), &drawn);
 }
 
+/// The planner's CLI runs tools and cannot resume a session, so its correction is a fresh one.
 #[tokio::test]
 async fn changes_requested_publish_the_corrected_plan_on_the_same_pull_request() {
     let (bench, forge_state) = bench_on_a_forge();
+    let bench = bench.with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     bench.run(PLAN_UNDER_REVIEW, PLANNER).await;
     forge_state.request_changes(
         bench.run_id.as_str(),

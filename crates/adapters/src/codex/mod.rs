@@ -1,43 +1,44 @@
 //! The real `codex` adapter: spawns `codex exec --json` headless,
 //! streams its JSONL into `AgentEvent`s (`parse.rs`), and maps yunta's
-//! portable request fields onto the CLI's own flags (`permissions.rs`).
-//! Automated tests use a scripted CLI. A live Codex probe is run
-//! separately when the binary and credentials are available.
+//! portable request fields onto the CLI's own flags (`plan`). Automated
+//! tests use a scripted CLI. A live Codex probe is run separately when the
+//! binary and credentials are available.
 //!
-//! **`resume_session` is a fixed `true`, not literally "calculated in
-//! the constructor from `probe()`"** the way the adapter spec's own
-//! prose for `codex` reads. `Adapter::new` is synchronous and
-//! `capabilities()` — fixed at construction, with no I/O needed to
-//! report it — has no `&self` access to an async probe result —
-//! `claude_code` doesn't attempt this either, despite the same general
-//! framing applying to it too. `codex exec resume` is a documented,
-//! stable subcommand at the CLI version this was written against, so
-//! declaring the capability unconditionally is accurate today;
-//! version-gating it for real would need an async constructor threaded
-//! through `real_adapters()`, a bigger change than this one adapter
-//! justifies on its own.
+//! **`resume_session` is a fixed `true`, not computed from `probe()`.**
+//! `Adapter::new` is synchronous and `capabilities()` is fixed at
+//! construction, with no I/O needed to report it, so it has no access to an
+//! async probe result. `claude_code` does not attempt this either.
+//! `codex exec resume` is a documented, stable subcommand at the CLI version
+//! this was written against, so declaring the capability unconditionally is
+//! accurate at that version; version-gating it for real would need an async
+//! constructor threaded through `real_adapters()`, a bigger change than this
+//! one adapter justifies on its own.
 
 mod config;
 mod fence;
 mod parse;
-mod rail;
-mod settings;
+pub(crate) mod rail;
+pub(crate) mod settings;
+pub(crate) mod wire;
 
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
-    ToolNaming, Unbuildable,
-};
-
-use yunta_core::fence::Coverage;
+use yunta_core::fence::{Coverage, Fenced};
 use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
 use yunta_core::process::subprocess::{self, Launch, LineParser};
+use yunta_core::rail::RailCommand;
+use yunta_core::{
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
+    ToolNaming,
+};
 
+use crate::dialect::{require_hook, Plan};
+use crate::mount::MountPlan;
+use crate::session::Sandbox;
 use config::ConfigOverride;
 
 /// The id config names this adapter by.
@@ -54,11 +55,12 @@ const TOKEN_VAR: &str = "YUNTA_RUN_TOOLS_TOKEN";
 
 pub struct CodexAdapter {
     binary: PathBuf,
-    /// The typed reading of `adapter_settings`, or the error it
-    /// produced — reported by `probe()`, where a misconfiguration is
-    /// diagnosed before any session is opened. A session opened without
-    /// a probe reads the defaults.
+    /// The typed reading of `adapter_settings`, or the error it produced —
+    /// reported by `probe()`, where a misconfiguration is diagnosed before
+    /// any session is opened.
     settings: Result<settings::CodexSettings>,
+    /// The settings as written, which every launch plans from.
+    raw: AdapterSettings,
 }
 
 impl CodexAdapter {
@@ -69,70 +71,8 @@ impl CodexAdapter {
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("codex")),
             settings: settings::CodexSettings::read(settings),
+            raw: settings.clone(),
         }
-    }
-
-    fn build_args(
-        &self,
-        req: &SessionRequest,
-        resume: Option<&SessionId>,
-    ) -> std::result::Result<Vec<String>, Unbuildable> {
-        let mut args = vec!["exec".to_string(), "--json".to_string()];
-        if let Some(model) = &req.model {
-            args.push("--model".to_string());
-            args.push(model.to_string());
-        }
-        // `launch` refused already for settings that do not read, so
-        // the fallback here is a node whose settings named nothing.
-        // The engine judges this CLI's edits only through a hook it can
-        // run and a listener the hook can reach. Without both there is no
-        // fence to build, and a session that opens anyway writes wherever
-        // its sandbox lets it.
-        let Some(command) = req.rail_command.as_ref().filter(|_| req.rail.is_some()) else {
-            return Err(Unbuildable::HookUnavailable);
-        };
-        args.extend(self.confinement_args(req));
-        args.extend(rail::hook_overrides(
-            command,
-            RunToolsEndpoint::call_timeout(&req.budget),
-            req.formats,
-        ));
-        // An isolated session loads none of the person's own configuration
-        // or rules; its credentials stay theirs.
-        if req.cli_config == yunta_core::CliConfig::Isolated {
-            args.push("--ignore-user-config".to_string());
-            args.push("--ignore-rules".to_string());
-        }
-        // `exec`'s own options are declared on the parent command and
-        // are not `global`, so clap reads one that follows `resume` as
-        // an unexpected argument and the invocation dies before a
-        // session opens: the subcommand goes last, with only its own
-        // arguments after it.
-        if let Some(session_id) = resume {
-            args.push("resume".to_string());
-            args.push(session_id.as_str().to_string());
-        }
-        // `codex exec` exposes no cap on turns: `budget.max_turns` is
-        // bounded here by the engine's own timeout and token budget.
-        // `-` makes the CLI read the prompt from stdin, so nothing of
-        // it shows in the process list.
-        args.push("-".to_string());
-        Ok(args)
-    }
-
-    /// The sandbox the session's commands run in, and the configuration
-    /// it opens with inside it.
-    fn confinement_args(&self, req: &SessionRequest) -> Vec<String> {
-        let settings = self.settings.as_ref().cloned().unwrap_or_default();
-        let edit_sandbox = settings.sandbox.unwrap_or_default();
-        let mut args = fence::sandbox_args(&req.fence, req.permissions, edit_sandbox);
-        // Only `workspace-write` reads the switch: `read-only` has no
-        // network to open and `danger-full-access` never closed it.
-        let opens_network = req.network
-            && fence::mode(&req.fence, req.permissions, edit_sandbox)
-                == crate::session::Sandbox::WorkspaceWrite;
-        args.extend(config_overrides(req, opens_network));
-        args
     }
 
     async fn launch(
@@ -140,47 +80,113 @@ impl CodexAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
-        // Settings that do not read fail the session rather than fall
-        // back: a `sandbox:` nobody could parse would run the agent
-        // under a confinement the team never asked for, and silently.
-        if let Err(unreadable) = &self.settings {
-            return Err(AdapterError::UnreadableSettings {
-                adapter: ID.clone(),
-                detail: unreadable.to_string(),
-            });
-        }
-        crate::skills::stage(&ID, SKILLS_MOUNT, &req)?;
-        let args =
-            self.build_args(&req, resume)
-                .map_err(|source| AdapterError::FenceUnbuildable {
-                    adapter: ID.clone(),
-                    source,
-                })?;
-        let env = session_env(&req);
-        let mode = fence::mode(
-            &req.fence,
-            req.permissions,
-            self.settings
-                .as_ref()
-                .ok()
-                .and_then(|settings| settings.sandbox)
-                .unwrap_or_default(),
-        );
+        let plan = plan(&self.raw, &req, resume)?;
+        plan.write_scratch(&ID)?;
+        let mounts = plan.mounts.install(&ID)?;
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
-            args,
+            args: plan.args,
             cwd: &req.cwd,
-            env: &env,
+            env: &plan.env,
             prompt: &req.prompt,
-            parser: Box::new(CodexParser {
-                last_message: String::new(),
-                model: req.model.clone(),
-                fence: fence::coverage(&req.fence, &req.cwd, mode),
-            }),
+            parser: Box::new(CodexParser::new(plan.coverage)),
+            held: Some(Box::new(mounts)),
         })
         .await
     }
+}
+
+/// What one launch of this CLI asks for, as data, before anything is
+/// written: its arguments, environment, scratch files, mounts, and the
+/// coverage its sandbox leaves. Pure, so the mock plans its sessions
+/// the same way a real launch does.
+pub(crate) fn plan(
+    settings: &AdapterSettings,
+    req: &SessionRequest,
+    resume: Option<&SessionId>,
+) -> Result<Plan> {
+    // Settings that do not read fail the session rather than fall back: a
+    // `sandbox:` nobody could parse would run the agent under a confinement
+    // the team never asked for, and silently.
+    let typed = settings::CodexSettings::read(settings).map_err(|unreadable| {
+        AdapterError::UnreadableSettings {
+            adapter: ID.clone(),
+            detail: unreadable.to_string(),
+        }
+    })?;
+    // The engine judges this CLI's edits only through a hook it can run and
+    // a listener the hook can reach. Without both there is no fence to build,
+    // and a session that opens anyway writes wherever its sandbox lets it.
+    let (command, _) = require_hook(&ID, req)?;
+    let sandbox = fence::mode(
+        &req.fence,
+        req.permissions,
+        typed.sandbox.unwrap_or_default(),
+    );
+    // A read-only sandbox seals the roots along with everything else, so its
+    // commands write none of them.
+    let roots: &[PathBuf] = match sandbox {
+        Sandbox::ReadOnly => &[],
+        Sandbox::WorkspaceWrite | Sandbox::DangerFullAccess => &req.fence.roots,
+    };
+    Ok(Plan {
+        args: argv(req, resume, command, sandbox),
+        env: session_env(req),
+        scratch: Vec::new(),
+        mounts: MountPlan::of(SKILLS_MOUNT, req),
+        coverage: Coverage::of(Fenced::Exact, sandbox.command_fence(&req.cwd, roots)),
+    })
+}
+
+/// The arguments one launch passes: the run's flags and configuration, then
+/// the resume, then the marker that reads the prompt from stdin.
+fn argv(
+    req: &SessionRequest,
+    resume: Option<&SessionId>,
+    command: &RailCommand,
+    sandbox: Sandbox,
+) -> Vec<String> {
+    let mut args = vec!["exec".to_string(), "--json".to_string()];
+    if let Some(model) = &req.model {
+        args.push("--model".to_string());
+        args.push(model.to_string());
+    }
+    args.extend(confinement_args(req, sandbox));
+    args.extend(rail::hook_overrides(
+        command,
+        RunToolsEndpoint::call_timeout(&req.budget),
+        req.formats,
+    ));
+    // An isolated session loads none of the person's own configuration
+    // or rules; its credentials stay theirs.
+    if req.cli_config == yunta_core::CliConfig::Isolated {
+        args.push("--ignore-user-config".to_string());
+        args.push("--ignore-rules".to_string());
+    }
+    // `exec`'s own options are declared on the parent command and
+    // are not `global`, so clap reads one that follows `resume` as
+    // an unexpected argument and the invocation dies before a
+    // session opens: the subcommand goes last, with only its own
+    // arguments after it.
+    if let Some(session_id) = resume {
+        args.push("resume".to_string());
+        args.push(session_id.as_str().to_string());
+    }
+    // `-` makes the CLI read the prompt from stdin, so nothing of
+    // it shows in the process list.
+    args.push("-".to_string());
+    args
+}
+
+/// The sandbox the session's commands run in, and the configuration it opens
+/// with inside it.
+fn confinement_args(req: &SessionRequest, sandbox: Sandbox) -> Vec<String> {
+    let mut args = fence::sandbox_args(sandbox);
+    // Only `workspace-write` reads the switch: `read-only` has no network to
+    // open and `danger-full-access` never closed it.
+    args.extend(config_overrides(req, sandbox.opens_network(req.network)));
+    args
 }
 
 /// The environment one session's CLI runs in: the request's own, the
@@ -271,27 +277,27 @@ fn run_tools_overrides(url: &str, budget: &yunta_core::port::Budget) -> Vec<Stri
     .collect()
 }
 
-/// The CLI's JSONL, one event list per line. The last note seen is
-/// what a turn's completion reports as its summary, so it travels from
-/// line to line.
-struct CodexParser {
+/// The CLI's JSONL, one event list per line. The last note seen is what a
+/// turn's completion reports as its summary, so it travels from line to line.
+pub(crate) struct CodexParser {
     last_message: String,
-    /// The model the session was launched with: the CLI's stream names
-    /// none, and the session runs on the one it was told.
-    model: Option<yunta_core::ModelName>,
-    /// What the sandbox this session runs under actually fenced —
-    /// computed once, when the session was built.
+    /// What the sandbox this session runs under actually fenced — computed
+    /// once, when the session was planned.
     fence: Coverage,
+}
+
+impl CodexParser {
+    pub(crate) fn new(fence: Coverage) -> Self {
+        Self {
+            last_message: String::new(),
+            fence,
+        }
+    }
 }
 
 impl LineParser for CodexParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        let mut events = parse::parse_line(line, &self.last_message, &self.fence);
-        for event in &mut events {
-            if let AgentEvent::SessionOpened { model, .. } = event {
-                model.clone_from(&self.model);
-            }
-        }
+        let events = parse::parse_line(line, &self.last_message, &self.fence);
         if let Some(text) = events.iter().rev().find_map(|event| match event {
             AgentEvent::Note { text } => Some(text.clone()),
             _ => None,
@@ -302,6 +308,51 @@ impl LineParser for CodexParser {
     }
 }
 
+/// What this CLI declares, which the adapter answers and the mock plays.
+pub(crate) fn capabilities() -> Capabilities {
+    Capabilities {
+        resume_session: true,
+        // Mounted by each launch into the session cwd's own
+        // `.agents/skills/` — where the CLI discovers a project's skills.
+        skills: true,
+        // Every edit goes through a `PreToolUse` hook that asks the
+        // engine before the patch applies; commands stay confined by the
+        // process's sandbox, which the coverage reports.
+        fence: FenceLevel::ToolCalls,
+        permission_profiles: true,
+        // A named agent's instructions reach the CLI the way a profile
+        // carries them, as `developer_instructions`.
+        custom_agents: true,
+        usage_reporting: true,
+        // The per-run MCP server reaches the CLI as an external
+        // streamable-HTTP server, configured by `-c` overrides.
+        // Like every other mapping in this adapter, this is read
+        // off the CLI's own source rather than confirmed live —
+        // see this module's doc comment.
+        run_tools: true,
+        // The `read-only` and `workspace-write` sandboxes keep a
+        // session off the network unless its request opens it; a
+        // `full` session, unconfined on every adapter, is one `check`
+        // refuses `network: false` for.
+        network_isolation: true,
+        // The CLI names an MCP server's tools `mcp__<server>__<tool>`
+        // with the server's `-` written `_`: a session finds
+        // `mcp__yunta_run__yunta_task`, never `yunta_task`.
+        tool_naming: ToolNaming::McpPrefixedUnderscored,
+        // The CLI takes another turn after each stop the engine refuses,
+        // over whatever state the work is in.
+        stop_refusals: true,
+    }
+}
+
+/// The files of a checkout this CLI loads its configuration from.
+pub(crate) fn own_config() -> Vec<yunta_core::ScopeGlob> {
+    [".codex/config.toml", ".codex/hooks.json"]
+        .into_iter()
+        .filter_map(|path| yunta_core::ScopeGlob::exact(std::path::Path::new(path)).ok())
+        .collect()
+}
+
 #[async_trait]
 impl Adapter for CodexAdapter {
     fn id(&self) -> &'static AdapterId {
@@ -309,48 +360,13 @@ impl Adapter for CodexAdapter {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            resume_session: true,
-            // Mounted by staging into the session cwd's own
-            // `.agents/skills/` — where the CLI discovers a project's
-            // skills.
-            skills: true,
-            // Every edit goes through a `PreToolUse` hook that asks the
-            // engine before the patch applies; commands stay confined by
-            // the process's sandbox, which the coverage reports.
-            fence: FenceLevel::ToolCalls,
-            permission_profiles: true,
-            // A named agent's instructions reach the CLI the way a profile
-            // carries them, as `developer_instructions`.
-            custom_agents: true,
-            usage_reporting: true,
-            // The per-run MCP server reaches the CLI as an external
-            // streamable-HTTP server, configured by `-c` overrides.
-            // Like every other mapping in this adapter, this is read
-            // off the CLI's own source rather than confirmed live —
-            // see this module's doc comment.
-            run_tools: true,
-            // The `read-only` and `workspace-write` sandboxes keep a
-            // session off the network unless its request opens it; a
-            // `full` session, unconfined on every adapter, is one `check`
-            // refuses `network: false` for.
-            network_isolation: true,
-            // The CLI names an MCP server's tools `mcp__<server>__<tool>`
-            // with the server's `-` written `_`: a session finds
-            // `mcp__yunta_run__yunta_task`, never `yunta_task`.
-            tool_naming: ToolNaming::McpPrefixedUnderscored,
-        }
+        capabilities()
     }
 
     fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf> {
-        crate::skills::mounts(SKILLS_MOUNT, req)
-            .into_iter()
-            .map(|(mount, _)| mount)
-            .collect()
-    }
-
-    fn unstage(&self, req: &SessionRequest) -> Result<()> {
-        crate::skills::unstage(&ID, SKILLS_MOUNT, req)
+        plan(&self.raw, req, None)
+            .map(|plan| plan.mounts.staged())
+            .unwrap_or_default()
     }
 
     fn rail_codec(&self) -> Option<&dyn yunta_core::port::RailCodec> {
@@ -368,10 +384,7 @@ impl Adapter for CodexAdapter {
     }
 
     fn own_config(&self) -> Vec<yunta_core::ScopeGlob> {
-        [".codex/config.toml", ".codex/hooks.json"]
-            .into_iter()
-            .filter_map(|path| yunta_core::ScopeGlob::exact(std::path::Path::new(path)).ok())
-            .collect()
+        own_config()
     }
 
     fn service_vars(&self) -> &'static [&'static str] {

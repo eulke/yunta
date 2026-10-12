@@ -32,11 +32,7 @@ fn fixture(sessions: &str) -> String {
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("task-a", "a", "a.txt", "test -f a.txt")
-    ))
-    .replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, resume_session: true, fence: tool_calls }",
-    );
+    ));
     fixture.push_str(sessions);
     fixture
 }
@@ -119,15 +115,15 @@ async fn a_session_that_asked_for_scope_is_never_sent_back() {
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("task-b", "b", "a.txt", "sh check.sh")
-    ))
-    .replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, resume_session: true }",
-    );
+    ));
     fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-b\"\n    effects:\n      - {{ path: {:?}, content: \"paths: [b.txt]\\nreason: the check reads b.txt\\nproposed_criterion:\\n  cmd: test -f b.txt\\n\" }}\n    before_stop: {{}}\n    outcome: {{ type: completed, summary: asked }}\n\
+        "  - match_prompt_contains: \"task-b\"\n{}    before_stop: {{}}\n    outcome: {{ type: completed, summary: asked }}\n\
          \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.txt, content: \"b\" }}\n    outcome: {{ type: completed, summary: did-b }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "the check reads b.txt",
+            "proposed_criterion": { "cmd": "test -f b.txt" },
+        })),
     ));
 
     let RunReport { terminal, state } = bench
@@ -163,7 +159,7 @@ async fn a_node_session_without_its_document_is_sent_back_to_hand_it_over() {
         .map(|(steps, _)| steps.lines().map(|line| format!("  {line}\n")).collect())
         .unwrap();
     let fixture = format!(
-        "capabilities: {{ run_tools: true }}\nsessions:\n  - before_stop:\n      steps:\n{steps}    outcome: {{ type: completed, summary: planned }}\n"
+        "dialect: claude-code\nsessions:\n  - before_stop:\n      steps:\n{steps}    outcome: {{ type: completed, summary: planned }}\n"
     );
 
     let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
@@ -191,11 +187,7 @@ async fn a_session_whose_refused_write_its_red_output_locates_is_never_sent_back
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("task-h", "h", "a.rs", "sh check.sh")
-    ))
-    .replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, resume_session: true, fence: tool_calls }",
-    );
+    ));
     fixture.push_str(
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.rs, content: \"a\" }\n      - { path: b.rs, content: \"b\" }\n    before_stop: {}\n    outcome: { type: completed, summary: did-h }\n\
          \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - { path: b.rs, content: \"b\" }\n    outcome: { type: completed, summary: did-b }\n",

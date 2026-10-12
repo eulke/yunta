@@ -49,7 +49,7 @@ async fn bench() -> Bench {
 #[tokio::test]
 async fn a_written_file_a_rule_covers_is_formatted_and_one_no_rule_covers_is_left_alone() {
     let bench = bench().await;
-    let fixture = "capabilities: { run_tools: true, fence: tool_calls }\neffects:\n  - { path: a.txt, content: \"hello\" }\n  - { path: b.md, content: \"hello\" }\n  - { path: c.txt, content: \"ALREADY\" }\noutcome: { type: completed, summary: wrote }\n";
+    let fixture = "dialect: claude-code\neffects:\n  - { path: a.txt, content: \"hello\" }\n  - { path: b.md, content: \"hello\" }\n  - { path: c.txt, content: \"ALREADY\" }\noutcome: { type: completed, summary: wrote }\n";
 
     let RunReport { terminal, .. } = bench.run_with_config(WORKFLOW, fixture, CONFIG).await;
 
@@ -81,7 +81,7 @@ async fn a_written_file_a_rule_covers_is_formatted_and_one_no_rule_covers_is_lef
 #[tokio::test]
 async fn a_formatter_that_fails_is_recorded_with_its_exit_and_the_session_goes_on() {
     let bench = bench().await;
-    let fixture = "capabilities: { run_tools: true, fence: tool_calls }\neffects:\n  - { path: bad.txt, content: \"x\" }\noutcome: { type: completed, summary: wrote }\n";
+    let fixture = "dialect: claude-code\neffects:\n  - { path: bad.txt, content: \"x\" }\noutcome: { type: completed, summary: wrote }\n";
 
     let RunReport { terminal, .. } = bench.run_with_config(WORKFLOW, fixture, CONFIG).await;
 
@@ -95,7 +95,7 @@ async fn a_formatter_that_fails_is_recorded_with_its_exit_and_the_session_goes_o
 #[tokio::test]
 async fn a_run_without_format_rules_formats_nothing() {
     let bench = bench().await;
-    let fixture = "capabilities: { run_tools: true, fence: tool_calls }\neffects:\n  - { path: a.txt, content: \"hello\" }\noutcome: { type: completed, summary: wrote }\n";
+    let fixture = "dialect: claude-code\neffects:\n  - { path: a.txt, content: \"hello\" }\noutcome: { type: completed, summary: wrote }\n";
     let config = "runners:\n  executor:\n    - { adapter: mock, model: mock-model }\n";
 
     let RunReport { terminal, .. } = bench.run_with_config(WORKFLOW, fixture, config).await;

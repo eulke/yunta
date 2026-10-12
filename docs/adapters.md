@@ -86,7 +86,7 @@ says which:
 |---|---|---|
 | `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens; commands stay inside the CLI's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `edit`, only the run's directories under `read-only`, anything under `full`. |
 | `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `workspace-write`, nothing under `read-only`, anything under `full`. |
-| `mock` | The fixture says which of the three levels it builds; at the per-call level each scripted effect asks the engine the way a CLI's hook does. | Whatever the fixture declares. |
+| `mock` | The fixture's `dialect:` (`claude-code` or `codex`) decides what the mock declares, as that CLI's adapter does; each scripted effect asks the engine the way that CLI's hook does. | What that CLI's adapter covers. |
 
 Every session also loads its person's own configuration of the CLI — settings,
 extensions, MCP servers, hooks — unless its node says `cli_config: isolated`, which
@@ -105,8 +105,9 @@ against the adapter.
 No adapter reports a denial of its CLI's sandbox, so none writes one to the log.
 Claude returns a command its sandbox refuses as an ordinary failed tool result,
 and Codex 0.157.0 emits no item for one. The engine's rail records each refusal
-it judges as `write_refused`; with a filesystem fence, the mock skips a denied
-write and reports nothing, as a sandbox does.
+it judges as `write_refused`. The mock asks the rail about each scripted write,
+as the CLI it stands for does; narrowed to a filesystem fence, it skips a
+denied write and reports nothing, as a sandbox does.
 
 After a write, when the project's `format:` covers what was written, the CLI
 tells the engine, which formats it and tells the session to read the file
@@ -155,17 +156,18 @@ The three permission profiles map onto the same confinement on both CLIs. A
 session's commands run in its CLI's own sandbox, enforced by the operating
 system: under `read-only` they write nothing of the checkout, under `edit` they
 write the checkout and the run's directories, and under `full` nothing confines
-them. Whether they reach the network — loopback included — is the node's
-`network:`, else the project's `permissions.network.default`, else open; a
+them. One difference is still open: under `read-only` with run directories, the
+two CLIs confine commands differently, as the table above shows, until a later
+change aligns them. Whether they reach the network — loopback included — is the
+node's `network:`, else the project's `permissions.network.default`, else open; a
 closed network keeps a test suite from listening on `127.0.0.1`, so leave it
 open where one does. `check` refuses `network: false` on a `full` node, whose
-commands nothing confines. `budget.max_turns`
-reaches `claude-code` as `--max-turns`; `codex exec` has no turn cap, so there
-the engine's own timeout and token budget bound the session. The timeout
-counts time the host is awake: a machine that sleeps spends none of it, and
-the run's log records the suspension. After a suspension, no session opens
-until the host has been awake for two minutes, so a session is not lost to a
-laptop that wakes briefly and sleeps again.
+commands nothing confines. The engine's own timeout and token budget bound every
+session, whichever CLI runs it. The timeout counts time the host is awake: a
+machine that sleeps spends none of it, and the run's log records the suspension.
+After a suspension, no session opens until the host has been awake for two
+minutes, so a session is not lost to a laptop that wakes briefly and sleeps
+again.
 
 ## `mock`: not a test helper, a first-class adapter
 
@@ -302,3 +304,10 @@ Claude Code as `mcp__yunta-run__yunta_task`, Codex as
 `tool_naming` capability, and every text the engine shows a session names a
 run tool by it, so a session calls the name its CLI has on the first try
 rather than the bare `yunta_task`, which reaches nothing.
+
+The event log names a run tool by its canonical name, such as
+`yunta_check_artifact`, whichever CLI called it. Each adapter reads a run tool
+call back to that name, so a CLI-specific name such as
+`mcp__yunta-run__yunta_check_artifact` never reaches the log, and neither does
+the generic `mcp_tool_call` for a run tool. A log written earlier, with those
+names, still reads.

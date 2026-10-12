@@ -34,7 +34,7 @@ nodes:
 /// questions — one `choice`, one optional `text` — over through
 /// `yunta_submit_questions`, and the engine writes `questions.yaml`.
 pub const QUESTIONS_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -194,7 +194,7 @@ pub fn tasks_session(tasks: &str, summary: &str) -> String {
 /// Executor sessions a test appends land after it, in dispatch order.
 pub fn plan_session(tasks: &str) -> String {
     format!(
-        "capabilities: {{ run_tools: true }}\nsessions:\n{}",
+        "dialect: claude-code\nsessions:\n{}",
         tasks_session(tasks, "planned")
     )
 }
@@ -215,7 +215,7 @@ pub fn review_session(findings: &[(&str, &str, &str, &str, &str)]) -> String {
         })
         .collect();
     format!(
-        "capabilities: {{ run_tools: true }}\nsessions:\n  - steps:\n{steps}\
+        "dialect: claude-code\nsessions:\n  - steps:\n{steps}\
          \x20   outcome: {{ type: completed, summary: \"reviewed\" }}\n"
     )
 }
@@ -359,14 +359,28 @@ pub fn findings_posted(
 
 // --- scope expansion escalation → real gate ------------
 
-/// One `ask`-mode attempt that writes a.txt (in scope), b.txt (outside)
-/// and the request file asking for b.txt.
+/// The step by which a session asks the engine for scope through its request
+/// tool, with `arguments` as the request object the tool takes.
+pub fn request_step(arguments: serde_json::Value) -> String {
+    let step = serde_json::json!({
+        "type": "run_tool",
+        "tool": "yunta_request_scope_expansion",
+        "arguments": arguments,
+    });
+    format!("    steps: [{step}]\n")
+}
+
+/// One `ask`-mode attempt that writes a.txt (in scope) and b.txt (outside,
+/// which the rail refuses), then asks the engine for b.txt through its
+/// request tool.
 pub fn requesting_session(task_id: &str) -> String {
-    let request_yaml = "paths:\n  - b.txt\nreason: \"adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
     format!(
-        "  - match_prompt_contains: {task_id:?}\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: {task_id:?}\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "adjacent fix in b.txt",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     )
 }
 
@@ -435,7 +449,7 @@ pub async fn run_stable_first(
 ) {
     std::fs::write(bench.worktree.join("stable.txt"), "STABLE-CONTENT\n").unwrap();
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"FIXED-BRIEF-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"{volatile_command_output}\"\n    outcome: {{ type: completed, summary: planned }}\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"FIXED-BRIEF-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"{volatile_command_output}\"\n    outcome: {{ type: completed, summary: planned }}\n",
         bench.staging("grill").display(),
     );
     let workflow = stable_first_workflow(volatile_command_output);
@@ -514,6 +528,7 @@ nodes:
 "#;
 
 pub const HOPELESS_UNTIL_RETRIED_FIXTURE: &str = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "did nothing useful" }
   - effects:
@@ -637,7 +652,7 @@ nodes:
 /// nodes); sessions 2 and 3 (the corrective, then `first`'s retry) only
 /// ever run if a human lets the run continue past the cap.
 pub const BUDGET_FIXTURE: &str = r#"
-capabilities: { usage_reporting: true }
+dialect: claude-code
 sessions:
   - steps:
       - { type: usage, input_tokens: 150, output_tokens: 50 }
@@ -793,6 +808,7 @@ on_finish:
 pub fn distill_fixture(bench: &Bench) -> String {
     format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{artifacts}/plan.md", content: "DISTILLED-MARKER: the durable decision\n" }}
@@ -815,6 +831,9 @@ pub struct Orphan<'a> {
     /// What the cut session had already written where a node writes the
     /// files it declares, as `(node, file name, content)`.
     pub staged: &'a [(&'a str, &'a str, &'a str)],
+    /// What the mock declares, when a case needs a narrower CLI than its
+    /// fixture's dialect; `None` keeps the dialect's own declaration.
+    pub capabilities: Option<yunta_core::Capabilities>,
 }
 
 /// Crafts an interrupted run: `run_created` + a `node_started` (and
@@ -837,8 +856,12 @@ pub async fn resume_orphan_with_mock(
         fixture,
         session: orphan_session,
         staged,
+        capabilities,
     } = orphan;
-    let bench = Bench::new();
+    let bench = match capabilities {
+        Some(capabilities) => Bench::new().with_capabilities(capabilities),
+        None => Bench::new(),
+    };
     let RunReport { terminal, .. } = bench
         .run_sabotaged(workflow, fixture, |run_dir| {
             let emit = |node: &str, payload: yunta_core::events::EventPayload| {

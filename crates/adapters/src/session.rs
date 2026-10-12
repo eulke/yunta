@@ -4,6 +4,9 @@
 //!
 //! The port these adapters implement is `yunta_core::port`.
 
+use std::path::{Path, PathBuf};
+
+use yunta_core::fence::Fenced;
 use yunta_core::{AdapterError, AdapterId, Result};
 
 /// Reads an adapter's `adapter_settings` map into its typed settings:
@@ -61,6 +64,29 @@ impl Sandbox {
             Sandbox::DangerFullAccess => "danger-full-access",
         }
     }
+
+    /// What a session's commands are fenced by under this mode; `None` is
+    /// unconfined. A workspace-write session writes its worktree, so the
+    /// worktree comes first among the roots.
+    pub(crate) fn command_fence(self, cwd: &Path, roots: &[PathBuf]) -> Option<Fenced> {
+        match self {
+            Sandbox::ReadOnly if roots.is_empty() => Some(Fenced::Exact),
+            Sandbox::ReadOnly => Some(Fenced::Roots(roots.to_vec())),
+            Sandbox::WorkspaceWrite => Some(Fenced::Roots(
+                std::iter::once(cwd.to_path_buf())
+                    .chain(roots.iter().cloned())
+                    .collect(),
+            )),
+            Sandbox::DangerFullAccess => None,
+        }
+    }
+
+    /// Whether the session's commands reach the network: the request's word,
+    /// which only `workspace-write` reads. `read-only` has no network to open,
+    /// and `danger-full-access` never closed it.
+    pub(crate) fn opens_network(self, requested: bool) -> bool {
+        requested && self == Sandbox::WorkspaceWrite
+    }
 }
 
 /// How long a CLI waits for its write hook to answer. A hook that does not
@@ -93,6 +119,41 @@ pub(crate) fn kept_working(reason: &str) -> yunta_core::port::HookReply {
         stdout: said.to_string().into_bytes(),
         stderr: Vec::new(),
         exit: 0,
+    }
+}
+
+/// The answer a stop hook's reply gives the session: `Refuse` with the
+/// reason when stdout blocks the stop, which is how both CLIs keep a session
+/// working, and `Proceed` otherwise.
+pub(crate) fn stop_answer(reply: &yunta_core::port::HookReply) -> yunta_core::rail::RailAnswer {
+    let said: serde_json::Value = serde_json::from_slice(&reply.stdout).unwrap_or_default();
+    match said.get("decision").and_then(serde_json::Value::as_str) {
+        Some("block") => yunta_core::rail::RailAnswer::Refuse {
+            reason: said
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        },
+        _ => yunta_core::rail::RailAnswer::Proceed,
+    }
+}
+
+/// The answer an after-write hook's reply gives the session: `Tell` with the
+/// context the model is shown, when stdout carries one, and `Proceed`
+/// otherwise.
+pub(crate) fn after_write_answer(
+    reply: &yunta_core::port::HookReply,
+) -> yunta_core::rail::RailAnswer {
+    let said: serde_json::Value = serde_json::from_slice(&reply.stdout).unwrap_or_default();
+    match said
+        .pointer("/hookSpecificOutput/additionalContext")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(context) => yunta_core::rail::RailAnswer::Tell {
+            context: context.to_string(),
+        },
+        None => yunta_core::rail::RailAnswer::Proceed,
     }
 }
 

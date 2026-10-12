@@ -311,7 +311,7 @@ fn write_pack_with_executor_and_tests(dir: &Path) {
     .unwrap();
     std::fs::write(
         dir.join(".yunta/tests/fixtures/mark.yaml"),
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     )
     .unwrap();
 }

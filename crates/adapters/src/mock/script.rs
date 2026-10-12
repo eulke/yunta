@@ -8,32 +8,44 @@
 //! fixture other sessions are still claiming from, and a stop ends it
 //! wherever it is.
 //!
+//! What the session says goes out the way its CLI prints it: each step is
+//! rendered as lines in that CLI's own format and read back by the reader
+//! the engine uses for that CLI, and every event read passes the stream
+//! guard, so the stream the engine sees is the one a real session makes.
+//!
 //! Every send is checked: a receiver that is gone means the engine
 //! stopped reading this session, and a script that keeps playing into a
 //! closed channel is work nobody asked for.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use yunta_core::fence::Coverage;
 
 use tokio::sync::{mpsc, Notify};
-use yunta_core::{ModelName, SessionId};
+use yunta_core::events::{RunToolFailureCause, ToolTarget};
+use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, FailureCause, RunToolsEndpoint};
+use yunta_core::process::stream::StreamGuard;
+use yunta_core::process::subprocess::LineParser;
+use yunta_core::rail::{RailAnswer, RailEvent};
+use yunta_core::{ModelName, RunTool, SessionId, ToolNaming};
 
-use super::run_tool::call_run_tool;
-use super::{MockOutcome, MockStep, OnInterrupt, ToolExpectation};
-use yunta_core::port::RunToolsEndpoint;
-use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, FailureCause};
+use super::effects::{ask_hook, Asked};
+use super::run_tool::{call_run_tool, list_run_tools, RunToolCallError};
+use super::{MockOutcome, MockStep, OnInterrupt, ToolExpectation, ID};
+use crate::dialect::DialectName;
 
 /// One session's script, cut loose from the fixture it was claimed from.
 pub(super) struct Script {
+    pub(super) dialect: DialectName,
     pub(super) session_id: SessionId,
     pub(super) model: ModelName,
-    /// The edits this session's effects would have made and the request's
-    /// constraints blocked — reported as writes it refused, which is how a
-    /// hook-capable CLI reports an edit it refused.
-    pub(super) refused: Vec<PathBuf>,
-    pub(super) fence: Option<Coverage>,
+    /// Reads the lines the session's CLI prints, as the engine reads that
+    /// CLI's stream.
+    pub(super) reader: Box<dyn LineParser>,
+    /// How the session's CLI names the run tools it calls.
+    pub(super) naming: ToolNaming,
+    /// How long one run tool call may take: the CLI's own call timeout.
+    pub(super) within: Duration,
     /// The effects this session writes by asking the engine first, as a
     /// CLI's hook does — `None` when they were judged before it opened.
     pub(super) asked: Option<Asked>,
@@ -47,16 +59,6 @@ pub(super) struct Script {
     pub(super) lists_tools: bool,
 }
 
-/// A session's effects, each written only once the engine allows it.
-pub(super) struct Asked {
-    pub(super) rail: yunta_core::rail::RailEndpoint,
-    pub(super) cwd: PathBuf,
-    pub(super) effects: Vec<super::fixture::MockEffect>,
-    /// Whether the engine formats what is written: each write that lands
-    /// is then told to it, as a CLI's after-write hook does.
-    pub(super) formats: bool,
-}
-
 /// What a session that asks before it stops does when it is sent back.
 pub(super) struct BeforeStop {
     /// Its writes, asked about as a CLI's write hook asks.
@@ -65,55 +67,17 @@ pub(super) struct BeforeStop {
 }
 
 impl BeforeStop {
-    /// The engine's answer to this session's wish to stop.
-    async fn asked(&self, session: &SessionId) -> Result<yunta_core::rail::RailAnswer, String> {
-        let call = yunta_core::rail::RailCall {
-            session_id: session.clone(),
-            act: yunta_core::rail::RailAct::BeforeStop,
-        };
-        let rail = self.writes.rail.clone();
-        tokio::task::spawn_blocking(move || rail.ask(&call, None))
-            .await
-            .map_err(|e| format!("the stop hook did not finish: {e}"))?
-            .map_err(|e| format!("the stop hook could not ask the engine: {e}"))
-    }
-}
-
-impl Asked {
-    /// Asks the engine about each effect and writes the ones it allows.
-    async fn written(self, session: SessionId) -> Result<(), String> {
-        for effect in self.effects {
-            let call = yunta_core::rail::RailCall {
-                session_id: session.clone(),
-                act: yunta_core::rail::RailAct::BeforeWrite {
-                    paths: vec![effect.path.clone()],
-                },
-            };
-            let rail = self.rail.clone();
-            let answer =
-                tokio::task::spawn_blocking(move || rail.ask(&call, Some(Duration::from_secs(30))))
-                    .await
-                    .map_err(|e| format!("the write hook did not finish: {e}"))?
-                    .map_err(|e| format!("the write hook could not ask the engine: {e}"))?;
-            if answer != yunta_core::rail::RailAnswer::Proceed {
-                continue;
-            }
-            super::effects::write_effect(&self.cwd, &effect).map_err(|e| e.to_string())?;
-            if self.formats {
-                let call = yunta_core::rail::RailCall {
-                    session_id: session.clone(),
-                    act: yunta_core::rail::RailAct::AfterWrite {
-                        paths: vec![effect.path.clone()],
-                    },
-                };
-                let rail = self.rail.clone();
-                tokio::task::spawn_blocking(move || rail.ask(&call, Some(Duration::from_secs(30))))
-                    .await
-                    .map_err(|e| format!("the after-write hook did not finish: {e}"))?
-                    .map_err(|e| format!("the after-write hook could not ask the engine: {e}"))?;
-            }
-        }
-        Ok(())
+    /// What the CLI reads from the engine's reply to this session's wish to
+    /// stop. A stop names no path, so the hook is asked with an empty one.
+    async fn asked(&self, session: &SessionId) -> Result<RailAnswer, String> {
+        ask_hook(
+            self.writes.dialect,
+            &self.writes.rail,
+            RailEvent::BeforeStop,
+            session,
+            Path::new(""),
+        )
+        .await
     }
 }
 
@@ -161,50 +125,244 @@ impl Stops {
     }
 }
 
-/// Plays `script` into `events` until it runs out, a stop arrives, or the
-/// engine stops listening.
-pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEvent>, stops: Stops) {
-    // SessionOpened is always the first event, unconditionally.
-    let session = script.session_id.clone();
-    if events
-        .send(AgentEvent::SessionOpened {
-            session_id: script.session_id,
-            model: Some(script.model),
-            fence: script.fence,
-        })
-        .is_err()
-    {
-        return;
+/// What a played session says on its stream, and the calls it makes on the
+/// engine's run tools endpoint. Every event passes the stream guard before
+/// it is sent.
+struct Stream {
+    dialect: DialectName,
+    naming: ToolNaming,
+    endpoint: Option<RunToolsEndpoint>,
+    /// How long one run tool call may take before the CLI gives up on it.
+    within: Duration,
+    reader: Box<dyn LineParser>,
+    guard: StreamGuard,
+    events: mpsc::UnboundedSender<AgentEvent>,
+}
+
+impl Stream {
+    /// Sends one event the guard admits. `true` while the session may go
+    /// on: the event went out, it was not a terminal one, and the engine
+    /// still reads.
+    fn send(&mut self, event: AgentEvent) -> bool {
+        let Some(event) = self.guard.admit(event, ID.as_str()) else {
+            return false;
+        };
+        let terminal = matches!(
+            event,
+            AgentEvent::Completed { .. } | AgentEvent::Failed { .. }
+        );
+        self.events.send(event).is_ok() && !terminal
     }
 
-    if script.lists_tools {
-        if let Some(endpoint) = &script.run_tools_endpoint {
-            super::run_tool::list_run_tools(endpoint).await;
+    /// Sends `events` in order, stopping at the first that does not go on.
+    fn emit(&mut self, events: impl IntoIterator<Item = AgentEvent>) -> bool {
+        events.into_iter().all(|event| self.send(event))
+    }
+
+    /// Reads the lines a CLI printed, sending each event they say.
+    fn read(&mut self, lines: Vec<String>) -> bool {
+        lines.iter().all(|line| {
+            let events = self.reader.parse(line);
+            self.emit(events)
+        })
+    }
+
+    /// Prints one step the way its CLI prints it, and reads the lines back.
+    fn say(&mut self, step: MockStep) -> bool {
+        let lines = self.dialect.render(&step, self.naming);
+        self.read(lines)
+    }
+
+    /// Ends the session failed with `message`.
+    fn fail(&mut self, message: String) -> bool {
+        self.send(AgentEvent::Failed {
+            error: AgentError::message(message),
+            cause: FailureCause::Final,
+        });
+        false
+    }
+
+    /// Plays one step. A run tool step calls the engine first; any other
+    /// step is printed as its CLI prints it.
+    async fn step(&mut self, step: MockStep) -> bool {
+        match step {
+            MockStep::RunTool {
+                tool,
+                arguments,
+                expect,
+                ..
+            } => self.run_tool(tool, arguments, expect).await,
+            step => self.say(step),
         }
     }
 
-    if !wrote(script.asked, session.clone(), script.refused, &events).await {
-        return;
+    /// One run tool step: a real MCP call, judged against what the step
+    /// expects. A refusal the step expects is audited and the session goes
+    /// on. The other mismatches fail it, because a fixture that got the
+    /// other answer is asserting something the engine does not do.
+    async fn run_tool(
+        &mut self,
+        tool: String,
+        arguments: serde_json::Map<String, serde_json::Value>,
+        expect: ToolExpectation,
+    ) -> bool {
+        let called = call_run_tool(self.endpoint.as_ref(), &tool, arguments, self.within).await;
+        match (called, expect) {
+            (Ok(answer), ToolExpectation::Accepted) => {
+                // The call is the CLI's own tool use, named the way its CLI
+                // names the tool.
+                let name = RunTool::parse(&tool)
+                    .map_or_else(|| tool.clone(), |known| known.called(self.naming));
+                self.say(MockStep::ToolUse {
+                    name,
+                    target: answer,
+                    after_ms: 0,
+                })
+            }
+            (Err(error), ToolExpectation::Refused) if error.reached_call() => {
+                let mut events = call_failure(&tool, &error);
+                events.push(AgentEvent::ToolUse {
+                    target: ToolTarget::opaque(tool.as_bytes()),
+                    name: tool,
+                });
+                self.emit(events)
+            }
+            (Err(error), _) => {
+                let mut events = call_failure(&tool, &error);
+                let message = RunTool::parse(&tool).map_or_else(
+                    || "run tool call failed".to_string(),
+                    |known| format!("run tool `{}` failed", known.name()),
+                );
+                events.push(AgentEvent::Failed {
+                    error: AgentError::message(message),
+                    cause: FailureCause::Final,
+                });
+                self.emit(events);
+                false
+            }
+            (Ok(_), ToolExpectation::Refused) => self
+                .fail("fixture expected a refused run tool call and it was accepted".to_string()),
+        }
     }
+}
 
-    if !stepped(
-        script.steps,
-        script.run_tools_endpoint.as_ref(),
-        &events,
+/// What a failed call leaves in the stream for the run tool it named: the
+/// tool's failure, when the call reached the engine at all.
+fn call_failure(tool: &str, error: &RunToolCallError) -> Vec<AgentEvent> {
+    match RunTool::parse(tool) {
+        Some(known) if error.reached_call() => vec![AgentEvent::RunToolFailed {
+            tool: known,
+            cause: RunToolFailureCause::CallFailed,
+        }],
+        _ => Vec::new(),
+    }
+}
+
+/// The session's opening: the lines its CLI prints before it opens, then the
+/// opening line itself and the run tool listing. `false` once the session
+/// has ended.
+async fn opening(
+    stream: &mut Stream,
+    stops: &Stops,
+    before_open: Vec<MockStep>,
+    session: &SessionId,
+    model: &ModelName,
+    lists_tools: bool,
+) -> bool {
+    // A line the CLI prints before its session opens goes out first, and the
+    // stream guard refuses it there: nothing after it is read.
+    if !stepped(before_open, stream, stops).await {
+        return false;
+    }
+    // Otherwise SessionOpened is the first event: the CLI's own opening line,
+    // read back the way the engine reads that CLI.
+    if !stream.read(stream.dialect.render_open(session, Some(model))) {
+        return false;
+    }
+    if let (true, Some(endpoint)) = (lists_tools, &stream.endpoint) {
+        list_run_tools(endpoint, stream.within).await;
+    }
+    true
+}
+
+/// Plays `script` into `events` until it runs out, a stop arrives, or the
+/// engine stops listening.
+pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEvent>, stops: Stops) {
+    let Script {
+        dialect,
+        session_id,
+        model,
+        reader,
+        naming,
+        within,
+        run_tools_endpoint,
+        lists_tools,
+        asked,
+        before_stop,
+        steps,
+        outcome,
+    } = script;
+    let mut stream = Stream {
+        dialect,
+        naming,
+        endpoint: run_tools_endpoint,
+        within,
+        reader,
+        guard: StreamGuard::default(),
+        events,
+    };
+    let (before_open, steps): (Vec<MockStep>, Vec<MockStep>) = steps
+        .into_iter()
+        .partition(|step| matches!(step, MockStep::BeforeOpen { .. }));
+    if !opening(
+        &mut stream,
         &stops,
+        before_open,
+        &session_id,
+        &model,
+        lists_tools,
     )
     .await
     {
         return;
     }
-
-    if let (Some(stop), MockOutcome::Completed { .. }) = (script.before_stop, &script.outcome) {
-        let endpoint = script.run_tools_endpoint.as_ref();
-        if !stopped(stop, session, &events, endpoint, &stops).await {
-            return;
-        }
+    if !wrote(asked, &session_id, &mut stream).await {
+        return;
     }
-    end(script.outcome, &events, &stops).await;
+    if !stepped(steps, &mut stream, &stops).await {
+        return;
+    }
+    if !stop_before_end(before_stop, &outcome, &session_id, &mut stream, &stops).await {
+        return;
+    }
+    end(outcome, &mut stream, &stops).await;
+}
+
+/// Runs the stop a completed session's script asks for before the session
+/// ends. `false` once the session has ended or the engine stopped listening.
+async fn stop_before_end(
+    before_stop: Option<BeforeStop>,
+    outcome: &MockOutcome,
+    session: &SessionId,
+    stream: &mut Stream,
+    stops: &Stops,
+) -> bool {
+    match (before_stop, outcome) {
+        (Some(stop), MockOutcome::Completed { .. }) => stopped(stop, session, stream, stops).await,
+        _ => true,
+    }
+}
+
+/// The session's writes that it asks the engine about. `false` once the
+/// session has ended, failed or unheard.
+async fn wrote(asked: Option<Asked>, session: &SessionId, stream: &mut Stream) -> bool {
+    match asked {
+        Some(asked) => match asked.written(session).await {
+            Ok(()) => true,
+            Err(message) => stream.fail(message),
+        },
+        None => true,
+    }
 }
 
 /// Asks the engine before the session stops, as a CLI's stop hook does.
@@ -214,231 +372,72 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
 /// has failed or gone unheard.
 async fn stopped(
     stop: BeforeStop,
-    session: SessionId,
-    events: &mpsc::UnboundedSender<AgentEvent>,
-    endpoint: Option<&RunToolsEndpoint>,
+    session: &SessionId,
+    stream: &mut Stream,
     stops: &Stops,
 ) -> bool {
     let mut after = Some((stop.writes.effects.clone(), stop.steps.clone()));
     for _ in 0..3 {
-        match stop.asked(&session).await {
-            Ok(
-                yunta_core::rail::RailAnswer::Proceed | yunta_core::rail::RailAnswer::Tell { .. },
-            ) => return true,
-            Ok(yunta_core::rail::RailAnswer::Refuse { .. }) => {}
-            Err(message) => {
-                failed(events, message);
-                return false;
-            }
+        match stop.asked(session).await {
+            Ok(RailAnswer::Proceed | RailAnswer::Tell { .. }) => return true,
+            Ok(RailAnswer::Refuse { .. }) => {}
+            Err(message) => return stream.fail(message),
         }
         let Some((effects, steps)) = after.take() else {
             continue;
         };
         let writes = Asked {
+            dialect: stop.writes.dialect,
             rail: stop.writes.rail.clone(),
             cwd: stop.writes.cwd.clone(),
             effects,
             formats: stop.writes.formats,
         };
-        if let Err(message) = writes.written(session.clone()).await {
-            failed(events, message);
-            return false;
+        if let Err(message) = writes.written(session).await {
+            return stream.fail(message);
         }
-        if !stepped(steps, endpoint, events, stops).await {
+        if !stepped(steps, stream, stops).await {
             return false;
         }
     }
-    failed(
-        events,
-        "the engine sent the stop back three times".to_string(),
-    );
-    false
+    stream.fail("the engine sent the stop back three times".to_string())
 }
 
 /// Plays `steps`, each after its delay. `false` once a stop arrives first,
 /// or the session has failed or gone unheard.
-async fn stepped(
-    steps: Vec<MockStep>,
-    endpoint: Option<&RunToolsEndpoint>,
-    events: &mpsc::UnboundedSender<AgentEvent>,
-    stops: &Stops,
-) -> bool {
+async fn stepped(steps: Vec<MockStep>, stream: &mut Stream, stops: &Stops) -> bool {
     for step in steps {
         if !stops.waited(step.after_ms()).await {
             return false;
         }
-        let generated = match played(step, endpoint).await {
-            Ok(events) => events,
-            Err(message) => {
-                failed(events, message);
-                return false;
-            }
-        };
-        for event in generated {
-            let terminal = matches!(event, AgentEvent::Failed { .. });
-            if events.send(event).is_err() || terminal {
-                return false;
-            }
+        if !stream.step(step).await {
+            return false;
         }
     }
     true
 }
 
-/// The session's writes: the ones it asks the engine about, then the ones
-/// judged before it opened that were refused. `false` once the session
-/// has ended, failed or unheard.
-async fn wrote(
-    asked: Option<Asked>,
-    session: SessionId,
-    refused: Vec<PathBuf>,
-    events: &mpsc::UnboundedSender<AgentEvent>,
-) -> bool {
-    if let Some(asked) = asked {
-        if let Err(message) = asked.written(session).await {
-            failed(events, message);
-            return false;
-        }
-    }
-    refused.iter().all(|path| {
-        events
-            .send(AgentEvent::WriteRefused {
-                target: yunta_core::events::ToolTarget::of_path(path),
-            })
-            .is_ok()
-    })
-}
-
-/// Ends the session failed with `message`. A receiver that is gone has
-/// stopped reading already, and there is nobody left to tell.
-fn failed(events: &mpsc::UnboundedSender<AgentEvent>, message: String) {
-    if events
-        .send(AgentEvent::Failed {
-            error: AgentError::message(message),
-            cause: FailureCause::Final,
-        })
-        .is_err()
-    {
-        tracing::debug!("a mock session failed after its reader left");
-    }
-}
-
-/// The event one step produces, or the message the session fails with
-/// because the step did not hold.
-async fn played(
-    step: MockStep,
-    endpoint: Option<&RunToolsEndpoint>,
-) -> std::result::Result<Vec<AgentEvent>, String> {
-    Ok(vec![match step {
-        MockStep::ToolUse { name, target, .. } => AgentEvent::ToolUse {
-            name,
-            target: yunta_core::events::ToolTarget::opaque(target.as_bytes()),
-        },
-        MockStep::Usage {
-            input_tokens,
-            output_tokens,
-            cached_input_tokens,
-            ..
-        } => AgentEvent::Usage {
-            input_tokens: Some(input_tokens),
-            output_tokens: Some(output_tokens),
-            cached_input_tokens,
-        },
-        MockStep::Note { text, .. } => AgentEvent::Note { text },
-        MockStep::RunTool {
-            tool,
-            arguments,
-            expect,
-            ..
-        } => return called(tool, arguments, expect, endpoint).await,
-    }])
-}
-
-/// One `run_tool` step: a real MCP call over the wire, judged against
-/// what the step says it expects.
-///
-/// A fixture scripts an intent and the answer it counts on. An accepted
-/// call and a refused one the step expected are both audit events and the
-/// session goes on — a refusal carries a diagnostic the session acts on.
-/// The two mismatches fail the session loudly, because a fixture that got
-/// the other answer is asserting something the engine does not do.
-async fn called(
-    tool: String,
-    arguments: serde_json::Map<String, serde_json::Value>,
-    expect: ToolExpectation,
-    endpoint: Option<&RunToolsEndpoint>,
-) -> std::result::Result<Vec<AgentEvent>, String> {
-    match (call_run_tool(endpoint, &tool, arguments).await, expect) {
-        (Ok(answer), ToolExpectation::Accepted) => Ok(vec![AgentEvent::ToolUse {
-            name: tool,
-            target: yunta_core::events::ToolTarget::opaque(answer.as_bytes()),
-        }]),
-        (Err(error), ToolExpectation::Refused) if error.reached_call() => {
-            let mut events = Vec::new();
-            if let Some(known) = yunta_core::RunTool::parse(&tool) {
-                events.push(AgentEvent::RunToolFailed {
-                    tool: known,
-                    cause: yunta_core::events::RunToolFailureCause::CallFailed,
-                });
-            }
-            events.push(AgentEvent::ToolUse {
-                target: yunta_core::events::ToolTarget::opaque(tool.as_bytes()),
-                name: tool,
-            });
-            Ok(events)
-        }
-        (Err(error), _) => {
-            let mut events = Vec::new();
-            let known = yunta_core::RunTool::parse(&tool);
-            if error.reached_call() {
-                if let Some(known) = known {
-                    events.push(AgentEvent::RunToolFailed {
-                        tool: known,
-                        cause: yunta_core::events::RunToolFailureCause::CallFailed,
-                    });
-                }
-            }
-            let message = known.map_or_else(
-                || "run tool call failed".to_string(),
-                |known| format!("run tool `{}` failed", known.name()),
-            );
-            events.push(AgentEvent::Failed {
-                error: AgentError::message(message),
-                cause: FailureCause::Final,
-            });
-            Ok(events)
-        }
-        (Ok(_), ToolExpectation::Refused) => {
-            Err("fixture expected a refused run tool call and it was accepted".to_string())
-        }
-    }
-}
-
 /// How a session that played its whole script ends.
-async fn end(outcome: MockOutcome, events: &mpsc::UnboundedSender<AgentEvent>, stops: &Stops) {
+async fn end(outcome: MockOutcome, stream: &mut Stream, stops: &Stops) {
     match outcome {
         MockOutcome::Completed { summary } => {
-            let _ = events.send(AgentEvent::Completed {
+            stream.send(AgentEvent::Completed {
                 result: AgentOutcome { summary },
             });
         }
-        MockOutcome::Failed { message, retryable } => {
+        MockOutcome::Failed { message, .. } => {
             // Read the way a real adapter reads its CLI's message, so a
             // fixture that prints what a cut-off CLI prints is one.
-            let cause = match crate::failure::classify(&message) {
-                crate::failure::FailureKind::Unreachable => FailureCause::Unreachable,
-                _ if retryable => FailureCause::Retryable,
-                _ => FailureCause::Final,
-            };
-            let _ = events.send(AgentEvent::Failed {
+            let cause = crate::failure::classify(&message).cause();
+            stream.send(AgentEvent::Failed {
                 error: AgentError::message(message),
                 cause,
             });
         }
-        // Both end with no terminal event — a real crash: the
-        // engine synthesizes Failed{retryable:true}, not the
-        // adapter. Hang additionally waits for a stop before
-        // ending, simulating a stuck session a timeout would
-        // have to act on.
+        // Both end with no terminal event — a real crash: the engine
+        // synthesizes the failure, not the adapter. Hang additionally waits
+        // for a stop before ending, simulating a stuck session a timeout
+        // would have to act on.
         MockOutcome::Crash => {}
         MockOutcome::Hang { .. } => stops.awaited().await,
     }

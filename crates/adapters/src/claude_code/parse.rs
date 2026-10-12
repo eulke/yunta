@@ -192,10 +192,16 @@ fn content_event(item: &Value) -> Option<AgentEvent> {
         "text" => Some(AgentEvent::Note {
             text: item.get("text")?.as_str()?.to_string(),
         }),
-        "tool_use" => Some(AgentEvent::ToolUse {
-            name: item.get("name")?.as_str()?.to_string(),
-            target: tool_target(item.get("input").unwrap_or(&Value::Null)),
-        }),
+        "tool_use" => {
+            let called = item.get("name")?.as_str()?;
+            Some(AgentEvent::ToolUse {
+                // A run tool is logged under its own name, however the CLI
+                // called it; every other tool keeps the name it was given.
+                name: RunTool::from_called(called, ToolNaming::McpPrefixed)
+                    .map_or_else(|| called.to_string(), |tool| tool.name().to_string()),
+                target: tool_target(item.get("input").unwrap_or(&Value::Null)),
+            })
+        }
         // "thinking"/"redacted_thinking" and anything future: not
         // surfaced as a Note — internal reasoning, not an operator-facing
         // status update.

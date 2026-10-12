@@ -714,6 +714,11 @@
           "type": "boolean",
           "default": false
         },
+        "stop_refusals": {
+          "description": "Whether the CLI keeps a session going after the engine refuses two stops in a row over\ndifferent states of the work.",
+          "type": "boolean",
+          "default": false
+        },
         "tool_naming": {
           "description": "How the model in this adapter's sessions calls a tool of a server\nthe adapter mounts — the name every text the engine shows a\nsession gives a run tool, so a session never calls a name its CLI\ndoes not have.",
           "$ref": "#/$defs/ToolNaming",
@@ -737,7 +742,8 @@
         "usage_reporting",
         "skills",
         "run_tools",
-        "network_isolation"
+        "network_isolation",
+        "stop_refusals"
       ]
     },
     "CapabilityDegradedPayload": {

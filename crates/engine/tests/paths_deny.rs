@@ -2,12 +2,14 @@
 //! node with a checkout of its own lands, no task integrates, no request
 //! widens and no person is offered.
 
-use yunta_core::events::{EventPayload, Failure, NodeEvent, ScopeEvent, StoredEvent};
+use yunta_core::events::{
+    EventPayload, Failure, NodeEvent, ScopeEvent, SessionEvent, StoredEvent, ToolTarget,
+};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git_output, Bench, MOCK_CONFIG};
 
 mod common;
-use common::{plan_session, scope_expansion_workflow, task_yaml};
+use common::{plan_session, request_step, scope_expansion_workflow, task_yaml};
 
 fn denying_ci() -> String {
     format!("{MOCK_CONFIG}permissions:\n  paths:\n    deny: [\".github/**\"]\n")
@@ -43,7 +45,11 @@ async fn a_scoped_node_writing_a_denied_path_fails_without_a_grant_and_never_lan
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"mkdir -p .github && echo x > .github/ci.yml && echo y > notes.txt\" }\n";
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []\n", &denying_ci())
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &denying_ci(),
+        )
         .await;
 
     assert!(
@@ -76,7 +82,7 @@ async fn a_scoped_node_writing_a_denied_path_fails_without_a_grant_and_never_lan
 async fn a_node_writing_an_agent_s_own_config_fails_without_a_grant_and_never_lands() {
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"mkdir -p .codex && echo x > .codex/hooks.json && echo y > notes.txt\" }\n";
-    let fixture = "own_config: [\".codex/hooks.json\"]\nsessions: []\n";
+    let fixture = "dialect: codex\nsessions: []\n";
     let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, MOCK_CONFIG).await;
 
     assert!(
@@ -103,11 +109,10 @@ fn one_task(scope: &str, writes: &str, request: Option<&str>) -> (String, String
     let mut fixture = plan_session(&tasks);
     let request = request
         .map(|paths| {
-            format!(
-                "      - {{ path: {:?}, content: {:?} }}\n",
-                yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-                format!("paths: [{paths}]\nreason: \"the workflow file is wrong\"\n"),
-            )
+            request_step(serde_json::json!({
+                "paths": [paths],
+                "reason": "the workflow file is wrong",
+            }))
         })
         .unwrap_or_default();
     fixture.push_str(&format!(
@@ -127,10 +132,18 @@ async fn a_task_writing_a_denied_path_is_rejected() {
         .run_with_config(&workflow, &fixture, &denying_ci())
         .await;
 
+    // The denied write is judged before it lands, so it is refused on the log.
     let events = bench.events();
+    let refused: Vec<ToolTarget> = events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Session(SessionEvent::WriteRefused(p))) => Some(p.target.clone()),
+            _ => None,
+        })
+        .collect();
     assert!(
-        denied_in_scope_checks(&events).contains(&".github/ci.yml".into()),
-        "the scope check names what the project denies"
+        refused.contains(&ToolTarget::of_path(std::path::Path::new(".github/ci.yml"))),
+        "the write the project denies is refused on the log: {refused:?}"
     );
     let landed = git_output(&bench.worktree, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(!landed.contains(".github/ci.yml"), "{landed}");
@@ -172,7 +185,7 @@ async fn a_task_request_for_a_denied_path_is_refused_by_rule_without_asking() {
 async fn a_nodes_request_for_a_denied_path_is_never_put_to_a_person() {
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: fix, kind: prompt, runner: executor, prompt: fix, scope: [\"src/**\"] }\n";
-    let fixture = "capabilities: { run_tools: true }\nsessions:\n  - steps:\n      - type: run_tool\n        tool: yunta_request_scope_expansion\n        arguments: { paths: [.github/ci.yml], reason: \"the workflow is wrong\" }\n    outcome: { type: completed, summary: asked }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - steps:\n      - type: run_tool\n        tool: yunta_request_scope_expansion\n        arguments: { paths: [.github/ci.yml], reason: \"the workflow is wrong\" }\n    outcome: { type: completed, summary: asked }\n";
     let RunReport { terminal, .. } = bench
         .run_with_config(workflow, fixture, &denying_ci())
         .await;

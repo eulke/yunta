@@ -48,7 +48,7 @@ fn posting(id: &str, title: &str) -> String {
 /// no document of its holds it — and answers the first reviewer's.
 fn fixture() -> String {
     format!(
-        "capabilities: {{ run_tools: true }}
+        "dialect: claude-code
 sessions:
   - steps:
 {}    outcome: {{ type: completed, summary: reviewed }}

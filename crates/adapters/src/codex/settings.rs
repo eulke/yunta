@@ -10,6 +10,9 @@ use yunta_core::{AdapterSettings, Result};
 
 use crate::session::{typed_settings, Sandbox};
 
+/// The keys `adapter_settings` may carry for this CLI.
+pub(crate) const KNOWN: &[&str] = &["sandbox"];
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CodexSettings {
@@ -18,9 +21,7 @@ pub(super) struct CodexSettings {
 }
 
 impl CodexSettings {
-    pub(super) const KNOWN: &'static [&'static str] = &["sandbox"];
-
     pub(super) fn read(settings: &AdapterSettings) -> Result<Self> {
-        typed_settings(&super::ID, settings.adapter_settings.as_ref(), Self::KNOWN)
+        typed_settings(&super::ID, settings.adapter_settings.as_ref(), KNOWN)
     }
 }

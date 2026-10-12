@@ -33,11 +33,7 @@ fn fixture(first: &str) -> String {
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("task-h", "h", "a.rs", "sh check.sh")
-    ))
-    .replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, resume_session: true }",
-    );
+    ));
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-h\"\n{first}    outcome: {{ type: completed, summary: did-h }}\n\
          \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.rs, content: \"b\" }}\n    outcome: {{ type: completed, summary: did-b }}\n"
@@ -71,10 +67,11 @@ async fn a_sessions_check_keeps_all_a_red_criterion_printed() {
 #[tokio::test]
 async fn evidence_reads_a_location_beyond_the_last_lines_of_an_answer_from_the_log() {
     let bench = bench();
-    let request = format!(
-        "    effects:\n      - {{ path: {:?}, content: \"paths: [b.rs]\\nreason: the caller breaks\\nevidence: sh check.sh\\n\" }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
-    );
+    let request = request_step(serde_json::json!({
+        "paths": ["b.rs"],
+        "reason": "the caller breaks",
+        "evidence": "sh check.sh",
+    }));
 
     bench.run(WORKFLOW, &fixture(&request)).await;
     answer_parked(&bench, "approve").await.unwrap();

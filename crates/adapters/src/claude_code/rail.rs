@@ -20,7 +20,7 @@ use yunta_core::SessionId;
 /// file.
 const WRITING_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
 
-pub(super) struct ClaudeRailCodec;
+pub(crate) struct ClaudeRailCodec;
 
 impl RailCodec for ClaudeRailCodec {
     fn decode(&self, event: RailEvent, stdin: &[u8]) -> Result<Option<RailCall>, CodecError> {
@@ -76,12 +76,25 @@ impl RailCodec for ClaudeRailCodec {
     }
 }
 
+/// The answer the `claude` CLI takes from a hook's reply: exit 2 denies a
+/// write with its stderr shown to the model, and anything else goes on.
+pub(crate) fn read_reply(event: RailEvent, reply: &HookReply) -> RailAnswer {
+    match event {
+        RailEvent::BeforeWrite if reply.exit == 2 => RailAnswer::Refuse {
+            reason: String::from_utf8_lossy(&reply.stderr).into_owned(),
+        },
+        RailEvent::BeforeWrite => RailAnswer::Proceed,
+        RailEvent::BeforeStop => crate::session::stop_answer(reply),
+        RailEvent::AfterWrite => crate::session::after_write_answer(reply),
+    }
+}
+
 /// The `--settings` document that installs the hooks — the one place this
 /// adapter states how its CLI is told to ask — beside the `sandbox` its
 /// commands run in, when they are confined. The stop hook waits for the
 /// engine as long as `judging` allows: judging the work runs its checks.
 /// The hook after a write is installed only when the engine `formats` it.
-pub(super) fn settings_json(
+pub(crate) fn settings_json(
     command: &RailCommand,
     sandbox: Option<serde_json::Value>,
     judging: std::time::Duration,

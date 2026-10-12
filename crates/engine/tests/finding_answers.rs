@@ -55,7 +55,7 @@ fn fixture() -> String {
         )
     };
     format!(
-        "capabilities: {{ run_tools: true }}
+        "dialect: claude-code
 sessions:
   - match_prompt_contains: \"Review the change\"
     steps:

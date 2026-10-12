@@ -12,6 +12,9 @@ use yunta_testkit_core::FixedClock;
 mod common;
 use common::*;
 
+/// A claude-code fixture that scripts no session, so a run reaches only its gates.
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
+
 /// The frozen manifest of a run parked with `NoInteraction` alongside its
 /// log — exactly the two inputs a separate `resolve_gate` invocation
 /// reads off disk (manifest.yaml + storage), with nothing else.
@@ -40,7 +43,7 @@ nodes:
     prompt: "Try to fix it."
 "#;
 
-const HOPELESS_UNTIL_RETRIED_FIXTURE: &str = r#"
+const HOPELESS_UNTIL_RETRIED_FIXTURE: &str = r#"dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "did nothing useful" }
 "#;
@@ -93,7 +96,7 @@ nodes:
 #[tokio::test]
 async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     let (manifest, events, bench) =
-        paused_manifest_and_events(INTERNAL_GATE_WORKFLOW, "sessions: []\n").await;
+        paused_manifest_and_events(INTERNAL_GATE_WORKFLOW, NO_SESSIONS).await;
 
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
@@ -117,7 +120,7 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
 // --- resolve_gate writes ONLY the decision; the engine
 // consumes it on wake through its one existing consequence path.
 
-const RETRY_FIX_FIXTURE: &str = r#"
+const RETRY_FIX_FIXTURE: &str = r#"dialect: claude-code
 sessions:
   - effects:
       - { path: fixed.txt, content: "fixed" }
@@ -192,12 +195,12 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     // records the choice; the resuming engine (a live process, exactly
     // what promotion's distill+close needs) applies it.
     let bench = Bench::new().in_mode("quick");
-    let report = bench.run(PROMOTABLE_WORKFLOW, "sessions: []\n").await;
+    let report = bench.run(PROMOTABLE_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
 
     answer_parked(&bench, "promote").await.unwrap();
 
-    let report = bench.wake_on_fixture("sessions: []\n").await;
+    let report = bench.wake_on_fixture(NO_SESSIONS).await;
     assert_eq!(
         report.terminal,
         RunTerminal::Promoted {
@@ -244,10 +247,10 @@ fn plan_runs(worktree: &std::path::Path) -> usize {
 
 #[tokio::test]
 async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume() {
-    let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, NO_SESSIONS).await;
 
     answer_parked(&bench, "proceed").await.unwrap();
-    let RunReport { terminal, state } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, state } = bench.wake_on_fixture(NO_SESSIONS).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
@@ -281,11 +284,11 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
 
 #[tokio::test]
 async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
-    let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, NO_SESSIONS).await;
     assert_eq!(plan_runs(&bench.worktree), 1);
 
     answer_parked(&bench, "revise").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
 
     // A reroute through a pre-seeded choice: plan re-ran, the gate came
     // back to ask again, and with no live surface the run parks there.
@@ -302,7 +305,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     .await;
 
     answer_parked(&bench, "abort").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
     };
@@ -317,7 +320,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     // A later manual resume must NOT re-apply the stale abort — the
     // decision was consumed; with no live surface it parks on the
     // escalation again, exactly as an interactive abort does today.
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the second resume to pause, got {terminal:?}");
     };
@@ -357,7 +360,7 @@ async fn live_and_pre_seeded_retry_reach_the_same_final_state() {
         }
     }
 
-    const TWO_SESSION_FIXTURE: &str = r#"
+    const TWO_SESSION_FIXTURE: &str = r#"dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "did nothing useful" }
   - effects:
@@ -416,7 +419,7 @@ nodes:
     kind: bash
     run: "true"
 "#,
-            "sessions: []\n",
+            NO_SESSIONS,
         )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -468,7 +471,7 @@ nodes:
     on_interrupt: fail_if_uncertain
     run: "true"
 "#,
-            "sessions: []\n",
+            NO_SESSIONS,
             yunta_testkit::MOCK_CONFIG,
         )
         .await;

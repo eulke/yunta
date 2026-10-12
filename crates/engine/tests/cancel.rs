@@ -24,11 +24,12 @@ nodes:
 
 /// A single session that opens and then never produces a terminal event on
 /// its own — only an interrupt or kill ends it.
-const HANG_FIXTURE: &str = "sessions:\n  - { outcome: { type: hang } }\n";
+const HANG_FIXTURE: &str = "dialect: claude-code\nsessions:\n  - { outcome: { type: hang } }\n";
 
 /// A single session that reports the usage of one turn, then hangs: what an
 /// attempt has spent when the run is cancelled while the attempt still works.
 const USAGE_THEN_HANG: &str = "\
+dialect: claude-code
 sessions:
   - steps: [{ type: usage, input_tokens: 30, output_tokens: 12 }]
     outcome: { type: hang }
@@ -36,7 +37,8 @@ sessions:
 
 /// A single session that finishes at once — what the interrupted node meets
 /// when the run resumes.
-const COMPLETING_FIXTURE: &str = "sessions:\n  - { outcome: { type: completed, summary: done } }\n";
+const COMPLETING_FIXTURE: &str =
+    "dialect: claude-code\nsessions:\n  - { outcome: { type: completed, summary: done } }\n";
 
 /// Fires `token` as soon as the run's node is under way. A hung run cannot
 /// finish on its own, so waiting for `node_started` to land on the log —
@@ -180,7 +182,7 @@ async fn a_cancel_that_stops_a_step_s_git_pauses_the_run() {
         .with_subprocess_vars(vars);
 
     let (report, ()) = tokio::join!(
-        bench.run(SCOPED_WORKFLOW, "sessions: []"),
+        bench.run(SCOPED_WORKFLOW, "dialect: claude-code\nsessions: []"),
         cancel_once_written(&held, &token)
     );
 
@@ -202,7 +204,9 @@ async fn a_cancel_that_stops_a_step_s_git_pauses_the_run() {
         .await
         .expect("disarm the hold");
     let bench = bench.with_cancel(CancellationToken::new());
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -247,7 +251,11 @@ async fn a_suite_the_cancellation_stops_leaves_no_measurement_and_the_run_pauses
     );
 
     let (report, ()) = tokio::join!(
-        bench.run_with_config(WORK_THEN_COMPARED, "sessions: []", &config),
+        bench.run_with_config(
+            WORK_THEN_COMPARED,
+            "dialect: claude-code\nsessions: []",
+            &config
+        ),
         cancel_once_written(&started, &token)
     );
 
@@ -289,9 +297,14 @@ async fn a_cancelled_token_stops_the_git_a_birth_runs() {
     // The token fires between the freeze and the birth, so the birth's
     // own git is the first thing it meets.
     let error = bench
-        .try_create_after(ONE_NODE, "sessions: []", yunta_testkit::MOCK_CONFIG, || {
-            token.cancel();
-        })
+        .try_create_after(
+            ONE_NODE,
+            "dialect: claude-code\nsessions: []",
+            yunta_testkit::MOCK_CONFIG,
+            || {
+                token.cancel();
+            },
+        )
         .await
         .expect_err("a birth whose git was killed cannot say what the tree carries");
 

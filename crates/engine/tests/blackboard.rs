@@ -33,7 +33,7 @@ fn blackboard_fixture(a_first: bool) -> String {
     let (a_delay, b_delay) = if a_first { (0, 60) } else { (60, 0) };
     format!(
         r#"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - match_prompt_contains: "as A"
     steps:
@@ -169,7 +169,7 @@ nodes:
         prompt: "Review as A."
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - { type: run_tool, tool: yunta_get_blackboard }
@@ -200,10 +200,12 @@ nodes:
     prompt: "Do the thing."
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let bench = Bench::new();
+    // A CLI that declares no capability at all: no tools are offered.
+    let bench = Bench::new().with_capabilities(yunta_core::Capabilities::default());
     let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(bench.mock().endpoints_seen(), vec![None]);
@@ -224,7 +226,7 @@ nodes:
     prompt: "Do the thing."
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -253,11 +255,15 @@ async fn a_blackboard_child_on_a_capability_less_adapter_fails_actionably() {
     // failure with a diagnostic — never silent emulation, never a
     // silently-missing blackboard.
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "never reached" }
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let RunReport { terminal, state } = Bench::new().run(BLACKBOARD_WORKFLOW, fixture).await;
+    let RunReport { terminal, state } = Bench::new()
+        .with_capabilities(yunta_core::Capabilities::default())
+        .run(BLACKBOARD_WORKFLOW, fixture)
+        .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {

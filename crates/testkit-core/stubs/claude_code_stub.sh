@@ -30,6 +30,10 @@
 #   exercising the kill fallback a session that ignores interrupt needs.
 # - (if $CLAUDE_STUB_LINGER is set) blocks until interrupted, then exits —
 #   a session that honours SIGINT.
+# - $CLAUDE_CODE_STOP_HOOK_BLOCK_CAP, if set: how many stop turns in a row the
+#   stream prints. A stop turn is a line carrying the text the contract suite
+#   writes after a refused stop; past the cap those lines are not printed,
+#   and the result line still is. Unset means one; zero lifts the cap.
 
 # How SIGINT is met is settled before anything else, so a test that waits
 # for the grandchild's pid interrupts a stub that already meets it so.
@@ -52,7 +56,7 @@ if [ -n "$CLAUDE_STUB_STDIN_FILE" ]; then
 fi
 
 if [ "$1" = "--version" ]; then
-  echo "2.1.235 (Claude Code)"
+  echo "2.1.296 (Claude Code)"
   exit 0
 fi
 
@@ -67,10 +71,24 @@ fi
 
 lines_file="${CLAUDE_STUB_LINES_FILE:-.claude-stub-lines.jsonl}"
 if [ -f "$lines_file" ]; then
+  # The most stop turns in a row the stream prints; zero prints them all.
+  stop_cap="${CLAUDE_CODE_STOP_HOOK_BLOCK_CAP:-1}"
+  stop_run=0
   # `|| [ -n "$line" ]` also emits a final line with no trailing newline —
   # POSIX `read` alone drops it, and a stream-json session's last line
   # (its terminal result) is exactly the one that must never go missing.
   while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *"a refused stop, and the work goes on: "*)
+        stop_run=$((stop_run + 1))
+        if [ "$stop_cap" -ne 0 ] && [ "$stop_run" -gt "$stop_cap" ]; then
+          continue
+        fi
+        ;;
+      *)
+        stop_run=0
+        ;;
+    esac
     # `printf '%s\n'` rather than `echo`: a shell whose `echo` reads
     # backslash escapes (dash's does) would split a JSON line carrying
     # `\n` in a string into two lines, and neither half is this protocol.

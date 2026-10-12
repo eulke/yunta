@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use yunta_adapters::MockAdapter;
 use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, Clock, RunId};
+use yunta_core::{AdapterId, Capabilities, Clock, RunId};
 use yunta_engine::{BirthArtifact, RunObserver};
 use yunta_storage::Storage;
 use yunta_testkit_core::{FixedClock, SeqIdSource};
@@ -78,6 +78,9 @@ pub struct Bench {
     /// one reading, taken under one lock, so two answers can never come
     /// from two different runs.
     driven: std::sync::Mutex<Option<Driven>>,
+    /// What every mock this bench creates answers with, when a test narrows
+    /// it; `None` keeps each fixture's dialect.
+    capabilities: Option<Capabilities>,
 }
 
 /// The run a bench created, as its next wake needs it.
@@ -134,6 +137,7 @@ impl Bench {
             birth: Vec::new(),
             pooled: false,
             driven: std::sync::Mutex::new(None),
+            capabilities: None,
         }
     }
 
@@ -165,6 +169,7 @@ impl Bench {
             birth: Vec::new(),
             pooled: self.pooled,
             driven: std::sync::Mutex::new(None),
+            capabilities: self.capabilities,
         }
     }
 
@@ -202,6 +207,13 @@ impl Bench {
     /// Starts the run on `adapter`, as `yunta run --adapter` does.
     pub fn with_adapter(mut self, adapter: &str) -> Self {
         self.adapter = Some(AdapterId::from(adapter));
+        self
+    }
+
+    /// Runs every fixture's mock as a narrower CLI: it answers with
+    /// `capabilities` instead of its dialect's.
+    pub fn with_capabilities(mut self, capabilities: Capabilities) -> Self {
+        self.capabilities = Some(capabilities);
         self
     }
 
@@ -322,5 +334,17 @@ impl Bench {
                 .as_ref()
                 .expect("a run has to happen before the bench can be asked about it"),
         )
+    }
+}
+
+/// The secrets a test chose, instead of whatever the process happens to
+/// carry: a test that reached the real environment would assert about a
+/// machine rather than about the engine.
+#[derive(Default)]
+struct KnownSecrets(std::collections::HashMap<String, String>);
+
+impl yunta_core::SecretSource for KnownSecrets {
+    fn get(&self, name: &str) -> Option<yunta_core::Secret<String>> {
+        self.0.get(name).cloned().map(yunta_core::Secret::from)
     }
 }

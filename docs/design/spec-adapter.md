@@ -66,6 +66,9 @@ pub struct Capabilities {
     /// `capability_degraded` — queda registrado para política y
     /// auditoría, nunca exigido (D252).
     pub network_isolation: bool,
+    /// Sigue la sesión después de que el engine le rechaza dos paradas
+    /// seguidas sobre estados distintos del trabajo.
+    pub stop_refusals: bool,
 }
 
 pub struct SessionRequest {
@@ -123,7 +126,7 @@ pub struct SessionRequest {
     pub run_tools_endpoint: Option<Endpoint>,
     /// Presupuesto duro de la sesión. El adapter lo pasa al CLI si
     /// puede; el engine lo hace cumplir igual contando `Usage`.
-    pub budget: Budget,                   // max_tokens, max_turns, timeout
+    pub budget: Budget,                   // max_tokens, timeout
     /// Settings específicos del adapter, opacos para el engine,
     /// declarados en el runner (p. ej. flags de sandbox). Solo para
     /// lo que NO tiene expresión portable: la selección de agente
@@ -141,8 +144,10 @@ pub trait Adapter: Send + Sync {
     /// la consulta en `yunta check` y al planificar cada nodo.
     fn capabilities(&self) -> Capabilities;
 
-    /// Chequeo de salud: binario presente, versión compatible,
-    /// autenticación válida. Corre en `yunta doctor` y al crear runs.
+    /// Chequeo de salud: el binario está y reporta su versión, y cada setting
+    /// del adapter que recibe es uno que lee; una clave desconocida se
+    /// reporta. No comprueba las banderas con que se lanza una sesión.
+    /// Corre en `yunta doctor` y al crear runs.
     async fn probe(&self) -> Result<ProbeReport>;
 
     /// Rutas del worktree (relativas) que una sesión abierta para `req`
@@ -155,11 +160,6 @@ pub trait Adapter: Send + Sync {
     /// que ejecuta código o monta herramientas (sus settings con hooks, sus
     /// servidores MCP). Ninguna sesión de ningún run los escribe. Default: ninguno.
     fn own_config(&self) -> Vec<ScopeGlob>;
-
-    /// Retira lo que una sesión abierta para `req` montó por su propia
-    /// mecánica, una vez terminada: nunca fue trabajo del agente, y no
-    /// debe quedar en el árbol que el run conserva. Default: nada.
-    fn unstage(&self, req: &SessionRequest) -> Result<()>;
 
     /// Cómo traduce este adapter entre los hooks de su CLI y el riel del engine.
     /// `Some` exactamente cuando `capabilities().fence` es `ToolCalls`: un cerco por
@@ -219,6 +219,11 @@ pub trait AgentSession: Send {
     /// Cómo terminó el proceso de la sesión. Solo se pregunta a una sesión cuyo
     /// stream terminó sin evento terminal. Default: `None`.
     async fn exit(&mut self) -> Result<Option<SessionExit>>;
+
+    /// Retira lo que el lanzamiento montó para esta sesión, una vez
+    /// terminada: el enlace de una skill, por ejemplo. Default: no montó
+    /// nada, así que no retira nada.
+    async fn release(&mut self) -> Result<()>;
 }
 ```
 
@@ -227,14 +232,11 @@ pub trait AgentSession: Send {
 ```rust
 pub enum AgentEvent {
     /// OBLIGATORIO como primer evento de toda sesión. `model` es el que
-    /// el CLI reportó; ausente cuando no reporta ninguno — nunca el pedido.
-    /// `fence` es cuánto de la sesión cercó realmente lo que el adapter
-    /// construyó, calculado —nunca declarado—; ausente cuando no
-    /// construyó ninguno.
+    /// el CLI reportó en su stream; ausente cuando no reporta ninguno (el
+    /// stream de Codex no nombra modelo) — nunca el pedido. `fence` es
+    /// cuánto de la sesión cercó realmente lo que el adapter construyó,
+    /// calculado —nunca declarado—; ausente cuando no construyó ninguno.
     SessionOpened { session_id: SessionId, model: Option<ModelName>, fence: Option<Coverage> },
-    /// Una escritura que el cerco rechazó antes de ocurrir. Crónica y
-    /// conteo, nunca estado del nodo: la sesión siguió.
-    WriteRefused { target: ToolTarget },
     /// Falló una herramienta conocida del servidor `yunta-run` de la sesión.
     /// Ningún argumento ni texto de error del CLI cruza esta frontera.
     RunToolFailed { tool: RunTool, cause: RunToolFailureCause },
@@ -256,8 +258,10 @@ pub enum AgentEvent {
     Note { text: String },
     /// Cierre exitoso de la sesión (el agente terminó su turno).
     Completed { result: AgentOutcome },
-    /// Cierre con error. `cause` dice si otra sesión con el mismo pedido puede
-    /// hacerlo mejor: el engine lo registra como `retryable`.
+    /// Cierre con error. `error` es el mensaje, con lo que el adapter atrapó
+    /// debajo. `cause` dice si otra sesión con el mismo pedido puede hacerlo
+    /// mejor: `Final` dice que no, `Retryable` y `Unreachable` dicen que sí,
+    /// y de ahí el engine registra el `retryable` del nodo.
     Failed { error: AgentError, cause: FailureCause },
 }
 ```
@@ -300,16 +304,14 @@ telemetría, no evidencia.
   cobertura de lo que construyó (nunca la declara) y la reporta en `SessionOpened`;
   el riel del engine registra `write_refused` cuando juzga una escritura y la
   rechaza (`crates/engine/src/run_tools/rail.rs`). Ningún adapter informa una
-  negativa de su sandbox: el parser de Codex no traduce ningún ítem a
-  `WriteRefused`, porque Codex 0.157.0 no emite ítem para un comando que su sandbox
-  niega, y Claude devuelve esa negativa como un `tool_result` con `is_error`, igual
-  que cualquier comando que falla. `AgentEvent::WriteRefused` sigue en el puerto
-  mientras el mock, sin riel, informe así sus rechazos de `ToolCalls`; el engine los
-  registra como `write_refused`. Un adapter con nivel `None` ignora el campo sin
-  error. Un adapter que necesita un mecanismo que no tiene —el hook, o raíces
-  escribibles bajo un sandbox de solo lectura— falla la sesión antes de spawn con
-  `AdapterError::FenceUnbuildable`, porque una capacidad ausente falla en vez de gastar
-  la sesión (D172).
+  negativa de su sandbox, y el puerto no tiene evento para eso: el parser de Codex
+  no traduce ningún ítem a un rechazo, porque Codex 0.157.0 no emite ítem para un
+  comando que su sandbox niega, y Claude devuelve esa negativa como un `tool_result`
+  con `is_error`, igual que cualquier comando que falla. Un adapter con nivel `None`
+  ignora el campo sin error. Un adapter que necesita un mecanismo que no tiene —el
+  hook, o raíces escribibles bajo un sandbox de solo lectura— falla la sesión antes
+  de spawn con `AdapterError::FenceUnbuildable`, porque una capacidad ausente falla
+  en vez de gastar la sesión (D172).
 - **O7. Sin estado propio**: un adapter no persiste nada entre sesiones fuera de lo
   que el CLI ya persiste. Todo lo que el engine necesita recordar viaja en eventos.
 
@@ -327,10 +329,11 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `fence` | scope solo post-check + warning, una vez por run |
 | `permission_profiles` | nodo `read_only` → error en check; `edit`/`full` corren con permisos del CLI |
 | `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado. Un `agent:` sin definición falla el nodo antes de abrir la sesión |
-| `usage_reporting` | presupuesto de tokens no exigible → solo timeout y max_turns; warning por run |
+| `usage_reporting` | presupuesto de tokens no exigible → solo timeout; warning por run |
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
 | `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
 | `network_isolation` | `network: false` queda registrado para política y auditoría, no exigido · `capability_degraded` |
+| `stop_refusals` | `yunta check` rechaza un nodo que abre sesión (un `prompt` o un `loop`) cuando ningún candidato de su runner la declara; no hay degradación |
 | `run_tools` montado y sin efecto | el listener de la sesión sabe si su CLI listó o llamó alguna de sus tools —los dos CLIs las listan antes de su primer turno—; el adapter no informa cuántas trae. Un listener que no abrió emite `capability_degraded` con la política `no_run_tools` al abrir la sesión, antes de gastarla. Una sesión que cerró sin listar ni llamar ninguna emite la misma degradación al cerrar |
 
 ## 6. Adapters builtin
@@ -351,6 +354,7 @@ el engine consulta antes de pedir nada (§5).
 | `skills` | `true` |
 | `run_tools` | `true` |
 | `network_isolation` | `true` |
+| `stop_refusals` | `true` |
 
 Lanza `claude -p` headless con salida en streaming JSON y traduce ese stream a
 `AgentEvent`; `resume` reutiliza la sesión vía el flag de reanudación del CLI con el
@@ -376,8 +380,9 @@ en el sandbox del CLI (`sandbox` en `--settings`, que falla en vez de correr sin
 confinar): bajo `edit` escriben el workspace y las raíces, bajo `read_only` solo las
 raíces (`denyWrite` sobre el workspace), y bajo `full` no se confinan; la red, loopback
 incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
-`allowLocalBinding`), así que `network_isolation` se declara (D252). Los detalles de flags viven en el adapter y se validan en
-`probe()` contra la versión instalada; el engine no conoce ninguno.
+`allowLocalBinding`), así que `network_isolation` se declara (D252). Las banderas viven
+en el adapter; `probe()` comprueba la versión que reporta el binario instalado y los
+settings que lee, no las banderas, y el engine no conoce ninguna.
 
 ### `codex`
 
@@ -391,6 +396,7 @@ incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
 | `skills` | `true` |
 | `run_tools` | `true` |
 | `network_isolation` | `true` |
+| `stop_refusals` | `true` |
 
 `codex exec` headless con salida JSON; `permission_profiles` mapea a sus modos de
 sandbox. El cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse` sobre
@@ -421,14 +427,18 @@ red de los comandos la abre el pedido (`sandbox_workspace_write.network_access`)
 Pieza de primera clase, no un helper de tests: reproduce sesiones desde fixtures
 (guiones YAML de eventos + efectos sobre el filesystem), con fallos y latencias
 inyectables, y puede simular solicitudes de ampliación de scope y posteos al
-blackboard. No lleva tabla fija porque no tiene capacidades fijas: las declara el
-fixture (`capabilities`, `fence_coverage`), que es lo que permite ejercitar una
-capacidad ausente sin un CLI que la niegue. Cada efecto pasa por el mismo
-`Fence::judge` que los adapters reales: un fixture ejercita la regla, nunca una
-segunda implementación de ella. Es lo que permite testear el engine completo (ciclo
-de tareas, degradación, cancelación, resume, paralelismo) en CI sin ningún LLM, y
-validar workflows nuevos sin gastar presupuesto (`yunta run --adapter mock`). El
-binario no lo construye para una corrida real: los fixtures entran por `yunta test`.
+blackboard. No lleva tabla fija: su fixture declara `dialect: claude-code` o
+`dialect: codex`, y el mock juega ese CLI. Responde con sus capacidades, arma su argv,
+su sandbox, su cobertura, sus hooks y su codec del riel como lo arma el adapter real,
+imprime cada paso en el formato del stream de ese CLI y lee esas líneas con el lector
+del adapter; cada escritura la pide al riel, como su CLI. Un test angosta una capacidad
+solo cuando la necesita ausente, que es lo que permite ejercitar una capacidad ausente
+sin un CLI que la niegue. Cada efecto pasa por el mismo `Fence::judge` que los
+adapters reales: un fixture ejercita la regla, nunca una segunda implementación de
+ella. Es lo que permite testear el engine completo (ciclo de tareas, degradación,
+cancelación, resume, paralelismo) en CI sin ningún LLM, y validar workflows nuevos
+sin gastar presupuesto (`yunta run --adapter mock`). El binario no lo construye para
+una corrida real: los fixtures entran por `yunta test`.
 
 ## 7. Invariantes
 
@@ -449,3 +459,36 @@ binario no lo construye para una corrida real: los fixtures entran por `yunta te
   siempre e íntegra.
 - **A8.** `mock` implementa el trait completo y es suficiente para ejercitar todo
   camino del engine en CI.
+
+## 8. Suite de contrato
+
+La suite de contrato (`crates/adapters/tests/contract`) somete a todo adapter a los
+mismos casos. Cada caso corre una vez por sujeto y se reporta bajo su nombre:
+`claude_code::<caso>`, `codex::<caso>` y `mock::<caso>`. Un sujeto que no puede expresar
+un hecho falla el caso; nunca se salta.
+
+Los sujetos son los dos adapters builtin, cada uno contra un stub de su CLI que imprime
+las líneas que el CLI imprimiría, y el mock, que juega un fixture declarado con el
+`dialect` del CLI que representa. Hay dos grupos de casos:
+
+- Los casos de contrato corren para todo sujeto. Cubren las causas de falla, el nombre
+  con que se registra la llamada a una run tool, el modo y la cobertura de un perfil, un
+  lanzamiento sin su hook que no abre nada, los hooks que instala un lanzamiento, el
+  conteo de tokens, el modelo que reporta la sesión, skills, agentes, esfuerzo,
+  aislamiento, red, el nivel del cerco contra el codec del riel, líneas del stream que el
+  adapter no conoce, líneas anteriores a la apertura de la sesión, una sesión que muere,
+  settings que no se leen, el probe, las capacidades declaradas, los usos de
+  herramientas, lo que llega a argv y las paradas rechazadas.
+- Los casos de proceso corren solo para los sujetos reales, porque el mock no tiene
+  proceso. Cubren un kill que se lleva el árbol de procesos entero, nietos incluidos, la
+  cola de stderr de una sesión muerta, el prompt que viaja por stdin y una sesión
+  interrumpida que sale y corta su gracia en el acto.
+
+`stop_refusals` es la capacidad que mide el caso de las paradas rechazadas: si el CLI
+sigue la sesión después de que el engine le rechaza dos paradas seguidas sobre estados
+distintos del trabajo. El caso compara esa declaración con lo que hizo la sesión, así
+que una declaración que no coincide falla la suite. `yunta check` rechaza un nodo que
+abre sesión cuando ningún candidato de su runner la declara. Claude la cumple con
+`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=0` (D254), y Codex la declara: en la medición en vivo
+siguió la sesión después de dos paradas rechazadas seguidas, con razones distintas
+(`smoke-checklist.md`, sección G).

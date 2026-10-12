@@ -36,7 +36,11 @@ async fn a_gate_asking_at_the_terminal_says_so_in_the_run_s_registry_until_it_st
         seen: Mutex::new(Vec::new()),
     };
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &person)
+        .run_with_interaction(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &person,
+        )
         .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),

@@ -127,7 +127,7 @@ fn item_completed(value: &Value) -> Vec<AgentEvent> {
             target: file_change_target(item),
         }),
         Some("mcp_tool_call") => Some(AgentEvent::ToolUse {
-            name: "mcp_tool_call".to_string(),
+            name: mcp_tool_name(item),
             target: mcp_tool_call_target(item),
         }),
         Some("web_search") => Some(AgentEvent::ToolUse {
@@ -185,6 +185,25 @@ fn file_change_target(item: &Value) -> ToolTarget {
         .and_then(Value::as_str)
         .map(|path| ToolTarget::of_path(std::path::Path::new(path)))
         .unwrap_or_else(|| ToolTarget::opaque(item.to_string().as_bytes()))
+}
+
+/// The name of an MCP call. A run tool of this run's server is named as the
+/// run tool it is, so the log reads one name for it under every CLI; another
+/// server's tool keeps the generic name.
+fn mcp_tool_name(item: &Value) -> String {
+    let ours = item.get("server").and_then(Value::as_str)
+        == Some(yunta_core::port::RunToolsEndpoint::SERVER_NAME);
+    let run_tool = ours
+        .then(|| {
+            item.get("tool")
+                .and_then(Value::as_str)
+                .and_then(RunTool::parse)
+        })
+        .flatten();
+    run_tool.map_or_else(
+        || "mcp_tool_call".to_string(),
+        |tool| tool.name().to_string(),
+    )
 }
 
 /// Which server and which tool — names the workflow itself declares, so

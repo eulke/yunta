@@ -14,7 +14,7 @@
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
 use yunta_core::events::{ArtifactId, EventPayload, SubmissionOutcome};
 use yunta_core::port::{Policy, PolicyApplied};
-use yunta_core::ArtifactKind;
+use yunta_core::{ArtifactKind, Capabilities};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -96,7 +96,7 @@ async fn a_session_submits_a_tasks_document_and_the_run_holds_it() {
     let bench = Bench::new();
     let fixture = format!(
         r#"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -168,7 +168,7 @@ async fn a_node_that_only_submits_is_never_granted_the_artifact_directory() {
     let bench = Bench::new();
     let fixture = format!(
         r#"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -195,7 +195,7 @@ async fn a_refused_submission_names_every_rule_problem_in_the_same_session() {
     // A dependency on a task nobody declared, and a cycle: two rules of
     // the same document, both reported at once.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -258,7 +258,7 @@ sessions:
 async fn a_structural_problem_is_reported_with_its_path() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -291,7 +291,7 @@ async fn the_same_document_submitted_twice_yields_the_same_hash() {
     // the engine holds is the same document, so the file is the same
     // bytes and the same hash.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -337,7 +337,7 @@ sessions:
 async fn a_document_never_submitted_fails_the_node_with_no_second_session() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "said it was done" }
 "#;
@@ -363,11 +363,12 @@ sessions:
 
 #[tokio::test]
 async fn a_typed_artifact_on_an_adapter_without_run_tools_fails_before_dispatch() {
-    let bench = Bench::new();
     // The capability is absent, so the document has no way in. The node
     // fails before a session opens rather than after one produced
     // nothing.
+    let bench = Bench::new().with_capabilities(Capabilities::default());
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
@@ -392,7 +393,7 @@ sessions:
 async fn a_review_reports_findings_and_the_engine_derives_the_file() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -448,7 +449,7 @@ sessions:
 async fn a_review_that_reports_nothing_closes_with_an_empty_findings_file() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "found nothing" }
 "#;
@@ -475,7 +476,7 @@ sessions:
 async fn a_finding_with_an_unknown_key_is_refused_and_nothing_is_recorded() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -513,7 +514,7 @@ sessions:
 async fn a_finding_id_already_posted_by_the_node_is_refused() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -550,7 +551,7 @@ sessions:
 async fn an_updated_finding_replaces_its_state_and_keeps_its_place() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -608,7 +609,7 @@ sessions:
 async fn a_withdrawn_finding_leaves_the_file_but_not_the_log() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -660,7 +661,7 @@ sessions:
 async fn a_withdrawn_id_is_final() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -728,7 +729,7 @@ sessions:
 async fn a_withdrawal_without_a_reason_is_refused() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -774,7 +775,7 @@ sessions:
 async fn findings_reported_before_a_session_dies_survive_it() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -816,14 +817,14 @@ async fn a_session_that_never_listed_its_run_tools_is_reported() {
     };
     assert_eq!(
         degraded(
-            "capabilities: { run_tools: true }\nlists_tools: false\nsessions:\n  - outcome: { type: completed, summary: done }\n"
+            "dialect: claude-code\nlists_tools: false\nsessions:\n  - outcome: { type: completed, summary: done }\n"
         )
         .await,
         1
     );
     assert_eq!(
         degraded(
-            "capabilities: { run_tools: true }\nsessions:\n  - outcome: { type: completed, summary: done }\n"
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n"
         )
         .await,
         0,
@@ -839,7 +840,7 @@ async fn a_session_that_holds_none_of_its_run_tools_is_reported_when_its_session
     // can only end owing the document it declares, so the cause is on
     // the log when the session ends, before the node fails.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 lists_tools: false
 sessions:
   - outcome: { type: completed, summary: "nothing to submit with" }
@@ -892,7 +893,7 @@ async fn a_listed_session_is_not_degraded_by_the_cli_count() {
     let _ = bench
         .run(
             PLAN_NODE,
-            "capabilities: { run_tools: true }\nsessions:\n  - outcome: { type: completed, summary: done }\n",
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n",
         )
         .await;
     let degraded = bench.events().iter().any(|event| {
@@ -916,7 +917,7 @@ async fn a_listed_session_is_not_degraded_by_the_cli_count() {
 /// with `kind: loop` spent a session per task and failed at the close.
 #[tokio::test]
 async fn a_loop_task_on_a_run_tools_less_adapter_is_refused_before_any_session() {
-    let bench = Bench::new();
+    let bench = Bench::new().with_capabilities(Capabilities::default());
     let workflow = r#"
 name: loop-owes-a-document
 nodes:
@@ -929,6 +930,7 @@ nodes:
       produces: [findings]
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;

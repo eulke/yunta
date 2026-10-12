@@ -51,7 +51,9 @@ nodes:
     scope: [landed.txt]
     run: "echo landed > landed.txt"
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let now = tree_now(&bench).await;
@@ -89,7 +91,7 @@ nodes:
     let RunReport { terminal, .. } = bench
         .run_full(
             workflow,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             MOCK_CONFIG,
             &SequencedInteraction::choosing(&["yes"]),
         )
@@ -104,7 +106,9 @@ nodes:
 async fn a_node_failure_names_the_tree_it_left_the_run_at() {
     let bench = Bench::new();
     let workflow = "name: fails\nnodes:\n  - { id: broke, kind: bash, run: \"echo half > half.txt; exit 1\" }\n";
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"

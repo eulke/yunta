@@ -47,7 +47,10 @@ fn make_then_fix(file: &str) -> String {
 async fn a_scope_run_node_may_write_what_the_run_changed() {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run(&make_then_fix("made.txt"), "sessions: []\n")
+        .run(
+            &make_then_fix("made.txt"),
+            "dialect: claude-code\nsessions: []\n",
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -63,7 +66,10 @@ async fn a_scope_run_node_may_write_what_the_run_changed() {
 async fn writing_elsewhere_fails_with_a_grantable_violation() {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run(&make_then_fix("elsewhere.txt"), "sessions: []\n")
+        .run(
+            &make_then_fix("elsewhere.txt"),
+            "dialect: claude-code\nsessions: []\n",
+        )
         .await;
 
     assert!(
@@ -85,7 +91,7 @@ async fn a_run_that_changed_nothing_leaves_nothing_writable() {
     let RunReport { terminal, .. } = bench
         .run(
             "name: first\nnodes:\n  - { id: fix, kind: bash, scope: run, run: \"echo x > x.txt\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
         )
         .await;
 
@@ -105,11 +111,13 @@ async fn a_run_that_changed_nothing_leaves_nothing_writable() {
 #[tokio::test]
 async fn a_persons_edit_is_part_of_what_the_run_changed() {
     let workflow = "name: fixes\nnodes:\n  - { id: fix, kind: bash, scope: run, run: \"test -f draft.txt && echo fixed >> draft.txt\" }\n";
-    let bench = parked(workflow, "sessions: []\n").await;
+    let bench = parked(workflow, "dialect: claude-code\nsessions: []\n").await;
     write(&bench.worktree.join("draft.txt"), "a person's draft\n");
 
     answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(

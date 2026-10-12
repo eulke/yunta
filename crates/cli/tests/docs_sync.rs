@@ -137,12 +137,13 @@ fn case_runs(case_text: &str, origin: &str) {
         .map(str::trim)
         .unwrap_or_else(|| panic!("{origin}: a case names its fixture"));
 
+    let empty_fixture = "dialect: claude-code\nsessions: []\n";
     let project = Checkout::new()
         .file(
             &format!(".yunta/workflows/{workflow}.yaml"),
             &format!("name: {workflow}\nnodes:\n  - {{ id: only, kind: bash, run: \"true\" }}\n"),
         )
-        .file(&format!(".yunta/tests/{fixture}"), "sessions: []\n")
+        .file(&format!(".yunta/tests/{fixture}"), empty_fixture)
         .file(".yunta/tests/documented.yaml", case_text)
         .committed();
 

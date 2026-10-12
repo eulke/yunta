@@ -39,7 +39,7 @@ nodes:
 fn ask_then_brief_fixture(staging: &std::path::Path) -> String {
     format!(
         r##"
-capabilities: {{ run_tools: true, usage_reporting: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: usage
@@ -255,7 +255,7 @@ nodes:
       produces: [questions]
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -380,7 +380,7 @@ async fn a_questions_document_that_asks_nothing_leaves_empty_derived_answers_and
     let staging = bench.staging("brief");
     let fixture = format!(
         r##"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

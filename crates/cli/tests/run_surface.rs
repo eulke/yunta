@@ -591,7 +591,7 @@ nodes:
 "#;
 
 const SPENDING_FIXTURE: &str = r#"
-capabilities: { usage_reporting: true }
+dialect: claude-code
 steps:
   - { type: usage, input_tokens: 400, output_tokens: 100 }
 outcome: { type: completed, summary: "thought it through" }
@@ -757,7 +757,7 @@ nodes:
 "#;
 
 const FOUND_SOMETHING_BLOCKING: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

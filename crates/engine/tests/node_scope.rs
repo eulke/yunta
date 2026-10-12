@@ -39,7 +39,11 @@ fn last_failure(bench: &Bench, node: &str) -> Failure {
 
 #[tokio::test]
 async fn a_scope_violation_names_every_path_outside_and_the_decision_shows_them() {
-    let bench = parked(WRITES_OUTSIDE_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        WRITES_OUTSIDE_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
 
     let failure = last_failure(&bench, "fix");
     assert_eq!(
@@ -109,7 +113,11 @@ async fn menu(bench: &Bench) -> Vec<String> {
 
 #[tokio::test]
 async fn a_scope_violation_is_offered_the_grant_that_widens_the_node_by_what_it_wrote() {
-    let bench = parked(WRITES_OUTSIDE_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        WRITES_OUTSIDE_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
 
     assert_eq!(menu(&bench).await, ["grant", "retry", "abort"]);
     let (_, escalation) = current_escalation(
@@ -128,10 +136,16 @@ async fn a_scope_violation_is_offered_the_grant_that_widens_the_node_by_what_it_
 
 #[tokio::test]
 async fn a_grant_chosen_while_parked_widens_the_scope_once_and_the_next_attempt_passes() {
-    let bench = parked(WRITES_OUTSIDE_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        WRITES_OUTSIDE_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
 
     answer_parked(&bench, "grant").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(attempts(&bench, "fix"), 2);
@@ -149,7 +163,7 @@ async fn a_grant_chosen_while_asked_continues_the_same_invocation() {
     let RunReport { terminal, .. } = bench
         .run_with_interaction(
             WRITES_OUTSIDE_WORKFLOW,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &SequencedInteraction::choosing(&["grant"]),
         )
         .await;
@@ -162,7 +176,11 @@ async fn a_grant_chosen_while_asked_continues_the_same_invocation() {
 async fn a_restart_after_the_grant_never_grants_it_twice() {
     // A crash between the grant and the attempt it widens: the next wake
     // finds the grant already after the decision and starts the attempt.
-    let bench = parked(WRITES_OUTSIDE_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        WRITES_OUTSIDE_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
     answer_parked(&bench, "grant").await.unwrap();
     bench
         .storage
@@ -185,7 +203,9 @@ async fn a_restart_after_the_grant_never_grants_it_twice() {
         .await
         .unwrap();
 
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(grants(&bench).len(), 1);
@@ -196,7 +216,11 @@ async fn a_ceiling_that_denies_every_expansion_leaves_retry_and_abort() {
     let bench = Bench::new();
     let config = format!("{MOCK_CONFIG}permissions:\n  scope_expansion:\n    max_mode: deny\n");
     let RunReport { terminal, .. } = bench
-        .run_with_config(WRITES_OUTSIDE_WORKFLOW, "sessions: []\n", &config)
+        .run_with_config(
+            WRITES_OUTSIDE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &config,
+        )
         .await;
 
     assert!(
@@ -218,6 +242,7 @@ nodes:
     scope: ["src/**"]
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - effects:
       - { path: Cargo.toml, content: "[lib]" }
@@ -226,7 +251,11 @@ sessions:
       - { path: Cargo.toml, content: "[lib]" }
     outcome: { type: completed, summary: "fixed" }
 "#;
-    let bench = Bench::new();
+    // The session's writes land unfenced, so the violation the grant answers exists.
+    let bench = Bench::new().with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     let RunReport { terminal, .. } = bench
         .run_with_interaction(
             workflow,
@@ -261,7 +290,7 @@ nodes:
 "#;
 
 const ASKS_FIRST_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -330,7 +359,7 @@ async fn under_a_ceiling_that_denies_expansions_a_node_session_is_not_offered_th
     let bench = Bench::new();
     let config = format!("{MOCK_CONFIG}permissions:\n  scope_expansion:\n    max_mode: deny\n");
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -359,15 +388,11 @@ sessions:
 /// tool shows its scope, rather than a fresh session reading the brief.
 #[tokio::test]
 async fn a_granted_request_resumes_the_node_session_that_asked() {
-    let fixture = ASKS_FIRST_FIXTURE.replace(
-        "capabilities: { run_tools: true }",
-        "capabilities: { run_tools: true, resume_session: true }",
-    );
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
         .run_with_interaction(
             ASKS_FIRST_WORKFLOW,
-            &fixture,
+            ASKS_FIRST_FIXTURE,
             &SequencedInteraction::choosing(&["grant"]),
         )
         .await;

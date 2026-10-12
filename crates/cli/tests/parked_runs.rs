@@ -74,7 +74,7 @@ nodes:
 /// closes, so the round with a person is reached with no agent
 /// installed.
 const ASKING_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -413,26 +413,48 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
     assert_eq!(options, ["retry", "abort"], "{state:#}");
 }
 
-/// Two nodes whose first session spends past the run's cap: the run
-/// parks before the second one on a budget, which has no menu to rebuild.
+/// Four nodes in a chain under a 100-token cap. Each session may spend an
+/// equal share of the cap across the nodes still owed, and no more than the
+/// cap has left: the first three sessions spend 25, 33 and 42 tokens, which
+/// is the whole cap. The run parks before the fourth on its budget, which has
+/// no menu to rebuild.
 const OVER_BUDGET: &str = r#"
 name: over-budget
 nodes:
-  - id: spend
+  - id: first
     kind: prompt
     runner: executor
-    prompt: "Spend."
+    prompt: "Spend a first share."
+  - id: second
+    kind: prompt
+    runner: executor
+    depends_on: [first]
+    prompt: "Spend a second share."
+  - id: third
+    kind: prompt
+    runner: executor
+    depends_on: [second]
+    prompt: "Spend a third share."
   - id: more
     kind: prompt
     runner: executor
-    depends_on: [spend]
+    depends_on: [third]
     prompt: "Spend more."
 "#;
 
+/// One script per session of [`OVER_BUDGET`], in the order the chain runs
+/// them, each spending exactly the share its session is given.
 const OVER_BUDGET_FIXTURE: &str = r#"
+dialect: claude-code
 sessions:
   - steps:
-      - { type: usage, input_tokens: 500, output_tokens: 10 }
+      - { type: usage, input_tokens: 25, output_tokens: 0 }
+    outcome: { type: completed, summary: spent }
+  - steps:
+      - { type: usage, input_tokens: 33, output_tokens: 0 }
+    outcome: { type: completed, summary: spent }
+  - steps:
+      - { type: usage, input_tokens: 42, output_tokens: 0 }
     outcome: { type: completed, summary: spent }
 "#;
 

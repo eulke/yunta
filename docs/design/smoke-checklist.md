@@ -145,8 +145,12 @@ ejercitar.
 
 ## E. Session hooks on the real CLIs (2026-10-06)
 
-Run against codex-cli 0.157.0 and Claude Code 2.1.289 with a hook script that
-logs its stdin and answers as told. Each item is what the engine relies on.
+The scripted CLIs the contract suite drives report Claude Code 2.1.296 and
+codex-cli 0.157.0, the versions this checklist pins. The items below were
+checked against Claude Code 2.1.289 and codex-cli 0.157.0, with a hook script
+that logs its stdin and answers as told; that flag registry stays as history.
+A live run against these versions closes the claim. Each item is what the
+engine relies on.
 
 **codex**
 
@@ -260,9 +264,12 @@ the rail started from; "after" carries it.
 | Codex before | `continue-work` | green first time | — | 0 / — | 7m | — | 43m |
 | Codex after | `grant` ×3 | green first time | 1 | 7 / 31 | 23m | 1 s | 26m |
 
-- The same causes give the same events on both CLIs: `stop_refused`
-  (`criteria_red`, `artifact_missing`, `outside_scope`), `write_refused`
-  naming the path, `write_formatted`, and each node's fence coverage.
+- Parity between the CLIs is a test, not an observation: the contract suite
+  (`cargo test -p yunta-adapters --test contract`) runs each case against
+  claude-code, codex and the mock. The runs above saw the same causes give the
+  same events on both CLIs: `stop_refused` (`criteria_red`,
+  `artifact_missing`, `outside_scope`), `write_refused` naming the path,
+  `write_formatted`, and each node's fence coverage.
 - The rail costs 0.06–0.2% of the time sessions work. `fmt` never ran red;
   the held lint kept every task's work clean, so the `lint` node passed the
   first time in every run after.

@@ -130,7 +130,7 @@ nodes:
 
 /// A session that does the task's work.
 const SESSION: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: made.txt, content: made }

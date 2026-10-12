@@ -29,7 +29,7 @@ nodes:
 /// The criterion says the secret before it answers, so what the run keeps
 /// of it is what redaction has to hold.
 const NOISY_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

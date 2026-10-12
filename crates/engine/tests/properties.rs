@@ -458,7 +458,7 @@ fn bash_chain(nodes: usize) -> String {
 }
 
 /// The fixture of a run whose nodes open no session.
-const NO_SESSIONS: &str = "sessions: []\n";
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 /// What a run of a chain left when nothing stopped it: the bench it ran
 /// on, whose store a resume copies objects from, its log, and how it

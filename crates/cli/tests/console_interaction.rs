@@ -38,7 +38,7 @@ nodes:
 /// The session that hands the questions over, scripted — the round a
 /// person answers is reached with no agent installed.
 const HANDED_THEM_OVER: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

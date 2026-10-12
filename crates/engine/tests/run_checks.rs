@@ -11,6 +11,9 @@ use yunta_testkit::{baselines, ApproveEverything, Bench, MOCK_CONFIG};
 mod common;
 use common::*;
 
+/// A claude-code fixture that scripts no session, so a run reaches only its gates.
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []";
+
 /// The node a pause stopped on, and the sentence its failure was stated
 /// in. Any other pause fails the test that asked for one.
 fn failed_in_a_sentence(reason: PauseReason) -> (NodeId, String) {
@@ -42,7 +45,7 @@ nodes:
     // already did is a measurement, and measuring is something an
     // invocation does — so a run that nobody has woken has none.
     bench
-        .create(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .create(workflow, NO_SESSIONS, CONFIG_WITH_BASELINE)
         .await;
 
     assert!(
@@ -77,7 +80,7 @@ async fn the_first_wake_measures_the_baseline_before_any_node() {
         .await
         .unwrap();
     bench
-        .create(ONE_NODE, "sessions: []", CONFIG_WITH_BASELINE)
+        .create(ONE_NODE, NO_SESSIONS, CONFIG_WITH_BASELINE)
         .await;
     bench.wake().await;
 
@@ -126,7 +129,7 @@ async fn a_run_that_reads_no_measurement_measures_nothing() {
     let bench = Bench::new();
     let only_work = "name: only-work\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
     bench
-        .create(only_work, "sessions: []", CONFIG_WITH_BASELINE)
+        .create(only_work, NO_SESSIONS, CONFIG_WITH_BASELINE)
         .await;
     let RunReport { terminal, .. } = bench.wake().await;
 
@@ -143,7 +146,7 @@ async fn the_measuring_run_keeps_everything_the_suite_wrote() {
         .await
         .unwrap();
     let run_dir = bench
-        .create(ONE_NODE, "sessions: []", CONFIG_WITH_BASELINE)
+        .create(ONE_NODE, NO_SESSIONS, CONFIG_WITH_BASELINE)
         .await;
     bench.wake().await;
 
@@ -200,7 +203,7 @@ nodes:
     tokio::fs::write(&brief, "findings: []\n").await.unwrap();
 
     let bench = bench.with_inputs(&[("brief", brief.to_str().expect("a utf-8 path"))]);
-    bench.create(workflow, "sessions: []", MOCK_CONFIG).await;
+    bench.create(workflow, NO_SESSIONS, MOCK_CONFIG).await;
     bench.wake().await;
 
     assert!(
@@ -249,7 +252,7 @@ async fn a_resumed_run_measures_nothing_again() {
     // The gate has nobody to answer it on the first wake, so the run
     // pauses there; the second wake brings a surface that answers.
     let RunReport { terminal, .. } = bench
-        .run_with_config(GATED_THEN_COMPARED, "sessions: []", &config)
+        .run_with_config(GATED_THEN_COMPARED, NO_SESSIONS, &config)
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     let RunReport { terminal, .. } = bench.wake_answering(&ApproveEverything::new("test")).await;
@@ -315,9 +318,7 @@ nodes:
     depends_on: [first]
 "#;
 
-    let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []", &config)
-        .await;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, NO_SESSIONS, &config).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.events();
@@ -354,9 +355,7 @@ nodes:
     builtin: baseline_compare
 "#;
 
-    let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []", &config)
-        .await;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, NO_SESSIONS, &config).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
@@ -391,9 +390,7 @@ nodes:
     builtin: baseline_compare
 "#;
 
-    let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []", &config)
-        .await;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, NO_SESSIONS, &config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
         outcome_of(&bench.events(), "compare"),
@@ -429,7 +426,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_BASELINE)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -462,7 +459,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_BASELINE)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
@@ -481,7 +478,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_COVERAGE)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
@@ -500,7 +497,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_COVERAGE)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -594,7 +591,7 @@ nodes:
     depends_on: [write]
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, NO_SESSIONS).await;
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["write", "verify"] {
         assert!(
@@ -621,7 +618,7 @@ nodes:
     kind: bash
     run: "exit 3"
 "#;
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(workflow, NO_SESSIONS).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
@@ -661,7 +658,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_EXECUTOR)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("probe") {
@@ -692,7 +689,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
         RunTerminal::Paused {
@@ -745,7 +742,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
         RunTerminal::Paused {
@@ -788,7 +785,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -812,7 +809,7 @@ nodes:
     executor: does-not-exist
 "#;
 
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, NO_SESSIONS).await;
     match terminal {
         RunTerminal::Paused {
             reason:
@@ -846,7 +843,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_DENY)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -881,7 +878,7 @@ nodes:
 "#;
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
+        .run_with_config(workflow, NO_SESSIONS, CONFIG_WITH_DENY)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -952,7 +949,7 @@ nodes:
     network: false
 "#;
 
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, NO_SESSIONS).await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -988,9 +985,8 @@ permissions:
     deny: ["*probe.py"]
 "#;
 
-    let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", config)
-        .await;
+    let RunReport { terminal, state: _ } =
+        bench.run_with_config(workflow, NO_SESSIONS, config).await;
     match terminal {
         RunTerminal::Paused { reason } => {
             let (node, outcome) = failed_in_a_sentence(reason);
@@ -1019,7 +1015,7 @@ nodes:
     run: "true"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, NO_SESSIONS).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let jsonl = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
@@ -1060,7 +1056,7 @@ nodes:
     prompt: "plan it"
 "#;
 
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, NO_SESSIONS).await;
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),

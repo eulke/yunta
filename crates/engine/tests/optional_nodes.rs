@@ -48,7 +48,7 @@ async fn an_optional_node_the_project_cannot_run_is_left_out_and_its_dependents_
 ) {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run_with_config(LINTED, "sessions: []\n", MOCK_CONFIG)
+        .run_with_config(LINTED, "dialect: claude-code\nsessions: []\n", MOCK_CONFIG)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -68,7 +68,7 @@ async fn an_optional_node_runs_where_the_project_declares_it() {
     let bench = Bench::new();
     let config = format!("{MOCK_CONFIG}commands:\n  lint: \"true\"\n");
     let RunReport { terminal, .. } = bench
-        .run_with_config(LINTED, "sessions: []\n", &config)
+        .run_with_config(LINTED, "dialect: claude-code\nsessions: []\n", &config)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -108,7 +108,7 @@ fn a_required_node_with_an_unset_key_is_still_refused() {
 async fn a_left_out_node_stands_apart_from_a_mode_skipped_one() {
     let bench = Bench::new();
     bench
-        .run_with_config(LINTED, "sessions: []\n", MOCK_CONFIG)
+        .run_with_config(LINTED, "dialect: claude-code\nsessions: []\n", MOCK_CONFIG)
         .await;
     let workflow: Workflow = yunta_core::yaml::parse(LINTED).expect("the workflow parses");
 

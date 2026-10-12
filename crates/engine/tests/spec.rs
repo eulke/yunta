@@ -12,7 +12,9 @@ mod common;
 
 use common::spec::*;
 use common::*;
-use yunta_core::events::{ArtifactEvent, EventPayload, NodeEvent, TaskStatus};
+use yunta_core::events::{
+    ArtifactEvent, EventPayload, NodeEvent, SessionEvent, TaskStatus, ToolTarget,
+};
 use yunta_core::ArtifactKind;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
@@ -197,18 +199,17 @@ async fn a_session_that_rewrites_its_own_test_does_not_close_its_task() {
         .await;
 
     assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
-    let denied: Vec<std::path::PathBuf> = bench
+    let refused: Vec<ToolTarget> = bench
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) => Some(p.denied.clone()),
+            Some(EventPayload::Session(SessionEvent::WriteRefused(p))) => Some(p.target.clone()),
             _ => None,
         })
-        .flatten()
         .collect();
     assert!(
-        denied.contains(&std::path::PathBuf::from("tests/greet.sh")),
-        "{denied:?}"
+        refused.contains(&ToolTarget::of_path(std::path::Path::new("tests/greet.sh"))),
+        "{refused:?}"
     );
 }
 

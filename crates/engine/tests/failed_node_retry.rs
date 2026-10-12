@@ -43,7 +43,11 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     // A failure with nothing to re-route it is still a decision: a person
     // who fixes its cause needs a way to hand the node back, and a resume
     // alone would find it failed and pause again.
-    let bench = parked(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        FAILS_UNTIL_FIXED_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
     let (node, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
@@ -69,7 +73,7 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
 async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() {
     let bench = parked(
         "name: gated\nnodes:\n  - { id: gate, kind: check, builtin: coverage_gate }\n",
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     )
     .await;
     let (node, escalation) = current_escalation(
@@ -101,11 +105,17 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
 
 #[tokio::test]
 async fn a_plain_failure_retried_after_its_cause_is_fixed_finishes() {
-    let bench = parked(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        FAILS_UNTIL_FIXED_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
     write(&bench.worktree.join("fixed.txt"), "fixed");
 
     answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, state } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, state } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -119,10 +129,16 @@ async fn a_plain_failure_retried_after_its_cause_is_fixed_finishes() {
 async fn a_plain_resume_never_retries_a_failed_node_by_itself() {
     // Fixing the cause is not the decision to spend again: without a
     // `retry` on the log, a resume parks on the same failure.
-    let bench = parked(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        FAILS_UNTIL_FIXED_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
     write(&bench.worktree.join("fixed.txt"), "fixed");
 
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the resume to pause again, got {terminal:?}");
@@ -136,10 +152,16 @@ async fn a_plain_resume_never_retries_a_failed_node_by_itself() {
 
 #[tokio::test]
 async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
-    let bench = parked(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(
+        FAILS_UNTIL_FIXED_WORKFLOW,
+        "dialect: claude-code\nsessions: []\n",
+    )
+    .await;
 
     answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
@@ -192,7 +214,11 @@ async fn a_person_who_fixes_the_cause_while_asked_retries_in_the_same_invocation
         fix: bench.worktree.join("fixed.txt"),
     };
     let RunReport { terminal, state } = bench
-        .run_with_interaction(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n", &fix)
+        .run_with_interaction(
+            FAILS_UNTIL_FIXED_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &fix,
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -217,7 +243,7 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     let RunReport { terminal, .. } = bench
         .run_with_interaction(
             FAILS_UNTIL_FIXED_WORKFLOW,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &SequencedInteraction::choosing(&["abort"]),
         )
         .await;
@@ -231,7 +257,9 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
 
     // The abort was consumed by its own pause: a later resume asks again
     // rather than re-applying it, and the menu is still there to answer.
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
@@ -267,14 +295,14 @@ nodes:
 
 /// An attempt that never writes the file: the task blocks after it.
 const MISSES: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: missed }
 ";
 
 /// One attempt that writes it.
 const MAKES_IT: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: made.txt, content: made }
@@ -394,7 +422,7 @@ nodes:
 /// Three attempts: the first writes the task's own work, none can meet
 /// what the person has to provide.
 const DOES_ITS_PART: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: made.txt, content: made }
@@ -433,7 +461,7 @@ async fn continuing_a_loop_from_the_work_it_left_closes_the_task_without_a_sessi
     write(&marker, "done");
     answer_parked(&bench, "continue-work").await.unwrap();
     let RunReport { terminal, state } = bench
-        .wake_on_fixture("capabilities: { run_tools: true }\nsessions: []\n")
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");

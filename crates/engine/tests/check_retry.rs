@@ -50,7 +50,7 @@ async fn parked_on_a_regression() -> Bench {
         counter(&bench).display()
     );
     let RunReport { terminal, .. } = bench
-        .run_with_config(REGRESSES, "sessions: []\n", &config)
+        .run_with_config(REGRESSES, "dialect: claude-code\nsessions: []\n", &config)
         .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
@@ -75,7 +75,10 @@ fn failures(bench: &Bench, node: &str) -> Vec<Failure> {
 
 async fn retried(bench: &Bench) -> RunTerminal {
     answer_parked(bench, "retry").await.unwrap();
-    bench.wake_on_fixture("sessions: []\n").await.terminal
+    bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await
+        .terminal
 }
 
 #[tokio::test]
@@ -169,7 +172,7 @@ async fn a_coverage_gate_retried_on_an_unchanged_tree_fails_without_running_agai
     );
     let workflow = "name: covered\nnodes:\n  - { id: gate, kind: check, builtin: coverage_gate }\n";
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []\n", &config)
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", &config)
         .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),

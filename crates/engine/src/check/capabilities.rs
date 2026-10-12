@@ -4,11 +4,14 @@
 //! Three of a node's declarations are the adapter's to honor or not:
 //! `permissions:` needs `permission_profiles`, `agent:` needs
 //! `custom_agents`, and what a session can only hand over or read through
-//! the engine — a document, a task, a blackboard — needs `run_tools`. None
+//! the engine — a document, a task, a blackboard — needs `run_tools`. A
+//! prompt or loop also needs `stop_refusals`: the engine may refuse a
+//! session's stop, and the CLI must keep the session going past it. None
 //! has a fallback — a session that silently ignored the profile it was
-//! given would edit under permissions nobody granted, and one without the
-//! run tools has no way to hand over what it declared — so the workflow is
-//! refused here rather than at the node that would have run without it.
+//! given would edit under permissions nobody granted, one without the run
+//! tools has no way to hand over what it declared, and one that ends at a
+//! refused stop leaves its work short — so the workflow is refused here
+//! rather than at the node that would have run without it.
 
 use super::*;
 use yunta_core::port::{absence_of, Absence};
@@ -31,26 +34,7 @@ pub(crate) fn check_adapter_capabilities(
 ) {
     for (node, group) in workflow.iter_nodes_with_group() {
         let adapters = candidate_adapters(node, config);
-        if node.permissions.is_some() {
-            refuse_if_none_can(
-                node,
-                &adapters,
-                declared,
-                Capability::PermissionProfiles,
-                "permissions:",
-                errors,
-            );
-        }
-        if node.agent.is_some() {
-            refuse_if_none_can(
-                node,
-                &adapters,
-                declared,
-                Capability::CustomAgents,
-                "agent:",
-                errors,
-            );
-        }
+        check_profile_and_agent(node, &adapters, declared, errors);
         let blackboard_member = group.is_some_and(|group| {
             matches!(
                 group.kind,
@@ -77,6 +61,57 @@ pub(crate) fn check_adapter_capabilities(
                 errors,
             );
         }
+        check_stop_refusals(node, &adapters, declared, errors);
+    }
+}
+
+/// A node's permission profile and custom agent each need a candidate
+/// adapter that can apply them.
+fn check_profile_and_agent(
+    node: &Node,
+    adapters: &[AdapterId],
+    declared: &dyn Fn(&AdapterId) -> Option<Capabilities>,
+    errors: &mut Vec<CheckError>,
+) {
+    if node.permissions.is_some() {
+        refuse_if_none_can(
+            node,
+            adapters,
+            declared,
+            Capability::PermissionProfiles,
+            "permissions:",
+            errors,
+        );
+    }
+    if node.agent.is_some() {
+        refuse_if_none_can(
+            node,
+            adapters,
+            declared,
+            Capability::CustomAgents,
+            "agent:",
+            errors,
+        );
+    }
+}
+
+/// A prompt or loop node runs a session whose stop the engine can refuse,
+/// so one of its candidate adapters must keep such a session going.
+fn check_stop_refusals(
+    node: &Node,
+    adapters: &[AdapterId],
+    declared: &dyn Fn(&AdapterId) -> Option<Capabilities>,
+    errors: &mut Vec<CheckError>,
+) {
+    if matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. }) {
+        refuse_if_none_can(
+            node,
+            adapters,
+            declared,
+            Capability::StopRefusals,
+            &format!("kind: {}", node.kind.kind_name()),
+            errors,
+        );
     }
 }
 

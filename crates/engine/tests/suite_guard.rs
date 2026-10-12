@@ -167,7 +167,7 @@ fn session(breaks: bool) -> String {
     };
     format!(
         "\
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: made.txt, content: made }}{broken}
@@ -230,7 +230,7 @@ async fn every_task_is_checked_against_the_lineage_suite_before_and_after_its_wo
 async fn a_post_check_records_the_suite_waiting_while_the_task_s_criterion_is_red() {
     let bench = Bench::new();
     let sessions = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: nothing made }
 ";

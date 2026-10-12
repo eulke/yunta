@@ -27,13 +27,15 @@ async fn what_a_person_left_in_the_tree_during_a_pause_is_committed_as_found_whe
 ) {
     let bench = parked(
         "name: fixed-by-hand\nnodes:\n  - { id: broken, kind: bash, run: \"test -f fixed.txt\" }\n",
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     )
     .await;
     write(&bench.worktree.join("fixed.txt"), "fixed by hand");
 
     answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     let starts = found(&bench.events(), "broken");
@@ -58,7 +60,7 @@ async fn an_interrupted_attempts_leftovers_are_found_when_it_restarts() {
     bench
         .create(
             "name: restarts\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             MOCK_CONFIG,
         )
         .await;
@@ -106,7 +108,9 @@ nodes:
     scope: ["out.txt"]
     run: "test -f left.txt && echo out > out.txt"
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(found(&bench.events(), "edit")[..], [Some(_)]));
@@ -124,13 +128,15 @@ nodes:
 async fn a_scoped_node_lands_an_edit_to_what_a_person_left() {
     let bench = parked(
         "name: finishes-a-draft\nnodes:\n  - { id: finish, kind: bash, scope: [\"draft.txt\"], run: \"test -f draft.txt && echo finished >> draft.txt\" }\n",
-        "sessions: []\n",
+        "dialect: claude-code\nsessions: []\n",
     )
     .await;
     write(&bench.worktree.join("draft.txt"), "a person's draft\n");
 
     answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -154,7 +160,9 @@ nodes:
       - { id: a, kind: bash, run: "true" }
       - { id: b, kind: bash, run: "true" }
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();

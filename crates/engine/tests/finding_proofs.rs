@@ -29,7 +29,7 @@ fn reporting(cmd: &str, accepted: bool) -> String {
         "        expect: refused\n"
     };
     format!(
-        "capabilities: {{ run_tools: true }}
+        "dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -120,7 +120,7 @@ nodes:
 /// `answer`.
 fn fixing(effects: &str, answer: &str) -> String {
     format!(
-        "capabilities: {{ run_tools: true }}
+        "dialect: claude-code
 sessions:
   - match_prompt_contains: \"Review the change\"
     steps:

@@ -29,7 +29,7 @@ nodes:
     run: "true"
 "#;
 
-const FIXTURE: &str = "sessions: []\n";
+const FIXTURE: &str = "dialect: claude-code\nsessions: []\n";
 
 #[tokio::test]
 async fn quick_mode_skips_the_excluded_node_and_still_finishes() {

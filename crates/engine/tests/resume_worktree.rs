@@ -47,7 +47,11 @@ async fn paused_run(isolation: Isolation) -> Bench {
         Isolation::None => format!("{MOCK_CONFIG}{NONE_ISOLATION}"),
     };
     bench
-        .create(ONE_INTERRUPTED_NODE, "sessions: []\n", &config)
+        .create(
+            ONE_INTERRUPTED_NODE,
+            "dialect: claude-code\nsessions: []\n",
+            &config,
+        )
         .await;
     assert_eq!(
         bench.manifest().isolation,

@@ -21,9 +21,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::lines::LineReader;
+use super::stream::StreamGuard;
 use crate::events::{SessionEnd, SessionExit, TAIL_LINES};
 use crate::port::session::SessionEnv;
-use crate::port::{AgentError, AgentEvent, AgentSession, ProbeReport};
+use crate::port::{AgentEvent, AgentSession, ProbeReport};
 use crate::process::signal::{signal_group, Signal};
 
 /// Hands `prompt` to a just-spawned CLI on its stdin and closes the
@@ -71,6 +72,15 @@ pub trait LineParser: Send {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent>;
 }
 
+/// What a launch sets up before its CLI starts, and takes back once the
+/// session it opened has ended. `Sync` because the session that holds it
+/// is shared by reference across the awaits of its own methods.
+pub trait Held: Send + Sync {
+    /// Takes back what was set up. The session is over by the time it is
+    /// asked.
+    fn release(self: Box<Self>) -> Result<()>;
+}
+
 /// Everything a CLI session needs to start.
 pub struct Launch<'a> {
     pub adapter: &'static AdapterId,
@@ -82,6 +92,10 @@ pub struct Launch<'a> {
     pub env: &'a SessionEnv,
     pub prompt: &'a str,
     pub parser: Box<dyn LineParser>,
+    /// What the launch set up for the session, given back when the session
+    /// ends, or when the launch fails before it. `None` when the launch set
+    /// nothing up.
+    pub held: Option<Box<dyn Held>>,
 }
 
 /// Starts the CLI and hands back the session that owns it. The readers
@@ -142,25 +156,12 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
     let mut parser = launch.parser;
     let reader = tokio::spawn(async move {
         let mut lines = LineReader::new(stdout);
-        let mut opened = false;
+        let mut guard = StreamGuard::default();
         while let Some(line) = lines.next_line().await {
             for event in parser.parse(&line) {
-                let event = match event {
-                    AgentEvent::SessionOpened { .. } | AgentEvent::Failed { .. } => event,
-                    other if opened => other,
-                    // The session opens before anything happens in it: a
-                    // CLI that reports work under no session is not
-                    // speaking the protocol, and a retry would read the
-                    // same lines.
-                    other => AgentEvent::Failed {
-                        error: AgentError::message(format!(
-                            "the CLI reported {} before opening the session",
-                            describe(&other)
-                        )),
-                        cause: crate::port::FailureCause::Final,
-                    },
+                let Some(event) = guard.admit(event, adapter.as_str()) else {
+                    return;
                 };
-                opened = true;
                 let terminal = matches!(
                     event,
                     AgentEvent::Completed { .. } | AgentEvent::Failed { .. }
@@ -205,6 +206,7 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
         stderr_drain,
         stderr_tail,
         receiver: Some(rx),
+        held: launch.held,
     };
     write_prompt(stdin, launch.prompt, adapter).await?;
     Ok(Box::new(session))
@@ -253,6 +255,9 @@ pub struct SubprocessSession {
     /// The last [`TAIL_LINES`] lines the child wrote, redacted.
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
+    /// What the launch set up, taken back by [`AgentSession::release`] or,
+    /// failing that, when the session is dropped.
+    held: Option<Box<dyn Held>>,
 }
 
 impl SubprocessSession {
@@ -431,6 +436,13 @@ impl AgentSession for SubprocessSession {
                 .collect(),
         }))
     }
+
+    async fn release(&mut self) -> Result<()> {
+        match self.held.take() {
+            Some(held) => held.release(),
+            None => Ok(()),
+        }
+    }
 }
 
 /// How a collected status says the process ended. A status is one or the
@@ -458,19 +470,5 @@ impl Drop for SubprocessSession {
         }
         self.reader.abort();
         self.stderr_drain.abort();
-    }
-}
-
-/// An event's kind, for a message about one that came out of order.
-fn describe(event: &AgentEvent) -> &'static str {
-    match event {
-        AgentEvent::SessionOpened { .. } => "a session opening",
-        AgentEvent::ToolUse { .. } => "a tool use",
-        AgentEvent::WriteRefused { .. } => "a write it refused",
-        AgentEvent::Usage { .. } => "token usage",
-        AgentEvent::Note { .. } => "a note",
-        AgentEvent::Completed { .. } => "a completion",
-        AgentEvent::Failed { .. } => "a failure",
-        AgentEvent::RunToolFailed { .. } => "a run tool failure",
     }
 }

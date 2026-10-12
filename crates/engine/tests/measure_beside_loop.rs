@@ -28,7 +28,7 @@ nodes:
 "#;
 
 const WRITES: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: a.txt, content: a }

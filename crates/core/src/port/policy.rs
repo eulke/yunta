@@ -106,7 +106,7 @@ pub enum Absence {
 /// Every capability and what its absence means. Exhaustive by test: a
 /// capability added to [`Capability`] without a row here is a capability
 /// whose absence nobody decided.
-pub const POLICY: [(Capability, Absence); 8] = [
+pub const POLICY: [(Capability, Absence); 9] = [
     (
         Capability::ResumeSession,
         Absence::DegradeWith(Policy::FreshSession),
@@ -138,6 +138,7 @@ pub const POLICY: [(Capability, Absence); 8] = [
         Capability::NetworkIsolation,
         Absence::DegradeWith(Policy::NetworkOpen),
     ),
+    (Capability::StopRefusals, Absence::FailAtCheck),
 ];
 
 /// What this capability's absence means.

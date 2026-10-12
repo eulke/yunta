@@ -1,31 +1,20 @@
-//! What a `codex` session's fence is built of, and what that leaves
-//! covered.
+//! The sandbox a `codex` session runs under, and the directories that
+//! sandbox keeps writable beside the workspace.
 //!
 //! Every file edit Codex makes is an `apply_patch`, and the hook it runs
 //! before one asks the engine about every path the patch names — that
-//! channel is exact. Commands the session runs are confined by the
-//! process's own sandbox instead, by directory and never by glob: the
-//! coverage says how wide that left them. The post-check diff is what
-//! catches a command's write inside those directories but outside the
-//! declared scope.
+//! channel is exact. Commands the session runs are confined by the process's
+//! own sandbox instead, by directory and never by glob; the coverage a
+//! session reports says how wide that left them.
 
-use std::path::{Path, PathBuf};
-
-use yunta_core::fence::{Coverage, Fence, Fenced};
+use yunta_core::fence::Fence;
 use yunta_core::port::PermissionProfile;
 
 use crate::session::Sandbox;
 
 /// The sandbox flags one session runs under.
-pub(super) fn sandbox_args(
-    fence: &Fence,
-    profile: PermissionProfile,
-    edit_sandbox: Sandbox,
-) -> Vec<String> {
-    vec![
-        "--sandbox".to_string(),
-        mode(fence, profile, edit_sandbox).as_flag().to_string(),
-    ]
+pub(super) fn sandbox_args(sandbox: Sandbox) -> Vec<String> {
+    vec!["--sandbox".to_string(), sandbox.as_flag().to_string()]
 }
 
 /// The sandbox mode a session under `profile` runs in.
@@ -50,20 +39,4 @@ pub(super) fn writable_roots(fence: &Fence) -> Vec<String> {
         .iter()
         .map(|root| root.display().to_string())
         .collect()
-}
-
-/// What this session ends up fenced by: its edits exactly, and its
-/// commands by whatever the sandbox under `mode` confines them to — the
-/// workspace and the roots, nothing at all, or everything.
-pub(super) fn coverage(fence: &Fence, cwd: &Path, mode: Sandbox) -> Coverage {
-    let commands = match mode {
-        Sandbox::WorkspaceWrite => Some(Fenced::Roots(
-            std::iter::once(cwd.to_path_buf())
-                .chain(fence.roots.iter().cloned())
-                .collect::<Vec<PathBuf>>(),
-        )),
-        Sandbox::ReadOnly => Some(Fenced::Exact),
-        Sandbox::DangerFullAccess => None,
-    };
-    Coverage::of(Fenced::Exact, commands)
 }

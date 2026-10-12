@@ -37,13 +37,27 @@ nodes:
 
 /// The task's session builds, and writes its work.
 const BUILDS: &str = "\
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: target/marker, content: built }
       - { path: a.txt, content: a }
     outcome: { type: completed, summary: built }
 ";
+
+/// A pooled bench whose CLI runs tools and declares nothing else, so the build a
+/// session writes outside its task's scope lands as scripted. A build is a
+/// command's output, which no fence judges, so the bench declares none. It keeps
+/// its stops honoured, which a loop needs before a check accepts it.
+fn pooled_unfenced() -> Bench {
+    Bench::new()
+        .pooled()
+        .with_capabilities(yunta_core::Capabilities {
+            run_tools: true,
+            stop_refusals: true,
+            ..Default::default()
+        })
+}
 
 fn ignore(bench: &Bench, ignored: &str) {
     std::fs::write(bench.worktree.join(".gitignore"), ignored).unwrap();
@@ -67,7 +81,7 @@ const TESTS_THE_BUILD: &str =
 
 #[tokio::test]
 async fn a_run_moves_into_the_checkout_its_last_task_built_in() {
-    let bench = Bench::new().pooled();
+    let bench = pooled_unfenced();
     ignore(&bench, "target/\n");
 
     let RunReport { terminal, .. } = bench.run(&builds_then(TESTS_THE_BUILD), BUILDS).await;
@@ -79,7 +93,7 @@ async fn a_run_moves_into_the_checkout_its_last_task_built_in() {
 
 #[tokio::test]
 async fn a_moved_run_wakes_where_it_moved() {
-    let bench = Bench::new().pooled();
+    let bench = pooled_unfenced();
     ignore(&bench, "target/\n");
     let gated = format!("{TESTS_THE_BUILD}  - {{ id: approve, kind: gate, depends_on: [lint], assignee: lead, options: [approve] }}\n");
     let RunReport { terminal, .. } = bench.run(&builds_then(&gated), BUILDS).await;
@@ -105,7 +119,7 @@ async fn a_moved_run_wakes_where_it_moved() {
 /// build where the task left it: the run follows it once it builds.
 #[tokio::test]
 async fn a_run_follows_its_tasks_build_past_a_gate() {
-    let bench = Bench::new().pooled();
+    let bench = pooled_unfenced();
     ignore(&bench, "target/\n");
     let gate = "  - { id: approve, kind: gate, depends_on: [implement], assignee: lead, options: [approve] }\n";
     let lint = TESTS_THE_BUILD.replace("[implement]", "[approve]");
@@ -129,7 +143,7 @@ async fn a_run_follows_its_tasks_build_past_a_gate() {
 /// in and keep it for its session: the run claims that build first.
 #[tokio::test]
 async fn a_run_claims_its_tasks_build_before_a_node_of_its_own_unit_takes_it() {
-    let bench = Bench::new().pooled();
+    let bench = pooled_unfenced();
     ignore(&bench, "target/\n");
     let review = "  - { id: review, kind: bash, depends_on: [implement], scope: [review.txt], run: \"echo ok > review.txt\" }\n";
     let lint = TESTS_THE_BUILD.replace("[implement]", "[review]");
@@ -147,7 +161,7 @@ async fn a_run_claims_its_tasks_build_before_a_node_of_its_own_unit_takes_it() {
 /// commit it stands at.
 #[tokio::test]
 async fn a_run_leaves_a_larger_build_of_an_older_commit_for_its_tasks_build() {
-    let bench = Bench::new().pooled();
+    let bench = pooled_unfenced();
     ignore(&bench, "target/\n");
     let older = "mkdir -p target && head -c 262144 /dev/zero > target/older && printf 'tasks:";
     let workflow = builds_then(TESTS_THE_BUILD).replace("printf 'tasks:", older);
@@ -163,7 +177,7 @@ async fn a_run_leaves_a_larger_build_of_an_older_commit_for_its_tasks_build() {
 /// more the task built.
 #[tokio::test]
 async fn a_run_stays_where_its_tree_holds_a_build_the_task_lacks() {
-    let bench = Bench::new().pooled();
+    let bench = pooled_unfenced();
     ignore(&bench, "target/\n.cache/\n");
     let workflow = builds_then(TESTS_THE_BUILD)
         .replace(
@@ -194,7 +208,14 @@ async fn a_promoted_run_hands_over_the_checkout_it_moved_to() {
     )
     .replace("name: follows\n", "name: follows\nmodes:\n  quick: { include: [plan, implement, lint, fix] }\n  full: { include: [ship] }\n");
     let parent = "name: parent\nnodes:\n  - { id: feat, kind: workflow, use: follows }\n";
-    let bench = Bench::new().with_workflow("follows", &child);
+    // The build the child's session makes is a command's output, which no fence judges.
+    let bench = Bench::new()
+        .with_workflow("follows", &child)
+        .with_capabilities(yunta_core::Capabilities {
+            run_tools: true,
+            stop_refusals: true,
+            ..Default::default()
+        });
     ignore(&bench, "target/\n");
 
     let promote = ScriptedInteraction::choose("promote");

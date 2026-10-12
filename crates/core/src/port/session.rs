@@ -37,7 +37,6 @@ pub enum PermissionProfile {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Budget {
     pub max_tokens: Option<u64>,
-    pub max_turns: Option<u32>,
     pub timeout: Option<Duration>,
 }
 
@@ -272,11 +271,6 @@ pub enum AgentEvent {
         /// derived from what it built. `None` when it built nothing.
         fence: Option<Coverage>,
     },
-    /// A write the fence refused before it happened. Chronicle and
-    /// count, never node state: the session went on.
-    WriteRefused {
-        target: crate::events::ToolTarget,
-    },
     /// A known tool of this session's `yunta-run` server failed. No
     /// arguments or CLI error text cross this boundary.
     RunToolFailed {
@@ -359,14 +353,6 @@ pub trait Adapter: Send + Sync {
     /// there would run what it says outside its sandbox. Default: none.
     fn own_config(&self) -> Vec<crate::ScopeGlob> {
         Vec::new()
-    }
-
-    /// Takes back what a session opened for `req` staged for the
-    /// adapter's own mechanics, once that session has ended: it was never
-    /// the agent's work, so it must not stay in the tree the run keeps.
-    /// Default: nothing staged, nothing to take back.
-    fn unstage(&self, _req: &SessionRequest) -> Result<()> {
-        Ok(())
     }
 
     /// How this adapter translates between its CLI's hooks and the
@@ -452,6 +438,13 @@ pub trait AgentSession: Send {
     /// process of its own answers `None`.
     async fn exit(&mut self) -> Result<Option<SessionExit>> {
         Ok(None)
+    }
+
+    /// Takes back what the launch set up for this session, once the
+    /// session has ended. Default: nothing was set up, so nothing is taken
+    /// back.
+    async fn release(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 

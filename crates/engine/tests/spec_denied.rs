@@ -8,7 +8,9 @@ mod common;
 use std::path::PathBuf;
 
 use common::spec::*;
-use yunta_core::events::{EventPayload, Failure, NodeEvent, StoredEvent, TaskStatus};
+use yunta_core::events::{
+    EventPayload, Failure, NodeEvent, SessionEvent, StoredEvent, TaskStatus, ToolTarget,
+};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, write, Bench, MOCK_CONFIG};
 
@@ -24,15 +26,14 @@ fn failures(events: &[StoredEvent], node: &str) -> Vec<Failure> {
         .collect()
 }
 
-/// Every path a scope audit of the run found denied.
-fn denied(events: &[StoredEvent]) -> Vec<PathBuf> {
+/// Every target a session was refused a write to, in log order.
+fn refused_targets(events: &[StoredEvent]) -> Vec<ToolTarget> {
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) => Some(p.denied.clone()),
+            Some(EventPayload::Session(SessionEvent::WriteRefused(p))) => Some(p.target.clone()),
             _ => None,
         })
-        .flatten()
         .collect()
 }
 
@@ -109,14 +110,14 @@ async fn a_node_scoped_to_the_run_is_refused_an_approved_test_without_a_grant() 
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench.run(&then_a_fix(), &fixing()).await;
 
+    assert_eq!(terminal, RunTerminal::Finished, "{terminal:?}");
     assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "{terminal:?}"
+        failures(&bench.events(), "fix").is_empty(),
+        "a refused write is no failure of the node"
     );
-    assert_eq!(
-        failures(&bench.events(), "fix"),
-        vec![Failure::paths_denied(vec![the_test()])],
-        "a test a person approved is never put to a person as a grant"
+    assert!(
+        refused_targets(&bench.events()).contains(&ToolTarget::of_path(&the_test())),
+        "a test a person approved is refused to the fix, never put to a person as a grant"
     );
     assert_eq!(at_head(&bench, "tests/greet.sh"), GREETS.trim_end());
 }
@@ -157,7 +158,7 @@ tasks:
 ";
 
 #[tokio::test]
-async fn a_task_that_rewrites_another_tasks_test_is_not_integrated() {
+async fn a_task_that_rewrites_another_tasks_test_is_refused_and_its_own_work_lands() {
     let spec = "{ specs: [\
         { task: greet, files: [{ path: tests/greet.sh, content: \"test \\\"$(cat greeting.txt 2>/dev/null)\\\" = Hello\\n\" }], \
           tests: [{ cmd: \"sh tests/greet.sh\", proves: \"the greeting says hello\" }] }, \
@@ -179,8 +180,8 @@ async fn a_task_that_rewrites_another_tasks_test_is_not_integrated() {
     let RunReport { state, .. } = bench.run(&specified_loop(), &fixture).await;
 
     assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Done));
-    assert_eq!(state.tasks.status("farewell"), Some(TaskStatus::Blocked));
-    assert!(denied(&bench.events()).contains(&the_test()));
+    assert_eq!(state.tasks.status("farewell"), Some(TaskStatus::Done));
+    assert!(refused_targets(&bench.events()).contains(&ToolTarget::of_path(&the_test())));
     assert_eq!(at_head(&bench, "tests/greet.sh"), GREETS.trim_end());
 }
 
@@ -250,7 +251,7 @@ async fn a_task_held_to_tests_is_told_they_are_denied_and_how_to_dispute_one() {
     for told in [
         "The tests a person approved for this task are in your checkout — `tests/greet.sh` — \
          and are not yours to change",
-        "declare it on that criterion with `yunta_declare_deviation`, and a person decides \
+        "declare it on that criterion with `mcp__yunta-run__yunta_declare_deviation`, and a person decides \
          whether it is written again",
     ] {
         assert!(prompt.contains(told), "`{told}` is missing from:\n{prompt}");

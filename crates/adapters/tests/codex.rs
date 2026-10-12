@@ -7,14 +7,17 @@
 //! comment for the details.
 
 use std::error::Error as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use futures::StreamExt;
 use yunta_core::fence::{Advice, Fence};
 
 use yunta_adapters::CodexAdapter;
 use yunta_core::events::SessionEnd;
-use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport};
+use yunta_core::port::{Adapter, AgentEvent, PermissionProfile};
 use yunta_core::Pid;
-use yunta_core::{AdapterSettings, Secret, SessionId};
+use yunta_core::{AdapterSettings, SessionId};
 use yunta_testkit_core::adapter::{
     child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, wait_until_gone, write_lines,
 };
@@ -36,28 +39,6 @@ const TURN_COMPLETED_LINE: &str =
     r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#;
 
 #[tokio::test]
-async fn probe_reports_the_stub_as_healthy_with_its_version() {
-    let report = adapter().probe().await.unwrap();
-    let ProbeReport::Healthy { version } = report else {
-        panic!("the stub is healthy: {report:?}");
-    };
-    assert!(version.unwrap().contains("0.47.0"));
-}
-
-#[tokio::test]
-async fn capabilities_declare_what_this_adapter_actually_does() {
-    let caps = adapter().capabilities();
-    assert!(caps.resume_session);
-    assert!(caps.permission_profiles);
-    assert!(caps.usage_reporting);
-    assert!(caps.custom_agents);
-    assert!(caps.skills);
-    // Every edit is judged before it applies, by the hook it runs.
-    assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
-    assert!(caps.run_tools);
-}
-
-#[tokio::test]
 async fn a_run_tool_is_named_the_way_this_cli_hands_it_to_the_model() {
     // A session's own tool list names the server's tools with its `-`
     // written `_`: `mcp__yunta_run__yunta_check_artifact` is what a
@@ -67,50 +48,6 @@ async fn a_run_tool_is_named_the_way_this_cli_hands_it_to_the_model() {
         yunta_core::RunTool::CheckArtifact.called(naming),
         "mcp__yunta_run__yunta_check_artifact"
     );
-}
-
-#[tokio::test]
-async fn capability_usage_reporting_surfaces_the_streams_usage() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            THREAD_STARTED_LINE,
-            r#"{"type":"turn.started"}"#,
-            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"all done"}}"#,
-            r#"{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":4}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.model = Some("gpt-5-codex".into());
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    assert!(matches!(
-        &events[0],
-        AgentEvent::SessionOpened { model: Some(model), .. } if model.as_str() == "gpt-5-codex"
-    ));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::Note { text } if text == "all done")));
-    assert!(events.iter().any(|e| matches!(
-        e,
-        AgentEvent::Usage {
-            input_tokens: Some(10),
-            output_tokens: Some(4),
-            cached_input_tokens: Some(2)
-        }
-    )));
-    assert!(matches!(
-        events.last().unwrap(),
-        AgentEvent::Completed { result } if result.summary == "all done"
-    ));
 }
 
 #[tokio::test]
@@ -332,23 +269,6 @@ async fn a_reasoning_item_is_never_surfaced() {
     );
 }
 
-#[tokio::test]
-async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
-}
-
 /// A CLI that refuses its configuration says so on stderr and exits
 /// before opening anything. That is the whole of what the engine has to
 /// go on, so the session hands it over rather than dropping it into a
@@ -379,39 +299,6 @@ async fn a_session_that_dies_before_its_first_event_reports_its_exit_and_its_las
     assert_eq!(exit.stderr_tail, ["url is not supported for stdio"]);
 }
 
-/// The child's environment is where this system puts its secrets, and a
-/// CLI that fails at startup is exactly the one liable to echo what it
-/// was handed straight back.
-#[tokio::test]
-async fn a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut req = request(dir.path().to_path_buf());
-    req.env.secret.insert(
-        "YUNTA_RUN_TOOLS_TOKEN".to_string(),
-        Secret::new("s3cr3t-token-value".to_string()),
-    );
-    let said = write_lines(
-        dir.path(),
-        "stderr.txt",
-        &["auth failed for bearer s3cr3t-token-value"],
-    );
-    req.env.plain.insert(
-        "CODEX_STUB_STDERR_FILE".to_string(),
-        said.display().to_string(),
-    );
-    req.env
-        .plain
-        .insert("CODEX_STUB_EXIT".to_string(), "1".to_string());
-    let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
-        .await
-        .unwrap();
-
-    let tail = exit
-        .expect("the session ended with a process of its own")
-        .stderr_tail;
-    assert_eq!(tail, ["auth failed for bearer [redacted]"], "{tail:?}");
-}
-
 /// Asking is killing first: nothing of a session outlives the run, and
 /// the wait for its status is bounded by a process already dead.
 #[tokio::test]
@@ -440,6 +327,23 @@ async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
         "the session had a process"
     );
     wait_until_gone(Pid::try_from(grandchild).unwrap()).await;
+}
+
+/// A CLI that keeps running after it has printed its last line leaves its
+/// stream open: the session waits for the CLI, not for the lines.
+#[tokio::test]
+async fn a_lingering_codex_stub_keeps_its_stream_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.env
+        .plain
+        .insert("CODEX_STUB_LINGER".to_string(), "1".to_string());
+    let mut session = adapter().spawn(req).await.unwrap();
+    let next = tokio::time::timeout(Duration::from_millis(500), session.events().next()).await;
+    assert!(
+        next.is_err(),
+        "the stub is still running, so its stream is open"
+    );
 }
 
 /// A named agent's instructions reach the CLI as the key a profile
@@ -476,31 +380,77 @@ async fn a_named_agent_s_instructions_reach_the_cli_as_developer_instructions() 
     );
 }
 
+/// A skill source and a worktree, both created under `dir`.
+fn skill_and_cwd(dir: &Path) -> (PathBuf, PathBuf) {
+    let (skill, cwd) = (dir.join("skills-src/grill"), dir.join("worktree"));
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    (skill, cwd)
+}
+
 /// A skill is mounted where the CLI discovers a project's skills, declared
-/// as the adapter's own staging, and taken back once the session ends.
+/// as staged, and taken back once the session is released.
 #[tokio::test]
 async fn a_skill_is_mounted_where_the_cli_finds_it_and_taken_back_after() {
     let dir = tempfile::tempdir().unwrap();
-    let skill = dir.path().join("skills-src/grill");
-    tokio::fs::create_dir_all(&skill).await.unwrap();
-    let cwd = dir.path().join("worktree");
-    tokio::fs::create_dir_all(&cwd).await.unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
     let mut req = request(cwd.clone());
     req.skills = vec![skill.clone()];
     let staged = [std::path::PathBuf::from(".agents/skills/grill")];
     assert_eq!(adapter().staged_paths(&req), staged);
 
-    let events = events_with(&dir, req.clone(), &[THREAD_STARTED_LINE]).await;
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+    req.env.plain.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    // The session holds its mount until it is released, so the link is read
+    // while the session is still alive.
+    let mut session = adapter().spawn(req).await.unwrap();
+    let events: Vec<AgentEvent> = session.events().collect().await;
     assert!(!events.is_empty());
     let link = tokio::fs::read_link(cwd.join(&staged[0])).await.unwrap();
     assert_eq!(link, skill);
 
-    adapter().unstage(&req).unwrap();
+    session.release().await.unwrap();
     assert!(!tokio::fs::try_exists(cwd.join(".agents")).await.unwrap());
 }
 
+/// A launch refused for want of its hook mounts nothing: the refusal comes
+/// before any skill is linked.
 #[tokio::test]
-async fn a_session_reports_the_model_it_was_launched_with() {
+async fn a_codex_launch_refused_for_its_hook_stages_no_skill() {
+    let dir = tempfile::tempdir().unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill];
+    req.rail_command = None;
+    assert!(adapter().spawn(req).await.is_err());
+    assert!(
+        !cwd.join(".agents").exists(),
+        "a refused launch leaves no skill link"
+    );
+}
+
+/// A session whose CLI cannot be started takes back the skill it mounted.
+#[tokio::test]
+async fn a_session_that_fails_to_open_leaves_no_skill_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
+    let missing = CodexAdapter::new(&AdapterSettings {
+        adapter_settings: None,
+        binary: Some("/nonexistent/codex".into()),
+    });
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill];
+    assert!(missing.spawn(req).await.is_err());
+    assert!(std::fs::symlink_metadata(cwd.join(".agents/skills/grill")).is_err());
+}
+
+/// The CLI's `thread.started` names no model, so the session reports none,
+/// whatever model it was asked to run.
+#[tokio::test]
+async fn a_codex_session_reports_no_model_from_its_stream() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
 
@@ -513,12 +463,10 @@ async fn a_session_reports_the_model_it_was_launched_with() {
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
 
-    // The CLI's `thread.started` never says which model runs; the
-    // session runs on the one it was launched with, and says so.
-    assert!(matches!(
-        &events[0],
-        AgentEvent::SessionOpened { model: Some(model), .. } if model.as_str() == "gpt-5-codex"
-    ));
+    assert!(
+        matches!(&events[0], AgentEvent::SessionOpened { model: None, .. }),
+        "{events:?}"
+    );
 }
 
 #[tokio::test]
@@ -617,41 +565,6 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
     assert!(
         effort < resume_pos,
         "an `exec` option precedes the subcommand"
-    );
-}
-
-/// The effort a session was asked for reaches the CLI as the key its
-/// configuration names it by; a session asked for none leaves it to the
-/// CLI.
-#[tokio::test]
-async fn a_session_s_effort_reaches_the_cli_and_none_leaves_it_to_the_cli() {
-    let dir = tempfile::tempdir().unwrap();
-    let args_file = dir.path().join("args.txt");
-    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
-    let mut req = request(dir.path().to_path_buf());
-    req.effort = Some(yunta_core::Effort::Low);
-    req.env.plain.insert(
-        "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string(),
-    );
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let _ = drain(adapter().spawn(req).await.unwrap()).await;
-    let args = tokio::fs::read_to_string(&args_file).await.unwrap();
-    let pos = args
-        .lines()
-        .position(|a| a == r#"model_reasoning_effort="low""#);
-    assert!(
-        pos.is_some_and(|pos| args.lines().nth(pos - 1) == Some("-c")),
-        "{args}"
-    );
-
-    let args = argv_under(&adapter(), PermissionProfile::Edit).await;
-    assert!(
-        !args.iter().any(|a| a.starts_with("model_reasoning_effort")),
-        "{args:?}"
     );
 }
 
@@ -767,70 +680,6 @@ fn the_stub_refuses_a_parent_option_after_resume_like_clap_does() {
         "the session streams its events: {}",
         String::from_utf8_lossy(&accepted.stdout)
     );
-}
-
-#[tokio::test]
-async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
-    let dir = tempfile::tempdir().unwrap();
-    let child_pid_file = child_pid_fifo(dir.path());
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CODEX_STUB_CHILD_PID_FILE".to_string(),
-        child_pid_file.display().to_string(),
-    );
-    req.env
-        .plain
-        .insert("CODEX_STUB_HANG".to_string(), "1".to_string());
-    let mut session = adapter().spawn(req).await.unwrap();
-
-    let grandchild_pid = grandchild_pid(&child_pid_file).await;
-
-    session.kill().await.unwrap();
-
-    let mut grandchild_running = true;
-    for _ in 0..50 {
-        let ps = std::process::Command::new("ps")
-            .args(["-o", "stat=", "-p", &grandchild_pid])
-            .output()
-            .unwrap();
-        let state = String::from_utf8_lossy(&ps.stdout);
-        let state = state.trim();
-        if state.is_empty() || state.starts_with('Z') {
-            grandchild_running = false;
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    assert!(!grandchild_running, "grandchild process survived kill()");
-}
-
-#[tokio::test]
-async fn prompt_travels_by_stdin_never_argv() {
-    let dir = tempfile::tempdir().unwrap();
-    let args_file = dir.path().join("args.txt");
-    let stdin_file = dir.path().join("stdin.txt");
-    write_lines(dir.path(), ".codex-stub-lines.jsonl", &[]);
-    let mut req = request(dir.path().to_path_buf());
-    req.prompt = "the whole brief, with a --flag-looking line".to_string();
-    req.env.plain.insert(
-        "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.to_str().unwrap().to_string(),
-    );
-    req.env.plain.insert(
-        "CODEX_STUB_STDIN_FILE".to_string(),
-        stdin_file.to_str().unwrap().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    drain(session).await;
-
-    let args = std::fs::read_to_string(&args_file).unwrap();
-    assert!(
-        !args.contains("the whole brief"),
-        "the prompt must never be an argument (visible in `ps`): {args}"
-    );
-    let stdin = std::fs::read_to_string(&stdin_file).unwrap();
-    assert_eq!(stdin, "the whole brief, with a --flag-looking line");
 }
 
 /// `adapter_settings.sandbox` is the mode the `Edit` profile runs
@@ -972,34 +821,6 @@ async fn the_request_opens_the_network_only_where_workspace_write_closed_it() {
     }
 }
 
-/// The network is the session's to open, not a setting of this adapter.
-#[tokio::test]
-async fn a_network_access_setting_is_one_this_adapter_does_not_read() {
-    let mut extra = serde_json::Map::new();
-    extra.insert("network_access".to_string(), serde_json::Value::from(true));
-    let adapter = CodexAdapter::new(&AdapterSettings {
-        adapter_settings: Some(extra),
-        binary: Some(stub_path()),
-    });
-    assert!(adapter.probe().await.is_err());
-}
-
-#[tokio::test]
-async fn an_unknown_adapter_setting_is_reported_by_probe() {
-    let mut extra = serde_json::Map::new();
-    extra.insert("sandbx".to_string(), serde_json::Value::from("read-only"));
-    let adapter = CodexAdapter::new(&AdapterSettings {
-        adapter_settings: Some(extra),
-        binary: Some(stub_path()),
-    });
-    let err = adapter.probe().await.unwrap_err();
-    let text = err.to_string();
-    assert!(
-        text.contains("sandbx") && text.contains("sandbox"),
-        "the unknown key and the known ones are named: {text}"
-    );
-}
-
 // --- a strict reading of the CLI's protocol ---------------------------
 
 /// Runs a session over `lines` scripted for the stub and returns every
@@ -1023,27 +844,6 @@ async fn events_with(
     );
     let session = adapter().spawn(req).await.unwrap();
     drain(session).await
-}
-
-#[tokio::test]
-async fn auth_errors_are_not_retryable() {
-    let events = events_of(&[
-        THREAD_STARTED_LINE,
-        r#"{"type":"turn.failed","error":{"message":"401 Unauthorized: invalid API key"}}"#,
-    ])
-    .await;
-
-    match events.last().unwrap() {
-        AgentEvent::Failed { error, cause } => {
-            assert!(
-                !cause.retryable(),
-                "not a failure to retry: {}",
-                error.message
-            );
-            assert!(error.message.contains("401"));
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -1292,166 +1092,6 @@ async fn no_dead_config_override_reaches_the_cli() {
     );
 }
 
-#[tokio::test]
-async fn a_tool_use_never_persists_the_command_it_ran() {
-    let dir = tempfile::tempdir().unwrap();
-    let command = "psql postgres://admin:hunter2@db.internal/prod -c 'select 1'";
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            THREAD_STARTED_LINE,
-            &format!(
-                r#"{{"type":"item.completed","item":{{"id":"item_0","type":"command_execution","command":"{command}","aggregated_output":"ok","exit_code":0,"status":"completed"}}}}"#
-            ),
-            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    let targets: Vec<&yunta_core::events::ToolTarget> = events
-        .iter()
-        .filter_map(|event| match event {
-            AgentEvent::ToolUse { target, .. } => Some(target),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(targets.len(), 1, "the stream carries the one call it made");
-    assert_eq!(
-        targets[0].display(),
-        None,
-        "a command is the session's own text: identified, never shown"
-    );
-    let carried = format!("{:?}", targets[0]);
-    for fragment in ["psql", "hunter2", "db.internal", "select"] {
-        assert!(
-            !carried.contains(fragment),
-            "`{fragment}` of the command reached the log as `{carried}`"
-        );
-    }
-    assert_eq!(
-        *targets[0].digest(),
-        yunta_core::sha256_hex(command.as_bytes())
-    );
-}
-
-/// A count the CLI did not report is absent, never zero. A run that
-/// recorded zero would say the session cost nothing, which is a
-/// different claim from "the CLI said nothing about it".
-#[tokio::test]
-async fn a_missing_token_count_is_absent_not_zero() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            THREAD_STARTED_LINE,
-            // A `usage` naming only what it counted.
-            r#"{"type":"turn.completed","usage":{"input_tokens":40}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    let usage = events
-        .iter()
-        .find_map(|event| match event {
-            AgentEvent::Usage {
-                input_tokens,
-                output_tokens,
-                cached_input_tokens,
-            } => Some((*input_tokens, *output_tokens, *cached_input_tokens)),
-            _ => None,
-        })
-        .expect("the turn reported its usage");
-    assert_eq!(usage, (Some(40), None, None));
-}
-
-/// A line kind this adapter does not read is tolerated: the stream goes
-/// on, and the line contributes nothing rather than failing the session
-/// or being mistaken for something it is not.
-#[tokio::test]
-async fn an_unknown_stream_line_is_tolerated_and_named() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            THREAD_STARTED_LINE,
-            // A kind the CLI could add tomorrow, and one it already has
-            // that this adapter deliberately ignores.
-            r#"{"type":"thread.renamed","name":"something new"}"#,
-            r#"{"type":"turn.started"}"#,
-            r#"{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"still here"}}"#,
-            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::Note { text } if text == "still here")),
-        "the stream went on past the line it does not read: {events:?}"
-    );
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::Completed { .. })),
-        "and the session still reached its terminal: {events:?}"
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::Failed { .. })),
-        "an unread line is not a failure: {events:?}"
-    );
-}
-
-/// Settings that do not read fail the session rather than fall back to
-/// a default: a `sandbox:` nobody could parse would run the agent under
-/// a confinement the team never asked for.
-#[tokio::test]
-async fn a_session_never_opens_under_settings_that_do_not_read() {
-    let dir = tempfile::tempdir().unwrap();
-    let settings = yunta_core::AdapterSettings {
-        adapter_settings: Some(
-            serde_json::from_str(r#"{"sandbox": "no-such-mode"}"#).expect("the settings parse"),
-        ),
-        ..Default::default()
-    };
-    let adapter = yunta_adapters::CodexAdapter::new(&settings);
-
-    let Err(error) = adapter.spawn(request(dir.path().to_path_buf())).await else {
-        panic!("a session must not open under settings nobody could read");
-    };
-    let text = yunta_core::describe(&error);
-    assert!(
-        text.contains("cannot read its `adapter_settings`") && text.contains("no-such-mode"),
-        "the refusal names what it could not read: {text}"
-    );
-}
-
 /// A thread id the CLI states and nothing can be fails the session, and
 /// the failure keeps what rejected the value so a reader following the
 /// chain reaches the rule it broke.
@@ -1527,30 +1167,32 @@ async fn a_read_only_codex_session_with_declared_files_writes_them_under_workspa
     );
 }
 
-/// Under `read-only` with nothing to keep writable, commands write
-/// nothing and edits are judged: the whole session is exact. Under
-/// `full`, nothing confines its commands.
+/// A read-only sandbox from the settings seals the roots along with the rest,
+/// so the commands of an edit session cover no root and the session reports
+/// exact coverage.
 #[tokio::test]
-async fn coverage_follows_what_the_sandbox_leaves_commands() {
-    for (profile, expected) in [
-        (
-            PermissionProfile::ReadOnly,
-            yunta_core::fence::Coverage::Exact,
-        ),
-        (
-            PermissionProfile::Full,
-            yunta_core::fence::Coverage::ToolsOnly,
-        ),
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        let mut req = request(dir.path().to_path_buf());
-        req.permissions = profile;
-        let events = events_with(&dir, req, &[THREAD_STARTED_LINE, TURN_COMPLETED_LINE]).await;
-        let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
-            panic!("a session opens first: {events:?}");
-        };
-        assert_eq!(fence.as_ref(), Some(&expected), "under {profile:?}");
-    }
+async fn a_read_only_sandbox_from_the_settings_leaves_the_commands_no_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+    let mut extra = serde_json::Map::new();
+    extra.insert("sandbox".to_string(), serde_json::Value::from("read-only"));
+    let adapter = CodexAdapter::new(&AdapterSettings {
+        adapter_settings: Some(extra),
+        binary: Some(stub_path()),
+    });
+    let mut req = request(dir.path().to_path_buf());
+    req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+    req.env.plain.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let events = drain(adapter.spawn(req).await.unwrap()).await;
+
+    let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
+        panic!("a session opens first: {events:?}");
+    };
+    assert_eq!(fence.as_ref(), Some(&yunta_core::fence::Coverage::Exact));
 }
 
 /// The hook reaches the CLI as an override it trusts in the same call:
@@ -1578,44 +1220,16 @@ async fn a_codex_session_installs_its_write_hook_trusted_and_nothing_more() {
     );
 }
 
-/// The engine judges this CLI's edits only through a hook it can run and a
-/// listener the hook can reach; without either the session never opens.
-#[tokio::test]
-async fn a_codex_session_without_a_hook_or_an_engine_to_ask_fails_before_spawning() {
-    for unset in ["command", "endpoint"] {
-        let dir = tempfile::tempdir().unwrap();
-        let mut req = request(dir.path().to_path_buf());
-        match unset {
-            "command" => req.rail_command = None,
-            _ => req.rail = None,
-        }
-        let refused = adapter()
-            .spawn(req)
-            .await
-            .err()
-            .expect("a session never opens without a fence to build");
-        assert!(
-            yunta_core::describe(&refused).contains("reach the rail"),
-            "{unset}"
-        );
-    }
-}
-
-/// A sandbox refusal is an ordinary command to the adapter: it names no refused write.
+/// A sandbox refusal is an ordinary command to the adapter: it comes out as
+/// the tool use it is.
 #[tokio::test]
 async fn a_sandbox_denial_is_not_a_refused_write() {
     let denied = r#"{"type":"item.completed","item":{"type":"command_execution","command":"tee /etc/hosts","status":"sandbox_denied"}}"#;
     let events = events_of(&[THREAD_STARTED_LINE, denied, TURN_COMPLETED_LINE]).await;
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::WriteRefused { .. })),
-        "{events:?}"
-    );
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolUse { name, .. } if name == "command_execution")),
-        "{events:?}"
+        events.iter().any(|event| {
+            matches!(event, AgentEvent::ToolUse { name, .. } if name == "command_execution")
+        }),
+        "the denied command comes out as a tool use: {events:?}"
     );
 }

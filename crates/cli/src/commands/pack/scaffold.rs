@@ -71,7 +71,8 @@ expect:
     verify: finished
 "#;
 
-const PACK_FIXTURE_TEMPLATE: &str = r#"effects:
+const PACK_FIXTURE_TEMPLATE: &str = r#"dialect: claude-code
+effects:
   - { path: src/.done, content: "" }
 outcome: { type: completed, summary: "done" }
 "#;

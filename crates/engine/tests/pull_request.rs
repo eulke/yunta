@@ -48,7 +48,7 @@ async fn it_pushes_the_run_branch_and_opens_a_pr_against_the_project_base() {
     let RunReport { terminal, .. } = bench
         .run_with_config(
             WRITES_THEN_OPENS,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config("project:\n  base_branch: trunk\n"),
         )
         .await;
@@ -91,7 +91,11 @@ nodes:
   - { id: check, kind: bash, depends_on: [pr], run: "test -f '{{run.dir}}/once' || { touch '{{run.dir}}/once'; exit 1; }", on_failure: { goto: pr, max_reroutes: 1 } }
 "#;
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []\n", &config(""))
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -105,7 +109,11 @@ nodes:
 async fn the_base_falls_back_to_the_branch_the_run_started_from() {
     let (bench, state) = forged();
     bench
-        .run_with_config(WRITES_THEN_OPENS, "sessions: []\n", &config(""))
+        .run_with_config(
+            WRITES_THEN_OPENS,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
         .await;
 
     assert_eq!(state.pull_requests()[0].base, INITIAL_BRANCH);
@@ -148,7 +156,11 @@ async fn optional_it_is_left_out_without_a_forge() {
         "title: \"add dark mode\", optional: true",
     );
     let RunReport { terminal, .. } = bench
-        .run_with_config(&workflow, "sessions: []\n", MOCK_CONFIG)
+        .run_with_config(
+            &workflow,
+            "dialect: claude-code\nsessions: []\n",
+            MOCK_CONFIG,
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -167,7 +179,11 @@ async fn optional_it_is_left_out_without_a_forge() {
 async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run_with_config(WRITES_THEN_OPENS, "sessions: []\n", &config(""))
+        .run_with_config(
+            WRITES_THEN_OPENS,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
         .await;
 
     match terminal {
@@ -186,7 +202,11 @@ async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
 async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
     let (bench, state) = forged();
     let RunReport { terminal, .. } = bench
-        .run_with_config(WRITES_THEN_OPENS, "sessions: []\n", &config(""))
+        .run_with_config(
+            WRITES_THEN_OPENS,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     let body = &state.pull_requests()[0].body;
@@ -214,7 +234,11 @@ async fn the_pull_request_body_reads_as_its_golden() {
         Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(state.clone())));
     bare_origin(&bench.worktree);
     let RunReport { terminal, .. } = bench
-        .run_with_config(WRITES_THEN_OPENS, "sessions: []\n", &config(""))
+        .run_with_config(
+            WRITES_THEN_OPENS,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_golden(
@@ -231,7 +255,11 @@ async fn receipt_false_keeps_only_the_author_s_body() {
         "body: \"What the run did.\", receipt: false }",
     );
     let RunReport { terminal, .. } = bench
-        .run_with_config(&workflow, "sessions: []\n", &config(""))
+        .run_with_config(
+            &workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(

@@ -40,7 +40,7 @@ nodes:
 /// A plan that changes `tests/greet.sh`, and the spec that then writes
 /// that file as the task's test.
 const SESSIONS: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Hand over the tasks"
     steps:

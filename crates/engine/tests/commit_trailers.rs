@@ -35,8 +35,7 @@ nodes:
 "#;
 
 const SESSIONS: &str = r#"
-capabilities:
-  run_tools: true
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool

@@ -32,7 +32,7 @@ nodes:
 "#;
 
 /// The run's one node runs a command, so no session is scripted.
-const NO_SESSIONS: &str = "sessions: []";
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []";
 
 /// The artifact the run is born holding.
 const REPORT: &[u8] = b"what the run was handed at birth";

@@ -34,7 +34,11 @@ async fn a_gate_between_a_correction_and_the_node_that_failed_asks_again_before_
     let interaction = SequencedInteraction::choosing(&["approve", "approve"]);
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(WORKFLOW, "sessions: []\n", &interaction)
+        .run_with_interaction(
+            WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &interaction,
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);

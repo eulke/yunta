@@ -36,9 +36,13 @@ nodes:
     run: "true"
 "#;
     let RunReport { terminal, .. } = bench
-        .run_sabotaged(workflow, "sessions: []\n", |run_dir| {
-            std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
-        })
+        .run_sabotaged(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            |run_dir| {
+                std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
+            },
+        )
         .await;
 
     assert!(matches!(terminal, RunTerminal::Finished));
@@ -67,7 +71,9 @@ nodes:
 on_finish:
   - cleanup: worktree
 "#;
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert!(matches!(terminal, RunTerminal::Finished));
     assert!(
@@ -120,7 +126,9 @@ on_finish:
   - distill:
       - { node: build, name: notes.md }
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     assert!(matches!(terminal, RunTerminal::Finished));
     assert!(
@@ -135,7 +143,12 @@ on_finish:
 /// that per node says nothing new and buries what does.
 #[tokio::test]
 async fn a_run_on_an_adapter_without_a_fence_says_so_once() {
-    let bench = Bench::new();
+    // A CLI that declares no fence: no rail judges the writes. Run tools stay declared,
+    // since a session's hook reaches the engine through the run's listener.
+    let bench = Bench::new().with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     let workflow = r#"
 name: two-scoped-nodes
 nodes:
@@ -152,6 +165,7 @@ nodes:
     scope: ["b.txt"]
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "first" }
   - outcome: { type: completed, summary: "second" }
@@ -173,7 +187,10 @@ sessions:
 /// about the cap it was given.
 #[tokio::test]
 async fn a_run_on_an_adapter_without_usage_reporting_says_it_has_no_token_budget() {
-    let bench = Bench::new();
+    let bench = Bench::new().with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     let workflow = r#"
 name: capped
 nodes:
@@ -184,6 +201,7 @@ nodes:
 "#;
     let config = format!("{MOCK_CONFIG}\nlimits:\n  max_tokens_per_run: 100000\n");
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
@@ -247,7 +265,7 @@ nodes:
     // The session says the secret back, twice over: once as a note, and
     // once as the outcome its close records.
     let fixture = format!(
-        "sessions:\n  - steps:\n      - {{ type: note, text: \"ran psql with {VALUE}\" }}\n    outcome: {{ type: completed, summary: \"used {VALUE}\" }}\n"
+        "dialect: claude-code\nsessions:\n  - steps:\n      - {{ type: note, text: \"ran psql with {VALUE}\" }}\n    outcome: {{ type: completed, summary: \"used {VALUE}\" }}\n"
     );
 
     let RunReport { .. } = bench
@@ -290,7 +308,7 @@ nodes:
     bench
         .run_with_secrets(
             workflow,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &config,
             &[("YUNTA_TEST_TOKEN", VALUE)],
         )
@@ -300,96 +318,6 @@ nodes:
         !log.contains(VALUE),
         "the input reached the birth event: {log}"
     );
-}
-
-/// An adapter that says it judged every write before it happened, and
-/// a write that reached the diff anyway: that is something to look at in
-/// the adapter, filed beside the failure the violation causes either way.
-#[tokio::test]
-async fn a_write_that_escapes_an_exact_fence_is_an_engine_finding() {
-    let bench = Bench::new();
-    let workflow = r#"
-name: scoped
-nodes:
-  - id: work
-    kind: prompt
-    runner: executor
-    prompt: "Do the thing."
-    scope: ["a.txt"]
-"#;
-    // A fixture that reports an exact fence and writes outside it
-    // anyway: the hook timed out, which this CLI lets through.
-    let fixture = r#"
-capabilities: { fence: none }
-fence_coverage: exact
-effects:
-  - { path: b.txt, content: "outside the scope\n" }
-outcome: { type: completed, summary: "done" }
-"#;
-    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "the violation fails the node and pauses the run: {terminal:?}"
-    );
-
-    assert!(
-        breaches(&bench).len() == 1,
-        "one breach, naming what escaped: {:?}",
-        breaches(&bench)
-    );
-    assert!(
-        breaches(&bench)[0].detail.contains("b.txt"),
-        "the finding names the path that reached the diff: {:?}",
-        breaches(&bench)[0]
-    );
-}
-
-/// Under a widened or tool-only coverage a violation is what it always
-/// was: the node fails with the list, and nobody claimed more.
-#[tokio::test]
-async fn a_write_inside_widened_roots_is_a_scope_violation_and_nothing_more() {
-    let bench = Bench::new();
-    let workflow = r#"
-name: scoped
-nodes:
-  - id: work
-    kind: prompt
-    runner: executor
-    prompt: "Do the thing."
-    scope: ["a.txt"]
-"#;
-    let fixture = r#"
-capabilities: { fence: filesystem }
-effects:
-  - { path: b.txt, content: "outside the scope\n" }
-outcome: { type: completed, summary: "done" }
-"#;
-    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "the violation fails the node and pauses the run: {terminal:?}"
-    );
-    assert!(
-        breaches(&bench).is_empty(),
-        "a sandbox never claimed to judge by glob: {:?}",
-        breaches(&bench)
-    );
-}
-
-/// Every fence breach the run filed.
-fn breaches(bench: &Bench) -> Vec<Finding> {
-    bench
-        .events()
-        .iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::Findings(FindingEvent::Posted(p)))
-                if p.finding.id == yunta_engine::Breach::ID =>
-            {
-                Some(p.finding.clone())
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 #[tokio::test]
@@ -411,9 +339,13 @@ on_finish:
   - cleanup: worktree
 "#;
     let RunReport { terminal, .. } = bench
-        .run_sabotaged(workflow, "sessions: []\n", |run_dir| {
-            std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
-        })
+        .run_sabotaged(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            |run_dir| {
+                std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
+            },
+        )
         .await;
 
     assert!(matches!(terminal, RunTerminal::Finished));

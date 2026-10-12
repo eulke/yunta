@@ -22,8 +22,8 @@ const LOST: &str = "API Error: Can't reach the API server — check your interne
 /// up; the service answers after `down_for` probes.
 fn fixture(down_for: u32) -> String {
     format!(
-        "capabilities: {{ resume_session: true }}\nservice_down_for: {down_for}\nsessions:\n\
-         \x20 - outcome: {{ type: failed, message: {LOST:?}, retryable: true }}\n\
+        "dialect: claude-code\nservice_down_for: {down_for}\nsessions:\n\
+         \x20 - outcome: {{ type: failed, message: {LOST:?}, cause: unreachable }}\n\
          \x20 - match_prompt_contains: \"dropped and is back\"\n    outcome: {{ type: completed, summary: done }}\n"
     )
 }

@@ -16,7 +16,7 @@ use yunta_engine::{
     NoInteraction, RunEnv, RunReport,
 };
 
-use super::{Bench, Driven, MOCK_CONFIG};
+use super::{Bench, Driven, KnownSecrets, MOCK_CONFIG};
 
 impl Bench {
     /// Runs `(workflow, fixture)` against the default [`MOCK_CONFIG`] with
@@ -134,8 +134,12 @@ impl Bench {
         &self,
         workflow_yaml: &str,
     ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
-        self.try_create(workflow_yaml, "sessions: []\n", MOCK_CONFIG)
-            .await
+        self.try_create(
+            workflow_yaml,
+            "dialect: claude-code\nsessions: []\n",
+            MOCK_CONFIG,
+        )
+        .await
     }
 
     /// Executes the run this bench already created, keeping the refusal
@@ -378,17 +382,27 @@ impl Bench {
         run_dir: &std::path::Path,
         tree: &std::path::Path,
     ) -> Arc<MockAdapter> {
-        Arc::new(MockAdapter::new(
-            MockFixture::parse(
-                fixture_yaml,
-                &RunPaths {
-                    run_dir,
-                    worktree: tree,
-                    staging: &yunta_engine::run_dir::staging_root(run_dir),
-                },
-            )
-            .expect("parse mock fixture"),
-        ))
+        let fixture = MockFixture::parse(
+            fixture_yaml,
+            &RunPaths {
+                run_dir,
+                worktree: tree,
+                staging: &yunta_engine::run_dir::staging_root(run_dir),
+            },
+        )
+        .expect("parse mock fixture");
+        let mock = MockAdapter::new(fixture);
+        Arc::new(match self.capabilities {
+            Some(capabilities) => mock.narrowed(capabilities),
+            None => mock,
+        })
+    }
+
+    /// The rail command a bench run carries. The bench runs no binary: a mock
+    /// session plans its hook from this name and never runs it. Its writes are
+    /// asked of the engine's rail, as in any run.
+    fn bench_rail_command() -> yunta_core::rail::RailCommand {
+        yunta_core::rail::RailCommand::new(std::path::PathBuf::from("yunta"))
     }
 
     /// The one `execute_run` this harness makes, its refusal kept.
@@ -430,10 +444,7 @@ impl Bench {
             cancel: &self.cancel,
             ambient: self.ambient.as_ref(),
             secrets,
-            // The bench runs no binary, so nothing can run a hook:
-            // an adapter whose fence needs one fails the session, and
-            // the mock judges in process.
-            rail_command: None,
+            rail_command: Some(Self::bench_rail_command()),
             observer: self.observer.clone(),
         })
         .await?;
@@ -476,18 +487,6 @@ impl Bench {
         .expect("build manifest");
         frozen.manifest.adapter = self.adapter.clone();
         frozen
-    }
-}
-
-/// The secrets a test chose, instead of whatever the process happens to
-/// carry: a test that reached the real environment would assert about a
-/// machine rather than about the engine.
-#[derive(Default)]
-struct KnownSecrets(std::collections::HashMap<String, String>);
-
-impl yunta_core::SecretSource for KnownSecrets {
-    fn get(&self, name: &str) -> Option<yunta_core::Secret<String>> {
-        self.0.get(name).cloned().map(yunta_core::Secret::from)
     }
 }
 

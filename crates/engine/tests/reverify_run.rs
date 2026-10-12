@@ -49,7 +49,10 @@ nodes:
 async fn an_invariant_reverifies_the_tree_a_later_node_changed_before_the_gate() {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run(&checked_then("echo more > more.txt"), "sessions: []\n")
+        .run(
+            &checked_then("echo more > more.txt"),
+            "dialect: claude-code\nsessions: []\n",
+        )
         .await;
 
     assert!(
@@ -67,7 +70,10 @@ async fn an_invariant_reverifies_the_tree_a_later_node_changed_before_the_gate()
 async fn an_invariant_that_fails_on_the_changed_tree_stops_the_run_before_the_gate() {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run(&checked_then("touch broken.txt"), "sessions: []\n")
+        .run(
+            &checked_then("touch broken.txt"),
+            "dialect: claude-code\nsessions: []\n",
+        )
         .await;
 
     let RunTerminal::Paused {
@@ -90,7 +96,12 @@ async fn an_invariant_that_fails_on_the_changed_tree_stops_the_run_before_the_ga
 #[tokio::test]
 async fn a_node_that_changes_nothing_leaves_every_invariant_standing() {
     let bench = Bench::new();
-    bench.run(&checked_then("true"), "sessions: []\n").await;
+    bench
+        .run(
+            &checked_then("true"),
+            "dialect: claude-code\nsessions: []\n",
+        )
+        .await;
 
     assert_eq!(attempts(&bench, "check"), 1);
 }
@@ -121,7 +132,7 @@ async fn an_invariant_run_beside_a_writer_runs_again_alone() {
     let RunReport { terminal, .. } = bench
         .run_with_config(
             SIDE_BY_SIDE,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             "defaults:\n  max_parallel_nodes: 2\n",
         )
         .await;

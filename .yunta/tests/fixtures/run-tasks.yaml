@@ -1,5 +1,5 @@
 # The loop's task sessions read their task through the run tools.
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Read your task from the tasks document"
     effects:

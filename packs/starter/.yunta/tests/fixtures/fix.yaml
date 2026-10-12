@@ -1,3 +1,4 @@
+dialect: claude-code
 effects:
   - { path: src/.fix-applied, content: "" }
 outcome: { type: completed, summary: "fixed" }

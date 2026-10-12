@@ -13,7 +13,7 @@ async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
     std::fs::write(bench.worktree.join("a.txt"), "MARKER-FILES-CONTENT\n").unwrap();
 
     let workflow = context_workflow("      - files: [\"a.txt\"]\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FILES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-FILES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport {
         terminal,
@@ -32,7 +32,7 @@ async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
 async fn a_command_source_resolves_stdout_and_is_replayable() {
     let bench = Bench::new();
     let workflow = context_workflow("      - command: \"echo MARKER-COMMAND-OUTPUT\"\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-COMMAND-OUTPUT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-COMMAND-OUTPUT\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport {
         terminal,
@@ -69,7 +69,7 @@ nodes:
       - artifact: { node: grill, name: brief.md }
 "#;
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"MARKER-ARTIFACT-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"MARKER-ARTIFACT-CONTENT\"\n    outcome: {{ type: completed, summary: planned }}\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"MARKER-ARTIFACT-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"MARKER-ARTIFACT-CONTENT\"\n    outcome: {{ type: completed, summary: planned }}\n",
         bench.staging("grill").display()
     );
 
@@ -119,7 +119,7 @@ nodes:
     context:
       - artifact: { node: grill, name: brief.md }
 "#;
-    let fixture = "sessions: []";
+    let fixture = "dialect: claude-code\nsessions: []";
 
     let RunReport { terminal, state } = bench.run(workflow, fixture).await;
     match &state.nodes.state("plan") {
@@ -145,7 +145,7 @@ async fn a_missing_optional_file_is_marked_in_the_context_and_recorded() {
     let workflow = context_workflow(
         "      - files: [{ path: docs/architecture.md, optional: true }, \"a.txt\"]\n",
     );
-    let fixture = "sessions:\n  - match_prompt_contains: \"# docs/architecture.md\\n[absent — declared optional; not in the run's tree]\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"# docs/architecture.md\\n[absent — declared optional; not in the run's tree]\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport { terminal, .. } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -167,7 +167,7 @@ async fn a_missing_optional_file_is_marked_in_the_context_and_recorded() {
 fn reads_architecture() -> (String, &'static str) {
     (
         context_workflow("      - files: [\"docs/architecture.md\"]\n"),
-        "sessions:\n  - match_prompt_contains: \"MARKER-ARCHITECTURE\"\n    outcome: { type: completed, summary: ok }\n",
+        "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-ARCHITECTURE\"\n    outcome: { type: completed, summary: ok }\n",
     )
 }
 
@@ -245,7 +245,7 @@ nodes:
     context:
       - command: "git diff --name-only {{run.base}}"
 "#;
-    let fixture = "sessions:\n  - match_prompt_contains: \"written-by-the-run.txt\"\n    outcome: { type: completed, summary: read }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"written-by-the-run.txt\"\n    outcome: { type: completed, summary: read }\n";
 
     let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
 
@@ -272,7 +272,7 @@ nodes:
     // The failures reach the prompt as canonical JSONL, so the event's
     // kind reads `node_failed` (not the Rust Debug `NodeFailed`).
     let fixture =
-        "sessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
+        "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
 
     let RunReport {
         terminal,
@@ -351,7 +351,7 @@ async fn a_knowledge_source_resolves_the_repo_layer_and_is_replayable() {
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: {}\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-KNOWLEDGE-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-KNOWLEDGE-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport {
         terminal,
@@ -382,7 +382,7 @@ nodes:
     context:
       - node-output: { node: build }
 "#;
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-BUILD-OUTPUT\"\n    outcome: { type: completed, summary: reported }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-BUILD-OUTPUT\"\n    outcome: { type: completed, summary: reported }\n";
 
     let RunReport {
         terminal,
@@ -412,7 +412,9 @@ nodes:
     runner: executor
     run: "test 'executor' = '{{runner.name}}'"
 "#;
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -426,7 +428,9 @@ nodes:
     kind: bash
     run: "test 'only' = '{{node.id}}'"
 "#;
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -444,7 +448,7 @@ nodes:
     run: "test '{{project.name}}' = 'mi-repo' && test '{{project.base_branch}}' = 'main' && test '{{project.branch_prefix}}' = 'yunta/'"
 "#;
     let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", &config)
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []", &config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
@@ -462,7 +466,9 @@ nodes:
     kind: bash
     run: "echo {{inputs.idea}}"
 "#;
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     match terminal {
         RunTerminal::Paused {
             reason:
@@ -498,7 +504,9 @@ nodes:
     kind: bash
     run: "test '{{inputs.greeting}}' = 'hola'"
 "#;
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -554,7 +562,7 @@ async fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_
 
     let bench = Bench::new().with_user_state_root(user_home.path());
     let workflow = context_workflow("      - knowledge: { layers: [user] }\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport {
         terminal,
@@ -593,7 +601,7 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: {}\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport {
         terminal,
@@ -636,7 +644,7 @@ async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
     );
 
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-ORG-CONVENTIONS\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-ORG-CONVENTIONS\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
@@ -671,7 +679,7 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: {}\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
@@ -717,7 +725,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     );
 
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
-    let fixture = "sessions: []";
+    let fixture = "dialect: claude-code\nsessions: []";
 
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     match &state.nodes.state("ask") {
@@ -749,7 +757,7 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: { layers: [repo] }\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-REPO-LOCAL\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-REPO-LOCAL\"\n    outcome: { type: completed, summary: ok }\n";
 
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
@@ -774,7 +782,8 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
     // the degradation-with-error refusal a stub without a resolver would give.
     let bench = Bench::new();
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
-    let fixture = "sessions:\n  - outcome: { type: completed, summary: ok }\n";
+    let fixture =
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: ok }\n";
 
     let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
@@ -880,7 +889,7 @@ nodes:
     // the run reaching a session at all is the assertion. `type: guard`
     // appears only in the shape, never in the author's prompt.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "type: guard"
     steps:
@@ -925,9 +934,9 @@ nodes:
     // The file is the engine's to write, so the shape names the way in
     // rather than a path: the script only matches a prompt that says so.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
-  - match_prompt_contains: "hand it over with `yunta_submit_tasks`"
+  - match_prompt_contains: "hand it over with `mcp__yunta-run__yunta_submit_tasks`"
     steps:
       - type: run_tool
         tool: yunta_submit_tasks
@@ -958,7 +967,7 @@ nodes:
       produces: [report.md]
 "#;
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/report.md\", content: \"done\\n\" }}\n    outcome: {{ type: completed, summary: written }}\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - {{ path: \"{}/report.md\", content: \"done\\n\" }}\n    outcome: {{ type: completed, summary: written }}\n",
         bench.staging("write").display()
     );
 
@@ -1012,6 +1021,7 @@ nodes:
 "#;
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
@@ -1083,6 +1093,7 @@ nodes:
     );
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}

@@ -26,6 +26,7 @@ runners:
 /// A curator who copies one candidate into `knowledge/` verbatim and
 /// records what it promoted in the artifact the node declares.
 const PROMOTION_FIXTURE: &str = r#"
+dialect: claude-code
 sessions:
   - effects:
       - path: "knowledge/retry-budgets.md"
@@ -41,6 +42,7 @@ sessions:
 /// The same review, writing only its notes: what the worktree holds when
 /// nothing behind the gate ever runs.
 const REVIEW_ONLY_FIXTURE: &str = r#"
+dialect: claude-code
 sessions:
   - effects:
       - path: "{{run.staging}}/review-candidates/promotion-notes.md"

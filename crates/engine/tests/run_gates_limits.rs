@@ -141,7 +141,11 @@ async fn an_internal_gate_aborted_with_blank_free_text_cites_the_gate_alone() {
     });
 
     let RunReport { terminal, state: _ } = bench
-        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .run_with_interaction(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &interaction,
+        )
         .await;
 
     match terminal {
@@ -188,7 +192,7 @@ nodes:
     depends_on: [approve]
     run: "touch shipped"
 "#,
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             &interaction,
         )
         .await;
@@ -264,7 +268,11 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     let bench = Bench::new();
     let interaction = SequencedInteraction::choosing(&["proceed"]);
     let RunReport { terminal, state } = bench
-        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .run_with_interaction(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &interaction,
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -417,7 +425,11 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
     let bench = Bench::new();
     let interaction = SequencedInteraction::choosing(&["revise", "proceed"]);
     let RunReport { terminal, state } = bench
-        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .run_with_interaction(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &interaction,
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -460,7 +472,11 @@ nodes:
     let bench = Bench::new();
     let interaction = SequencedInteraction::choosing(&["revise", "proceed"]);
     let RunReport { terminal, .. } = bench
-        .run_with_interaction(workflow, "sessions: []\n", &interaction)
+        .run_with_interaction(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &interaction,
+        )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -479,7 +495,11 @@ async fn gate_reroute_records_its_origin_without_fake_counters() {
     let bench = Bench::new();
     let interaction = SequencedInteraction::choosing(&["revise", "proceed"]);
     let RunReport { terminal, state: _ } = bench
-        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &interaction)
+        .run_with_interaction(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &interaction,
+        )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
@@ -506,7 +526,12 @@ async fn gate_reroute_records_its_origin_without_fake_counters() {
 #[tokio::test]
 async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     let bench = Bench::new();
-    let first = bench.run(INTERNAL_GATE_WORKFLOW, "sessions: []\n").await;
+    let first = bench
+        .run(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+        )
+        .await;
     match &first.terminal {
         // The reason a pause records is the escalation on one line, so a
         // reader of `status` and a reader of the decision page meet the
@@ -798,7 +823,7 @@ limits:
 "#;
     // The only script matches the pointer wording — if the content were
     // inlined instead, no session would match and the node would fail.
-    let fixture = "sessions:\n  - match_prompt_contains: \"bytes, referenced\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"bytes, referenced\"\n    outcome: { type: completed, summary: ok }\n";
     let RunReport { terminal, state: _ } = bench
         .run_with_config(INLINE_CONTEXT_WORKFLOW, fixture, config)
         .await;
@@ -814,7 +839,7 @@ async fn a_source_under_the_default_inline_threshold_is_inlined() {
     )
     .unwrap();
     // No `limits:` — the reference default (32000 bytes) inlines it.
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-NOTES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-NOTES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
     let RunReport { terminal, state: _ } = bench.run(INLINE_CONTEXT_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
@@ -827,7 +852,11 @@ async fn a_source_under_the_default_inline_threshold_is_inlined() {
 async fn a_gate_that_waits_records_one_run_paused_and_the_gate_records_none() {
     let bench = Bench::new();
     let RunReport { terminal, state: _ } = bench
-        .run_with_interaction(INTERNAL_GATE_WORKFLOW, "sessions: []\n", &NoInteraction)
+        .run_with_interaction(
+            INTERNAL_GATE_WORKFLOW,
+            "dialect: claude-code\nsessions: []\n",
+            &NoInteraction,
+        )
         .await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),

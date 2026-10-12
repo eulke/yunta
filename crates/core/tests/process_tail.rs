@@ -30,6 +30,7 @@ async fn a_launch_value_that_is_not_declared_stays_out_of_the_stderr_tail() {
         env: &env,
         prompt: "",
         parser: Box::new(Quiet),
+        held: None,
     })
     .await
     .unwrap();

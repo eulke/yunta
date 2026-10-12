@@ -54,7 +54,11 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
 
     let workflow = "name: spans\nnodes:\n  - id: build\n    kind: bash\n    run: \"true\"\n";
     Bench::with_run_id("run-spans")
-        .run_with_config(workflow, "sessions: []\n", "runners: {}\n")
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            "runners: {}\n",
+        )
         .await;
 
     let spans = capture.0.lock().unwrap();
@@ -106,7 +110,7 @@ nodes:
       produces: [questions]
 "#;
     let asked = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -129,7 +133,9 @@ nodes:
     kind: gate
     assignee: lead
 "#;
-    Bench::new().run(gating, "sessions: []\n").await;
+    Bench::new()
+        .run(gating, "dialect: claude-code\nsessions: []\n")
+        .await;
 
     let spans = capture.0.lock().unwrap();
     let recorded: Vec<&str> = spans.iter().map(|(name, _)| name.as_str()).collect();

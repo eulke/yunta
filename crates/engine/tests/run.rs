@@ -53,7 +53,7 @@ nodes:
     // tools. Sessions 2 and 3 are one executor session per task, each
     // writing the file its task is scoped to.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -129,6 +129,7 @@ nodes:
 "#;
 
     let fixture = r#"
+dialect: claude-code
 sessions:
   - effects:
       - { path: fixed.txt, content: "fixed" }
@@ -175,6 +176,7 @@ nodes:
     // the mock adapter has nothing to hand it and the run errors out
     // instead of quietly leaking a false pass.
     let fixture = r#"
+dialect: claude-code
 sessions: []
 "#;
 
@@ -215,7 +217,7 @@ nodes:
     let RunReport { terminal, state } = bench
         .run_with_interaction(
             workflow,
-            "sessions: []",
+            "dialect: claude-code\nsessions: []",
             &SequencedInteraction::choosing(&["ship"]),
         )
         .await;
@@ -248,6 +250,7 @@ nodes:
 "#;
 
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "did nothing useful" }
 "#;
@@ -278,7 +281,9 @@ nodes:
     run: "exit 3"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -312,7 +317,7 @@ nodes:
     // names the node and what that node owes: no file was ever going to
     // be there, so the failure points at nothing on disk.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "trust me, it is written" }
 "#;
@@ -344,7 +349,9 @@ nodes:
     run: "true"
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // Second execution: same log, still Finished — and no duplicate
@@ -386,7 +393,9 @@ nodes:
     // No sessions declared: if the engine opened one despite the failing
     // before-hook, the mock would fail for a different, distinguishable
     // reason than "before hook".
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert!(
@@ -412,7 +421,9 @@ nodes:
       exit 101
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     // The pause names the claim; what the compiler printed is the
     // failure's own evidence.
@@ -449,7 +460,9 @@ nodes:
         - run: "echo installing; echo 'lockfile is out of date' >&2; exit 1"
 "#;
 
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert!(
@@ -483,7 +496,9 @@ nodes:
         - run: "exit 1"
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -512,7 +527,9 @@ nodes:
           on_failure: warn
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -535,7 +552,9 @@ nodes:
           timeout_seconds: 1
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert!(
@@ -562,7 +581,9 @@ nodes:
     run: "true"
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(bench.worktree.join("defaults-ran.txt").exists());
 }
@@ -586,7 +607,9 @@ nodes:
         - run: "touch overridden.txt"
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(bench.worktree.join("overridden.txt").exists());
     assert!(!bench.worktree.join("should-not-run.txt").exists());
@@ -608,7 +631,9 @@ nodes:
         worktree = worktree.display()
     );
 
-    let RunReport { terminal, state } = bench.run(&workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 }
 
@@ -628,7 +653,7 @@ nodes:
 "#;
 
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -671,7 +696,7 @@ nodes:
     let RunReport { terminal, .. } = bench
         .run(
             workflow,
-            "sessions:\n  - outcome: { type: completed, summary: ok }\n",
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: ok }\n",
         )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -720,7 +745,9 @@ nodes:
     run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#;
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let held = bench.accepted();
@@ -763,7 +790,9 @@ nodes:
     artifacts:
       produces: [tasks]
 "#;
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let held = bench.accepted();
@@ -837,7 +866,9 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
         bytes: b"hello".to_vec(),
     }]);
 
-    bench.run(BIRTH_WORKFLOW, "sessions: []").await;
+    bench
+        .run(BIRTH_WORKFLOW, "dialect: claude-code\nsessions: []")
+        .await;
 
     assert_eq!(
         bench.projection(None, "brief/plan.md").unwrap(),
@@ -1008,7 +1039,7 @@ nodes:
 "#;
 
     let RunReport { terminal, .. } = bench
-        .run_sabotaged(workflow, "sessions: []", |_| {
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_| {
             // A crash mid-node: node_started with no terminal event.
             bench
                 .storage
@@ -1086,7 +1117,7 @@ nodes:
         view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
     );
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - effects:
       - { path: hello.txt, content: "hello" }
@@ -1121,7 +1152,9 @@ nodes:
     kind: bash
     run: "touch marker"
 "#;
-    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("the second attempt owes an artifact it never wrote: {terminal:?} {state:?}");
     };
@@ -1247,7 +1280,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
     let run_dir = bench
         .try_create(
             LOOP_ONLY_WORKFLOW,
-            "capabilities: { run_tools: true }\nsessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             yunta_testkit::MOCK_CONFIG,
         )
         .await
@@ -1295,7 +1328,7 @@ nodes:
     ] {
         let bench = Bench::new();
         let RunReport { terminal, .. } = bench
-            .run_with_config(workflow, "sessions: []\n", config)
+            .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", config)
             .await;
         let events = bench.events();
         let closes: Vec<&yunta_core::events::StoredEvent> = events
@@ -1350,7 +1383,7 @@ nodes:
 "#;
 
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -1397,7 +1430,9 @@ async fn a_run_records_what_its_commands_run_with_when_it_is_born() {
         Bench::new().with_subprocess_vars(vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]);
     let workflow = "name: one\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n";
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let born_in = bench
@@ -1426,7 +1461,7 @@ async fn a_log_that_breaks_before_its_close_is_broken_not_finished() {
     bench
         .create(
             "name: broken\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
-            "sessions: []\n",
+            "dialect: claude-code\nsessions: []\n",
             MOCK_CONFIG,
         )
         .await;
