@@ -8,9 +8,9 @@ use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
 
-use yunta_core::events::{EventPayload, StoredEvent, TerminalState};
+use yunta_core::events::{StoredEvent, TerminalState};
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{run_frame, PriorEstimation};
+use yunta_engine::{derive, run_frame_of, PriorEstimation, RunState};
 use yunta_storage::AsyncStorage;
 
 pub(super) use super::draw::Draw;
@@ -19,7 +19,6 @@ use super::fold::Folded;
 use super::turns::{Standby, Standing};
 use super::SurfaceEnv;
 use crate::render::Glyphs;
-use yunta_core::events::{ChildEvent, RunEvent};
 
 /// How often the surface redraws on its own. The durations it shows are
 /// counted in whole seconds, so a beat of one second is exactly as often
@@ -193,10 +192,14 @@ impl Painter {
             .map(|event| event.run_id.clone())
             .collect();
         self.fold(events);
-        if let Some(successor) = foreign
-            .into_iter()
-            .find(|id| succeeds(self.folded.settled(), id))
-        {
+        if foreign.is_empty() {
+            return;
+        }
+        let successor = {
+            let state = derive(self.folded.settled());
+            foreign.into_iter().find(|id| succeeds(&state, id))
+        };
+        if let Some(successor) = successor {
             self.follow(successor).await;
         }
     }
@@ -217,19 +220,19 @@ impl Painter {
             ..
         } = self;
         let Draw::Live(region) = draw else { return };
-        let frame = run_frame(
+        let state = derive(folded.settled());
+        let frame = run_frame_of(
             run_id,
             &manifest.workflow,
-            folded.settled(),
+            &state,
             prior.as_ref(),
             clock.now(),
         );
         // Only a parked run has a menu to rebuild, and rebuilding one is
-        // a walk of the log — asked exactly when the answer changes what
-        // the attention row says.
+        // a walk of the run's state — asked exactly when the answer changes
+        // what the attention row says.
         let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
-            && yunta_engine::awaits_decision(manifest, &yunta_engine::derive(folded.settled()))
-                .is_some();
+            && yunta_engine::awaits_decision(manifest, &state).is_some();
         region.show(&frame, run_id, answerable);
     }
 
@@ -336,28 +339,17 @@ impl Painter {
     }
 }
 
-/// Whether `run_id` is the promotion successor of the run whose log is
-/// `events`.
+/// Whether `run_id` is the promotion successor of the run `state` derives
+/// from.
 ///
 /// Derived from the log rather than announced: a run closed `promoted`
 /// executes nothing more, so the only run that can append after it is
 /// the successor driven in its place — and the one other run that could
-/// append under an id of its own, a `kind: workflow` child, is named on
-/// this very log by the `child_run_created` that bore it.
-fn succeeds(events: &[StoredEvent], run_id: &RunId) -> bool {
-    let mut promoted = false;
-    for event in events {
-        match event.payload() {
-            Some(EventPayload::Run(RunEvent::Finished(p))) => {
-                promoted = p.terminal_state == TerminalState::Promoted;
-            }
-            Some(EventPayload::Children(ChildEvent::Created(p))) if &p.child_run_id == run_id => {
-                return false
-            }
-            _ => {}
-        }
-    }
-    promoted
+/// append under an id of its own, a `kind: workflow` child, is named in
+/// the same log by the `child_run_created` that bore it.
+fn succeeds(state: &RunState, run_id: &RunId) -> bool {
+    matches!(state.run.finished(), Some(finished) if finished.terminal == TerminalState::Promoted)
+        && !state.children.is_child(run_id)
 }
 
 /// Drives the painter until the surface says nothing more is coming.
@@ -398,7 +390,7 @@ pub(super) async fn paint(mut painter: Painter, mut beats: Receiver<Beat>, stand
 
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::{ChildEvent, RunEvent};
+    use yunta_core::events::{ChildEvent, EventPayload, RunEvent};
     use yunta_core::events::{
         ChildRunCreatedPayload, NodeStartedPayload, RunFinishedPayload, RunMetrics, TokenUsage,
     };
@@ -435,8 +427,8 @@ mod tests {
 
     #[test]
     fn a_run_still_moving_has_no_successor() {
-        let log = Log::for_run(DRAWN).event(started()).build();
-        assert!(!succeeds(&log, &OTHER));
+        let log = Log::for_run(DRAWN).node("build", started()).build();
+        assert!(!succeeds(&derive(&log), &OTHER));
     }
 
     #[test]
@@ -447,29 +439,29 @@ mod tests {
             TerminalState::Cancelled,
         ] {
             let log = Log::for_run(DRAWN)
-                .event(started())
+                .node("build", started())
                 .event(closed(terminal))
                 .build();
-            assert!(!succeeds(&log, &OTHER), "{terminal:?}");
+            assert!(!succeeds(&derive(&log), &OTHER), "{terminal:?}");
         }
     }
 
     #[test]
     fn the_run_appending_after_a_promoted_close_is_the_successor() {
         let log = Log::for_run(DRAWN)
-            .event(started())
+            .node("build", started())
             .event(closed(TerminalState::Promoted))
             .build();
-        assert!(succeeds(&log, &OTHER));
+        assert!(succeeds(&derive(&log), &OTHER));
     }
 
     #[test]
     fn a_child_this_run_bore_is_never_mistaken_for_its_successor() {
         let log = Log::for_run(DRAWN)
-            .event(started())
+            .node("build", started())
             .event(bore(&OTHER))
             .event(closed(TerminalState::Promoted))
             .build();
-        assert!(!succeeds(&log, &OTHER));
+        assert!(!succeeds(&derive(&log), &OTHER));
     }
 }

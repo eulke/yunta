@@ -403,7 +403,6 @@ fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
     let events = fixture_events();
     let summary = run_summary(
         "run-1".into(),
-        "default".into(),
         yunta_core::sha256_hex(b"workflow-hash"),
         &wf,
         &events,

@@ -29,7 +29,6 @@ use yunta_core::{Isolation, Manifest, RunId};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::project::Project;
-use yunta_core::events::RunEvent;
 
 pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -231,13 +230,7 @@ async fn reclaim(
         let Some(last) = events.last() else { continue };
 
         let state = yunta_engine::derive(&events);
-        let is_terminal = state.broken.is_some()
-            || events.iter().any(|e| {
-                matches!(
-                    e.payload(),
-                    Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
-                )
-            });
+        let is_terminal = state.ended();
         if !is_terminal {
             if let Some(places) = old_layouts(ctx, pool, &run_id, &state).await {
                 collected.idle.push((run_id.clone(), places));

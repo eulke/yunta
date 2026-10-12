@@ -53,6 +53,8 @@ Read-only audit. Nothing modified. All line numbers verified against the tree at
 
 ## 2. DERIVATIONS — every walk over the event log
 
+> Superseded on 2026-10-12 by the change that derives a run's spend and clock once, in `RunState`: `walk_attempts`, `cptv`, `live_total_tokens` and `in_flight_tokens` are deleted, and `stats_observed_at` and the open-child scan read the state the run already holds.
+
 `e` = events, `n` = declared nodes, `F` = finding events, `T` = tasks.
 
 | Derivation | File:line | Derives | Cost | Duplicates |
@@ -214,6 +216,8 @@ So: text is produced once *per fact* (good — no two surfaces disagree), but it
 ---
 
 ## 7. DUPLICATION — both copies cited
+
+> Superseded on 2026-10-12 by the change that derives a run's spend and clock once, in `RunState`, for rows 5 and 14: every close builds its `run_finished` from `RunState::metrics()` through `RunFinishedPayload::closed`, and `RunLedger::finished()` is the one reading of how a run closed, so neither end of the log is scanned.
 
 | # | Duplicated thing | Copy A | Copy B (+C…) | Divergent? |
 |---|---|---|---|---|

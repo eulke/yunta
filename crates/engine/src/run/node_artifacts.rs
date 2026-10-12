@@ -15,6 +15,7 @@ use crate::artifacts::{
     accept, answerer, canonical, interpreted, Answerer, ArtifactContent, RunArtifacts,
     VerifiedArtifact,
 };
+use crate::replay::RunView;
 use crate::tasks::{Provenance, Standing};
 
 use super::node_close::{fail_with_tokens, ChildRun};
@@ -204,15 +205,15 @@ pub(super) async fn acquire_from_child(
     node: &Node,
     child: ChildRun<'_>,
 ) -> Result<Result<Acquired, NotAcquired>, RunError> {
-    let events = ctx.storage.events_for_run(child.id.clone()).await?;
-    let standing = crate::tasks::standing_of(child.id, &events)?;
+    let view = RunView::of(ctx.storage.events_for_run(child.id.clone()).await?);
+    let standing = crate::tasks::standing_of(child.id, &view)?;
     let Some(artifacts) = &node.artifacts else {
         return Ok(Ok(Acquired {
             verified: Vec::new(),
             standing,
         }));
     };
-    let held = RunArtifacts::of(child.run_dir, &events);
+    let held = RunArtifacts::of(child.run_dir, &view.events);
     let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id).await {
         Ok(resolved) => resolved,
         Err(problem) => return Ok(Err(problem)),

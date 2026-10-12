@@ -27,6 +27,7 @@ use super::rail::refused_writes;
 use super::session::{RunToolError, SessionTools};
 use crate::artifacts::{answerer, Answerer, RunArtifacts};
 use crate::process::Printed;
+use crate::replay::RunView;
 use crate::task_cycle::CriterionRun;
 
 /// Work a session would leave that its close would not take.
@@ -246,8 +247,8 @@ impl SessionTools {
         session: &SessionId,
         state: &ContentHash,
     ) -> Result<bool, RunToolError> {
-        let derived = crate::replay::derive(&self.events().await?);
-        Ok(derived.nodes.stop_refused_on(&self.node, session, state))
+        let view = RunView::of(self.events().await?);
+        Ok(view.state.nodes.stop_refused_on(&self.node, session, state))
     }
 
     /// Everything each red criterion of `runs` printed: what this check

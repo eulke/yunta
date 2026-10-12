@@ -382,6 +382,8 @@ pub enum RunTerminal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunReport {
     pub terminal: RunTerminal,
+    /// The run's state as this invocation left its log: its close or its
+    /// pause included.
     pub state: RunState,
 }
 

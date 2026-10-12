@@ -134,7 +134,8 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
             let events = storage.events_for_run(run_id.clone()).await?;
             // The pause this signal asks for, not one an earlier wake
             // already resumed.
-            let terminal = !matches!(yunta_engine::derive(&events).run.phase(), RunPhaseRaw::Open);
+            let state = yunta_engine::derive(&events);
+            let terminal = !matches!(state.run.phase(), RunPhaseRaw::Open);
             if terminal {
                 println!("run {called}: cancelled — the log has its terminal");
                 return Ok(Outcome::Success);

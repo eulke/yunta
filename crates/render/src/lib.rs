@@ -44,6 +44,7 @@ pub mod receipt;
 mod run_word;
 pub mod shown;
 mod spec;
+pub mod spend;
 pub mod state;
 pub mod surface;
 pub mod target;

@@ -1039,7 +1039,7 @@ nodes:
     };
     assert_eq!(states(&exported.nodes), states(&state.nodes));
     assert_eq!(
-        exported.run.closed().map(|(terminal, _)| *terminal),
+        exported.run.finished().map(|finished| finished.terminal),
         Some(yunta_core::events::TerminalState::Done)
     );
     assert!(

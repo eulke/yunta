@@ -17,6 +17,7 @@ use yunta_core::ScopeGlob;
 use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::{json, Reply};
+use crate::replay::RunView;
 
 impl SessionTools {
     /// What this node's close would find outside its scope if the
@@ -40,7 +41,7 @@ impl SessionTools {
         &self,
         access: &super::host::NodeScopeAccess,
     ) -> Result<crate::scope::ScopeCheckResult, RunToolError> {
-        let state = crate::replay::derive(&self.events().await?);
+        let state = RunView::of(self.events().await?).state;
         let from = state
             .nodes
             .from_tree(&self.node)

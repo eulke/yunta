@@ -299,10 +299,15 @@ impl<'a> RunCtx<'a> {
     /// resumes, and later finishes just gets the file rewritten with the
     /// fuller log, never appended to.
     pub(crate) async fn export_events_jsonl(&self) -> Result<(), RunError> {
-        let events = self.load_events().await?;
+        self.export(&self.load_events().await?)
+    }
+
+    /// Writes `events`, the run's whole log as just read, to
+    /// `run.dir/events.jsonl`.
+    pub(crate) fn export(&self, events: &[StoredEvent]) -> Result<(), RunError> {
         // blocking: `write_jsonl` replaces the whole file on this thread;
         // `tokio::fs` would run the same write and rename on a pool thread.
-        Ok(crate::events_export::write_jsonl(self.run_dir, &events)?)
+        Ok(crate::events_export::write_jsonl(self.run_dir, events)?)
     }
 
     /// Records an engine-authored degradation as a `finding_posted`:

@@ -26,6 +26,7 @@ use yunta_core::events::{ExecutionEnvironment, TaskProbe};
 use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
+use crate::replay::{RunState, RunView};
 use crate::task_cycle::{probe, CriterionRun};
 
 /// What a spec's handover found: every rule it breaks, and how each test
@@ -45,22 +46,22 @@ impl SessionTools {
     ) -> Result<(Vec<Diagnostic>, Vec<TaskProbe>), RunToolError> {
         // A task the run already finished, handed over unchanged, keeps
         // its `done`: it will not run again, so it is not checked again.
-        let events = self.events().await?;
-        let prior = crate::tasks::prior_registrations(&events);
-        let current = crate::replay::derive(&events).tasks;
+        let view = RunView::of(self.events().await?);
+        let prior = crate::tasks::prior_registrations(&view.events);
+        let current = &view.state.tasks;
         let supervision = self.host.supervision(&self.stop);
         // A plan a gate shows a person says what it changes and why.
-        let mut found = match crate::tasks::plan_reviewed(&self.host.workflow, &events, &self.node)
-        {
-            true => tasks.unexplained(),
-            false => Vec::new(),
-        };
-        found.extend(self.specified(tasks, &events).await?);
+        let mut found =
+            match crate::tasks::plan_reviewed(&self.host.workflow, &view.state, &self.node) {
+                true => tasks.unexplained(),
+                false => Vec::new(),
+            };
+        found.extend(self.specified(tasks, &view.events, &view.state).await?);
         // The tests a plan's criteria run are the spec's to write and to
         // prove failing; until then the plan is held only to programs the
         // engine can find.
-        if crate::tasks::plan_specified(&self.host.workflow, &events) {
-            let asked = |task: &Task| !crate::tasks::stays_done(task, &prior, &current);
+        if crate::tasks::plan_specified(&self.host.workflow, &view.state) {
+            let asked = |task: &Task| !crate::tasks::stays_done(task, &prior, current);
             found.extend(
                 super::findable::unfindable(
                     tasks,
@@ -77,7 +78,7 @@ impl SessionTools {
         let checkout = probing.checkout.clone();
         let mut ran = Vec::new();
         for (index, task) in tasks.tasks.iter().enumerate() {
-            if crate::tasks::stays_done(task, &prior, &current) {
+            if crate::tasks::stays_done(task, &prior, current) {
                 continue;
             }
             let probes = probe(task, &checkout, &self.host.memo, supervision)
@@ -96,23 +97,22 @@ impl SessionTools {
     /// Every rule the spec breaks against the run's plan and where its
     /// tests run. Empty when the spec can be accepted.
     pub(super) async fn spec_handover(&self, spec: &SpecFile) -> Result<SpecProven, RunToolError> {
-        let events = self.events().await?;
-        let plan = crate::artifacts::latest::<TasksFile>(&self.host.run_dir, &events)
+        let view = RunView::of(self.events().await?);
+        let plan = crate::artifacts::latest::<TasksFile>(&self.host.run_dir, &view.events)
             .await
             .map_err(|source| RunToolError::Plan { source })?
             .map(|held| held.document);
         // A spec written again because a person accepted that a task's
         // tests are wrong answers for those tasks' tests alone: the others
         // stand as they were, and a task already done passes its own.
-        let state = crate::replay::derive(&events);
-        let owed: Vec<TaskId> = crate::tasks::respecifications_owed(&state)
+        let owed: Vec<TaskId> = crate::tasks::respecifications_owed(&view.state)
             .into_iter()
             .map(|(task, _)| task.clone())
             .collect();
         let asked = |one: &&Spec| owed.is_empty() || owed.contains(&one.task);
         let mut broken = match owed.is_empty() {
             true => Vec::new(),
-            false => rewritten(spec, &self.held_spec(&events).await?, &owed),
+            false => rewritten(spec, &self.held_spec(&view.events).await?, &owed),
         };
         // A test that runs none of the spec's files judges the work by
         // nothing the spec wrote; a file nothing runs judges nothing.
@@ -225,8 +225,9 @@ impl SessionTools {
         &self,
         tasks: &TasksFile,
         events: &[yunta_core::events::StoredEvent],
+        state: &RunState,
     ) -> Result<Vec<Diagnostic>, RunToolError> {
-        let spec_planned = crate::tasks::plan_specified(&self.host.workflow, events);
+        let spec_planned = crate::tasks::plan_specified(&self.host.workflow, state);
         let mut found = tasks.unspecifiable(spec_planned, self.host.suite.as_ref());
         found.extend(tasks.against_spec(&self.held_spec(events).await?));
         let answered: Vec<yunta_core::QuestionId> =

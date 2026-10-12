@@ -4,13 +4,16 @@
 //! findings and the birth of a run, all derived from the event log alone.
 
 use yunta_core::RunId;
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{NodeState, RunError, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
-use yunta_core::events::{ArtifactEvent, NodeEvent, PauseReason, RecordedOrigin, RunEvent};
+use yunta_core::events::{
+    ArtifactEvent, EventDraft, EventPayload, Failure, NodeEvent, NodeFailedPayload, PauseReason,
+    RecordedOrigin, RunEvent, RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
+};
 
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
@@ -101,8 +104,8 @@ sessions:
         Some(yunta_core::events::TaskStatus::Done)
     );
     // Tokens from both executor sessions were attributed to the run.
-    assert_eq!(state.total_tokens().input, 180);
-    assert_eq!(state.total_tokens().output, 30);
+    assert_eq!(state.spend().so_far().input, 180);
+    assert_eq!(state.spend().so_far().output, 30);
 }
 
 #[tokio::test]
@@ -1413,4 +1416,46 @@ async fn a_run_records_what_its_commands_run_with_when_it_is_born() {
         "the shell is the one found on that PATH: {}",
         born_in.shell
     );
+}
+
+/// A log whose replay breaks before its `run_finished` is broken, not closed:
+/// the replay never reaches the close the log carries.
+#[tokio::test]
+async fn a_log_that_breaks_before_its_close_is_broken_not_finished() {
+    let bench = Bench::new();
+    bench
+        .create(
+            "name: broken\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
+            "sessions: []\n",
+            MOCK_CONFIG,
+        )
+        .await;
+    let failed = NodeFailedPayload::new(
+        Failure::message("no start".to_string()),
+        false,
+        TokenUsage::default(),
+    );
+    let close = RunFinishedPayload {
+        terminal_state: TerminalState::Done,
+        metrics: RunMetrics {
+            cptv: None,
+            tokens: TokenUsage::default(),
+        },
+        closed_by: None,
+    };
+    let run_id = bench.run_id.clone();
+    let node_failed = EventDraft::new(
+        run_id.clone(),
+        Some("only".into()),
+        EventPayload::Node(NodeEvent::Failed(failed)),
+    )
+    .expect("a node's failure names its node");
+    let run_closed = EventDraft::new(run_id, None, EventPayload::Run(RunEvent::Finished(close)))
+        .expect("a close names no subject");
+    bench.storage.append(&node_failed, &FixedClock).unwrap();
+    bench.storage.append(&run_closed, &FixedClock).unwrap();
+    assert!(matches!(
+        bench.try_wake().await,
+        Err(RunError::Broken { .. })
+    ));
 }

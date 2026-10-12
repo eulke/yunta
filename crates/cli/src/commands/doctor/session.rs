@@ -17,10 +17,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use yunta_core::events::{
-    ArtifactEvent, ArtifactId, Failure, NodeEvent, RunEvent, SessionDeath, SessionEvent,
-};
-use yunta_core::{RunnerCandidate, RunnerName};
+use yunta_core::events::{ArtifactId, Failure, SessionDeath};
+use yunta_core::{ArtifactKind, NodeId, RunnerCandidate, RunnerName};
 
 use crate::commands::test::{init_git, sandboxed_checkout, SandboxedCheckout};
 use crate::context::Context;
@@ -45,6 +43,9 @@ nodes:
 /// sandbox's config, so the run resolves to exactly the binding under
 /// test and `probe_or_refuse` probes exactly its adapter.
 const PROBE_RUNNER: RunnerName = RunnerName::from_static("probe");
+
+/// The node the probe workflow declares; the probe reads its facts off it.
+const PROBE_NODE: NodeId = NodeId::from_static("probe");
 
 /// One binding, and every runner that reaches it.
 pub(super) struct Binding {
@@ -192,16 +193,13 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
     })
     .await?;
 
-    let events = storage.events_for_run(prepared.run_id.clone()).await?;
-    Ok(verdict(&events, &report))
+    Ok(verdict(&report))
 }
 
-/// What the run's own log says happened to the one node.
-fn verdict(
-    events: &[yunta_core::events::StoredEvent],
-    report: &yunta_engine::RunReport,
-) -> Outcome {
-    let facts = ProbeFacts::from_events(events);
+/// What the run's own log says happened to the one node: the state the
+/// report carries is that log as the run left it.
+fn verdict(report: &yunta_engine::RunReport) -> Outcome {
+    let facts = ProbeFacts::of(&report.state);
     match facts.failure {
         Some(Failure::SessionDied { died }) => Outcome::Died(Box::new(died)),
         other if facts.opened && !facts.accepted => Outcome::NoDelivery(other.map_or_else(
@@ -214,12 +212,7 @@ fn verdict(
                 if facts.accepted && facts.node_finished && facts.run_finished =>
             {
                 Outcome::Ok {
-                    tokens: report
-                        .state
-                        .run
-                        .closed_tokens()
-                        .map(|tokens| tokens.total())
-                        .unwrap_or_default(),
+                    tokens: report.state.metrics().tokens.total(),
                 }
             }
             other => Outcome::Refused(format!(
@@ -239,44 +232,28 @@ struct ProbeFacts {
 }
 
 impl ProbeFacts {
-    fn from_events(events: &[yunta_core::events::StoredEvent]) -> Self {
-        let failure = events.iter().rev().find_map(|event| match event.payload() {
-            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(p))) => {
-                Some(p.failure.clone())
-            }
-            _ => None,
-        });
-        let opened = events.iter().any(|event| {
-            matches!(
-                event.payload(),
-                Some(yunta_core::events::EventPayload::Session(
-                    SessionEvent::Opened(_)
-                ))
-            )
-        });
-        let accepted = events.iter().any(|event| matches!(event.payload(),
-            Some(yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(p)))
-                if event.node_id.as_ref().is_some_and(|id| id.as_str() == "probe")
-                    && p.artifact == ArtifactId::Interpreted { kind: yunta_core::ArtifactKind::Questions }
-        ));
-        let node_finished = events.iter().any(|event| {
-            matches!(event.payload(),
-            Some(yunta_core::events::EventPayload::Node(NodeEvent::Finished(_)))
-                if event.node_id.as_ref().is_some_and(|id| id.as_str() == "probe"))
-        });
-        let run_finished = events.iter().any(|event| {
-            matches!(
-                event.payload(),
-                Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
-            )
-        });
+    /// The facts a probe run's derived state carries: the failure the run's
+    /// frame names, and what the probe node and its questions artifact show.
+    fn of(state: &yunta_engine::RunState) -> Self {
+        let record = state.nodes.get(&PROBE_NODE);
+        let questions = ArtifactId::Interpreted {
+            kind: ArtifactKind::Questions,
+        };
         Self {
-            failure,
-            opened,
-            accepted,
-            node_finished,
-            run_finished,
+            failure: state.last_failure(),
+            opened: record.is_some_and(|record| record.last_session.is_some()),
+            accepted: state
+                .artifacts
+                .latest(&questions, Some(&PROBE_NODE))
+                .is_some(),
+            node_finished: record.is_some_and(|record| record.last_finished.is_some()),
+            run_finished: state.run.finished().is_some(),
         }
+    }
+
+    #[cfg(test)]
+    fn from_events(events: &[yunta_core::events::StoredEvent]) -> Self {
+        Self::of(&yunta_engine::derive(events))
     }
 }
 
@@ -322,10 +299,52 @@ fn ended(terminal: &yunta_engine::RunTerminal) -> String {
 mod tests {
     use super::*;
     use yunta_core::events::{
-        AgentSessionOpenedPayload, ArtifactAcceptedPayload, EventPayload, NodeFinishedPayload,
-        NodeOutcome, RecordedOrigin, RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
+        AgentSessionOpenedPayload, ArtifactAcceptedPayload, ArtifactEvent, EventPayload, NodeEvent,
+        NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RecordedOrigin,
+        RunEvent, RunFinishedPayload, RunMetrics, SessionEvent, StoredEvent, TerminalState,
+        TokenUsage,
     };
-    use yunta_testkit_core::Log;
+    use yunta_core::{RunId, Workflow};
+    use yunta_engine::RunPhase;
+    use yunta_testkit_core::{fixed_now, Log};
+
+    fn node_started(attempt: u32) -> EventPayload {
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(attempt)))
+    }
+
+    fn node_failed(text: &str) -> EventPayload {
+        EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+            Failure::message(text),
+            true,
+            TokenUsage::default(),
+        )))
+    }
+
+    fn node_finished() -> EventPayload {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+            NodeOutcome::Summary("ok".into()),
+            TokenUsage::default(),
+        )))
+    }
+
+    fn run_failed() -> EventPayload {
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
+            terminal_state: TerminalState::Failed,
+            metrics: RunMetrics {
+                cptv: None,
+                tokens: TokenUsage::default(),
+            },
+            closed_by: None,
+        }))
+    }
+
+    /// A finished run's report over `events`, as the run left its log.
+    fn finished_report(events: &[StoredEvent]) -> yunta_engine::RunReport {
+        yunta_engine::RunReport {
+            terminal: yunta_engine::RunTerminal::Finished,
+            state: yunta_engine::derive(events),
+        }
+    }
 
     #[test]
     fn accepted_questions_and_both_terminals_are_required_for_success() {
@@ -347,10 +366,7 @@ mod tests {
                 yunta_core::sha256_hex(b"questions: []\n"),
                 RecordedOrigin::Submitted,
             )));
-        let finished = EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-            NodeOutcome::Summary("done".to_string()),
-            TokenUsage::default(),
-        )));
+        let finished = node_finished();
         let closed = EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Done,
             metrics: RunMetrics {
@@ -359,23 +375,53 @@ mod tests {
             },
             closed_by: None,
         }));
-        let report = yunta_engine::RunReport {
-            terminal: yunta_engine::RunTerminal::Finished,
-            state: yunta_engine::RunState::default(),
-        };
         let only_reply = Log::for_run("doctor-test")
             .node("probe", opened.clone())
             .build();
         assert!(matches!(
-            verdict(&only_reply, &report),
+            verdict(&finished_report(&only_reply)),
             Outcome::NoDelivery(_)
         ));
         let delivered = Log::for_run("doctor-test")
+            .node("probe", node_started(1))
             .node("probe", opened)
             .node("probe", accepted)
             .node("probe", finished)
             .event(closed)
             .build();
-        assert!(matches!(verdict(&delivered, &report), Outcome::Ok { .. }));
+        assert!(matches!(
+            verdict(&finished_report(&delivered)),
+            Outcome::Ok { .. }
+        ));
+    }
+
+    #[test]
+    fn doctor_and_the_phase_page_name_the_same_last_failure() {
+        // "build" failed and stayed failed. "probe" failed later, then ran again
+        // to its finish. The page names the failure still standing; doctor must too.
+        let events = Log::for_run("doctor-test")
+            .node("build", node_started(1))
+            .node("build", node_failed("build broke"))
+            .node("probe", node_started(1))
+            .node("probe", node_failed("probe broke"))
+            .node("probe", node_started(2))
+            .node("probe", node_finished())
+            .event(run_failed())
+            .build();
+        let workflow: Workflow = yunta_core::yaml::parse(
+            "name: doctor-test\nnodes:\n  - { id: build, kind: bash, run: \"true\" }\n  - { id: probe, kind: bash, run: \"true\" }\n",
+        )
+        .unwrap();
+        let frame = yunta_engine::run_frame(
+            &RunId::from("doctor-test"),
+            &workflow,
+            &events,
+            None,
+            fixed_now(),
+        );
+        let RunPhase::Failed { failure: page } = frame.phase else {
+            panic!("the run closed failed");
+        };
+        assert_eq!(ProbeFacts::from_events(&events).failure, page);
     }
 }

@@ -31,7 +31,6 @@ use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
 use mode::resolve_mode;
-use yunta_core::events::RunEvent;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -75,21 +74,16 @@ fn validate_adapter_flag(name: &AdapterId, adapters: &Adapters) -> Result<(), St
     Ok(())
 }
 
-/// Every run in storage with events but no `run_finished` — paused runs
-/// hold a slot (they expect a `resume`), finished ones never do.
+/// Every run in storage that has events and has neither closed nor broken:
+/// paused runs hold a slot (they expect a `resume`), finished and broken
+/// runs never do.
 async fn count_non_terminal_runs(
     storage: &AsyncStorage,
 ) -> Result<usize, yunta_storage::StorageError> {
     let mut active = 0;
     for run_id in storage.list_runs().await?.into_iter().map(|run| run.run_id) {
         let events = storage.events_for_run(run_id).await?;
-        let finished = events.iter().any(|e| {
-            matches!(
-                e.payload(),
-                Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
-            )
-        });
-        if !events.is_empty() && !finished {
+        if !events.is_empty() && !yunta_engine::derive(&events).ended() {
             active += 1;
         }
     }
@@ -267,7 +261,7 @@ pub(super) async fn preflight(
         )));
     }
     let context_files = context_files(ctx, manifest, mode).await?;
-    let (prior, budget) = estimate(ctx, manifest, quiet, json).await;
+    let (prior, budget) = estimate(ctx, manifest, &started_in, quiet, json).await;
     Ok(Preflight {
         prior,
         warnings: PreRunWarnings {
@@ -324,14 +318,23 @@ async fn context_files(
 /// warning survives both — it asks for a decision before tokens are
 /// spent, and a run that stops halfway on a badly chosen cap is the most
 /// expensive waste there is.
+///
+/// Only the runs that started in `mode` and carry this workflow's hash
+/// are a sample of what this run costs: a run in another mode, or of
+/// another shape of the workflow, would read as this run's own cost.
 async fn estimate(
     ctx: &Context,
     manifest: &Manifest,
+    mode: &ModeName,
     quiet: bool,
     json: bool,
 ) -> (Option<PriorEstimation>, Option<String>) {
     let history =
         super::stats::summaries(&super::stats::history(ctx, &manifest.workflow.name).await);
+    let history: Vec<_> = history
+        .into_iter()
+        .filter(|run| run.mode == *mode && run.workflow_hash == manifest.workflow_hash)
+        .collect();
     let estimation = yunta_engine::prior_estimation(&history);
     if let Some(estimation) = &estimation {
         if !(quiet || json) {

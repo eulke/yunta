@@ -6,16 +6,15 @@
 //! module only reads what the engine already recorded. Drawing it for a
 //! person is for whoever shows it; the engine hands over the data.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
 use yunta_core::events::{EventPayload, Failure, Phase, RunMetrics, StoredEvent, TerminalState};
-use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId};
+use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId, Seq};
 
-use crate::replay::unknown_kind_counts;
-use crate::replay::{derive, NodeState};
-use yunta_core::events::{NodeEvent, RunEvent};
+use crate::replay::{derive, unknown_kind_counts, NodeState, RunState};
+use yunta_core::events::NodeEvent;
 
 pub use yunta_core::receipt::{
     BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
@@ -32,7 +31,7 @@ pub fn render_json(receipt: &Receipt) -> Result<String, serde_json::Error> {
 pub enum ReceiptError {
     /// A receipt certifies *closed* work — a run still
     /// `running`/`waiting`/`paused` has no
-    /// `run_finished` metrics (CPTV, final token total) to report yet.
+    /// `run_finished` metrics (CPTV, final token total) to report.
     ///
     /// The sentence names the state the run is in and stops there:
     /// which command shows a reader where that run stands is the
@@ -76,13 +75,13 @@ fn counted(failure: &ArtifactFailure) -> Vec<(Option<DocumentKind>, DiagnosticCo
 /// Every problem the log recorded, counted by `(document kind, code)`,
 /// most frequent first and ties broken by name so the same log always
 /// renders the same receipt.
-fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
+fn diagnostic_counts(state: &RunState) -> Vec<DiagnosticCount> {
     let mut counts: HashMap<(Option<DocumentKind>, DiagnosticCode), usize> = HashMap::new();
-    let failed = events.iter().filter_map(|event| match event.payload() {
-        Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(&p.failure),
-        _ => None,
-    });
-    for failure in failed {
+    let failures = state
+        .nodes
+        .values()
+        .flat_map(|record| record.failures.iter());
+    for failure in failures {
         // Only a failure about documents has documents to count. A
         // sentence and a dead session name no artifact, and counting
         // them as zero of something would be a different claim from
@@ -124,21 +123,18 @@ pub fn build_receipt(
     events: &[StoredEvent],
     event_chain: EventChainStatus,
 ) -> Result<Receipt, ReceiptError> {
-    let Some((terminal_state, metrics)) = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::Run(RunEvent::Finished(p))) => {
-            Some((p.terminal_state, p.metrics.clone()))
-        }
-        _ => None,
-    }) else {
+    let state = derive(events);
+    let Some(finished) = state.run.finished() else {
         return Err(ReceiptError::NotFinished(run_id.clone()));
     };
     Ok(receipt(
         run_id,
         manifest,
         events,
+        &state,
         event_chain,
-        Some(terminal_state),
-        metrics,
+        Some(finished.terminal),
+        finished.metrics.clone(),
     ))
 }
 
@@ -151,28 +147,28 @@ pub fn receipt_so_far(
     events: &[StoredEvent],
     event_chain: EventChainStatus,
 ) -> Receipt {
-    let state = crate::replay::derive(events);
-    let metrics = RunMetrics {
-        tokens: state.total_tokens(),
-        cptv: crate::stats::cptv(&state),
-    };
-    receipt(run_id, manifest, events, event_chain, None, metrics)
+    let state = derive(events);
+    let metrics = state.metrics();
+    receipt(run_id, manifest, events, &state, event_chain, None, metrics)
 }
 
+/// The receipt of `state`'s run. The criteria, scope and re-route counts
+/// are read from the log's own events; every other answer comes from
+/// `state`.
 fn receipt(
     run_id: &RunId,
     manifest: &Manifest,
     events: &[StoredEvent],
+    state: &RunState,
     event_chain: EventChainStatus,
     terminal_state: Option<TerminalState>,
     metrics: RunMetrics,
 ) -> Receipt {
     let criteria = criteria_summary(events);
-    let baseline = baseline_summary(manifest, events);
+    let baseline = baseline_summary(manifest, state);
     let scope = scope_summary(events);
-    let runners = runner_usage(events);
-    let state = crate::replay::derive(events);
-    let unknown_kinds = unknown_kind_counts(&state);
+    let runners = runner_usage(state);
+    let unknown_kinds = unknown_kind_counts(state);
     let reroutes = events
         .iter()
         .filter(|e| {
@@ -186,7 +182,7 @@ fn receipt(
         schema_version: Receipt::SCHEMA_VERSION,
         run_id: run_id.clone(),
         workflow: manifest.workflow.name.clone(),
-        mode: yunta_core::events::run_mode(events),
+        mode: state.run.mode().clone(),
         terminal_state,
         criteria,
         baseline,
@@ -199,18 +195,18 @@ fn receipt(
         },
         event_chain,
         unknown_kinds,
-        diagnostics: diagnostic_counts(events),
-        failed: failed_nodes(manifest, &state),
+        diagnostics: diagnostic_counts(state),
+        failed: failed_nodes(manifest, state),
     }
 }
 
 /// Each node that stands failed, in the order the workflow declares it.
-fn failed_nodes(manifest: &Manifest, state: &crate::replay::RunState) -> Vec<FailedNode> {
+fn failed_nodes(manifest: &Manifest, state: &RunState) -> Vec<FailedNode> {
     manifest
         .workflow
         .iter_nodes()
         .filter_map(|node| match state.nodes.state(&node.id) {
-            Some(crate::replay::NodeState::Failed { failure, .. }) => Some(FailedNode {
+            Some(NodeState::Failed { failure, .. }) => Some(FailedNode {
                 node: node.id.clone(),
                 failure: failure.clone(),
             }),
@@ -251,7 +247,7 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
     }
 }
 
-fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<BaselineSummary> {
+fn baseline_summary(manifest: &Manifest, state: &RunState) -> Option<BaselineSummary> {
     // A run holds a measurement whenever its lineage declared a suite,
     // so what decides whether the run *looked* is the workflow: with no
     // `baseline_compare` in it there is no comparison to report, and a
@@ -267,7 +263,6 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
     }
     // Read from the run's own fold and each node's derived state, never
     // from a node's outcome text.
-    let state = derive(events);
     let captured = state.run.baseline()?;
     let mut compared = 0usize;
     let mut regressions = 0usize;
@@ -315,21 +310,22 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
 /// runners, not resolutions, so each node appears once. Fan-out siblings
 /// carry distinct ids (`<base>@<runner>`), so they are not collapsed by
 /// this.
-fn runner_usage(events: &[StoredEvent]) -> Vec<RunnerUsage> {
-    let mut seen: BTreeSet<NodeId> = BTreeSet::new();
-    events
+fn runner_usage(state: &RunState) -> Vec<RunnerUsage> {
+    // Keyed by the seq of each node's first resolution, so the map reads
+    // in the order the nodes first resolved one.
+    let by_resolution: BTreeMap<Seq, RunnerUsage> = state
+        .nodes
         .iter()
-        .filter_map(|e| match e.payload() {
-            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
-                let node_id = e.node_id.clone()?;
-                seen.insert(node_id.clone()).then(|| RunnerUsage {
-                    node_id,
-                    runner: p.runner.clone(),
-                    adapter: p.chosen.adapter.clone(),
-                    model: p.chosen.model.clone(),
-                })
-            }
-            _ => None,
+        .filter_map(|(node_id, record)| {
+            let (seq, resolved) = record.first_runner.as_ref()?;
+            let usage = RunnerUsage {
+                node_id: node_id.clone(),
+                runner: resolved.runner.clone(),
+                adapter: resolved.chosen.adapter.clone(),
+                model: resolved.chosen.model.clone(),
+            };
+            Some((*seq, usage))
         })
-        .collect()
+        .collect();
+    by_resolution.into_values().collect()
 }

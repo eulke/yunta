@@ -5,6 +5,8 @@
 //! its spend, two to draw it. Every surface that asks what a run bore
 //! reads it here.
 
+use std::collections::BTreeMap;
+
 use crate::events::children::kinds::ChildEvent;
 use crate::events::meta::EventMeta;
 use crate::events::{TerminalState, TokenUsage};
@@ -37,12 +39,24 @@ pub struct ChildLedger {
     tokens: TokenUsage,
     /// The highest iteration any loop node reported.
     iterations: u32,
+    /// The child run that each node's latest `child_run_finished` closed.
+    finished_by: BTreeMap<NodeId, RunId>,
 }
 
 impl ChildLedger {
     /// Every child link, oldest first.
     pub fn links(&self) -> &[ChildLink] {
         &self.links
+    }
+
+    /// The child run `node`'s latest `child_run_finished` closed.
+    pub fn finished_for(&self, node: &NodeId) -> Option<&RunId> {
+        self.finished_by.get(node)
+    }
+
+    /// Whether `run` is a child this run started.
+    pub fn is_child(&self, run: &RunId) -> bool {
+        self.links.iter().any(|link| &link.run_id == run)
     }
 
     /// The child `node` bore and has not closed, if there is one.
@@ -74,6 +88,10 @@ impl ChildLedger {
             }),
             ChildEvent::Finished(p) => {
                 self.tokens += p.tokens;
+                if let Some(node) = meta.node {
+                    self.finished_by
+                        .insert(node.clone(), p.child_run_id.clone());
+                }
                 match self
                     .links
                     .iter_mut()

@@ -242,10 +242,7 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
     })
 }
 
-/// The checkout of its own a run's log names, when it names one.
-pub fn bound_checkout(events: &[yunta_core::events::StoredEvent]) -> Option<PathBuf> {
-    yunta_engine::derive(events)
-        .run
-        .checkout()
-        .map(Path::to_path_buf)
+/// The checkout of its own a run's state names, when it names one.
+pub fn bound_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
+    state.run.checkout().map(Path::to_path_buf)
 }

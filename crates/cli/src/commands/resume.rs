@@ -39,7 +39,7 @@ struct Parked {
 /// the worktree it works in is the one its own frozen roots name.
 async fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
     let open = ctx.open_run(run_id).await?;
-    let bound = crate::project::bound_checkout(&open.events);
+    let bound = crate::project::bound_checkout(&yunta_engine::derive(&open.events));
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     // Resolved before any checkout is taken, so a refused resume takes no
     // checkout and writes nothing; the wake resolves the same redactor again.

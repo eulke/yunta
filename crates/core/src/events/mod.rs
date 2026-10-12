@@ -26,6 +26,7 @@ pub mod run;
 mod samples;
 pub mod scope;
 pub mod session;
+mod spend;
 pub mod tasks;
 mod unknown;
 mod wire;
@@ -45,9 +46,10 @@ pub use redact::Unredactable;
 #[cfg(feature = "testkit")]
 pub use registry::sample_payloads;
 pub use registry::KIND_VERSION;
-pub use run::{ledger::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
+pub use run::{ledger::*, metrics::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
 pub use session::{ledger::*, payloads::*, SessionEvent};
+pub use spend::Spend;
 pub use tasks::{ledger::*, payloads::*, TaskEvent};
 pub use unknown::UnknownKindCount;
 
@@ -58,7 +60,7 @@ pub use crate::Capabilities;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ModeName, NodeId, RunId, Seq};
+use crate::ids::{NodeId, RunId, Seq};
 
 /// What the engine hands to storage: what happened, in which run, for
 /// which node. Storage assigns the position (`seq`) and the timestamp
@@ -398,27 +400,6 @@ impl schemars::JsonSchema for EventPayload {
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         registry::EventPayloadWire::json_schema(generator)
-    }
-}
-
-/// The mode `run_created` froze for this log — always the log's own
-/// first event; the default mode for a log without one (written before
-/// modes existed, or truncated). This is the one place that mode is
-/// derived: `execute_run`'s resume and the stats surfaces must never
-/// disagree about a run's mode.
-pub fn run_mode(events: &[StoredEvent]) -> ModeName {
-    match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::Run(RunEvent::Created(p))) => p.mode.clone(),
-        _ => ModeName::default(),
-    }
-}
-
-/// The nodes a run's `run_created` left out — none for a log that has no
-/// such event, or one written before anything was left out.
-pub fn run_left_out(events: &[StoredEvent]) -> Vec<crate::LeftOut> {
-    match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::Run(RunEvent::Created(p))) => p.left_out.clone(),
-        _ => Vec::new(),
     }
 }
 

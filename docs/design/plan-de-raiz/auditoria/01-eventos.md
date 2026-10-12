@@ -118,6 +118,8 @@ Method: `grep -rn "EventPayload::" crates/*/src` (269 hits, 55 files), minus rea
 
 ## 3. READERS — exhaustive vs catch-all
 
+> Superseded on 2026-10-12 by the change that derives a run's spend and clock once, in `RunState`: `stats::walk_attempts` is deleted, `stats::Activity::of` is replaced by the activity `RunState` folds, the in-flight token fold of `live.rs` is deleted, and the receipt's runner and diagnostic folds read the node ledger.
+
 **55 src files name `EventPayload::`; 32 call `.payload()`.** Exactly **two** matches over `EventPayload` in the whole workspace have no wildcard:
 
 | Exhaustive reader | File:line | Effect of a new kind |

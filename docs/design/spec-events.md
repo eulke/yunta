@@ -233,7 +233,7 @@ que `from_tree` es exactamente el árbol de `found` (D201).
 | `tool_name` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.name` |
 | `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre, `display` solo cuando el argumento nombra el repositorio — nunca contenido completo |
 | `input_tokens` / `output_tokens` [inferido] | `Option<u64>` | solo si `usage` | de `Usage` |
-| `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché |
+| `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché. Es parte de `input_tokens`, nunca un total aparte: `cached ≤ input`. El gasto suma `input` y `output`, y el caché ya está dentro del input |
 | `text` [inferido] | `Option<string>` | solo si `note` | resumen mecánico `N bytes, sha256 <prefijo>` del texto de `Note` — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado |
 
 ### 5.7 `artifact_written` — solo lectura
@@ -393,7 +393,7 @@ la tarea.
 |---|---|---|---|
 | `outcome` [inferido] | `NodeOutcome`: un hecho del engine (objeto con `type`: `exit_status`, `pull_request_opened`, `children_finished`, `succeeded_first`, `tasks_done`, `child_run_finished`, `nothing_to_compare`, `no_regression`, `coverage_met`, `no_finding`), o un texto: el resumen del agente, o una frase que un log escrito antes guardó tal cual | solo en `node_finished` | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter: el hecho es el veredicto; el resumen del agente es telemetría |
 | `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
-| `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
+| `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage`. Un cierre diferido por una ronda de preguntas lleva cero: no abre sesión, y la ronda ya asentó lo que gastó la sesión que preguntó. El gasto del intento es lo que asentaron sus rondas más este valor |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
 | `refused` | lista de paths | sí; solo en `node_failed`, vacía —y omitida del log— si no hubo ninguno | lo que el intento dejó en el árbol del run y el proyecto niega a todo run (`permissions.paths.deny`): no se commiteó y, en un run con worktree propio, volvió a como la rama lo tenía. La falla propia del nodo sigue siendo su causa (D206) |
@@ -522,7 +522,7 @@ engine y un `questions_answered` con canal `assumed` —cada pregunta dice en
 |---|---|---|---|
 | `questions_hash` | string | sí | hash del documento `questions` que el nodo entregó |
 | `questions` | `[string]` | sí | los ids que esperan respuesta; nunca vacío |
-| `tokens_used` | `TokenUsage` | sí | lo que gastó la sesión que preguntó; la contabilidad del intento cierra acá |
+| `tokens_used` | `TokenUsage` | sí | lo que gastó la sesión que preguntó. La ronda asienta ese uso: pasa de en vuelo a asentado, y el intento sigue abierto hasta su terminal. Como `agent_message` no lleva id de sesión, lo que se resta es el uso que la ronda declara; el de otras sesiones del mismo intento sigue en vuelo |
 
 `questions_answered`:
 
@@ -859,7 +859,7 @@ the run reports leaves the span out (D199).
 | `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
 | `checkout` | ruta | no, solo en `run_resumed` | el checkout en que trabaja el run desde este wake, cuando no es el último que nombró su log (D235) |
 | `terminal_state` | estado | solo en `run_finished` | — |
-| `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas |
+| `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas. Son el gasto del run al cerrarse: `tokens` es lo asentado más lo en vuelo, y `cptv` es `tokens.total()` sobre las tareas `done`, ausente cuando ninguna está hecha. Un run cerrado gasta lo que este evento registró |
 | `closed_by` | responder | no, solo en `run_finished` | quién cerró un run detenido que nadie iba a continuar (`yunta close`), con `terminal_state: cancelled`; ausente cuando el engine cerró el run llevándolo a su fin |
 
 ### 5.26a `run_moved` — engine

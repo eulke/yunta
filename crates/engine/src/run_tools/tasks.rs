@@ -23,11 +23,12 @@ use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
+use crate::replay::RunView;
 use crate::task_cycle::{could_not_run, judge, CriterionRun, Judgement, Work};
 
 impl SessionTools {
     pub(super) async fn task_status(&self) -> Result<String, RunToolError> {
-        let state = crate::replay::derive(&self.events().await?);
+        let state = RunView::of(self.events().await?).state;
         let mut tasks: Vec<(String, String)> = state
             .tasks
             .iter()

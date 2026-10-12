@@ -361,17 +361,18 @@ pub(crate) struct Closed<'a> {
 /// off the same source every other surface reads.
 pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliError> {
     let events = closed.storage.events_for_run(closed.run_id.clone()).await?;
-    let decision = crate::json::decision_of(closed.manifest, closed.run_dir, &events)
+    let state = yunta_engine::derive(&events);
+    let decision = crate::json::decision_of(closed.manifest, closed.run_dir, &state)
         .await?
         .map(|(node, escalation)| (node, escalation.into_payload()));
     let shown = match &decision {
-        Some((_, escalation)) => crate::json::shown_of(closed.run_dir, escalation, &events).await?,
+        Some((_, escalation)) => crate::json::shown_of(closed.run_dir, escalation, &state).await?,
         None => Vec::new(),
     };
     let closing = Closing::of(ClosingEnv {
         run_id: closed.run_id,
         workflow: &closed.manifest.workflow,
-        events: &events,
+        state: &state,
         prior: closed.prior,
         now: closed.clock.now(),
         decision,
@@ -409,15 +410,17 @@ async fn documented(
     warnings: PreRunWarnings,
 ) -> Result<crate::json::RunDocument, CliError> {
     let events = storage.events_for_run(run_id.clone()).await?;
+    let state = yunta_engine::derive(&events);
     // This invocation is the engine that drove the run.
     let engine = crate::render::Engine::this(ctx.clock.now());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
-        Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &events).await?,
+        Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
         None => None,
     };
     Ok(crate::json::RunDocument::of(
         run_id,
         &events,
+        &state,
         manifest,
         ctx.clock.now(),
         &engine,

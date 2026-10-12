@@ -73,6 +73,15 @@ fn kinds_of(events: &[StoredEvent], node: &str) -> Vec<String> {
         .collect()
 }
 
+fn assert_counted_once_while_asked(events: &[StoredEvent]) {
+    let cut = events
+        .iter()
+        .position(|e| e.body.kind_name() == "questions_asked")
+        .expect("the question is on the log");
+    let spent = derive(&events[..=cut]).spend().so_far();
+    assert_eq!((spent.input, spent.output), (30, 12), "counted once");
+}
+
 #[tokio::test]
 async fn a_node_that_asks_records_questions_asked_and_no_terminal_event() {
     // Asking is a fact of the log, not a failure the derivation reads as a
@@ -357,11 +366,9 @@ async fn the_finished_node_carries_what_the_asking_session_spent() {
         (30, 12),
         "the finished node carries what the session that asked spent"
     );
-    assert_eq!(
-        (state.total_tokens().input, state.total_tokens().output),
-        (30, 12),
-        "counted once"
-    );
+    assert_counted_once_while_asked(&bench.events());
+    let spent = state.spend().so_far();
+    assert_eq!((spent.input, spent.output), (30, 12), "counted once");
 }
 
 #[tokio::test]

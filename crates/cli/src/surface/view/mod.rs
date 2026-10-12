@@ -12,6 +12,7 @@ use std::time::Duration;
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 
 use yunta_core::RunId;
+use yunta_render::spend::Breakdown;
 
 mod children;
 
@@ -20,7 +21,7 @@ pub(super) use children::{child_row, child_standing, children_by_node, closed_as
 
 use crate::commands::advice;
 use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, Glyphs, Mark, Tokens, CHILD_DEPTH};
+use crate::render::{duration, indent, Glyphs, Mark, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -67,9 +68,8 @@ pub(super) fn attention(
 pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
     let sep = format!(" {} ", glyphs.sep());
     let mut said = vec![crate::render::counter::line(frame, glyphs)];
-    let spent = frame.tokens.input + frame.tokens.output;
-    if spent > 0 {
-        said.push(Tokens(spent).to_string());
+    if frame.tokens.total() > 0 {
+        said.push(Breakdown(&frame.tokens).to_string());
     }
     if let Some(elapsed) = frame.elapsed {
         said.push(duration(elapsed));
@@ -343,6 +343,29 @@ mod tests {
         assert!(
             waiting.ends_with(" needs you") && !waiting.contains("nothing"),
             "{waiting}"
+        );
+    }
+
+    #[test]
+    fn the_footer_names_what_the_run_spent_in_and_out() {
+        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
+        let spent = RunFrame {
+            tokens: yunta_core::events::TokenUsage {
+                input: 18_000,
+                output: 2_200,
+                cached: None,
+            },
+            ..standing(RunPhase::Running, None)
+        };
+        let line = paint(&spent);
+        assert!(line.contains("18k in / 2.2k out"), "{line}");
+        let quiet = RunFrame {
+            tokens: yunta_core::events::TokenUsage::default(),
+            ..standing(RunPhase::Running, None)
+        };
+        assert!(
+            !paint(&quiet).contains(" in / "),
+            "a run that spent nothing names no tokens"
         );
     }
 

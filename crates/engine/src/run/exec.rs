@@ -61,7 +61,7 @@ pub(super) async fn pause(ctx: &RunCtx<'_>, reason: PauseReason) -> Result<RunRe
     record_pause(ctx, &reason).await?;
     Ok(RunReport {
         terminal: RunTerminal::Paused { reason },
-        state: ctx.run_view().await?.state,
+        state: *ctx.run_view().await?.state,
     })
 }
 
@@ -185,8 +185,7 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
         }
         // One read and one replay per iteration: the decision and every
         // handler that needs the run's state read the same derivation.
-        let events = ctx.load_events().await?;
-        let state = crate::replay::derive(&events);
+        let state = ctx.run_view().await?.state;
         if let Some(owed) = schedule::owed_baseline(&state, policy) {
             if policy.measures_aside {
                 aside.start(ctx, owed);
@@ -358,16 +357,12 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
             run_id: ctx.run_id.clone(),
         });
     }
-    if view
-        .events
-        .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Finished(_)))))
-    {
+    if view.state.run.finished().is_some() {
         // Re-executing a finished run is a no-op, not an error — the log
         // already has its ending.
         return Ok(Startup::Finished(Box::new(RunReport {
             terminal: RunTerminal::Finished,
-            state: view.state,
+            state: *view.state,
         })));
     }
     super::invocation::share_dirs(&ctx.manifest.config).await?;
@@ -407,10 +402,9 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
 
     // The mode is frozen once, in `run_created` (`events[0]` — never
     // absent, checked above), and never re-resolved — a resume reads the
-    // same name back off the log rather than re-deriving it, same
-    // "resolved once, reused forever" discipline runner resolution
-    // already follows.
-    let mode_name = yunta_core::events::run_mode(&view.events);
+    // same name back off the log's state, same "resolved once, reused
+    // forever" discipline runner resolution already follows.
+    let mode_name = view.state.run.mode().clone();
     let policy = schedule::Policy::of(ctx.manifest, &mode_name, &view.state.run);
     Ok(Startup::Ready(Box::new(Ready {
         ctx,

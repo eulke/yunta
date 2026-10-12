@@ -48,7 +48,6 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{ChildRunCreatedPayload, EventPayload};
 use yunta_core::{InputName, Isolation, MountSpec, Node};
 
-use crate::replay::derive;
 use yunta_core::template::render_template;
 
 use child::{drive_child, resume_child, Child};
@@ -121,8 +120,8 @@ pub(super) async fn execute_workflow(
     // never reached child_run_finished — and actually exists (a
     // dangling reference from a crash between the parent's event and
     // the child's run_created has no events, and is superseded below).
-    let events = ctx.load_events().await?;
-    let state = crate::replay::derive(&events);
+    let view = ctx.run_view().await?;
+    let state = &view.state;
     if let Some(open_child) = state.children.open_under(&node.id).map(|link| &link.run_id) {
         if !ctx
             .storage
@@ -223,7 +222,7 @@ pub(super) async fn execute_workflow(
     // Mounts resolve to bytes here, before anything is linked or
     // born — a missing source is this node's failure, with no dangling
     // child left behind.
-    let mounted = match resolve_mounts(ctx, &events, mounts).await {
+    let mounted = match resolve_mounts(ctx, state, &view.events, mounts).await {
         Ok(mounted) => mounted,
         Err(problem) => {
             return fail_with(
@@ -247,7 +246,7 @@ pub(super) async fn execute_workflow(
     if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
         if let Some(limits) = child_config.limits.as_mut() {
             if let Some(cap) = limits.max_tokens_per_run {
-                let spent = derive(&events).total_tokens().total();
+                let spent = state.spend().so_far().total();
                 limits.max_tokens_per_run = Some(cap.saturating_sub(spent));
             }
         }
@@ -393,7 +392,7 @@ pub(super) async fn execute_workflow(
             // The lineage measures once: the child is born holding what
             // its root measured, so its comparisons see what its parent
             // did to the tree.
-            baseline: crate::run::baseline::inherited(ctx.run_id, &state).as_ref(),
+            baseline: crate::run::baseline::inherited(ctx.run_id, state).as_ref(),
             environment: crate::process::execution_environment(ctx.ambient),
             redactor: &redactor,
         },

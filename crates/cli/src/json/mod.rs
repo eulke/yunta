@@ -18,7 +18,8 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::{ArtifactId, EventPayload, Failure, NodeEvent, StoredEvent};
 use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, Manifest, NodeId, RunId};
-use yunta_engine::{RunPhase, WaitingOn};
+use yunta_engine::{RunPhase, RunState, WaitingOn};
+use yunta_render::spend::SpendJson;
 
 mod node;
 
@@ -58,7 +59,7 @@ impl PreRunWarnings {
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
 /// command prints its document, reporting a serialization failure as the
@@ -148,24 +149,28 @@ pub(crate) struct RunDocument {
     /// this says it in a shape a program acts on without parsing one.
     #[serde(skip_serializing_if = "Option::is_none")]
     waiting_on: Option<WaitingOnJson>,
-    tokens: TokensJson,
+    /// What the run spent: the work its attempts settled, plus the usage
+    /// an open attempt has reported that no settled round has taken in.
+    tokens: SpendJson,
 }
 
 impl RunDocument {
     /// The run as its own log describes it at `now`, which the caller's
     /// injected clock decides, and as `engine` — what the run's registry
     /// says about the process driving it — qualifies a run that looks
-    /// like it is moving.
+    /// like it is moving. `state` is the run derived from `events`; the
+    /// log is read again only for the failures each node's diagnostics
+    /// name.
     pub(crate) fn of(
         run_id: &RunId,
         events: &[StoredEvent],
+        state: &RunState,
         manifest: &Manifest,
         now: DateTime<Utc>,
         engine: &crate::render::Engine,
         decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     ) -> Self {
-        let state = yunta_engine::derive(events);
-        let frame = progress::frame(run_id, manifest, events, now);
+        let frame = progress::frame_of(run_id, manifest, state, now);
         RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
@@ -190,10 +195,7 @@ impl RunDocument {
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
             waiting_on: WaitingOnJson::of(&frame.phase, engine),
-            tokens: TokensJson {
-                input: state.total_tokens().input,
-                output: state.total_tokens().output,
-            },
+            tokens: SpendJson::of(&state.spend()),
         }
     }
 
@@ -251,27 +253,24 @@ fn parked_decision(
     ))
 }
 
-/// The decision a run waits on, rebuilt from its log and the documents its
-/// gate shows — the one reading every surface takes.
+/// The decision a run waits on, rebuilt from the run's derived state and
+/// the documents its gate shows — the one reading every surface takes.
 pub(crate) async fn decision_of(
     manifest: &Manifest,
     run_dir: &std::path::Path,
-    events: &[StoredEvent],
+    state: &RunState,
 ) -> Result<Option<(yunta_core::NodeId, yunta_core::events::Escalation)>, crate::error::CliError> {
-    Ok(yunta_engine::current_escalation(manifest, run_dir, &yunta_engine::derive(events)).await?)
+    Ok(yunta_engine::current_escalation(manifest, run_dir, state).await?)
 }
 
-/// The documents `escalation` shows, as the run whose log is `events`
-/// holds them.
+/// The documents `escalation` shows, as the run whose derived state is
+/// `state` holds them.
 pub(crate) async fn shown_of(
     run_dir: &std::path::Path,
     escalation: &yunta_core::events::GateWaitingPayload,
-    events: &[StoredEvent],
+    state: &RunState,
 ) -> Result<Vec<yunta_engine::ShownDocument>, crate::error::CliError> {
-    Ok(
-        yunta_engine::shown_documents(run_dir, escalation.shows(), &yunta_engine::derive(events))
-            .await?,
-    )
+    Ok(yunta_engine::shown_documents(run_dir, escalation.shows(), state).await?)
 }
 
 /// What a waiting run is waiting on.
@@ -336,12 +335,6 @@ impl WaitingOnJson {
             },
         })
     }
-}
-
-#[derive(serde::Serialize)]
-struct TokensJson {
-    input: u64,
-    output: u64,
 }
 
 /// One artifact a node's failure names, with what is wrong with it. A

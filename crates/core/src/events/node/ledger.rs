@@ -9,19 +9,24 @@
 //! answer.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::node::payloads::{
-    DiscardedCandidate, NodeOutcome, NodeReroutedPayload, RerouteOrigin,
+    DiscardedCandidate, NodeOutcome, NodeReroutedPayload, RerouteOrigin, RunnerResolvedPayload,
 };
-use crate::events::{Failure, TokenUsage};
+use crate::events::{Failure, Spend, Suspensions, TokenUsage};
 use crate::ids::{NodeId, QuestionId, RunnerName, Seq};
 use crate::{NonEmpty, RunnerCandidate, TreeId};
 
 mod sessions;
+mod spend;
+mod standing;
+
+use standing::Tally;
 
 pub use sessions::{OpenSession, OrphanedSession, RefusedStop, RefusedWrite, ToolCall};
 
@@ -121,8 +126,8 @@ pub struct ResolvedRunner {
 /// What the log says about one node.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NodeRecord {
-    /// How many times this node started. The attempt a reader reports is
-    /// this, never a count re-derived from somewhere else.
+    /// The highest attempt number a `node_started` of this node carried. A
+    /// retry is numbered after it, so this is the attempt a reader reports.
     pub attempts: u32,
     pub state: Option<NodeState>,
     /// Where and when the open attempt started; `None` once it closed.
@@ -130,6 +135,8 @@ pub struct NodeRecord {
     /// Where the latest attempt started; unlike `open_since`, kept once
     /// the attempt closes.
     pub last_started: Option<Seq>,
+    /// When the node first started, across all of its attempts.
+    pub first_started: Option<DateTime<Utc>>,
     /// The run's tree as the node's latest finish left it; `None` when
     /// it never finished, or its finish named no tree.
     pub left_tree: Option<TreeId>,
@@ -148,8 +155,12 @@ pub struct NodeRecord {
     /// What the open attempt of a node scoped to the run may change.
     pub run_scope: Option<Vec<crate::ScopeGlob>>,
     pub last_terminal: Option<Seq>,
+    /// When the node last reached a terminal state.
+    pub last_terminal_at: Option<DateTime<Utc>>,
     pub last_failed: Option<Seq>,
     pub last_finished: Option<Seq>,
+    /// Every failure the node recorded, oldest first.
+    pub failures: Vec<Failure>,
     pub reroutes: u32,
     /// The re-routes its own `on_failure` made, which its
     /// `max_reroutes` counts: a person's choice that sends the run
@@ -157,16 +168,25 @@ pub struct NodeRecord {
     pub on_failure_reroutes: u32,
     pub last_reroute: Option<Reroute>,
     pub runner: Option<ResolvedRunner>,
-    /// What every closed attempt of this node spent.
-    pub tokens_closed: TokenUsage,
-    /// What the attempt now open has spent that is already accounted
-    /// for — a round of questions closes its session's accounting when
-    /// it asks, so the terminal that follows carries the attempt's whole
-    /// spend without counting that session twice.
-    pub tokens_this_attempt: TokenUsage,
-    /// What the open attempt has reported so far, in `agent_message`
-    /// usage — not yet in `tokens_closed`, which only a terminal moves.
-    pub tokens_in_flight: TokenUsage,
+    /// The first runner the node resolved, with the seq of the event that
+    /// resolved it.
+    pub first_runner: Option<(Seq, ResolvedRunner)>,
+    /// What the node spent: its settled work, and the usage its open
+    /// attempt reported that nothing has settled.
+    pub spend: Spend,
+    /// What the open attempt has settled through its rounds of questions.
+    /// A terminal folds it into the state it leaves and resets it.
+    pub attempt_settled: TokenUsage,
+    /// What the attempts after the first spent, settled.
+    pub rework: TokenUsage,
+    /// Where the open attempt's current working stretch began. `None` while
+    /// the node waits on a person, and once the attempt has closed.
+    pub working_since: Option<DateTime<Utc>>,
+    /// The working time of every stretch that has closed, across attempts.
+    pub active: Duration,
+    /// The working time of the attempt now or last open. Reset when an
+    /// attempt starts.
+    pub attempt_active: Duration,
     /// The sessions the open attempt has opened, oldest first. A node's
     /// attempt is what bounds a session's life: the schema has no
     /// per-session close event, so a session is open exactly while the
@@ -182,6 +202,9 @@ pub struct NodeRecord {
     /// attempt. A new start clears it; a terminal preserves it.
     pub last_tool_failure: Option<crate::events::RunToolFailedPayload>,
     pub last_event_at: Option<DateTime<Utc>>,
+    /// Whether the node's session lost its service and has not got it back.
+    /// A terminal clears it.
+    pub unreachable: bool,
     /// The attempt before the open one, when it failed: its number, the
     /// tree it started from and what it failed with — what the open
     /// attempt is measured against to tell whether anything changed
@@ -228,12 +251,39 @@ impl NodeRecord {
             .as_ref()
             .filter(|failed| failed.from_tree.is_some() && failed.from_tree == self.from_tree)
     }
+
+    /// A `node_rerouted`: one more re-route, and the latest one kept.
+    fn rerouted(&mut self, p: &NodeReroutedPayload, meta: &EventMeta<'_>) {
+        self.reroutes += 1;
+        if p.origin == RerouteOrigin::OnFailure {
+            self.on_failure_reroutes += 1;
+        }
+        self.last_reroute = Some(Reroute::of(p, meta));
+    }
+
+    /// A `runner_resolved`: the runner the node runs on now, and the first
+    /// one it ever resolved.
+    fn resolved(&mut self, p: &RunnerResolvedPayload, meta: &EventMeta<'_>) {
+        let resolved = ResolvedRunner {
+            runner: p.runner.clone(),
+            chosen: p.chosen.clone(),
+            discarded: p.discarded.clone(),
+        };
+        if self.first_runner.is_none() {
+            self.first_runner = Some((meta.seq, resolved.clone()));
+        }
+        self.runner = Some(resolved);
+    }
 }
 
 /// Every node's record, by id.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NodeLedger {
     per_node: BTreeMap<NodeId, NodeRecord>,
+    /// How many records have an attempt open or a session without its
+    /// service: kept as each record changes, so a reader that asks on
+    /// every event reads no record.
+    tally: Tally,
 }
 
 impl NodeLedger {
@@ -295,10 +345,10 @@ impl NodeLedger {
         let Some(record) = self.per_node.get(writer) else {
             return;
         };
-        let (Some(from), Some(started)) = (record.from_tree.clone(), record.last_started) else {
+        let (Some(from), Some(started)) = (&record.from_tree, record.last_started) else {
             return;
         };
-        if &from == left {
+        if from == left {
             return;
         }
         for (_, beside) in self.per_node.iter_mut().filter(|(id, _)| *id != writer) {
@@ -375,17 +425,9 @@ impl NodeLedger {
         self.per_node.entry(node.clone()).or_default().state = state;
     }
 
-    /// Records what a round of questions closed before the node's own
-    /// terminal did: it counts toward the run's total now, and toward
-    /// the attempt's own spend when the terminal arrives.
-    pub fn add_closed_tokens(&mut self, node: &NodeId, tokens: TokenUsage) {
-        let record = self.per_node.entry(node.clone()).or_default();
-        record.tokens_closed += tokens;
-        record.tokens_this_attempt += tokens;
-    }
-
-    /// Folds one node-domain event.
-    pub fn apply(&mut self, event: &NodeEvent, meta: &EventMeta<'_>) {
+    /// Folds one node-domain event. `asleep` is the host's suspensions: a
+    /// working stretch that ends here leaves out the time the host slept.
+    pub fn apply(&mut self, event: &NodeEvent, meta: &EventMeta<'_>, asleep: &Suspensions) {
         let Some(node) = meta.node else {
             // A node event with no node on its envelope states nothing
             // about any node. The replay that dispatches here refuses it
@@ -393,84 +435,20 @@ impl NodeLedger {
             // for the rest there is simply nothing to record.
             return;
         };
-        let record = self.per_node.entry(node.clone()).or_default();
+        // The id is copied only the first time the log names the node:
+        // almost every event names a node the ledger holds.
+        let record = match self.per_node.get_mut(node) {
+            Some(record) => record,
+            None => self.per_node.entry(node.clone()).or_default(),
+        };
+        let before = record.standing();
         record.last_event_at = Some(meta.at);
         match event {
-            NodeEvent::Started(p) => {
-                record.failed_before = record.failed_attempt();
-                record.from_tree = p.from_tree.clone();
-                record.run_scope = p.run_scope.clone();
-                // A start while the previous attempt is still open means
-                // nothing closed it: whatever session it had is the
-                // orphan a resume has to deal with.
-                record.orphaned_session =
-                    record
-                        .open_since
-                        .is_some()
-                        .then(|| match record.sessions.last() {
-                            Some(session) => OrphanedSession::Open(session.session_id.clone()),
-                            None => OrphanedSession::NoneRecorded,
-                        });
-                record.attempts += 1;
-                record.state = Some(NodeState::Running { attempt: p.attempt });
-                record.open_since = Some((meta.seq, meta.at));
-                record.last_started = Some(meta.seq);
-                record.tree_moved = false;
-                record.tokens_in_flight = TokenUsage::default();
-                // A fresh attempt owes nothing for an earlier round's
-                // answer: whatever it produces closes it.
-                record.tokens_this_attempt = TokenUsage::default();
-                record.sessions.clear();
-                record.calls.clear();
-                record.last_tool_failure = None;
-            }
-            NodeEvent::Finished(p) => {
-                let attempt = record.tokens_this_attempt + p.tokens_used;
-                record.tokens_closed += p.tokens_used;
-                record.tokens_this_attempt = TokenUsage::default();
-                record.tokens_in_flight = TokenUsage::default();
-                record.open_since = None;
-                record.last_terminal = Some(meta.seq);
-                record.last_finished = Some(meta.seq);
-                record.left_tree = p.tree.clone();
-                record.sessions.clear();
-                record.calls.clear();
-                record.state = Some(NodeState::Finished {
-                    outcome: p.outcome.clone(),
-                    tokens: attempt,
-                });
-            }
-            NodeEvent::Failed(p) => {
-                let attempt = record.tokens_this_attempt + p.tokens_used;
-                record.tokens_closed += p.tokens_used;
-                record.tokens_this_attempt = TokenUsage::default();
-                record.tokens_in_flight = TokenUsage::default();
-                record.open_since = None;
-                record.last_terminal = Some(meta.seq);
-                record.last_failed = Some(meta.seq);
-                record.failed_tree = p.tree.clone();
-                record.sessions.clear();
-                record.calls.clear();
-                record.state = Some(NodeState::Failed {
-                    failure: p.failure.clone(),
-                    tokens: attempt,
-                    retryable: p.retryable,
-                });
-            }
-            NodeEvent::Rerouted(p) => {
-                record.reroutes += 1;
-                if p.origin == RerouteOrigin::OnFailure {
-                    record.on_failure_reroutes += 1;
-                }
-                record.last_reroute = Some(Reroute::of(p, meta));
-            }
-            NodeEvent::RunnerResolved(p) => {
-                record.runner = Some(ResolvedRunner {
-                    runner: p.runner.clone(),
-                    chosen: p.chosen.clone(),
-                    discarded: p.discarded.clone(),
-                });
-            }
+            NodeEvent::Started(p) => record.started(p, meta),
+            NodeEvent::Finished(p) => record.finished(p, meta, asleep),
+            NodeEvent::Failed(p) => record.failed(p, meta, asleep),
+            NodeEvent::Rerouted(p) => record.rerouted(p, meta),
+            NodeEvent::RunnerResolved(p) => record.resolved(p, meta),
             // Audit: the engine ran a mechanical check around the node
             // and recorded what it found. None of it moves the node's
             // lifecycle — what a criterion or a scope diff decided
@@ -481,6 +459,8 @@ impl NodeLedger {
             | NodeEvent::ScopeChecked(_)
             | NodeEvent::PullRequestOpened(_) => {}
         }
+        let after = record.standing();
+        self.track(before, after);
         if let Some(left) = left_by_close(event) {
             self.moved_beside(node, left);
         }

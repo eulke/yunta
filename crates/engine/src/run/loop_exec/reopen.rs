@@ -25,21 +25,15 @@ pub(super) async fn after_retry(
     node: &Node,
     tasks: &TasksFile,
 ) -> Result<(), RunError> {
-    let view = ctx.run_view().await?;
-    let Some((decision, chosen)) = run_again_after_failure(&view.state, &node.id) else {
+    let state = ctx.run_view().await?.state;
+    let Some((decision, chosen)) = run_again_after_failure(&state, &node.id) else {
         return Ok(());
     };
-    let acted_on = view.events.iter().any(|event| {
-        matches!(
-            event.payload(),
-            Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) if p.caused_by == decision
-        )
-    });
-    if acted_on {
+    if state.tasks.caused_by(decision) {
         return Ok(());
     }
     for task in &tasks.tasks {
-        let Some(record) = view.state.tasks.get(&task.id) else {
+        let Some(record) = state.tasks.get(&task.id) else {
             continue;
         };
         if record.status != TaskStatus::Blocked {

@@ -26,7 +26,7 @@ use crate::replay::RunState;
 /// The node that writes the run's spec again: the one the log accepted
 /// the spec it holds from, when that node opens a session of its own and
 /// the run's mode keeps it. `None` when the spec came with the run.
-pub(super) fn writer(ctx: &RunCtx<'_>, events: &[StoredEvent], state: &RunState) -> Option<NodeId> {
+pub(super) fn writer(ctx: &RunCtx<'_>, state: &RunState) -> Option<NodeId> {
     let producer = state
         .artifacts
         .of_kind(ArtifactKind::Spec)
@@ -34,9 +34,7 @@ pub(super) fn writer(ctx: &RunCtx<'_>, events: &[StoredEvent], state: &RunState)
         .producer
         .clone()?;
     let workflow = &ctx.manifest.workflow;
-    let mode = yunta_core::events::run_mode(events);
-    let left_out = yunta_core::events::run_left_out(events);
-    let kept = crate::modes::included_nodes(workflow, &mode, &left_out)
+    let kept = crate::modes::included_nodes(workflow, state.run.mode(), state.run.left_out())
         .is_none_or(|ids| ids.contains(&producer));
     let writes = workflow
         .iter_nodes()

@@ -18,6 +18,7 @@ use yunta_core::events::{
 use yunta_core::ScopeGlob;
 use yunta_core::{CommitSha, NodeId, Task, TaskId, TasksFile};
 
+use crate::replay::{RunState, RunView};
 use crate::run::RunError;
 use crate::run_log::RunLog;
 use yunta_core::events::TaskEvent;
@@ -37,12 +38,10 @@ pub use review::review as plan_review;
 /// reads what it changes and why, not only its commands.
 pub(crate) fn plan_reviewed(
     workflow: &yunta_core::Workflow,
-    events: &[yunta_core::events::StoredEvent],
+    state: &RunState,
     producer: &NodeId,
 ) -> bool {
-    let mode = yunta_core::events::run_mode(events);
-    let left_out = yunta_core::events::run_left_out(events);
-    let included = crate::modes::included_nodes(workflow, &mode, &left_out);
+    let included = crate::modes::included_nodes(workflow, state.run.mode(), state.run.left_out());
     let kept = workflow
         .nodes
         .iter()
@@ -53,13 +52,8 @@ pub(crate) fn plan_reviewed(
 /// Whether this run writes a spec for its plan: a node among the ones
 /// its mode includes produces one. Where it does, the spec writes each
 /// task's tests, and a plan that writes its own is refused.
-pub(crate) fn plan_specified(
-    workflow: &yunta_core::Workflow,
-    events: &[yunta_core::events::StoredEvent],
-) -> bool {
-    let mode = yunta_core::events::run_mode(events);
-    let left_out = yunta_core::events::run_left_out(events);
-    let included = crate::modes::included_nodes(workflow, &mode, &left_out);
+pub(crate) fn plan_specified(workflow: &yunta_core::Workflow, state: &RunState) -> bool {
+    let included = crate::modes::included_nodes(workflow, state.run.mode(), state.run.left_out());
     workflow
         .iter_nodes()
         .filter(|node| included.as_ref().is_none_or(|ids| ids.contains(&node.id)))
@@ -205,16 +199,15 @@ pub(crate) async fn register(
     document: &TasksFile,
     provenance: Provenance<'_>,
 ) -> Result<(), RunError> {
-    let events = log.events().await?;
-    let prior = prior_registrations(&events);
-    let current = crate::replay::derive(&events).tasks;
+    let view = RunView::of(log.events().await?);
+    let prior = prior_registrations(&view.events);
     let nothing = BTreeMap::new();
     let carried = match provenance {
         Provenance::Fresh => &nothing,
         Provenance::Inherited { carried } => carried,
     };
 
-    for planned in plan_registration(document, &prior, &current, carried) {
+    for planned in plan_registration(document, &prior, &view.state.tasks, carried) {
         let registered = log
             .record(
                 node,

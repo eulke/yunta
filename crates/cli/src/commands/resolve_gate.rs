@@ -122,7 +122,7 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
     let state = yunta_engine::derive(&open.events);
     let called = run_id.handle();
     let decision =
-        crate::json::decision_of(&open.manifest.doc, &open.run_dir, &open.events).await?;
+        yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;
     let Some((_, escalation)) = decision else {
         return Err(CliError::msg(format!(
             "run {called} waits on no decision — `{}` says where it stands",

@@ -15,7 +15,8 @@ use yunta_core::events::StoredEvent;
 use yunta_core::units::Tokens;
 use yunta_core::{ContentHash, ModeName, RunId, Workflow};
 
-use crate::stats::{compute_run_stats, median};
+use crate::replay::derive;
+use crate::stats::{median, stats_observed_at};
 
 /// One past run's contribution to a workflow's history — enough to drive
 /// `--workflow`'s comparison table and the prior estimation below.
@@ -31,20 +32,21 @@ pub struct RunSummary {
 }
 
 /// Builds one run's summary from its workflow and event log — the per-run
-/// unit `--workflow`'s aggregate views fold over.
+/// unit `--workflow`'s aggregate views fold over. The log is derived once,
+/// and its mode is the one the state reads off `run_created`.
 pub fn run_summary(
     run_id: RunId,
-    mode: ModeName,
     workflow_hash: ContentHash,
     workflow: &Workflow,
     events: &[StoredEvent],
 ) -> RunSummary {
-    let stats = compute_run_stats(workflow, events);
+    let state = derive(events);
+    let stats = stats_observed_at(&state, workflow, None);
     RunSummary {
         run_id,
-        mode,
+        mode: state.run.mode().clone(),
         workflow_hash,
-        tokens: stats.total_tokens.total(),
+        tokens: state.spend().so_far().total(),
         wall_clock: stats.wall_clock,
         tasks_total: stats.tasks_total,
         cptv: stats.cptv,

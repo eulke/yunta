@@ -19,7 +19,7 @@ use yunta_core::events::{
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{PauseReason, RunPausedPayload, TaskRegisteredPayload};
 use yunta_core::events::{SessionEvent, ToolTarget, WriteRefusedPayload};
-use yunta_core::{Seq, SessionId};
+use yunta_core::{NodeId, Seq, SessionId};
 use yunta_engine::{dedup_findings, derive, NodeState};
 use yunta_testkit_core::Log;
 
@@ -40,6 +40,10 @@ fn tokens(input: u64, output: u64) -> TokenUsage {
         output,
         cached: None,
     }
+}
+
+fn started(attempt: u32) -> EventPayload {
+    EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(attempt)))
 }
 
 #[test]
@@ -67,7 +71,7 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
             tokens: tokens(10, 5),
         })
     );
-    assert_eq!(state.total_tokens(), tokens(10, 5));
+    assert_eq!(state.spend().so_far(), tokens(10, 5));
 }
 
 #[test]
@@ -108,7 +112,7 @@ fn a_retryable_failure_can_restart_and_then_finish() {
         })
     );
     // Both the failed attempt and the finishing one count toward the total.
-    assert_eq!(state.total_tokens(), tokens(8, 3));
+    assert_eq!(state.spend().so_far(), tokens(8, 3));
 }
 
 #[test]
@@ -153,6 +157,23 @@ fn a_second_node_started_is_a_restart_not_a_broken_log() {
         state.nodes.state("lint"),
         Some(yunta_engine::NodeState::Running { attempt: 2 })
     ));
+}
+
+#[test]
+fn a_node_counts_the_highest_attempt_it_reached() {
+    let events = Log::for_run("run-1")
+        .node("build", started(1))
+        .after(5)
+        .node("build", started(1))
+        .build();
+
+    assert_eq!(
+        derive(&events)
+            .nodes
+            .get(&NodeId::from("build"))
+            .map(|record| record.attempts),
+        Some(1)
+    );
 }
 
 #[test]
@@ -490,16 +511,13 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
 /// taken off.
 const AUDIT_KINDS: &[&str] = &[
     "finding_refused",
-    "asking_opened",
     "context_assembled",
     "scope_checked",
     "hook_executed",
     "pull_request_opened",
     "write_formatted",
     "run_tool_refused",
-    "service_unreachable",
     "service_reachable",
-    "task_check_started",
     "task_check_answered",
 ];
 

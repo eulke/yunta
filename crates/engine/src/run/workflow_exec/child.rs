@@ -15,6 +15,7 @@ use super::super::node_close::{close_node, fail, ChildRun, Close};
 use super::super::node_exec::{cancelled_end, NodeEnd};
 use super::super::{RunCtx, RunError, RunTerminal};
 use super::{runs_root, worktrees_root};
+use crate::replay::RunView;
 
 /// Re-enters an existing, unfinished child run — everything it needs is
 /// its own frozen truth (manifest + paths + log), never re-resolved.
@@ -47,10 +48,8 @@ pub(super) async fn resume_child(
             // The checkout the child's own log names; a log that names none
             // was written when a child's tree was named after it.
             let child_events = ctx.storage.events_for_run(child_id.clone()).await?;
-            let bound = crate::replay::derive(&child_events)
-                .run
-                .checkout()
-                .map(Path::to_path_buf);
+            let child = RunView::of(child_events).state;
+            let bound = child.run.checkout().map(Path::to_path_buf);
             let tree = bound.unwrap_or_else(|| {
                 child_manifest
                     .paths
@@ -174,7 +173,7 @@ pub(super) async fn drive_child(
                         current_id.clone(),
                         current_manifest.workflow_hash.clone(),
                         TerminalState::Done,
-                        report.state.total_tokens(),
+                        report.state.metrics().tokens,
                     ))),
                 )
                 .await?;
@@ -211,7 +210,7 @@ pub(super) async fn drive_child(
                         current_id.clone(),
                         current_manifest.workflow_hash.clone(),
                         TerminalState::Promoted,
-                        report.state.total_tokens(),
+                        report.state.metrics().tokens,
                     ))),
                 )
                 .await?;
@@ -274,7 +273,7 @@ pub(super) async fn drive_child(
                         current_id.clone(),
                         current_manifest.workflow_hash.clone(),
                         TerminalState::Failed,
-                        report.state.total_tokens(),
+                        report.state.metrics().tokens,
                     ))),
                 )
                 .await?;

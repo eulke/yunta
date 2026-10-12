@@ -2,9 +2,9 @@
 //! node only it leads to — the way a mode leaves a node out, and says
 //! why.
 
-use yunta_core::events::{run_left_out, EventPayload, NodeEvent, StoredEvent};
+use yunta_core::events::{EventPayload, NodeEvent, StoredEvent};
 use yunta_core::{Because, CommandName, ConfigKey, ConfigLayer, Workflow};
-use yunta_engine::{CheckError, NodeStanding, RunReport, RunTerminal};
+use yunta_engine::{derive, CheckError, NodeStanding, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 /// A lint the project may not have, the fix only a failing lint leads
@@ -54,7 +54,9 @@ async fn an_optional_node_the_project_cannot_run_is_left_out_and_its_dependents_
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();
     assert_eq!(started(&events), ["build", "ship"]);
-    let left: Vec<String> = run_left_out(&events)
+    let left: Vec<String> = derive(&events)
+        .run
+        .left_out()
         .iter()
         .map(|left| left.node.to_string())
         .collect();
@@ -72,7 +74,7 @@ async fn an_optional_node_runs_where_the_project_declares_it() {
     assert_eq!(terminal, RunTerminal::Finished);
     let events = bench.events();
     assert_eq!(started(&events), ["build", "lint", "ship"]);
-    assert!(run_left_out(&events).is_empty());
+    assert!(derive(&events).run.left_out().is_empty());
 }
 
 /// A mode may never drop an invariant; a project may lack what it needs.

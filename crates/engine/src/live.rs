@@ -1,20 +1,18 @@
 //! What a node is doing right now, read off the node ledger.
 //!
-//! Each of these used to walk the log with a rule of its own — where an
-//! attempt began, when the node last said anything, which sessions count
-//! as open, what the open attempt has spent. They are all facts the
-//! [`NodeLedger`](yunta_core::events::NodeLedger) already folds, and
-//! this module is what names them in the words a surface asks in.
+//! Each of these is a fact the [`NodeLedger`](yunta_core::events::NodeLedger)
+//! already folds: where an attempt began, when the node last said anything,
+//! which sessions are open, what the open attempt calls were. This module
+//! names them in the words a surface asks in.
 //!
 //! Reads the node domain only.
 
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::{StoredEvent, TokenUsage};
 use yunta_core::NodeId;
 
-use crate::replay::{derive, RunState};
+use crate::replay::RunState;
 
 pub use yunta_core::events::{OpenSession, ToolCall};
 
@@ -68,33 +66,4 @@ pub fn recent_tool_calls(state: &RunState, node: &NodeId, limit: usize) -> Vec<T
         return Vec::new();
     };
     record.calls.iter().rev().take(limit).cloned().collect()
-}
-
-/// What the run has spent including the attempts still open — the number
-/// a surface shows while a run is moving.
-pub fn live_total_tokens(events: &[StoredEvent]) -> TokenUsage {
-    live_total_tokens_of(&derive(events))
-}
-
-/// [`live_total_tokens`] for a caller that has already replayed the log
-/// — a frame derives once and reads everything off that one pass.
-pub(crate) fn live_total_tokens_of(state: &RunState) -> TokenUsage {
-    state.total_tokens() + in_flight_tokens(state)
-}
-
-/// The usage reported by nodes whose current attempt has not closed:
-/// every start opens a node's accounting again from zero, so this is
-/// what the attempts now running have reported, never a sum across
-/// attempts.
-///
-/// A closed attempt is paid for by its terminal — or, for a node that
-/// asked, by the `questions_asked` that closed its accounting — which is
-/// why this drops the moment one arrives.
-fn in_flight_tokens(state: &RunState) -> TokenUsage {
-    state
-        .nodes
-        .values()
-        .filter(|record| record.open_since.is_some())
-        .map(|record| record.tokens_in_flight)
-        .sum()
 }

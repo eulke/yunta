@@ -11,7 +11,6 @@ use yunta_core::{ModeName, NodeId, RunId};
 
 use crate::replay::RunState;
 use crate::reserved::ReservedOption;
-use crate::stats::tasks_done;
 
 use super::{
     budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
@@ -34,9 +33,11 @@ pub(super) async fn broken(ctx: &RunCtx<'_>, diagnostic: String) -> RunError {
 }
 
 /// Closes the run's log, whichever way it ends: the one `run_finished`
-/// any ending writes, the forensic export that follows it, and — only at
-/// a real `Done` — the worktree cleanup `on_finish` asked for. Returns
-/// the state the close recorded, which is what every report carries.
+/// any ending writes, the cleanup that follows it — and, only at a real
+/// `Done`, the worktree cleanup `on_finish` asked for — then the forensic
+/// export. Returns the state of the closed log, the close and any finding
+/// its cleanup recorded included, which is what every report carries: a
+/// paused run's report holds its pause the same way.
 ///
 /// One function because one close: three of them meant three places
 /// that could each decide what a run costs and how many tasks it did.
@@ -44,30 +45,25 @@ pub(super) async fn finish(
     ctx: &RunCtx<'_>,
     terminal: TerminalState,
 ) -> Result<RunState, RunError> {
-    let state = ctx.run_view().await?.state;
-    ctx.emit(
-        None,
-        EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
-            terminal,
-            state.total_tokens(),
-            tasks_done(&state),
-        ))),
-    )
-    .await?;
-    ctx.export_events_jsonl().await?;
+    let open = ctx.run_view().await?.state;
+    let closed = RunFinishedPayload::closed(terminal, open.metrics());
+    ctx.emit(None, EventPayload::Run(RunEvent::Finished(closed)))
+        .await?;
     super::cleanup::units(ctx).await;
     if terminal != TerminalState::Promoted {
         super::cleanup::run(ctx).await;
     }
-    // `on_finish.cleanup: worktree` — after the export, only at a real Finish
-    // (a paused run expects a resume in that tree; a promoted one seeds its
-    // successor's worktree from it). A cleanup failure warns and never
-    // un-finishes the run the log already closed.
-    if terminal != TerminalState::Done {
-        return Ok(state);
+    // `on_finish.cleanup: worktree`, only at a real Finish: a paused run
+    // expects a resume in that tree, and a promoted one seeds its
+    // successor's worktree from it. A cleanup that cannot run is a finding
+    // on the closed log and never un-finishes the run.
+    if terminal == TerminalState::Done {
+        super::cleanup::worktrees(ctx).await?;
     }
-    super::cleanup::worktrees(ctx).await?;
-    Ok(state)
+    // One read once the log is whole: the export and the report hold it.
+    let view = ctx.run_view().await?;
+    ctx.export(&view.events)?;
+    Ok(*view.state)
 }
 
 /// Every node is done: distill what the run learned, then close it.
@@ -180,7 +176,7 @@ pub(super) async fn gate_exhausted(
     })?;
     let Some(choice) = escalation::decided(ctx, state, &node, &escalation).await? else {
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
-        // let a later `yunta resume` (or a future MCP client) carry the
+        // let a later `yunta resume` (or an MCP client) carry the
         // decision instead.
         return Ok(Some(
             pause(ctx, PauseReason::Escalation(Box::new(escalation.clone()))).await?,
@@ -303,7 +299,7 @@ pub(super) async fn execute_batch(
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run)
         {
-            let spent = state.total_tokens().total();
+            let spent = state.spend().so_far().total();
             if spent >= cap {
                 let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap)
                     .map_err(|source| RunError::Escalation {

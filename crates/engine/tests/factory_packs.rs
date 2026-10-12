@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{run_left_out, EventPayload, NodeEvent};
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_core::events::{EventPayload, NodeEvent};
+use yunta_engine::{derive, NodeState, RunReport, RunTerminal};
 use yunta_testkit::{
     bare_origin, git, write, ApproveEverything, Bench, INITIAL_BRANCH, MOCK_CONFIG,
 };
@@ -201,7 +201,9 @@ async fn yunta_fragua_leaves_lint_out_where_the_project_declares_none() {
     let (bench, forge, RunReport { terminal, state }) = quick_run("").await;
 
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
-    let left: Vec<String> = run_left_out(&bench.events())
+    let left: Vec<String> = derive(&bench.events())
+        .run
+        .left_out()
         .iter()
         .map(|left| left.node.to_string())
         .collect();

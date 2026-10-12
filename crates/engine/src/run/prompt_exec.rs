@@ -81,7 +81,7 @@ async fn resume_target(
     if policy != yunta_core::OnInterrupt::ResumeSession {
         return Ok(None);
     }
-    let state = crate::replay::derive(&ctx.load_events().await?);
+    let state = ctx.run_view().await?.state;
     // A session that worked in the run's own tree started in the checkout
     // the run left behind when it woke somewhere else.
     let left_behind = !crate::audits(node) && state.run.moved_on_waking();

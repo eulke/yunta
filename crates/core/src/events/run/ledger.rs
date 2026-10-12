@@ -11,10 +11,12 @@ use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::run::kinds::RunEvent;
+use crate::events::run::metrics::RunMetrics;
 use crate::events::run::suspensions::{Suspension, Suspensions};
 use crate::events::{
     BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, EnvironmentDrift, Evidence,
-    ExecutionEnvironment, PauseReason, PromotionCause, TerminalState, TokenUsage,
+    ExecutionEnvironment, PauseReason, PromotionCause, RunCreatedPayload, RunFinishedPayload,
+    RunResumedPayload, TerminalState,
 };
 use crate::ids::{ModeName, Seq};
 
@@ -46,21 +48,40 @@ pub struct Promotion {
     pub at: Seq,
 }
 
+/// How the run closed, as the `run_finished` that closed it recorded it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Finished {
+    pub terminal: TerminalState,
+    pub seq: Seq,
+    pub at: DateTime<Utc>,
+    pub metrics: RunMetrics,
+    pub closed_by: Option<crate::Responder>,
+}
+
+impl Finished {
+    /// The close `payload` records, placed by its envelope.
+    fn of(payload: &RunFinishedPayload, meta: &EventMeta<'_>) -> Self {
+        Finished {
+            terminal: payload.terminal_state,
+            seq: meta.seq,
+            at: meta.at,
+            metrics: payload.metrics.clone(),
+            closed_by: payload.closed_by.clone(),
+        }
+    }
+}
+
 /// The run's own events, folded.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RunLedger {
     phase: RunPhaseRaw,
     mode: ModeName,
     left_out: Vec<crate::LeftOut>,
-    born_at: Option<DateTime<Utc>>,
-    closed: Option<(TerminalState, Seq)>,
+    /// The last close the log records for this run.
+    finished: Option<Finished>,
     paused: Option<(PauseReason, Seq)>,
     resumed_after: Option<Seq>,
     promotion: Option<Promotion>,
-    /// What the run's own close reported it spent. A run that has not
-    /// closed reports nothing here; the running total is the node
-    /// ledger's.
-    closed_tokens: Option<TokenUsage>,
     /// The measurement this run holds: its own, or the one it was born
     /// holding. `None` for a lineage whose root declared no suite.
     baseline: Option<BaselineCapturedPayload>,
@@ -185,20 +206,9 @@ impl RunLedger {
         &self.left_out
     }
 
-    /// When the run's first event was written; `None` for a log with
-    /// none.
-    pub fn born_at(&self) -> Option<DateTime<Utc>> {
-        self.born_at
-    }
-
-    /// How the run closed, and where.
-    pub fn closed(&self) -> Option<(&TerminalState, Seq)> {
-        self.closed.as_ref().map(|(state, seq)| (state, *seq))
-    }
-
-    /// What the run closed reporting it spent.
-    pub fn closed_tokens(&self) -> Option<TokenUsage> {
-        self.closed_tokens
+    /// How the run closed, if it did.
+    pub fn finished(&self) -> Option<&Finished> {
+        self.finished.as_ref()
     }
 
     /// Why the run is parked, when it is: a `run_paused` with no
@@ -230,44 +240,21 @@ impl RunLedger {
 
     /// Folds one of the run's own events.
     pub fn apply(&mut self, event: &RunEvent, meta: &EventMeta<'_>) {
-        if self.born_at.is_none() {
-            self.born_at = Some(meta.at);
-        }
         match event {
-            RunEvent::Created(p) => {
-                self.phase = RunPhaseRaw::Open;
-                self.mode = p.mode.clone();
-                self.left_out = p.left_out.clone();
-                self.opens_on_base = p.opens_on_base;
-                self.checkout = p.checkout.clone();
-                self.bound_at = p.checkout.as_ref().map(|_| meta.seq);
-                self.invocations
-                    .push((meta.seq, p.environment.as_deref().cloned()));
-            }
+            RunEvent::Created(p) => self.created(p, meta),
             RunEvent::Paused(p) => {
                 self.woken = true;
                 self.phase = RunPhaseRaw::Paused;
                 self.paused = Some((p.pause.clone(), meta.seq));
             }
-            RunEvent::Resumed(p) => {
-                self.woken = true;
-                self.phase = RunPhaseRaw::Open;
-                self.resumed_after = Some(meta.seq);
-                self.invocations.push((meta.seq, p.environment.clone()));
-                if let Some(checkout) = &p.checkout {
-                    self.checkout = Some(checkout.clone());
-                    self.moved_at = Some(meta.seq);
-                    self.bound_at = Some(meta.seq);
-                }
-            }
+            RunEvent::Resumed(p) => self.resumed(p, meta),
             RunEvent::Moved(p) => {
                 self.checkout = Some(p.checkout.clone());
                 self.bound_at = Some(meta.seq);
             }
             RunEvent::Finished(p) => {
                 self.phase = RunPhaseRaw::Closed;
-                self.closed = Some((p.terminal_state, meta.seq));
-                self.closed_tokens = Some(p.metrics.tokens);
+                self.finished = Some(Finished::of(p, meta));
             }
             RunEvent::BaselineCaptured(p) => {
                 // Measuring is something an invocation does; being born
@@ -295,6 +282,33 @@ impl RunLedger {
                     at: meta.seq,
                 });
             }
+        }
+    }
+
+    /// The run's birth: what it is, where it works and the environment its
+    /// first invocation ran with.
+    fn created(&mut self, p: &RunCreatedPayload, meta: &EventMeta<'_>) {
+        self.phase = RunPhaseRaw::Open;
+        self.mode = p.mode.clone();
+        self.left_out = p.left_out.clone();
+        self.opens_on_base = p.opens_on_base;
+        self.checkout = p.checkout.clone();
+        self.bound_at = p.checkout.as_ref().map(|_| meta.seq);
+        self.invocations
+            .push((meta.seq, p.environment.as_deref().cloned()));
+    }
+
+    /// A wake: the run works again under the invocation that woke it, and
+    /// moves to another checkout when the wake names one.
+    fn resumed(&mut self, p: &RunResumedPayload, meta: &EventMeta<'_>) {
+        self.woken = true;
+        self.phase = RunPhaseRaw::Open;
+        self.resumed_after = Some(meta.seq);
+        self.invocations.push((meta.seq, p.environment.clone()));
+        if let Some(checkout) = &p.checkout {
+            self.checkout = Some(checkout.clone());
+            self.moved_at = Some(meta.seq);
+            self.bound_at = Some(meta.seq);
         }
     }
 }

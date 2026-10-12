@@ -8,13 +8,14 @@ use std::path::Path;
 use yunta_core::events::NodeState;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
+use yunta_render::spend::Breakdown;
 
 use crate::commands::advice;
 use crate::error::CliError;
 use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
 use crate::render::doc::Doc;
 use crate::render::ink::{Line, Tone};
-use crate::render::{duration, paths, wrap, Look, Tokens, INDENT};
+use crate::render::{duration, paths, wrap, Look, INDENT};
 
 /// What the page is drawn from.
 pub(super) struct NodePage<'a> {
@@ -131,11 +132,7 @@ impl NodePage<'_> {
             .unwrap_or_default();
         let tokens = match node.tokens.total() {
             0 => String::new(),
-            _ => format!(
-                "{} in / {} out",
-                Tokens(node.tokens.input).figure(),
-                Tokens(node.tokens.output).figure()
-            ),
+            _ => Breakdown(&node.tokens).to_string(),
         };
         let produced: Vec<String> = node
             .artifacts

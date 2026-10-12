@@ -6,10 +6,11 @@
 //! alike. It derives node lifecycle
 //! (`node_started`/`node_finished`/`node_failed`), task status and the
 //! node each task belongs to (`task_registered`/`task_status_changed`),
-//! plus the running token total `limits.max_tokens_per_run` is compared
-//! against. `waiting` is derived too: a published gate without its
-//! resolution (the state that outlives an invocation), and a node that
-//! recorded `questions_asked` with no `questions_answered` beside it.
+//! what the run has spent, which `limits.max_tokens_per_run` is compared
+//! against, and the wall clock the run has used. `waiting` is derived
+//! too: a published gate without its resolution (the state that outlives
+//! an invocation), and a node that recorded `questions_asked` with no
+//! `questions_answered` beside it.
 //! Both are the same shape — a fact that opens the wait and one that
 //! closes it — and both round-trip back to the node's prior state by
 //! construction, so a node that asked comes back `Running`, owed the
@@ -22,23 +23,34 @@
 //! that point is still returned.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::findings::FindingLedger;
 use yunta_core::events::tasks::ledger::UnknownTask;
 use yunta_core::events::{
-    ChildLedger, DegradationLedger, EventMeta, EventPayload, Finding, GateEvent, GateLedger,
-    GrantLedger, NodeEvent, NodeLedger, RunLedger, SessionEvent, StoredEvent, TaskLedger,
+    ChildLedger, DegradationLedger, EventMeta, EventPayload, Failure, Finding, GateLedger,
+    GrantLedger, NodeLedger, RunEvent, RunLedger, RunMetrics, Spend, StoredEvent, TaskLedger,
     TokenUsage,
 };
-use yunta_core::{NodeId, NonEmpty, Seq, TaskId};
+use yunta_core::{NodeId, Seq};
 
 /// Re-exported where it has always been read from: the node states this
 /// module derives are `yunta_core::events`' to define now, and every
 /// caller keeps naming them here.
 pub use yunta_core::events::{NodeState, NodeWait};
 
+mod activity;
+mod clock;
 mod decisions;
+mod refuse;
+
+pub use clock::TimeSpent;
+pub use refuse::ReplayError;
+
+use activity::Activity;
+use clock::{Open, Timeline};
 
 /// Every fold of a run's log, in one value.
 ///
@@ -46,7 +58,7 @@ mod decisions;
 /// mean. A surface that counts attempts, lists findings, asks what a
 /// task is doing or where a gate stands reads the ledger rather than
 /// walking the log with a rule of its own.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RunState {
     pub run: RunLedger,
     pub nodes: NodeLedger,
@@ -70,6 +82,37 @@ pub struct RunState {
     /// leaves a `Failed` node `Failed`, and a node that asked comes back
     /// `Running`.
     pre_gate: HashMap<NodeId, Option<NodeState>>,
+    /// The run's wall clock: its first event, its last applied event, and
+    /// every stretch booked between them. Boxed, with the activity, so a
+    /// state held across the awaits of a run stays the size of its facts.
+    clock: Box<Timeline>,
+    /// Submissions and finding calls the log carries, for the run and for
+    /// each node that made one.
+    activity: Box<Activity>,
+    /// Whether the last event applied was a pause.
+    tail_paused: bool,
+}
+
+/// Two states are the same when they derive the same facts. The clock and
+/// the activity are read beside those facts and are left out of the
+/// comparison: an event delivered twice derives the same facts, while the
+/// activity counts both deliveries.
+impl PartialEq for RunState {
+    fn eq(&self, other: &Self) -> bool {
+        self.run == other.run
+            && self.nodes == other.nodes
+            && self.degradations == other.degradations
+            && self.tasks == other.tasks
+            && self.grants == other.grants
+            && self.findings == other.findings
+            && self.artifacts == other.artifacts
+            && self.gates == other.gates
+            && self.children == other.children
+            && self.unknown_kinds == other.unknown_kinds
+            && self.broken == other.broken
+            && self.pre_gate == other.pre_gate
+            && self.tail_paused == other.tail_paused
+    }
 }
 
 impl RunState {
@@ -95,14 +138,80 @@ impl RunState {
             || self.broken.is_some()
     }
 
-    /// What the whole run has spent: every node's closed attempts, what
-    /// is in flight, and every child run's own total.
-    pub fn total_tokens(&self) -> TokenUsage {
+    /// What the run has spent. A closed run answers with what its close
+    /// recorded, and nothing is in flight once it has closed; an open one
+    /// sums every node's spend and every child run's total.
+    pub fn spend(&self) -> Spend {
+        match self.run.finished() {
+            Some(finished) => Spend {
+                settled: finished.metrics.tokens,
+                in_flight: TokenUsage::default(),
+            },
+            None => {
+                self.nodes
+                    .values()
+                    .map(|record| record.spend)
+                    .sum::<Spend>()
+                    + Spend {
+                        settled: self.children.tokens(),
+                        in_flight: TokenUsage::default(),
+                    }
+            }
+        }
+    }
+
+    /// The run's metrics as its close would record them at this point.
+    pub fn metrics(&self) -> RunMetrics {
+        RunMetrics::of(self.spend().so_far(), self.tasks.done())
+    }
+
+    /// Where the run's wall-clock went. With `until`, the stretch from the
+    /// last applied event to it is counted too, classified by what is open
+    /// now.
+    pub fn time_spent(&self, until: Option<DateTime<Utc>>) -> TimeSpent {
+        let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
+        self.clock.spent(&open, self.run.suspensions(), until)
+    }
+
+    /// The awake time from the first event to `until`, or to the last
+    /// applied event when `until` is `None`. `None` for a log with no event.
+    pub fn elapsed(&self, until: Option<DateTime<Utc>>) -> Option<Duration> {
+        let (first, end) = self.clock.window(until)?;
+        Some(self.run.suspensions().awake_between(first, end))
+    }
+
+    /// Whether the run has closed, or its log has broken before it could.
+    pub fn ended(&self) -> bool {
+        self.run.finished().is_some() || self.broken.is_some()
+    }
+
+    /// The failure the run stands on: the one of the node still in
+    /// `Failed` that failed last.
+    pub fn last_failure(&self) -> Option<Failure> {
         self.nodes
-            .iter()
-            .map(|(_, record)| record.tokens_closed)
-            .sum::<TokenUsage>()
-            + self.children.tokens()
+            .values()
+            .filter_map(|record| match (&record.state, record.last_failed) {
+                (Some(NodeState::Failed { failure, .. }), Some(seq)) => Some((seq, failure)),
+                _ => None,
+            })
+            .max_by_key(|(seq, _)| *seq)
+            .map(|(_, failure)| failure.clone())
+    }
+
+    /// Whether the last event applied was a pause.
+    pub fn tail_paused(&self) -> bool {
+        self.tail_paused
+    }
+
+    /// The run's clock: its first and last event, and every stretch booked
+    /// between them.
+    pub fn clock(&self) -> &Timeline {
+        &self.clock
+    }
+
+    /// What sessions handed the run and what the engine answered.
+    pub(crate) fn activity(&self) -> &Activity {
+        &self.activity
     }
 
     /// Every finding that stands, in the order each was first posted.
@@ -146,13 +255,14 @@ impl RunState {
         answered && owed
     }
 
-    /// Whether nothing has been derived from this state's log beyond
-    /// the fact that a node was heard from — a node record carrying a
+    /// Whether nothing has been derived from this state's log beyond the
+    /// fact that a node was heard from — a node record carrying a
     /// timestamp and no derivation behind it.
     ///
     /// What a kind of event states about the run, told apart from the
     /// envelope every event carries: `a_kind_that_moves_no_state_says_so_by_name`
     /// pairs this with an explicit list of the kinds that move no state.
+    /// The clock and the activity are not compared, as in equality.
     pub fn derives_nothing(&self) -> bool {
         let heard_from_only = self.nodes.iter().all(|(_, record)| {
             *record
@@ -170,10 +280,39 @@ impl RunState {
 
     /// Folds one event into every ledger its domain reaches.
     ///
+    /// The order is fixed. The event is refused first, so a refused event
+    /// moves nothing and books no time. A suspension the event states is
+    /// recorded next, before the stretch it ends is booked, so that
+    /// stretch leaves the sleep out. The stretch is then booked against
+    /// what the ledgers hold open, and each owner folds the event. The
+    /// activity counts it last.
+    ///
     /// The dispatch names every domain: a kind this binary knows and no
     /// ledger reads would be a kind that silently derives nothing, which
     /// is the failure this shape exists to make impossible.
     pub fn apply(&mut self, event: &StoredEvent) -> Result<(), ReplayError> {
+        self.refuse(event)?;
+        let meta = EventMeta::of(event);
+        if let Some(EventPayload::Run(e @ RunEvent::HostSuspended(_))) = event.payload() {
+            self.run.apply(e, &meta);
+        }
+        let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
+        self.clock.book(event, &open, self.run.suspensions());
+        self.apply_owners(event, &meta)?;
+        self.activity.apply(event);
+        self.tail_paused = matches!(
+            event.payload(),
+            Some(EventPayload::Run(RunEvent::Paused(_)))
+        );
+        Ok(())
+    }
+
+    /// Hands the event to every ledger that reads its domain.
+    fn apply_owners(
+        &mut self,
+        event: &StoredEvent,
+        meta: &EventMeta<'_>,
+    ) -> Result<(), ReplayError> {
         let Some(payload) = event.payload() else {
             // A kind this binary does not know: counted, named, never a
             // reason to stop deriving what it does know.
@@ -181,189 +320,59 @@ impl RunState {
                 .push((event.seq, event.body.kind_name().to_string()));
             return Ok(());
         };
-        let meta = EventMeta::of(event);
         match payload {
-            EventPayload::Run(e) => self.run.apply(e, &meta),
+            EventPayload::Run(e) => self.apply_run(e, meta),
             EventPayload::Node(e) => {
-                self.node_lifecycle(e, event)?;
-                self.nodes.apply(e, &meta);
+                self.nodes.apply(e, meta, self.run.suspensions());
                 self.tasks.apply_criteria(e);
             }
             EventPayload::Session(e) => {
-                self.session_fact(e, event)?;
-                self.tasks.apply_session(e);
-                self.degradations.apply(e, &meta);
-            }
-            EventPayload::Tasks(e) => {
-                self.tasks.apply(e, &meta).map_err(|UnknownTask(task)| {
-                    ReplayError::StatusWithoutTask {
+                self.nodes
+                    .apply_session(e, meta)
+                    .map_err(|_| ReplayError::SessionWithoutNode {
                         seq: event.seq,
-                        task,
-                    }
-                })?;
+                        kind: event.body.kind_name().to_string(),
+                    })?;
+                self.tasks.apply_session(e);
+                self.degradations.apply(e, meta);
             }
-            EventPayload::Scope(e) => {
-                self.grants
-                    .apply(e, &meta)
-                    .map_err(|_| ReplayError::UngrantableSubject { seq: event.seq })?;
-            }
+            EventPayload::Tasks(e) => self.tasks.apply(e, meta).map_err(|UnknownTask(task)| {
+                ReplayError::StatusWithoutTask {
+                    seq: event.seq,
+                    task,
+                }
+            })?,
+            EventPayload::Scope(e) => self
+                .grants
+                .apply(e, meta)
+                .map_err(|_| ReplayError::UngrantableSubject { seq: event.seq })?,
             EventPayload::Findings(e) => self.findings.apply(event.node_id.as_ref(), e),
             EventPayload::Artifacts(e) => {
                 self.artifacts.apply(event.node_id.as_ref(), event.seq, e);
             }
             EventPayload::Gates(e) => {
-                self.gate_lifecycle(e, event)?;
-                self.gates.apply(e, &meta);
+                self.gate_transition(e, event, meta)?;
+                self.gates.apply(e, meta);
             }
-            EventPayload::Children(e) => self.children.apply(e, &meta),
+            EventPayload::Children(e) => self.children.apply(e, meta),
         }
         Ok(())
     }
 
-    /// The part of a node's lifecycle that is a rule about the log
-    /// rather than a fold of it: a terminal with no start behind it is a
-    /// log that stopped making sense.
-    fn node_lifecycle(
-        &mut self,
-        event: &NodeEvent,
-        stored: &StoredEvent,
-    ) -> Result<(), ReplayError> {
-        let running = |state: Option<&NodeState>| matches!(state, Some(NodeState::Running { .. }));
-        match event {
-            NodeEvent::Finished(_) => {
-                let node = require_node_id(stored)?;
-                if !running(self.nodes.state(&node)) {
-                    return Err(ReplayError::FinishedWithoutStart {
-                        seq: stored.seq,
-                        node,
-                    });
-                }
-            }
-            NodeEvent::Failed(_) => {
-                let node = require_node_id(stored)?;
-                if !running(self.nodes.state(&node)) {
-                    return Err(ReplayError::FailedWithoutStart {
-                        seq: stored.seq,
-                        node,
-                    });
-                }
-            }
-            NodeEvent::Started(_) => {
-                require_node_id(stored)?;
-            }
-            // Audit around the node, and the runner it resolved to:
-            // neither is a transition, so neither can be out of order.
-            NodeEvent::Rerouted(_)
-            | NodeEvent::RunnerResolved(_)
-            | NodeEvent::HookExecuted(_)
-            | NodeEvent::ContextAssembled(_)
-            | NodeEvent::CriteriaChecked(_)
-            | NodeEvent::ScopeChecked(_)
-            | NodeEvent::PullRequestOpened(_) => {}
+    /// The run's own events. A host suspension was recorded before the clock
+    /// booked its stretch, so it is not folded again here; a pause, a resume
+    /// or a close ends every question the run still holds.
+    fn apply_run(&mut self, event: &RunEvent, meta: &EventMeta<'_>) {
+        if matches!(event, RunEvent::HostSuspended(_)) {
+            return;
         }
-        Ok(())
-    }
-
-    /// What a gate does to the node it parks. A gate and a round of
-    /// questions both suspend a node and restore it, and which state it
-    /// comes back to is the node ledger's to hold — so the transition
-    /// lives here, where both ledgers are in reach.
-    fn gate_lifecycle(
-        &mut self,
-        event: &GateEvent,
-        stored: &StoredEvent,
-    ) -> Result<(), ReplayError> {
-        // No node = a run-level escalation (the token budget check): it
-        // gates the whole invocation, not any node's state.
-        let Some(node) = stored.node_id.clone() else {
-            return Ok(());
-        };
-        match event {
-            GateEvent::Waiting(p) => {
-                self.pre_gate
-                    .insert(node.clone(), self.nodes.state(&node).cloned());
-                self.nodes.set_state(
-                    &node,
-                    Some(NodeState::Waiting {
-                        on: NodeWait::Gate {
-                            external_ref: p.external_ref().map(str::to_string),
-                        },
-                    }),
-                );
-            }
-            GateEvent::Resolved(_) => {
-                // Only restores while still `Waiting`: an external
-                // gate's poll resolution emits `node_started` *before*
-                // `gate_resolved`, so by then the node is already
-                // `Running` and the outcome events own its state.
-                if matches!(self.nodes.state(&node), Some(NodeState::Waiting { .. })) {
-                    let prior = self.pre_gate.remove(&node).flatten();
-                    self.nodes.set_state(&node, prior);
-                }
-            }
-            GateEvent::QuestionsAsked(p) => {
-                if !matches!(self.nodes.state(&node), Some(NodeState::Running { .. })) {
-                    return Err(ReplayError::AskedWithoutStart {
-                        seq: stored.seq,
-                        node,
-                    });
-                }
-                // A `questions_asked` with no ids is not a wait: its
-                // constructor refuses one, so a log that holds it came
-                // from somewhere else. The node stays as it was and the
-                // event is named, which is what a production fold owes
-                // instead of a panic.
-                let Some(asked) = NonEmpty::new(p.questions.clone()) else {
-                    return Err(ReplayError::AskedNothing {
-                        seq: stored.seq,
-                        node,
-                    });
-                };
-                // The attempt's accounting closes here: the session that
-                // asked is done, and no reader counts it again while the
-                // node waits.
-                self.nodes.add_closed_tokens(&node, p.tokens_used);
-                self.pre_gate
-                    .insert(node.clone(), self.nodes.state(&node).cloned());
-                self.nodes.set_state(
-                    &node,
-                    Some(NodeState::Waiting {
-                        on: NodeWait::Questions { asked },
-                    }),
-                );
-            }
-            GateEvent::QuestionsAnswered(_) => {
-                if !matches!(self.nodes.state(&node), Some(NodeState::Waiting { .. })) {
-                    return Err(ReplayError::AnsweredWithoutAsk {
-                        seq: stored.seq,
-                        node,
-                    });
-                }
-                // The answer reopens the node exactly where asking left
-                // it: `Running`, owed the terminal its close deferred.
-                let prior = self.pre_gate.remove(&node).flatten();
-                self.nodes.set_state(&node, prior);
-            }
-            // When the asking began moves no node: the wait it opens is
-            // the gate's or the round's, which their own events say.
-            GateEvent::AskingOpened(_) => {}
+        self.run.apply(event, meta);
+        if matches!(
+            event,
+            RunEvent::Paused(_) | RunEvent::Resumed(_) | RunEvent::Finished(_)
+        ) {
+            self.gates.clear_asking();
         }
-        Ok(())
-    }
-
-    /// A session fact is read against the node its session ran on: one
-    /// that names none cannot be read back, so the replay stops at it.
-    fn session_fact(
-        &mut self,
-        fact: &SessionEvent,
-        stored: &StoredEvent,
-    ) -> Result<(), ReplayError> {
-        self.nodes
-            .apply_session(fact, &EventMeta::of(stored))
-            .map_err(|_| ReplayError::SessionWithoutNode {
-                seq: stored.seq,
-                kind: stored.body.kind_name().to_string(),
-            })
     }
 }
 
@@ -373,13 +382,15 @@ impl RunState {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RunView {
     pub(crate) events: Vec<StoredEvent>,
-    pub(crate) state: RunState,
+    /// Boxed: a view is held across the awaits of every run step, and the
+    /// state is the bulk of it, so the futures of those steps stay small.
+    pub(crate) state: Box<RunState>,
 }
 
 impl RunView {
     /// Derives the state from the events, keeping both.
     pub(crate) fn of(events: Vec<StoredEvent>) -> Self {
-        let state = derive(&events);
+        let state = Box::new(derive(&events));
         Self { events, state }
     }
 }
@@ -442,38 +453,4 @@ fn normalized_title(title: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
-}
-
-fn require_node_id(event: &StoredEvent) -> Result<NodeId, ReplayError> {
-    event
-        .node_id
-        .clone()
-        .ok_or_else(|| ReplayError::MissingNodeId {
-            seq: event.seq,
-            kind: event.body.kind_name().to_string(),
-        })
-}
-
-/// The point at which the log stops making sense — what
-/// [`RunState::broken`] reports.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ReplayError {
-    #[error("seq {seq}: `{kind}` is missing node_id")]
-    MissingNodeId { seq: Seq, kind: String },
-    #[error("seq {seq}: node `{node}` got node_finished without a matching node_started")]
-    FinishedWithoutStart { seq: Seq, node: NodeId },
-    #[error("seq {seq}: node `{node}` got node_failed without a matching node_started")]
-    FailedWithoutStart { seq: Seq, node: NodeId },
-    #[error("seq {seq}: node `{node}` got questions_asked without a matching node_started")]
-    AskedWithoutStart { seq: Seq, node: NodeId },
-    #[error("seq {seq}: node `{node}` got questions_answered without a matching questions_asked")]
-    AnsweredWithoutAsk { seq: Seq, node: NodeId },
-    #[error("seq {seq}: node `{node}` got questions_asked naming no question to answer")]
-    AskedNothing { seq: Seq, node: NodeId },
-    #[error("seq {seq}: task `{task}` got task_status_changed without a prior task_registered")]
-    StatusWithoutTask { seq: Seq, task: TaskId },
-    #[error("seq {seq}: a grant names neither a task nor a node")]
-    UngrantableSubject { seq: Seq },
-    #[error("seq {seq}: `{kind}` is a session fact with no node")]
-    SessionWithoutNode { seq: Seq, kind: String },
 }

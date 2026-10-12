@@ -216,7 +216,7 @@ pub(super) async fn poll_gate(
 /// gate for the first time or re-checking one already `Finished` for
 /// SHA drift (see this module's own doc comment): a review only counts
 /// if it covers the PR's *current* head; anything
-/// else — no decisive review yet, or one that no longer covers the
+/// else — no decisive review recorded, or one that no longer covers the
 /// current commit — is "still waiting", not a decision.
 /// The gate continues: `gate_resolved` records who approved and the
 /// commit the approval covers, and the node finishes.
@@ -344,7 +344,7 @@ async fn resolve_from_poll(
 /// longer covers the PR's current head is re-opened (`node_started` at
 /// the next attempt) so the ordinary dispatch path re-resolves it fresh
 /// — `resolve_from_poll` naturally lands it back on "still waiting"
-/// when nothing new has been approved yet.
+/// when nothing new has been approved.
 ///
 /// **Only reachable while the run is still open.** Its one caller
 /// (`run/mod.rs::execute_run`) places this after the "already
@@ -363,7 +363,7 @@ pub(super) async fn recheck_approved_gates(
         return Ok(()); // nothing to re-check without a live forge
     };
 
-    let crate::replay::RunView { events, state } = ctx.run_view().await?;
+    let state = ctx.run_view().await?.state;
 
     for node in &ctx.manifest.workflow.nodes {
         if !matches!(node.kind, yunta_core::NodeKind::Gate { .. }) {
@@ -372,7 +372,6 @@ pub(super) async fn recheck_approved_gates(
         let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.state(&node.id) else {
             continue;
         };
-        let state = crate::replay::derive(&events);
         let Some(approved_sha) = state.gates.approved_sha(&node.id).cloned() else {
             continue;
         };
@@ -401,8 +400,8 @@ pub(super) async fn recheck_approved_gates(
 }
 
 pub(super) async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
-    let events = ctx.load_events().await?;
-    let attempts = crate::replay::derive(&events)
+    let state = ctx.run_view().await?.state;
+    let attempts = state
         .nodes
         .get(&node.id)
         .map_or(0, |record| record.attempts);

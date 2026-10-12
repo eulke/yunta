@@ -1,15 +1,15 @@
 //! Where a run as a whole stands, and what a parked one is waiting on.
 //!
-//! A run's phase is read off the tail of its own log: the close that
-//! ended it, the pause that stopped it, the resume or the node start
-//! that moved it again. Everything here is a pure function of that log
-//! and of the state replay derived from it.
+//! A run's phase is read off the state replay derived from its own log:
+//! the close that ended it, the pause that stopped it, the resume or the
+//! node start that moved it again. Everything here is a pure function of
+//! that state.
 //!
 //! A parked run carries the pause its own `run_paused` recorded, so the
 //! frame answers *what* a person is being asked for and not only *which*
 //! node is asking. No surface goes back to the log for it.
 
-use yunta_core::events::{Failure, PauseReason, StoredEvent, TerminalState};
+use yunta_core::events::{Failure, PauseReason, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 use crate::replay::{NodeState, NodeWait, RunState};
@@ -18,7 +18,7 @@ use yunta_core::events::RunPhaseRaw;
 /// Where the run as a whole stands, derived from the log alone.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunPhase {
-    /// The log carries no start yet.
+    /// The log carries no start event.
     Created,
     Running,
     /// Parked on a person: at least one node is on a published gate or
@@ -31,10 +31,10 @@ pub enum RunPhase {
     },
     /// `run_finished: done`.
     Finished,
-    /// `run_finished: failed`, carrying the failure of the last
-    /// `node_failed` on the log — `None` when the log closed the run as
-    /// failed with no node failure on it, since nothing here invents
-    /// one.
+    /// `run_finished: failed`, carrying the failure of the node still
+    /// standing in `Failed` that failed last — `None` when the log closed
+    /// the run as failed with no such node on it, since nothing here
+    /// invents one.
     Failed {
         failure: Option<Failure>,
     },
@@ -94,7 +94,7 @@ pub enum WaitingOn {
 
 /// The run's phase: a log that stopped making sense says so first, then
 /// the run's own close, then what it is parked on, then movement.
-pub(super) fn phase(workflow: &Workflow, state: &RunState, _events: &[StoredEvent]) -> RunPhase {
+pub(super) fn phase(workflow: &Workflow, state: &RunState) -> RunPhase {
     if let Some(diagnostic) = &state.broken {
         return RunPhase::Broken {
             diagnostic: diagnostic.clone(),
@@ -104,8 +104,8 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState, _events: &[StoredEven
     // says which node it stands on, when one does.
     match state.run.phase() {
         RunPhaseRaw::Unborn => RunPhase::Created,
-        RunPhaseRaw::Closed => match state.run.closed() {
-            Some((terminal, _)) => closed(terminal, state),
+        RunPhaseRaw::Closed => match state.run.finished() {
+            Some(finished) => closed(&finished.terminal, state),
             None => RunPhase::Created,
         },
         // A node parked on a person is the more precise answer, and it
@@ -131,23 +131,15 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState, _events: &[StoredEven
     }
 }
 
-/// How a closed run closed, with the evidence its own log carries for
-/// it: the last `node_failed`'s failure, the last `promotion_signaled`'s
-/// suggested mode.
+/// How a closed run closed, with the evidence its state carries for it:
+/// the failure still standing in a failed node, the mode a promotion
+/// signal suggested.
 fn closed(terminal: &TerminalState, state: &RunState) -> RunPhase {
     match terminal {
         TerminalState::Done => RunPhase::Finished,
         TerminalState::Cancelled => RunPhase::Cancelled,
         TerminalState::Failed => RunPhase::Failed {
-            failure: state
-                .nodes
-                .values()
-                .filter_map(|record| match (&record.state, record.last_failed) {
-                    (Some(NodeState::Failed { failure, .. }), Some(seq)) => Some((seq, failure)),
-                    _ => None,
-                })
-                .max_by_key(|(seq, _)| *seq)
-                .map(|(_, failure)| failure.clone()),
+            failure: state.last_failure(),
         },
         TerminalState::Promoted => RunPhase::Promoted {
             to: state.run.promotion().map(|promotion| promotion.to.clone()),

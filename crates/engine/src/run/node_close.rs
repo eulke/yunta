@@ -164,7 +164,7 @@ pub(super) async fn close_node(
                     return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
                 }
             };
-            if let Some(failure) = unexplained_plan(ctx, node, &events, &own) {
+            if let Some(failure) = unexplained_plan(ctx, node, &own).await? {
                 return fail_with(ctx, node, Failure::artifacts(vec![failure]), false, tokens)
                     .await;
             }
@@ -185,12 +185,11 @@ pub(super) async fn close_node(
             // the bytes the close happened to hold: the round that
             // follows resolves the same acceptance, and one number that
             // came from two places is one that can disagree with itself.
-            let events = ctx.load_events().await?;
+            let crate::replay::RunView { events, state } = ctx.run_view().await?;
             let questions_hash = held_questions(ctx, &events, &node.id)?;
             // Whether the round waits is the workflow's to say, under the
             // mode the run was created in.
-            let mode = yunta_core::events::run_mode(&events);
-            let waits = asked.waits(ctx.manifest.workflow.ask(node, &mode));
+            let waits = asked.waits(ctx.manifest.workflow.ask(node, state.run.mode()));
             match QuestionsAskedPayload::new(questions_hash, asked.ids, tokens) {
                 Some(payload) => {
                     ctx.emit(
@@ -457,16 +456,12 @@ async fn emit_failed(
 /// that does not say what it changes and why. The submission tool
 /// refuses one when it is handed over; this holds one that arrived as a
 /// file to the same rule.
-fn unexplained_plan(
+async fn unexplained_plan(
     ctx: &RunCtx<'_>,
     node: &yunta_core::Node,
-    events: &[yunta_core::events::StoredEvent],
     verified: &[crate::artifacts::VerifiedArtifact],
-) -> Option<yunta_core::diagnostic::ArtifactFailure> {
-    if !crate::tasks::plan_reviewed(&ctx.manifest.workflow, events, &node.id) {
-        return None;
-    }
-    verified.iter().find_map(|artifact| {
+) -> Result<Option<yunta_core::diagnostic::ArtifactFailure>, RunError> {
+    let unexplained = verified.iter().find_map(|artifact| {
         let crate::artifacts::ArtifactContent::Tasks(tasks) = &artifact.content else {
             return None;
         };
@@ -480,5 +475,15 @@ fn unexplained_plan(
                 broken,
             ))
         })
-    })
+    });
+    let Some(unexplained) = unexplained else {
+        return Ok(None);
+    };
+    // Only a document with an unexplained change asks the run's state
+    // whether its node is reviewed, so every other close reads no state.
+    let state = ctx.run_view().await?.state;
+    if !crate::tasks::plan_reviewed(&ctx.manifest.workflow, &state, &node.id) {
+        return Ok(None);
+    }
+    Ok(Some(unexplained))
 }

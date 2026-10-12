@@ -17,6 +17,7 @@ use yunta_core::events::{EventPayload, ScopeDerivedPayload, ScopeEvent};
 use yunta_core::{CommitSha, NodeId, ScopeGlob, Shape, Task, TasksFile};
 
 use crate::process::Supervision;
+use crate::replay::RunView;
 use crate::run::RunError;
 use crate::run_log::RunLog;
 
@@ -32,7 +33,7 @@ pub(crate) async fn derive_reach(
     tree: &Path,
     supervision: Supervision<'_>,
 ) -> Result<(), RunError> {
-    let stated = crate::replay::derive(&log.events().await?).grants;
+    let stated = RunView::of(log.events().await?).state.grants;
     let followed = document.shapes.iter().any(|shape| identifier(&shape.name));
     let restated = document
         .tasks

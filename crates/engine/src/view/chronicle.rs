@@ -66,7 +66,6 @@ pub enum Happening {
 /// then, not the ones the run ended with.
 pub fn chronicle(events: &[StoredEvent]) -> Vec<Moment> {
     let mut state = RunState::default();
-    let opened = events.first().map(|event| event.timestamp);
     events
         .iter()
         .map(|event| {
@@ -85,16 +84,10 @@ pub fn chronicle(events: &[StoredEvent]) -> Vec<Moment> {
             Moment {
                 seq: event.seq,
                 at: event.timestamp,
-                // On the run's awake clock: a moment after the host slept
-                // sits where the run's own time put it, not an hour on.
-                elapsed: opened
-                    .map(|first| {
-                        state
-                            .run
-                            .suspensions()
-                            .awake_between(first, event.timestamp)
-                    })
-                    .unwrap_or_default(),
+                // On the run's awake clock, read off the state this event
+                // leaves: a moment after the host slept sits where the
+                // run's own time put it, not an hour on.
+                elapsed: state.elapsed(Some(event.timestamp)).unwrap_or_default(),
                 node: event.node_id.clone(),
                 happening: happening(event, &meta, &before, &state),
             }

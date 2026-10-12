@@ -81,7 +81,7 @@ async fn settled_liveness(
 /// `gc` collects it.
 async fn give_back(ctx: &Context, open: &crate::context::Opened, run_id: &RunId) {
     let manifest = &open.manifest.doc;
-    let bound = crate::project::bound_checkout(&open.events);
+    let bound = crate::project::bound_checkout(&yunta_engine::derive(&open.events));
     let tree = ctx
         .project
         .run_tree(manifest, bound.as_deref(), run_id, &ctx.cwd);

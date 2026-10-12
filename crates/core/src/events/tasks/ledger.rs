@@ -7,13 +7,13 @@
 //! it is checked against cost — reads it here rather than walking the
 //! kinds itself: a second fold is a second answer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
 use crate::events::TaskStatus;
-use crate::events::{DeviationDeclaredPayload, DeviationResolvedPayload};
+use crate::events::{DeviationDeclaredPayload, DeviationResolvedPayload, TaskStatusChangedPayload};
 use crate::hash::CommitSha;
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
@@ -96,6 +96,10 @@ pub struct TaskLedger {
     /// the cost belongs to the command, not to the task that named it,
     /// so one suite guarding twenty tasks has one history.
     per_criterion: BTreeMap<String, Vec<u64>>,
+    /// The tasks a check is judging: each started, and none answered.
+    checking: BTreeSet<TaskId>,
+    /// The events a status change named as the cause of its move.
+    caused: BTreeSet<Seq>,
 }
 
 impl TaskLedger {
@@ -177,6 +181,17 @@ impl TaskLedger {
         self.per_criterion.get(cmd).map_or(&[], Vec::as_slice)
     }
 
+    /// The tasks a check is judging right now.
+    pub fn checking(&self) -> &BTreeSet<TaskId> {
+        &self.checking
+    }
+
+    /// Whether a status change named the event at `decision` as the cause
+    /// of its move.
+    pub fn caused_by(&self, decision: Seq) -> bool {
+        self.caused.contains(&decision)
+    }
+
     /// Folds one node-domain event into what it says about the tasks: a
     /// `criteria_checked` prices every criterion it actually ran, and
     /// that price outlives the invocation that paid it.
@@ -220,30 +235,17 @@ impl TaskLedger {
                 record.registered_at.get_or_insert(meta.seq);
                 Ok(())
             }
-            TaskEvent::StatusChanged(p) => {
-                let Some(record) = self.per_task.get_mut(&p.task_id) else {
-                    return Err(UnknownTask(p.task_id.clone()));
-                };
-                record.owner = record.owner.take().or_else(|| meta.node.cloned());
-                if matches!(p.new_status, TaskStatus::Running) {
-                    record.attempts += 1;
-                    record.deviation_answer = None;
-                }
-                record.status = p.new_status;
-                if let Some(commit) = &p.commit {
-                    record.commit = Some(commit.clone());
-                }
-                record.left_work = p
-                    .left_work
-                    .clone()
-                    .and_then(|work| meta.node.cloned().map(|node| (node, work)));
-                record.resumes = p.resumes.clone();
-                record.in_session = false;
-                Ok(())
-            }
+            TaskEvent::StatusChanged(p) => self.status_changed(p, meta),
             // A check judges work in progress; the attempt's close moves
             // the task.
-            TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => Ok(()),
+            TaskEvent::CheckStarted(p) => {
+                self.checking.insert(p.task_id.clone());
+                Ok(())
+            }
+            TaskEvent::CheckAnswered(p) => {
+                self.checking.remove(&p.task_id);
+                Ok(())
+            }
             TaskEvent::DeviationDeclared(p) => {
                 let Some(record) = self.per_task.get_mut(&p.task_id) else {
                     return Err(UnknownTask(p.task_id.clone()));
@@ -259,6 +261,35 @@ impl TaskLedger {
                 Ok(())
             }
         }
+    }
+
+    /// Folds a status change: the task moves, and the event it names as its
+    /// cause is remembered. A task nothing registered is refused.
+    fn status_changed(
+        &mut self,
+        p: &TaskStatusChangedPayload,
+        meta: &EventMeta<'_>,
+    ) -> Result<(), UnknownTask> {
+        let Some(record) = self.per_task.get_mut(&p.task_id) else {
+            return Err(UnknownTask(p.task_id.clone()));
+        };
+        record.owner = record.owner.take().or_else(|| meta.node.cloned());
+        if matches!(p.new_status, TaskStatus::Running) {
+            record.attempts += 1;
+            record.deviation_answer = None;
+        }
+        record.status = p.new_status;
+        if let Some(commit) = &p.commit {
+            record.commit = Some(commit.clone());
+        }
+        record.left_work = p
+            .left_work
+            .clone()
+            .and_then(|work| meta.node.cloned().map(|node| (node, work)));
+        record.resumes = p.resumes.clone();
+        record.in_session = false;
+        self.caused.insert(p.caused_by);
+        Ok(())
     }
 
     /// Folds a session a loop opened for one of its tasks: the task's

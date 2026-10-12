@@ -2,7 +2,7 @@
 
 use yunta_core::events::{
     EventMeta, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeOutcome, NodeStartedPayload,
-    TokenUsage,
+    Suspensions, TokenUsage,
 };
 use yunta_core::{NodeId, TreeId};
 
@@ -16,7 +16,7 @@ fn fold(events: Vec<NodeEvent>) -> NodeLedger {
             at: chrono::DateTime::UNIX_EPOCH,
             node: Some(&node),
         };
-        ledger.apply(event, &meta);
+        ledger.apply(event, &meta, &Suspensions::default());
     }
     ledger
 }
@@ -77,6 +77,7 @@ fn fold_nodes(events: Vec<(&str, NodeEvent)>) -> NodeLedger {
                 at: chrono::DateTime::UNIX_EPOCH,
                 node: Some(&node),
             },
+            &Suspensions::default(),
         );
     }
     ledger

@@ -193,6 +193,54 @@ fn concurrent_appends_across_two_connections_never_fail_busy() {
     assert_eq!(seqs, expected, "no gaps, no duplicates, both connections");
 }
 
+/// Eight handles open the same new log at once, fifty times over: every
+/// opening succeeds, and none reports the database as locked.
+#[test]
+fn concurrent_opens_of_a_fresh_log_all_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    for round in 0..50 {
+        let log = dir.path().join(format!("round-{round}.db"));
+        let failed = opened_at_once(&log);
+        assert!(failed.is_empty(), "round {round}: {failed:?}");
+    }
+}
+
+/// A log written before the chain had its hash column gains the column
+/// once: eight handles opening it at once all succeed.
+#[test]
+fn concurrent_opens_of_a_log_from_before_the_chain_all_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    for round in 0..20 {
+        let log = dir.path().join(format!("round-{round}.db"));
+        let old = rusqlite::Connection::open(&log).unwrap();
+        old.pragma_update(None, "journal_mode", "WAL").unwrap();
+        old.execute_batch(
+            "CREATE TABLE events (run_id TEXT NOT NULL, seq INTEGER NOT NULL, ts TEXT NOT NULL, \
+             node_id TEXT, kind TEXT NOT NULL, payload_json TEXT NOT NULL, \
+             schema_version INTEGER NOT NULL, PRIMARY KEY (run_id, seq));",
+        )
+        .unwrap();
+        drop(old);
+        let failed = opened_at_once(&log);
+        assert!(failed.is_empty(), "round {round}: {failed:?}");
+    }
+}
+
+/// Opens `log` from eight threads at once: what each opening that failed
+/// said.
+fn opened_at_once(log: &std::path::Path) -> Vec<String> {
+    std::thread::scope(|scope| {
+        let opens: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| Storage::open(log).err()))
+            .collect();
+        opens
+            .into_iter()
+            .filter_map(|open| open.join().unwrap())
+            .map(|e| e.to_string())
+            .collect()
+    })
+}
+
 #[test]
 fn list_runs_returns_every_distinct_run() {
     let (_dir, storage) = open_temp();

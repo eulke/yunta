@@ -18,13 +18,13 @@
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::ArtifactId;
-use yunta_core::events::{EventPayload, Failure, StoredEvent};
+use yunta_core::events::{Failure, StoredEvent};
 use yunta_core::{ArtifactRefId, MountSpec, NodeKind, RunId};
 
 use super::runs_root;
+use crate::replay::RunState;
 use crate::run::promote::birth_artifact;
 use crate::run::{read_manifest, BirthArtifact, RunCtx};
-use yunta_core::events::ChildEvent;
 
 /// Why the parent's node fails instead of giving birth to the child, in
 /// the two shapes a node failure has.
@@ -112,12 +112,13 @@ pub(super) enum MountError {
 /// birth artifacts, or the diagnostic to fail the node with.
 pub(super) async fn resolve_mounts(
     ctx: &RunCtx<'_>,
+    state: &RunState,
     events: &[StoredEvent],
     mounts: &[MountSpec],
 ) -> Result<Vec<BirthArtifact>, NotMounted> {
     let mut resolved = Vec::new();
     for mount in mounts {
-        resolved.push(resolve_one(ctx, events, mount).await?);
+        resolved.push(resolve_one(ctx, state, events, mount).await?);
     }
     Ok(resolved)
 }
@@ -125,6 +126,7 @@ pub(super) async fn resolve_mounts(
 /// One mount, resolved to the bytes the child is born holding.
 async fn resolve_one(
     ctx: &RunCtx<'_>,
+    state: &RunState,
     events: &[StoredEvent],
     mount: &MountSpec,
 ) -> Result<BirthArtifact, NotMounted> {
@@ -137,14 +139,7 @@ async fn resolve_one(
         .find(|candidate| candidate.id == m.node);
     let source_run = match target.map(|candidate| &candidate.kind) {
         Some(NodeKind::Workflow { .. }) => {
-            let child = events.iter().rev().find_map(|e| match e.payload() {
-                Some(EventPayload::Children(ChildEvent::Finished(p)))
-                    if e.node_id.as_ref() == Some(&m.node) =>
-                {
-                    Some(p.child_run_id.clone())
-                }
-                _ => None,
-            });
+            let child = state.children.finished_for(&m.node).cloned();
             match child {
                 Some(child_id) => child_id,
                 None => {

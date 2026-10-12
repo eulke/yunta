@@ -3,7 +3,7 @@
 - workflow: release-cycle
 - mode: default
 - run: run-2026-08-21-0001
-- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
+- cost: 1.54k tokens (1.2k in / 340 out (200 cached)) · CPTV: 770 tokens per task · 2 reroutes
 
 - ✓ **criteria** 3/3 green, each command below
 - · **baseline** not used by this workflow

@@ -108,7 +108,7 @@ fn status_json_lists_every_declared_node_in_order() {
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
 
-    assert_eq!(document["schema_version"], 6);
+    assert_eq!(document["schema_version"], 7);
     let nodes = document["nodes"].as_array().expect("a list of nodes");
     assert_eq!(
         nodes

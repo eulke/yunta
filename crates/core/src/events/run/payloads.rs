@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::events::session::payloads::TokenUsage;
 use crate::events::Evidence;
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{ModeName, NodeId, RunId};
 use crate::workflow::OnInterrupt;
 
+use super::metrics::RunMetrics;
 use super::pause::PauseReason;
 
 /// Exact variant names are provisional; a `cancel` command
@@ -413,20 +413,11 @@ pub struct RunFinishedPayload {
 }
 
 impl RunFinishedPayload {
-    /// A run closed at `terminal`, with the metrics its log implies.
-    ///
-    /// The metrics are derived here and nowhere else: cost per verified
-    /// task is total spend over the tasks that actually reached `done`,
-    /// and a run that verified none has no such cost — `None`, never a
-    /// zero that reads like a free run. Each of the three ways a run
-    /// closes passes the same two numbers and gets the same arithmetic.
-    pub fn closed(terminal: TerminalState, tokens: TokenUsage, tasks_done: usize) -> Self {
+    /// A run closed at `terminal`, recording the metrics it was given.
+    pub fn closed(terminal: TerminalState, metrics: RunMetrics) -> Self {
         RunFinishedPayload {
             terminal_state: terminal,
-            metrics: RunMetrics {
-                cptv: (tasks_done > 0).then(|| tokens.total() as f64 / tasks_done as f64),
-                tokens,
-            },
+            metrics,
             closed_by: None,
         }
     }
@@ -438,13 +429,6 @@ impl RunFinishedPayload {
             ..self
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct RunMetrics {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cptv: Option<f64>,
-    pub tokens: TokenUsage,
 }
 
 #[cfg(test)]

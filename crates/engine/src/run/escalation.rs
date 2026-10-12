@@ -9,7 +9,7 @@
 
 use yunta_core::events::{
     Escalation, EscalationError, EventPayload, Fact, Failure, GateResolvedPayload,
-    GateWaitingPayload, HumanChoice, Refusal, StoredEvent,
+    GateWaitingPayload, HumanChoice, Refusal,
 };
 use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Workflow};
 
@@ -18,16 +18,7 @@ use super::{RunCtx, RunError};
 use crate::replay::RunState;
 use crate::reserved::offers;
 use crate::run_log::RunLog;
-use yunta_core::events::{GateEvent, RunEvent};
-
-/// Whether an event is the run-level `run_paused` marker — the one predicate
-/// the resolve-gate path reads a parked run's log by.
-fn is_run_paused(event: &StoredEvent) -> bool {
-    matches!(
-        event.payload(),
-        Some(EventPayload::Run(RunEvent::Paused(_)))
-    )
-}
+use yunta_core::events::GateEvent;
 
 /// The escalation object for a node whose re-routes are exhausted:
 /// retry once more, abort, or — when `modes:` has somewhere later to go
@@ -269,7 +260,7 @@ fn current_decision(
 /// distill+successor needs) and internal gates alike, with zero
 /// duplicated consequence logic that could drift.
 ///
-/// Preconditions: the run must be parked (its last event is
+/// Preconditions: the run must be parked (the last event it replays is
 /// `run_paused` — refuses `NotPaused` otherwise, which also removes any
 /// race with a live process about to ask the same question), and the
 /// chosen option must be on the reconstructed escalation's own menu.
@@ -282,11 +273,10 @@ pub async fn resolve_gate(
     choice: HumanChoice,
     redactor: &Redactor,
 ) -> Result<(), ResolveGateError> {
-    let events = storage.events_for_run(run_id.clone()).await?;
-    if !events.last().is_some_and(is_run_paused) {
+    let state = crate::replay::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
+    if !state.tail_paused() {
         return Err(ResolveGateError::NotPaused);
     }
-    let state = crate::replay::derive(&events);
     let Some((node, escalation)) = current_escalation(manifest, run_dir, &state)
         .await
         .map_err(Box::new)?
@@ -321,7 +311,7 @@ pub async fn resolve_gate(
 /// a live-path pair (its consequence — a node event, or the abort's own
 /// `run_paused` — always lands right after); never a consumed abort (a
 /// fresh `run_paused` follows it, so a later manual resume asks again,
-/// today's exact semantics); never a decision from before a newer
+/// the semantics `resume` relies on); never a decision from before a newer
 /// failure. The decision also has to be a human's choice of an option
 /// `escalation`'s re-derived menu still offers; anything else (an
 /// option the menu dropped, a shape no surface produces) means ask

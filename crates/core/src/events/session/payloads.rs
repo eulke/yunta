@@ -110,6 +110,19 @@ impl TokenUsage {
     pub fn total(&self) -> u64 {
         self.input + self.output
     }
+
+    /// Field by field, never below zero: usage that settles more than was
+    /// in flight leaves nothing behind. `cached` stays unknown only while
+    /// nothing reported it, as it does under `+`.
+    pub fn saturating_sub(self, other: TokenUsage) -> TokenUsage {
+        TokenUsage {
+            input: self.input.saturating_sub(other.input),
+            output: self.output.saturating_sub(other.output),
+            cached: self
+                .cached
+                .map(|cached| cached.saturating_sub(other.cached.unwrap_or(0))),
+        }
+    }
 }
 
 /// Field by field; `cached` stays unknown only while nobody reported it.

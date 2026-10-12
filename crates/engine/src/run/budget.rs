@@ -1,5 +1,5 @@
 //! Run-level token budget: `limits.max_tokens_per_run`
-//! against the log-derived `total_tokens`, checked before every
+//! against the spend the log derives, checked before every
 //! token-spending scheduler step. Exhaustion is never a silent pause —
 //! it's an escalation (`continue`/`abort`) first, and only degrades
 //! to `run_paused { reason: budget… }` when no surface can answer.
@@ -14,7 +14,7 @@
 use yunta_core::events::{
     Escalation, EscalationError, EventPayload, Fact, GateResolvedPayload, PauseReason,
 };
-use yunta_core::NonEmpty;
+use yunta_core::{Node, NonEmpty};
 
 use super::{RunCtx, RunError};
 use crate::reserved::{offers, ReservedOption};
@@ -193,7 +193,7 @@ impl RunCtx<'_> {
         Ok(yunta_core::port::Budget {
             max_tokens: Some(session_token_budget(
                 cap,
-                state.total_tokens().total(),
+                state.spend().so_far().total(),
                 self.nodes_still_owed(&state),
             )),
             timeout,
@@ -201,12 +201,19 @@ impl RunCtx<'_> {
         })
     }
 
-    /// How many of this run's nodes are short of a terminal — what the
-    /// remaining cap is shared among.
+    /// How many of the nodes this run's mode includes are short of a
+    /// terminal — what the remaining cap is shared among.
     fn nodes_still_owed(&self, state: &crate::replay::RunState) -> usize {
+        let included = crate::modes::included_nodes(
+            &self.manifest.workflow,
+            state.run.mode(),
+            state.run.left_out(),
+        );
+        let in_mode = |node: &&Node| included.as_ref().is_none_or(|set| set.contains(&node.id));
         self.manifest
             .workflow
             .iter_nodes()
+            .filter(in_mode)
             .filter(|node| {
                 !matches!(
                     state.nodes.state(&node.id),

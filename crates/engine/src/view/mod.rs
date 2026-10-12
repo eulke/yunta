@@ -1,7 +1,7 @@
 //! [`RunFrame`] — one derived snapshot of a run, ready for any surface
 //! to present.
 //!
-//! The same family as [`derive`] and
+//! The same family as [`derive()`] and
 //! [`compute_run_stats_at`](crate::compute_run_stats_at): a pure
 //! function of the run's own event log, the workflow its manifest
 //! froze, and one instant the caller supplies. Nothing here reads a
@@ -24,13 +24,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{
-    run_left_out, run_mode, FindingSeverity, StoredEvent, TaskStatus, TokenUsage,
-};
+use yunta_core::events::{FindingSeverity, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{ModeName, NodeId, RunId, Workflow, WorkflowName};
 
 use crate::history::PriorEstimation;
-use crate::live::live_total_tokens_of;
 use crate::modes::mode_included_nodes;
 use crate::replay::{derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount};
 use crate::stats::stats_observed_at;
@@ -110,9 +107,10 @@ pub struct RunFrame {
     /// Every `node_rerouted` on the log: the count that makes a grown
     /// denominator attributable.
     pub reroutes: usize,
-    /// What the run has spent, the work still in flight included and
-    /// counted once ([`live_total_tokens`](crate::live_total_tokens)). Deliberately *not* the sum
-    /// of [`NodeFrame::tokens`], which covers closed attempts only.
+    /// What the run has spent: every settled amount and the usage of the
+    /// attempts still open, counted once ([`RunState::spend`]). Not the sum
+    /// of [`NodeFrame::tokens`]: child runs add to this total, and no node
+    /// row carries their spend.
     pub tokens: TokenUsage,
     /// What this workflow's past runs cost, from the caller that read
     /// the history ([`prior_estimation`](crate::prior_estimation)) —
@@ -146,14 +144,11 @@ pub struct RunFrame {
 /// clock, injected — nothing in this module reads one — so a frame
 /// rendered at a chosen instant is reproducible in a test.
 ///
-/// **What it costs.** The run-wide derivations walk the log a fixed
-/// number of times; each declared node then walks it again for every
-/// liveness reading its own frame carries — when it last spoke, which
-/// sessions it has open, what it last reached for, the last two each
-/// scanning back first to where the node's current attempt begins. A
-/// workflow of `n` declared nodes over a log of `e` events costs
-/// `O(n · e)`. A caller framing one run pays that once; a caller
-/// framing every run of a project pays it per run.
+/// **What it costs.** The log is folded once, by [`derive()`]; the frame
+/// is then read off that state, so each figure after the fold is a read
+/// of a ledger, never another pass over the log. A caller framing one
+/// run pays for the fold once; a caller that already holds the state
+/// calls [`run_frame_of`] and pays for none.
 pub fn run_frame(
     run_id: &RunId,
     workflow: &Workflow,
@@ -161,10 +156,22 @@ pub fn run_frame(
     prior: Option<&PriorEstimation>,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    let state = derive(events);
-    let stats = stats_observed_at(&state, workflow, events, Some(now));
-    let mode = run_mode(events);
-    let phase = phase::phase(workflow, &state, events);
+    run_frame_of(run_id, workflow, &derive(events), prior, now)
+}
+
+/// [`run_frame`] read from a state the caller has already derived from the
+/// run's own log: `state` is `derive(events)` for the events `run_frame`
+/// would have been given, so both return the same frame.
+pub fn run_frame_of(
+    run_id: &RunId,
+    workflow: &Workflow,
+    state: &RunState,
+    prior: Option<&PriorEstimation>,
+    now: DateTime<Utc>,
+) -> RunFrame {
+    let stats = stats_observed_at(state, workflow, Some(now));
+    let mode = state.run.mode().clone();
+    let phase = phase::phase(workflow, state);
     let reading = Reading {
         stats: stats
             .nodes
@@ -172,8 +179,8 @@ pub fn run_frame(
             .map(|stat| (&stat.node_id, stat))
             .collect(),
         included: mode_included_nodes(workflow, &mode),
-        left_out: run_left_out(events),
-        state: &state,
+        left_out: state.run.left_out(),
+        state,
         now,
         open: matches!(
             phase,
@@ -192,18 +199,18 @@ pub fn run_frame(
         phase,
         elapsed: stats.wall_clock,
         flow: flow_counter(&nodes, &mode),
-        tasks: task_counter(&state),
+        tasks: task_counter(state),
         reroutes: state
             .nodes
             .values()
             .map(|record| record.reroutes as usize)
             .sum(),
-        tokens: live_total_tokens_of(&state),
+        tokens: state.spend().so_far(),
         prior: prior.cloned(),
         nodes,
         children: state.children.links().to_vec(),
         degraded: state.degradations.all().to_vec(),
-        unknown_kinds: unknown_kind_counts(&state),
+        unknown_kinds: unknown_kind_counts(state),
         blocking_findings: crate::dedup_findings(&state.unsettled_findings())
             .iter()
             .filter(|finding| finding.severity == FindingSeverity::Blocking)

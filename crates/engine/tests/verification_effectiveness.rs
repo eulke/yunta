@@ -423,9 +423,9 @@ fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
 
 #[test]
 fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
-    let wf = moded_workflow(vec![], &["quick", "standard", "full"]);
+    let wf = moded_workflow(vec![], &["alpha", "beta", "gamma"]);
     let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|_| run_created_in_mode("quick"))
+        .map(|_| run_created_in_mode("alpha"))
         .collect();
     let findings = analyze(&wf, &history);
     let unused: Vec<&str> = findings
@@ -433,7 +433,7 @@ fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
         .iter()
         .map(|m| m.name.as_str())
         .collect();
-    assert_eq!(unused, vec!["standard", "full"]);
+    assert_eq!(unused, vec!["beta", "gamma"]);
     assert_eq!(
         findings.unused_modes[0].runs_observed,
         VERIFICATION_MIN_SAMPLES
@@ -442,9 +442,9 @@ fn a_declared_mode_never_used_across_enough_runs_is_flagged() {
 
 #[test]
 fn with_fewer_runs_than_the_floor_no_mode_is_flagged() {
-    let wf = moded_workflow(vec![], &["quick", "full"]);
+    let wf = moded_workflow(vec![], &["alpha", "beta"]);
     let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES - 1)
-        .map(|_| run_created_in_mode("quick"))
+        .map(|_| run_created_in_mode("alpha"))
         .collect();
     let findings = analyze(&wf, &history);
     assert!(findings.unused_modes.is_empty());
@@ -452,11 +452,11 @@ fn with_fewer_runs_than_the_floor_no_mode_is_flagged() {
 
 #[test]
 fn a_mode_used_even_once_is_never_flagged() {
-    let wf = moded_workflow(vec![], &["quick", "full"]);
+    let wf = moded_workflow(vec![], &["alpha", "beta"]);
     let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|_| run_created_in_mode("quick"))
+        .map(|_| run_created_in_mode("alpha"))
         .collect();
-    history.push(run_created_in_mode("full"));
+    history.push(run_created_in_mode("beta"));
     let findings = analyze(&wf, &history);
     assert!(findings.unused_modes.is_empty());
 }

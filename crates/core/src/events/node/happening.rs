@@ -191,8 +191,12 @@ fn worked(
     asleep: &Suspensions,
 ) -> Option<Duration> {
     let record = before.get(node)?;
-    let (_, since) = record.open_since?;
-    (meta.at >= since).then(|| asleep.awake_between(since, meta.at))
+    record.open_since?;
+    let stretch = match record.working_since {
+        Some(since) => asleep.awake_between(since, meta.at),
+        None => Duration::ZERO,
+    };
+    Some(record.attempt_active + stretch)
 }
 
 /// The child runs this node bore, as the log has them at this event.

@@ -12,8 +12,8 @@
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::diagnostic::{ArtifactCode, DiagnosticCode, FileCode, ParseCode, RuleCode};
 use yunta_core::events::{
-    ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
-    RunMetrics, StoredEvent, TerminalState, TokenUsage,
+    ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, NodeStartedPayload,
+    RunFinishedPayload, RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_core::{ArtifactKind, NodeId, RunId};
@@ -470,10 +470,21 @@ async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -
     let bench = Bench::new();
     let manifest = bench.manifest_for(workflow_yaml, CONFIG).await;
 
+    // A node fails only while it runs, so the log starts it first: a
+    // failure with no start before it breaks the log before its close.
     let events = vec![
         StoredEvent {
             run_id: bench.run_id.clone(),
             seq: 1_u64.into(),
+            timestamp: yunta_core::Clock::now(&FixedClock),
+            node_id: Some(NodeId::from(node)),
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(
+                NodeStartedPayload::attempt(1),
+            ))),
+        },
+        StoredEvent {
+            run_id: bench.run_id.clone(),
+            seq: 2_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: Some(NodeId::from(node)),
             body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
@@ -482,7 +493,7 @@ async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -
         },
         StoredEvent {
             run_id: bench.run_id.clone(),
-            seq: 2_u64.into(),
+            seq: 3_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: None,
             body: EventBody::Known(EventPayload::Run(RunEvent::Finished(RunFinishedPayload {

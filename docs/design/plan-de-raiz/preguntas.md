@@ -128,7 +128,7 @@ pub enum Happening { Escalated(Escalation), Resolved(GateResolvedPayload), Asked
 
 | evento | estado del nodo | además |
 |---|---|---|
-| `questions_asked` sobre `Running` | `Waiting { on: NodeWait::Questions { asked } }`, guardando el estado previo como `gate_waiting` | `total_tokens += tokens_used`; cierra la contabilidad del intento |
+| `questions_asked` sobre `Running` | `Waiting { on: NodeWait::Questions { asked } }`, guardando el estado previo como `gate_waiting` | `Spend.settled += tokens_used` y ese uso sale de `in_flight`; el intento sigue abierto |
 | `questions_asked` sobre otro estado | `ReplayError::AskedWithoutStart { seq, node }` | |
 | `questions_answered` sobre `Waiting` | restaura el estado previo (`Running`); `answered_unfinished` gana el nodo | |
 | `questions_answered` sobre otro estado | `ReplayError::AnsweredWithoutAsk { seq, node }` | |
@@ -136,10 +136,13 @@ pub enum Happening { Escalated(Escalation), Resolved(GateResolvedPayload), Asked
 | `node_failed` | `Failed`, siempre | `Aux.pending_questions` y su cálculo se borran |
 | `node_started` | `Running { attempt }` | `answered_unfinished` pierde el nodo |
 
-La contabilidad de un intento cierra en el primero de `questions_asked`,
-`node_finished` o `node_failed` después de su `node_started`, en un solo lugar
-por lector: `replay.rs` (`total_tokens`), `live.rs::in_flight_tokens`,
-`stats.rs::walk_attempts`. Con M04 los tres leen `NodeLedger`.
+La contabilidad de un intento se asienta en `questions_asked` y en el terminal
+(`node_finished` o `node_failed`) después de su `node_started`, y tiene un solo
+dueño: `NodeLedger`, que guarda el gasto de cada nodo como `Spend` (asentado y
+en vuelo). `RunState::spend()` lo lee, y ningún otro lector vuelve a plegar ese
+uso. La regla de no contar dos veces se cumple por construcción: el tipo separa
+lo asentado de lo que está en vuelo, y cada ronda o terminal mueve el uso de su
+sesión de uno al otro.
 
 ---
 
@@ -356,8 +359,8 @@ Rojo primero, con la razón:
   — log cortado entre `questions_answered` y `node_finished`, resume con un
   fixture sin sesiones; hoy `resume_policies` lo reinicia como huérfano.
 - `::the_finished_node_carries_what_the_asking_session_spent` — `Finished.tokens`
-  es `questions_asked.tokens_used`; `live_total_tokens` no cuenta dos veces
-  mientras espera.
+  es `questions_asked.tokens_used`; `RunState::spend()` no cuenta dos veces
+  mientras espera, porque `Spend` separa lo asentado de lo en vuelo.
 - `::a_questions_document_that_asks_nothing_leaves_empty_derived_answers_and_never_waits`
   — hoy no existe artifact de respuestas y el nodo siguiente falla.
 - `::the_node_that_follows_reads_the_questions_and_the_answers_of_the_node_that_asked`
@@ -429,8 +432,8 @@ kind y sus dos reglas (4-02, M12); `text::counted` en la frase (4-03, M13);
   `questions_exec.rs:160` y dice "`node_close::finish_node`, único emisor".
 - **M04**: `GateRecord` gana `rounds: Vec<QuestionRound>`; `GateLedger::answered_unfinished`;
   la fila "`questions_exec.rs:106-120` (attempt) pasa a
-  leer `NodeLedger`" se borra: la ronda no cuenta intentos; `NodeRecord.tokens_closed`
-  suma `questions_asked.tokens_used`.
+  leer `NodeLedger`" se borra: la ronda no cuenta intentos; `NodeRecord.spend`
+  asienta `questions_asked.tokens_used`.
 - **M06**: `PauseReason` gana `Questions { node, pending }` y `AnswersRefused
   { node, report }`; la fila `validate_answers -> Vec<Diagnostic>` pasa a
   `AnswersFile::against -> Result<Self, Report>`.

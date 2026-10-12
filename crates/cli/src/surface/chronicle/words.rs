@@ -8,15 +8,16 @@
 
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
-    GateResolvedPayload, TaskStatus, ToolTarget,
+    GateResolvedPayload, TaskStatus, TokenUsage, ToolTarget,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::text::{detailed, one_line};
 use yunta_core::NonEmpty;
 use yunta_engine::{Happening, NodeState, NodeWait};
+use yunta_render::spend::Breakdown;
 
 use super::super::view;
-use crate::render::{duration, Mark, NodeDisplay, StateWord, Tokens};
+use crate::render::{duration, Mark, NodeDisplay, StateWord};
 use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
@@ -303,11 +304,12 @@ fn message(
 ) -> String {
     let mut said = kind.as_str().to_string();
     if input_tokens.is_some() || output_tokens.is_some() {
-        said.push_str(&format!(
-            " {sep} {} in / {} out",
-            Tokens(input_tokens.unwrap_or_default()).figure(),
-            Tokens(output_tokens.unwrap_or_default()).figure()
-        ));
+        let usage = TokenUsage {
+            input: input_tokens.unwrap_or_default(),
+            output: output_tokens.unwrap_or_default(),
+            cached: None,
+        };
+        said.push_str(&format!(" {sep} {}", Breakdown(&usage)));
     }
     match text {
         Some(text) => detailed(said, &one_line(text)),

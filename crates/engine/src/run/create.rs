@@ -13,6 +13,7 @@ use yunta_core::{
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
+use crate::replay::RunView;
 use crate::run_log::RunLog;
 use crate::tasks::Provenance;
 
@@ -129,12 +130,11 @@ pub fn run_redactor(manifest: &Manifest, secrets: &dyn SecretSource) -> Result<R
 ///
 /// `mode` is frozen into `run_created.mode` right here and
 /// never re-resolved again — a resume reads the same name back off the
-/// log. `"default"` — the caller's choice when nothing else applies,
-/// same sentinel `events::run_mode` falls back to for a log with no
-/// mode recorded — always passes: a workflow declaring no `modes:` at
-/// all has nothing to validate a name against, so every node stays
-/// schedulable. A workflow that *does* declare `modes:` rejects any
-/// other unrecognized name.
+/// log. `"default"` — the caller's choice when nothing else applies, and
+/// the name a log with no mode recorded reads back as — always passes: a
+/// workflow declaring no `modes:` at all has nothing to validate a name
+/// against, so every node stays schedulable. A workflow that *does*
+/// declare `modes:` rejects any other unrecognized name.
 pub async fn create_run(
     params: CreateRunParams<'_>,
     storage: &AsyncStorage,
@@ -353,8 +353,8 @@ async fn birth_registrations(
                 let standing = match standings.entry(run.clone()) {
                     Entry::Occupied(held) => held.into_mut(),
                     Entry::Vacant(slot) => {
-                        let events = storage.events_for_run(run.clone()).await?;
-                        slot.insert(crate::tasks::standing_of(run, &events)?)
+                        let view = RunView::of(storage.events_for_run(run.clone()).await?);
+                        slot.insert(crate::tasks::standing_of(run, &view)?)
                     }
                 };
                 Some(crate::tasks::carried_into(standing, &document, worktree, supervision).await?)

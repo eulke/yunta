@@ -19,6 +19,7 @@ use crate::blocks::{
 };
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
+use crate::spend::Breakdown;
 use crate::{Mark, RunWord};
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
@@ -267,10 +268,9 @@ fn cost(receipt: &Receipt) -> String {
         return "nothing spent".to_string();
     }
     let mut said = format!(
-        "{} ({} in / {} out)",
+        "{} ({})",
         Tokens(cost.tokens.total()),
-        Tokens(cost.tokens.input).figure(),
-        Tokens(cost.tokens.output).figure(),
+        Breakdown(&cost.tokens)
     );
     if let Some(cptv) = cost.cptv {
         said.push_str(&format!(" · CPTV: {} per task", Tokens::rounded(cptv)));

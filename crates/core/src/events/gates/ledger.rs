@@ -6,7 +6,7 @@
 //! what was asked reads it here rather than walking those four kinds
 //! itself: a second fold is a second answer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::events::gates::kinds::GateEvent;
 use crate::events::gates::payloads::{
@@ -51,12 +51,36 @@ pub struct GateLedger {
     /// Run-level escalations: the token budget gates the whole
     /// invocation, not any node.
     run_level: Vec<(GateWaitingPayload, Seq)>,
+    /// Whom a person is being asked about: the node, or `None` for a
+    /// run-level ask. An asking opens it, and a resolution or an answer
+    /// closes it.
+    asking: BTreeSet<Option<NodeId>>,
+    /// The nodes waiting on a question a person answers elsewhere: a round
+    /// of questions, or a gate published to a forge.
+    awaiting: BTreeSet<NodeId>,
 }
 
 impl GateLedger {
     /// What the log says about `node`'s gates.
     pub fn get(&self, node: &NodeId) -> Option<&GateRecord> {
         self.per_node.get(node)
+    }
+
+    /// Whom a person is being asked about right now: a node, or `None` for
+    /// a run-level ask.
+    pub fn asking(&self) -> &BTreeSet<Option<NodeId>> {
+        &self.asking
+    }
+
+    /// The nodes waiting on an answer that a person gives elsewhere.
+    pub fn awaiting(&self) -> &BTreeSet<NodeId> {
+        &self.awaiting
+    }
+
+    /// Forgets every ask in progress: a run that pauses, resumes or closes
+    /// is no longer asking anyone.
+    pub fn clear_asking(&mut self) {
+        self.asking.clear();
     }
 
     /// The forge's handle of the gate `node` published and a wake polls.
@@ -100,8 +124,9 @@ impl GateLedger {
 
     /// Folds one gate-domain event.
     pub fn apply(&mut self, event: &GateEvent, meta: &EventMeta<'_>) {
-        // When the asking began is the log's to say, and nothing this
-        // ledger holds turns on it.
+        self.track(event, meta);
+        // An asking opening is held by the asking set alone: no node
+        // record turns on it.
         if let GateEvent::AskingOpened(_) = event {
             return;
         }
@@ -117,6 +142,26 @@ impl GateLedger {
             .entry(node.clone())
             .or_default()
             .apply(event, meta.seq);
+    }
+
+    /// Keeps the asking and awaiting sets in step with one event.
+    fn track(&mut self, event: &GateEvent, meta: &EventMeta<'_>) {
+        match event {
+            GateEvent::AskingOpened(_) => {
+                self.asking.insert(meta.node.cloned());
+            }
+            GateEvent::QuestionsAsked(_) => self.awaiting.extend(meta.node.cloned()),
+            GateEvent::Waiting(p) if p.external_ref().is_some() => {
+                self.awaiting.extend(meta.node.cloned());
+            }
+            GateEvent::Waiting(_) => {}
+            GateEvent::Resolved(_) | GateEvent::QuestionsAnswered(_) => {
+                self.asking.remove(&meta.node.cloned());
+                if let Some(node) = meta.node {
+                    self.awaiting.remove(node);
+                }
+            }
+        }
     }
 }
 

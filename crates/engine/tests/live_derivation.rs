@@ -16,11 +16,14 @@ use yunta_core::events::{
     RunFinishedPayload, RunMetrics, StoredEvent, TaskRegisteredPayload, TaskStatus,
     TaskStatusChangedPayload, TerminalState, TokenUsage,
 };
-use yunta_core::events::{NodeEvent, RunEvent, SessionEvent, TaskEvent};
-use yunta_core::{Node, NodeKind, Workflow};
+use yunta_core::events::{
+    Channel, GateEvent, NodeEvent, QuestionsAnsweredPayload, QuestionsAskedPayload, RunEvent,
+    SessionEvent, TaskEvent,
+};
+use yunta_core::{sha256_hex, Node, NodeKind, Workflow};
 use yunta_engine::{
-    compute_run_stats, compute_run_stats_at, derive, last_event_age, live_total_tokens,
-    open_sessions, recent_tool_calls, running_since,
+    compute_run_stats, compute_run_stats_at, derive, last_event_age, open_sessions,
+    recent_tool_calls, running_since,
 };
 use yunta_testkit_core::{fixed_now, Log};
 
@@ -531,9 +534,9 @@ fn a_nodes_tool_calls_are_its_own_and_stop_at_its_last_terminal() {
 #[test]
 fn a_live_total_adds_the_usage_a_running_node_has_reported() {
     let events = in_progress().build();
-    // Nothing has terminated, so replay's own total is still zero.
-    assert_eq!(derive(&events).total_tokens(), TokenUsage::default());
-    assert_eq!(live_total_tokens(&events), tokens(100, 50));
+    // Nothing has terminated, so nothing is settled.
+    assert_eq!(derive(&events).spend().settled, TokenUsage::default());
+    assert_eq!(derive(&events).spend().so_far(), tokens(100, 50));
 }
 
 #[test]
@@ -544,8 +547,8 @@ fn a_terminated_nodes_usage_is_not_counted_on_top_of_its_terminal() {
         .build();
 
     // The usage events and `tokens_used` describe the same 150 tokens.
-    assert_eq!(derive(&events).total_tokens(), tokens(100, 50));
-    assert_eq!(live_total_tokens(&events), tokens(100, 50));
+    assert_eq!(derive(&events).spend().settled, tokens(100, 50));
+    assert_eq!(derive(&events).spend().so_far(), tokens(100, 50));
 }
 
 #[test]
@@ -562,8 +565,8 @@ fn a_new_attempt_counts_only_its_own_usage_over_the_closed_one() {
         .node("build", usage(7, 0))
         .build();
 
-    assert_eq!(derive(&events).total_tokens(), tokens(10, 0));
-    assert_eq!(live_total_tokens(&events), tokens(17, 0));
+    assert_eq!(derive(&events).spend().settled, tokens(10, 0));
+    assert_eq!(derive(&events).spend().so_far(), tokens(17, 0));
 }
 
 #[test]
@@ -582,8 +585,8 @@ fn an_attempt_restarted_with_no_terminal_leaves_its_usage_behind() {
         .node("build", usage(7, 0))
         .build();
 
-    assert_eq!(derive(&events).total_tokens(), TokenUsage::default());
-    assert_eq!(live_total_tokens(&events), tokens(7, 0));
+    assert_eq!(derive(&events).spend().settled, TokenUsage::default());
+    assert_eq!(derive(&events).spend().so_far(), tokens(7, 0));
 }
 
 #[test]
@@ -591,14 +594,63 @@ fn usage_no_node_owns_is_left_out_of_the_live_total() {
     // No terminal event can ever retire it, so counting it would inflate
     // the run's total for good.
     let events = Log::for_run("run-1").event(usage(42, 7)).build();
-    assert_eq!(live_total_tokens(&events), TokenUsage::default());
+    assert_eq!(derive(&events).spend().so_far(), TokenUsage::default());
+}
+
+#[test]
+fn a_round_of_questions_settles_the_usage_its_session_reported() {
+    let asked = QuestionsAskedPayload::new(sha256_hex(b"q"), vec!["q1".into()], tokens(30, 12))
+        .expect("one question");
+    let events = Log::for_run("run-1")
+        .node("grill", started(1))
+        .after(5)
+        .node("grill", usage(30, 12))
+        .after(5)
+        .node(
+            "grill",
+            EventPayload::Gates(GateEvent::QuestionsAsked(asked)),
+        )
+        .build();
+
+    assert_eq!(derive(&events).spend().so_far(), tokens(30, 12));
+}
+
+#[test]
+fn the_usage_an_answer_leaves_behind_is_counted_once() {
+    let asked = QuestionsAskedPayload::new(sha256_hex(b"q"), vec!["q1".into()], tokens(30, 12))
+        .expect("one question");
+    let answered = QuestionsAnsweredPayload {
+        answers_hash: sha256_hex(b"a"),
+        channel: Channel::Tty,
+        responder: None,
+    };
+    let events = Log::for_run("run-1")
+        .node("grill", started(1))
+        .after(5)
+        .node("grill", usage(30, 12))
+        .after(5)
+        .node(
+            "grill",
+            EventPayload::Gates(GateEvent::QuestionsAsked(asked)),
+        )
+        .after(5)
+        .node(
+            "grill",
+            EventPayload::Gates(GateEvent::QuestionsAnswered(answered)),
+        )
+        .after(5)
+        .node("grill", usage(7, 0))
+        .build();
+
+    assert_eq!(derive(&events).spend().so_far(), tokens(37, 12));
 }
 
 proptest! {
     /// A node's usage events and the `tokens_used` of its terminal
     /// describe the same tokens: whatever the adapter reported along the
-    /// way, the live total is that one figure both before and after the
-    /// node closes — never the two added together.
+    /// way, the spend is that one figure both before and after the node
+    /// closes — never the two added together — and a closed run keeps it
+    /// with nothing left in flight.
     #[test]
     fn usage_counts_once_across_a_nodes_terminal(
         reports in prop::collection::vec((0u64..1_000, 0u64..1_000), 1..8)
@@ -607,20 +659,32 @@ proptest! {
             reports.iter().map(|(input, _)| input).sum(),
             reports.iter().map(|(_, output)| output).sum(),
         );
+        let reported = || {
+            reports.iter().enumerate().fold(
+                Log::for_run("run-1").node("build", started(1)),
+                |log, (index, (input, output))| {
+                    log.at(at(index as i64 + 1)).node("build", usage(*input, *output))
+                },
+            )
+        };
 
-        let mut log = Log::for_run("run-1").node("build", started(1));
-        for (index, (input, output)) in reports.iter().enumerate() {
-            log = log
-                .at(at(index as i64 + 1))
-                .node("build", usage(*input, *output));
-        }
-        let events = log.at(at(100)).node("build", finished(spent)).build();
+        // In flight: the terminal is not in the log.
+        prop_assert_eq!(derive(&reported().build()).spend().so_far(), spent);
 
-        // In flight: the terminal has not been written yet.
-        let in_flight = &events[..events.len() - 1];
-        prop_assert_eq!(live_total_tokens(in_flight), spent);
+        let terminal = reported().at(at(100)).node("build", finished(spent)).build();
+        prop_assert_eq!(derive(&terminal).spend().so_far(), spent);
 
-        prop_assert_eq!(derive(&events).total_tokens(), spent);
-        prop_assert_eq!(live_total_tokens(&events), spent);
+        let closed = reported()
+            .at(at(100))
+            .node("build", finished(spent))
+            .event(EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
+                terminal_state: TerminalState::Done,
+                metrics: RunMetrics::of(spent, 0),
+                closed_by: None,
+            })))
+            .build();
+        let state = derive(&closed);
+        prop_assert_eq!(state.spend().so_far(), spent);
+        prop_assert_eq!(state.spend().in_flight, TokenUsage::default());
     }
 }

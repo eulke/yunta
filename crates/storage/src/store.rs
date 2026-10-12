@@ -12,12 +12,13 @@ use crate::error::{Cause, Result, StorageError};
 use yunta_core::events::RunEvent;
 
 mod chain;
+mod opening;
 pub use chain::ChainVerification;
 
 /// The schema migration, embedded in the binary rather than shipped as a
 /// file — the schema is a few tables, so there is nothing a migration runner
 /// would buy over `CREATE TABLE IF NOT EXISTS`. `event_hash` is nullable at
-/// the SQL level only so the `ALTER TABLE` migration below can add it to
+/// the SQL level only so the `ALTER TABLE` migration in [`Storage::open`] can add it to
 /// databases created before the hash chain existed — every append since
 /// writes it, and `verify_chain` reports a NULL as a break, never skips it.
 /// `run_heads` holds each run's last appended seq and hash, the anchor that
@@ -135,50 +136,6 @@ fn lock(conn: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
 }
 
 impl Storage {
-    /// Opens (creating if needed) the event log at `path` in WAL mode,
-    /// running the embedded schema migration.
-    pub fn open(path: &Path) -> Result<Self> {
-        let open_err = |error| StorageError::Open {
-            path: path.to_path_buf(),
-            source: cause(error),
-        };
-
-        let conn = Connection::open(path).map_err(open_err)?;
-        // WAL admits exactly one writer at a time; a second handle onto
-        // the same database (a status/follower reader, a per-session
-        // run-tools listener) must wait for a busy writer instead of
-        // surfacing SQLITE_BUSY as a spurious append failure. Writes
-        // here are all sub-millisecond appends — 5s of patience means
-        // something is truly wedged, not busy. Set before the journal
-        // pragma so even that first statement waits rather than fails
-        // when another connection happens to be mid-write.
-        // Note the timeout alone is NOT enough for `append` — see the
-        // BEGIN IMMEDIATE note there.
-        conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(open_err)?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(open_err)?;
-        conn.execute_batch(SCHEMA_V1).map_err(open_err)?;
-
-        // A database created before the chain existed has the table but
-        // not the column — added here once, with old rows left NULL
-        // (visible to `verify_chain` as a break, never silently
-        // backfilled with hashes nothing ever wrote).
-        let has_hash_column = conn
-            .prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'event_hash'")
-            .and_then(|mut stmt| stmt.exists([]))
-            .map_err(open_err)?;
-        if !has_hash_column {
-            conn.execute("ALTER TABLE events ADD COLUMN event_hash TEXT", [])
-                .map_err(open_err)?;
-        }
-
-        Ok(Self {
-            conn: Mutex::new(conn),
-            path: path.to_path_buf(),
-        })
-    }
-
     /// Where this log lives.
     pub fn path(&self) -> &Path {
         &self.path

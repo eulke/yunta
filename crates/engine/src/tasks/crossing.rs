@@ -11,10 +11,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use yunta_core::events::{EventPayload, StoredEvent, TaskEvent, TaskStatus};
+use yunta_core::events::{EventPayload, TaskEvent, TaskStatus};
 use yunta_core::{CommitSha, RunId, TaskId, TasksFile};
 
 use crate::process::Supervision;
+use crate::replay::RunView;
 use crate::run::RunError;
 
 /// What a source run's log leaves standing about the tasks it was given:
@@ -28,15 +29,17 @@ pub(crate) struct Standing {
 }
 
 /// The state another run's log leaves standing — the one thing this
-/// module reads from a log that is not this run's.
+/// module reads from a log that is not this run's. `view` is that log
+/// read once: its events say where each `done` put the work, and its
+/// state says which tasks stand done.
 ///
 /// A log that does not replay is refused here rather than read
 /// partially: a source that cannot answer for its own tasks is not a
 /// source this run can build on, and the diagnostic names it and what
 /// stopped the replay.
-pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<Standing, RunError> {
-    let state = crate::replay::derive(events);
-    if let Some(diagnostic) = state.broken {
+pub(crate) fn standing_of(run: &RunId, view: &RunView) -> Result<Standing, RunError> {
+    let state = &view.state;
+    if let Some(diagnostic) = &state.broken {
         return Err(RunError::Broken {
             diagnostic: format!(
                 "run `{run}` hands over a tasks document, and its own log does not replay: \
@@ -48,7 +51,7 @@ pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<Standin
     // status a task ends at is replay's answer; the commit is this
     // log's, and only for the tasks replay leaves `done`.
     let mut placed: BTreeMap<TaskId, Option<CommitSha>> = BTreeMap::new();
-    for event in events {
+    for event in &view.events {
         if let Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) = event.payload() {
             if p.new_status == TaskStatus::Done {
                 placed.insert(p.task_id.clone(), p.commit.clone());
@@ -176,9 +179,10 @@ mod tests {
         RunId::from("run-source")
     }
 
-    /// A source run's log: each task registered, then left where the
-    /// entry says, at the commit the entry names.
-    fn source_log(entries: &[(&Task, TaskStatus, Option<&CommitSha>)]) -> Vec<StoredEvent> {
+    /// A source run's log, read once as the view a receiving run is handed:
+    /// each task registered, then left where the entry says, at the commit
+    /// the entry names.
+    fn source_log(entries: &[(&Task, TaskStatus, Option<&CommitSha>)]) -> RunView {
         let mut log = Log::for_run(source().as_str());
         for (index, (task, status, commit)) in entries.iter().enumerate() {
             let registered = Seq::from(index as u64 * 2 + 1);
@@ -196,7 +200,7 @@ mod tests {
                 .event(yunta_testkit::task_registered(task))
                 .event(changed);
         }
-        log.build()
+        RunView::of(log.build())
     }
 
     #[tokio::test]
@@ -376,7 +380,7 @@ mod tests {
             ))
             .build();
 
-        let error = standing_of(&source(), &orphan).unwrap_err();
+        let error = standing_of(&source(), &RunView::of(orphan)).unwrap_err();
 
         let RunError::Broken { diagnostic } = &error else {
             panic!("a source that cannot answer for itself is refused: {error:?}");

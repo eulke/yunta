@@ -7,8 +7,9 @@
 //! what happened.
 
 use yunta_core::events::{
-    ChildRunCreatedPayload, ChildRunFinishedPayload, EventBody, EventPayload, NodeEvent,
-    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState, TerminalState, TokenUsage,
+    Channel, ChildRunCreatedPayload, ChildRunFinishedPayload, EventBody, EventPayload, GateEvent,
+    NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState,
+    QuestionsAnsweredPayload, QuestionsAskedPayload, TerminalState, TokenUsage,
 };
 use yunta_engine::{chronicle, Happening};
 use yunta_testkit_core::{all_kinds, Log};
@@ -190,6 +191,48 @@ fn a_moment_after_a_suspension_sits_on_the_runs_awake_clock() {
         std::time::Duration::from_secs(14 * 60),
         "74 minutes after the start, 60 of them asleep"
     );
+}
+
+/// A node that asked worked up to its question and again after the answer:
+/// the moment that closes it says how long it worked, without the person's
+/// wait.
+#[test]
+fn a_node_that_asked_worked_without_the_wait_for_its_answer() {
+    let asked = QuestionsAskedPayload::new(
+        yunta_core::sha256_hex(b"q"),
+        vec!["q1".into()],
+        TokenUsage::default(),
+    )
+    .expect("one question");
+    let answered = QuestionsAnsweredPayload {
+        answers_hash: yunta_core::sha256_hex(b"a"),
+        channel: Channel::Tty,
+        responder: None,
+    };
+    let events = Log::for_run("run-asked")
+        .node("grill", started())
+        .after(10 * 60)
+        .node(
+            "grill",
+            EventPayload::Gates(GateEvent::QuestionsAsked(asked)),
+        )
+        .after(20 * 60)
+        .node(
+            "grill",
+            EventPayload::Gates(GateEvent::QuestionsAnswered(answered)),
+        )
+        .after(10 * 60)
+        .node("grill", finished("done"))
+        .build();
+
+    let moments = chronicle(&events);
+    let Happening::Node(yunta_core::events::node::happening::Happening::Reached {
+        elapsed, ..
+    }) = &moments.last().expect("the close").happening
+    else {
+        panic!("the close is a node reaching a state");
+    };
+    assert_eq!(*elapsed, Some(std::time::Duration::from_secs(20 * 60)));
 }
 
 #[test]

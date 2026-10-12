@@ -23,16 +23,18 @@
 //! always-approved gate is the node doing its job, excluded by
 //! construction).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use yunta_core::events::{CriterionType, EventPayload, GateResolvedPayload, Phase, StoredEvent};
-use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
+use yunta_core::events::{GateEvent, NodeEvent, RunPhaseRaw};
 use yunta_core::{ModeName, NodeId, Workflow};
+
+use crate::replay::{derive, RunState};
 
 /// Below this many independent samples, a signal says nothing — a
 /// number without a distribution behind it is a guess wearing a data
 /// costume (same floor, and the same reasoning, as the prior
-/// estimation in `stats.rs`).
+/// estimation in `history.rs`).
 pub const MIN_SAMPLES: usize = 3;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,39 +92,37 @@ impl VerificationFindings {
 /// `history` is every past run's own full event log — the caller's job
 /// (imperative shell) is gathering those; this function only reads them.
 pub fn analyze(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> VerificationFindings {
+    let states: Vec<RunState> = history.iter().map(|events| derive(events)).collect();
     VerificationFindings {
         never_red_criteria: never_red_criteria(history),
         never_triggered_reroutes: never_triggered_reroutes(workflow, history),
         always_approved_gates: always_approved_gates(workflow, history),
         always_first_try_tasks: always_first_try_tasks(history),
-        unused_modes: unused_modes(workflow, history),
+        unused_modes: unused_modes(workflow, &states),
     }
 }
 
-/// "unused mode": every declared mode against the mode
-/// each historical run actually recorded in its own `run_created`.
-fn unused_modes(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> Vec<UnusedMode> {
+/// "unused mode": every declared mode against the mode each historical
+/// run recorded when it was created. A log with no creation recorded no
+/// mode, so it counts toward the sample but names none.
+fn unused_modes(workflow: &Workflow, states: &[RunState]) -> Vec<UnusedMode> {
     let Some(modes) = &workflow.modes else {
         return Vec::new();
     };
-    if history.len() < MIN_SAMPLES {
+    if states.len() < MIN_SAMPLES {
         return Vec::new();
     }
-    let used: std::collections::HashSet<&ModeName> = history
+    let used: HashSet<&ModeName> = states
         .iter()
-        .filter_map(|events| {
-            events.iter().find_map(|e| match e.payload() {
-                Some(EventPayload::Run(RunEvent::Created(p))) => Some(&p.mode),
-                _ => None,
-            })
-        })
+        .filter(|state| !matches!(state.run.phase(), RunPhaseRaw::Unborn))
+        .map(|state| state.run.mode())
         .collect();
     modes
         .keys()
         .filter(|name| !used.contains(name))
         .map(|name| UnusedMode {
             name: name.clone(),
-            runs_observed: history.len(),
+            runs_observed: states.len(),
         })
         .collect()
 }

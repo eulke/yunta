@@ -264,14 +264,12 @@ pub(crate) async fn run_case(
     // Where the run and each node stand is read off the run's frame, the
     // one place that tells a node the run's mode leaves out from one it
     // has not reached and a run that finished from one findings still
-    // block — so a case says what `status` says.
-    let events = storage.events_for_run(prepared.run_id.clone()).await?;
-    let read_at = events
-        .last()
-        .map(|event| event.timestamp)
-        .unwrap_or_default();
+    // block — so a case says what `status` says. The report's state is
+    // the log as the run left it, read at its last event.
+    let state = &report.state;
+    let read_at = state.clock().last_at().unwrap_or_default();
     let frame =
-        yunta_engine::run_frame(&prepared.run_id, &manifest.workflow, &events, None, read_at);
+        yunta_engine::run_frame_of(&prepared.run_id, &manifest.workflow, state, None, read_at);
     let expected_word = case.expect.final_state.word();
     let reached = crate::render::run_word(&frame);
     if reached != expected_word {
@@ -343,9 +341,7 @@ async fn answered(
     mut report: yunta_engine::RunReport,
 ) -> Result<yunta_engine::RunReport, CliError> {
     while !decisions.is_empty() {
-        let events = storage.events_for_run(prepared.run_id.clone()).await?;
-        let state = yunta_engine::derive(&events);
-        let Some(node) = yunta_engine::awaits_decision(manifest, &state) else {
+        let Some(node) = yunta_engine::awaits_decision(manifest, &report.state) else {
             break;
         };
         let Some(option) = decisions.remove(&node) else {

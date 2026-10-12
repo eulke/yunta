@@ -107,7 +107,7 @@ permissions:                        # techo; las capas inferiores solo estrechan
   scope_expansion: { max_mode: ask }   # rules | ask | deny: lo más permisivo que un nodo puede pedir
 
 limits:
-  max_tokens_per_run: 2000000
+  max_tokens_per_run: 2000000     # tokens del run: asentados más en vuelo (§8.4)
   max_loop_iterations: 12
   max_concurrent_runs: 3
   max_workflow_depth: 4

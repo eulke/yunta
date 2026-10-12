@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 
 use super::{NodeLedger, NodeRecord};
 use crate::events::meta::EventMeta;
-use crate::events::{SubjectError, TokenUsage};
+use crate::events::{AgentMessagePayload, AgentMessageType, SubjectError, TokenUsage};
 
 impl NodeRecord {
     /// A session this node's attempt opened: open while the attempt is,
@@ -22,6 +22,31 @@ impl NodeRecord {
             fence: p.fence.clone(),
             opened_at: at,
         });
+    }
+
+    /// What an agent message of the open attempt's session records: a tool
+    /// it called, or the usage it reported. Usage moves the spend only while
+    /// an attempt is open; reported outside one, it belongs to no attempt.
+    fn message(&mut self, p: &AgentMessagePayload, at: DateTime<Utc>) {
+        match p.message_type {
+            AgentMessageType::ToolUse => self.calls.push(ToolCall {
+                tool_name: p.tool_name.clone(),
+                target: p.target.clone(),
+                at,
+            }),
+            AgentMessageType::Usage => {
+                if self.open_since.is_some() {
+                    self.spend.in_flight += TokenUsage {
+                        input: p.input_tokens.unwrap_or_default(),
+                        output: p.output_tokens.unwrap_or_default(),
+                        cached: p.cached_input_tokens,
+                    };
+                }
+            }
+            // What the agent said about itself, for a reader. It
+            // moves nothing.
+            AgentMessageType::Note => {}
+        }
     }
 }
 
@@ -107,12 +132,17 @@ impl NodeLedger {
         meta: &EventMeta<'_>,
     ) -> Result<(), SubjectError> {
         use crate::events::session::kinds::SessionEvent;
-        use crate::events::AgentMessageType;
 
         let Some(node) = meta.node else {
             return Err(SubjectError::SessionWithoutNode);
         };
-        let record = self.per_node.entry(node.clone()).or_default();
+        // The id is copied only the first time the log names the node:
+        // almost every session fact names a node the ledger holds.
+        let record = match self.per_node.get_mut(node) {
+            Some(record) => record,
+            None => self.per_node.entry(node.clone()).or_default(),
+        };
+        let before = record.standing();
         record.last_event_at = Some(meta.at);
         match event {
             SessionEvent::Opened(p) => record.opened(p, meta.at),
@@ -132,28 +162,15 @@ impl NodeLedger {
             SessionEvent::RunToolRefused(_) => {}
             // A session waiting for its service is still the attempt's;
             // how long it waited is `stats`' to read off the log.
-            SessionEvent::ServiceUnreachable(_) | SessionEvent::ServiceReachable(_) => {}
-            SessionEvent::Message(p) => match p.message_type {
-                AgentMessageType::ToolUse => record.calls.push(ToolCall {
-                    tool_name: p.tool_name.clone(),
-                    target: p.target.clone(),
-                    at: meta.at,
-                }),
-                AgentMessageType::Usage => {
-                    record.tokens_in_flight += TokenUsage {
-                        input: p.input_tokens.unwrap_or_default(),
-                        output: p.output_tokens.unwrap_or_default(),
-                        cached: p.cached_input_tokens,
-                    }
-                }
-                // What the agent said about itself, for a reader. It
-                // moves nothing.
-                AgentMessageType::Note => {}
-            },
+            SessionEvent::ServiceUnreachable(_) => record.unreachable = true,
+            SessionEvent::ServiceReachable(_) => record.unreachable = false,
+            SessionEvent::Message(p) => record.message(p, meta.at),
             // A degradation is the adapter's, not the attempt's: the
             // session ledger holds it.
             SessionEvent::CapabilityDegraded(_) => {}
         }
+        let after = record.standing();
+        self.track(before, after);
         Ok(())
     }
 }

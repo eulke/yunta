@@ -17,10 +17,9 @@ pub(crate) mod progress;
 
 use std::path::Path;
 
-use yunta_core::events::StoredEvent;
 use yunta_core::Clock;
 use yunta_core::RunId;
-use yunta_engine::RunPhase;
+use yunta_engine::{RunPhase, RunState};
 
 use crate::commands::advice;
 use crate::context::Context;
@@ -55,16 +54,16 @@ pub async fn status(
 
     let now = ctx.clock.now();
     let engine = crate::render::Engine::of(&run_dir, now);
-    let decision = crate::json::decision_of(&manifest, &run_dir, &events).await?;
+    let state = yunta_engine::derive(&events);
+    let decision = crate::json::decision_of(&manifest, &run_dir, &state).await?;
     if json {
         return crate::json::print_json(&crate::json::RunDocument::of(
-            run_id, &events, &manifest, now, &engine, decision,
+            run_id, &events, &state, &manifest, now, &engine, decision,
         ));
     }
 
-    let frame = progress::frame(run_id, &manifest, &events, now);
+    let frame = progress::frame_of(run_id, &manifest, &state, now);
     if let Some(node) = node {
-        let state = yunta_engine::derive(&events);
         let documents = yunta_engine::produced_documents(&run_dir, node, &state).await?;
         let page = node::NodePage {
             run_id,
@@ -78,7 +77,6 @@ pub async fn status(
         print!("{}", page.render(node, &crate::render::stdout_look())?);
         return Ok(Outcome::Success);
     }
-    let state = yunta_engine::derive(&events);
     let page = page::Page {
         run_id,
         frame: &frame,
@@ -108,15 +106,15 @@ pub async fn status(
             out.push_str(&part);
         }
     }
-    let bound = crate::project::bound_checkout(&events);
+    let bound = crate::project::bound_checkout(&state);
     let tree = ctx
         .project
         .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
     let shown = match &decision {
-        Some((_, escalation)) => crate::json::shown_of(&run_dir, escalation, &events).await?,
+        Some((_, escalation)) => crate::json::shown_of(&run_dir, escalation, &state).await?,
         None => Vec::new(),
     };
-    let decided = decision_page((run_id, &tree), &events, &frame.phase, (decision, &shown));
+    let decided = decision_page((run_id, &tree), &state, &frame.phase, (decision, &shown));
     if let Some(decided) = &decided {
         out.push('\n');
         out.push_str(&decided.text);
@@ -147,7 +145,7 @@ struct Decided {
 /// run. `None` for a run that is not parked.
 fn decision_page(
     (run_id, tree): (&RunId, &Path),
-    events: &[StoredEvent],
+    state: &RunState,
     phase: &RunPhase,
     (decision, shown): (
         Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
@@ -155,7 +153,6 @@ fn decision_page(
     ),
 ) -> Option<Decided> {
     let waiting = advice::parked(phase)?;
-    let state = yunta_engine::derive(events);
     Some(match decision {
         Some((node, escalation)) => {
             let look = crate::render::stdout_look();

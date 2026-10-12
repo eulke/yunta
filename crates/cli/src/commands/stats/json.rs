@@ -4,6 +4,7 @@
 use serde::Serialize;
 use yunta_core::{ContentHash, RunId, WorkflowName};
 use yunta_engine::{prior_estimation, NodeStat, RunStats, RunSummary};
+use yunta_render::spend::SpendJson;
 
 use super::run::currency_line;
 
@@ -63,9 +64,9 @@ pub(super) struct RunStatsJson {
     cptv: Option<f64>,
     rework_rate: Option<f64>,
     cache_rate: Option<f64>,
-    tokens_input: u64,
-    tokens_output: u64,
-    tokens_cached: Option<u64>,
+    /// What the run spent, in the token shape every JSON document carries:
+    /// settled and in-flight usage, with the in-flight part on its own.
+    tokens: SpendJson,
     tasks_total: usize,
     tasks_done: usize,
     wall_clock_secs: Option<f64>,
@@ -135,9 +136,7 @@ impl RunStatsJson {
             cptv: stats.cptv,
             rework_rate: stats.rework_rate,
             cache_rate: stats.cache_rate,
-            tokens_input: stats.total_tokens.input,
-            tokens_output: stats.total_tokens.output,
-            tokens_cached: stats.total_tokens.cached,
+            tokens: SpendJson::of(&stats.spend),
             tasks_total: stats.tasks_total,
             tasks_done: stats.tasks_done,
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
@@ -309,5 +308,57 @@ impl VerificationFindingsJson {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use yunta_core::events::{Spend, TokenUsage};
+    use yunta_core::Workflow;
+    use yunta_engine::compute_run_stats;
+
+    use super::*;
+
+    /// The stats of a run with no events, carrying the spend a test gives it.
+    fn stats_spending(spend: Spend) -> RunStats {
+        let workflow: Workflow = yunta_core::yaml::parse(
+            "name: stats-json\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
+        )
+        .expect("a workflow with one node");
+        RunStats {
+            spend,
+            total_tokens: spend.so_far(),
+            ..compute_run_stats(&workflow, &[])
+        }
+    }
+
+    #[test]
+    fn stats_json_spends_through_the_shape_every_document_carries() {
+        let spend = Spend {
+            settled: TokenUsage {
+                input: 30,
+                output: 12,
+                cached: Some(10),
+            },
+            in_flight: TokenUsage {
+                input: 5,
+                output: 3,
+                cached: None,
+            },
+        };
+        let stats = stats_spending(spend);
+
+        let document = RunStatsJson::from(&RunId::from("run-json"), "default", &stats, None);
+        let value = serde_json::to_value(&document).expect("the document serializes");
+
+        assert_eq!(
+            value["tokens"],
+            json!({ "input": 35, "output": 15, "cached": 10, "total": 50, "in_flight": 8 }),
+        );
+        assert!(
+            value.get("tokens_input").is_none(),
+            "one shape for one figure: {value}"
+        );
     }
 }

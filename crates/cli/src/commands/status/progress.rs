@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{RunFrame, RunPhase};
+use yunta_engine::{RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
 
@@ -41,7 +41,19 @@ pub(crate) fn frame(
     events: &[StoredEvent],
     now: DateTime<Utc>,
 ) -> RunFrame {
-    yunta_engine::run_frame(run_id, &manifest.workflow, events, None, now)
+    frame_of(run_id, manifest, &yunta_engine::derive(events), now)
+}
+
+/// The frame of a run whose state the caller already derived from its
+/// log: the same frame [`frame`] builds, without a second pass over the
+/// log.
+pub(crate) fn frame_of(
+    run_id: &RunId,
+    manifest: &Manifest,
+    state: &RunState,
+    now: DateTime<Utc>,
+) -> RunFrame {
+    yunta_engine::run_frame_of(run_id, &manifest.workflow, state, None, now)
 }
 
 /// The counters and the phase on one line: the counters every surface

@@ -18,16 +18,19 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use yunta_core::events::{GateWaitingPayload, NodeState, StoredEvent};
+use yunta_core::events::{GateWaitingPayload, NodeState};
 use yunta_core::{Isolation, NodeId, RunId, Workflow};
-use yunta_engine::{run_frame, NodeFrame, NodeStanding, PriorEstimation, RunFrame, RunPhase};
+use yunta_engine::{
+    run_frame_of, NodeFrame, NodeStanding, PriorEstimation, RunFrame, RunPhase, RunState,
+};
+use yunta_render::spend::Breakdown;
 
 use crate::commands::status::decision;
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
 use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
 use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, paths, wrap, Glyphs, Look, Tokens, INDENT};
+use crate::render::{duration, indent, paths, wrap, Glyphs, Look, INDENT};
 use yunta_core::text::counted;
 
 use super::view;
@@ -54,7 +57,8 @@ pub(crate) struct Outline<'a> {
 pub(crate) struct ClosingEnv<'a> {
     pub(crate) run_id: &'a RunId,
     pub(crate) workflow: &'a Workflow,
-    pub(crate) events: &'a [StoredEvent],
+    /// The run as its log derives it, once the run has stopped.
+    pub(crate) state: &'a RunState,
     pub(crate) prior: Option<&'a PriorEstimation>,
     pub(crate) now: chrono::DateTime<chrono::Utc>,
     /// The decision a parked run stopped on, rebuilt from the manifest and
@@ -81,11 +85,11 @@ pub(crate) struct Closing {
 }
 
 impl Closing {
-    /// Derives the block from the run's own log — the truth about what
+    /// Builds the block from the run's own state — the truth about what
     /// happened, read once after the run stops rather than carried along
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
-        let frame = run_frame(env.run_id, env.workflow, env.events, env.prior, env.now);
+        let frame = run_frame_of(env.run_id, env.workflow, env.state, env.prior, env.now);
         Self::framed(env.run_id, frame, (env.decision, env.shown), &env.outline)
     }
 
@@ -348,7 +352,7 @@ impl Closing {
     /// nothing and has no history to compare with.
     fn tokens(&self, glyphs: Glyphs) -> String {
         let spent = self.frame.tokens.total();
-        let said = format!("{} spent", Tokens(spent).figure());
+        let said = Breakdown(&self.frame.tokens).to_string();
         match &self.frame.prior {
             Some(prior) => format!("{said} {} {}", glyphs.sep(), history(prior, glyphs)),
             None if spent == 0 => String::new(),

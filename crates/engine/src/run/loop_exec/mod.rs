@@ -176,6 +176,7 @@ pub(super) async fn execute_loop(
         let grants = crate::scope_expansion::GrantLedger::new(granted_count(&view.events));
         let batch_env = BatchDispatchEnv {
             events: &view.events,
+            state: &view.state,
             batch: &batch,
             base_commit: &base_commit,
             adapter: prep.adapter.as_ref(),
@@ -379,7 +380,7 @@ async fn prepare_loop<'a>(
     let tasks = crate::tasks::judged_plan(&held.document, held_by, spec.as_deref(), ledger);
     // Every task session reads the plan its task belongs to: the design
     // it names, and the tasks that own what it may not touch.
-    let writer = respecify::writer(ctx, &view.events, &view.state);
+    let writer = respecify::writer(ctx, &view.state);
     let superseded = respecify::superseded(ctx.run_dir, &view.events, spec.as_deref()).await?;
     let setup = crate::task_cycle::SessionSetup {
         plan: Some(std::sync::Arc::new(tasks.clone())),

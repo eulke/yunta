@@ -128,9 +128,10 @@ pub async fn create_promotion_successor(
 
     // What the predecessor's own log says it held, so each inherited
     // artifact keeps the identity and the producer it had there.
-    let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
+    let predecessor =
+        crate::replay::RunView::of(storage.events_for_run(predecessor_id.clone()).await?);
     let inherited =
-        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events).await?;
+        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor.events).await?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -144,11 +145,7 @@ pub async fn create_promotion_successor(
             // successor compares against what the lineage measured
             // before any of it ran — never against the tree its
             // predecessor already worked.
-            baseline: crate::run::baseline::inherited(
-                predecessor_id,
-                &crate::replay::derive(&predecessor_events),
-            )
-            .as_ref(),
+            baseline: crate::run::baseline::inherited(predecessor_id, &predecessor.state).as_ref(),
             environment,
             redactor: &redactor,
         },

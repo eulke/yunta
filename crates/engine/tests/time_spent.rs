@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{EventBody, StoredEvent};
-use yunta_engine::{compute_run_stats, TimeSpent};
+use yunta_engine::{compute_run_stats, derive, TimeSpent};
 
 /// A log of `(seconds since the run began, node, payload as the log
 /// persists it)`.
@@ -41,13 +41,16 @@ fn log_ms(entries: &[(i64, Option<&str>, &str)]) -> Vec<StoredEvent> {
 }
 
 fn time_of(events: &[StoredEvent]) -> TimeSpent {
-    let workflow: yunta_core::Workflow =
-        yunta_core::yaml::parse("name: timed\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
-            .unwrap();
-    compute_run_stats(&workflow, events).time
+    derive(events).time_spent(None)
 }
 
-const CREATED: &str = r#"{"kind":"run_created","manifest_hash":"03a119e94d983cbf5279c0959eca2fa361b3db64414f223eb0ec83f2cad41ae9","inputs":{},"mode":"quick","base_branch":"main","base_commit":"d07a58e99f630cc0567076fa7d4cd19c7c6a3b49"}"#;
+/// The one-node workflow the timed logs name their node against.
+fn timed_workflow() -> yunta_core::Workflow {
+    yunta_core::yaml::parse("name: timed\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
+        .unwrap()
+}
+
+const CREATED: &str = r#"{"kind":"run_created","manifest_hash":"03a119e94d983cbf5279c0959eca2fa361b3db64414f223eb0ec83f2cad41ae9","inputs":{},"mode":"alpha","base_branch":"main","base_commit":"d07a58e99f630cc0567076fa7d4cd19c7c6a3b49"}"#;
 const MEASURED: &str = r#"{"kind":"baseline_captured","command":"cargo test","results":{"exit_code":0,"summary":"ok"},"hash":"040fb4c74cc0f56e630cd65d8a3a296f6abefa441bbb81df7b7e65cf16209af3","origin":{"type":"measured"}}"#;
 const STARTED: &str = r#"{"kind":"node_started","attempt":1}"#;
 const FINISHED: &str =
@@ -110,6 +113,45 @@ fn every_stretch_of_a_run_is_the_time_of_one_thing() {
         }
     );
     assert_eq!(time.total(), Duration::from_secs(2121));
+}
+
+/// A node that asks has done work up to the question and again after the
+/// answer: the working time of its attempt is both stretches, and the
+/// person's wait is the stretch between.
+#[test]
+fn an_asked_attempts_working_time_resumes_when_the_answer_lands() {
+    let events = log_ms(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (600_000, Some("a"), ASKED),
+        (1_800_000, Some("a"), ANSWERED),
+        (2_400_000, Some("a"), FINISHED),
+    ]);
+
+    let stats = compute_run_stats(&timed_workflow(), &events);
+
+    assert_eq!(stats.nodes[0].active, Duration::from_secs(20 * 60));
+    assert_eq!(stats.time.people, Duration::from_secs(20 * 60));
+}
+
+/// A node a person is asked about stops working from the asking, though
+/// the escalation and its answer are written together once the person
+/// answers: the node's working time and the run's clock agree on the wait.
+#[test]
+fn a_node_a_person_is_asked_about_stops_working_until_the_answer_lands() {
+    let events = log_ms(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (600_000, Some("a"), ASKING),
+        (1_800_000, Some("a"), WAITING),
+        (1_800_000, Some("a"), RESOLVED),
+        (2_400_000, Some("a"), FINISHED),
+    ]);
+
+    let stats = compute_run_stats(&timed_workflow(), &events);
+
+    assert_eq!(stats.nodes[0].active, Duration::from_secs(20 * 60));
+    assert_eq!(stats.time.people, Duration::from_secs(20 * 60));
 }
 
 /// A guard before the work is asked whether the tree it starts from holds,
@@ -211,4 +253,20 @@ fn formatting_what_a_session_wrote_is_its_own_share_of_the_working_time() {
     assert_eq!(time.rails, Duration::from_secs(4));
     assert_eq!(time.working, Duration::from_secs(96));
     assert_eq!(time.total(), Duration::from_secs(100));
+}
+
+/// An event under a kind this binary does not know, written as JSON the way
+/// the rest of this file writes its payloads: it is booked and counted, never
+/// refused.
+const TELEMETRY: &str = r#"{"kind":"telemetry_sampled"}"#;
+
+#[test]
+fn a_stretch_that_ends_at_a_kind_this_binary_does_not_know_is_booked() {
+    let events = log(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (30, None, TELEMETRY),
+    ]);
+
+    assert_eq!(time_of(&events).total(), Duration::from_secs(30));
 }

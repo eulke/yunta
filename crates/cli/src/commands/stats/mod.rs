@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use yunta_core::events::StoredEvent;
 use yunta_core::{RunId, Workflow, WorkflowName};
-use yunta_engine::{compute_run_stats, run_summary, RunSummary};
+use yunta_engine::{compute_run_stats_of, run_summary, RunSummary};
 
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
@@ -51,21 +51,22 @@ async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let events = open.events;
     let manifest = open.manifest.doc;
 
-    let run_stats = compute_run_stats(&manifest.workflow, &events);
-    let mode = yunta_core::events::run_mode(&events);
+    let state = yunta_engine::derive(&events);
+    let run_stats = compute_run_stats_of(&manifest.workflow, &state);
+    let mode = state.run.mode().as_str();
     let pricing = ctx.project.config.pricing.clone();
 
     if json {
-        let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
+        let dto = RunStatsJson::from(run_id, mode, &run_stats, pricing.as_ref());
         return crate::json::print_json(&dto);
     }
     print!(
         "{}",
         render_run_stats(
             run_id,
-            mode.as_str(),
+            mode,
             &run_stats,
-            &yunta_engine::derive(&events),
+            &state,
             pricing.as_ref(),
             &crate::render::stdout_look(),
         )
@@ -153,7 +154,6 @@ pub(crate) fn summaries(history: &[Opened]) -> Vec<RunSummary> {
         .map(|open| {
             run_summary(
                 open.run_id.clone(),
-                yunta_core::events::run_mode(&open.events),
                 open.manifest.doc.workflow_hash.clone(),
                 &open.manifest.doc.workflow,
                 &open.events,

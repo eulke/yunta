@@ -351,7 +351,7 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
         "a fact that names itself carries no label invented for it: {state:#}"
     );
 
-    assert_eq!(state["schema_version"], 6, "{state:#}");
+    assert_eq!(state["schema_version"], 7, "{state:#}");
     assert!(
         state["summary"]
             .as_str()

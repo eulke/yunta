@@ -211,6 +211,27 @@ dos momentos.
 _Evitar_: línea, entrada del log, evento — un evento es lo persistido; un
 momento es cómo se lee.
 
+**Gasto asentado** (`Spend::settled`):
+Lo que un run ya dio por gastado: el terminal de cada nodo que cerró, la ronda de
+preguntas que asentó el uso de su sesión y el gasto de los hijos que cerraron. Lo
+asentado no vuelve a estar en vuelo. Un run cerrado graba su gasto total: lo que
+quedó en vuelo al cerrar pasa a ser gasto grabado.
+_Evitar_: gasto confirmado, gasto final.
+
+**En vuelo** (`Spend::in_flight`):
+El uso que una sesión abierta ya reportó y que ningún terminal ni ronda asentó. Se
+suma a lo asentado en la única cifra de gasto del run (`Spend::so_far`), así que un
+nodo que espera a una persona muestra lo que ya gastó.
+_Evitar_: gasto pendiente, gasto parcial, uso abierto.
+
+**Tramo de tiempo** (`Timeline`):
+Un trozo del reloj del run entre dos eventos. Cada tramo es el tiempo de una sola
+cosa, la que estaba abierta a lo largo de él: un nodo trabajando, una persona
+preguntada, un chequeo, un servicio caído, un run detenido. Si nada estaba abierto,
+es del motor entre un paso y el siguiente. Un tramo que el host pasó dormido no
+cae en ningún balde.
+_Evitar_: intervalo, lapso, periodo.
+
 ## Gates
 
 **Escalación** (`Escalation`):

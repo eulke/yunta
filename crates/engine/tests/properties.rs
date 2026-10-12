@@ -21,6 +21,7 @@ mod common;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use proptest::prelude::*;
 
@@ -28,16 +29,16 @@ use common::{answer, ScriptedAnswers, QUESTIONS_FIXTURE, QUESTIONS_WORKFLOW};
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::node::happening::Happening as NodeHappening;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EngineFact, EventBody,
-    EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, PauseReason, RecordedOrigin,
-    RunPausedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage, UnknownEvent,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, ChildRunFinishedPayload,
+    EngineFact, EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity,
+    HostSuspendedPayload, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload,
+    PauseReason, RecordedOrigin, RunPausedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
-use yunta_core::events::{EventDraft, SessionEvent};
+use yunta_core::events::{ChildEvent, EventDraft, SessionEvent};
 use yunta_core::ArtifactKind;
-use yunta_core::NodeId;
+use yunta_core::{NodeId, RunId};
 use yunta_engine::{
     chronicle, derive, ArtifactIntegrity, Happening, NodeState, ObjectStore, RunReport, RunState,
 };
@@ -57,14 +58,27 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
         .block_on(future)
 }
 
+/// What the node ledger counts — an attempt open, sessions without their
+/// service — is what its records hold.
+fn counts_what_its_records_hold(state: &RunState) -> Result<(), TestCaseError> {
+    let open = || state.nodes.records().filter(|r| r.open_since.is_some());
+    prop_assert_eq!(state.nodes.attempting(), open().next().is_some());
+    let offline = state.nodes.records().any(|r| r.unreachable);
+    let waiting = offline && open().all(|r| r.unreachable);
+    prop_assert_eq!(state.nodes.attempts_offline(), waiting);
+    Ok(())
+}
+
+/// Usage whose cache is a part of its input: the cached tokens never exceed
+/// the input tokens they are counted in.
 fn tokens() -> impl Strategy<Value = TokenUsage> {
-    (0u64..1000, 0u64..1000, proptest::option::of(0u64..1000)).prop_map(
-        |(input, output, cached)| TokenUsage {
+    (0u64..1000, 0u64..1000).prop_flat_map(|(input, output)| {
+        proptest::option::of(0..=input).prop_map(move |cached| TokenUsage {
             input,
             output,
             cached,
-        },
-    )
+        })
+    })
 }
 
 fn task_status() -> impl Strategy<Value = TaskStatus> {
@@ -184,6 +198,18 @@ fn parameterized() -> impl Strategy<Value = EventPayload> {
                 responder: None,
             }
         ))),
+        // A child run closes with the usage it spent, and replay adds it to
+        // the parent's total: the monotone check sees it only if drawn.
+        (tokens(), prop::sample::select(vec!["child-a", "child-b"])).prop_map(
+            |(tokens_used, child)| {
+                EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                    RunId::from(child),
+                    yunta_core::sha256_hex(child.as_bytes()),
+                    TerminalState::Done,
+                    tokens_used,
+                )))
+            }
+        ),
     ]
 }
 
@@ -377,9 +403,14 @@ fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
             at(k).nodes.state(&grill)
         );
         assert_eq!(
-            at(k).total_tokens(),
+            at(k).spend().so_far(),
             asked_tokens,
             "the session that asked is counted once, at {k}"
+        );
+        assert_eq!(
+            at(k).spend().settled,
+            asked_tokens,
+            "the round settled the usage of the session that asked, at {k}"
         );
     }
     assert!(
@@ -404,7 +435,7 @@ fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
     );
     assert!(!at(6).answered_unfinished(&grill));
     assert_eq!(
-        at(6).total_tokens(),
+        at(6).spend().so_far(),
         asked_tokens,
         "counted once, not twice"
     );
@@ -709,16 +740,28 @@ proptest! {
         }
     }
 
-    /// `derive` is monotonic by prefix: as the log grows, tokens only
-    /// accumulate, tasks and nodes once seen stay seen, and a finding
+    /// `derive` is monotonic by prefix: as the log grows, settled tokens
+    /// only accumulate, tasks and nodes once seen stay seen, and a finding
     /// leaves the set that stands only by being withdrawn — a longer
     /// prefix never un-does what a shorter one derived.
     #[test]
     fn derive_is_prefix_monotonic(log in log()) {
+        // Every node's settled usage and every closed child run's total:
+        // what the log has settled, with the usage in flight left out.
+        let settled = |state: &RunState| -> u64 {
+            let nodes: u64 = state
+                .nodes
+                .values()
+                .map(|record| record.spend.settled.total())
+                .sum();
+            nodes + state.children.tokens().total()
+        };
         let mut prev = derive(&[]);
         for k in 1..=log.len() {
             let cur = derive(&log[..k]);
-            prop_assert!(cur.total_tokens().total() >= prev.total_tokens().total());
+            // Usage in flight is not monotone: a restart drops what an open
+            // attempt reported, and a close replaces it with what it states.
+            prop_assert!(settled(&cur) >= settled(&prev));
             // The one event this prefix added is the only thing that can
             // have taken a finding back, so the property reads it rather
             // than the ledger: a run-level finding has no node to ask
@@ -748,6 +791,7 @@ proptest! {
             for id in prev.nodes.iter().map(|(id, _)| id) {
                 prop_assert!(cur.nodes.contains(id), "node {id} disappeared");
             }
+            counts_what_its_records_hold(&cur)?;
             prev = cur;
         }
     }
@@ -892,6 +936,61 @@ proptest! {
             "every artifact the log names is accounted for"
         );
         prop_assert_eq!(derive(&log), before);
+    }
+
+    /// The cache is a part of the input: whatever a node's terminal reports,
+    /// the spend a log derives counts no more cached tokens than input tokens.
+    #[test]
+    fn the_cache_is_a_part_of_the_input(usage in tokens()) {
+        let events = Log::for_run(RUN)
+            .node(
+                "a",
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+            )
+            .node(
+                "a",
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    NodeOutcome::Summary("ok".into()),
+                    usage,
+                ))),
+            )
+            .build();
+        let spent = derive(&events).spend().so_far();
+        prop_assert!(spent.cached.unwrap_or(0) <= spent.input);
+    }
+
+    /// Every stretch of a clocked log is booked once: the buckets add up to
+    /// the awake time from the log's first event to its last.
+    #[test]
+    fn every_stretch_of_a_clocked_log_is_booked_once(
+        steps in prop::collection::vec((0i64..120, prop::option::of(0u64..300), entry()), 1..30)
+    ) {
+        let mut log = Log::for_run(RUN);
+        for (gap, slept, (node, payload, _)) in steps {
+            // A suspension comes only from `slept`, inside its gap: a host
+            // suspension drawn among the kinds would state a sleep no gap bounds.
+            if matches!(payload, EventPayload::Run(RunEvent::HostSuspended(_))) {
+                continue;
+            }
+            log = log.after(gap);
+            if let Some(secs) = slept {
+                // A host sleeps inside the gap it is stated in, so no two
+                // suspensions overlap.
+                let slept = Duration::from_secs(secs.min(gap as u64));
+                log = log.event(EventPayload::Run(RunEvent::HostSuspended(
+                    HostSuspendedPayload::slept(slept),
+                )));
+            }
+            log = match node {
+                Some(n) => log.node(n, payload),
+                None => log.event(payload),
+            };
+        }
+        let state = derive(&log.build());
+        prop_assert_eq!(
+            state.time_spent(None).total(),
+            state.elapsed(None).unwrap_or_default()
+        );
     }
 }
 

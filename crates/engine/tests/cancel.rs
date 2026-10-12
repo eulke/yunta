@@ -6,10 +6,12 @@
 //! process; the `hang` mock stands in for a stuck agent.
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::EventPayload;
+use yunta_core::events::{AgentMessageType, EventPayload, SessionEvent};
 use yunta_core::events::{NodeEvent, PauseReason, RunEvent};
-use yunta_engine::{RunReport, RunTerminal};
+use yunta_core::Redactor;
+use yunta_engine::{EngineLiveness, RunReport, RunTerminal};
 use yunta_testkit::{wait_until_async, Bench, MOCK_CONFIG};
+use yunta_testkit_core::FixedClock;
 
 const HANGING_WORKFLOW: &str = "\
 name: cancel-me
@@ -23,6 +25,14 @@ nodes:
 /// A single session that opens and then never produces a terminal event on
 /// its own — only an interrupt or kill ends it.
 const HANG_FIXTURE: &str = "sessions:\n  - { outcome: { type: hang } }\n";
+
+/// A single session that reports the usage of one turn, then hangs: what an
+/// attempt has spent when the run is cancelled while the attempt still works.
+const USAGE_THEN_HANG: &str = "\
+sessions:
+  - steps: [{ type: usage, input_tokens: 30, output_tokens: 12 }]
+    outcome: { type: hang }
+";
 
 /// A single session that finishes at once — what the interrupted node meets
 /// when the run resumes.
@@ -64,6 +74,61 @@ async fn cancel_pauses_a_hanging_run_as_cancelled_by_user() {
         }
         other => panic!("a cancelled run must pause, got {other:?}"),
     }
+}
+
+/// Fires `token` once the attempt's usage is on the log. A cancellation that
+/// lands before the session takes its step ends the session without usage, so
+/// the wait is for the usage itself and not for the start.
+async fn cancel_once_reported(bench: &Bench, token: &CancellationToken) {
+    wait_until_async(
+        || async move {
+            bench.events().iter().any(|event| {
+                matches!(
+                    event.payload(),
+                    Some(EventPayload::Session(SessionEvent::Message(p)))
+                        if p.message_type == AgentMessageType::Usage
+                )
+            })
+        },
+        || "the usage never reached the log".to_string(),
+    )
+    .await;
+    token.cancel();
+}
+
+/// A run cancelled while its attempt works records the spend that attempt had
+/// reported, so the close counts what the session spent.
+#[tokio::test]
+async fn a_cancelled_run_records_the_spend_its_open_attempt_reported() {
+    let token = CancellationToken::new();
+    let bench = Bench::new().with_cancel(token.clone());
+
+    let (report, ()) = tokio::join!(
+        bench.run(HANGING_WORKFLOW, USAGE_THEN_HANG),
+        cancel_once_reported(&bench, &token)
+    );
+
+    assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
+    let redactor = Redactor::of_values(std::iter::empty());
+    yunta_engine::close_run(
+        &bench.storage.async_handle(),
+        &bench.run_id,
+        &bench.run_dir(),
+        &FixedClock,
+        EngineLiveness::Dead,
+        "tester".into(),
+        &redactor,
+    )
+    .await
+    .expect("a paused run closes");
+    let recorded = bench
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Run(RunEvent::Finished(p))) => Some(p.metrics.tokens),
+            _ => None,
+        });
+    assert_eq!(recorded.map(|t| (t.input, t.output)), Some((30, 12)));
 }
 
 #[tokio::test]

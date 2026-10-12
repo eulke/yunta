@@ -7,6 +7,7 @@ use std::path::Path;
 use yunta_core::events::Failure;
 use yunta_core::RunId;
 use yunta_engine::{NodeState, RunFrame, RunPhase, RunState};
+use yunta_render::spend::Breakdown;
 
 use crate::commands::advice;
 use crate::render::blocks::{
@@ -14,7 +15,7 @@ use crate::render::blocks::{
 };
 use crate::render::ink::{Line, Tone};
 use crate::render::state::{RunWord, StateWord};
-use crate::render::{indent, prose, truncate, Look, Tokens, INDENT};
+use crate::render::{indent, prose, truncate, Look, INDENT};
 
 /// What the page is drawn from.
 pub(super) struct Page<'a> {
@@ -226,7 +227,7 @@ impl Page<'_> {
 
     /// The facts a reader checks once they know where the run stands.
     pub(super) fn fields(&self, glyphs: crate::render::Glyphs) -> Fields {
-        let tokens = self.state.total_tokens();
+        let tokens = self.state.spend().so_far();
         let mut tasks: Vec<_> = self.state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
         let sep = format!(" {} ", glyphs.sep());
@@ -286,11 +287,7 @@ impl Page<'_> {
 fn spent(tokens: yunta_core::events::TokenUsage) -> String {
     match tokens.total() {
         0 => String::new(),
-        _ => format!(
-            "{} in / {} out",
-            Tokens(tokens.input).figure(),
-            Tokens(tokens.output).figure()
-        ),
+        _ => Breakdown(&tokens).to_string(),
     }
 }
 

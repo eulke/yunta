@@ -10,9 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::{RunFrame, RunPhase};
+use yunta_engine::{RunFrame, RunPhase, RunState};
 use yunta_storage::Storage;
 
 use crate::commands::advice;
@@ -344,15 +343,16 @@ fn run_row(
                 ),
             )
         })?;
-    let frame = progress::frame(&run_id, &manifest, &events, now);
+    let state = yunta_engine::derive(&events);
+    let frame = progress::frame_of(&run_id, &manifest, &state, now);
     // Only a parked run has a menu to rebuild, and rebuilding one is a
-    // walk of the log.
+    // walk of the run's state.
     let menu = matches!(frame.phase, RunPhase::Waiting { .. })
-        && yunta_engine::awaits_decision(&manifest, &yunta_engine::derive(&events)).is_some();
+        && yunta_engine::awaits_decision(&manifest, &state).is_some();
     let row = RunRow::of(
         &frame,
         &crate::render::Engine::of(&run_dir, now),
-        time_in_state(&events, now),
+        time_in_state(&state, now),
         menu,
     );
     Ok((row, manifest.project.map(|project| project.git_common_dir)))
@@ -373,10 +373,11 @@ impl Unreadable {
 /// `run_finished`. Zero for a log with no events, and for one whose last
 /// event is stamped after `now`, since a run cannot have been somewhere
 /// for a negative time.
-fn time_in_state(events: &[StoredEvent], now: DateTime<Utc>) -> Duration {
-    events
-        .last()
-        .map(|event| (now - event.timestamp).to_std().unwrap_or(Duration::ZERO))
+fn time_in_state(state: &RunState, now: DateTime<Utc>) -> Duration {
+    state
+        .clock()
+        .last_at()
+        .map(|at| (now - at).to_std().unwrap_or(Duration::ZERO))
         .unwrap_or(Duration::ZERO)
 }
 

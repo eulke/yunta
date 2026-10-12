@@ -67,12 +67,28 @@ nodes:
 on_finish:
   - cleanup: worktree
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
 
     assert!(matches!(terminal, RunTerminal::Finished));
     assert!(
         finding(&bench.events(), "cleanup-not-a-worktree").is_some(),
         "a cleanup that cannot run on a primary checkout must be a finding"
+    );
+    // The finding follows the close, and the report and the forensic
+    // export both hold the log as the close left it, finding included.
+    let reported = state.effective_findings();
+    assert!(
+        reported
+            .iter()
+            .any(|f| f.id.as_str() == "cleanup-not-a-worktree"),
+        "the report carries the closed log: {reported:?}"
+    );
+    let exported = tokio::fs::read_to_string(bench.run_dir().join("events.jsonl"))
+        .await
+        .unwrap();
+    assert!(
+        exported.contains("cleanup-not-a-worktree"),
+        "the export holds the closed log"
     );
 }
 

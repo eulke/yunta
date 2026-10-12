@@ -13,10 +13,10 @@ use yunta_core::events::{
     CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload, DiscardedCandidate,
     Escalation, EventBody, EventPayload, Evidence, Fact, Failure, GateOption, NodeFailedPayload,
     NodeFinishedPayload, NodeOutcome, NodeReroutedPayload, NodeStartedPayload, PauseReason,
-    PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload,
-    RunMetrics, RunPausedPayload, RunResumedPayload, RunnerRejection, RunnerResolvedPayload,
-    StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TerminalState,
-    TokenUsage, UnknownEvent,
+    PromotionCause, PromotionSignaledPayload, QuestionsAskedPayload, RerouteOrigin,
+    RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload,
+    RunnerRejection, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{
     ArtifactEvent, ChildEvent, GateEvent, NodeEvent, RunEvent, SessionEvent, TaskEvent,
@@ -24,13 +24,13 @@ use yunta_core::events::{
 use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::NonEmpty;
 use yunta_core::{
-    AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
-    TaskId, Workflow,
+    sha256_hex, AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind,
+    RunnerCandidate, TaskId, Workflow,
 };
 use yunta_engine::NodeWait;
 use yunta_engine::{
-    run_frame, Counter, NodeStanding, NodeState, Percentiles, PriorEstimation, RunFrame, RunPhase,
-    RunningTask, WaitingOn,
+    compute_run_stats, run_frame, Counter, NodeStanding, NodeState, Percentiles, PriorEstimation,
+    RunFrame, RunPhase, RunningTask, WaitingOn,
 };
 
 const RUN: &str = "run-1";
@@ -189,6 +189,19 @@ fn tool_use(tool: &str) -> EventPayload {
     }))
 }
 
+/// The usage a session reports for its turn, as an `agent_message` carries it.
+fn usage_message(input: u64, output: u64) -> EventPayload {
+    EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
+        message_type: AgentMessageType::Usage,
+        tool_name: None,
+        target: None,
+        input_tokens: Some(input),
+        output_tokens: Some(output),
+        cached_input_tokens: None,
+        text: None,
+    }))
+}
+
 /// The one option a locally-answered gate in these tests offers.
 fn approve_option() -> GateOption {
     GateOption {
@@ -247,7 +260,7 @@ fn buckets(counter: &Counter) -> [usize; 6] {
 #[test]
 fn the_frame_names_the_run_and_the_workflow_its_manifest_froze() {
     let workflow = chain();
-    let events = log(vec![(0, None, created("standard"))]);
+    let events = log(vec![(0, None, created("alpha"))]);
 
     let frame = frame(&workflow, &events, 100);
     assert_eq!(frame.run_id, RUN);
@@ -260,7 +273,7 @@ fn the_frame_names_the_run_and_the_workflow_its_manifest_froze() {
 #[test]
 fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
     let workflow = chain();
-    let events = log(vec![(0, None, created("standard"))]);
+    let events = log(vec![(0, None, created("alpha"))]);
 
     assert_eq!(
         run_frame(&RUN.into(), &workflow, &events, None, at(100)).prior,
@@ -295,7 +308,7 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
 fn a_node_that_reroutes_and_runs_again_moves_between_buckets_without_shrinking_the_total() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
         (2, Some("plan"), finished()),
         (3, Some("build"), started(1)),
@@ -337,7 +350,7 @@ fn a_node_that_reroutes_and_runs_again_moves_between_buckets_without_shrinking_t
 fn a_failed_node_rerouted_to_its_fix_counts_as_correcting_until_it_runs_again() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
         (2, Some("plan"), finished()),
         (3, Some("build"), started(1)),
@@ -389,7 +402,7 @@ fn a_failed_node_rerouted_to_its_fix_counts_as_correcting_until_it_runs_again() 
 fn a_correction_a_closed_run_never_reached_counts_as_failed() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
         (2, Some("plan"), finished()),
         (3, Some("build"), started(1)),
@@ -406,7 +419,7 @@ fn a_correction_a_closed_run_never_reached_counts_as_failed() {
 fn the_run_counts_every_reroute_and_the_node_keeps_the_last_one_it_took() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), failed("red")),
         (3, Some("build"), rerouted("fix")),
@@ -431,7 +444,7 @@ fn the_run_counts_every_reroute_and_the_node_keeps_the_last_one_it_took() {
 fn tasks_are_absent_until_a_ledger_registers_one() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), registered("t1")),
         (3, Some("build"), registered("t2")),
@@ -458,7 +471,7 @@ fn a_task_that_returns_to_ready_moves_back_into_to_go_and_the_total_holds() {
     // shows the move, and the denominator does not budge.
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), registered("t1")),
         (3, Some("build"), task_now("t1", TaskStatus::Running)),
@@ -478,7 +491,7 @@ fn a_task_that_returns_to_ready_moves_back_into_to_go_and_the_total_holds() {
 fn a_task_held_by_its_dependencies_is_waiting_and_a_failed_one_is_failed() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), registered("t1")),
         (3, Some("build"), registered("t2")),
@@ -503,8 +516,8 @@ fn moded() -> Workflow {
         r#"
 name: ship
 modes:
-  quick: { include: [plan, fan] }
-  full: { include: all }
+  alpha: { include: [plan, fan] }
+  beta: { include: all }
 nodes:
   - { id: plan, kind: bash, run: "true" }
   - id: fan
@@ -520,12 +533,12 @@ nodes:
 #[test]
 fn a_modes_excluded_nodes_count_as_skipped_and_name_the_mode() {
     let workflow = moded();
-    let events = log(vec![(0, None, created("quick"))]);
+    let events = log(vec![(0, None, created("alpha"))]);
 
     let frame = frame(&workflow, &events, 100);
-    assert_eq!(frame.mode, "quick");
+    assert_eq!(frame.mode, "alpha");
     assert_eq!(frame.flow.skipped, 1);
-    assert_eq!(frame.flow.skipped_by, Some(ModeName::from("quick")));
+    assert_eq!(frame.flow.skipped_by, Some(ModeName::from("alpha")));
     assert_eq!(
         frame.flow.total, 4,
         "the denominator is what this run will do: the excluded node is outside it"
@@ -543,7 +556,7 @@ fn a_parallel_groups_children_are_included_with_their_group() {
     // `modes:` names top-level nodes; a group the mode schedules runs
     // every child it declares, so no child of `fan` is skipped.
     let workflow = moded();
-    let events = log(vec![(0, None, created("quick"))]);
+    let events = log(vec![(0, None, created("alpha"))]);
 
     let frame = frame(&workflow, &events, 100);
     for child in ["left", "right"] {
@@ -560,7 +573,7 @@ fn a_parallel_groups_children_are_included_with_their_group() {
 #[test]
 fn a_mode_that_narrows_nothing_skips_nothing() {
     let workflow = moded();
-    let events = log(vec![(0, None, created("full"))]);
+    let events = log(vec![(0, None, created("beta"))]);
 
     let frame = frame(&workflow, &events, 100);
     assert_eq!(frame.flow.skipped, 0);
@@ -592,7 +605,7 @@ nodes:
   - { id: pr, kind: pull_request, title: "open it" }
 "#,
     );
-    let events = log(vec![(0, None, created("standard"))]);
+    let events = log(vec![(0, None, created("alpha"))]);
 
     let kinds: Vec<&str> = frame(&workflow, &events, 100)
         .nodes
@@ -640,7 +653,7 @@ fn a_node_carries_every_artifact_it_produced_in_log_order() {
         ))
     };
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), produced("plan.md")),
         (3, Some("build"), produced("report.md")),
@@ -679,7 +692,7 @@ fn a_node_carries_every_artifact_it_produced_in_log_order() {
 fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (
             2,
@@ -721,35 +734,45 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
 }
 
 #[test]
-fn the_run_total_carries_the_work_in_flight_and_a_node_carries_its_closed_attempts() {
-    let workflow = chain();
-    let usage = EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
-        message_type: AgentMessageType::Usage,
-        tool_name: None,
-        target: None,
-        input_tokens: Some(100),
-        output_tokens: Some(50),
-        cached_input_tokens: None,
-        text: None,
-    }));
+fn a_running_node_carries_the_spend_its_open_attempt_reported() {
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
-        (2, Some("build"), usage),
+        (2, Some("build"), usage_message(100, 50)),
     ]);
 
-    let in_flight = frame(&workflow, &events, 100);
-    assert_eq!(in_flight.tokens, tokens(100, 50));
-    let build = in_flight
+    let frame = frame(&chain(), &events, 100);
+    let build = frame
         .nodes
         .iter()
         .find(|node| node.id == "build")
         .expect("declared");
     assert_eq!(
-        build.tokens,
-        TokenUsage::default(),
-        "a node reports what its closed attempts spent; this one has closed none"
+        (frame.tokens, build.tokens),
+        (tokens(100, 50), tokens(100, 50))
     );
+}
+
+#[test]
+fn the_frame_and_the_stats_read_one_spend_while_a_question_waits() {
+    let asked = QuestionsAskedPayload::new(sha256_hex(b"q"), vec!["q1".into()], tokens(30, 12))
+        .expect("one question");
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("build"), started(1)),
+        (2, Some("build"), usage_message(30, 12)),
+        (
+            3,
+            Some("build"),
+            EventPayload::Gates(GateEvent::QuestionsAsked(asked)),
+        ),
+    ]);
+    let frame = frame(&chain(), &events, 100);
+    assert_eq!(
+        frame.tokens,
+        compute_run_stats(&chain(), &events).total_tokens
+    );
+    assert_eq!(frame.tokens, tokens(30, 12));
 }
 
 #[test]
@@ -765,7 +788,7 @@ nodes:
 "#,
     );
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("implement"), started(1)),
         (2, Some("implement"), session_opened("s-1")),
         (3, Some("implement"), session_opened("s-2")),
@@ -822,7 +845,7 @@ nodes:
         EventPayload::Session(SessionEvent::Opened(opened))
     };
     let in_session = |events: &[EventPayload]| {
-        let log = log(std::iter::once((0, None, created("standard")))
+        let log = log(std::iter::once((0, None, created("alpha")))
             .chain(
                 events
                     .iter()
@@ -860,7 +883,7 @@ nodes:
 fn a_degraded_capability_is_carried_with_what_happened_instead() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (
             2,
@@ -893,7 +916,7 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
 fn elapsed_and_last_event_age_are_measured_against_the_injected_now() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (10, Some("build"), started(1)),
     ]);
 
@@ -932,7 +955,7 @@ fn elapsed_and_last_event_age_are_measured_against_the_injected_now() {
 #[test]
 fn a_node_that_never_started_reports_no_elapsed_rather_than_zero() {
     let workflow = chain();
-    let events = log(vec![(0, None, created("standard"))]);
+    let events = log(vec![(0, None, created("alpha"))]);
 
     let frame = frame(&workflow, &events, 100);
     let plan = frame.nodes.first().expect("declared");
@@ -940,6 +963,18 @@ fn a_node_that_never_started_reports_no_elapsed_rather_than_zero() {
     assert_eq!(plan.elapsed, None);
     assert_eq!(plan.last_event_age, None);
     assert_eq!(plan.attempt, None);
+}
+
+#[test]
+fn a_log_that_starts_with_a_non_run_event_ages_from_that_event() {
+    let events = log(vec![
+        (10, Some("plan"), started(1)),
+        (20, None, created("alpha")),
+    ]);
+    assert_eq!(
+        frame(&chain(), &events, 100).elapsed,
+        Some(Duration::from_secs(90))
+    );
 }
 
 // --- composition -------------------------------------------------------
@@ -955,7 +990,7 @@ nodes:
     );
     let hash = ContentHash::sha256(b"child workflow");
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("sub"), started(1)),
         (
             2,
@@ -1010,7 +1045,7 @@ nodes:
 "#,
     );
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("sub"), started(1)),
         (
             2,
@@ -1037,7 +1072,7 @@ nodes:
 fn unknown_event_kinds_survive_into_the_frame() {
     let workflow = chain();
     let mut events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
     ]);
     push_unknown(&mut events, 2, "telemetry_sampled");
@@ -1073,7 +1108,7 @@ nodes:
 "#,
     );
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("approve"), started(1)),
         (
             2,
@@ -1126,7 +1161,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
     let workflow = chain();
     let asked = "node `plan` asked 1 question: `what-changed`";
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
         (2, Some("plan"), gate_waiting(None)),
         (
@@ -1161,7 +1196,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
     // the frame says so, quoting nothing rather than the wrong thing.
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
         (2, Some("plan"), gate_waiting(None)),
         (
@@ -1201,7 +1236,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
 fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), failed("out of budget")),
         (
@@ -1231,7 +1266,7 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
 fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), failed("criteria still red")),
         (3, None, run_finished(TerminalState::Failed)),
@@ -1249,7 +1284,7 @@ fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
 fn a_promoted_run_names_the_mode_its_signal_suggested() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("quick")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), finished()),
         (
@@ -1261,7 +1296,7 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
                     goto: "fix".into(),
                 },
                 vec![Fact::bare("criteria still red")].into(),
-                "full".into(),
+                "beta".into(),
             ))),
         ),
         (4, None, run_finished(TerminalState::Promoted)),
@@ -1270,7 +1305,7 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
     assert_eq!(
         frame(&workflow, &events, 100).phase,
         RunPhase::Promoted {
-            to: Some("full".into()),
+            to: Some("beta".into()),
         }
     );
 }
@@ -1279,7 +1314,7 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
 fn a_cancelled_run_is_reported_as_cancelled_not_as_finished() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), finished()),
         (3, None, run_finished(TerminalState::Cancelled)),
@@ -1291,14 +1326,14 @@ fn a_cancelled_run_is_reported_as_cancelled_not_as_finished() {
 #[test]
 fn a_run_with_no_start_yet_is_created_and_a_finished_one_says_so() {
     let workflow = chain();
-    let created_only = log(vec![(0, None, created("standard"))]);
+    let created_only = log(vec![(0, None, created("alpha"))]);
     assert_eq!(
         frame(&workflow, &created_only, 100).phase,
         RunPhase::Created
     );
 
     let done = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), finished()),
         (3, None, run_finished(TerminalState::Done)),
@@ -1316,7 +1351,7 @@ fn a_run_with_no_start_yet_is_created_and_a_finished_one_says_so() {
 fn a_broken_log_reports_its_diagnostic_and_keeps_what_replay_derived() {
     let workflow = chain();
     let events = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
         (2, Some("plan"), finished()),
         // No `node_started` for `build`: the log stops making sense here.
@@ -1352,7 +1387,7 @@ fn a_run_closed_with_no_evidence_behind_it_reports_none_instead_of_inventing_one
     // promotion aimed at. A log that closed without one says so.
     let workflow = chain();
     let failed_blind = log(vec![
-        (0, None, created("standard")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), finished()),
         (3, None, run_finished(TerminalState::Failed)),
@@ -1363,7 +1398,7 @@ fn a_run_closed_with_no_evidence_behind_it_reports_none_instead_of_inventing_one
     );
 
     let promoted_blind = log(vec![
-        (0, None, created("quick")),
+        (0, None, created("alpha")),
         (1, Some("build"), started(1)),
         (2, Some("build"), finished()),
         (3, None, run_finished(TerminalState::Promoted)),

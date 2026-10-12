@@ -72,7 +72,6 @@ mod skills;
 mod stats;
 mod task_cycle;
 mod tasks;
-mod time_spent;
 mod verification_effectiveness;
 mod view;
 mod wakefulness;
@@ -109,8 +108,7 @@ pub use human_interaction::{
 };
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
 pub use live::{
-    last_event_age, live_total_tokens, open_sessions, recent_tool_calls, running_since,
-    OpenSession, ToolCall,
+    last_event_age, open_sessions, recent_tool_calls, running_since, OpenSession, ToolCall,
 };
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
 pub use modes::{dependencies_in_mode, included_nodes, mode_included_nodes};
@@ -129,6 +127,7 @@ pub use receipt::{
     CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, FailedNode, Receipt,
     ReceiptError, RunnerUsage, ScopeSummary,
 };
+pub use replay::TimeSpent;
 pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, NodeWait, RunState, UnknownKindCount,
 };
@@ -150,8 +149,8 @@ pub use scope::{
     violations, Breach, Ceiling, ScopeCheckError, ScopeCheckResult,
 };
 pub use stats::{
-    compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,
-    Submissions,
+    compute_run_stats, compute_run_stats_at, compute_run_stats_of, median, FindingActivity,
+    NodeStat, RunStats, Submissions,
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, BlockedCause,
@@ -159,15 +158,14 @@ pub use task_cycle::{
     SessionSetup, Surprise, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use tasks::{held_of, judged_task, measured};
-pub use time_spent::TimeSpent;
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
 pub use view::{
-    chronicle, run_frame, ChildLink, Counter, Degradation, Happening, Moment, NodeFrame,
-    NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
+    chronicle, run_frame, run_frame_of, ChildLink, Counter, Degradation, Happening, Moment,
+    NodeFrame, NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
 };
 pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{

@@ -58,6 +58,11 @@ impl Suspensions {
     /// working.
     pub fn awake_between(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Duration {
         let wall = (to - from).to_std().unwrap_or(Duration::ZERO);
+        if self.0.is_empty() {
+            // A host that never slept: every stretch is awake, and replay
+            // asks this once per event.
+            return wall;
+        }
         wall.saturating_sub(self.asleep_between(from, to))
     }
 

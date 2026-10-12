@@ -264,8 +264,8 @@ sessions:
     // the parent's derived total (what `limits.max_tokens_per_run`
     // compares against) includes it exactly once. The node's own close
     // deliberately carries none — it would double-count.
-    assert_eq!(state.total_tokens().input, 100);
-    assert_eq!(state.total_tokens().output, 20);
+    assert_eq!(state.spend().so_far().input, 100);
+    assert_eq!(state.spend().so_far().output, 20);
     match state.nodes.state("feat") {
         Some(NodeState::Finished { tokens, .. }) => {
             assert_eq!(

@@ -40,16 +40,17 @@ pub struct NodeFrame {
     /// The highest attempt number the log reached for this node; `None`
     /// for a node that never started.
     pub attempt: Option<u32>,
-    /// How long this node has spent running: every attempt that closed,
-    /// plus the one open at `now`. `None` for a node that never started.
+    /// How long this node has spent working: every stretch of work that
+    /// closed, plus the one open at `now`. Time spent waiting on a person
+    /// is not work and is left out. `None` for a node that never started.
     pub elapsed: Option<Duration>,
     /// How long ago this node wrote its last event — what a view shows
     /// instead of a spinner, since it is measured and grows while the
     /// node says nothing. `None` for a node with no events.
     pub last_event_age: Option<Duration>,
-    /// What this node's closed attempts reported spending, first and
-    /// retries alike. The attempt now running reports into the run's own
-    /// live total instead, so these never add up to it.
+    /// What this node's attempts have spent, first and retries alike, the
+    /// attempt open at `now` included as it reports. A child run's spend
+    /// is in no node's row, only in [`RunFrame::tokens`](super::RunFrame::tokens).
     pub tokens: TokenUsage,
     /// Every artifact this node produced, by the identity the log holds
     /// it under, in the order the log accepted them.
@@ -125,15 +126,15 @@ fn sent_to_correction(record: &NodeRecord) -> bool {
 /// The derivations every node frame is read from, and the instant they
 /// are read at.
 ///
-/// The run-wide ones — replay's state, the per-node stats, the ids the
-/// mode includes — are derived once for the whole frame instead of once
-/// per node. What a node is doing right now is read off the same state:
+/// The run-wide ones — the per-node stats and the ids the mode includes —
+/// are computed once for the whole frame instead of once per node. What a
+/// node is doing right now is read off the same state the frame was given:
 /// the node ledger already folds it.
 pub(super) struct Reading<'a> {
     pub(super) stats: HashMap<&'a NodeId, &'a NodeStat>,
     pub(super) included: Included,
     /// What the run's birth left out, as `run_created` recorded it.
-    pub(super) left_out: Vec<yunta_core::LeftOut>,
+    pub(super) left_out: &'a [yunta_core::LeftOut],
     pub(super) state: &'a RunState,
     pub(super) now: DateTime<Utc>,
     /// Whether the run has not closed: a correction under way belongs to

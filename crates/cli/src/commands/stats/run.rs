@@ -4,6 +4,7 @@
 use yunta_core::units::DURATION_WIDEST;
 use yunta_core::RunId;
 use yunta_engine::{NodeStat, RunStats};
+use yunta_render::spend::Breakdown;
 
 use crate::render::blocks::Fields;
 use crate::render::doc::Doc;
@@ -130,18 +131,10 @@ fn cache(stats: &RunStats, glyphs: Glyphs) -> String {
 /// What the run spent, in tokens. Nothing for a run that spent none.
 fn spent(stats: &RunStats) -> String {
     let tokens = &stats.total_tokens;
-    if tokens.total() == 0 {
-        return String::new();
+    match tokens.total() {
+        0 => String::new(),
+        _ => Breakdown(tokens).to_string(),
     }
-    let cached = match tokens.cached {
-        Some(cached) => format!(" ({} cached)", Tokens(cached).figure()),
-        None => String::new(),
-    };
-    format!(
-        "{} in / {} out{cached}",
-        Tokens(tokens.input).figure(),
-        Tokens(tokens.output).figure()
-    )
 }
 
 /// What the run handed over, by what the engine answered — the other
@@ -281,7 +274,8 @@ mod tests {
     use std::time::Duration;
 
     use yunta_core::events::{
-        EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, TokenUsage,
+        EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Spend,
+        TokenUsage,
     };
     use yunta_testkit::{assert_golden, ENVIRONMENTS};
 
@@ -289,18 +283,35 @@ mod tests {
 
     const RUN: RunId = RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
+    /// The usage the golden page reads, with the cache figure it reports.
+    const PAGE_USAGE: TokenUsage = TokenUsage {
+        input: 18_000,
+        output: 2_200,
+        cached: Some(25_200),
+    };
+
+    /// A spend whose usage has all settled: nothing is in flight.
+    fn settled(usage: TokenUsage) -> Spend {
+        Spend {
+            settled: usage,
+            in_flight: TokenUsage::default(),
+        }
+    }
+
     /// A run with one task done, its documents and findings counted, and
     /// `nodes` under it.
     fn stats(nodes: Vec<NodeStat>) -> RunStats {
+        let spend = settled(TokenUsage {
+            input: 300,
+            output: 200,
+            cached: None,
+        });
         RunStats {
             cptv: Some(500.0),
             rework_rate: None,
             cache_rate: None,
-            total_tokens: yunta_core::events::TokenUsage {
-                input: 300,
-                output: 200,
-                cached: None,
-            },
+            total_tokens: spend.so_far(),
+            spend,
             tasks_total: 2,
             tasks_done: 1,
             wall_clock: Some(Duration::from_secs(90)),
@@ -332,7 +343,7 @@ mod tests {
             &RUN,
             "default",
             stats,
-            &yunta_engine::derive(&[]),
+            &yunta_engine::RunState::default(),
             None,
             look,
         )
@@ -359,6 +370,7 @@ mod tests {
     fn a_fact_with_nothing_to_say_is_not_a_row() {
         let quiet = RunStats {
             total_tokens: Default::default(),
+            spend: Spend::default(),
             artifact_submissions: Default::default(),
             findings: Default::default(),
             findings_effective: 0,
@@ -410,14 +422,12 @@ mod tests {
             open_attempt: None,
             blocked: Duration::from_secs(secs / 4),
         };
+        let spend = settled(PAGE_USAGE);
         let run = RunStats {
             rework_rate: Some(0.12),
             cache_rate: Some(1.4),
-            total_tokens: yunta_core::events::TokenUsage {
-                input: 18_000,
-                output: 2_200,
-                cached: Some(25_200),
-            },
+            total_tokens: spend.so_far(),
+            spend,
             ..stats(vec![
                 node("plan", 4_000, 40),
                 node("implement-the-whole-feature", 14_000, 300),

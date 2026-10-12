@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use yunta_core::events::{EventPayload, RunEvent, RunFinishedPayload, StoredEvent, TerminalState};
+use yunta_core::events::{EventPayload, RunEvent, RunFinishedPayload, TerminalState};
 use yunta_core::{Clock, Redactor, Responder, RunId};
 use yunta_storage::{AsyncStorage, StorageError};
 
@@ -52,11 +52,11 @@ pub async fn close_run(
     by: Responder,
     redactor: &Redactor,
 ) -> Result<(), CloseRunError> {
-    let events = storage.events_for_run(run_id.clone()).await?;
-    if events.iter().any(finishes_the_run) {
+    let state = crate::replay::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
+    if state.run.finished().is_some() {
         return Err(CloseRunError::AlreadyClosed);
     }
-    if !events.last().is_some_and(pauses_the_run) {
+    if !state.tail_paused() {
         return Err(match engine {
             EngineLiveness::Alive => CloseRunError::Driven,
             EngineLiveness::Dead | EngineLiveness::Unrecorded | EngineLiveness::Unknown => {
@@ -64,13 +64,8 @@ pub async fn close_run(
             }
         });
     }
-    let state = crate::replay::derive(&events);
-    let closed = RunFinishedPayload::closed(
-        TerminalState::Cancelled,
-        state.total_tokens(),
-        crate::stats::tasks_done(&state),
-    )
-    .closed_by(by);
+    let closed =
+        RunFinishedPayload::closed(TerminalState::Cancelled, state.metrics()).closed_by(by);
     RunLog::new(storage, run_id, clock, redactor)
         .record(None, EventPayload::Run(RunEvent::Finished(closed)))
         .await?;
@@ -79,18 +74,4 @@ pub async fn close_run(
     // `tokio::fs` would run the same write and rename on a pool thread.
     crate::events_export::write_jsonl(run_dir, &events)
         .map_err(|error| CloseRunError::Export(yunta_core::describe(&error)))
-}
-
-fn finishes_the_run(event: &StoredEvent) -> bool {
-    matches!(
-        event.payload(),
-        Some(EventPayload::Run(RunEvent::Finished(_)))
-    )
-}
-
-fn pauses_the_run(event: &StoredEvent) -> bool {
-    matches!(
-        event.payload(),
-        Some(EventPayload::Run(RunEvent::Paused(_)))
-    )
 }
