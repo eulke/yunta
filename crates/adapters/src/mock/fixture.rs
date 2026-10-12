@@ -348,16 +348,6 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
-    /// What a CLI reports about the per-run tools the session holds:
-    /// how many of them it actually mounted. A fixture scripts it to
-    /// put a session in the state a client that could not read the
-    /// server's tool list leaves behind — the server mounted, the
-    /// session holding nothing from it.
-    RunToolsMounted {
-        count: usize,
-        #[serde(default)]
-        after_ms: u64,
-    },
     /// Performs a REAL MCP `tools/call` against the session's own
     /// `run_tools_endpoint` — the mock as a genuine client of the
     /// engine's per-run listener, over the wire. A fixture using this
@@ -395,7 +385,6 @@ impl MockStep {
             MockStep::ToolUse { after_ms, .. }
             | MockStep::Usage { after_ms, .. }
             | MockStep::Note { after_ms, .. }
-            | MockStep::RunToolsMounted { after_ms, .. }
             | MockStep::RunTool { after_ms, .. } => *after_ms,
         }
     }

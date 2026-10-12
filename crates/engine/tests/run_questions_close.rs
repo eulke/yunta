@@ -9,7 +9,7 @@ use yunta_testkit_core::Log;
 
 mod common;
 use common::*;
-use yunta_core::events::{ArtifactEvent, GateEvent, NodeEvent};
+use yunta_core::events::{ArtifactEvent, GateEvent, NodeEvent, PauseReason};
 
 /// One node that asks, and the node after it that reads the answers —
 /// the shape `packs/fragua` has once `grill` stops owing a brief.
@@ -481,8 +481,12 @@ async fn a_run_with_no_surface_parks_naming_the_questions_it_asked() {
         .await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "node `grill` asked 1 question: `q1`")
+        RunTerminal::Paused {
+            reason: PauseReason::Questions { node, pending },
+        } => {
+            let asked: Vec<&str> = pending.as_slice().iter().map(|id| id.as_str()).collect();
+            assert_eq!(node.as_str(), "grill");
+            assert_eq!(asked, ["q1"]);
         }
         other => panic!("expected a pause on the questions, got {other:?}"),
     }

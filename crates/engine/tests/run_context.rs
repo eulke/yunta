@@ -5,7 +5,7 @@ use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
 mod common;
 use common::*;
-use yunta_core::events::NodeEvent;
+use yunta_core::events::{Failure, NodeEvent, PauseReason};
 
 #[tokio::test]
 async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
@@ -279,8 +279,10 @@ nodes:
         state: _state,
     } = bench.run(workflow, fixture).await;
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
+        RunTerminal::Paused {
+            reason: reason @ PauseReason::Escalation(_),
+        } => assert_eq!(
+            yunta_render::pause::sentence(&reason),
             "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
         ),
         other => panic!(
@@ -462,8 +464,18 @@ nodes:
 "#;
     let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `only` failed: template references `{{inputs.idea}}`, which is not defined here");
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    node,
+                    failure: Failure::Message { outcome },
+                },
+        } => {
+            assert_eq!(node.as_str(), "only");
+            assert_eq!(
+                outcome,
+                "template references `{{inputs.idea}}`, which is not defined here"
+            );
         }
         other => panic!("expected the run to pause citing the undefined variable, got {other:?}"),
     }

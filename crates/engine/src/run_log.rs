@@ -112,11 +112,7 @@ impl<'a> RunLog<'a> {
             .redactor
             .payload(payload)
             .map_err(StorageError::Unredactable)?;
-        let draft = EventDraft {
-            run_id: self.run_id.clone(),
-            node_id: node.cloned(),
-            payload,
-        };
+        let draft = EventDraft::new(self.run_id.clone(), node.cloned(), payload)?;
         let Some(observer) = self.observer else {
             return self.storage.append(draft, at).await;
         };
@@ -132,8 +128,8 @@ impl<'a> RunLog<'a> {
             run_id: self.run_id,
             seq,
             at,
-            node_id: mirrored.node_id.as_ref(),
-            payload: &mirrored.payload,
+            node_id: mirrored.node_id(),
+            payload: mirrored.payload(),
         });
         Ok(seq)
     }

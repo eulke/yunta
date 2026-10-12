@@ -8,11 +8,21 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// A `Vec<T>` with at least one element.
 ///
 /// Built through [`NonEmpty::new`], which answers `None` for an empty
-/// one, or from a first element and the rest. Reads as a slice.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// one, or from a first element and the rest. Reads as a slice. On the
+/// wire it is the plain array, and an empty array does not read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+// Writing converts a copy of the list, so writing needs the elements to clone.
+#[serde(
+    try_from = "Vec<T>",
+    into = "Vec<T>",
+    bound(serialize = "T: Serialize + Clone")
+)]
+#[schemars(with = "Vec<T>")]
 pub struct NonEmpty<T>(Vec<T>);
 
 impl<T> NonEmpty<T> {
@@ -67,6 +77,23 @@ impl<T> From<(T, Vec<T>)> for NonEmpty<T> {
         items.push(first);
         items.extend(rest);
         NonEmpty(items)
+    }
+}
+
+impl<T> TryFrom<Vec<T>> for NonEmpty<T> {
+    type Error = Empty;
+
+    /// The list, when it has anything in it: the check a read of the
+    /// wire's array makes.
+    fn try_from(items: Vec<T>) -> Result<Self, Empty> {
+        NonEmpty::new(items).ok_or(Empty("list"))
+    }
+}
+
+impl<T> From<NonEmpty<T>> for Vec<T> {
+    /// The elements as an ordinary list, for the wire's plain array.
+    fn from(list: NonEmpty<T>) -> Self {
+        list.0
     }
 }
 

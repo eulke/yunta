@@ -26,9 +26,9 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 48 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 57 names in this document. A changed shape takes a new name, never a higher version. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
-| `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
+| `schema_version` | `u32` | `KIND_VERSION`: 1 para todo kind — ver la política de versionado más abajo |
 
 **El `node_id` vive solo en el envelope.** Ningún payload que corre en el contexto
 de un nodo lo repite: `NodeStartedPayload`, `ArtifactWrittenPayload`,
@@ -40,6 +40,12 @@ de un nodo lo repite: `NodeStartedPayload`, `ArtifactWrittenPayload`,
 nodo del envelope. Un dato repetido en dos lugares puede desincronizarse; uno solo,
 no.
 
+**El sujeto de un evento de alcance o de sesión.** Una concesión nombra la tarea que
+amplía o, cuando no hay tarea, el nodo del envelope: una concesión sin tarea ni nodo
+no se escribe. Una denegación de nodo no nombra tarea (`task_id` ausente): su sujeto
+es el nodo del envelope. Un hecho de sesión lleva su nodo en el envelope; sin nodo, el
+replay se corta con error tipado.
+
 Los siete campos de la tupla, **en este orden**, son también los que participan en
 `event_hash`.
 
@@ -47,9 +53,9 @@ Los siete campos de la tupla, **en este orden**, son también los que participan
 
 Cuatro reglas, aplicadas desde el primer commit:
 
-1. **Versión por tipo, no global.** `schema_version` versiona *ese* `kind`;
-   `criteria_checked` puede estar en v3 mientras `run_created` sigue en v1.
-2. **Dentro de una versión, solo cambios compatibles** (agregar campos opcionales).
+1. **Una versión para todo `kind`.** `schema_version` vale `KIND_VERSION`, que es 1
+   para cada kind. Ningún kind sube de versión: no hay versión por tipo ni por dominio.
+2. **Dentro de un kind, solo cambios compatibles** (agregar campos opcionales).
    Renombrar, eliminar o cambiar el tipo de un campo existente es un **`kind`
    nuevo** (`criteria_checked_v2`), nunca una migración del log — el event log es
    append-only y una migración introduciría una operación falible sobre la
@@ -57,8 +63,10 @@ Cuatro reglas, aplicadas desde el primer commit:
 3. **Lector tolerante, escritor estricto.** Campos desconocidos se ignoran al leer;
    al escribir, el payload se valida contra el schema — un evento inválido es un
    bug del engine, no un warning.
-4. **`kind` desconocido → run parcialmente interpretado, nunca `broken`.** Ninguna
-   degradación es silenciosa: el run sigue interpretándose hasta donde puede, con
+4. **`kind` desconocido → run parcialmente interpretado, nunca `broken`.** Un `kind`
+   que este binario no conoce no vuelve `broken` el run; ninguna versión promete leer
+   así un log escrito por otra, y lo que sigue describe lo que este binario hace.
+   Ninguna degradación es silenciosa: el run sigue interpretándose hasta donde puede, con
    el `kind` desconocido señalado explícitamente, nunca escondido. El lector
    conserva el evento entero — `kind`, `schema_version` y todos sus campos — y
    `status`, el recibo y `stats` cuentan los kinds desconocidos por nombre.
@@ -68,7 +76,7 @@ se versiona en el repo; cualquier cambio de payload produce diff visible en PR. 
 normalización a modelo de dominio ocurre en memoria al leer — **ningún `_vN`
 aparece en `status`, `stats`, el recibo ni ninguna otra superficie de usuario**.
 
-**Versión inicial de cada `kind`**: todos arrancan en **v1**. No hay
+**Versión de cada `kind`**: todos se escriben con `KIND_VERSION` = **1**. No hay
 historial previo — es la primera implementación.
 
 ## 3. Política de `event_hash` (spec, no implementación)
@@ -99,20 +107,18 @@ historial previo — es la primera implementación.
 
 ## 4. Mapeo `AgentEvent` (Spec Adapter) → `kind` del event log
 
-El trait `Adapter` emite 6 variantes de `AgentEvent` (`SessionOpened`, `ToolUse`,
-`Usage`, `Note`, `Completed`, `Failed`), pero solo dos `kind` del event log están
-atribuidos al adapter: `agent_session_opened` y
-`agent_message`. El mapeo completo no está explicitado en ningún lado; se resuelve acá
-**[inferido]**, apoyado en principios ya normativos:
+El trait `Adapter` emite 8 variantes de `AgentEvent` (`SessionOpened`, `WriteRefused`,
+`RunToolFailed`, `ToolUse`, `Usage`, `Note`, `Completed`, `Failed`). El adapter informa
+lo que vio en el stream de su CLI; el engine decide qué `kind` escribe con cada una, en
+la sesión que las abrió (`task_cycle/stream.rs`):
 
 | `AgentEvent` | `kind` resultante | Razón |
 |---|---|---|
 | `SessionOpened` | `agent_session_opened` | mapeo directo — obligatorio y siempre primero |
+| `WriteRefused` | `write_refused` | lo emite solo el mock, que juzga en local las escrituras de su cerco; con un CLI real, el riel escribe la negativa antes de responderle al hook |
+| `RunToolFailed` | `run_tool_failed` | una run tool que falló, con su causa cerrada |
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
-
-Si esta lectura no es la intención original, es exactamente el tipo de cosa a
-corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
 ## 5. Los 57 tipos de evento, campo por campo
 
@@ -145,7 +151,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `runner` | string | sí | nombre del runner (`runner:`); el lector acepta también `role`, el nombre anterior del campo |
 | `chosen` | `{adapter, model, agent?}` | sí | binding resuelto y congelado |
-| `discarded` | lista de `{candidate, reason}` | sí (puede ser vacía) | candidatos no elegidos y por qué — nunca vacío sin motivo si hubo &gt;1 candidato |
+| `discarded` | lista de `{candidate, reason}` | sí (puede ser vacía) | candidatos no elegidos y por qué: `reason` es un `RunnerRejection` con `type`: `not_pinned` (con `pinned`, el adapter que fijó `--adapter`), `unavailable`, o `recorded` (con `sentence`, la frase de un log escrito antes). Nunca vacío sin motivo si hubo &gt;1 candidato |
 
 Un nodo con sesión resuelve su runner antes de armar su contexto: el contexto le nombra a la sesión las run tools como las nombra el CLI de ese runner (`tool_naming`), así que `runner_resolved` precede a su `context_assembled`.
 
@@ -355,8 +361,8 @@ they are gone, and the task's next cycle reads the answer.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `task_id` | string | sí, en `scope_expansion_denied` | — |
-| `task_id` | `Option<string>` | no, en `scope_expansion_granted` | la tarea que la concesión amplía; ausente en la concesión al scope de un nodo — el que figura en el evento — que una persona hace desde el menú de su falla |
+| `task_id` | `Option<string>` | no, en `scope_expansion_denied` | ausente cuando la denegación es la del propio nodo, que no nombra tarea: el nodo del evento es su sujeto |
+| `task_id` | `Option<string>` | no, en `scope_expansion_granted` | la tarea que la concesión amplía; ausente en la concesión al scope de un nodo — el que figura en el evento — que una persona hace desde el menú de su falla. Una concesión sin tarea ni nodo no se escribe |
 | `decided_by` | enum `rule \| person \| evidence` + identificador | sí | `person` lleva quién; `evidence`, el criterio rojo de la tarea cuya salida ubicó cada path (`ruta:línea`) — un hecho que el engine verificó, no una decisión (D240) |
 | `mode` | enum `rules \| ask \| deny` | sí | modo vigente en el momento de la decisión |
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |
@@ -385,7 +391,7 @@ la tarea.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
+| `outcome` [inferido] | `NodeOutcome`: un hecho del engine (objeto con `type`: `exit_status`, `pull_request_opened`, `children_finished`, `succeeded_first`, `tasks_done`, `child_run_finished`, `nothing_to_compare`, `no_regression`, `coverage_met`, `no_finding`), o un texto: el resumen del agente, o una frase que un log escrito antes guardó tal cual | solo en `node_finished` | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter: el hecho es el veredicto; el resumen del agente es telemetría |
 | `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
@@ -458,7 +464,7 @@ cuyo stream terminó sin decir nada; el adapter nunca inventa un terminal (D180)
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `to_node` | `NodeId` | sí | destino — el nodo que reruteó es el `node_id` del envelope |
-| `cause` | string | sí | — |
+| `cause` | `Failure` | sí | la falla que causó la re-ruta, con la forma de la falla de `node_failed` (§5.15). Un log escrito antes guarda la frase como texto: se lee como `{"outcome": "<frase>"}`, que es `Failure::Message` |
 | `origin` | enum `on_failure \| gate_choice` | sí | qué mecanismo reruteó; un log viejo sin el campo lo lee como `on_failure` |
 | `attempt` | `Option<u32>` | solo en `on_failure` | N de `max_reroutes` (M); ausente en una elección de gate, que no es un reintento |
 | `max_reroutes` | `Option<u32>` | solo en `on_failure` | — |
@@ -711,11 +717,11 @@ viven un nivel adentro, donde no colisionan con él.
 tuvo el artifact y el log no dice cómo.
 
 ### 5.22 `promotion_signaled` — engine
-**Fuente:** razón, evidencia, modo sugerido
+**Fuente:** causa, evidencia, modo sugerido
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `reason` | string | sí | la afirmación y los hechos detrás, en una línea — es el único campo que un lector del evento en sí recibe |
+| `cause` | `Option<PromotionCause>` | no | el nodo que señaló la promoción (`node`) y el nodo al que apunta (`goto`). Un log escrito antes no la tiene: guarda la afirmación en una frase, `reason`, que se muestra tal cual y no se escribe |
 | `evidence` | lista de `{label?, value}` | sí | la misma estructura que `gate_waiting`, con la misma tolerancia de lectura |
 | `suggested_mode` | string | sí | debe respetar la escalera de promoción |
 
@@ -736,13 +742,15 @@ tuvo el artifact y el log no dice cómo.
 |---|---|---|---|
 | `capability` | string (nombre de campo de `Capabilities`) | sí | — |
 | `adapter` | string (`id()` del adapter) | sí | — |
-| `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir, o cuando abrió y la sesión no recibió ninguna de sus tools— el texto que dice que la sesión corre sin run tools y por qué |
+| `policy` | `Policy` | sí | uno de los seis nombres del conjunto cerrado: `post_check_only`, `no_token_budget`, `no_skills`, `no_run_tools`, `network_open`, `fresh_session`. Es la política de la tabla de degradación del adapter (`spec-adapter.md` §5), o `no_run_tools` cuando la sesión corre sin run tools: su listener no abrió, o cerró sin listar ni llamar ninguna de sus tools. Un log escrito antes guarda `policy_applied`, que se lee como `policy`; si su texto no es el nombre de una política, se lee como frase tal cual. El esquema publica solo el conjunto |
 
 ### 5.25 `write_refused` — engine (el riel de la sesión)
 **Fuente:** la sesión que la rechazó, y qué iba a escribir. La escribe el
 engine cuando el hook de la sesión le pregunta antes de escribir y el cerco
-rechaza, antes de responderle (D249); el mock sin riel y el sandbox de un CLI
-que reporta su rechazo por el stream la escriben por la misma vía del stream.
+rechaza, antes de responderle (D249). Es juicio del engine: ningún adapter informa
+que el sandbox de su CLI negó una escritura, así que una escritura que el sandbox
+niega no llega aquí. El mock sin riel escribe por la vía del stream sus rechazos de
+efectos `ToolCalls`, hasta que esos efectos pasen por el riel.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
@@ -842,13 +850,12 @@ the run reports leaves the span out (D199).
 | `slept_ms` | `u64` | yes | How long the host slept, in milliseconds. |
 
 ### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
-**Fuente:** razón / estado terminal, métricas
+**Fuente:** pausa / estado terminal, métricas
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `reason` | string | solo en `run_paused` | presupuesto excedido, gate esperando, etc. |
-| `resume_policy_applied` [inferido] | `Option<string>` | solo en `run_resumed` | el único `on_interrupt` que todos los huérfanos resolvieron; ausente sin huérfanos o con políticas distintas |
-| `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config |
+| `pause` | `PauseReason` | sí, en `run_paused` | el hecho por el que el run se detuvo, con `type`: `budget_exhausted` (con `spent` y `cap`), `uncertain_orphans` (con `nodes`), `escalation`, `child_paused`, entre otros. Un log escrito antes guarda la frase en `reason`: se lee como `{"type": "recorded", "sentence": "<frase>"}` y no se escribe |
+| `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config. De aquí sale la política común de los huérfanos (`agreed_policy`), que el log no guarda: la que todos resolvieron, ausente sin huérfanos o con políticas distintas. La lectura ignora el `resume_policy_applied` de un log viejo |
 | `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
 | `checkout` | ruta | no, solo en `run_resumed` | el checkout en que trabaja el run desde este wake, cuando no es el último que nombró su log (D235) |
 | `terminal_state` | estado | solo en `run_finished` | — |

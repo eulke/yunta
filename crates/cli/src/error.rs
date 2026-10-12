@@ -334,6 +334,12 @@ impl CliError {
             CliError::CloseRefused { run_id, refusal } => {
                 format!("{refusal}{}", close_advice(&id(run_id), refusal))
             }
+            // The engine names the condition and carries the fact it repeats
+            // as data; the fact is drawn here, where a person reads it.
+            CliError::Run(error @ yunta_engine::RunError::Escalation { source, .. }) => format!(
+                "{error}: `{}`",
+                yunta_render::escalation::repeated_fact(source)
+            ),
             other => other.to_string(),
         };
         // What caused it goes with it, to a person and an agent alike: a
@@ -391,4 +397,27 @@ pub(crate) fn warning_word() -> String {
 /// error.
 pub fn note(message: impl Display) {
     eprintln!("{message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::{EscalationError, Fact};
+    use yunta_engine::RunError;
+
+    use super::{CliError, Reader};
+
+    #[test]
+    fn a_run_broken_by_a_claim_that_repeats_its_record_names_the_fact_it_repeats() {
+        let error = CliError::Run(RunError::Escalation {
+            context: "node `lint`'s escalation".to_string(),
+            source: EscalationError::SummaryRepeatsEvidence {
+                fact: Fact::bare("exit 1"),
+            },
+        });
+        assert_eq!(
+            error.said_to(Reader::Person),
+            "run is broken: node `lint`'s escalation: the summary repeats what the evidence \
+             already states: `exit 1`"
+        );
+    }
 }

@@ -32,7 +32,7 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{Failure, NodeWait, PauseReason, RerouteCause, ResumePolicy};
+use yunta_core::events::{node_failed_line, Failure, NodeWait, PauseReason, ResumePolicy};
 use yunta_core::{
     DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, ScopeExpansionMode, Workflow,
 };
@@ -83,7 +83,7 @@ pub enum Decision {
         to: NodeId,
         attempt: u32,
         max_reroutes: u32,
-        cause: RerouteCause,
+        cause: Failure,
     },
     Pause {
         reason: PauseReason,
@@ -92,8 +92,8 @@ pub enum Decision {
     /// `defaults.on_failure` closes the run as failed rather than pausing:
     /// `abort` at the first such failure, `continue` once every node not
     /// blocked behind a failure has run. `reason` names a causing node,
-    /// the same shape a `Pause` reason takes. The imperative shell writes
-    /// `run_finished { terminal_state: Failed }` and stops.
+    /// in the words a `NodeFailed` pause gives it. The imperative shell
+    /// writes `run_finished { terminal_state: Failed }` and stops.
     Fail {
         reason: String,
     },
@@ -108,7 +108,7 @@ pub enum Decision {
         node: NodeId,
         goto: NodeId,
         max_reroutes: u32,
-        cause: RerouteCause,
+        cause: Failure,
     },
     /// A node failed with no re-route of its own, and the run's
     /// `defaults.on_failure` is `pause`: a person decides whether it runs
@@ -582,7 +582,7 @@ fn orphan_step(board: &Board<'_>) -> Option<Decision> {
         .collect();
     if !uncertain.is_empty() {
         return Some(Decision::Pause {
-            reason: PauseReason::UncertainOrphans(uncertain),
+            reason: PauseReason::UncertainOrphans { nodes: uncertain },
         });
     }
     Some(Decision::Execute(
@@ -655,14 +655,14 @@ fn unrerouted(
                 to: on_failure.goto.clone(),
                 attempt: reroutes + 1,
                 max_reroutes: on_failure.max_reroutes,
-                cause: RerouteCause(failure.clone()),
+                cause: failure.clone(),
             });
         }
         return Some(Decision::GateExhaustedReroutes {
             node: node.id.clone(),
             goto: on_failure.goto.clone(),
             max_reroutes: on_failure.max_reroutes,
-            cause: RerouteCause(failure.clone()),
+            cause: failure.clone(),
         });
     }
     let reason = PauseReason::NodeFailed {
@@ -683,7 +683,7 @@ fn unrerouted(
             grantable: board.grantable(node, failure),
         }),
         DefaultOnFailure::Abort => Some(Decision::Fail {
-            reason: reason.to_string(),
+            reason: node_failed_line(&node.id, failure),
         }),
         DefaultOnFailure::Continue => None,
     }
@@ -864,13 +864,9 @@ fn nothing_runnable(board: &Board<'_>) -> Decision {
                 .nodes
                 .iter()
                 .find_map(|node| match board.state.nodes.state(&node.id) {
-                    Some(NodeState::Failed { failure, .. }) => Some(
-                        PauseReason::NodeFailed {
-                            node: node.id.clone(),
-                            failure: failure.clone(),
-                        }
-                        .to_string(),
-                    ),
+                    Some(NodeState::Failed { failure, .. }) => {
+                        Some(node_failed_line(&node.id, failure))
+                    }
                     _ => None,
                 })
         {

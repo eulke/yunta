@@ -29,8 +29,8 @@ impl MockAdapter {
 
     /// Applies one session's filesystem effects under the request's
     /// `cwd`, leaving out the ones the fence refuses: an adapter that
-    /// can judge a write blocks it before it lands, and the session
-    /// says so.
+    /// can judge a write blocks it before it lands. What the session
+    /// reports about a blocked write is `refused`'s business.
     pub(super) fn apply_effects(&self, script: &SessionScript, req: &SessionRequest) -> Result<()> {
         for effect in &script.effects {
             if self.refuses(req, &effect.path) {
@@ -41,15 +41,20 @@ impl MockAdapter {
         Ok(())
     }
 
-    /// The effects the fence kept from landing — what the session
-    /// reports as writes it refused.
+    /// The effects the fence kept from landing that the session reports
+    /// as writes it refused. Only a judgement per tool call reports: a
+    /// filesystem sandbox leaves its denied writes out without a word, as
+    /// a CLI's own sandbox does.
     pub(super) fn refused(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
-        script
-            .effects
-            .iter()
-            .filter(|e| self.refuses(req, &e.path))
-            .map(|e| e.path.clone())
-            .collect()
+        match self.fixture.capabilities.fence {
+            FenceLevel::ToolCalls => script
+                .effects
+                .iter()
+                .filter(|e| self.refuses(req, &e.path))
+                .map(|e| e.path.clone())
+                .collect(),
+            FenceLevel::None | FenceLevel::Filesystem => Vec::new(),
+        }
     }
 }
 

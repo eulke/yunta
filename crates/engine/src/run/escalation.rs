@@ -18,7 +18,7 @@ use super::{RunCtx, RunError};
 use crate::replay::RunState;
 use crate::reserved::offers;
 use crate::run_log::RunLog;
-use yunta_core::events::{GateEvent, RerouteCause, RunEvent};
+use yunta_core::events::{GateEvent, RunEvent};
 
 /// Whether an event is the run-level `run_paused` marker — the one predicate
 /// the resolve-gate path reads a parked run's log by.
@@ -38,7 +38,7 @@ pub(crate) fn build_reroute_escalation(
     node: &NodeId,
     goto: &NodeId,
     max_reroutes: u32,
-    cause: &RerouteCause,
+    cause: &Failure,
 ) -> Result<Escalation, EscalationError> {
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
     let retry = offers::retry(goto, max_reroutes);
@@ -55,7 +55,7 @@ pub(crate) fn build_reroute_escalation(
             yunta_core::text::counted(max_reroutes as usize, "re-route"),
             yunta_core::text::agreeing(max_reroutes as usize, "is", "are")
         ),
-        failure_facts(&cause.0).into(),
+        failure_facts(cause).into(),
         NonEmpty::from((retry, rest)),
     )
 }

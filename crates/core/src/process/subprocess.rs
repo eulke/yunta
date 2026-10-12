@@ -465,7 +465,6 @@ impl Drop for SubprocessSession {
 fn describe(event: &AgentEvent) -> &'static str {
     match event {
         AgentEvent::SessionOpened { .. } => "a session opening",
-        AgentEvent::RunToolsMounted { .. } => "the run tools it holds",
         AgentEvent::ToolUse { .. } => "a tool use",
         AgentEvent::WriteRefused { .. } => "a write it refused",
         AgentEvent::Usage { .. } => "token usage",

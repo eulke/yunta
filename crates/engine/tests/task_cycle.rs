@@ -1362,6 +1362,19 @@ impl yunta_engine::SessionObserver for FailingObserver {
         }
     }
 
+    async fn refused_writes(
+        &self,
+        _sessions: &[yunta_core::SessionId],
+    ) -> Result<Vec<yunta_core::events::ToolTarget>, yunta_storage::StorageError> {
+        match self.0 {
+            Down::Log => Err(yunta_storage::StorageError::Append {
+                run_id: yunta_core::RunId::from("run-test"),
+                source: "audit storage is down".into(),
+            }),
+            Down::Objects => Ok(Vec::new()),
+        }
+    }
+
     fn process_registry(&self) -> Option<&yunta_engine::ProcessRegistry> {
         None
     }

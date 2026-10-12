@@ -13,7 +13,7 @@ pub use forge::{
     Forge, ForgeError, ForgeProbe, GateDecision, PolledGate, PublishRequest, PullRequestRef,
     PullRequestRequest, ReviewComment, ReviewOutcome,
 };
-pub use policy::{absence_of, Absence, POLICY};
+pub use policy::{absence_of, Absence, Policy, PolicyApplied, POLICY};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, CodecError, FailureCause,
     HookReply, PermissionProfile, ProbeReport, RailCodec, RunToolsEndpoint, SessionRequest,

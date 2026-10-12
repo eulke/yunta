@@ -7,8 +7,82 @@
 //! so it is written once, here, and the engine reads it rather than
 //! deciding again.
 
-use crate::events::Policy;
+use serde::{Deserialize, Serialize};
+
 use crate::Capability;
+
+/// What the engine does when an adapter does not declare a capability it
+/// asked for. A closed set: the engine has one fallback per capability
+/// it consults, and a degradation naming anything else would be a
+/// fallback nobody implemented.
+///
+/// The words a reader is shown for each one are kept outside core, so
+/// the same fallback reads the same way wherever it is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Policy {
+    /// `fence` is `None`: the session edits freely and the diff is
+    /// judged afterwards.
+    PostCheckOnly,
+    /// `usage_reporting` absent: the run's token cap cannot be counted
+    /// against this session.
+    NoTokenBudget,
+    /// `skills` absent: the session runs with none mounted.
+    NoSkills,
+    /// `run_tools` absent, or its server unreachable: the session holds
+    /// none of the run's tools.
+    NoRunTools,
+    /// `network_isolation` absent: `network: false` is recorded, not
+    /// enforced.
+    NetworkOpen,
+    /// `resume_session` absent, or nothing to resume: a fresh session
+    /// replaces the interrupted one.
+    FreshSession,
+}
+
+impl Policy {
+    /// The word the log stores this policy under.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Policy::PostCheckOnly => "post_check_only",
+            Policy::NoTokenBudget => "no_token_budget",
+            Policy::NoSkills => "no_skills",
+            Policy::NoRunTools => "no_run_tools",
+            Policy::NetworkOpen => "network_open",
+            Policy::FreshSession => "fresh_session",
+        }
+    }
+}
+
+/// What the log says the engine did: a closed policy, or a sentence an
+/// older writer stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum PolicyApplied {
+    Known(Policy),
+    /// A sentence, kept as the writer stored it.
+    Recorded(String),
+}
+
+impl From<String> for PolicyApplied {
+    /// The name of a closed policy reads back as that policy; any other
+    /// text is a sentence, kept as written.
+    fn from(text: String) -> Self {
+        match serde_json::from_value::<Policy>(serde_json::Value::String(text.clone())) {
+            Ok(policy) => PolicyApplied::Known(policy),
+            Err(_) => PolicyApplied::Recorded(text),
+        }
+    }
+}
+
+impl From<PolicyApplied> for String {
+    fn from(applied: PolicyApplied) -> Self {
+        match applied {
+            PolicyApplied::Known(policy) => policy.as_str().to_owned(),
+            PolicyApplied::Recorded(text) => text,
+        }
+    }
+}
 
 /// What an absent capability means. Three answers, and every capability
 /// has exactly one.
@@ -75,4 +149,40 @@ pub fn absence_of(capability: Capability) -> &'static Absence {
         .iter()
         .find_map(|(named, absence)| (*named == capability).then_some(absence))
         .unwrap_or(&Absence::Resting)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each policy is stored under the name written here, and the name a
+    /// serialized policy carries is the same one, so the log's word and the
+    /// schema's word cannot drift apart.
+    #[test]
+    fn each_policy_is_stored_under_its_written_name() {
+        let names = [
+            (Policy::PostCheckOnly, "post_check_only"),
+            (Policy::NoTokenBudget, "no_token_budget"),
+            (Policy::NoSkills, "no_skills"),
+            (Policy::NoRunTools, "no_run_tools"),
+            (Policy::NetworkOpen, "network_open"),
+            (Policy::FreshSession, "fresh_session"),
+        ];
+        for (policy, name) in names {
+            assert_eq!(policy.as_str(), name);
+            assert_eq!(serde_json::to_value(policy).unwrap(), name);
+            assert_eq!(String::from(PolicyApplied::Known(policy)), name);
+        }
+    }
+
+    /// A sentence an older writer stored is kept as it was written, not
+    /// matched against the closed set.
+    #[test]
+    fn a_stored_sentence_reads_back_as_written() {
+        let sentence = "post-check only — the session edits unguarded".to_string();
+        assert_eq!(
+            PolicyApplied::from(sentence.clone()),
+            PolicyApplied::Recorded(sentence)
+        );
+    }
 }

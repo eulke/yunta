@@ -11,8 +11,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, Escalation, EventBody, EventPayload, Fact, Failure,
     GateEvent, GateOption, GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice,
-    NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload,
-    RunEvent, SessionEvent, StoredEvent, TokenUsage,
+    NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload,
+    RunCreatedPayload, RunEvent, SessionEvent, StoredEvent, TokenUsage,
 };
 use yunta_core::{
     CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, Workflow,
@@ -110,7 +110,7 @@ fn every_decision_is_a_function_of_state_alone() {
         (
             Some("plan"),
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok",
+                NodeOutcome::Summary("ok".into()),
                 TokenUsage::default(),
             ))),
         ),
@@ -138,7 +138,7 @@ fn every_decision_is_a_function_of_state_alone() {
         (
             Some("plan"),
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok",
+                NodeOutcome::Summary("ok".into()),
                 TokenUsage::default(),
             ))),
         ),

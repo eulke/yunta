@@ -223,6 +223,12 @@ pub trait SessionObserver: KeepsOutput {
         node_id: &yunta_core::NodeId,
         payload: EventPayload,
     ) -> Result<yunta_core::Seq, StorageError>;
+    /// Every write these sessions were refused, in the order the log holds
+    /// them: what an attempt reads its refusals from.
+    async fn refused_writes(
+        &self,
+        sessions: &[yunta_core::SessionId],
+    ) -> Result<Vec<yunta_core::events::ToolTarget>, StorageError>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
     /// Waits until the host the run works on has stayed awake a while
     /// since it last slept — `false` when `cancel` fired first. An
@@ -301,9 +307,7 @@ pub(super) async fn stream_session(
                 outcome: DispatchOutcome::Cancelled,
                 tokens: TokenUsage::default(),
                 fence: None,
-                session: None,
-                refused: Vec::new(),
-                tools_reported: false,
+                sessions: Vec::new(),
             };
             return Ok((nothing, false));
         }
@@ -311,10 +315,6 @@ pub(super) async fn stream_session(
     let budget = request.budget;
     let requested_agent = request.agent.as_ref().map(|agent| agent.name.clone());
     let requested_effort = request.effort;
-    // Whether this session was handed a per-run tool server at all: a
-    // session that holds none of those tools only means something went
-    // wrong if it was given a server to hold them from.
-    let run_tools_offered = request.run_tools_endpoint.is_some();
     // A resume continues a conversation instead of opening a new one. One
     // the adapter cannot pick up — it declares no resume, or its CLI
     // refuses this one — opens fresh on what the caller gave for that, and
@@ -344,7 +344,7 @@ pub(super) async fn stream_session(
                             yunta_core::events::CapabilityDegradedPayload::new(
                                 yunta_core::Capability::ResumeSession,
                                 adapter.id().clone(),
-                                yunta_core::events::Policy::FreshSession,
+                                yunta_core::port::Policy::FreshSession,
                             ),
                         )),
                     )
@@ -370,8 +370,6 @@ pub(super) async fn stream_session(
     let mut tokens = TokenUsage::default();
     let mut opened: Option<yunta_core::SessionId> = None;
     let mut fence: Option<yunta_core::fence::Coverage> = None;
-    let mut refused = Vec::new();
-    let mut tools_reported = false;
     let mut cut_off = false;
     let mut terminal = None;
     let mut cancelled = false;
@@ -424,14 +422,11 @@ pub(super) async fn stream_session(
                     adapter,
                     requested_agent: &requested_agent,
                     requested_effort,
-                    run_tools_offered,
                     max_tokens: budget.max_tokens,
                     audit,
                     tokens: &mut tokens,
                     opened: &mut opened,
                     fence: &mut fence,
-                    refused: &mut refused,
-                    tools_reported: &mut tools_reported,
                     cut_off: &mut cut_off,
                     task: opening.task,
                     continues,
@@ -460,9 +455,7 @@ pub(super) async fn stream_session(
             outcome: DispatchOutcome::Cancelled,
             tokens,
             fence,
-            session: opened,
-            refused,
-            tools_reported,
+            sessions: opened.into_iter().collect(),
         };
         return Ok((cancelled, false));
     }
@@ -480,9 +473,7 @@ pub(super) async fn stream_session(
         outcome,
         tokens,
         fence,
-        session: opened,
-        refused,
-        tools_reported,
+        sessions: opened.into_iter().collect(),
     };
     Ok((dispatched, cut_off))
 }

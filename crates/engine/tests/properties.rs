@@ -28,10 +28,11 @@ use common::{answer, ScriptedAnswers, QUESTIONS_FIXTURE, QUESTIONS_WORKFLOW};
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::node::happening::Happening as NodeHappening;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventBody, EventPayload, Failure,
-    Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
-    NodeStartedPayload, RecordedOrigin, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
-    TaskStatus, TaskStatusChangedPayload, TokenUsage, UnknownEvent,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EngineFact, EventBody,
+    EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, PauseReason, RecordedOrigin,
+    RunPausedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{EventDraft, SessionEvent};
@@ -112,7 +113,10 @@ fn parameterized() -> impl Strategy<Value = EventPayload> {
             NodeStartedPayload::attempt(attempt)
         ))),
         ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| EventPayload::Node(
-            NodeEvent::Finished(NodeFinishedPayload::new(outcome, tokens_used))
+            NodeEvent::Finished(NodeFinishedPayload::new(
+                NodeOutcome::Summary(outcome),
+                tokens_used,
+            ))
         )),
         ("[a-z]{0,6}", tokens(), any::<bool>()).prop_map(|(outcome, tokens_used, retryable)| {
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
@@ -161,7 +165,7 @@ fn parameterized() -> impl Strategy<Value = EventPayload> {
             )))
         }),
         "[a-z ]{0,10}".prop_map(|reason| EventPayload::Run(RunEvent::Paused(
-            RunPausedPayload::recorded(reason)
+            RunPausedPayload::new(&PauseReason::Recorded { sentence: reason })
         ))),
         ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::Gates(
             GateEvent::QuestionsAsked(
@@ -322,7 +326,7 @@ fn a_questions_round() -> Vec<StoredEvent> {
         .node(
             "grill",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "questions answered".to_string(),
+                NodeOutcome::Fact(EngineFact::QuestionsAnswered),
                 yunta_core::events::TokenUsage::default(),
             ))),
         )
@@ -393,7 +397,7 @@ fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
     assert_eq!(
         at(6).nodes.state(&grill),
         Some(&yunta_engine::NodeState::Finished {
-            outcome: "questions answered".to_string(),
+            outcome: NodeOutcome::Fact(EngineFact::QuestionsAnswered),
             tokens: asked_tokens,
         }),
         "finished, carrying what the session that asked spent"
@@ -485,11 +489,8 @@ fn interrupted_after(
         bench
             .storage
             .append(
-                &EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: event.node_id.clone(),
-                    payload: payload.clone(),
-                },
+                &EventDraft::new(bench.run_id.clone(), event.node_id.clone(), payload.clone())
+                    .expect("a draft names its subject"),
                 &FixedClock,
             )
             .expect("append one event of the interrupted run");

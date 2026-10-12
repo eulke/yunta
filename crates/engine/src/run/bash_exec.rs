@@ -2,7 +2,7 @@
 //! verdict and whose output `node-output:` can read back.
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::TokenUsage;
+use yunta_core::events::{EngineFact, NodeOutcome, TokenUsage};
 use yunta_core::{ConfigKey, Node, Resolved, RunCommand};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
@@ -69,10 +69,17 @@ pub(super) async fn execute_bash(
     crate::run::context_resolve::write_node_output(ctx.run_dir, &node.id, stdout, stderr).await?;
 
     if status.success() {
-        close_node(ctx, node, Close::new("exit 0", TokenUsage::default())).await
+        close_succeeded(ctx, node).await
     } else {
         let code = status.code().unwrap_or(-1);
         let failure = super::command_exited(ctx, &outcome, code, None, "bash node").await?;
         fail_with(ctx, node, failure, false, TokenUsage::default()).await
     }
+}
+
+/// Closes a bash node whose command exited 0: the exit status is the one
+/// fact the engine holds about it.
+async fn close_succeeded(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
+    let outcome = NodeOutcome::Fact(EngineFact::ExitStatus { code: 0 });
+    close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
 }

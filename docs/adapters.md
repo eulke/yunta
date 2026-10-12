@@ -102,6 +102,12 @@ happening; the diff Yunta takes after the session is still the guarantee, and
 a write that reaches that diff despite an exact fence is reported as a finding
 against the adapter.
 
+No adapter reports a denial of its CLI's sandbox, so none writes one to the log.
+Claude returns a command its sandbox refuses as an ordinary failed tool result,
+and Codex 0.157.0 emits no item for one. The engine's rail records each refusal
+it judges as `write_refused`; with a filesystem fence, the mock skips a denied
+write and reports nothing, as a sandbox does.
+
 After a write, when the project's `format:` covers what was written, the CLI
 tells the engine, which formats it and tells the session to read the file
 again when it changed. Before a session ends its turn, its CLI asks the engine

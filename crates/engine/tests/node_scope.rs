@@ -56,7 +56,7 @@ async fn a_scope_violation_names_every_path_outside_and_the_decision_shows_them(
     .await
     .unwrap()
     .expect("a failed node is a pause with a menu");
-    let evidence = escalation.evidence().lines().join("\n");
+    let evidence = yunta_render::evidence::lines(escalation.evidence()).join("\n");
     assert!(
         evidence.contains("Cargo.toml"),
         "the person deciding reads which file fell outside: {evidence}"
@@ -168,17 +168,18 @@ async fn a_restart_after_the_grant_never_grants_it_twice() {
         .storage
         .async_handle()
         .append(
-            EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("fix".into()),
-                payload: EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
+            EventDraft::new(
+                bench.run_id.clone(),
+                Some("fix".into()),
+                EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
                     task_id: None,
                     decided_by: yunta_core::events::Decider::Person { id: "mcp".into() },
                     mode: yunta_core::ScopeExpansionMode::Ask,
                     count_this_run: 1,
                     paths: vec!["Cargo.toml".into()],
                 })),
-            },
+            )
+            .expect("a draft names its subject"),
             yunta_testkit_core::FixedClock.now(),
         )
         .await
@@ -290,7 +291,7 @@ async fn a_node_session_that_asks_for_scope_puts_its_request_to_a_person() {
     .await
     .unwrap()
     .unwrap();
-    let evidence = escalation.evidence().lines().join("\n");
+    let evidence = yunta_render::evidence::lines(escalation.evidence()).join("\n");
     assert!(
         evidence.contains("the lint's cause is the manifest"),
         "the person reads the session's own reason: {evidence}"

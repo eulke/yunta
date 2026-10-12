@@ -5,8 +5,8 @@
 //! remembering a decision that was never really made.
 
 use yunta_core::events::{
-    Escalation, EventPayload, Fact, GateEvent, GateResolvedPayload, PauseReason, Shown, TokenUsage,
-    Withheld,
+    Approval, EngineFact, Escalation, EventPayload, Fact, GateEvent, GateResolvedPayload,
+    NodeOutcome, PauseReason, Shown, TokenUsage, Withheld,
 };
 use yunta_core::{ExternalGate, Node, NodeKind, NonEmpty};
 
@@ -50,7 +50,10 @@ pub(super) async fn degrade_to_console(
         finish_node(
             ctx,
             node,
-            format!("approved from the console by {}", choice.by),
+            NodeOutcome::Fact(EngineFact::Approved {
+                by: choice.by.clone(),
+                on: Approval::Console,
+            }),
             TokenUsage::default(),
         )
         .await?;
@@ -78,8 +81,9 @@ async fn asked(ctx: &RunCtx<'_>, node: &Node, summary: String) -> Result<Escalat
             vec![offers::reject_from_console()],
         )),
     )
-    .map_err(|source| RunError::Broken {
-        diagnostic: format!("node `{}`'s gate: {source}", node.id),
+    .map_err(|source| RunError::Escalation {
+        context: format!("node `{}`'s gate", node.id),
+        source,
     })?;
     let withheld = because.map(|because| Withheld {
         option: offers::approve_from_console().id,

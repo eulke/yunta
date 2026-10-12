@@ -5,11 +5,11 @@
 //! that moved it again. Everything here is a pure function of that log
 //! and of the state replay derived from it.
 //!
-//! A parked run carries the sentence its own `run_paused` recorded, so
-//! the frame answers *what* a person is being asked for and not only
-//! *which* node is asking. No surface goes back to the log for it.
+//! A parked run carries the pause its own `run_paused` recorded, so the
+//! frame answers *what* a person is being asked for and not only *which*
+//! node is asking. No surface goes back to the log for it.
 
-use yunta_core::events::{Failure, StoredEvent, TerminalState};
+use yunta_core::events::{Failure, PauseReason, StoredEvent, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 use crate::replay::{NodeState, NodeWait, RunState};
@@ -56,8 +56,9 @@ pub enum RunPhase {
     },
 }
 
-/// What a waiting run is waiting on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a waiting run is waiting on. Only `PartialEq`, because a
+/// [`PauseReason`] is only `PartialEq`.
+#[derive(Debug, Clone, PartialEq)]
 pub enum WaitingOn {
     /// A node parked on a person: `external_ref` is the forge's handle
     /// for a published gate, `None` for an internal gate and for
@@ -66,17 +67,17 @@ pub enum WaitingOn {
     /// them is in [`RunFrame::nodes`](super::RunFrame::nodes) and
     /// counted in [`RunFrame::flow`](super::RunFrame::flow).
     ///
-    /// `reason` is the sentence the run's own `run_paused` recorded, so
-    /// no surface opens the log a second time to learn what the node
-    /// asked for. A node id says *which* node stopped; the sentence says
-    /// *what* it asked — which questions are still unanswered, which cap
-    /// a budget hit, which review a forge is holding. It is `None` for a
-    /// node parked while the run itself keeps moving, where there is no
-    /// standing pause to quote: a resume or a close came after the last
+    /// `reason` is the pause the run's own `run_paused` recorded, so no
+    /// surface opens the log a second time to learn what the node asked
+    /// for. A node id says *which* node stopped; the pause says *what* it
+    /// asked — which questions are still unanswered, which cap a budget
+    /// hit, which review a forge is holding. It is `None` for a node
+    /// parked while the run itself keeps moving, where there is no
+    /// standing pause to carry: a resume or a close came after the last
     /// one.
     ///
     /// `run_paused` is a run-level event and carries no node id, so the
-    /// sentence is the run's standing pause rather than this node's own:
+    /// pause is the run's standing pause rather than this node's own:
     /// with several nodes parked at once, the two name the same stop
     /// only because one pause stops the whole run.
     Node {
@@ -84,11 +85,11 @@ pub enum WaitingOn {
         /// What the node waits on — one vocabulary for the wait in the
         /// run and in the node.
         on: NodeWait,
-        reason: Option<String>,
+        reason: Option<PauseReason>,
     },
-    /// The run itself paused, with the reason `run_paused` recorded — an
+    /// The run itself paused, with the pause `run_paused` recorded — an
     /// exhausted budget, a cancellation, a gate nobody has answered.
-    Run { reason: String },
+    Run { reason: PauseReason },
 }
 
 /// The run's phase: a log that stopped making sense says so first, then
@@ -114,7 +115,11 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState, _events: &[StoredEven
             let reason = state.run.paused().map(|(reason, _)| reason);
             RunPhase::Waiting {
                 on: waiting_node(workflow, state, reason).unwrap_or_else(|| WaitingOn::Run {
-                    reason: reason.unwrap_or_default().to_string(),
+                    // Replay sets the paused phase together with its pause,
+                    // so this empty fallback is never read.
+                    reason: reason.cloned().unwrap_or(PauseReason::Recorded {
+                        sentence: String::new(),
+                    }),
                 }),
             }
         }
@@ -152,14 +157,18 @@ fn closed(terminal: &TerminalState, state: &RunState) -> RunPhase {
 
 /// The first node parked on a person, in the workflow's own declaration
 /// order, carrying the run's standing pause.
-fn waiting_node(workflow: &Workflow, state: &RunState, reason: Option<&str>) -> Option<WaitingOn> {
+fn waiting_node(
+    workflow: &Workflow,
+    state: &RunState,
+    reason: Option<&PauseReason>,
+) -> Option<WaitingOn> {
     workflow
         .iter_nodes()
         .find_map(|node| match state.nodes.state(&node.id) {
             Some(NodeState::Waiting { on }) => Some(WaitingOn::Node {
                 node: node.id.clone(),
                 on: on.clone(),
-                reason: reason.map(str::to_string),
+                reason: reason.cloned(),
             }),
             _ => None,
         })

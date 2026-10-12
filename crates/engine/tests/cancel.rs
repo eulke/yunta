@@ -7,7 +7,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
-use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::events::{NodeEvent, PauseReason, RunEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{wait_until_async, Bench, MOCK_CONFIG};
 
@@ -60,7 +60,7 @@ async fn cancel_pauses_a_hanging_run_as_cancelled_by_user() {
     let RunReport { terminal, .. } = report;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "cancelled by user");
+            assert_eq!(reason, PauseReason::Cancelled);
         }
         other => panic!("a cancelled run must pause, got {other:?}"),
     }
@@ -122,7 +122,7 @@ async fn a_cancel_that_stops_a_step_s_git_pauses_the_run() {
     assert_eq!(
         report.terminal,
         RunTerminal::Paused {
-            reason: "cancelled by user".to_string()
+            reason: PauseReason::Cancelled
         }
     );
     assert!(
@@ -188,7 +188,7 @@ async fn a_suite_the_cancellation_stops_leaves_no_measurement_and_the_run_pauses
 
     let RunReport { terminal, .. } = report;
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "cancelled by user"),
+        RunTerminal::Paused { reason } => assert_eq!(reason, PauseReason::Cancelled),
         other => panic!("a cancelled run must pause, got {other:?}"),
     }
     assert!(

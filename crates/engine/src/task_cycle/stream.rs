@@ -13,28 +13,9 @@ use super::dispatch::DispatchError;
 use super::session::{note_summary, SessionObserver};
 use super::DispatchOutcome;
 
-/// The server is up and the endpoint reached the session; what did not
-/// survive is the client's own reading of the tool list, which neither
-/// side can work around from here — every tool this node needs to hand
-/// its documents over is simply absent. It goes on the log as the
-/// session opens rather than at the close it dooms, so the cause sits
-/// next to the moment it happened instead of one failed close away,
-/// where the only visible symptom is a document nobody delivered.
-/// The record of a session that opened holding none of the run tools
-/// the engine gave it a server for.
-fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
-    EventPayload::Session(SessionEvent::CapabilityDegraded(
-        yunta_core::events::CapabilityDegradedPayload::new(
-            yunta_core::Capability::RunTools,
-            adapter.clone(),
-            yunta_core::events::Policy::NoRunTools,
-        ),
-    ))
-}
-/// Records that a session's run tools never reached it, for a session
-/// whose CLI says nothing of the tools it holds: one that was offered the
-/// tools, opened, and never listed them or called one — which both CLIs do
-/// before their first turn.
+/// Records that a session's run tools never reached it: one that was
+/// offered its tools, opened, and never listed them or called one, which
+/// both CLIs do before their first turn.
 pub(crate) async fn record_unlisted_tools(
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     adapter: &yunta_core::AdapterId,
@@ -42,10 +23,28 @@ pub(crate) async fn record_unlisted_tools(
     dispatched: &super::Dispatched,
 ) -> Result<(), yunta_storage::StorageError> {
     let unlisted = run_tools.is_some_and(|session| !session.listed());
-    if unlisted && !dispatched.tools_reported && dispatched.session.is_some() {
-        emit_audit(audit, run_tools_unreachable(adapter)).await?;
+    if unlisted && !dispatched.sessions.is_empty() {
+        emit_audit(audit, crate::run_tools::run_tools_unreachable(adapter)).await?;
     }
     Ok(())
+}
+
+/// The writes the sessions a dispatch opened were refused, as the log holds
+/// them. Read only while a criterion of the attempt is red, since a refused
+/// write explains only a failure; a dispatch with no observer has no log to
+/// read, so it reads none.
+pub(crate) async fn read_refusals(
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    sessions: &[yunta_core::SessionId],
+    post: &[super::CriterionRun],
+) -> Result<Vec<yunta_core::events::ToolTarget>, StorageError> {
+    let red = post
+        .iter()
+        .any(|run| run.exit_code != 0 && run.could_not_run().is_none());
+    match audit.filter(|_| red) {
+        Some((observer, _)) => observer.refused_writes(sessions).await,
+        None => Ok(Vec::new()),
+    }
 }
 
 /// One streamed `AgentEvent` and the dispatch state [`apply_agent_event`]
@@ -55,8 +54,6 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) adapter: &'a dyn Adapter,
     pub(super) requested_agent: &'a Option<yunta_core::AgentName>,
     pub(super) requested_effort: Option<yunta_core::Effort>,
-    /// Whether the engine gave this session a per-run tool server.
-    pub(super) run_tools_offered: bool,
     pub(super) max_tokens: Option<u64>,
     pub(super) audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     pub(super) tokens: &'a mut TokenUsage,
@@ -66,10 +63,6 @@ pub(super) struct AgentEventCtx<'a> {
     /// How much of this session's writes its adapter's fence covered,
     /// as the opening reported it.
     pub(super) fence: &'a mut Option<yunta_core::fence::Coverage>,
-    /// Every write the fence refused this session, as it reported it.
-    pub(super) refused: &'a mut Vec<yunta_core::events::ToolTarget>,
-    /// Set when the session's CLI said how many run tools it holds.
-    pub(super) tools_reported: &'a mut bool,
     /// Set when the session failed because it lost its service.
     pub(super) cut_off: &'a mut bool,
     /// The task this session works, when a loop opened it.
@@ -94,14 +87,11 @@ pub(super) async fn apply_agent_event(
         adapter,
         requested_agent,
         requested_effort,
-        run_tools_offered,
         max_tokens,
         audit,
         tokens,
         opened,
         fence: covered,
-        refused,
-        tools_reported,
         cut_off,
         task,
         continues,
@@ -140,7 +130,6 @@ pub(super) async fn apply_agent_event(
             // something this adapter cannot place, and nothing is
             // recorded for it.
             if let Some(session_id) = opened.clone() {
-                refused.push(target.clone());
                 emit_audit(
                     audit,
                     EventPayload::Session(SessionEvent::WriteRefused(
@@ -149,14 +138,6 @@ pub(super) async fn apply_agent_event(
                 )
                 .await
                 .map_err(DispatchError::Audit)?;
-            }
-        }
-        AgentEvent::RunToolsMounted { count } => {
-            *tools_reported = true;
-            if run_tools_offered && count == 0 {
-                emit_audit(audit, run_tools_unreachable(adapter.id()))
-                    .await
-                    .map_err(DispatchError::Audit)?;
             }
         }
         AgentEvent::RunToolFailed { tool, cause } => {

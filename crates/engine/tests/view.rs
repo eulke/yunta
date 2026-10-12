@@ -12,14 +12,16 @@ use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, Capabilities,
     CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload, DiscardedCandidate,
     Escalation, EventBody, EventPayload, Evidence, Fact, Failure, GateOption, NodeFailedPayload,
-    NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload, PromotionSignaledPayload,
-    RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
-    RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
+    NodeFinishedPayload, NodeOutcome, NodeReroutedPayload, NodeStartedPayload, PauseReason,
+    PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload,
+    RunMetrics, RunPausedPayload, RunResumedPayload, RunnerRejection, RunnerResolvedPayload,
+    StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TerminalState,
+    TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{
     ArtifactEvent, ChildEvent, GateEvent, NodeEvent, RunEvent, SessionEvent, TaskEvent,
 };
+use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::NonEmpty;
 use yunta_core::{
     AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
@@ -122,7 +124,7 @@ fn tokens(input: u64, output: u64) -> TokenUsage {
 
 fn finished() -> EventPayload {
     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-        "ok".to_string(),
+        NodeOutcome::Summary("ok".to_string()),
         tokens(10, 5),
     )))
 }
@@ -138,9 +140,7 @@ fn failed(outcome: &str) -> EventPayload {
 fn rerouted(to: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
         to.into(),
-        yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
-            "criteria still red",
-        )),
+        Failure::message("criteria still red"),
         RerouteOrigin::OnFailure,
         Some(1),
         Some(2),
@@ -699,7 +699,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
                         agent: None,
                         effort: None,
                     },
-                    reason: "adapter `absent` is not installed".to_string(),
+                    reason: RunnerRejection::Unavailable,
                 }],
             })),
         ),
@@ -717,10 +717,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
     assert_eq!(runner.chosen.model, "mock-model");
     assert_eq!(runner.chosen.agent, Some(AgentName::from("builder")));
     assert_eq!(runner.discarded.len(), 1);
-    assert_eq!(
-        runner.discarded[0].reason,
-        "adapter `absent` is not installed"
-    );
+    assert_eq!(runner.discarded[0].reason, RunnerRejection::Unavailable);
 }
 
 #[test]
@@ -872,7 +869,7 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
                 CapabilityDegradedPayload::new(
                     Capability::ResumeSession,
                     "mock".into(),
-                    yunta_core::events::Policy::FreshSession,
+                    Policy::FreshSession,
                 ),
             )),
         ),
@@ -884,7 +881,7 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
     assert_eq!(frame.degraded[0].adapter, "mock");
     assert_eq!(
         frame.degraded[0].policy,
-        yunta_core::events::Policy::FreshSession.to_string()
+        PolicyApplied::Known(Policy::FreshSession)
     );
     assert_eq!(frame.degraded[0].node, Some(NodeId::from("build")));
     assert_eq!(frame.degraded[0].at, at(2));
@@ -1094,8 +1091,10 @@ nodes:
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
-                "waiting on external gate: https://forge/pr/1".to_string(),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: "waiting on external gate: https://forge/pr/1".to_string(),
+                },
             ))),
         ),
     ]);
@@ -1109,7 +1108,9 @@ nodes:
                 on: NodeWait::Gate {
                     external_ref: Some("https://forge/pr/1".to_string())
                 },
-                reason: Some("waiting on external gate: https://forge/pr/1".to_string()),
+                reason: Some(PauseReason::Recorded {
+                    sentence: "waiting on external gate: https://forge/pr/1".to_string(),
+                }),
             }
         }
     );
@@ -1131,8 +1132,10 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
-                asked.to_string(),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: asked.to_string(),
+                },
             ))),
         ),
     ]);
@@ -1143,7 +1146,9 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
             on: WaitingOn::Node {
                 node: "plan".into(),
                 on: NodeWait::Gate { external_ref: None },
-                reason: Some(asked.to_string()),
+                reason: Some(PauseReason::Recorded {
+                    sentence: asked.to_string(),
+                }),
             }
         }
     );
@@ -1162,8 +1167,10 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
-                "token budget exceeded".to_string(),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: "token budget exceeded".to_string(),
+                },
             ))),
         ),
         (
@@ -1171,7 +1178,6 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
             None,
             EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
                 checkout: None,
-                resume_policy_applied: None,
                 policies: Vec::new(),
                 environment: None,
             })),
@@ -1201,8 +1207,10 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
-                "token budget exceeded".to_string(),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: "token budget exceeded".to_string(),
+                },
             ))),
         ),
     ]);
@@ -1211,7 +1219,9 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
         frame(&workflow, &events, 100).phase,
         RunPhase::Waiting {
             on: WaitingOn::Run {
-                reason: "token budget exceeded".to_string(),
+                reason: PauseReason::Recorded {
+                    sentence: "token budget exceeded".to_string(),
+                },
             }
         }
     );
@@ -1245,11 +1255,14 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
-                reason: "re-routes exhausted".to_string(),
-                evidence: vec![Fact::bare("criteria still red")].into(),
-                suggested_mode: "full".into(),
-            })),
+            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
+                PromotionCause {
+                    node: "build".into(),
+                    goto: "fix".into(),
+                },
+                vec![Fact::bare("criteria still red")].into(),
+                "full".into(),
+            ))),
         ),
         (4, None, run_finished(TerminalState::Promoted)),
     ]);

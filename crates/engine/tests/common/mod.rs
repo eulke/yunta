@@ -842,16 +842,15 @@ pub async fn resume_orphan_with_mock(
     let RunReport { terminal, .. } = bench
         .run_sabotaged(workflow, fixture, |run_dir| {
             let emit = |node: &str, payload: yunta_core::events::EventPayload| {
+                let draft = yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some(node.into()),
+                    payload,
+                )
+                .expect("a draft names its subject");
                 bench
                     .storage
-                    .append(
-                        &yunta_core::events::EventDraft {
-                            run_id: bench.run_id.clone(),
-                            node_id: Some(node.into()),
-                            payload,
-                        },
-                        &yunta_core::SystemClock,
-                    )
+                    .append(&draft, &yunta_core::SystemClock)
                     .unwrap();
             };
             emit(

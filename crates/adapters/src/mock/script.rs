@@ -30,7 +30,7 @@ pub(super) struct Script {
     pub(super) session_id: SessionId,
     pub(super) model: ModelName,
     /// The edits this session's effects would have made and the request's
-    /// constraints blocked — reported as tool use, which is how a
+    /// constraints blocked — reported as writes it refused, which is how a
     /// hook-capable CLI reports an edit it refused.
     pub(super) refused: Vec<PathBuf>,
     pub(super) fence: Option<Coverage>,
@@ -344,7 +344,6 @@ async fn played(
             cached_input_tokens,
         },
         MockStep::Note { text, .. } => AgentEvent::Note { text },
-        MockStep::RunToolsMounted { count, .. } => AgentEvent::RunToolsMounted { count },
         MockStep::RunTool {
             tool,
             arguments,

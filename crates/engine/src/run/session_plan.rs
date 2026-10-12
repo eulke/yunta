@@ -458,18 +458,7 @@ async fn mount_tools(
     }
     if let Some((observer, node)) = observer {
         observer
-            .record(
-                node,
-                yunta_core::events::EventPayload::Session(
-                    yunta_core::events::SessionEvent::CapabilityDegraded(
-                        yunta_core::events::CapabilityDegradedPayload::new(
-                            yunta_core::Capability::RunTools,
-                            adapter.id().clone(),
-                            yunta_core::events::Policy::NoRunTools,
-                        ),
-                    ),
-                ),
-            )
+            .record(node, crate::run_tools::run_tools_unreachable(adapter.id()))
             .await?;
     }
     Ok(None)

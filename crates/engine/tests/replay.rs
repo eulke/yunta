@@ -8,15 +8,18 @@
 //! event that broke it named, and the state up to that point is still
 //! returned.
 
+use std::path::Path;
+
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
     EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, RecordedOrigin, StoredEvent, TaskStatus,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RecordedOrigin, StoredEvent, TaskStatus,
     TaskStatusChangedPayload, TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
-use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
-use yunta_core::Seq;
+use yunta_core::events::{PauseReason, RunPausedPayload, TaskRegisteredPayload};
+use yunta_core::events::{SessionEvent, ToolTarget, WriteRefusedPayload};
+use yunta_core::{Seq, SessionId};
 use yunta_engine::{dedup_findings, derive, NodeState};
 use yunta_testkit_core::Log;
 
@@ -49,7 +52,7 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "criteria green".to_string(),
+                NodeOutcome::Summary("criteria green".to_string()),
                 tokens(10, 5),
             ))),
         )
@@ -60,7 +63,7 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
     assert_eq!(
         state.nodes.state("lint"),
         Some(&NodeState::Finished {
-            outcome: "criteria green".to_string(),
+            outcome: NodeOutcome::Summary("criteria green".to_string()),
             tokens: tokens(10, 5),
         })
     );
@@ -89,7 +92,7 @@ fn a_retryable_failure_can_restart_and_then_finish() {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "criteria green".to_string(),
+                NodeOutcome::Summary("criteria green".to_string()),
                 tokens(3, 1),
             ))),
         )
@@ -100,7 +103,7 @@ fn a_retryable_failure_can_restart_and_then_finish() {
     assert_eq!(
         state.nodes.state("lint"),
         Some(&NodeState::Finished {
-            outcome: "criteria green".to_string(),
+            outcome: NodeOutcome::Summary("criteria green".to_string()),
             tokens: tokens(3, 1),
         })
     );
@@ -114,7 +117,7 @@ fn node_finished_without_a_prior_node_started_is_broken() {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "criteria green".to_string(),
+                NodeOutcome::Summary("criteria green".to_string()),
                 tokens(1, 1),
             ))),
         )
@@ -269,14 +272,16 @@ fn replay_stops_deriving_further_state_once_broken() {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "criteria green".to_string(),
+                NodeOutcome::Summary("criteria green".to_string()),
                 tokens(1, 1),
             ))),
         )
         // a perfectly valid event that comes after the break point
-        .event(EventPayload::Run(RunEvent::Paused(
-            RunPausedPayload::recorded("irrelevant".to_string()),
-        )))
+        .event(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            &PauseReason::Recorded {
+                sentence: "irrelevant".to_string(),
+            },
+        ))))
         .node(
             "implement",
             EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
@@ -297,6 +302,18 @@ fn replay_stops_deriving_further_state_once_broken() {
 }
 
 #[test]
+fn a_session_fact_with_no_node_breaks_replay() {
+    let refused = SessionEvent::WriteRefused(WriteRefusedPayload::new(
+        SessionId::from("session-1"),
+        ToolTarget::of_path(Path::new("src/a.rs")),
+    ));
+    let events = Log::for_run("run-1")
+        .event(EventPayload::Session(refused))
+        .build();
+    assert!(derive(&events).broken.is_some());
+}
+
+#[test]
 fn replay_is_deterministic_across_several_fixtures() {
     let fixtures: Vec<Vec<StoredEvent>> = vec![
         Log::for_run("run-1")
@@ -307,7 +324,7 @@ fn replay_is_deterministic_across_several_fixtures() {
             .node(
                 "a",
                 EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                    "ok".to_string(),
+                    NodeOutcome::Summary("ok".to_string()),
                     tokens(1, 1),
                 ))),
             )
@@ -334,7 +351,7 @@ fn replay_is_deterministic_across_several_fixtures() {
             .node(
                 "a",
                 EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                    "broken from the start".to_string(),
+                    NodeOutcome::Summary("broken from the start".to_string()),
                     tokens(0, 0),
                 ))),
             )
@@ -366,7 +383,7 @@ fn an_unknown_kind_is_counted_and_never_breaks_replay() {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "criteria green".to_string(),
+                NodeOutcome::Summary("criteria green".to_string()),
                 tokens(10, 5),
             ))),
         )
@@ -467,6 +484,25 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
     );
 }
 
+/// The kinds that move no ledger: applying one leaves the derived state
+/// where it was. Listed by name, so that a kind which starts moving state
+/// contradicts this list and fails the test below until its name is
+/// taken off.
+const AUDIT_KINDS: &[&str] = &[
+    "finding_refused",
+    "asking_opened",
+    "context_assembled",
+    "scope_checked",
+    "hook_executed",
+    "pull_request_opened",
+    "write_formatted",
+    "run_tool_refused",
+    "service_unreachable",
+    "service_reachable",
+    "task_check_started",
+    "task_check_answered",
+];
+
 /// Every kind either moves state or says it does not. The pair is what
 /// makes a silent no-op impossible: a kind nothing reads would sit in
 /// the log deriving nothing, with no diagnostic anywhere — the exact
@@ -505,11 +541,9 @@ fn a_kind_that_moves_no_state_says_so_by_name() {
             Ok(()) => state != before,
             Err(_) => true,
         };
-        if !moved != payload.is_audit() {
-            mismatched.push(format!(
-                "{kind}: moves={moved} is_audit={}",
-                payload.is_audit()
-            ));
+        let audit = AUDIT_KINDS.contains(&kind);
+        if !moved != audit {
+            mismatched.push(format!("{kind}: moves={moved} audit={audit}"));
         }
     }
     assert!(

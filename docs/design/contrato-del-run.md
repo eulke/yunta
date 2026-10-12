@@ -68,11 +68,11 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 48 event kinds in 39 rows; some rows group related variants:
+The current table contains 57 event kinds in 47 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
-| `runner_resolved` | engine | rol, candidato elegido, candidatos descartados y causa |
+| `runner_resolved` | engine | rol, candidato elegido, candidatos descartados con su motivo tipado (`RunnerRejection`) |
 | `baseline_captured` | engine | comando de suite, resultados, hash, origen (`measured` \| `inherited` con el run que midió) |
 | `baseline_held` | engine | un comando de `baseline.held` medido al lado de la suite: nombre, texto, resultados y origen (D256) |
 | `node_started` | engine | node_id, intento N, árbol de partida, commit de lo que encontró en el árbol del run (si encontró algo) |
@@ -87,11 +87,11 @@ The current table contains 48 event kinds in 39 rows; some rows group related va
 | `deviation_declared` / `deviation_resolved` | engine | task_id; en la declaración, de qué elemento del plan se aparta (forma, decisión, cambio, criterio u outcome), qué decía el plan, qué hace en cambio y por qué; en la respuesta, si una persona lo aceptó y qué dijo |
 | `scope_checked` | engine | task_id/node_id, diff observado, violaciones |
 | `scope_expansion_requested` | engine | task_id, paths, razón, criterio propuesto y su pre-check (§6.2) |
-| `scope_expansion_granted` / `scope_expansion_denied` | engine | task_id, decisor (regla, persona o evidencia), modo, conteo del run |
+| `scope_expansion_granted` / `scope_expansion_denied` | engine | task_id (ausente en la denegación de un nodo), decisor (regla, persona o evidencia), modo, conteo del run |
 | `scope_derived` | engine | task_id, los archivos fuera de su scope que nombran una shape suya, esas shapes, las demasiado comunes y el commit en que se leyeron |
-| `node_finished` / `node_failed` | engine | resultado, tokens, ¿reintentable? |
+| `node_finished` / `node_failed` | engine | resultado (un hecho del engine o el resumen del agente), tokens, ¿reintentable? |
 | `hook_executed` | engine | node_id, fase before/after, comando, exit code |
-| `node_rerouted` | engine | nodo fallido, destino, causa, reintento N de M |
+| `node_rerouted` | engine | nodo fallido, destino, causa (la falla tipada), reintento N de M |
 | `pull_request_opened` | engine | url y número del pull request que un nodo `pull_request` abrió —o encontró abierto para este run—, rama del run, rama base |
 | `gate_waiting` / `gate_resolved` | engine/adapter | opciones, elección, quién, feedback |
 | `questions_asked` / `questions_answered` | engine | node_id; hash e ids del documento `questions` y tokens de la sesión que preguntó / hash del artifact de respuestas, canal (tty\\|mcp\\|assumed), respondiente si se conoce |
@@ -106,9 +106,9 @@ The current table contains 48 event kinds in 39 rows; some rows group related va
 | `finding_answered` | engine | el nodo que responde, el hallazgo que responde (nodo e id), `fixed` o `declined` y por qué (§4.1) |
 | `finding_proved` | engine | el nodo que respondió `fixed`, el hallazgo (nodo e id) y el resultado de su criterio propuesto sobre el árbol que deja (§4.1) |
 | `finding_settled` | engine | el gate, el hallazgo que mostró (nodo e id) y la decisión (`caused_by`) con la que una persona siguió adelante (§4.1, §5.3) |
-| `promotion_signaled` | engine | razón, evidencia, modo sugerido |
+| `promotion_signaled` | engine | causa (nodo y destino), evidencia, modo sugerido |
 | `child_run_created` / `child_run_finished` | engine | node_id, child run_id, `workflow_hash` del hijo, estado terminal |
-| `capability_degraded` | engine | capacidad, adapter, política aplicada |
+| `capability_degraded` | engine | capacidad, adapter, política (un conjunto cerrado) |
 | `write_refused` | engine (riel) | sesión que la rechazó, y el path que la escritura nombraba (§6) |
 | `write_formatted` | engine (riel) | sesión que escribió, el comando de `format:` que formateó, los paths, cuáles cambió, su exit code y su duración (D255) |
 | `stop_refused` | engine (riel) | sesión que quiso terminar con trabajo que su cierre no tomaría, el estado de ese trabajo y qué lo impedía (§5.2) |
@@ -116,16 +116,16 @@ The current table contains 48 event kinds in 39 rows; some rows group related va
 | `run_tool_refused` | engine | el tool conocido de `yunta-run` que nombró la llamada, y el motivo cerrado por el que el engine la rechazó |
 | `host_suspended` | engine | cuánto durmió el host (ms), notado al despertar; no despierta el run y las duraciones lo descuentan |
 | `service_unreachable` / `service_reachable` | engine | la sesión que perdió su servicio y lo que dijo su CLI / cuánto esperó (ms, tiempo despierto) hasta que el servicio respondió y la misma sesión siguió |
-| `run_paused` / `run_resumed` / `run_finished` | engine | razón / estado terminal, métricas |
+| `run_paused` / `run_resumed` / `run_finished` | engine | pausa tipada / estado terminal, métricas |
 | `run_moved` | engine | el checkout del pool, ya compilado en el commit del run, al que se mudó entre dos de sus pasos |
 
 Dos decisiones incorporadas al modelo. Primera: `agent_session_opened` es obligatorio para los adapters y transporta el session_id — es lo que hace posible reanudar conversaciones (§8.1). Segunda: el uso de tokens viaja en eventos, así que los presupuestos (`limits.*`) se evalúan en el engine contra el log, nunca contra el autorreporte del agente.
 ## 3.1 Schema de eventos y evolución
 Los eventos son el formato más duradero del sistema: sobreviven a los runs, se exportan a `events.jsonl`, alimentan recibos y stats, y deben poder leerse años después. Su evolución se rige por cuatro reglas:
-**Versión por tipo, no global.** `schema_version` es la versión *de ese* `kind`: `criteria_checked` puede ir por su v3 mientras `run_created` sigue en v1. Una versión global obligaría a tocar todo cada vez que un solo evento cambia.
-**Dentro de una versión, solo cambios compatibles.** Agregar campos opcionales, sí. Renombrar, eliminar o cambiar el tipo de un campo existente, no: eso es un `kind` nuevo (`criteria_checked_v2`), y el lector viejo lo ignora en lugar de romperse. Es deliberadamente burdo — la alternativa, migrar el log al actualizar, introduciría una operación falible sobre la fuente de verdad y contradiría el append-only (I2). En un sistema cuyo argumento es la auditabilidad, un log que jamás se reescribe vale más que un vocabulario prolijo; los `kind` legacy se retiran cuando la retención los agota. La regla rige desde la primera versión publicada en adelante; antes de ella un payload se reemplaza en el lugar, porque no existe todavía un lector de la forma anterior (D141).
+**Una versión para todo `kind`.** `schema_version` vale `KIND_VERSION`, que es 1 para cada kind: ningún kind sube de versión. Un cambio de forma que no sea compatible nombra un kind nuevo, así que el log no necesita una versión por tipo para distinguir formas.
+**Dentro de un kind, solo cambios compatibles.** Agregar campos opcionales, sí. Renombrar, eliminar o cambiar el tipo de un campo existente, no: eso es un `kind` nuevo (`criteria_checked_v2`). Es deliberadamente burdo — la alternativa, migrar el log al actualizar, introduciría una operación falible sobre la fuente de verdad y contradiría el append-only (I2). En un sistema cuyo argumento es la auditabilidad, un log que jamás se reescribe vale más que un vocabulario prolijo; los `kind` legacy se retiran cuando la retención los agota. La regla rige desde la primera versión publicada en adelante; antes de ella un payload se reemplaza en el lugar, porque no existe todavía un lector de la forma anterior (D141).
 **Lector tolerante, escritor estricto.** Al leer, los campos desconocidos se ignoran — el replay nunca falla por encontrar un evento más nuevo de lo esperado. Al escribir, el payload se valida contra el schema: un evento inválido es un bug del engine, no un warning.
-**Evento desconocido: parcial, no roto.** Si el replay encuentra un `kind` que esta versión no conoce (log escrito por una posterior), deriva lo que puede y marca el run como *parcialmente interpretado*, con diagnóstico — ni `broken` innecesario ni silencio (I11).
+**Evento desconocido: parcial, no roto.** Si el replay encuentra un `kind` que esta versión no conoce, deriva lo que puede y marca el run como *parcialmente interpretado*, con diagnóstico — ni `broken` innecesario ni silencio (I11). Ninguna versión promete leer así un log escrito por otra: esto es lo que este binario hace con un `kind` que no conoce.
 **Forma.** El JSON Schema se **genera desde los tipos de Rust** y se versiona en el repo: los tipos son la fuente de verdad y el schema es su emisión. Así, cualquier cambio que altere el formato produce un diff visible en el PR — nadie modifica el contrato de eventos sin notarlo — y los golden tests comparan contra el schema emitido, no contra expectativas escritas a mano.
 **Normalización en lectura.** Las variantes de versión son un detalle de almacenamiento, jamás vocabulario de usuario: al leer, el engine normaliza cada evento al modelo de dominio actual **en memoria**, sin tocar el disco. Ningún `_vN` aparece en `status`, `stats`, el recibo ni ninguna otra superficie de usuario. El log conserva exactamente los bytes que se escribieron — la evidencia no se reescribe — y quien lo consume ve un vocabulario limpio. Esto también resuelve el `events.jsonl` ya exportado: como los archivos que salieron del sistema no pueden migrarse, la compatibilidad de lectura es la única garantía que funciona para ellos.
 ## 3.2 Estados de nodo
@@ -139,7 +139,7 @@ Cada evento persiste un `event_hash` que encadena con el anterior — lo que RFC
 event_hash = SHA-256(prev_event_hash || campos_estructurales_en_orden_fijo)
 ```
 
-**Campos que participan**, en el orden declarado del schema (nunca orden alfabético de mapa — evita ambigüedad de serialización): `run_id, seq, timestamp, node_id, kind, payload_json, schema_version`. El `event_hash` se calcula sobre **los bytes exactamente como se persistieron**, antes de cualquier normalización en lectura (§3.1): la integridad de la cadena es así completamente ortogonal a la evolución del schema — un evento `_v2` futuro no invalida hashes ya calculados sobre eventos `_v1` existentes.
+**Campos que participan**, en el orden declarado del schema (nunca orden alfabético de mapa — evita ambigüedad de serialización): `run_id, seq, timestamp, node_id, kind, payload_json, schema_version`. El `event_hash` se calcula sobre **los bytes exactamente como se persistieron**, antes de cualquier normalización en lectura (§3.1): la integridad de la cadena es así completamente ortogonal a la evolución del schema — un kind nuevo no invalida hashes ya calculados sobre eventos existentes.
 
 **Génesis determinístico, sin null ambiguo**: `H0 = SHA-256(manifest_hash)`. Atarlo al manifest (que ya existe, §2.1) hace que la cadena nazca única por run sin inventar una constante nueva, y liga la integridad de eventos a la integridad del propio run desde el primer eslabón.
 

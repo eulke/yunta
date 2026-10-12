@@ -10,22 +10,28 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use yunta_core::events::{EventPayload, SessionEvent, ToolTarget, WriteRefusedPayload};
+use yunta_core::events::{
+    EventPayload, SessionEvent, StoredEvent, ToolTarget, WriteRefusedPayload,
+};
 use yunta_core::fence::{Fence, Verdict};
 use yunta_core::rail::{unasked, RailAct, RailAnswer, RailCall, RailEvent};
-use yunta_core::SessionId;
+use yunta_core::{SessionId, Unredactable};
+use yunta_storage::StorageError;
 
-use super::session::SessionTools;
+use super::session::{RunToolError, SessionTools};
 
-/// What one session's hooks are judged against, and what they were
-/// refused.
+/// What one session's hooks are judged against, and the refusal the log
+/// could not keep, if one was.
 ///
 /// The fence is set once the session's request is built, which is
 /// before the session is dispatched and so before any hook can ask.
 #[derive(Default)]
 pub struct SessionRails {
     fence: OnceLock<Fence>,
-    refused: Mutex<Vec<ToolTarget>>,
+    /// The most recent refusal whose log append failed. The engine answered
+    /// it all the same; the attempt that dispatched the session reads it
+    /// and fails with the storage cause.
+    unrecorded: Mutex<Option<RunToolError>>,
 }
 
 impl SessionRails {
@@ -40,12 +46,18 @@ impl SessionRails {
         self.fence.get()
     }
 
-    /// Every write this session was refused, in the order it asked.
-    pub fn refused(&self) -> Vec<ToolTarget> {
-        self.refused
+    /// The refusal whose log append failed, taken: read once the session
+    /// has ended.
+    pub(crate) fn take_unrecorded(&self) -> Option<RunToolError> {
+        self.unrecorded
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .take()
+    }
+
+    /// Keeps `error` as the refusal whose log append failed.
+    fn keep_unrecorded(&self, error: RunToolError) {
+        *self.unrecorded.lock().unwrap_or_else(|e| e.into_inner()) = Some(error);
     }
 }
 
@@ -72,16 +84,11 @@ impl SessionTools {
                 continue;
             };
             let target = shown(&refusal.target, &self.cwd);
-            self.rails
-                .refused
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(target.clone());
             let payload = EventPayload::Session(SessionEvent::WriteRefused(
                 WriteRefusedPayload::new(session.clone(), target),
             ));
             if let Err(error) = self.append(payload).await {
-                tracing::debug!(%error, "a refused write went unrecorded");
+                self.rails.keep_unrecorded(error);
             }
             reasons.push(refusal.to_string());
         }
@@ -91,6 +98,36 @@ impl SessionTools {
                 reason: reasons.join("\n\n"),
             },
         }
+    }
+}
+
+/// Every write these sessions were refused, in the order the log holds
+/// them. Refusals are read from the log only, so this is the one place
+/// they are derived.
+pub fn refused_writes(events: &[StoredEvent], sessions: &[SessionId]) -> Vec<ToolTarget> {
+    events
+        .iter()
+        .filter_map(|stored| match stored.payload() {
+            Some(EventPayload::Session(SessionEvent::WriteRefused(refused)))
+                if sessions.contains(&refused.session_id) =>
+            {
+                Some(refused.target.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The storage cause of a refusal the engine answered and could not write.
+/// A log append fails with one of the two causes here; any other error is
+/// not one the rail stores, so it gives an attempt no cause to fail with.
+pub(crate) fn unrecorded_cause(error: RunToolError) -> Option<StorageError> {
+    match error {
+        RunToolError::Storage { source } => Some(source),
+        RunToolError::Unredactable { kind } => {
+            Some(StorageError::Unredactable(Unredactable { kind }))
+        }
+        _ => None,
     }
 }
 

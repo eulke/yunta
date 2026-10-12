@@ -10,7 +10,16 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
-use yunta_core::events::{ArtifactEvent, NodeEvent, RecordedOrigin, RunEvent};
+use yunta_core::events::{ArtifactEvent, NodeEvent, PauseReason, RecordedOrigin, RunEvent};
+
+/// Whether a pause is the failure of `node`, and the headline its failure states.
+fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
+    matches!(
+        pause,
+        PauseReason::NodeFailed { node: named, failure }
+            if named.as_str() == node && failure.headline() == headline
+    )
+}
 
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
@@ -244,8 +253,9 @@ sessions:
 
     match terminal {
         RunTerminal::Paused { reason } => {
+            assert!(matches!(&reason, PauseReason::Escalation(_)), "{reason:?}");
             assert_eq!(
-                reason,
+                yunta_render::pause::sentence(&reason),
                 "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
             );
         }
@@ -268,7 +278,9 @@ nodes:
     let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 3"),
+        RunTerminal::Paused { reason } => {
+            assert!(node_failed(&reason, "build", "exit 3"), "{reason:?}");
+        }
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
@@ -374,9 +386,9 @@ nodes:
     let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `implement` failed: before hook `exit 1` failed"
+        RunTerminal::Paused { reason } => assert!(
+            node_failed(&reason, "implement", "before hook `exit 1` failed"),
+            "{reason:?}"
         ),
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -402,7 +414,9 @@ nodes:
     // The pause names the claim; what the compiler printed is the
     // failure's own evidence.
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 101"),
+        RunTerminal::Paused { reason } => {
+            assert!(node_failed(&reason, "build", "exit 101"), "{reason:?}");
+        }
         other => panic!("expected Paused, got {other:?}"),
     }
     let Some(NodeState::Failed { failure, .. }) = state.nodes.state("build") else {
@@ -435,10 +449,13 @@ nodes:
     let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `only` failed: before hook `echo installing; echo 'lockfile is out of date' \
-             >&2; exit 1` failed"
+        RunTerminal::Paused { reason } => assert!(
+            node_failed(
+                &reason,
+                "only",
+                "before hook `echo installing; echo 'lockfile is out of date' >&2; exit 1` failed"
+            ),
+            "{reason:?}"
         ),
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -467,7 +484,10 @@ nodes:
 
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `only` failed: after hook `exit 1` failed")
+            assert!(
+                node_failed(&reason, "only", "after hook `exit 1` failed"),
+                "{reason:?}"
+            )
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -515,9 +535,9 @@ nodes:
     let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `only` failed: before hook `tail -f /dev/null` failed"
+        RunTerminal::Paused { reason } => assert!(
+            node_failed(&reason, "only", "before hook `tail -f /dev/null` failed"),
+            "{reason:?}"
         ),
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -990,13 +1010,14 @@ nodes:
             bench
                 .storage
                 .append(
-                    &yunta_core::events::EventDraft {
-                        run_id: bench.run_id.clone(),
-                        node_id: Some("only".into()),
-                        payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    &yunta_core::events::EventDraft::new(
+                        bench.run_id.clone(),
+                        Some("only".into()),
+                        yunta_core::events::EventPayload::Node(NodeEvent::Started(
                             yunta_core::events::NodeStartedPayload::attempt(1),
                         )),
-                    },
+                    )
+                    .expect("a draft names its subject"),
                     &yunta_core::SystemClock,
                 )
                 .unwrap();
@@ -1024,7 +1045,7 @@ nodes:
         "the orphan and the policy it resolved to"
     );
     assert_eq!(
-        resumed.resume_policy_applied.as_deref(),
+        resumed.agreed_policy().as_deref(),
         Some("fail_if_uncertain"),
         "the one policy every orphan shares, never a fixed literal"
     );
@@ -1104,9 +1125,12 @@ nodes:
     let Some(NodeState::Failed { failure, .. }) = state.nodes.state("report") else {
         panic!("`report` failed: {state:?}");
     };
+    let sentence = yunta_render::pause::sentence(reason);
     assert!(
-        reason.contains("report.md") && failure.to_string().contains("never produced"),
-        "the second attempt is judged on what it produced: {reason} / {failure}"
+        matches!(reason, PauseReason::Escalation(_))
+            && sentence.contains("report.md")
+            && failure.to_string().contains("never produced"),
+        "the second attempt is judged on what it produced: {reason:?} / {failure}"
     );
     assert_eq!(
         bench.accepted(),
@@ -1180,6 +1204,38 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
 "#;
 
+/// Records on the run's log that it accepted `one_task_document()` as its
+/// tasks document, inherited from another run.
+async fn accept_an_inherited_tasks_document(bench: &Bench, run_dir: &std::path::Path) {
+    let content_hash = yunta_engine::ObjectStore::at(run_dir)
+        .put(&one_task_document())
+        .await
+        .unwrap();
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft::new(
+                bench.run_id.clone(),
+                None,
+                yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(
+                    yunta_core::events::ArtifactAcceptedPayload::new(
+                        yunta_core::events::ArtifactId::Interpreted {
+                            kind: yunta_core::ArtifactKind::Tasks,
+                        },
+                        content_hash,
+                        RecordedOrigin::Inherited {
+                            run: "run-elsewhere".into(),
+                            producer: None,
+                        },
+                    ),
+                )),
+            )
+            .expect("a draft names its subject"),
+            &yunta_core::SystemClock,
+        )
+        .unwrap();
+}
+
 #[tokio::test]
 async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stuck() {
     let bench = Bench::new();
@@ -1196,32 +1252,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
 
     // A document the run holds and never said what to do about — the
     // one shape that reaches a loop with no registration behind it.
-    let content_hash = yunta_engine::ObjectStore::at(&run_dir)
-        .put(&one_task_document())
-        .await
-        .unwrap();
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: None,
-                payload: yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(
-                    yunta_core::events::ArtifactAcceptedPayload::new(
-                        yunta_core::events::ArtifactId::Interpreted {
-                            kind: yunta_core::ArtifactKind::Tasks,
-                        },
-                        content_hash,
-                        RecordedOrigin::Inherited {
-                            run: "run-elsewhere".into(),
-                            producer: None,
-                        },
-                    ),
-                )),
-            },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
+    accept_an_inherited_tasks_document(&bench, &run_dir).await;
 
     let error = bench.try_wake().await.unwrap_err();
 

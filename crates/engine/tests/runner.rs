@@ -6,6 +6,7 @@
 //! over, and a runner with nothing available is an error naming
 //! everything that was tried.
 
+use yunta_core::events::RunnerRejection;
 use yunta_core::ConfigLayer;
 use yunta_engine::{resolve_runner, RunnerError};
 
@@ -41,7 +42,7 @@ fn an_unavailable_adapter_is_discarded_with_a_reason_not_skipped_silently() {
     assert_eq!(resolved.chosen.adapter, "codex");
     assert_eq!(resolved.discarded.len(), 1);
     assert_eq!(resolved.discarded[0].candidate.adapter, "claude-code");
-    assert!(!resolved.discarded[0].reason.is_empty());
+    assert_eq!(resolved.discarded[0].reason, RunnerRejection::Unavailable);
 }
 
 #[test]
@@ -84,10 +85,12 @@ fn an_adapter_override_wins_over_declaration_order_and_records_the_discards() {
     assert_eq!(resolved.chosen.adapter, "codex");
     assert_eq!(resolved.discarded.len(), 1);
     assert_eq!(resolved.discarded[0].candidate.adapter, "claude-code");
-    assert!(
-        resolved.discarded[0].reason.contains("--adapter"),
-        "the reason names the override: {}",
-        resolved.discarded[0].reason
+    assert_eq!(
+        resolved.discarded[0].reason,
+        RunnerRejection::NotPinned {
+            pinned: override_id,
+        },
+        "the reason names the override"
     );
 }
 

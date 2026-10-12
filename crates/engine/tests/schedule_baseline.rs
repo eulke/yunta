@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     BaselineCapturedPayload, BaselineOrigin, BaselineResults, EventBody, EventPayload, NodeEvent,
-    NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent, TokenUsage,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent,
+    TokenUsage,
 };
 use yunta_core::{CommitSha, ContentHash, DefaultOnFailure, NodeId, OnInterrupt, Workflow};
 use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
@@ -121,7 +122,7 @@ nodes:
         (
             Some("plan"),
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok",
+                NodeOutcome::Summary("ok".into()),
                 TokenUsage::default(),
             ))),
         ),
@@ -167,7 +168,7 @@ fn a_gate_showing_a_plan_waits_for_the_measurement() {
         (
             Some("plan"),
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok",
+                NodeOutcome::Summary("ok".into()),
                 TokenUsage::default(),
             ))),
         ),
@@ -253,7 +254,7 @@ nodes:
         (
             Some("plan"),
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok",
+                NodeOutcome::Summary("ok".into()),
                 TokenUsage::default(),
             ))),
         ),

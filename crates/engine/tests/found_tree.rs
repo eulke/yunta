@@ -65,11 +65,12 @@ async fn an_interrupted_attempts_leftovers_are_found_when_it_restarts() {
     bench
         .storage
         .append(
-            &EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("only".into()),
-                payload: EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-            },
+            &EventDraft::new(
+                bench.run_id.clone(),
+                Some("only".into()),
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+            )
+            .expect("a draft names its subject"),
             &yunta_testkit_core::FixedClock,
         )
         .unwrap();

@@ -20,7 +20,7 @@ fn gate_kinds(bench: &Bench) -> Vec<&'static str> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Gates(gate)) => Some(gate.kind_name()),
+            Some(payload @ EventPayload::Gates(_)) => Some(payload.kind_name()),
             _ => None,
         })
         .collect()

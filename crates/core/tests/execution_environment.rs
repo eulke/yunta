@@ -25,11 +25,6 @@ fn a_drift_names_what_the_path_gained_and_lost() {
 
     assert_eq!(drift.gained, vec!["/opt/tools"]);
     assert_eq!(drift.lost, vec!["/opt/old"]);
-    assert_eq!(
-        drift.to_string(),
-        "commands now run in another environment than the run was born in: PATH gained \
-         /opt/tools; PATH lost /opt/old"
-    );
 }
 
 #[test]

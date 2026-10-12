@@ -5,7 +5,7 @@ use yunta_testkit::Bench;
 
 mod common;
 use common::*;
-use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::events::{GateEvent, NodeEvent, PauseReason};
 
 #[tokio::test]
 async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_closed() {
@@ -21,8 +21,12 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
     } = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "node `ask` asked 2 questions: `q1`, `q2`");
+        RunTerminal::Paused {
+            reason: PauseReason::Questions { node, pending },
+        } => {
+            let asked: Vec<&str> = pending.as_slice().iter().map(|id| id.as_str()).collect();
+            assert_eq!(node.as_str(), "ask");
+            assert_eq!(asked, ["q1", "q2"]);
         }
         other => panic!("expected the run to pause on unanswered questions, got {other:?}"),
     }
@@ -165,13 +169,18 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert!(
-                reason.starts_with("node `ask`'s answers were refused:"),
-                "the pause says whose answers and that they were refused: {reason}"
+            let PauseReason::AnswersRefused { node, .. } = reason else {
+                panic!("an incomplete reply pauses on the answers it refused: {reason:?}");
+            };
+            assert_eq!(
+                node.as_str(),
+                "ask",
+                "the pause says whose answers were refused"
             );
+            let words = yunta_render::pause::sentence(reason);
             assert!(
-                reason.contains("`q1`") && reason.contains("nothing answers it"),
-                "and which question went unanswered, in the engine's own words: {reason}"
+                words.contains("`q1`") && words.contains("nothing answers it"),
+                "and which question went unanswered, in the engine's own words: {words}"
             );
         }
         other => panic!("an incomplete reply must pause, got {other:?}"),
@@ -249,9 +258,14 @@ async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
 
     match &terminal {
         RunTerminal::Paused { reason } => {
+            let PauseReason::AnswersRefused { node, .. } = reason else {
+                panic!("an out-of-values choice pauses on the answers it refused: {reason:?}");
+            };
+            assert_eq!(node.as_str(), "ask");
+            let words = yunta_render::pause::sentence(reason);
             assert!(
-                reason.contains("qa") || reason.contains("q1"),
-                "must cite the invalid value or its question: {reason}"
+                words.contains("qa") || words.contains("q1"),
+                "must cite the invalid value or its question: {words}"
             );
         }
         other => panic!("an out-of-values choice must pause, got {other:?}"),

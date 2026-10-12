@@ -3,10 +3,11 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, Evidence, Failure, NodeReroutedPayload, PauseReason, PromotionSignaledPayload,
-    RerouteCause, RerouteOrigin, RunFinishedPayload, TerminalState, TokenUsage,
+    EngineFact, EventPayload, Evidence, Failure, NodeOutcome, NodeReroutedPayload, PauseReason,
+    PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, TerminalState,
+    TokenUsage,
 };
-use yunta_core::{ModeName, NodeId};
+use yunta_core::{ModeName, NodeId, RunId};
 
 use crate::replay::RunState;
 use crate::reserved::ReservedOption;
@@ -104,7 +105,7 @@ pub(super) async fn reroute(
     to: NodeId,
     attempt: u32,
     max_reroutes: u32,
-    cause: RerouteCause,
+    cause: Failure,
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&from),
@@ -134,8 +135,9 @@ pub(super) async fn failure_escalation(
     (next_attempt, ways_back): (u32, (bool, bool)),
 ) -> Result<Option<RunReport>, RunError> {
     let escalation = escalation::build_failure_escalation(&node, &failure, next_attempt, ways_back)
-        .map_err(|source| RunError::Broken {
-            diagnostic: format!("node `{node}`'s escalation: {source}"),
+        .map_err(|source| RunError::Escalation {
+            context: format!("node `{node}`'s escalation"),
+            source,
         })?;
     let choice = escalation::decided(ctx, state, &node, &escalation).await?;
     if choice.is_some_and(|choice| {
@@ -161,7 +163,7 @@ pub(super) async fn gate_exhausted(
     node: NodeId,
     goto: NodeId,
     max_reroutes: u32,
-    cause: RerouteCause,
+    cause: Failure,
 ) -> Result<Option<RunReport>, RunError> {
     let suggested_mode = schedule::next_mode_after(&ctx.manifest.workflow, mode_name);
     let escalation = escalation::build_reroute_escalation(
@@ -172,8 +174,9 @@ pub(super) async fn gate_exhausted(
         max_reroutes,
         &cause,
     )
-    .map_err(|source| RunError::Broken {
-        diagnostic: format!("node `{node}`'s escalation: {source}"),
+    .map_err(|source| RunError::Escalation {
+        context: format!("node `{node}`'s escalation"),
+        source,
     })?;
     let Some(choice) = escalation::decided(ctx, state, &node, &escalation).await? else {
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
@@ -208,17 +211,14 @@ pub(super) async fn gate_exhausted(
                 ),
             });
         };
-        let evidence: Evidence = super::escalation::failure_facts(&cause.0).into();
+        let evidence: Evidence = super::escalation::failure_facts(&cause).into();
         ctx.emit(
             None,
-            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
-                reason: yunta_core::text::aside(
-                    format!("node `{node}` exhausted its re-routes to `{goto}`"),
-                    &evidence.one_line(),
-                ),
+            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
+                PromotionCause { node, goto },
                 evidence,
-                suggested_mode: next_mode.clone(),
-            })),
+                next_mode.clone(),
+            ))),
         )
         .await?;
         // A promotion is a real close — the short attempt's knowledge is
@@ -306,8 +306,9 @@ pub(super) async fn execute_batch(
             let spent = state.total_tokens().total();
             if spent >= cap {
                 let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap)
-                    .map_err(|source| RunError::Broken {
-                        diagnostic: format!("the run's budget escalation: {source}"),
+                    .map_err(|source| RunError::Escalation {
+                        context: "the run's budget escalation".to_string(),
+                        source,
                     })?;
                 match budget::escalate(ctx, None, escalation, reason).await? {
                     budget::BudgetDecision::Continue => ctx
@@ -342,17 +343,20 @@ pub(super) async fn execute_batch(
     // waits on the child's *terminal* state) — after the whole batch lands,
     // the parent pauses too, naming the child. A root cancellation takes
     // precedence: the loop-top check handles it as "cancelled by user".
-    let mut child_paused: Option<(NodeId, String)> = None;
+    let mut child_paused: Option<(NodeId, RunId, PauseReason)> = None;
     for result in futures::future::join_all(executions).await {
-        if let node_exec::NodeEnd::ChildPaused { node, reason } = result? {
-            child_paused.get_or_insert((node, reason));
+        if let node_exec::NodeEnd::ChildPaused { node, run, child } = result? {
+            child_paused.get_or_insert((node, run, child));
         }
     }
-    if let Some((node, reason)) = child_paused {
+    if let Some((node, run, child)) = child_paused {
         if !ctx.root_cancel.is_cancelled() {
-            return Ok(Some(
-                pause(ctx, PauseReason::ChildPaused { node, reason }).await?,
-            ));
+            let reason = PauseReason::ChildPaused {
+                node,
+                run,
+                child: Box::new(child),
+            };
+            return Ok(Some(pause(ctx, reason).await?));
         }
     }
     Ok(None)
@@ -434,7 +438,13 @@ pub(super) async fn finish_answered(
     node_id: NodeId,
 ) -> Result<Option<RunReport>, RunError> {
     let node = find_node(&ctx.manifest.workflow, &node_id)?;
-    node_close::finish_node(ctx, node, "questions answered", TokenUsage::default()).await?;
+    node_close::finish_node(
+        ctx,
+        node,
+        NodeOutcome::Fact(EngineFact::QuestionsAnswered),
+        TokenUsage::default(),
+    )
+    .await?;
     Ok(None)
 }
 

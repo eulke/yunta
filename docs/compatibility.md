@@ -180,15 +180,15 @@ The engine hands storage a draft — what happened, in which run, for which
 node — and storage assigns the event's position (`seq`, from 1) and its
 timestamp from the injected clock; no caller invents either.
 
-A binary reads every log a newer binary wrote. An event under a `kind` this
-binary does not know is kept as written — its kind, the version it was
-written under and every field — and the run is interpreted up to what the
-binary understands: replay never breaks on it, `yunta status` and the
-receipt name the unknown kinds with their counts, `stats --json` lists them
-under `unknown_kinds`, and `events.jsonl` carries the event back out
-verbatim (with its `schema_version` beside the envelope fields). An event
-under a known kind whose payload is not that kind's shape is corrupt, and
-reading the run fails naming its position.
+A log a newer binary wrote can carry a `kind` this binary does not know, and
+this policy makes no promise about reading one. Where the binary meets such an
+event, it keeps it as written — its kind, the version it was written under and
+every field — and interprets the run up to what it understands: `yunta status`
+and the receipt name the unknown kinds with their counts, `stats --json` lists
+them under `unknown_kinds`, and `events.jsonl` carries the event back out
+verbatim (with its `schema_version` beside the envelope fields). An event under
+a known kind whose payload is not that kind's shape is corrupt, and reading the
+run fails naming its position.
 
 `node_failed` records what failed, not a sentence about it. Its `failure` is
 either `outcome:` — one sentence the engine states, for a failure with no
@@ -307,9 +307,8 @@ node in the envelope; `finding_proved` carries the same `node` and `id` and the
 `result` of the criterion the finding proposes, run on the tree the answering node
 left; `finding_settled` carries the `node` (absent for the engine's own finding) and
 `id` a person went on past at the gate in the envelope, and `caused_by`, the
-decision's `gate_resolved`. An older binary keeps it as a kind it does not know. A run
-tool a newer binary serves can reach a log as `run_tool_failed.tool`, which an older
-binary reads as corrupt — a log written by a newer binary is read by a binary as new.
+decision's `gate_resolved`. A run tool a newer binary serves can reach a log as
+`run_tool_failed.tool`, which an older binary reads as corrupt.
 
 Which findings a run holds is the last state of each `(node, id)` pair, minus the
 withdrawn ones, in the order each was first posted. A log that carries only

@@ -1,11 +1,27 @@
 //! Verification gates: baseline and coverage compares, findings gates, how a node's end is recorded, the executor, command-permission denials, and events.jsonl.
 
-use yunta_core::events::{BaselineOrigin, EventPayload, NodeEvent, RunEvent};
+use yunta_core::events::{
+    BaselineOrigin, CommandOrigin, EngineFact, EventPayload, Failure, NodeEvent, NodeOutcome,
+    PauseReason, RunEvent,
+};
+use yunta_core::{ConfigKey, NodeId};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{baselines, ApproveEverything, Bench, MOCK_CONFIG};
 
 mod common;
 use common::*;
+
+/// The node a pause stopped on, and the sentence its failure was stated
+/// in. Any other pause fails the test that asked for one.
+fn failed_in_a_sentence(reason: PauseReason) -> (NodeId, String) {
+    match reason {
+        PauseReason::NodeFailed {
+            node,
+            failure: Failure::Message { outcome },
+        } => (node, outcome),
+        other => panic!("expected a node to fail in one sentence, got {other:?}"),
+    }
+}
 
 #[tokio::test]
 async fn a_run_born_and_not_yet_woken_holds_no_baseline() {
@@ -142,7 +158,7 @@ async fn the_measuring_run_keeps_everything_the_suite_wrote() {
     );
 }
 
-/// What `node` closed with, as its `node_finished` states it.
+/// What `node` closed with, as the sentence its `node_finished` states.
 fn outcome_of(events: &[yunta_core::events::StoredEvent], node: &str) -> String {
     events
         .iter()
@@ -150,7 +166,7 @@ fn outcome_of(events: &[yunta_core::events::StoredEvent], node: &str) -> String 
             Some(EventPayload::Node(NodeEvent::Finished(payload)))
                 if event.node_id.as_ref().is_some_and(|id| id.as_str() == node) =>
             {
-                Some(payload.outcome.clone())
+                Some(yunta_render::outcome::sentence(&payload.outcome))
             }
             _ => None,
         })
@@ -416,10 +432,13 @@ nodes:
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
         .await;
     match terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("regression") && reason.contains("marker.txt: No such file"),
-            "expected a regression diagnostic quoting what the suite printed, got: {reason}"
-        ),
+        RunTerminal::Paused { reason } => {
+            let (_, outcome) = failed_in_a_sentence(reason);
+            assert!(
+                outcome.contains("regression") && outcome.contains("marker.txt: No such file"),
+                "expected a regression diagnostic quoting what the suite printed, got: {outcome}"
+            );
+        }
         other => panic!(
             "a run's only `baseline_compare` compares against the measurement its first \
              wake took, so it must catch the regression; got {other:?}"
@@ -485,10 +504,9 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `coverage` failed: coverage 40% is below the 80% threshold"
-            );
+            let (node, outcome) = failed_in_a_sentence(reason);
+            assert_eq!(node.as_str(), "coverage");
+            assert_eq!(outcome, "coverage 40% is below the 80% threshold");
         }
         other => panic!("expected the coverage gate to pause the run, got {other:?}"),
     }
@@ -524,10 +542,11 @@ nodes:
 
     let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `gate` failed: 1 finding at or above major: f1"
-        ),
+        RunTerminal::Paused { reason } => {
+            let (node, outcome) = failed_in_a_sentence(reason);
+            assert_eq!(node.as_str(), "gate");
+            assert_eq!(outcome, "1 finding at or above major: f1");
+        }
         other => panic!("expected the gate to pause the run, got {other:?}"),
     }
 }
@@ -581,7 +600,8 @@ nodes:
         assert!(
             matches!(
                 state.nodes.state(node),
-                Some(yunta_engine::NodeState::Finished { outcome, .. }) if outcome == "exit 0"
+                Some(yunta_engine::NodeState::Finished { outcome, .. })
+                    if *outcome == NodeOutcome::Fact(EngineFact::ExitStatus { code: 0 })
             ),
             "{node}: {:?}",
             state.nodes.state(node)
@@ -646,7 +666,7 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("probe") {
         Some(NodeState::Finished { outcome, .. }) => {
-            assert_eq!(outcome, "threshold was 80");
+            assert_eq!(outcome, &NodeOutcome::Summary("threshold was 80".into()));
         }
         other => panic!("expected probe to finish, got {other:?}"),
     }
@@ -675,8 +695,21 @@ nodes:
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `probe` failed: executor `probe` exited 1");
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    node,
+                    failure: Failure::Exited { exited },
+                },
+        } => {
+            assert_eq!(node.as_str(), "probe");
+            assert_eq!(exited.code, 1);
+            assert_eq!(
+                exited.origin,
+                Some(CommandOrigin::Executor {
+                    executor: "probe".into(),
+                })
+            );
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -715,8 +748,21 @@ nodes:
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `probe` failed: executor `probe` exited 3");
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    node,
+                    failure: Failure::Exited { exited },
+                },
+        } => {
+            assert_eq!(node.as_str(), "probe");
+            assert_eq!(exited.code, 3);
+            assert_eq!(
+                exited.origin,
+                Some(CommandOrigin::Executor {
+                    executor: "probe".into(),
+                })
+            );
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -746,10 +792,9 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `probe` failed: executor `probe` exceeded its 1s timeout"
-            );
+            let (node, outcome) = failed_in_a_sentence(reason);
+            assert_eq!(node.as_str(), "probe");
+            assert_eq!(outcome, "executor `probe` exceeded its 1s timeout");
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -769,12 +814,16 @@ nodes:
 
     let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert!(
-                reason.contains("skills.executors"),
-                "unexpected reason: {reason}"
-            );
-        }
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    failure:
+                        Failure::Unset {
+                            unset: ConfigKey::Executor { executor },
+                        },
+                    ..
+                },
+        } => assert_eq!(executor.as_str(), "does-not-exist"),
         other => panic!("expected the run to pause, got {other:?}"),
     }
 }
@@ -801,9 +850,11 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
+            let (node, outcome) = failed_in_a_sentence(reason);
+            assert_eq!(node.as_str(), "sneaky");
             assert!(
-                reason.contains("forbidden-marker") && reason.contains("denied"),
-                "must cite the rule: {reason}"
+                outcome.contains("forbidden-marker") && outcome.contains("denied"),
+                "must cite the rule: {outcome}"
             );
         }
         other => panic!("expected the run to pause on the violation, got {other:?}"),
@@ -834,7 +885,12 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `build` failed: command `echo forbidden-marker` matches denied pattern `*forbidden-marker*` (permissions.commands.deny)");
+            let (node, outcome) = failed_in_a_sentence(reason);
+            assert_eq!(node.as_str(), "build");
+            assert_eq!(
+                outcome,
+                "command `echo forbidden-marker` matches denied pattern `*forbidden-marker*` (permissions.commands.deny)"
+            );
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -871,9 +927,10 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
+            let words = yunta_render::pause::sentence(&reason);
             assert!(
-                reason.contains("denied"),
-                "the blocked task must cite the rule: {reason}"
+                words.contains("denied"),
+                "the blocked task must cite the rule: {words}"
             );
         }
         other => panic!("expected the run to pause, got {other:?}"),
@@ -936,10 +993,12 @@ permissions:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
+            let (node, outcome) = failed_in_a_sentence(reason);
+            assert_eq!(node.as_str(), "probe");
             assert_eq!(
-                reason,
+                outcome,
                 format!(
-                    "node `probe` failed: command `{}` matches denied pattern `*probe.py` (permissions.commands.deny)",
+                    "command `{}` matches denied pattern `*probe.py` (permissions.commands.deny)",
                     bench.worktree.join("probe.py").display()
                 )
             );

@@ -6,6 +6,7 @@
 
 use yunta_core::events::FindingEvent;
 use yunta_core::events::{EventPayload, Finding, StoredEvent};
+use yunta_core::port::{Policy, PolicyApplied};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, Bench, MOCK_CONFIG};
 
@@ -148,10 +149,7 @@ sessions:
         1,
         "two scoped nodes, one adapter that cannot hold them: {stated:?}"
     );
-    assert_eq!(
-        stated[0],
-        yunta_core::events::Policy::PostCheckOnly.to_string()
-    );
+    assert_eq!(stated[0], PolicyApplied::Known(Policy::PostCheckOnly));
 }
 
 /// A run whose adapter reports no usage cannot count what it spends, so
@@ -178,10 +176,7 @@ sessions:
 
     let stated = degradations_of(&bench, yunta_core::Capability::UsageReporting);
     assert_eq!(stated.len(), 1, "{stated:?}");
-    assert_eq!(
-        stated[0],
-        yunta_core::events::Policy::NoTokenBudget.to_string()
-    );
+    assert_eq!(stated[0], PolicyApplied::Known(Policy::NoTokenBudget));
 
     // And the cap it cannot count against never reaches a session.
     let budgets: Vec<Option<u64>> = bench
@@ -197,16 +192,16 @@ sessions:
     );
 }
 
-/// The `policy_applied` of every `capability_degraded` the run recorded
-/// for `capability`, in log order.
-fn degradations_of(bench: &Bench, capability: yunta_core::Capability) -> Vec<String> {
+/// The `policy` of every `capability_degraded` the run recorded for
+/// `capability`, in log order.
+fn degradations_of(bench: &Bench, capability: yunta_core::Capability) -> Vec<PolicyApplied> {
     bench
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
             Some(EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
                 p,
-            ))) if p.capability == capability => Some(p.policy_applied().to_string()),
+            ))) if p.capability == capability => Some(p.policy.clone()),
             _ => None,
         })
         .collect()

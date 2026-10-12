@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactId, EventPayload, Failure, NodeEvent, NodeReroutedPayload, RerouteCause, RerouteOrigin,
-    StoredEvent, TokenUsage,
+    ArtifactId, EventPayload, Failure, NodeEvent, NodeReroutedPayload, RerouteOrigin, StoredEvent,
+    TokenUsage,
 };
 use yunta_core::{ArtifactKind, Node, NodeId, NodeKind, SpecFile, TaskId};
 
@@ -70,7 +70,7 @@ pub(super) async fn send_back(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
             by,
-            RerouteCause(Failure::message(reason)),
+            Failure::message(reason),
             RerouteOrigin::GateChoice,
             None,
             None,

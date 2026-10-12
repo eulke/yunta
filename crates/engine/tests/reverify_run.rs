@@ -2,7 +2,7 @@
 //! invariant again before it goes on — and stops there when the changed
 //! tree no longer passes.
 
-use yunta_core::events::{EventPayload, GateEvent, NodeEvent};
+use yunta_core::events::{EventPayload, GateEvent, NodeEvent, PauseReason};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -70,10 +70,13 @@ async fn an_invariant_that_fails_on_the_changed_tree_stops_the_run_before_the_ga
         .run(&checked_then("touch broken.txt"), "sessions: []\n")
         .await;
 
-    let RunTerminal::Paused { reason } = terminal else {
+    let RunTerminal::Paused {
+        reason: PauseReason::NodeFailed { node, .. },
+    } = terminal
+    else {
         panic!("the run stops on the check: {terminal:?}");
     };
-    assert!(reason.starts_with("node `check` failed"), "{reason}");
+    assert_eq!(node.as_str(), "check");
     assert!(
         !bench.events().iter().any(|event| matches!(
             event.payload(),

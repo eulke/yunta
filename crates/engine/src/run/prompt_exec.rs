@@ -4,6 +4,7 @@
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
 use yunta_core::events::Failure;
+use yunta_core::events::NodeOutcome;
 use yunta_core::events::OrphanedSession;
 use yunta_core::{Node, PromptSource};
 
@@ -126,7 +127,7 @@ async fn starts_over(
             yunta_core::events::CapabilityDegradedPayload::new(
                 yunta_core::Capability::ResumeSession,
                 adapter.id().clone(),
-                yunta_core::events::Policy::FreshSession,
+                yunta_core::port::Policy::FreshSession,
             ),
         )),
     )
@@ -271,7 +272,8 @@ pub(super) async fn execute_prompt(
 
     match outcome {
         DispatchOutcome::Completed { summary } => {
-            close_node(ctx, node, Close::new(summary, tokens).staged(&staged)).await
+            let node_outcome = NodeOutcome::Summary(summary);
+            close_node(ctx, node, Close::new(node_outcome, tokens).staged(&staged)).await
         }
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await

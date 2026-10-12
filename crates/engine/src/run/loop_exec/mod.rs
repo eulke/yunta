@@ -16,7 +16,8 @@ mod reopen;
 mod respecify;
 
 use yunta_core::events::{
-    EventPayload, Failure, LoopIterationPayload, SessionDeath, StoredEvent, TaskStatus, TokenUsage,
+    loop_overrun_failure, EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome,
+    SessionDeath, StoredEvent, TaskStatus, TokenUsage,
 };
 use yunta_core::{Node, NodeKind, PromptSource, TaskId, TasksFile};
 
@@ -91,18 +92,10 @@ pub(super) async fn execute_loop(
                 return fail.await;
             }
             if all_done {
-                return close_node(
-                    ctx,
-                    node,
-                    Close::new(
-                        format!(
-                            "{} done",
-                            yunta_core::text::counted(prep.tasks.tasks.len(), "task")
-                        ),
-                        state.tokens,
-                    ),
-                )
-                .await;
+                let outcome = NodeOutcome::Fact(EngineFact::TasksDone {
+                    count: prep.tasks.tasks.len(),
+                });
+                return close_node(ctx, node, Close::new(outcome, state.tokens)).await;
             }
             // A session that died is the actionable fact among them, and
             // it reaches the log as the fact rather than inside a
@@ -137,14 +130,15 @@ pub(super) async fn execute_loop(
                 state.iteration,
                 prep.max_iterations,
             )
-            .map_err(|source| RunError::Broken {
-                diagnostic: format!("loop `{}`'s escalation: {source}", node.id),
+            .map_err(|source| RunError::Escalation {
+                context: format!("loop `{}`'s escalation", node.id),
+                source,
             })?;
             match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
-                super::budget::BudgetDecision::Pause { reason } => {
-                    return fail_with_tokens(ctx, node, reason.to_string(), false, state.tokens)
-                        .await;
+                super::budget::BudgetDecision::Pause { .. } => {
+                    let failure = loop_overrun_failure(&node.id, prep.max_iterations);
+                    return fail_with_tokens(ctx, node, failure, false, state.tokens).await;
                 }
             }
         }

@@ -36,20 +36,16 @@ pub enum DispatchError {
     Audit(#[source] StorageError),
 }
 
-/// What one session left behind: how it ended, what it spent, and how
-/// much of its writes its adapter's fence covered — a cache of one
-/// invocation of what the log already carries.
+/// What one session left behind: how it ended, what it spent, how much of
+/// its writes its adapter's fence covered, and the sessions it opened — a
+/// cache of one invocation of what the log already carries.
 pub(crate) struct Dispatched {
     pub outcome: DispatchOutcome,
     pub tokens: TokenUsage,
     pub fence: Option<yunta_core::fence::Coverage>,
-    /// The session the stream opened, once it did: what the next
+    /// The sessions the stream opened, in order. The last is what the next
     /// attempt resumes when something it asked for changes.
-    pub session: Option<yunta_core::SessionId>,
-    /// Every write the fence refused it.
-    pub refused: Vec<yunta_core::events::ToolTarget>,
-    /// Whether the session's CLI said how many run tools it holds.
-    pub tools_reported: bool,
+    pub sessions: Vec<yunta_core::SessionId>,
 }
 
 /// How a session opens: the task it works, if any, and the conversation
@@ -91,7 +87,7 @@ pub(crate) async fn dispatch_session(
     while cut_off && resumable {
         let worked = working.elapsed();
         let (Some(session), Some(again)) = (
-            dispatched.session.clone(),
+            dispatched.sessions.last().cloned(),
             remaining(&request, &dispatched.tokens, worked),
         ) else {
             break;
@@ -148,20 +144,18 @@ fn remaining(
 }
 
 /// One session's dispatch, as the stretches it was picked back up in add
-/// up: the last one's ending, everything any of them spent and refused.
+/// up: the last one's ending, everything any of them spent, and every
+/// session any of them opened.
 fn joined(before: Dispatched, after: Dispatched) -> Dispatched {
     let mut tokens = before.tokens;
     tokens += after.tokens;
-    let mut refused = before.refused;
-    refused.extend(after.refused);
-    let tools_reported = before.tools_reported || after.tools_reported;
+    let mut sessions = before.sessions;
+    sessions.extend(after.sessions);
     Dispatched {
         outcome: after.outcome,
         tokens,
         fence: after.fence.or(before.fence),
-        session: after.session.or(before.session),
-        refused,
-        tools_reported,
+        sessions,
     }
 }
 

@@ -13,6 +13,7 @@
 
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
 use yunta_core::events::{ArtifactId, EventPayload, SubmissionOutcome};
+use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::ArtifactKind;
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
@@ -831,19 +832,17 @@ async fn a_session_that_never_listed_its_run_tools_is_reported() {
 }
 
 #[tokio::test]
-async fn a_session_that_holds_none_of_its_run_tools_is_reported_before_it_is_spent() {
+async fn a_session_that_holds_none_of_its_run_tools_is_reported_when_its_session_ends() {
     let bench = Bench::new();
     // The server is mounted and the session holds not one of its tools —
     // what a client that refuses the tool list leaves behind. The node
     // can only end owing the document it declares, so the cause is on
-    // the log while the session is still opening, not one failure later.
+    // the log when the session ends, before the node fails.
     let fixture = r#"
 capabilities: { run_tools: true }
+lists_tools: false
 sessions:
-  - steps:
-      - type: run_tools_mounted
-        count: 0
-    outcome: { type: completed, summary: "nothing to submit with" }
+  - outcome: { type: completed, summary: "nothing to submit with" }
 "#;
 
     let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
@@ -866,8 +865,8 @@ sessions:
         })
         .expect("a session with no run tool of its own is degraded, not silently failed");
     assert_eq!(
-        degraded.policy_applied(),
-        yunta_core::events::Policy::NoRunTools.to_string(),
+        degraded.policy,
+        PolicyApplied::Known(Policy::NoRunTools),
         "the record names what was missing and what ran instead"
     );
 
@@ -882,6 +881,30 @@ sessions:
     assert!(
         degraded_at < failed_at,
         "the cause is recorded while the session runs, not after it ends"
+    );
+}
+
+/// A session whose listener listed its tools holds them, whatever the CLI
+/// counted: the listener's own answer is the only input to the degradation.
+#[tokio::test]
+async fn a_listed_session_is_not_degraded_by_the_cli_count() {
+    let bench = Bench::new();
+    let _ = bench
+        .run(
+            PLAN_NODE,
+            "capabilities: { run_tools: true }\nsessions:\n  - outcome: { type: completed, summary: done }\n",
+        )
+        .await;
+    let degraded = bench.events().iter().any(|event| {
+        matches!(
+            event.payload(),
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
+                if p.capability == yunta_core::Capability::RunTools
+        )
+    });
+    assert!(
+        !degraded,
+        "the listener saw its tools; the CLI's count is not an input"
     );
 }
 

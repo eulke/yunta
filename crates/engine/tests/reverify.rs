@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeFinishedPayload,
-    NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent, TokenUsage,
+    NodeOutcome, NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent, TokenUsage,
 };
 use yunta_core::{CommitSha, ContentHash, DefaultOnFailure, OnInterrupt, TreeId, Workflow};
 use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
@@ -67,7 +67,7 @@ fn ran(
         (
             node,
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::leaving(
-                "ok",
+                NodeOutcome::Summary("ok".into()),
                 TokenUsage::default(),
                 tree(left),
             ))),
@@ -234,7 +234,7 @@ nodes:
 #[test]
 fn an_invariant_whose_finish_named_no_tree_is_never_run_again() {
     let unnamed = EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-        "ok",
+        NodeOutcome::Summary("ok".into()),
         TokenUsage::default(),
     )));
     let checked = vec![
@@ -274,7 +274,7 @@ nodes:
 
 fn finish(left: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::leaving(
-        "ok",
+        NodeOutcome::Summary("ok".into()),
         TokenUsage::default(),
         tree(left),
     )))

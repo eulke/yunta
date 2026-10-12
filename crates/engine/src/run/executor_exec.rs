@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::TokenUsage;
+use yunta_core::events::{NodeOutcome, TokenUsage};
 use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
 
 use super::node_close::{close_node, fail, fail_with, Close};
@@ -142,7 +142,8 @@ pub(super) async fn execute_executor(
             .ok()
             .and_then(|output| output.summary)
             .unwrap_or_else(|| format!("executor `{executor}` exited 0"));
-        close_node(ctx, node, Close::new(summary, TokenUsage::default())).await
+        let node_outcome = NodeOutcome::Summary(summary);
+        close_node(ctx, node, Close::new(node_outcome, TokenUsage::default())).await
     } else {
         // An executor that signals only through its exit code — a probe
         // that writes nothing — is reported as that code alone.

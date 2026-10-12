@@ -10,7 +10,7 @@
 //! this adapter constructed in this invocation".
 
 use thiserror::Error;
-use yunta_core::events::DiscardedCandidate;
+use yunta_core::events::{DiscardedCandidate, RunnerRejection};
 use yunta_core::{AdapterId, ConfigLayer, RunnerName};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -77,10 +77,9 @@ pub fn resolve_runner(
             if candidate.adapter != *wanted {
                 discarded.push(DiscardedCandidate {
                     candidate: candidate.clone(),
-                    reason: format!(
-                        "adapter `{}` is not the `--adapter` override (`{wanted}`)",
-                        candidate.adapter
-                    ),
+                    reason: RunnerRejection::NotPinned {
+                        pinned: wanted.clone(),
+                    },
                 });
                 continue;
             }
@@ -94,7 +93,7 @@ pub fn resolve_runner(
         }
         discarded.push(DiscardedCandidate {
             candidate: candidate.clone(),
-            reason: format!("adapter `{}` is not available here", candidate.adapter),
+            reason: RunnerRejection::Unavailable,
         });
     }
 

@@ -43,7 +43,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
         H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
-        H::Paused { reason } => format!("needs you — {reason}"),
+        H::Paused { pause } => format!("needs you — {}", yunta_render::pause::sentence(pause)),
         H::Resumed { policies } => match policies.len() {
             0 => "resumed".to_string(),
             n => format!(
@@ -68,9 +68,19 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
             duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
         ),
         H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
-        H::PromotionSignaled { to, reason, .. } => {
-            detailed(format!("promotion to `{to}`"), &one_line(reason))
-        }
+        H::PromotionSignaled {
+            to,
+            cause,
+            legacy_reason,
+            evidence,
+        } => detailed(
+            format!("promotion to `{to}`"),
+            &one_line(&yunta_render::outcome::promotion_reason(
+                cause.as_ref(),
+                legacy_reason.as_deref(),
+                evidence,
+            )),
+        ),
     };
     (None, said)
 }
@@ -97,21 +107,15 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
         }
         H::Rerouted(it) => (
             Some(Mark::Reroute),
-            detailed(format!("rerouted to `{}`", it.to), &one_line(&it.cause)),
+            detailed(
+                format!("rerouted to `{}`", it.to),
+                &one_line(&it.cause.to_string()),
+            ),
         ),
         H::HookRan { phase, exit_code } => {
             (None, format!("hook {} exit {exit_code}", phase.as_str()))
         }
-        H::ContextAssembled { absent } if absent.is_empty() => {
-            (None, "context assembled".to_string())
-        }
-        H::ContextAssembled { absent } => (
-            None,
-            format!(
-                "context assembled {sep} {} absent (optional)",
-                yunta_core::text::listed(absent.iter().map(String::as_str))
-            ),
-        ),
+        H::ContextAssembled { absent } => (None, context_assembled(absent, sep)),
         H::CriteriaChecked {
             task,
             phase,
@@ -127,6 +131,17 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
         ),
         H::PullRequestOpened { url, number } => (None, format!("pull request #{number} — {url}")),
     }
+}
+
+/// What a node's context assembly reads as: the optional sources it left out, when it left any.
+fn context_assembled(absent: &[String], sep: char) -> String {
+    if absent.is_empty() {
+        return "context assembled".to_string();
+    }
+    format!(
+        "context assembled {sep} {} absent (optional)",
+        yunta_core::text::listed(absent.iter().map(String::as_str))
+    )
 }
 
 /// A task's check: how many criteria ran, and each one a post-check left
@@ -178,9 +193,9 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             policy,
         } => detailed(
             format!("{} not declared by {adapter}", capability.as_str()),
-            &one_line(policy),
+            &one_line(&yunta_render::policy::applied(policy)),
         ),
-        H::Refused(target) => format!("write refused: {}", target.sentence()),
+        H::Refused(target) => format!("write refused: {}", yunta_render::target::line(target)),
         H::StopRefused(why) => stop_refused(why),
         H::Formatted {
             run,
@@ -273,7 +288,7 @@ fn called(tool: Option<&str>, target: Option<&ToolTarget>) -> String {
         None => "called a tool it did not name".to_string(),
     };
     match target {
-        Some(target) => format!("{called} on {}", target.sentence()),
+        Some(target) => format!("{called} on {}", yunta_render::target::line(target)),
         None => called,
     }
 }

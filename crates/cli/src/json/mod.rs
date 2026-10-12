@@ -329,10 +329,10 @@ impl WaitingOnJson {
             WaitingOn::Node { node, on, reason } => WaitingOnJson::Node {
                 node: node.to_string(),
                 waiting: NodeWaitJson::of(on),
-                reason: reason.clone(),
+                reason: reason.as_ref().map(yunta_render::pause::sentence),
             },
             WaitingOn::Run { reason } => WaitingOnJson::Run {
-                reason: reason.clone(),
+                reason: yunta_render::pause::sentence(reason),
             },
         })
     }

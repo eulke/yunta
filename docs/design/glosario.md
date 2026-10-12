@@ -153,6 +153,13 @@ presupuesto, un scope—, en todas las superficies y en el JSON; su marca, `◆`
 la única que dice "una persona", y no marca nada más. Sale con código 3.
 _Evitar_: paused, parked (como palabra de superficie).
 
+**Pausa** (`PauseReason`):
+Por qué un run se detuvo y espera: un presupuesto agotado, una escalación, nodos
+huérfanos cuyo resultado es incierto. Es un hecho tipado que guarda `run_paused`; la
+frase que lee una persona la produce cada superficie al leerlo, igual que el texto de
+una falla de nodo. Un log escrito antes guarda la frase, y se lee tal cual.
+_Evitar_: frase de pausa, motivo de pausa.
+
 **Reported**:
 La palabra de un run que terminó sosteniendo findings bloqueantes: el trabajo
 está hecho y nadie lo aceptó. Sale con código 4.
@@ -312,6 +319,13 @@ La sesión quiso terminar con trabajo que su cierre no tomaría, y el engine la
 devolvió a él diciendo qué falta. Una vez por estado del trabajo (D254).
 _Evitar_: stop bloqueado, reintento.
 
+**Sujeto de una concesión**:
+Lo que una decisión de alcance amplía o deniega: una tarea, o el nodo al que pertenece
+la sesión. Una concesión sin tarea ni nodo no se escribe. Una denegación de nodo no
+nombra tarea, porque su sujeto es el nodo del evento; y un hecho de sesión sin nodo
+corta el replay, porque no tiene a quién atribuirse.
+_Evitar_: destino de la concesión, alcance del run.
+
 ## Fallas
 
 **Falla de nodo**:
@@ -400,6 +414,20 @@ que se decide un gate externo. Los dos viven en core, así que el engine depende
 de la interfaz y nunca de una implementación de ella, y el compilador sostiene
 esa frontera (D165).
 _Evitar_: interfaz del adapter, capa de integración, puerto de red.
+
+**Política de degradación** (`Policy`, `PolicyApplied`):
+Lo que una sesión dejó de tener cuando faltó una capacidad de su adapter: uno de seis
+nombres de un conjunto cerrado (`post_check_only`, `no_token_budget`, `no_skills`,
+`no_run_tools`, `network_open`, `fresh_session`), que `capability_degraded` guarda como
+dato. La frase que lo explica la produce el crate `render`. Un log escrito antes guarda
+un texto: si no es el nombre de una política, se lee tal cual.
+_Evitar_: policy_applied, frase de degradación.
+
+**Descarte de runner** (`RunnerRejection`):
+Por qué un candidato del runner no se usó: el run fijó otro adapter con `--adapter`, el
+adapter del candidato no está disponible aquí, o es la frase que guardó un log escrito
+antes. `runner_resolved` lo guarda en cada candidato descartado, como dato tipado.
+_Evitar_: rechazo del runner, candidato fallido.
 
 **Línea de exigencia** (`view::demand_line`):
 La línea que contesta "¿este run me necesita?": o no necesita a nadie, o algo

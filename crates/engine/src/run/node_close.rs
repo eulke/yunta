@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::events::{
-    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload,
-    QuestionsAskedPayload, TokenUsage,
+    EngineFact, EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload,
+    NodeOutcome, QuestionsAskedPayload, TokenUsage,
 };
 use yunta_core::{HookFailurePolicy, Node, RunId};
 
@@ -42,7 +42,7 @@ pub(super) struct ChildRun<'a> {
 /// the adapter declared it wrote for itself, and — for a composition —
 /// which run actually did the work.
 pub(super) struct Close<'a> {
-    outcome: String,
+    outcome: NodeOutcome,
     tokens: TokenUsage,
     staged: &'a [PathBuf],
     child: Option<ChildRun<'a>>,
@@ -52,9 +52,9 @@ impl<'a> Close<'a> {
     /// A close that staged nothing in the worktree — every kind but an
     /// agent session, whose adapter writes files of its own that the
     /// scope diff must leave out.
-    pub(super) fn new(outcome: impl Into<String>, tokens: TokenUsage) -> Self {
+    pub(super) fn new(outcome: NodeOutcome, tokens: TokenUsage) -> Self {
         Close {
-            outcome: outcome.into(),
+            outcome,
             tokens,
             staged: &[],
             child: None,
@@ -210,7 +210,8 @@ pub(super) async fn close_node(
                         .map_err(|source| RunError::Broken {
                             diagnostic: source.to_string(),
                         })?;
-                    finish_node(ctx, node, "questions assumed", TokenUsage::default()).await
+                    let outcome = NodeOutcome::Fact(EngineFact::QuestionsAssumed);
+                    finish_node(ctx, node, outcome, TokenUsage::default()).await
                 }
                 // A questions document with no questions asked nothing.
                 // Its answers still exist, empty and the engine's own,
@@ -261,7 +262,7 @@ fn held_questions(
 pub(super) async fn finish_node(
     ctx: &RunCtx<'_>,
     node: &Node,
-    outcome: impl Into<String>,
+    outcome: NodeOutcome,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
     let closed = Box::pin(closed(ctx, node, super::shared_tree::Closing::Finished)).await?;

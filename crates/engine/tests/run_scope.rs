@@ -88,7 +88,7 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         .iter()
         .find_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
-                if p.task_id.as_str() == "task-p" =>
+                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-p") =>
             {
                 Some(p)
             }
@@ -144,7 +144,7 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
         .iter()
         .find_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
-                if p.task_id.as_str() == "task-d" =>
+                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-d") =>
             {
                 Some(p)
             }
@@ -474,7 +474,7 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         .iter()
         .find_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
-                if p.task_id.as_str() == "task-n" =>
+                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-n") =>
             {
                 Some(p)
             }

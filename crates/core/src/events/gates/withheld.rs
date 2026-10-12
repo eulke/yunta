@@ -98,10 +98,10 @@ mod tests {
         assert!(escalation.offers(&"abort".into()));
         assert_eq!(escalation.withheld(), [withheld("approve")]);
         assert_eq!(
-            escalation.evidence().lines(),
+            escalation.evidence().facts(),
             [
-                "assignee: lead",
-                "withheld: `approve` — the plan cannot be proven"
+                Fact::bare("assignee: lead"),
+                Fact::labelled("withheld", "`approve` — the plan cannot be proven"),
             ]
         );
         assert_eq!(

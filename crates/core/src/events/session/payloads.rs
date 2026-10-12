@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::fence::Coverage;
 use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId, TaskId};
+use crate::port::{Policy, PolicyApplied};
 use crate::{Capabilities, Capability};
 
 /// The closed reason a run tool call failed, without adapter error text.
@@ -275,9 +276,9 @@ pub struct ToolTarget {
     /// The target as a reader may see it. Absent whenever the value is
     /// the session's own text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<String>,
+    display: Option<String>,
     /// What identifies the target, whether or not it can be shown.
-    pub digest: ContentHash,
+    digest: ContentHash,
 }
 
 impl ToolTarget {
@@ -285,10 +286,15 @@ impl ToolTarget {
     /// reader finds the file, and hashed so two edits of one file read
     /// as the same target.
     pub fn of_path(path: &Path) -> Self {
-        let display = path.display().to_string();
+        Self::named(&path.display().to_string())
+    }
+
+    /// A name the engine can vouch for: shown as written, and hashed the
+    /// way a path is, so two uses of one name read as the same target.
+    pub fn named(name: &str) -> Self {
         ToolTarget {
-            digest: crate::sha256_hex(display.as_bytes()),
-            display: Some(display),
+            digest: crate::sha256_hex(name.as_bytes()),
+            display: Some(name.to_owned()),
         }
     }
 
@@ -302,13 +308,15 @@ impl ToolTarget {
         }
     }
 
-    /// The one line a surface shows for this target: what it names when
-    /// it can be named, and the shortened hash when it cannot.
-    pub fn sentence(&self) -> String {
-        match &self.display {
-            Some(display) => display.clone(),
-            None => self.digest.abbreviated(),
-        }
+    /// The target as a reader may see it, or `None` when the value is the
+    /// session's own text.
+    pub fn display(&self) -> Option<&str> {
+        self.display.as_deref()
+    }
+
+    /// What identifies the target, whether or not it can be shown.
+    pub fn digest(&self) -> &ContentHash {
+        &self.digest
     }
 }
 
@@ -331,69 +339,16 @@ pub struct AgentMessagePayload {
     pub text: Option<String>,
 }
 
-/// What the engine does when an adapter does not declare a capability it
-/// asked for. A closed set: the engine has one fallback per capability
-/// it consults, and a degradation naming anything else would be a
-/// fallback nobody implemented.
-///
-/// The sentence a reader sees is produced here, once, by `Display` — so
-/// the same fallback reads the same way wherever it is recorded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Policy {
-    /// `fence` is `None`: the session edits freely and the diff is
-    /// judged afterwards.
-    PostCheckOnly,
-    /// `usage_reporting` absent: the run's token cap cannot be counted
-    /// against this session.
-    NoTokenBudget,
-    /// `skills` absent: the session runs with none mounted.
-    NoSkills,
-    /// `run_tools` absent, or its server unreachable: the session holds
-    /// none of the run's tools.
-    NoRunTools,
-    /// `network_isolation` absent: `network: false` is recorded, not
-    /// enforced.
-    NetworkOpen,
-    /// `resume_session` absent, or nothing to resume: a fresh session
-    /// replaces the interrupted one.
-    FreshSession,
-}
-
-impl std::fmt::Display for Policy {
-    /// What the engine did instead, in the words every surface prints.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Policy::PostCheckOnly => {
-                "post-check only — the session edits unguarded and its diff is judged \
-                 against the declared scope after the fact"
-            }
-            Policy::NoTokenBudget => {
-                "no token budget — the session reports no usage, so the run's cap is \
-                 recorded against it as zero"
-            }
-            Policy::NoSkills => {
-                "skills not mounted — the session runs without the skills the node \
-                 declares"
-            }
-            Policy::NoRunTools => {
-                "run tools unreachable — the session holds none of the run's tools, so \
-                 this node ends owing every document it declares"
-            }
-            Policy::NetworkOpen => {
-                "declarative only — `network: false` is recorded for policy and audit, \
-                 not enforced"
-            }
-            Policy::FreshSession => "restart_node — a fresh session replaces the interrupted one",
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CapabilityDegradedPayload {
     /// The capability the engine consulted and the adapter does not declare.
     pub capability: Capability,
     pub adapter: AdapterId,
-    policy_applied: String,
+    /// What the engine did instead. A log that stored a sentence under
+    /// `policy_applied` reads it back as `PolicyApplied::Recorded`.
+    #[serde(alias = "policy_applied")]
+    #[schemars(with = "Policy")]
+    pub policy: PolicyApplied,
 }
 
 impl CapabilityDegradedPayload {
@@ -409,12 +364,7 @@ impl CapabilityDegradedPayload {
         CapabilityDegradedPayload {
             capability,
             adapter,
-            policy_applied: policy.to_string(),
+            policy: PolicyApplied::Known(policy),
         }
-    }
-
-    /// What the engine did instead.
-    pub fn policy_applied(&self) -> &str {
-        &self.policy_applied
     }
 }

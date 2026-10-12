@@ -12,9 +12,9 @@ use chrono::{DateTime, Utc};
 use proptest::prelude::*;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, Capabilities, EventPayload,
-    Failure, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RunFinishedPayload,
-    RunMetrics, StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
-    TerminalState, TokenUsage,
+    Failure, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload,
+    RunFinishedPayload, RunMetrics, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload, TerminalState, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent, SessionEvent, TaskEvent};
 use yunta_core::{Node, NodeKind, Workflow};
@@ -82,7 +82,7 @@ fn started(attempt: u32) -> EventPayload {
 
 fn finished(tokens_used: TokenUsage) -> EventPayload {
     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-        "ok",
+        NodeOutcome::Summary("ok".into()),
         tokens_used,
     )))
 }
@@ -488,7 +488,10 @@ fn tool_calls_come_back_newest_first_and_capped_at_the_limit() {
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].tool_name.as_deref(), Some("cargo"));
     assert_eq!(
-        calls[0].target.as_ref().map(|target| target.digest.clone()),
+        calls[0]
+            .target
+            .as_ref()
+            .map(|target| target.digest().clone()),
         Some(yunta_core::sha256_hex(b"digest-cargo"))
     );
     assert_eq!(calls[0].at, at(30));

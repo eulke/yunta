@@ -5,8 +5,10 @@
 //! Running it again pushes the same branch and finds the pull request it
 //! opened by the run's marker, so a rerun never opens a second one.
 
-use yunta_core::events::{EventPayload, NodeEvent, PullRequestOpenedPayload, TokenUsage};
-use yunta_core::port::{Forge, PullRequestRequest};
+use yunta_core::events::{
+    EngineFact, EventPayload, NodeEvent, NodeOutcome, PullRequestOpenedPayload, TokenUsage,
+};
+use yunta_core::port::{Forge, PullRequestRef, PullRequestRequest};
 use yunta_core::{ConfigKey, Node};
 
 use super::node_close::{close_node, fail, Close};
@@ -59,8 +61,16 @@ pub(super) async fn execute_pull_request(
         })),
     )
     .await?;
-    let outcome = format!("pull request #{} — {}", opened.number, opened.url);
+    let outcome = opened_fact(opened);
     close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
+}
+
+/// The fact a pull request node closes with: the pull request it opened.
+fn opened_fact(opened: PullRequestRef) -> NodeOutcome {
+    NodeOutcome::Fact(EngineFact::PullRequestOpened {
+        number: opened.number,
+        url: opened.url,
+    })
 }
 
 /// The forge the pull request is opened through and what it asks for,

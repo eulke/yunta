@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 use yunta_core::commit_message::CommitMessage;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Failure, HookPhase};
+use yunta_core::events::{Failure, HookPhase, PauseReason};
 use yunta_core::port::PermissionProfile;
-use yunta_core::{HookFailurePolicy, Node, NodeId, NodeKind};
+use yunta_core::{HookFailurePolicy, Node, NodeId, NodeKind, RunId};
 
 use yunta_core::template::render_template;
 
@@ -36,13 +36,15 @@ pub(crate) enum NodeEnd {
     /// (a gate, a failure without re-route, its budget). No terminal
     /// event here either — the node stays open so a later resume
     /// re-enters it and resumes the child recursively — but
-    /// unlike `Interrupted` the *parent run* must pause with this
-    /// reason rather than fall through to its loop-top cancel check.
+    /// unlike `Interrupted` the *parent run* must pause on the child's
+    /// own pause rather than fall through to its loop-top cancel check.
     ChildPaused {
         /// The parent's own `kind: workflow` node.
         node: NodeId,
-        /// The line the child run stated for its pause.
-        reason: String,
+        /// The child run that paused; its own log holds the pause.
+        run: RunId,
+        /// The pause the child run stopped on.
+        child: PauseReason,
     },
     /// The node closed in full — hooks, scope, artifacts — and handed
     /// questions over: `questions_asked` is on the log and no terminal

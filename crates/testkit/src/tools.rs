@@ -100,11 +100,8 @@ impl ToolsHost {
     pub fn record(&self, node: Option<&str>, payload: EventPayload) -> Seq {
         self.storage
             .append(
-                &EventDraft {
-                    run_id: self.run_id.clone(),
-                    node_id: node.map(NodeId::from),
-                    payload,
-                },
+                &EventDraft::new(self.run_id.clone(), node.map(NodeId::from), payload)
+                    .expect("a draft names its subject"),
                 self.clock.as_ref(),
             )
             .expect("append to the run's log")

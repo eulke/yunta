@@ -227,14 +227,12 @@ async fn a_gate_withholds_going_on_with_a_plan_that_changes_its_own_spec_test() 
         "the reason names what keeps the plan from being proven: {}",
         withheld[0].because
     );
+    let lines = yunta_render::evidence::lines(asked[0].evidence());
     assert!(
-        asked[0]
-            .evidence()
-            .lines()
+        lines
             .iter()
             .any(|line| line.starts_with("withheld: `approve`")),
-        "a surface that prints only the record still says why: {:?}",
-        asked[0].evidence().lines()
+        "a surface that prints only the record still says why: {lines:?}"
     );
     assert_eq!(
         rebuilt(&bench).await,
@@ -273,11 +271,12 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
         bench
             .storage
             .append(
-                &EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("approve-plan".into()),
-                    payload: EventPayload::Gates(payload),
-                },
+                &EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("approve-plan".into()),
+                    EventPayload::Gates(payload),
+                )
+                .expect("a draft names its subject"),
                 &FixedClock,
             )
             .unwrap();

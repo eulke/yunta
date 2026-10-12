@@ -83,7 +83,7 @@ impl NodePage<'_> {
                 (Tone::Failed, failure.headline())
             }
             NodeStanding::Reached(NodeState::Finished { outcome, .. }) => {
-                (Tone::Plain, outcome.clone())
+                (Tone::Plain, yunta_render::outcome::sentence(outcome))
             }
             _ => return Vec::new(),
         };

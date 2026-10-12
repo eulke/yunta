@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
-use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent};
+use yunta_core::events::{
+    EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent, KIND_VERSION,
+};
 use yunta_core::ContentHash;
 use yunta_core::{Clock, NodeId, RunId, Seq};
 
@@ -200,7 +202,7 @@ impl Storage {
     /// thread, so the instant recorded is the one its clock reported.
     pub fn append_at(&self, draft: &EventDraft, at: chrono::DateTime<chrono::Utc>) -> Result<Seq> {
         let append_err = |error| StorageError::Append {
-            run_id: draft.run_id.clone(),
+            run_id: draft.run_id().clone(),
             source: cause(error),
         };
 
@@ -222,14 +224,14 @@ impl Storage {
         let seq: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?1",
-                params![draft.run_id.as_str()],
+                params![draft.run_id().as_str()],
                 |row| row.get(0),
             )
             .map_err(append_err)?;
 
         let payload_json =
-            serde_json::to_string(&draft.payload).map_err(|source| StorageError::Serialize {
-                run_id: draft.run_id.clone(),
+            serde_json::to_string(draft.payload()).map_err(|source| StorageError::Serialize {
+                run_id: draft.run_id().clone(),
                 source,
             })?;
 
@@ -237,16 +239,16 @@ impl Storage {
         // assigns `seq` — the previous event's stored hash (or the
         // manifest-derived genesis for the run's first event) anchors it.
         let prev_hash = if seq == 1 {
-            let EventPayload::Run(RunEvent::Created(created)) = &draft.payload else {
+            let EventPayload::Run(RunEvent::Created(created)) = draft.payload() else {
                 return Err(StorageError::GenesisMissing {
-                    run_id: draft.run_id.clone(),
+                    run_id: draft.run_id().clone(),
                 });
             };
             genesis_hash(created.manifest_hash.as_str()).to_string()
         } else {
             tx.query_row(
                 "SELECT event_hash FROM events WHERE run_id = ?1 AND seq = ?2",
-                params![draft.run_id.as_str(), seq - 1],
+                params![draft.run_id().as_str(), seq - 1],
                 |row| row.get::<_, Option<String>>(0),
             )
             .map_err(append_err)?
@@ -260,13 +262,13 @@ impl Storage {
         let ts = at.to_rfc3339();
         let event_hash = chain_hash(ChainHashFields {
             prev_hash: &prev_hash,
-            run_id: draft.run_id.as_str(),
+            run_id: draft.run_id().as_str(),
             seq,
             ts: &ts,
-            node_id: draft.node_id.as_ref().map(NodeId::as_str),
-            kind: draft.payload.kind_name(),
+            node_id: draft.node_id().map(NodeId::as_str),
+            kind: draft.payload().kind_name(),
             payload_json: &payload_json,
-            schema_version: draft.payload.schema_version(),
+            schema_version: KIND_VERSION,
         });
 
         tx.execute(
@@ -274,13 +276,13 @@ impl Storage {
              event_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                draft.run_id.as_str(),
+                draft.run_id().as_str(),
                 seq,
                 ts,
-                draft.node_id.as_ref().map(NodeId::as_str),
-                draft.payload.kind_name(),
+                draft.node_id().map(NodeId::as_str),
+                draft.payload().kind_name(),
                 payload_json,
-                draft.payload.schema_version(),
+                KIND_VERSION,
                 event_hash.as_str(),
             ],
         )
@@ -292,14 +294,14 @@ impl Storage {
             "INSERT INTO run_heads (run_id, seq, event_hash) VALUES (?1, ?2, ?3) \
              ON CONFLICT(run_id) DO UPDATE SET seq = excluded.seq, \
              event_hash = excluded.event_hash",
-            params![draft.run_id.as_str(), seq, event_hash.as_str()],
+            params![draft.run_id().as_str(), seq, event_hash.as_str()],
         )
         .map_err(append_err)?;
 
         tx.commit().map_err(append_err)?;
 
         Seq::try_from(seq).map_err(|source| StorageError::CorruptSeq {
-            run_id: draft.run_id.clone(),
+            run_id: draft.run_id().clone(),
             source,
         })
     }

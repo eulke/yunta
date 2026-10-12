@@ -7,9 +7,9 @@ use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskE
 use yunta_core::events::{
     ArtifactSubmittedPayload, EventBody, EventPayload, Failure, Finding, FindingOperation,
     FindingPostedPayload, FindingRefusedPayload, FindingSeverity, FindingUpdatedPayload,
-    FindingWithdrawnPayload, NodeFailedPayload, NodeFinishedPayload, NodeReroutedPayload,
-    NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent, SubmissionOutcome,
-    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    FindingWithdrawnPayload, NodeFailedPayload, NodeFinishedPayload, NodeOutcome,
+    NodeReroutedPayload, NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent,
+    SubmissionOutcome, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{Node, NodeId, NodeKind, RunnerCandidate, Workflow};
 use yunta_engine::{
@@ -108,7 +108,7 @@ fn fixture_events() -> Vec<StoredEvent> {
         .node(
             "a",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok".to_string(),
+                NodeOutcome::Summary("ok".to_string()),
                 tokens(100, 50, Some(20)),
             ))),
         )
@@ -140,9 +140,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             "b",
             EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
                 "b".into(),
-                yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
-                    "criteria still red",
-                )),
+                yunta_core::events::Failure::message("criteria still red"),
                 yunta_core::events::RerouteOrigin::OnFailure,
                 Some(2),
                 Some(1),
@@ -165,7 +163,7 @@ fn fixture_events() -> Vec<StoredEvent> {
         .node(
             "b",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok".to_string(),
+                NodeOutcome::Summary("ok".to_string()),
                 tokens(60, 30, None),
             ))),
         )
@@ -255,7 +253,7 @@ fn cache_rate_is_none_without_input() {
         .node(
             "a",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok".to_string(),
+                NodeOutcome::Summary("ok".to_string()),
                 tokens(0, 50, Some(0)),
             ))),
         )
@@ -653,7 +651,7 @@ fn the_time_the_host_slept_is_left_out_of_active_and_wall_clock() {
         .node(
             "work",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "ok",
+                NodeOutcome::Summary("ok".to_string()),
                 TokenUsage::default(),
             ))),
         )

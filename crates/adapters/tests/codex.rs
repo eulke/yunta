@@ -167,8 +167,8 @@ async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
         e,
         AgentEvent::ToolUse { name, target }
             if name == "command_execution"
-                && target.display.is_none()
-                && target.digest == yunta_core::sha256_hex(b"cargo test")
+                && target.display().is_none()
+                && *target.digest() == yunta_core::sha256_hex(b"cargo test")
     )));
 }
 
@@ -196,7 +196,7 @@ async fn a_file_change_item_maps_to_tool_use_digesting_its_first_path() {
         e,
         AgentEvent::ToolUse { name, target }
             if name == "file_change"
-                && target.display.as_deref() == Some("src/lib.rs")
+                && target.display() == Some("src/lib.rs")
     )));
 }
 
@@ -224,7 +224,7 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
         e,
         AgentEvent::ToolUse { name, target }
             if name == "mcp_tool_call"
-                && target.display.as_deref() == Some("yunta:query")
+                && target.display() == Some("yunta:query")
     )));
 }
 
@@ -300,8 +300,8 @@ async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
         e,
         AgentEvent::ToolUse { name, target }
             if name == "web_search"
-                && target.display.is_none()
-                && target.digest == yunta_core::sha256_hex(b"codex exec json schema")
+                && target.display().is_none()
+                && *target.digest() == yunta_core::sha256_hex(b"codex exec json schema")
     )));
 }
 
@@ -1325,7 +1325,8 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
         .collect();
     assert_eq!(targets.len(), 1, "the stream carries the one call it made");
     assert_eq!(
-        targets[0].display, None,
+        targets[0].display(),
+        None,
         "a command is the session's own text: identified, never shown"
     );
     let carried = format!("{:?}", targets[0]);
@@ -1336,7 +1337,7 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
         );
     }
     assert_eq!(
-        targets[0].digest,
+        *targets[0].digest(),
         yunta_core::sha256_hex(command.as_bytes())
     );
 }
@@ -1600,23 +1601,21 @@ async fn a_codex_session_without_a_hook_or_an_engine_to_ask_fails_before_spawnin
     }
 }
 
-/// A command the sandbox refused is a write that did not happen, not
-/// activity to chronicle as a tool call.
+/// A sandbox refusal is an ordinary command to the adapter: it names no refused write.
 #[tokio::test]
-async fn a_sandbox_denial_becomes_write_refused() {
+async fn a_sandbox_denial_is_not_a_refused_write() {
     let denied = r#"{"type":"item.completed","item":{"type":"command_execution","command":"tee /etc/hosts","status":"sandbox_denied"}}"#;
     let events = events_of(&[THREAD_STARTED_LINE, denied, TURN_COMPLETED_LINE]).await;
-
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, AgentEvent::WriteRefused { .. })),
-        "the denial is recorded as a refused write: {events:?}"
-    );
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, AgentEvent::ToolUse { .. })),
-        "and never also as a tool call: {events:?}"
+            .any(|e| matches!(e, AgentEvent::WriteRefused { .. })),
+        "{events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolUse { name, .. } if name == "command_execution")),
+        "{events:?}"
     );
 }

@@ -458,6 +458,14 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
         self.log().record(Some(node_id), payload).await
     }
 
+    async fn refused_writes(
+        &self,
+        sessions: &[yunta_core::SessionId],
+    ) -> Result<Vec<yunta_core::events::ToolTarget>, StorageError> {
+        let events = self.log().events().await?;
+        Ok(crate::run_tools::refused_writes(&events, sessions))
+    }
+
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
         self.process_registry.as_deref()
     }

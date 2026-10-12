@@ -6,7 +6,8 @@ use std::path::Path;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
+    ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EngineFact, EventPayload,
+    NodeOutcome, TerminalState,
 };
 use yunta_core::{Isolation, Manifest, Node, RunId};
 
@@ -187,7 +188,9 @@ pub(super) async fn drive_child(
                     ctx,
                     node,
                     Close::new(
-                        format!("child run `{current_id}` finished"),
+                        NodeOutcome::Fact(EngineFact::ChildRunFinished {
+                            child: current_id.clone(),
+                        }),
                         yunta_core::events::TokenUsage::default(),
                     )
                     .child(ChildRun {
@@ -301,11 +304,8 @@ pub(super) async fn drive_child(
                 }
                 return Ok(NodeEnd::ChildPaused {
                     node: node.id.clone(),
-                    reason: format!(
-                        "child run `{current_id}` paused, and resuming this run resumes \
-                         it:\n  {}",
-                        yunta_core::text::hanging(&reason, "  ")
-                    ),
+                    run: current_id.clone(),
+                    child: reason,
                 });
             }
         }

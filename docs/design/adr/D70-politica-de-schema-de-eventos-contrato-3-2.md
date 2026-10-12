@@ -20,6 +20,15 @@ y versionado en el repo — los tipos son la fuente de verdad, todo cambio de
 formato produce diff visible en el PR, y los golden tests comparan contra el
 schema emitido.
 
+Nota 2026-10-12. Cambian las reglas (a) y (c). (a) Todo `kind` se escribe con
+la misma versión, `KIND_VERSION` (1): un cambio de forma que no es compatible
+nombra un kind nuevo y nunca sube una versión, así que una versión por tipo no
+distingue nada. (c) El lector sigue ignorando los campos que no conoce, pero
+ninguna versión promete leer un log que escribió una posterior: Yunta no se
+publicó y no hay binarios anteriores que lo necesiten; `docs/compatibility.md`
+retira esa promesa. La regla (d) sigue: un `kind` desconocido marca el run como
+parcialmente interpretado, con diagnóstico.
+
 Descartada: migración del log al actualizar. Razones: reescribir eventos
 convierte la evidencia en "lo que la última versión del migrador cree que
 ocurrió" — un migrador correcto y uno con bug producen logs igualmente

@@ -1,142 +1,30 @@
 //! The event wire: every kind the log can carry, field by field.
 //!
-//! One sample of each kind is built through its constructor, so a
-//! variant added without one fails to compile; the set of names, their
-//! JSON round trip, their schema version and the domain each belongs to
-//! are all asserted against that sample. A kind this binary does not
-//! know reads as unknown and writes back verbatim, which is what lets an
-//! older reader run against a newer log.
+//! Each kind's sample comes from the registry, and the set of names, the
+//! JSON round trip and the schema version are all asserted against those
+//! samples. A kind this binary does not know reads as unknown and writes
+//! back verbatim, which is what lets an older reader run against a newer
+//! log.
+
+use std::collections::BTreeSet;
 
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
-use yunta_core::{Capability, NonEmpty, QuestionId, Redactor, RunId, Secret};
+use yunta_core::{Capability, NonEmpty, QuestionId, Redactor, RunId, ScopeExpansionMode, Secret};
 use yunta_testkit_core::all_kinds;
 
-/// A compile-time guard for [`all_kinds`], not a runtime check. Each domain's
-/// match has one arm per variant and no wildcard, so adding a variant to an
-/// event enum fails this crate's compile until the variant is also
-/// constructed in `all_kinds` above. Without it, a new kind would be silently absent from
-/// every round-trip, version, and name test in this file.
-#[allow(dead_code)]
-fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
-    match payload {
-        EventPayload::Run(event) => run_kinds(event),
-        EventPayload::Node(event) => node_kinds(event),
-        EventPayload::Session(event) => session_kinds(event),
-        EventPayload::Artifacts(event) => artifacts_kinds(event),
-        EventPayload::Tasks(event) => tasks_kinds(event),
-        EventPayload::Scope(event) => scope_kinds(event),
-        EventPayload::Gates(event) => gates_kinds(event),
-        EventPayload::Children(event) => children_kinds(event),
-        EventPayload::Findings(event) => findings_kinds(event),
-    }
-}
-
-#[allow(dead_code)]
-fn run_kinds(event: &RunEvent) {
-    match event {
-        RunEvent::Created(_)
-        | RunEvent::BaselineCaptured(_)
-        | RunEvent::BaselineHeld(_)
-        | RunEvent::PromotionSignaled(_)
-        | RunEvent::HostSuspended(_)
-        | RunEvent::Paused(_)
-        | RunEvent::Resumed(_)
-        | RunEvent::Moved(_)
-        | RunEvent::Finished(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn node_kinds(event: &NodeEvent) {
-    match event {
-        NodeEvent::RunnerResolved(_)
-        | NodeEvent::Started(_)
-        | NodeEvent::ContextAssembled(_)
-        | NodeEvent::CriteriaChecked(_)
-        | NodeEvent::ScopeChecked(_)
-        | NodeEvent::Finished(_)
-        | NodeEvent::Failed(_)
-        | NodeEvent::HookExecuted(_)
-        | NodeEvent::Rerouted(_)
-        | NodeEvent::PullRequestOpened(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn session_kinds(event: &SessionEvent) {
-    match event {
-        SessionEvent::Opened(_)
-        | SessionEvent::Message(_)
-        | SessionEvent::CapabilityDegraded(_)
-        | SessionEvent::WriteRefused(_)
-        | SessionEvent::StopRefused(_)
-        | SessionEvent::WriteFormatted(_)
-        | SessionEvent::RunToolFailed(_)
-        | SessionEvent::RunToolRefused(_)
-        | SessionEvent::ServiceUnreachable(_)
-        | SessionEvent::ServiceReachable(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn artifacts_kinds(event: &ArtifactEvent) {
-    match event {
-        ArtifactEvent::Written(_) | ArtifactEvent::Submitted(_) | ArtifactEvent::Accepted(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn tasks_kinds(event: &TaskEvent) {
-    match event {
-        TaskEvent::Registered(_)
-        | TaskEvent::StatusChanged(_)
-        | TaskEvent::CheckStarted(_)
-        | TaskEvent::CheckAnswered(_)
-        | TaskEvent::DeviationDeclared(_)
-        | TaskEvent::DeviationResolved(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn scope_kinds(event: &ScopeEvent) {
-    match event {
-        ScopeEvent::Requested(_)
-        | ScopeEvent::Granted(_)
-        | ScopeEvent::Denied(_)
-        | ScopeEvent::Derived(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn gates_kinds(event: &GateEvent) {
-    match event {
-        GateEvent::Waiting(_)
-        | GateEvent::Resolved(_)
-        | GateEvent::QuestionsAsked(_)
-        | GateEvent::QuestionsAnswered(_)
-        | GateEvent::AskingOpened(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn children_kinds(event: &ChildEvent) {
-    match event {
-        ChildEvent::LoopIteration(_) | ChildEvent::Created(_) | ChildEvent::Finished(_) => {}
-    }
-}
-
-#[allow(dead_code)]
-fn findings_kinds(event: &FindingEvent) {
-    match event {
-        FindingEvent::Posted(_)
-        | FindingEvent::Updated(_)
-        | FindingEvent::Withdrawn(_)
-        | FindingEvent::Refused(_)
-        | FindingEvent::Answered(_)
-        | FindingEvent::Proved(_)
-        | FindingEvent::Settled(_) => {}
-    }
+#[test]
+fn every_wire_kind_is_sampled() {
+    let sampled: BTreeSet<&str> = all_kinds().iter().map(EventPayload::kind_name).collect();
+    let unsampled: Vec<&str> = EventPayload::KINDS
+        .iter()
+        .copied()
+        .filter(|k| !sampled.contains(k))
+        .collect();
+    assert!(
+        unsampled.is_empty(),
+        "kinds no sample builds: {unsampled:?}"
+    );
 }
 
 #[test]
@@ -171,8 +59,14 @@ fn an_escalation_whose_summary_repeats_a_fact_is_refused() {
     )
     .expect_err("the claim states the record");
     assert_eq!(
+        refused,
+        EscalationError::SummaryRepeatsEvidence {
+            fact: Fact::bare("exit 1")
+        }
+    );
+    assert_eq!(
         refused.to_string(),
-        "the summary repeats what the evidence already states: `exit 1`"
+        "the summary repeats what the evidence already states"
     );
 
     // A labelled fact is repeated when both halves are: the label is
@@ -217,64 +111,12 @@ fn a_done_task_carries_its_commit_and_nothing_else_does() {
 }
 
 #[test]
-fn every_domain_declares_the_kinds_the_wire_carries() {
-    let domains: Vec<(&str, &[&str])> = vec![
-        ("run", RunEvent::KINDS),
-        ("node", NodeEvent::KINDS),
-        ("session", SessionEvent::KINDS),
-        ("tasks", TaskEvent::KINDS),
-        ("scope", ScopeEvent::KINDS),
-        ("findings", FindingEvent::KINDS),
-        ("artifacts", ArtifactEvent::KINDS),
-        ("gates", GateEvent::KINDS),
-        ("children", ChildEvent::KINDS),
-    ];
-
-    // Every kind belongs to exactly one domain, and between them they
-    // account for the whole log: a kind in no domain is one nothing owns,
-    // and a kind in two is a kind with two homes.
-    let mut owned: Vec<&str> = domains
-        .iter()
-        .flat_map(|(_, kinds)| kinds.iter().copied())
-        .collect();
-    owned.sort_unstable();
-    let mut declared: Vec<&str> = EventPayload::KINDS.to_vec();
-    declared.sort_unstable();
-    assert_eq!(
-        owned, declared,
-        "the domains and the wire name the same set of kinds"
-    );
-
-    // And each domain lists its own in the order the wire writes them, so
-    // a reader moving between a domain and the log never re-sorts.
-    for (name, kinds) in &domains {
-        let placed: Vec<usize> = kinds
-            .iter()
-            .map(|kind| {
-                EventPayload::KINDS
-                    .iter()
-                    .position(|k| k == kind)
-                    .unwrap_or_else(|| {
-                        panic!("`{kind}` of domain `{name}` is not a kind the wire carries")
-                    })
-            })
-            .collect();
-        let mut sorted = placed.clone();
-        sorted.sort_unstable();
-        assert_eq!(
-            placed, sorted,
-            "domain `{name}` lists its kinds in the order the wire writes them"
-        );
-    }
-}
-
-#[test]
-fn there_are_exactly_54_kinds_with_distinct_names() {
+fn there_are_exactly_57_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 54);
+    assert_eq!(kinds.len(), 57);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 54, "expected 54 distinct kind names");
+    assert_eq!(names.len(), 57, "expected 57 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -300,8 +142,9 @@ fn every_kind_round_trips_through_json() {
 
 #[test]
 fn every_kind_starts_at_schema_version_1() {
+    assert_eq!(KIND_VERSION, 1);
     for payload in all_kinds() {
-        assert_eq!(payload.schema_version(), 1);
+        assert_eq!(EventBody::Known(payload).schema_version(), KIND_VERSION);
     }
 }
 
@@ -321,6 +164,7 @@ const KIND_NAMES: &[&str] = &[
     "run_created",
     "runner_resolved",
     "baseline_captured",
+    "baseline_held",
     "node_started",
     "agent_session_opened",
     "agent_message",
@@ -363,6 +207,8 @@ const KIND_NAMES: &[&str] = &[
     "child_run_finished",
     "capability_degraded",
     "write_refused",
+    "stop_refused",
+    "write_formatted",
     "run_tool_failed",
     "run_tool_refused",
     "service_unreachable",
@@ -390,16 +236,21 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
             .unwrap()
             .with_timezone(&chrono::Utc),
         node_id: None,
-        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(
-            RunPausedPayload::recorded("gate waiting".to_string()),
-        ))),
+        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            &PauseReason::Recorded {
+                sentence: "gate waiting".to_string(),
+            },
+        )))),
     };
 
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["run_id"], "run-1");
     assert_eq!(json["seq"], 1);
     assert_eq!(json["kind"], "run_paused");
-    assert_eq!(json["reason"], "gate waiting");
+    assert_eq!(
+        json["pause"],
+        serde_json::json!({"type": "recorded", "sentence": "gate waiting"})
+    );
     assert!(json.get("node_id").is_none());
 
     let round_tripped: StoredEvent = serde_json::from_value(json).unwrap();
@@ -533,7 +384,12 @@ fn a_known_kind_reads_as_its_payload_and_ignores_fields_it_does_not_know() {
     let event: StoredEvent = serde_json::from_value(json).unwrap();
     match event.payload() {
         Some(EventPayload::Run(RunEvent::Paused(p))) => {
-            assert_eq!(p.reason(), "waiting on gate approve")
+            assert_eq!(
+                p.pause,
+                PauseReason::Recorded {
+                    sentence: "waiting on gate approve".to_string()
+                }
+            )
         }
         other => panic!("expected run_paused, got {other:?}"),
     }
@@ -542,14 +398,17 @@ fn a_known_kind_reads_as_its_payload_and_ignores_fields_it_does_not_know() {
 
 #[test]
 fn a_draft_names_what_happened_and_nothing_storage_assigns() {
-    let draft = EventDraft {
-        run_id: RunId::from("run-1"),
-        node_id: None,
-        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
-            "budget".to_string(),
+    let draft = EventDraft::new(
+        RunId::from("run-1"),
+        None,
+        EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            &PauseReason::Recorded {
+                sentence: "budget".to_string(),
+            },
         ))),
-    };
-    assert_eq!(draft.payload.kind_name(), "run_paused");
+    )
+    .expect("a draft names its subject");
+    assert_eq!(draft.payload().kind_name(), "run_paused");
 }
 
 #[test]
@@ -627,17 +486,14 @@ fn a_capability_parses_to_the_capabilities_field_it_names() {
 /// a node's sessions were stopped from writing.
 #[test]
 fn write_refused_is_a_session_kind_that_moves_the_ledger() {
-    assert!(yunta_core::events::SessionEvent::KINDS.contains(&"write_refused"));
+    assert!(EventPayload::KINDS.contains(&"write_refused"));
 
     let refused = yunta_core::events::WriteRefusedPayload::new(
         "sess-1".into(),
         yunta_core::events::ToolTarget::of_path(std::path::Path::new("docs/readme.md")),
     );
-    let event = yunta_core::events::SessionEvent::WriteRefused(refused);
-    assert!(
-        !event.is_audit(),
-        "a refusal is state a reader derives, not a note beside it"
-    );
+    let event = EventPayload::Session(yunta_core::events::SessionEvent::WriteRefused(refused));
+    assert_eq!(event.kind_name(), "write_refused");
 }
 
 /// A log written before the fence existed carries `edit_hooks`, and a
@@ -662,13 +518,9 @@ fn an_old_log_without_a_fence_level_reads_as_none() {
 /// it is state a reader derives rather than a note beside it.
 #[test]
 fn baseline_captured_is_a_run_kind_that_moves_the_ledger() {
-    assert!(RunEvent::KINDS.contains(&"baseline_captured"));
-    assert!(
-        !NodeEvent::KINDS.contains(&"baseline_captured"),
-        "one domain owns a kind"
-    );
+    assert!(EventPayload::KINDS.contains(&"baseline_captured"));
 
-    let event = RunEvent::BaselineCaptured(BaselineCapturedPayload {
+    let event = EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
         command: "cargo test".to_string(),
         results: BaselineResults {
             exit_code: 0,
@@ -678,12 +530,8 @@ fn baseline_captured_is_a_run_kind_that_moves_the_ledger() {
         origin: BaselineOrigin::Measured,
         tree: None,
         duration_ms: None,
-    });
+    }));
     assert_eq!(event.kind_name(), "baseline_captured");
-    assert!(
-        !event.is_audit(),
-        "what a run holds is derived from this, so a ledger folds it"
-    );
 }
 
 /// A log written before a lineage could hand a measurement down carries
@@ -956,7 +804,7 @@ fn a_node_finished_without_a_tree_reads_as_naming_none() {
     assert_eq!(old.tree, None);
 
     let named = NodeFinishedPayload::leaving(
-        "exit 0",
+        NodeOutcome::Summary("exit 0".to_string()),
         TokenUsage::default(),
         "a1b2c3d4e5f6".parse().unwrap(),
     );
@@ -997,4 +845,56 @@ fn a_log_written_before_continuations_reads_as_naming_none() {
         panic!("reads as the status change it is: {reopened:?}");
     };
     assert_eq!(reopened.resumes, None);
+}
+
+/// A pause is stored as the fact that stopped the run, not as the
+/// sentence a reader will see.
+#[test]
+fn a_pause_is_data_not_a_sentence() {
+    let pause = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
+    let json = serde_json::to_value(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+        &pause,
+    ))))
+    .unwrap();
+    assert!(json.get("reason").is_none(), "{json}");
+    assert_eq!(json["pause"]["type"], "budget_exhausted", "{json}");
+}
+
+/// A denial a node received names no task, and reads back without one.
+#[test]
+fn a_node_scope_denial_reads_back_without_a_task() {
+    let line = serde_json::json!({
+        "kind": "scope_expansion_denied",
+        "decided_by": {"type": "rule"},
+        "mode": "ask",
+        "count_this_run": 1
+    });
+    let payload: EventPayload = serde_json::from_value(line).expect("a node's denial parses");
+    assert!(matches!(
+        payload,
+        EventPayload::Scope(ScopeEvent::Denied(_))
+    ));
+    let written = serde_json::to_value(&payload).unwrap();
+    assert!(written.get("task_id").is_none(), "{written}");
+}
+
+/// A grant that names neither a task nor a node widens nothing, so the
+/// ledger does not count it.
+#[test]
+fn a_grant_naming_no_subject_counts_for_nothing() {
+    let grant = ScopeEvent::Granted(ScopeExpansionGrantedPayload {
+        task_id: None,
+        decided_by: Decider::Rule,
+        mode: ScopeExpansionMode::Rules,
+        count_this_run: 1,
+        paths: vec![],
+    });
+    let meta = EventMeta {
+        seq: 1.into(),
+        at: chrono::DateTime::UNIX_EPOCH,
+        node: None,
+    };
+    let mut ledger = GrantLedger::default();
+    let _ = ledger.apply(&grant, &meta);
+    assert_eq!(ledger.granted(), 0);
 }

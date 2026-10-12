@@ -13,6 +13,9 @@ use crate::events::Failure;
 use crate::hash::{CommitSha, ContentHash, TreeId};
 use crate::ids::{NodeId, RunnerName, TaskId};
 
+pub use super::outcome::{Approval, EngineFact, NodeOutcome};
+pub use super::runner::{DiscardedCandidate, RunnerRejection};
+
 /// A tasks document criterion, frozen into `task_registered` — the same shape
 /// the tasks parser produces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -100,12 +103,6 @@ impl HookPhase {
             HookPhase::After => "after",
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DiscardedCandidate {
-    pub candidate: RunnerCandidate,
-    pub reason: String,
 }
 
 /// One resolved `ContextSource` reference in `context_assembled.sources`.
@@ -258,7 +255,8 @@ pub struct ScopeCheckedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFinishedPayload {
-    pub outcome: String,
+    /// What the node resolved to: a fact the engine checked, or the agent's summary.
+    pub outcome: NodeOutcome,
     pub tokens_used: TokenUsage,
     /// The run's tree as the node left it, after whatever it landed —
     /// what a check that verified the tree is measured against when
@@ -281,9 +279,9 @@ impl NodeFinishedPayload {
     /// closed elsewhere — one that paid for its session when it asked
     /// its questions — passes nothing, so no surface counts the same
     /// tokens twice.
-    pub fn new(outcome: impl Into<String>, tokens: TokenUsage) -> Self {
+    pub fn new(outcome: NodeOutcome, tokens: TokenUsage) -> Self {
         NodeFinishedPayload {
-            outcome: outcome.into(),
+            outcome,
             tokens_used: tokens,
             tree: None,
             commit: None,
@@ -296,7 +294,7 @@ impl NodeFinishedPayload {
     }
 
     /// The same, naming the tree the node left the run at.
-    pub fn leaving(outcome: impl Into<String>, tokens: TokenUsage, tree: TreeId) -> Self {
+    pub fn leaving(outcome: NodeOutcome, tokens: TokenUsage, tree: TreeId) -> Self {
         NodeFinishedPayload {
             tree: Some(tree),
             ..NodeFinishedPayload::new(outcome, tokens)
@@ -385,7 +383,10 @@ pub struct HookExecutedPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeReroutedPayload {
     pub to_node: NodeId,
-    pub cause: String,
+    /// Why control left the node, as data: the failure the node ended
+    /// with, or the message a gate's choice states.
+    #[serde(deserialize_with = "failure_or_sentence")]
+    pub cause: Failure,
     /// The retry count against the cap — present only for an
     /// `on_failure` reroute, absent for a gate's routing choice, which
     /// is not a retry and has no cap to count against.
@@ -409,7 +410,7 @@ impl NodeReroutedPayload {
     /// on its last try.
     pub fn new(
         to: NodeId,
-        cause: RerouteCause,
+        cause: Failure,
         origin: RerouteOrigin,
         attempt: Option<u32>,
         max_reroutes: Option<u32>,
@@ -417,7 +418,7 @@ impl NodeReroutedPayload {
         let retrying = matches!(origin, RerouteOrigin::OnFailure);
         NodeReroutedPayload {
             to_node: to,
-            cause: cause.to_string(),
+            cause,
             attempt: attempt.filter(|_| retrying),
             max_reroutes: max_reroutes.filter(|_| retrying),
             origin,
@@ -425,17 +426,22 @@ impl NodeReroutedPayload {
     }
 }
 
-/// Why control left a node. A re-route happens for exactly one reason —
-/// the node did not succeed — so the cause is that failure itself, not a
-/// sentence somebody wrote about it: the same `Failure` the
-/// `node_failed` before it carries, and the same words.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RerouteCause(pub Failure);
-
-impl std::fmt::Display for RerouteCause {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+/// Reads the typed failure, or the sentence a log written before it was
+/// typed stored: a JSON string becomes the message it spells.
+fn failure_or_sentence<'de, D>(deserializer: D) -> Result<Failure, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Typed(Failure),
+        Sentence(String),
     }
+    Ok(match Stored::deserialize(deserializer)? {
+        Stored::Typed(failure) => failure,
+        Stored::Sentence(outcome) => Failure::Message { outcome },
+    })
 }
 
 /// What caused a `node_rerouted`. The two mechanisms differ in kind: an

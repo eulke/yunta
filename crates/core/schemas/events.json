@@ -167,6 +167,26 @@
         "capabilities"
       ]
     },
+    "Approval": {
+      "description": "Where a person approved a gate.",
+      "oneOf": [
+        {
+          "description": "At the console, on the menu the run asked with.",
+          "type": "string",
+          "const": "console"
+        },
+        {
+          "description": "On the forge, by a review.",
+          "type": "string",
+          "const": "review"
+        },
+        {
+          "description": "On the forge, by merging the change.",
+          "type": "string",
+          "const": "merge"
+        }
+      ]
+    },
     "ArtifactAcceptedPayload": {
       "description": "One artifact the run holds: what it is, the bytes it is made of, and\nhow the run came by it.\n\nThis is what makes an artifact a fact of the log rather than a file\nsomebody may have replaced: the identity says which artifact, the\nhash says which content, and the envelope's `node_id` says who\nproduced it — absent for what a run acquires without a node of its\nown (a `document` input, a mount, a promotion).\n\nThe field is named `artifact`, not `kind`, for the reason\n[`ArtifactWrittenPayload::artifact_kind`] gives: the event\nenvelope's own internally-tagged discriminant already claims `kind`\nin the serialized JSON, and a colliding field name silently corrupts\nthe payload.",
       "type": "object",
@@ -730,14 +750,15 @@
           "description": "The capability the engine consulted and the adapter does not declare.",
           "$ref": "#/$defs/Capability"
         },
-        "policy_applied": {
-          "type": "string"
+        "policy": {
+          "description": "What the engine did instead. A log that stored a sentence under\n`policy_applied` reads it back as `PolicyApplied::Recorded`.",
+          "$ref": "#/$defs/Policy"
         }
       },
       "required": [
         "capability",
         "adapter",
-        "policy_applied"
+        "policy"
       ]
     },
     "Channel": {
@@ -1592,7 +1613,7 @@
           "$ref": "#/$defs/RunnerCandidate"
         },
         "reason": {
-          "type": "string"
+          "$ref": "#/$defs/RunnerRejection"
         }
       },
       "required": [
@@ -1641,6 +1662,262 @@
         "xhigh"
       ]
     },
+    "EngineFact": {
+      "description": "A fact the engine verified about how a node closed, kept as data: a\nsurface words it.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "exit_status"
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "number": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "pull_request_opened"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "number",
+            "url"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "children_finished"
+            }
+          },
+          "required": [
+            "type",
+            "count"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "succeeded_first"
+            }
+          },
+          "required": [
+            "type",
+            "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "tasks_done"
+            }
+          },
+          "required": [
+            "type",
+            "count"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/RunId"
+            },
+            "type": {
+              "type": "string",
+              "const": "child_run_finished"
+            }
+          },
+          "required": [
+            "type",
+            "child"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "exit_code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "nothing_to_compare"
+            }
+          },
+          "required": [
+            "type",
+            "command",
+            "exit_code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "exit_code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "reused": {
+              "type": "boolean"
+            },
+            "type": {
+              "type": "string",
+              "const": "no_regression"
+            }
+          },
+          "required": [
+            "type",
+            "exit_code",
+            "reused"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "measured": {
+              "type": "number",
+              "format": "double"
+            },
+            "threshold": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "coverage_met"
+            }
+          },
+          "required": [
+            "type",
+            "measured",
+            "threshold"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "severity": {
+              "$ref": "#/$defs/FindingSeverity"
+            },
+            "type": {
+              "type": "string",
+              "const": "no_finding"
+            }
+          },
+          "required": [
+            "type",
+            "severity"
+          ]
+        },
+        {
+          "description": "A person answered the node's questions.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "questions_answered"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Nobody was asked: each question says what the work assumes\nwithout an answer.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "questions_assumed"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A gate closed on the option a person chose, which sends the run\nnowhere else.",
+          "type": "object",
+          "properties": {
+            "option": {
+              "$ref": "#/$defs/OptionId"
+            },
+            "type": {
+              "type": "string",
+              "const": "option_chosen"
+            }
+          },
+          "required": [
+            "type",
+            "option"
+          ]
+        },
+        {
+          "description": "A person approved the gate, and where they did.",
+          "type": "object",
+          "properties": {
+            "by": {
+              "$ref": "#/$defs/Responder"
+            },
+            "on": {
+              "$ref": "#/$defs/Approval"
+            },
+            "type": {
+              "type": "string",
+              "const": "approved"
+            }
+          },
+          "required": [
+            "type",
+            "by",
+            "on"
+          ]
+        }
+      ]
+    },
     "Envelope": {
       "description": "The wire shape's envelope fields. Kept apart from [`StoredEvent`] so\nthe body can be flattened beside them by hand: serde's own\n`flatten` cannot fall back to an unknown kind.",
       "type": "object",
@@ -1681,8 +1958,54 @@
         "timestamp"
       ]
     },
+    "Escalation": {
+      "description": "An escalation on its way to a person: the claim, the record it is\naudited against, and the menu of answers.\n\nThe one way a `gate_waiting` payload comes to exist: which half of the\nstory goes into the summary and which into the evidence is decided\nhere, once, and the menu cannot be empty by type, since an escalation\nwith no options refuses every answer it is given.",
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
+          "$ref": "#/$defs/Evidence"
+        },
+        "external_ref": {
+          "description": "The forge's own handle for this gate, such as a pull request's\nURL; `None` for an internal escalation, such as exhausted\nre-routes. It carries the forge's `PullRequestRef` through the\nlog, so a later `poll` from another process knows what to poll\nwithout publishing again.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GateOption"
+          }
+        },
+        "shows": {
+          "description": "The artifacts the decision is about, as the person was shown\nthem. Empty for an escalation about something that happened.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Shown"
+          }
+        },
+        "summary": {
+          "description": "The claim: what happened, in the words of whoever escalated.\nIt ends where the record begins — a summary that quotes what\n`evidence` holds leaves every surface printing it twice.",
+          "type": "string"
+        },
+        "withheld": {
+          "description": "The options the gate does not offer, each with why: what stands\nagainst them is part of the decision.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Withheld"
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "evidence",
+        "options"
+      ]
+    },
     "EventPayload": {
-      "description": "All event kinds, internally tagged by `kind`.",
+      "description": "All event kinds, internally tagged by `kind`; published in `events.json`.",
       "oneOf": [
         {
           "type": "object",
@@ -2428,7 +2751,7 @@
       ]
     },
     "Evidence": {
-      "description": "The facts behind an escalation's summary, attached by the engine\nstraight from the log.\n\nThe pair is the point: the summary is a *claim* about what happened\nand this is the *record* it is audited against, so neither one\nrepeats the other. A producer that writes the cause into both leaves\nevery surface printing it twice, under a heading that promised\nsomething new.\n\nUntagged, with `Prose` last: a payload carrying a list reads as\n[`Evidence::Facts`], and a log written before evidence was data\ncarries one string and reads back as [`Evidence::Prose`], which\nrenders as the single unlabelled fact it always was. That tolerance\nis the rule for what is persisted and versioned, and it is why no\nreader needs to know which version wrote the line it is looking at.",
+      "description": "The facts behind an escalation's summary, attached by the engine\nstraight from the log.\n\nThe pair is the point: the summary is a *claim* about what happened\nand this is the *record* it is audited against, so neither one\nrepeats the other. A producer that writes the cause into both leaves\nevery surface printing it twice, under a heading that promised\nsomething new.\n\nUntagged, with `Prose` last: a payload carrying a list reads as\n[`Evidence::Facts`], and a log written before evidence was data\ncarries one string and reads back as [`Evidence::Prose`], which\nreads as the single unlabelled fact it always was. That tolerance\nis the rule for what is persisted and versioned, and it is why no\nreader needs to know which version wrote the line it is looking at.",
       "anyOf": [
         {
           "description": "What this binary writes: the labelled facts, in the order a\nreader meets them.",
@@ -2996,7 +3319,7 @@
           "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
-          "description": "The forge's own handle for this gate — a PR URL,\ntoday — `None` for the internal escalation case (exhausted\nre-routes) this payload already covered before external\ngates existed. Round-trips the forge's `PullRequestRef` through\nthe log so a later `poll` (from a completely different process\nwaking up to check on the gate) knows what to poll without\nre-publishing.",
+          "description": "The forge's own handle for this gate, such as a pull request's\nURL; `None` for an internal escalation, such as exhausted\nre-routes. It carries the forge's `PullRequestRef` through the\nlog, so a later `poll` from another process knows what to poll\nwithout publishing again.",
           "type": [
             "string",
             "null"
@@ -3487,7 +3810,8 @@
           ]
         },
         "outcome": {
-          "type": "string"
+          "description": "What the node resolved to: a fact the engine checked, or the agent's summary.",
+          "$ref": "#/$defs/NodeOutcome"
         },
         "tokens_used": {
           "$ref": "#/$defs/TokenUsage"
@@ -3514,6 +3838,18 @@
       "type": "string",
       "minLength": 1
     },
+    "NodeOutcome": {
+      "description": "What a node resolved to: a fact the engine checked, or the agent's\nown summary of its work.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EngineFact"
+        },
+        {
+          "description": "The agent's own summary, or a sentence read from a log.",
+          "type": "string"
+        }
+      ]
+    },
     "NodeReroutedPayload": {
       "description": "`from_node` is the envelope's own `node_id` (the node that failed) —\nonly the re-route's destination is extra information.",
       "type": "object",
@@ -3528,7 +3864,8 @@
           "minimum": 0
         },
         "cause": {
-          "type": "string"
+          "description": "Why control left the node, as data: the failure the node ended\nwith, or the message a gate's choice states.",
+          "$ref": "#/$defs/Failure"
         },
         "max_reroutes": {
           "type": [
@@ -3597,6 +3934,13 @@
         "attempt"
       ]
     },
+    "NonEmpty": {
+      "description": "A `Vec<T>` with at least one element.\n\nBuilt through [`NonEmpty::new`], which answers `None` for an empty\none, or from a first element and the rest. Reads as a slice. On the\nwire it is the plain array, and an empty array does not read.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/QuestionId"
+      }
+    },
     "OnInterrupt": {
       "description": "A node's crash-recovery policy — the full triple of options.",
       "oneOf": [
@@ -3642,6 +3986,319 @@
         "reason"
       ]
     },
+    "PauseReason": {
+      "description": "Why a run is parked, as a fact rather than a sentence.\n\nThe log stores this fact. The line a reader sees for a parked run is\ncomposed from it at the border, by the render crate, so every surface\nthat shows the pause says it the same way.",
+      "oneOf": [
+        {
+          "description": "A decision is waiting on a person, with the escalation that asks\nit. Serde goes through `GateWaitingPayload`; a read does not\nre-check the claim.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "escalation"
+            }
+          },
+          "$ref": "#/$defs/Escalation",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A person stopped the run while it was running.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancelled"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A person stopped a run whose engine was already dead: the\norphaned process groups were killed from outside and the pause\nwritten on the engine's behalf, so the log says who ended the\nrun and that nothing of it was still alive to ask.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancelled_after_crash"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The run reached `limits.max_tokens_per_run`.",
+          "type": "object",
+          "properties": {
+            "cap": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "spent": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "budget_exhausted"
+            }
+          },
+          "required": [
+            "type",
+            "spent",
+            "cap"
+          ]
+        },
+        {
+          "description": "The disk has `available` bytes free, and going on would take\n`need` more where `keep_free` must stay free.",
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "keep_free": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "need": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "no_room"
+            }
+          },
+          "required": [
+            "type",
+            "available",
+            "need",
+            "keep_free"
+          ]
+        },
+        {
+          "description": "A loop reached `limits.max_loop_iterations` with tasks still\nready.",
+          "type": "object",
+          "properties": {
+            "cap": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "loop_overrun"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "cap"
+          ]
+        },
+        {
+          "description": "A gate is published and the forge has not answered it.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "external_gate"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ]
+        },
+        {
+          "description": "A resume found nodes still running whose fate it cannot tell.",
+          "type": "object",
+          "properties": {
+            "nodes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NodeId"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "uncertain_orphans"
+            }
+          },
+          "required": [
+            "type",
+            "nodes"
+          ]
+        },
+        {
+          "description": "A node failed and nothing re-routed it.",
+          "type": "object",
+          "properties": {
+            "failure": {
+              "$ref": "#/$defs/Failure"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "node_failed"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "failure"
+          ]
+        },
+        {
+          "description": "Nothing is runnable: `node` waits on `on`, which this pass left\nunresolved.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "on": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NodeId"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "blocked"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "on"
+          ]
+        },
+        {
+          "description": "A gate was resolved to abort, with whatever the person wrote.",
+          "type": "object",
+          "properties": {
+            "free_text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "gate_aborted"
+            }
+          },
+          "required": [
+            "type",
+            "node"
+          ]
+        },
+        {
+          "description": "A child run paused on its own log; the parent names it and keeps\nthe child's pause.",
+          "type": "object",
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/PauseReason"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            },
+            "type": {
+              "type": "string",
+              "const": "child_paused"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "run",
+            "child"
+          ]
+        },
+        {
+          "description": "A node asked questions and no surface could answer them.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "pending": {
+              "$ref": "#/$defs/NonEmpty"
+            },
+            "type": {
+              "type": "string",
+              "const": "questions"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "pending"
+          ]
+        },
+        {
+          "description": "A surface answered and the questions refused the reply, with\nevery way it failed to answer them.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "report": {
+              "$ref": "#/$defs/Report"
+            },
+            "type": {
+              "type": "string",
+              "const": "answers_refused"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "report"
+          ]
+        },
+        {
+          "description": "Prose a log carries as one sentence; shown as written.",
+          "type": "object",
+          "properties": {
+            "sentence": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "recorded"
+            }
+          },
+          "required": [
+            "type",
+            "sentence"
+          ]
+        }
+      ]
+    },
     "Phase": {
       "type": "string",
       "enum": [
@@ -3649,23 +4306,81 @@
         "post"
       ]
     },
-    "PromotionSignaledPayload": {
+    "Policy": {
+      "description": "What the engine does when an adapter does not declare a capability it\nasked for. A closed set: the engine has one fallback per capability\nit consults, and a degradation naming anything else would be a\nfallback nobody implemented.\n\nThe words a reader is shown for each one are kept outside core, so\nthe same fallback reads the same way wherever it is shown.",
+      "oneOf": [
+        {
+          "description": "`fence` is `None`: the session edits freely and the diff is\njudged afterwards.",
+          "type": "string",
+          "const": "post_check_only"
+        },
+        {
+          "description": "`usage_reporting` absent: the run's token cap cannot be counted\nagainst this session.",
+          "type": "string",
+          "const": "no_token_budget"
+        },
+        {
+          "description": "`skills` absent: the session runs with none mounted.",
+          "type": "string",
+          "const": "no_skills"
+        },
+        {
+          "description": "`run_tools` absent, or its server unreachable: the session holds\nnone of the run's tools.",
+          "type": "string",
+          "const": "no_run_tools"
+        },
+        {
+          "description": "`network_isolation` absent: `network: false` is recorded, not\nenforced.",
+          "type": "string",
+          "const": "network_open"
+        },
+        {
+          "description": "`resume_session` absent, or nothing to resume: a fresh session\nreplaces the interrupted one.",
+          "type": "string",
+          "const": "fresh_session"
+        }
+      ]
+    },
+    "PromotionCause": {
+      "description": "Where a run's promotion leads: the node that exhausted its re-routes,\nand the node it was routed to.",
       "type": "object",
       "properties": {
-        "evidence": {
-          "description": "The record `reason` is built from, kept apart so a surface can\nshow it under its own heading.",
-          "$ref": "#/$defs/Evidence"
+        "goto": {
+          "$ref": "#/$defs/NodeId"
         },
-        "reason": {
-          "description": "Why the run promoted, on one line — the claim and the facts\nbehind it, since this is the only field a reader of the event\nitself gets.",
-          "type": "string"
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "required": [
+        "node",
+        "goto"
+      ]
+    },
+    "PromotionSignaledPayload": {
+      "description": "A run asked to be run wider than the mode it started in.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "description": "What asked for the promotion. Absent from a log written before the\ncause was recorded, which carries only the sentence `reason` holds.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromotionCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "description": "The record the promotion rests on, kept apart so a surface can show\nit under its own heading.",
+          "$ref": "#/$defs/Evidence"
         },
         "suggested_mode": {
           "$ref": "#/$defs/ModeName"
         }
       },
       "required": [
-        "reason",
         "evidence",
         "suggested_mode"
       ]
@@ -4258,14 +4973,15 @@
       ]
     },
     "RunPausedPayload": {
+      "description": "Why the run is parked: the pause the engine recorded, as a fact.",
       "type": "object",
       "properties": {
-        "reason": {
-          "type": "string"
+        "pause": {
+          "$ref": "#/$defs/PauseReason"
         }
       },
       "required": [
-        "reason"
+        "pause"
       ]
     },
     "RunResumedPayload": {
@@ -4295,13 +5011,6 @@
           "items": {
             "$ref": "#/$defs/ResumePolicy"
           }
-        },
-        "resume_policy_applied": {
-          "description": "The one `on_interrupt` every orphan of this resume resolved to;\nabsent when the resume found no orphan or their policies differ\n— `policies` is the record either way.",
-          "type": [
-            "string",
-            "null"
-          ]
         }
       }
     },
@@ -4448,6 +5157,58 @@
       "type": "string",
       "minLength": 1
     },
+    "RunnerRejection": {
+      "description": "Why a runner candidate was not used. A log written before the typed\nreason stored the sentence, which reads back as `Recorded { sentence: String }`.",
+      "oneOf": [
+        {
+          "description": "The run's `--adapter` flag pinned another adapter.",
+          "type": "object",
+          "properties": {
+            "pinned": {
+              "$ref": "#/$defs/AdapterId"
+            },
+            "type": {
+              "type": "string",
+              "const": "not_pinned"
+            }
+          },
+          "required": [
+            "type",
+            "pinned"
+          ]
+        },
+        {
+          "description": "The candidate's adapter is not available here.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unavailable"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A sentence an older log stored, kept as written. The field is\nnamed: a newtype variant of `String` does not serialize under an\ninternal tag.",
+          "type": "object",
+          "properties": {
+            "sentence": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "recorded"
+            }
+          },
+          "required": [
+            "type",
+            "sentence"
+          ]
+        }
+      ]
+    },
     "RunnerResolvedPayload": {
       "description": "`runner` names the `runners:` entry the node resolved through. The\nreader also accepts `role`, the field's former name, so a log written\nunder it still replays.",
       "type": "object",
@@ -4576,11 +5337,18 @@
           "$ref": "#/$defs/ScopeExpansionMode"
         },
         "task_id": {
-          "$ref": "#/$defs/TaskId"
+          "description": "Absent when the denied request was the node's own.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "task_id",
         "decided_by",
         "mode",
         "count_this_run"

@@ -16,6 +16,7 @@ use super::record::Recorder;
 use super::session::{SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
+use crate::run_tools::unrecorded_cause;
 
 /// Everything one attempt of [`run_task`] reads: the per-cycle context that
 /// never changes between attempts, so an attempt takes just this and its
@@ -84,17 +85,19 @@ pub(super) async fn run_one_attempt(
             outcome: dispatch_outcome,
             tokens,
             fence: covered,
-            session,
-            refused,
+            sessions,
             ..
         },
     ) = open_and_dispatch(params).await?;
+    // The session the attempt ends in is the one a next attempt picks back up.
+    let session = sessions.last().cloned();
     let &AttemptParams {
         task,
         unit,
         memo,
         already_granted_paths,
         supervision,
+        audit,
         ..
     } = params;
     // A cancelled dispatch ends the cycle right here — no post-check, no
@@ -171,7 +174,15 @@ pub(super) async fn run_one_attempt(
     // no one is asked.
     let expansion_outcome = match expansion_outcome {
         _ if succeeded => expansion_outcome,
-        None => super::evidence::of_refusals(params, &refused, &post_runs).await,
+        None => {
+            let refused = super::stream::read_refusals(audit, &sessions, &post_runs)
+                .await
+                .map_err(|source| TaskCycleError::Audit {
+                    task: task.id.clone(),
+                    source,
+                })?;
+            super::evidence::of_refusals(params, &refused, &post_runs).await
+        }
         Some(outcome) if outcome.decision == crate::scope_expansion::Decision::Granted => {
             Some(outcome)
         }
@@ -406,7 +417,7 @@ async fn open_and_dispatch(
             fresh_prompt: Some(&brief),
         }),
     };
-    let mut dispatched = dispatch_session(adapter, request, cancel, audit, opening)
+    let dispatched = dispatch_session(adapter, request, cancel, audit, opening)
         .await
         .map_err(|error| match error {
             DispatchError::Adapter(source) => TaskCycleError::Spawn {
@@ -418,10 +429,16 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
-    // What the session's hooks were refused reached the engine through
-    // its listener, not its stream.
-    if let Some(session) = &run_tools {
-        dispatched.refused.extend(session.rails().refused());
+    // A refusal the engine answered and could not write fails the attempt
+    // with the storage cause the log gave it.
+    let unrecorded = run_tools
+        .as_ref()
+        .and_then(|session| session.rails().take_unrecorded());
+    if let Some(source) = unrecorded.and_then(unrecorded_cause) {
+        return Err(TaskCycleError::Audit {
+            task: task.id.clone(),
+            source,
+        });
     }
     super::record_unlisted_tools(audit, adapter.id(), run_tools.as_ref(), &dispatched)
         .await

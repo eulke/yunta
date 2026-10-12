@@ -132,7 +132,7 @@ async fn a_refused_retry_still_offers_retry_and_names_the_attempt_that_ran() {
         escalation.options()[0].label,
         "Run `compare` again (attempt 3)"
     );
-    let said = escalation.evidence().lines().join("\n");
+    let said = yunta_render::evidence::lines(escalation.evidence()).join("\n");
     assert!(
         said.contains("since attempt 1 failed") && said.contains("regression:"),
         "{said}"

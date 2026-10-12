@@ -18,8 +18,10 @@ use crate::hash::ContentHash;
 use crate::ids::AdapterId;
 
 mod exit;
+mod sentences;
 
 pub use exit::{CommandExit, CommandOrigin, SessionDeath, SessionEnd, SessionExit, TAIL_LINES};
+pub use sentences::{loop_overrun_failure, node_failed_line, PAST_THE_CAP};
 
 /// Why a node failed.
 ///

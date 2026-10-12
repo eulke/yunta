@@ -5,7 +5,9 @@
 pub mod happening;
 pub mod kinds;
 pub mod ledger;
+pub mod outcome;
 pub mod payloads;
+pub mod runner;
 
 pub use kinds::NodeEvent;
 pub use ledger::*;

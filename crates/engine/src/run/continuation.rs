@@ -167,7 +167,7 @@ pub(super) async fn not_resumed(ctx: &RunCtx<'_>, node: &Node) -> Result<(), Run
             yunta_core::events::CapabilityDegradedPayload::new(
                 yunta_core::Capability::ResumeSession,
                 adapter,
-                yunta_core::events::Policy::FreshSession,
+                yunta_core::port::Policy::FreshSession,
             ),
         )),
     )

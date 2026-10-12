@@ -281,7 +281,7 @@ mod tests {
     use std::time::Duration;
 
     use yunta_core::events::{
-        EventPayload, NodeEvent, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
+        EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, TokenUsage,
     };
     use yunta_testkit::{assert_golden, ENVIRONMENTS};
 
@@ -434,7 +434,7 @@ mod tests {
                 .node(
                     id,
                     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                        "exit 0".to_string(),
+                        NodeOutcome::Summary("exit 0".to_string()),
                         TokenUsage::default(),
                     ))),
                 );

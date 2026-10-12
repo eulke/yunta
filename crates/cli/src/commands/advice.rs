@@ -72,7 +72,9 @@ pub(crate) fn parked_on(on: &WaitingOn) -> String {
                 format!("node `{node}`")
             }
         },
-        WaitingOn::Run { reason } => yunta_core::text::one_line(reason),
+        WaitingOn::Run { reason } => {
+            yunta_core::text::one_line(&yunta_render::pause::sentence(reason))
+        }
     }
 }
 
@@ -103,7 +105,9 @@ pub(crate) fn parked_in_full(on: &WaitingOn) -> String {
             reason: Some(reason),
             ..
         }
-        | WaitingOn::Run { reason } => yunta_core::text::one_line(reason),
+        | WaitingOn::Run { reason } => {
+            yunta_core::text::one_line(&yunta_render::pause::sentence(reason))
+        }
         WaitingOn::Node { reason: None, .. } => parked_on(on),
     }
 }

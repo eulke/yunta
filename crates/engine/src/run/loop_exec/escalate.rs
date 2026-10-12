@@ -39,8 +39,9 @@ pub(super) async fn resolve_escalations(
     for pending in pending_escalations {
         let escalation =
             expansion_escalation(&pending, mode, max_per_run, *expansions_granted_this_run)
-                .map_err(|source| RunError::Broken {
-                    diagnostic: format!("task `{}`'s expansion request: {source}", pending.task_id),
+                .map_err(|source| RunError::Escalation {
+                    context: format!("task `{}`'s expansion request", pending.task_id),
+                    source,
                 })?;
         let Some(choice) = ctx
             .ask_human(Some(&node.id), Some(&pending.task_id), &escalation)
@@ -89,7 +90,7 @@ pub(super) async fn resolve_escalations(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Scope(ScopeEvent::Denied(ScopeExpansionDeniedPayload {
-                    task_id: pending.task_id.clone(),
+                    task_id: Some(pending.task_id.clone()),
                     decided_by,
                     mode,
                     count_this_run: *expansions_granted_this_run,
@@ -308,7 +309,7 @@ pub(super) async fn emit_scope_expansion_events(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Scope(ScopeEvent::Denied(ScopeExpansionDeniedPayload {
-                    task_id: task_id.clone(),
+                    task_id: Some(task_id.clone()),
                     decided_by: Decider::Rule,
                     mode,
                     count_this_run: *granted_this_run,

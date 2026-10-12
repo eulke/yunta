@@ -80,14 +80,13 @@ impl Lines {
 /// The one line a parked run shows, produced once and read by every
 /// surface that has to show it.
 ///
-/// `PauseReason` is the fact; its `Display` is the only prose. This
-/// checks the three places a reader meets it — the chronicle's own line,
-/// the closing verdict, and the page a `status` prints — say the same
-/// thing, for every reason a run can park on.
+/// This checks the three places a reader meets it — the chronicle's own
+/// line, the closing verdict, and the page a `status` prints — say the
+/// same thing, for every reason a run can park on.
 #[cfg(test)]
 mod pause_reason_tests {
     use yunta_core::events::{Escalation, Fact, Failure, PauseReason, RunEvent, RunPausedPayload};
-    use yunta_core::{NodeId, QuestionId};
+    use yunta_core::{NodeId, QuestionId, RunId};
     use yunta_engine::WaitingOn;
 
     use crate::commands::advice;
@@ -124,7 +123,9 @@ mod pause_reason_tests {
             PauseReason::ExternalGate {
                 url: "https://example.invalid/pull/1".to_string(),
             },
-            PauseReason::UncertainOrphans(vec![NodeId::from("review")]),
+            PauseReason::UncertainOrphans {
+                nodes: vec![NodeId::from("review")],
+            },
             PauseReason::NodeFailed {
                 node: NodeId::from("lint"),
                 failure: Failure::message("exit 1"),
@@ -139,7 +140,8 @@ mod pause_reason_tests {
             },
             PauseReason::ChildPaused {
                 node: NodeId::from("fanout"),
-                reason: "cancelled by user".to_string(),
+                run: RunId::from("child"),
+                child: Box::new(PauseReason::Cancelled),
             },
             PauseReason::Questions {
                 node: NodeId::from("scope"),
@@ -166,6 +168,9 @@ mod pause_reason_tests {
                     )],
                 ),
             },
+            PauseReason::Recorded {
+                sentence: "a sentence an older log stored".to_string(),
+            },
         ];
         for reason in &all {
             match reason {
@@ -176,13 +181,14 @@ mod pause_reason_tests {
                 | PauseReason::NoRoom { .. }
                 | PauseReason::LoopOverrun { .. }
                 | PauseReason::ExternalGate { .. }
-                | PauseReason::UncertainOrphans(_)
+                | PauseReason::UncertainOrphans { .. }
                 | PauseReason::NodeFailed { .. }
                 | PauseReason::Blocked { .. }
                 | PauseReason::GateAborted { .. }
                 | PauseReason::ChildPaused { .. }
                 | PauseReason::Questions { .. }
-                | PauseReason::AnswersRefused { .. } => {}
+                | PauseReason::AnswersRefused { .. }
+                | PauseReason::Recorded { .. } => {}
             }
         }
         all
@@ -191,13 +197,13 @@ mod pause_reason_tests {
     #[test]
     fn a_pause_reason_renders_once_at_the_border() {
         for reason in every_reason() {
-            let sentence = reason.to_string();
+            let sentence = yunta_render::pause::sentence(&reason);
             assert!(
                 !sentence.is_empty(),
                 "a reason a reader is shown says something"
             );
             let payload = RunPausedPayload::new(&reason);
-            assert_eq!(payload.reason(), sentence);
+            assert_eq!(payload.pause, reason);
 
             let said = chronicle::say(
                 &yunta_testkit::moment(
@@ -215,11 +221,35 @@ mod pause_reason_tests {
             );
 
             let waiting = WaitingOn::Run {
-                reason: payload.reason().to_string(),
+                reason: payload.pause.clone(),
             };
             let one_line = yunta_core::text::one_line(&sentence);
             assert_eq!(advice::parked_on(&waiting), one_line);
             assert_eq!(advice::parked_in_full(&waiting), one_line);
         }
+    }
+}
+
+/// The line a promotion says when its log names neither a cause nor a
+/// sentence: the mode alone, on the chronicle line every surface writes.
+#[cfg(test)]
+mod promotion_tests {
+    use yunta_core::events::{run, Evidence};
+
+    use super::super::chronicle;
+
+    #[test]
+    fn a_promotion_with_no_cause_recorded_reads_as_the_mode_alone() {
+        let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
+            to: "ship".into(),
+            cause: None,
+            legacy_reason: None,
+            evidence: Evidence::none(),
+        });
+        let said = chronicle::say(
+            &yunta_testkit::moment(None, promoted),
+            crate::render::Glyphs::Unicode,
+        );
+        assert_eq!(said.text, "run — promotion to `ship`");
     }
 }

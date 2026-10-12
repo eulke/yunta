@@ -10,7 +10,10 @@ use std::collections::BTreeMap;
 
 use crate::events::meta::EventMeta;
 use crate::events::scope::kinds::ScopeEvent;
-use crate::events::scope::payloads::ScopeDerivedPayload;
+use crate::events::scope::payloads::{
+    ScopeDerivedPayload, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
+};
+use crate::events::SubjectError;
 use crate::glob::ScopeGlob;
 use crate::ids::{NodeId, Seq, TaskId};
 
@@ -20,6 +23,9 @@ pub struct GrantLedger {
     per_task: BTreeMap<TaskId, Vec<ScopeGlob>>,
     /// The last answer each task's request got.
     answers: BTreeMap<TaskId, ScopeAnswer>,
+    /// The last answer each node's own request got: a denial that names
+    /// no task is answered to the node it is written under.
+    node_answers: BTreeMap<NodeId, ScopeAnswer>,
     per_node: BTreeMap<NodeId, NodeGrants>,
     /// The latest derivation stated for each task — each one replaces the
     /// one before, so a recut that changed its shapes changes its reach.
@@ -86,6 +92,11 @@ impl GrantLedger {
         self.answers.get(task)
     }
 
+    /// The last answer the scope request of `node`'s own scope got.
+    pub fn node_answer_for(&self, node: &NodeId) -> Option<&ScopeAnswer> {
+        self.node_answers.get(node)
+    }
+
     /// What the latest grant to `node`'s own scope added.
     pub fn last_granted_to_node_paths(&self, node: &NodeId) -> &[ScopeGlob] {
         self.per_node
@@ -116,47 +127,78 @@ impl GrantLedger {
     }
 
     /// Folds one scope-domain event. A grant that names no task widens
-    /// the node it is written under; one that names neither widens
-    /// nothing, and is still counted. A derivation replaces the task's
-    /// last one.
-    pub fn apply(&mut self, event: &ScopeEvent, meta: &EventMeta<'_>) {
+    /// the node it is written under. A grant or a denial that names
+    /// neither a task nor a node has no subject to widen or to answer: it
+    /// is refused, and counts for nothing. A derivation replaces the
+    /// task's last one.
+    pub fn apply(&mut self, event: &ScopeEvent, meta: &EventMeta<'_>) -> Result<(), SubjectError> {
         match event {
             ScopeEvent::Requested(_) => self.requested += 1,
             ScopeEvent::Granted(p) => {
+                self.widen(p, meta)?;
                 self.granted += 1;
-                match (&p.task_id, meta.node) {
-                    (Some(task), _) => {
-                        self.per_task
-                            .entry(task.clone())
-                            .or_default()
-                            .extend(p.paths.iter().cloned());
-                        self.answers
-                            .insert(task.clone(), ScopeAnswer::Granted(p.paths.clone()));
-                    }
-                    (None, Some(node)) => {
-                        let grants = self.per_node.entry(node.clone()).or_insert(NodeGrants {
-                            paths: Vec::new(),
-                            last_at: meta.seq,
-                            last_paths: Vec::new(),
-                        });
-                        grants.paths.extend(p.paths.iter().cloned());
-                        grants.last_at = meta.seq;
-                        grants.last_paths = p.paths.clone();
-                    }
-                    (None, None) => {}
-                }
             }
             ScopeEvent::Denied(p) => {
+                self.answer_denial(p, meta)?;
                 self.denied += 1;
-                self.answers.insert(
-                    p.task_id.clone(),
-                    ScopeAnswer::Denied(p.denial_reason.clone()),
-                );
             }
             ScopeEvent::Derived(p) => {
                 self.derived.insert(p.task_id.clone(), p.clone());
             }
         }
+        Ok(())
+    }
+
+    /// Adds a grant's paths to the task it names, or to the node it is
+    /// written under when it names no task.
+    fn widen(
+        &mut self,
+        p: &ScopeExpansionGrantedPayload,
+        meta: &EventMeta<'_>,
+    ) -> Result<(), SubjectError> {
+        match (&p.task_id, meta.node) {
+            (Some(task), _) => {
+                self.per_task
+                    .entry(task.clone())
+                    .or_default()
+                    .extend(p.paths.iter().cloned());
+                self.answers
+                    .insert(task.clone(), ScopeAnswer::Granted(p.paths.clone()));
+            }
+            (None, Some(node)) => {
+                let grants = self.per_node.entry(node.clone()).or_insert(NodeGrants {
+                    paths: Vec::new(),
+                    last_at: meta.seq,
+                    last_paths: Vec::new(),
+                });
+                grants.paths.extend(p.paths.iter().cloned());
+                grants.last_at = meta.seq;
+                grants.last_paths = p.paths.clone();
+            }
+            (None, None) => return Err(SubjectError::UngrantableSubject),
+        }
+        Ok(())
+    }
+
+    /// Answers a denied request for the task it names, or for the node it
+    /// is written under when it names no task.
+    fn answer_denial(
+        &mut self,
+        p: &ScopeExpansionDeniedPayload,
+        meta: &EventMeta<'_>,
+    ) -> Result<(), SubjectError> {
+        match (&p.task_id, meta.node) {
+            (Some(task), _) => {
+                self.answers
+                    .insert(task.clone(), ScopeAnswer::Denied(p.denial_reason.clone()));
+            }
+            (None, Some(node)) => {
+                self.node_answers
+                    .insert(node.clone(), ScopeAnswer::Denied(p.denial_reason.clone()));
+            }
+            (None, None) => return Err(SubjectError::UngrantableSubject),
+        }
+        Ok(())
     }
 }
 
@@ -172,7 +214,9 @@ mod tests {
             at: chrono::DateTime::UNIX_EPOCH,
             node: None,
         };
-        ledger.apply(&event, &meta);
+        ledger
+            .apply(&event, &meta)
+            .expect("the fixture names its subject");
     }
 
     fn derived(paths: &[&str]) -> ScopeEvent {

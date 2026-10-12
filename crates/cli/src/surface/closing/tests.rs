@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    CommandExit, Escalation, Fact, Failure, GateOption, NodeWait, TokenUsage,
+    CommandExit, Escalation, Fact, Failure, GateOption, NodeOutcome, NodeWait, PauseReason,
+    TokenUsage,
 };
 use yunta_core::{ContentHash, NonEmpty};
 use yunta_engine::{Counter, WaitingOn};
@@ -34,7 +35,7 @@ fn finished(id: &str) -> NodeFrame {
     reached(
         id,
         NodeState::Finished {
-            outcome: "exit 0".to_string(),
+            outcome: NodeOutcome::Summary("exit 0".to_string()),
             tokens: TokenUsage::default(),
         },
     )
@@ -88,7 +89,8 @@ fn frame(phase: RunPhase, nodes: Vec<NodeFrame>) -> RunFrame {
     }
 }
 
-fn exhausted() -> GateWaitingPayload {
+/// The escalation a node parks on once its re-routes are spent.
+fn exhausted_escalation() -> Escalation {
     let option = |id: &'static str, label: &str, tradeoff: &str| GateOption {
         id: yunta_core::OptionId::from_static(id),
         label: label.to_string(),
@@ -112,7 +114,10 @@ fn exhausted() -> GateWaitingPayload {
         )),
     )
     .expect("the summary states no fact the evidence holds")
-    .into_payload()
+}
+
+fn exhausted() -> GateWaitingPayload {
+    exhausted_escalation().into_payload()
 }
 
 fn closing(frame: RunFrame, decision: Option<(NodeId, GateWaitingPayload)>) -> Closing {
@@ -162,11 +167,7 @@ fn cases() -> Vec<(&'static str, Closing)> {
         on: WaitingOn::Node {
             node: NodeId::from("lint"),
             on: NodeWait::Gate { external_ref: None },
-            reason: Some(
-                "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted \
-                 — exit 101"
-                    .to_string(),
-            ),
+            reason: Some(PauseReason::Escalation(Box::new(exhausted_escalation()))),
         },
     };
     let mut reported = frame(

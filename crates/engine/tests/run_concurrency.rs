@@ -5,7 +5,7 @@ use yunta_testkit::{git, git_output, Bench};
 
 mod common;
 use common::*;
-use yunta_core::events::{ArtifactEvent, NodeEvent, RunEvent, TaskEvent};
+use yunta_core::events::{ArtifactEvent, Failure, NodeEvent, PauseReason, RunEvent, TaskEvent};
 
 #[tokio::test]
 async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
@@ -76,13 +76,14 @@ fn orphan_a_node(bench: &Bench, node: &str) {
     bench
         .storage
         .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some(node.into()),
-                payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+            &yunta_core::events::EventDraft::new(
+                bench.run_id.clone(),
+                Some(node.into()),
+                yunta_core::events::EventPayload::Node(NodeEvent::Started(
                     yunta_core::events::NodeStartedPayload::attempt(1),
                 )),
-            },
+            )
+            .expect("a draft names its subject"),
             &yunta_core::SystemClock,
         )
         .expect("the log takes the start a crash left behind");
@@ -142,26 +143,14 @@ nodes:
 
     let RunReport { terminal, .. } = bench
         .run_sabotaged(workflow, "sessions: []", |_run_dir| {
-            // Same simulated crash as the restart_node test: node_started with no
-            // terminal event.
-            bench
-                .storage
-                .append(
-                    &yunta_core::events::EventDraft {
-                        run_id: bench.run_id.clone(),
-                        node_id: Some("only".into()),
-                        payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                            yunta_core::events::NodeStartedPayload::attempt(1),
-                        )),
-                    },
-                    &yunta_core::SystemClock,
-                )
-                .unwrap();
+            orphan_a_node(&bench, "only");
         })
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "a node was running with no terminal event when the engine last stopped: `only` — `on_interrupt: fail_if_uncertain` refuses to guess how each ended; verify manually before resuming"),
+        RunTerminal::Paused {
+            reason: PauseReason::UncertainOrphans { nodes },
+        } => assert_eq!(nodes, vec![yunta_core::NodeId::from("only")]),
         other => panic!("expected Paused, got {other:?}"),
     }
     // Never restarted: no second node_started attempt was ever emitted.
@@ -271,10 +260,16 @@ nodes:
 
     let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `pre-launch` failed: child `load-test` failed under join: all"
-        ),
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    node,
+                    failure: Failure::Message { outcome },
+                },
+        } => {
+            assert_eq!(node.as_str(), "pre-launch");
+            assert_eq!(outcome, "child `load-test` failed under join: all");
+        }
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
@@ -340,30 +335,33 @@ nodes:
             // Simulate a crash mid-group: the parallel node and one child
             // (write-docs) finished; the other child (load-test) never started.
             for event in [
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("pre-launch".into()),
-                    payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("pre-launch".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
                         yunta_core::events::NodeStartedPayload::attempt(1),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("write-docs".into()),
-                    payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("write-docs".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
                         yunta_core::events::NodeStartedPayload::attempt(1),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("write-docs".into()),
-                    payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("write-docs".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Finished(
                         yunta_core::events::NodeFinishedPayload::new(
-                            "exit 0".to_string(),
+                            yunta_core::events::NodeOutcome::Summary("exit 0".to_string()),
                             Default::default(),
                         ),
                     )),
-                },
+                )
+                .expect("a draft names its subject"),
             ] {
                 bench
                     .storage
@@ -563,10 +561,13 @@ nodes:
     // a.txt" once a.txt is permanently integrated) — that's expected, not
     // a test bug: the point here is task-a's own success was untouched.
     match terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("task-b"),
-            "the pause names the task the run gave up on: {reason}"
-        ),
+        RunTerminal::Paused { reason } => {
+            let words = yunta_render::pause::sentence(&reason);
+            assert!(
+                words.contains("task-b"),
+                "the pause names the task the run gave up on: {words}"
+            );
+        }
         other => panic!("expected the run to eventually pause on task-b, got {other:?}"),
     }
     assert_eq!(
@@ -663,30 +664,32 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             git(&bench.worktree, &["merge", "--ff-only", task_p_branch]);
 
             for event in [
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("plan".into()),
-                    payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
                         yunta_core::events::NodeStartedPayload::attempt(1),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("plan".into()),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
                     // A log written before `artifact_accepted` existed: the
                     // fold reads it as the same artifact under the same hash.
-                    payload: yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Written(
+                    yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Written(
                         yunta_core::events::ArtifactWrittenPayload {
                             path: "artifacts/plan.yaml".into(),
                             content_hash: tasks_hash.clone(),
                             artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
                         },
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("plan".into()),
-                    payload: yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(
                         yunta_core::events::TaskRegisteredPayload {
                             task_id: "task-p".into(),
                             criteria: vec![],
@@ -694,11 +697,12 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                             depends_on: vec![],
                         },
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("plan".into()),
-                    payload: yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(
                         yunta_core::events::TaskRegisteredPayload {
                             task_id: "task-q".into(),
                             criteria: vec![],
@@ -706,57 +710,63 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                             depends_on: vec![],
                         },
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("plan".into()),
-                    payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Finished(
                         yunta_core::events::NodeFinishedPayload::new(
-                            "planned".to_string(),
+                            yunta_core::events::NodeOutcome::Summary("planned".to_string()),
                             Default::default(),
                         ),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("implement".into()),
-                    payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
                         yunta_core::events::NodeStartedPayload::attempt(1),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("implement".into()),
-                    payload: yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
                         yunta_core::events::TaskStatusChangedPayload::to(
                             "task-p".into(),
                             yunta_core::events::TaskStatus::Running,
                             1.into(),
                         ),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("implement".into()),
-                    payload: yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
                         yunta_core::events::TaskStatusChangedPayload::to(
                             "task-q".into(),
                             yunta_core::events::TaskStatus::Running,
                             1.into(),
                         ),
                     )),
-                },
-                yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some("implement".into()),
-                    payload: yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
                         yunta_core::events::TaskStatusChangedPayload::to(
                             "task-p".into(),
                             yunta_core::events::TaskStatus::Done,
                             1.into(),
                         ),
                     )),
-                },
+                )
+                .expect("a draft names its subject"),
                 // task-q never got a follow-up — orphaned Running, no p.txt-style
                 // commit ever landed for it.
             ] {
@@ -1020,13 +1030,14 @@ nodes:
                 bench
                     .storage
                     .append(
-                        &yunta_core::events::EventDraft {
-                            run_id: bench.run_id.clone(),
-                            node_id: Some(node.into()),
-                            payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        &yunta_core::events::EventDraft::new(
+                            bench.run_id.clone(),
+                            Some(node.into()),
+                            yunta_core::events::EventPayload::Node(NodeEvent::Started(
                                 yunta_core::events::NodeStartedPayload::attempt(1),
                             )),
-                        },
+                        )
+                        .expect("a draft names its subject"),
                         &yunta_core::SystemClock,
                     )
                     .unwrap();

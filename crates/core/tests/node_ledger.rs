@@ -1,7 +1,8 @@
 //! What a node's record remembers across its attempts.
 
 use yunta_core::events::{
-    EventMeta, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeStartedPayload, TokenUsage,
+    EventMeta, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeOutcome, NodeStartedPayload,
+    TokenUsage,
 };
 use yunta_core::{NodeId, TreeId};
 
@@ -83,7 +84,7 @@ fn fold_nodes(events: Vec<(&str, NodeEvent)>) -> NodeLedger {
 
 fn finished(tree: &str) -> NodeEvent {
     NodeEvent::Finished(yunta_core::events::NodeFinishedPayload::leaving(
-        "ok",
+        NodeOutcome::Summary("ok".to_string()),
         TokenUsage::default(),
         tree.parse().unwrap(),
     ))
@@ -160,7 +161,7 @@ fn a_new_attempt_starts_unmarked() {
 fn rerouted(origin: yunta_core::events::RerouteOrigin) -> NodeEvent {
     NodeEvent::Rerouted(yunta_core::events::NodeReroutedPayload::new(
         NodeId::from_static("spec"),
-        yunta_core::events::RerouteCause(yunta_core::events::Failure::message("sent back")),
+        Failure::message("sent back"),
         origin,
         Some(1),
         Some(1),

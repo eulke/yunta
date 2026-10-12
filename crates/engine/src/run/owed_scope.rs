@@ -59,7 +59,7 @@ pub(super) async fn answer(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError
             })
         } else {
             ScopeEvent::Denied(ScopeExpansionDeniedPayload {
-                task_id: request.task_id.clone(),
+                task_id: Some(request.task_id.clone()),
                 decided_by,
                 mode: ScopeExpansionMode::Ask,
                 count_this_run: granted,
@@ -88,7 +88,7 @@ fn answered_since(
                 granted.task_id.as_ref() == Some(&request.task_id)
             }
             Some(EventPayload::Scope(ScopeEvent::Denied(denied))) => {
-                denied.task_id == request.task_id
+                denied.task_id.as_ref() == Some(&request.task_id)
             }
             _ => false,
         })

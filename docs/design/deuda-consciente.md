@@ -108,9 +108,10 @@ difiere.
 `claude-code`, la forja de GitHub, `yunta mcp` montado en un cliente real, el MCP
 por-run con un agente real y `pack add` contra un host remoto están construidos
 contra documentación y ejemplos reales, sin una corrida contra el sistema que
-describen (`status.md`). Los dos cercos son parte de eso: qué parte del stderr del
-hook de Claude Code llega al `tool_result` del stream, y con qué marca `codex` un
-proceso que su sandbox denegó. Es deuda porque lo único que confirma el contrato de
+describen (`status.md`). Del cerco queda una pregunta: qué parte del stderr del hook
+de Claude Code llega al `tool_result` del stream. La otra ya está medida: `codex`
+0.157.0 no emite ningún ítem para un proceso que su sandbox denegó
+(`smoke-checklist.md`, sección G). Es deuda porque lo único que confirma el contrato de
 un sistema ajeno es una corrida contra él: hasta que ocurra, el comportamiento que el
 adapter espera es el documentado y no el medido. La resuelve la checklist de
 `smoke-checklist.md`, que describe cada corrida y su protocolo —cada divergencia se

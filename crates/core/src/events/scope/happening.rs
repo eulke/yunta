@@ -55,7 +55,7 @@ impl From<&ScopeEvent> for Happening {
                 },
             },
             ScopeEvent::Denied(p) => Happening::Expansion {
-                task: Some(p.task_id.clone()),
+                task: p.task_id.clone(),
                 step: Step::Denied {
                     by: p.decided_by.clone(),
                     reason: p.denial_reason.clone(),

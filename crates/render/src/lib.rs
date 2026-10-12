@@ -1,8 +1,9 @@
 //! How Yunta tells a reader things: the columns a line is built from,
 //! the step every block is indented by, the bars and sparklines that
 //! carry a magnitude, the words a run's and a node's state and a
-//! decision's options are called by, and the characters it is all drawn
-//! with.
+//! decision's options are called by, the sentences a log's typed facts
+//! are read as (why a run paused, how a node ended, which fallback the
+//! engine took), and the characters it is all drawn with.
 //!
 //! One crate, because two readers told the same fact in two words — a
 //! person at a terminal, a file the engine writes, a pull request — read
@@ -24,6 +25,7 @@ pub mod color;
 pub mod diagram;
 pub mod doc;
 pub mod escalation;
+pub mod evidence;
 mod findings;
 mod fold;
 pub mod glyphs;
@@ -31,8 +33,11 @@ pub mod ink;
 pub mod line_width;
 pub mod look;
 pub mod markdown;
+pub mod outcome;
 pub mod paths;
+pub mod pause;
 mod plan;
+pub mod policy;
 pub mod prose;
 pub mod published;
 pub mod receipt;
@@ -41,6 +46,7 @@ pub mod shown;
 mod spec;
 pub mod state;
 pub mod surface;
+pub mod target;
 pub mod width;
 
 pub use bars::{bar, bar_cells, sparkline};

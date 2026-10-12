@@ -220,7 +220,7 @@ fn measure() -> BTreeMap<String, usize> {
     // A `_ =>` inside a ledger's fold is a kind that derives nothing
     // with nothing saying so: the arm exists, the reader sees no
     // diagnostic, and the state is simply wrong. Every kind is named,
-    // and one that moves nothing says `is_audit`.
+    // and one that moves nothing is listed by name in the replay test.
     counts.insert(
         "wildcard_in_ledger_apply".to_string(),
         wildcards_in_folds(&root),

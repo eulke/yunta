@@ -72,6 +72,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+use yunta_core::events::PauseReason;
 use yunta_core::port::{Adapter, Forge, ForgeError};
 use yunta_core::{
     AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
@@ -152,6 +153,15 @@ pub enum RunError {
 
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
+
+    /// An escalation the engine built could not be put together: its claim
+    /// repeats the record it is audited against. The error keeps the fact
+    /// that repeats as data, and the surface that shows the error draws it.
+    #[error("run is broken: {context}: {source}")]
+    Escalation {
+        context: String,
+        source: yunta_core::events::EscalationError,
+    },
 
     /// The invocation's token fired while the run was being born, or
     /// while it was preparing the tree a run works on. A birth has no
@@ -344,14 +354,15 @@ fn cancelled_within(error: &TaskCycleError) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunTerminal {
     Finished,
+    /// The pause the run stopped on, as its log records it.
     Paused {
-        reason: String,
+        reason: PauseReason,
     },
     /// A node failed and the run's `defaults.on_failure` closed the run
     /// as failed rather than pausing it (`abort` at the first failure,
     /// `continue` once the rest of the graph has run). `run_finished`
     /// (`terminal_state: Failed`) is on the log; `reason` names the
-    /// causing node, the same shape a `Paused` reason takes.
+    /// causing node, in the words a `NodeFailed` pause gives it.
     Failed {
         reason: String,
     },

@@ -23,6 +23,7 @@ use yunta_core::rail::RailAnswer;
 use yunta_core::{ArtifactSpec, ContentHash, RunTool, SessionId};
 
 use super::host::TaskAccess;
+use super::rail::refused_writes;
 use super::session::{RunToolError, SessionTools};
 use crate::artifacts::{answerer, Answerer, RunArtifacts};
 use crate::process::Printed;
@@ -55,8 +56,16 @@ impl SessionTools {
                 return RailAnswer::Proceed;
             }
         };
-        if self.stop.is_cancelled() || self.scope_owed(&unfinished).await {
+        if self.stop.is_cancelled() {
             return RailAnswer::Proceed;
+        }
+        match self.scope_owed(session, &unfinished).await {
+            Ok(false) => {}
+            Ok(true) => return RailAnswer::Proceed,
+            Err(error) => {
+                tracing::debug!(%error, "a stop's scope owed went unread");
+                return RailAnswer::Proceed;
+            }
         }
         match self.refused_before(session, &unfinished.state).await {
             Ok(false) => {}
@@ -207,20 +216,28 @@ impl SessionTools {
 
     /// Whether the attempt's end owes this session an answer about its
     /// scope: a request it made, or a write it was refused that a red
-    /// criterion locates.
-    async fn scope_owed(&self, unfinished: &Unfinished) -> bool {
+    /// criterion locates. The log is read only when a red criterion has
+    /// output to locate a write in.
+    async fn scope_owed(
+        &self,
+        session: &SessionId,
+        unfinished: &Unfinished,
+    ) -> Result<bool, RunToolError> {
         let request = self
             .cwd
             .join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
         if tokio::fs::try_exists(&request).await.unwrap_or(false) {
-            return true;
+            return Ok(true);
         }
-        let refused = self.rails.refused();
-        !refused.is_empty()
+        if unfinished.red.is_empty() {
+            return Ok(false);
+        }
+        let refused = refused_writes(&self.events().await?, std::slice::from_ref(session));
+        Ok(!refused.is_empty()
             && unfinished
                 .red
                 .iter()
-                .any(|printed| crate::task_cycle::locates_a_refusal(printed, &self.cwd, &refused))
+                .any(|printed| crate::task_cycle::locates_a_refusal(printed, &self.cwd, &refused)))
     }
 
     /// Whether `session` was sent back already with its work at `state`.

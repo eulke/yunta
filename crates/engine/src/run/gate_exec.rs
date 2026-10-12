@@ -17,8 +17,9 @@
 //! [`flawed`](super::flawed) sends it back instead.
 
 use yunta_core::events::{
-    Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
-    GateResolvedPayload, NodeStartedPayload, PauseReason, Shown, TokenUsage,
+    Approval, EngineFact, Escalation, EventPayload, Fact, Finding, FindingPostedPayload,
+    FindingSeverity, GateResolvedPayload, NodeOutcome, NodeStartedPayload, PauseReason, Shown,
+    TokenUsage,
 };
 use yunta_core::port::{
     Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome,
@@ -105,8 +106,9 @@ pub(super) async fn publish_gate(
                 vec![Fact::labelled("published at", published.url.clone())].into(),
                 encode_ref(&published),
             )
-            .map_err(|source| RunError::Broken {
-                diagnostic: format!("node `{}`'s external gate: {source}", node.id),
+            .map_err(|source| RunError::Escalation {
+                context: format!("node `{}`'s external gate", node.id),
+                source,
             })?
             .into_payload(),
         )),
@@ -223,7 +225,7 @@ async fn resolve_approved(
     node: &Node,
     by: &Responder,
     approved_sha: &CommitSha,
-    outcome: String,
+    on: Approval,
 ) -> Result<GateStep, RunError> {
     emit_started(ctx, node).await?;
     ctx.emit(
@@ -234,7 +236,13 @@ async fn resolve_approved(
         })),
     )
     .await?;
-    finish_node(ctx, node, outcome, TokenUsage::default()).await?;
+    finish_node(
+        ctx,
+        node,
+        NodeOutcome::Fact(EngineFact::Approved { by: by.clone(), on }),
+        TokenUsage::default(),
+    )
+    .await?;
     Ok(GateStep::Resolved)
 }
 
@@ -246,12 +254,12 @@ async fn resolve_from_poll(
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
-            resolve_approved(ctx, node, by, &polled.head_sha, format!("approved by {by}")).await
+            resolve_approved(ctx, node, by, &polled.head_sha, Approval::Review).await
         }
         // A merge is an approval that also landed: the evidence is the
         // merge commit, and nothing can move the branch after it.
         ReviewOutcome::Merged { by, merge_sha } => {
-            resolve_approved(ctx, node, by, merge_sha, format!("merged by {by}")).await
+            resolve_approved(ctx, node, by, merge_sha, Approval::Merge).await
         }
         // Like an approval, a request for changes decides what it
         // reviewed: one left on an earlier head waits for a review of

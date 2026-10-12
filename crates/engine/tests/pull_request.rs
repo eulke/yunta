@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{run_left_out, EventPayload, NodeEvent, StoredEvent};
+use yunta_core::events::{
+    run_left_out, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
+};
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
 use yunta_engine::{CheckError, RunReport, RunTerminal};
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
@@ -169,9 +171,13 @@ async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert!(reason.contains("token_env"), "{reason}")
-        }
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    failure: Failure::Message { outcome },
+                    ..
+                },
+        } => assert!(outcome.contains("token_env"), "{outcome}"),
         other => panic!("expected the run to pause, got {other:?}"),
     }
 }

@@ -34,13 +34,14 @@ fn a_run_whose_host_slept() -> (tempfile::TempDir, String) {
     for slept in [60 * 60, 20 * 60] {
         storage
             .append_at(
-                &EventDraft {
-                    run_id: id.clone(),
-                    node_id: None,
-                    payload: EventPayload::Run(RunEvent::HostSuspended(
-                        HostSuspendedPayload::slept(Duration::from_secs(slept)),
-                    )),
-                },
+                &EventDraft::new(
+                    id.clone(),
+                    None,
+                    EventPayload::Run(RunEvent::HostSuspended(HostSuspendedPayload::slept(
+                        Duration::from_secs(slept),
+                    ))),
+                )
+                .expect("a draft names its subject"),
                 last,
             )
             .unwrap();

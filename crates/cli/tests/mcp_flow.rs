@@ -1292,7 +1292,7 @@ async fn answer_questions_pre_seeds_the_answer_and_resume_finishes_the_node() {
          `Channel::Mcp` is for: {text}"
     );
     assert!(
-        text.matches("questions_answered").count() == 1,
+        text.matches("\"kind\":\"questions_answered\"").count() == 1,
         "the refused reply wrote nothing: {text}"
     );
 }

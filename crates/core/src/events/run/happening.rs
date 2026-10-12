@@ -1,6 +1,9 @@
 //! What a run-level event says happened, read as a person reads it.
 
-use crate::events::{BaselineOrigin, Evidence, ResumePolicy, RunEvent, TerminalState, TokenUsage};
+use crate::events::{
+    BaselineOrigin, Evidence, PauseReason, PromotionCause, ResumePolicy, RunEvent, TerminalState,
+    TokenUsage,
+};
 use crate::ModeName;
 
 /// One thing that happened to the run itself.
@@ -10,11 +13,9 @@ pub enum Happening {
         mode: ModeName,
         base_branch: String,
     },
-    /// The sentence the engine wrote when it stopped the run. The log
-    /// persists the reason as prose rather than as the enum that built
-    /// it, so this is what a reader of the log has.
+    /// Why the engine stopped the run, as the fact its log records.
     Paused {
-        reason: String,
+        pause: PauseReason,
     },
     /// The policies a resume settled its orphans under. A resume that
     /// found none names none; one that found orphans disagreeing about
@@ -51,7 +52,8 @@ pub enum Happening {
     },
     PromotionSignaled {
         to: ModeName,
-        reason: String,
+        cause: Option<PromotionCause>,
+        legacy_reason: Option<String>,
         evidence: Evidence,
     },
 }
@@ -64,7 +66,7 @@ impl From<&RunEvent> for Happening {
                 base_branch: p.base_branch.clone(),
             },
             RunEvent::Paused(p) => Happening::Paused {
-                reason: p.reason().to_string(),
+                pause: p.pause.clone(),
             },
             RunEvent::Resumed(p) => Happening::Resumed {
                 policies: p.policies.clone(),
@@ -90,9 +92,52 @@ impl From<&RunEvent> for Happening {
             },
             RunEvent::PromotionSignaled(p) => Happening::PromotionSignaled {
                 to: p.suggested_mode.clone(),
-                reason: p.reason.clone(),
+                cause: p.cause.clone(),
+                legacy_reason: p.legacy_reason().map(str::to_string),
                 evidence: p.evidence.clone(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{PromotionSignaledPayload, RunPausedPayload};
+
+    /// A pause an older writer stored as a sentence reads as the recorded
+    /// pause, with the sentence as written.
+    #[test]
+    fn a_legacy_pause_sentence_reads_as_the_recorded_pause() {
+        let legacy = serde_json::json!({ "reason": "waiting" });
+        let read: RunPausedPayload = serde_json::from_value(legacy).unwrap();
+        let recorded = PauseReason::Recorded {
+            sentence: "waiting".to_string(),
+        };
+        assert_eq!(
+            Happening::from(&RunEvent::Paused(read)),
+            Happening::Paused { pause: recorded }
+        );
+    }
+
+    /// A promotion an older writer stored as a sentence reads with no
+    /// cause, and keeps the sentence as written.
+    #[test]
+    fn a_legacy_promotion_sentence_reads_with_no_cause() {
+        let legacy = serde_json::json!({
+            "reason": "exhausted",
+            "evidence": [],
+            "suggested_mode": "standard",
+        });
+        let read: PromotionSignaledPayload = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            Happening::from(&RunEvent::PromotionSignaled(read)),
+            Happening::PromotionSignaled {
+                to: ModeName::from_static("standard"),
+                cause: None,
+                legacy_reason: Some("exhausted".to_string()),
+                evidence: Evidence::none(),
+            }
+        );
     }
 }

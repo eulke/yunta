@@ -68,13 +68,11 @@ pub struct GateWaitingPayload {
     /// straight from the log.
     pub(super) evidence: Evidence,
     pub(super) options: Vec<GateOption>,
-    /// The forge's own handle for this gate — a PR URL,
-    /// today — `None` for the internal escalation case (exhausted
-    /// re-routes) this payload already covered before external
-    /// gates existed. Round-trips the forge's `PullRequestRef` through
-    /// the log so a later `poll` (from a completely different process
-    /// waking up to check on the gate) knows what to poll without
-    /// re-publishing.
+    /// The forge's own handle for this gate, such as a pull request's
+    /// URL; `None` for an internal escalation, such as exhausted
+    /// re-routes. It carries the forge's `PullRequestRef` through the
+    /// log, so a later `poll` from another process knows what to poll
+    /// without publishing again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_ref: Option<String>,
     /// The artifacts the decision is about, as the person was shown
@@ -107,21 +105,22 @@ pub enum EscalationError {
     /// The claim repeats a fact the record already holds. Every surface
     /// prints the two under separate headings, so a summary that quotes
     /// its own evidence reads as the same sentence twice, the second
-    /// time under a heading that promised something new.
-    #[error("the summary repeats what the evidence already states: `{fact}`")]
-    SummaryRepeatsEvidence { fact: String },
+    /// time under a heading that promised something new. The fact is
+    /// carried as data; a surface that shows it draws it.
+    #[error("the summary repeats what the evidence already states")]
+    SummaryRepeatsEvidence { fact: Fact },
 }
 
 /// An escalation on its way to a person: the claim, the record it is
 /// audited against, and the menu of answers.
 ///
-/// The one way a `gate_waiting` payload comes to exist. It used to be
-/// built by four independent callers, each deciding for itself which
-/// half of the story went into the summary and which into the evidence,
-/// and one of them shipped an empty menu — an escalation that refuses
-/// every answer it is given. Here the split is decided once and the
-/// menu cannot be empty by type.
-#[derive(Debug, Clone, PartialEq)]
+/// The one way a `gate_waiting` payload comes to exist: which half of the
+/// story goes into the summary and which into the evidence is decided
+/// here, once, and the menu cannot be empty by type, since an escalation
+/// with no options refuses every answer it is given.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(from = "GateWaitingPayload", into = "GateWaitingPayload")]
+#[schemars(with = "GateWaitingPayload")]
 pub struct Escalation(pub(super) GateWaitingPayload);
 
 impl Escalation {
@@ -133,7 +132,7 @@ impl Escalation {
     ) -> Result<Self, EscalationError> {
         let summary = summary.into();
         if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
-            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.line() });
+            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() });
         }
         Ok(Escalation(GateWaitingPayload {
             summary,
@@ -160,7 +159,7 @@ impl Escalation {
     ) -> Result<Self, EscalationError> {
         let summary = summary.into();
         if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
-            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.line() });
+            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() });
         }
         Ok(Escalation(GateWaitingPayload {
             summary,
@@ -181,6 +180,19 @@ impl Escalation {
     /// The payload, for the event that carries it.
     pub fn into_payload(self) -> GateWaitingPayload {
         self.0
+    }
+}
+
+impl From<GateWaitingPayload> for Escalation {
+    /// A payload read off the log is taken as written, without re-checking its claim.
+    fn from(payload: GateWaitingPayload) -> Self {
+        Escalation(payload)
+    }
+}
+
+impl From<Escalation> for GateWaitingPayload {
+    fn from(escalation: Escalation) -> Self {
+        escalation.0
     }
 }
 
@@ -264,18 +276,6 @@ impl GateWaitingPayload {
             }),
             _ => Ok(()),
         }
-    }
-
-    /// The escalation on one line — its claim, then the facts behind
-    /// it — for a surface with room for exactly one: the reason a
-    /// `run_paused` records, and the row a listing gives a run.
-    ///
-    /// A surface with room for two parts heads each separately; a line
-    /// has room for neither heading. Composing them here is what keeps
-    /// the page and the line from disagreeing about what an escalation
-    /// says.
-    pub fn sentence(&self) -> String {
-        crate::text::aside(&self.summary, &self.evidence.one_line())
     }
 
     /// The menu's option ids as one comma-separated line, for a message

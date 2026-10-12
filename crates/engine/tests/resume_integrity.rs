@@ -63,11 +63,12 @@ fn interrupt(bench: &Bench) {
     bench
         .storage
         .append(
-            &EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("only".into()),
-                payload: EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-            },
+            &EventDraft::new(
+                bench.run_id.clone(),
+                Some("only".into()),
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+            )
+            .expect("a draft names its subject"),
             &SystemClock,
         )
         .unwrap();
@@ -208,17 +209,16 @@ async fn a_run_whose_log_predates_the_object_store_resumes_and_says_what_it_coul
             bench
                 .storage
                 .append(
-                    &EventDraft {
-                        run_id: bench.run_id.clone(),
-                        node_id: Some("only".into()),
-                        payload: EventPayload::Artifacts(ArtifactEvent::Written(
-                            ArtifactWrittenPayload {
-                                path: PathBuf::from("artifacts/legacy.md"),
-                                content_hash: sha256_hex(b"bytes this run never stored"),
-                                artifact_kind: None,
-                            },
-                        )),
-                    },
+                    &EventDraft::new(
+                        bench.run_id.clone(),
+                        Some("only".into()),
+                        EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
+                            path: PathBuf::from("artifacts/legacy.md"),
+                            content_hash: sha256_hex(b"bytes this run never stored"),
+                            artifact_kind: None,
+                        })),
+                    )
+                    .expect("a draft names its subject"),
                     &SystemClock,
                 )
                 .unwrap();

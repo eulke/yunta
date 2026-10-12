@@ -14,7 +14,7 @@ use crate::events::run::kinds::RunEvent;
 use crate::events::run::suspensions::{Suspension, Suspensions};
 use crate::events::{
     BaselineCapturedPayload, BaselineHeldPayload, BaselineOrigin, EnvironmentDrift, Evidence,
-    ExecutionEnvironment, TerminalState, TokenUsage,
+    ExecutionEnvironment, PauseReason, PromotionCause, TerminalState, TokenUsage,
 };
 use crate::ids::{ModeName, Seq};
 
@@ -34,11 +34,14 @@ pub enum RunPhaseRaw {
     Closed,
 }
 
-/// A promotion the run signalled: the mode it asked for and why.
+/// A promotion the run signalled: the mode it asked for, what asked for
+/// it, and the record it rests on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Promotion {
     pub to: ModeName,
-    pub reason: String,
+    pub cause: Option<PromotionCause>,
+    /// The sentence an older log stored in place of `cause`.
+    pub legacy_reason: Option<String>,
     pub evidence: Evidence,
     pub at: Seq,
 }
@@ -51,7 +54,7 @@ pub struct RunLedger {
     left_out: Vec<crate::LeftOut>,
     born_at: Option<DateTime<Utc>>,
     closed: Option<(TerminalState, Seq)>,
-    paused: Option<(String, Seq)>,
+    paused: Option<(PauseReason, Seq)>,
     resumed_after: Option<Seq>,
     promotion: Option<Promotion>,
     /// What the run's own close reported it spent. A run that has not
@@ -200,11 +203,11 @@ impl RunLedger {
 
     /// Why the run is parked, when it is: a `run_paused` with no
     /// `run_resumed` after it.
-    pub fn paused(&self) -> Option<(&str, Seq)> {
+    pub fn paused(&self) -> Option<(&PauseReason, Seq)> {
         self.paused
             .as_ref()
             .filter(|(_, at)| self.resumed_after.is_none_or(|resumed| resumed < *at))
-            .map(|(reason, at)| (reason.as_str(), *at))
+            .map(|(pause, at)| (pause, *at))
     }
 
     /// Where the latest `run_paused` sits, whether or not a resume came
@@ -244,7 +247,7 @@ impl RunLedger {
             RunEvent::Paused(p) => {
                 self.woken = true;
                 self.phase = RunPhaseRaw::Paused;
-                self.paused = Some((p.reason().to_string(), meta.seq));
+                self.paused = Some((p.pause.clone(), meta.seq));
             }
             RunEvent::Resumed(p) => {
                 self.woken = true;
@@ -286,7 +289,8 @@ impl RunLedger {
             RunEvent::PromotionSignaled(p) => {
                 self.promotion = Some(Promotion {
                     to: p.suggested_mode.clone(),
-                    reason: p.reason.clone(),
+                    cause: p.cause.clone(),
+                    legacy_reason: p.legacy_reason().map(str::to_string),
                     evidence: p.evidence.clone(),
                     at: meta.seq,
                 });
@@ -298,7 +302,7 @@ impl RunLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{RunCreatedPayload, RunResumedPayload};
+    use crate::events::{RunCreatedPayload, RunPausedPayload, RunResumedPayload};
 
     fn environment(path: &str) -> ExecutionEnvironment {
         ExecutionEnvironment {
@@ -440,5 +444,24 @@ mod tests {
         let written = serde_json::to_string(&born).unwrap();
         let read: RunCreatedPayload = serde_json::from_str(&written).unwrap();
         assert_eq!(read, born);
+    }
+
+    /// A pause reads back as the fact its event recorded, until a resume
+    /// after it ends the pause.
+    #[test]
+    fn a_pause_is_the_fact_it_recorded_until_a_resume_follows() {
+        let mut ledger = RunLedger::default();
+        at(&mut ledger, 1, RunEvent::Created(born_in(None)));
+        let pause = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
+        at(
+            &mut ledger,
+            2,
+            RunEvent::Paused(RunPausedPayload::new(&pause)),
+        );
+        assert_eq!(ledger.paused(), Some((&pause, Seq::from(2_u64))));
+
+        let resumed = RunResumedPayload::new(Vec::new(), None);
+        at(&mut ledger, 3, RunEvent::Resumed(resumed));
+        assert_eq!(ledger.paused(), None);
     }
 }

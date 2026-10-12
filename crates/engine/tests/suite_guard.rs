@@ -4,7 +4,7 @@
 
 use yunta_core::events::{
     BaselineCapturedPayload, BaselineOrigin, BaselineResults, CriterionResult, CriterionType,
-    EventPayload, NodeEvent, Phase, RunEvent, SessionEvent, TaskStatus,
+    EngineFact, EventPayload, NodeEvent, NodeOutcome, Phase, RunEvent, SessionEvent, TaskStatus,
 };
 use yunta_core::{Criterion, RunId, Task};
 use yunta_engine::{judged_task, RunReport, RunTerminal};
@@ -304,11 +304,12 @@ async fn a_task_whose_base_already_fails_the_suite_is_blocked_before_any_session
     let RunTerminal::Paused { reason } = terminal else {
         panic!("the loop stops on the red base: {terminal:?}");
     };
+    let sentence = yunta_render::pause::sentence(&reason);
     assert!(
-        reason.contains(&format!(
+        sentence.contains(&format!(
             "guard `{SUITE}` is already red before any work started"
-        )) && reason.contains("it is there to show that"),
-        "{reason}"
+        )) && sentence.contains("it is there to show that"),
+        "{reason:?}"
     );
     assert!(
         !bench.events().iter().any(|event| matches!(
@@ -336,10 +337,10 @@ async fn a_task_whose_base_an_unscoped_node_broke_is_blocked_before_any_session(
         panic!("the loop stops on the red base: {terminal:?}");
     };
     assert!(
-        reason.contains(&format!(
+        yunta_render::pause::sentence(&reason).contains(&format!(
             "guard `{SUITE}` is already red before any work started"
         )),
-        "{reason}"
+        "{reason:?}"
     );
     assert!(
         !bench.events().iter().any(|event| matches!(
@@ -379,10 +380,11 @@ async fn a_compare_after_the_loop_reuses_what_the_guard_answered_on_that_tree() 
             }
             _ => None,
         });
-    assert_eq!(
-        outcome.as_deref(),
-        Some("no regression vs baseline (exit 0, reused: the suite already ran on this same tree)")
-    );
+    let reused = NodeOutcome::Fact(EngineFact::NoRegression {
+        exit_code: 0,
+        reused: true,
+    });
+    assert_eq!(outcome, Some(reused));
 }
 
 /// The measurement is the suite's answer on the tree the run opens on,

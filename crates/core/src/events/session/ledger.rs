@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use crate::events::meta::EventMeta;
 use crate::events::session::kinds::SessionEvent;
 use crate::ids::{AdapterId, NodeId};
+use crate::port::PolicyApplied;
 use crate::Capability;
 
 /// One `capability_degraded`: the capability the engine consulted, the
@@ -18,7 +19,7 @@ use crate::Capability;
 pub struct Degradation {
     pub capability: Capability,
     pub adapter: AdapterId,
-    pub policy: String,
+    pub policy: PolicyApplied,
     pub node: Option<NodeId>,
     pub at: DateTime<Utc>,
 }
@@ -55,7 +56,7 @@ impl DegradationLedger {
             SessionEvent::CapabilityDegraded(p) => self.all.push(Degradation {
                 capability: p.capability,
                 adapter: p.adapter.clone(),
-                policy: p.policy_applied().to_string(),
+                policy: p.policy.clone(),
                 node: meta.node.cloned(),
                 at: meta.at,
             }),

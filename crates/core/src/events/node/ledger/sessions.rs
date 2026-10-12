@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 
 use super::{NodeLedger, NodeRecord};
 use crate::events::meta::EventMeta;
-use crate::events::TokenUsage;
+use crate::events::{SubjectError, TokenUsage};
 
 impl NodeRecord {
     /// A session this node's attempt opened: open while the attempt is,
@@ -99,17 +99,18 @@ impl NodeLedger {
 
     /// Folds a session-domain event onto the node that wrote it: a
     /// session belongs to the attempt that opened it, so what is open
-    /// and what it has spent is part of that node's record.
+    /// and what it has spent is part of that node's record. A session
+    /// fact with no node belongs to no attempt, so it is refused.
     pub fn apply_session(
         &mut self,
         event: &crate::events::session::kinds::SessionEvent,
         meta: &EventMeta<'_>,
-    ) {
+    ) -> Result<(), SubjectError> {
         use crate::events::session::kinds::SessionEvent;
         use crate::events::AgentMessageType;
 
         let Some(node) = meta.node else {
-            return;
+            return Err(SubjectError::SessionWithoutNode);
         };
         let record = self.per_node.entry(node.clone()).or_default();
         record.last_event_at = Some(meta.at);
@@ -153,5 +154,6 @@ impl NodeLedger {
             // session ledger holds it.
             SessionEvent::CapabilityDegraded(_) => {}
         }
+        Ok(())
     }
 }

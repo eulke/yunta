@@ -106,9 +106,11 @@ pub(super) async fn resolve_departures(
 ) -> Result<Option<NodeEnd>, RunError> {
     let mut unanswered: Vec<TaskId> = Vec::new();
     for departure in pending {
-        let escalation = escalation(&departure, holders).map_err(|source| RunError::Broken {
-            diagnostic: format!("task `{}`'s departure: {source}", departure.task_id),
-        })?;
+        let escalation =
+            escalation(&departure, holders).map_err(|source| RunError::Escalation {
+                context: format!("task `{}`'s departure", departure.task_id),
+                source,
+            })?;
         let Some(choice) = ctx
             .ask_human(Some(&node.id), Some(&departure.task_id), &escalation)
             .await?

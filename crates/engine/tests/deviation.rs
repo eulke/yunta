@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use yunta_core::events::{
-    DepartsFrom, EventPayload, GateEvent, SessionEvent, TaskEvent, TaskStatus,
+    DepartsFrom, EventPayload, Failure, GateEvent, PauseReason, SessionEvent, TaskEvent, TaskStatus,
 };
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
@@ -185,10 +185,16 @@ async fn a_departure_no_one_answers_parks_the_run_owing_it() {
     let RunReport { terminal, state } = bench.run(WORKFLOW, &fixture(true, "")).await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("a departure from the plan needs a person's answer")
-                && reason.contains("`greet`"),
-            "{reason}"
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    failure: Failure::Message { outcome },
+                    ..
+                },
+        } => assert!(
+            outcome.contains("a departure from the plan needs a person's answer")
+                && outcome.contains("`greet`"),
+            "{outcome}"
         ),
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -299,9 +305,15 @@ async fn a_departure_declared_beside_a_scope_request_is_still_owed_once_the_scop
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("a departure from the plan needs a person's answer"),
-            "{reason}"
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    failure: Failure::Message { outcome },
+                    ..
+                },
+        } => assert!(
+            outcome.contains("a departure from the plan needs a person's answer"),
+            "{outcome}"
         ),
         other => panic!("expected the run to pause owing the departure, got {other:?}"),
     }

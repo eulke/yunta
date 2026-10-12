@@ -15,7 +15,7 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::NodeEvent;
+use yunta_core::events::{Failure, NodeEvent, PauseReason};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -155,8 +155,14 @@ async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
     // config behind `run` declares no `mcp_servers:` at all.
     let RunReport { terminal, .. } = Bench::new().run(CONTEXT_WORKFLOW, "sessions: []").await;
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert!(reason.contains("toy"), "got: {reason}");
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    failure: Failure::Message { outcome },
+                    ..
+                },
+        } => {
+            assert!(outcome.contains("toy"), "got: {outcome}");
         }
         other => panic!("expected the run to pause citing the unknown server, got {other:?}"),
     }
@@ -174,10 +180,16 @@ async fn a_missing_auth_env_var_fails_the_node_before_any_connection_attempt() {
         .run_with_secrets(CONTEXT_WORKFLOW, "sessions: []", &config, &[])
         .await;
     match terminal {
-        RunTerminal::Paused { reason } => {
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    failure: Failure::Message { outcome },
+                    ..
+                },
+        } => {
             assert!(
-                reason.contains("YUNTA_TEST_MCP_TOKEN_DOES_NOT_EXIST"),
-                "got: {reason}"
+                outcome.contains("YUNTA_TEST_MCP_TOKEN_DOES_NOT_EXIST"),
+                "got: {outcome}"
             );
         }
         other => panic!("expected the run to pause citing the missing env var, got {other:?}"),

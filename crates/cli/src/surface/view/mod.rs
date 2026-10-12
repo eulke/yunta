@@ -196,7 +196,7 @@ fn recent_calls(node: &NodeFrame) -> String {
             .clone()
             .unwrap_or_else(|| "an unnamed tool".to_string());
         match &call.target {
-            Some(target) => format!("{tool} {}", target.sentence()),
+            Some(target) => format!("{tool} {}", yunta_render::target::line(target)),
             None => tool,
         }
     }))

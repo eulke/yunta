@@ -73,7 +73,11 @@ struct Expect {
 /// a reader.
 fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
     match terminal {
-        RunTerminal::Paused { reason } | RunTerminal::Failed { reason } => {
+        RunTerminal::Paused { reason } => format!(
+            "{word}\n    {}",
+            yunta_core::text::hanging(&yunta_render::pause::sentence(reason), "    ")
+        ),
+        RunTerminal::Failed { reason } => {
             format!("{word}\n    {}", yunta_core::text::hanging(reason, "    "))
         }
         RunTerminal::Finished | RunTerminal::Promoted { .. } => word.to_string(),

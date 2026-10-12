@@ -63,8 +63,8 @@ pub(super) struct SessionTools {
     pub(super) declared: Vec<ArtifactSpec>,
     /// How the session's CLI names these tools to its model.
     pub(super) naming: yunta_core::ToolNaming,
-    /// What the session's hooks are judged against, and what they were
-    /// refused.
+    /// What the session's hooks are judged against, and the refusal the log
+    /// could not keep, if one was.
     pub(super) rails: Arc<super::rail::SessionRails>,
     /// Whether the session's CLI ever listed these tools or called one:
     /// what says they reached it when its own stream does not.
@@ -114,7 +114,7 @@ impl SessionTools {
 /// Why a tool call could not be honored — rendered once, at the MCP
 /// boundary, as the text the session gets back.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum RunToolError {
+pub(crate) enum RunToolError {
     /// A refusal a session acts on: the numbered problems to fix, in the
     /// words the document's own diagnostics use. Never a deserializer's
     /// account of itself.

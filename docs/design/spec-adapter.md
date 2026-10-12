@@ -235,11 +235,6 @@ pub enum AgentEvent {
     /// Una escritura que el cerco rechazó antes de ocurrir. Crónica y
     /// conteo, nunca estado del nodo: la sesión siguió.
     WriteRefused { target: ToolTarget },
-    /// Cuántas herramientas del run tiene de verdad la sesión, según las
-    /// reportó su CLI. Solo lo emite un adapter cuyo CLI nombra el conjunto
-    /// de herramientas de la sesión: el silencio significa que no lo sabe,
-    /// nunca que el conteo sea cero.
-    RunToolsMounted { count: usize },
     /// Falló una herramienta conocida del servidor `yunta-run` de la sesión.
     /// Ningún argumento ni texto de error del CLI cruza esta frontera.
     RunToolFailed { tool: RunTool, cause: RunToolFailureCause },
@@ -304,14 +299,17 @@ telemetría, no evidencia.
   cerco como su CLI permita antes de la primera escritura posible, calcula la
   cobertura de lo que construyó (nunca la declara) y la reporta en `SessionOpened`;
   el riel del engine registra `write_refused` cuando juzga una escritura y la
-  rechaza (`crates/engine/src/run_tools/rail.rs`). El parser de Codex traduce un
-  ítem `command_execution` con estado `sandbox_denied` a `WriteRefused`, con el
-  comando como objetivo; Codex 0.157.0 no emite ese estado cuando su sandbox niega
-  un comando, y Claude no informa ninguna negativa de su sandbox. Un adapter con
-  nivel `None` ignora el campo sin error. Un adapter que
-  necesita un mecanismo que no tiene —el hook, o raíces escribibles bajo un sandbox
-  de solo lectura— falla la sesión antes de spawn con `AdapterError::FenceUnbuildable`,
-  porque una capacidad ausente falla en vez de gastar la sesión (D172).
+  rechaza (`crates/engine/src/run_tools/rail.rs`). Ningún adapter informa una
+  negativa de su sandbox: el parser de Codex no traduce ningún ítem a
+  `WriteRefused`, porque Codex 0.157.0 no emite ítem para un comando que su sandbox
+  niega, y Claude devuelve esa negativa como un `tool_result` con `is_error`, igual
+  que cualquier comando que falla. `AgentEvent::WriteRefused` sigue en el puerto
+  mientras el mock, sin riel, informe así sus rechazos de `ToolCalls`; el engine los
+  registra como `write_refused`. Un adapter con nivel `None` ignora el campo sin
+  error. Un adapter que necesita un mecanismo que no tiene —el hook, o raíces
+  escribibles bajo un sandbox de solo lectura— falla la sesión antes de spawn con
+  `AdapterError::FenceUnbuildable`, porque una capacidad ausente falla en vez de gastar
+  la sesión (D172).
 - **O7. Sin estado propio**: un adapter no persiste nada entre sesiones fuera de lo
   que el CLI ya persiste. Todo lo que el engine necesita recordar viaja en eventos.
 
@@ -333,7 +331,7 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
 | `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
 | `network_isolation` | `network: false` queda registrado para política y auditoría, no exigido · `capability_degraded` |
-| `run_tools` montado y sin efecto | el adapter reporta cuántas tools del servidor por sesión trae la sesión; cero con endpoint entregado emite `capability_degraded` al abrir la sesión, antes de gastarla. Un CLI que no nombra sus tools (`codex`) no reporta nada: el listener de la sesión sabe si las listó o llamó alguna —los dos CLIs las listan antes de su primer turno—, y una sesión que abrió y terminó sin hacerlo emite la misma degradación al cerrar |
+| `run_tools` montado y sin efecto | el listener de la sesión sabe si su CLI listó o llamó alguna de sus tools —los dos CLIs las listan antes de su primer turno—; el adapter no informa cuántas trae. Un listener que no abrió emite `capability_degraded` con la política `no_run_tools` al abrir la sesión, antes de gastarla. Una sesión que cerró sin listar ni llamar ninguna emite la misma degradación al cerrar |
 
 ## 6. Adapters builtin
 

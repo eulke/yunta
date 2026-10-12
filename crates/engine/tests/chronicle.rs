@@ -8,7 +8,7 @@
 
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventBody, EventPayload, NodeEvent,
-    NodeFinishedPayload, NodeStartedPayload, NodeState, TerminalState, TokenUsage,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState, TerminalState, TokenUsage,
 };
 use yunta_engine::{chronicle, Happening};
 use yunta_testkit_core::{all_kinds, Log};
@@ -19,7 +19,7 @@ fn started() -> EventPayload {
 
 fn finished(outcome: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-        outcome,
+        NodeOutcome::Summary(outcome.into()),
         TokenUsage::default(),
     )))
 }

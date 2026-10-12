@@ -10,7 +10,7 @@
 //! the parent-side half of the chain.
 
 use yunta_core::events::EventPayload;
-use yunta_core::events::{BaselineOrigin, FindingEvent, RunEvent, TaskEvent};
+use yunta_core::events::{BaselineOrigin, FindingEvent, PromotionCause, RunEvent, TaskEvent};
 use yunta_core::ModeName;
 use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
 use yunta_testkit::{baselines, Bench, ScriptedInteraction};
@@ -155,11 +155,8 @@ fn record(bench: &Bench, payload: EventPayload) {
     bench
         .storage
         .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: None,
-                payload,
-            },
+            &yunta_core::events::EventDraft::new(bench.run_id.clone(), None, payload)
+                .expect("a draft names its subject"),
             &yunta_core::SystemClock,
         )
         .unwrap();
@@ -185,7 +182,13 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     });
     let signaled = signaled.expect("promotion_signaled must be on the parent's own log");
     assert_eq!(signaled.suggested_mode, "full");
-    assert!(!signaled.reason.is_empty());
+    assert_eq!(
+        signaled.cause,
+        Some(PromotionCause {
+            node: "lint".into(),
+            goto: "fix-lint".into(),
+        })
+    );
 
     let finished = events.iter().find_map(|e| match e.payload() {
         Some(EventPayload::Run(RunEvent::Finished(p))) => Some(p),

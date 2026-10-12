@@ -2,6 +2,7 @@
 
 use crate::events::{AgentMessageType, SessionEvent, ToolTarget};
 use crate::fence::Coverage;
+use crate::port::PolicyApplied;
 use crate::{AdapterId, AgentName, Capability, ModelName};
 
 /// One thing that happened inside a node's session.
@@ -35,7 +36,7 @@ pub enum Happening {
         adapter: AdapterId,
         /// What the engine did instead. A degradation naming only what
         /// was missing leaves a reader guessing whether anything holds.
-        policy: String,
+        policy: PolicyApplied,
     },
     /// A write the fence turned down, and what it would have touched.
     Refused(ToolTarget),
@@ -87,7 +88,7 @@ impl From<&SessionEvent> for Happening {
             SessionEvent::CapabilityDegraded(p) => Happening::Degraded {
                 capability: p.capability,
                 adapter: p.adapter.clone(),
-                policy: p.policy_applied().to_string(),
+                policy: p.policy.clone(),
             },
             SessionEvent::WriteRefused(p) => Happening::Refused(p.target.clone()),
             SessionEvent::StopRefused(p) => Happening::StopRefused(p.why.clone()),

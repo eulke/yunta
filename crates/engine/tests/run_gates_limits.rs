@@ -5,7 +5,7 @@ use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
 use common::*;
-use yunta_core::events::{GateEvent, NodeEvent, Refusal};
+use yunta_core::events::{EngineFact, GateEvent, NodeEvent, NodeOutcome, PauseReason, Refusal};
 
 /// The option a human chose, for a resolution that is a human's choice.
 fn chosen_option(resolution: &yunta_core::events::GateResolvedPayload) -> Option<&str> {
@@ -88,11 +88,11 @@ async fn a_gate_resolved_to_abort_pauses_citing_the_decision_and_free_text() {
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `lint`'s gate was resolved to abort: not worth chasing today"
-            );
+        RunTerminal::Paused {
+            reason: PauseReason::GateAborted { node, free_text },
+        } => {
+            assert_eq!(node.as_str(), "lint");
+            assert_eq!(free_text.as_deref(), Some("not worth chasing today"));
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -118,8 +118,14 @@ async fn a_gate_resolved_to_abort_with_blank_free_text_cites_the_decision_alone(
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `lint`'s gate was resolved to abort");
+        RunTerminal::Paused {
+            reason: PauseReason::GateAborted { node, free_text },
+        } => {
+            assert_eq!(node.as_str(), "lint");
+            assert!(
+                free_text.unwrap_or_default().trim().is_empty(),
+                "a blank comment is no comment"
+            );
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -139,8 +145,14 @@ async fn an_internal_gate_aborted_with_blank_free_text_cites_the_gate_alone() {
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `approve`'s gate was resolved to abort");
+        RunTerminal::Paused {
+            reason: PauseReason::GateAborted { node, free_text },
+        } => {
+            assert_eq!(node.as_str(), "approve");
+            assert!(
+                free_text.unwrap_or_default().trim().is_empty(),
+                "a blank comment is no comment"
+            );
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -182,11 +194,11 @@ nodes:
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `approve`'s gate was resolved to abort: not this plan"
-            );
+        RunTerminal::Paused {
+            reason: PauseReason::GateAborted { node, free_text },
+        } => {
+            assert_eq!(node.as_str(), "approve");
+            assert_eq!(free_text.as_deref(), Some("not this plan"));
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -237,12 +249,12 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
-            );
-        }
+        RunTerminal::Paused {
+            reason: reason @ PauseReason::Escalation(_),
+        } => assert_eq!(
+            yunta_render::pause::sentence(&reason),
+            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
+        ),
         other => panic!("expected Paused, got {other:?}"),
     }
 }
@@ -258,7 +270,12 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
         Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
-            assert_eq!(outcome, "proceed")
+            assert_eq!(
+                outcome,
+                &NodeOutcome::Fact(EngineFact::OptionChosen {
+                    option: yunta_core::OptionId::from_static("proceed"),
+                })
+            )
         }
         other => panic!("expected the gate finished with the chosen option, got {other:?}"),
     }
@@ -332,11 +349,12 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         bench
             .storage
             .append(
-                &yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some(node.into()),
+                &yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some(node.into()),
                     payload,
-                },
+                )
+                .expect("a draft names its subject"),
                 &yunta_core::SystemClock,
             )
             .unwrap();
@@ -351,7 +369,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         "plan",
         yunta_core::events::EventPayload::Node(NodeEvent::Finished(
             yunta_core::events::NodeFinishedPayload::new(
-                "ok".to_string(),
+                yunta_core::events::NodeOutcome::Summary("ok".to_string()),
                 yunta_core::events::TokenUsage::default(),
             ),
         )),
@@ -372,7 +390,14 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         "the crashed gate is re-asked and resolved, not left stuck"
     );
     match report.state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "proceed"),
+        Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
+            assert_eq!(
+                outcome,
+                &NodeOutcome::Fact(EngineFact::OptionChosen {
+                    option: yunta_core::OptionId::from_static("proceed"),
+                })
+            )
+        }
         other => panic!("expected the gate resolved after the resume, got {other:?}"),
     }
     assert!(
@@ -487,7 +512,11 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         // reader of `status` and a reader of the decision page meet the
         // same words. The node is on the event, not spelled into them.
         RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "Approve the plan? — assignee: lead")
+            assert!(matches!(reason, PauseReason::Escalation(_)), "{reason:?}");
+            assert_eq!(
+                yunta_render::pause::sentence(reason),
+                "Approve the plan? — assignee: lead"
+            )
         }
         other => panic!("headless internal gate must pause, got {other:?}"),
     }
@@ -513,8 +542,11 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
         .await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort");
+        RunTerminal::Paused {
+            reason: PauseReason::BudgetExhausted { spent, cap },
+        } => {
+            assert_eq!(*spent, 200);
+            assert_eq!(*cap, 100);
         }
         other => panic!("an exhausted budget with no surface must pause, got {other:?}"),
     }
@@ -593,7 +625,12 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
         .await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort"),
+        RunTerminal::Paused {
+            reason: PauseReason::BudgetExhausted { spent, cap },
+        } => {
+            assert_eq!(*spent, 200);
+            assert_eq!(*cap, 100);
+        }
         other => panic!("abort must pause the run, got {other:?}"),
     }
     assert_eq!(state.nodes.state("fix"), None);
@@ -640,7 +677,12 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         .run_with_config(BUDGET_WORKFLOW, BUDGET_FIXTURE, BUDGET_CONFIG)
         .await;
     match &first.terminal {
-        RunTerminal::Paused { reason } => assert_eq!(*reason, "budget: run spent 200 tokens with `limits.max_tokens_per_run: 100` — resume with an interactive surface to continue past the cap or abort"),
+        RunTerminal::Paused {
+            reason: PauseReason::BudgetExhausted { spent, cap },
+        } => {
+            assert_eq!(*spent, 200);
+            assert_eq!(*cap, 100);
+        }
         other => panic!("expected the headless invocation to pause, got {other:?}"),
     }
 
@@ -670,10 +712,13 @@ async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless(
         .await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("max_loop_iterations"),
-            "the pause must name the limit: {reason}"
-        ),
+        RunTerminal::Paused { reason } => {
+            let words = yunta_render::pause::sentence(reason);
+            assert!(
+                words.contains("max_loop_iterations"),
+                "the pause must name the limit: {words}"
+            )
+        }
         other => panic!("an exhausted iteration cap with no surface must pause, got {other:?}"),
     }
     assert!(matches!(

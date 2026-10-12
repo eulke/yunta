@@ -28,7 +28,8 @@ use yunta_core::events::findings::FindingLedger;
 use yunta_core::events::tasks::ledger::UnknownTask;
 use yunta_core::events::{
     ChildLedger, DegradationLedger, EventMeta, EventPayload, Finding, GateEvent, GateLedger,
-    GrantLedger, NodeEvent, NodeLedger, RunLedger, StoredEvent, TaskLedger, TokenUsage,
+    GrantLedger, NodeEvent, NodeLedger, RunLedger, SessionEvent, StoredEvent, TaskLedger,
+    TokenUsage,
 };
 use yunta_core::{NodeId, NonEmpty, Seq, TaskId};
 
@@ -151,7 +152,7 @@ impl RunState {
     ///
     /// What a kind of event states about the run, told apart from the
     /// envelope every event carries: `a_kind_that_moves_no_state_says_so_by_name`
-    /// pairs this with each kind's own `is_audit`.
+    /// pairs this with an explicit list of the kinds that move no state.
     pub fn derives_nothing(&self) -> bool {
         let heard_from_only = self.nodes.iter().all(|(_, record)| {
             *record
@@ -189,7 +190,7 @@ impl RunState {
                 self.tasks.apply_criteria(e);
             }
             EventPayload::Session(e) => {
-                self.nodes.apply_session(e, &meta);
+                self.session_fact(e, event)?;
                 self.tasks.apply_session(e);
                 self.degradations.apply(e, &meta);
             }
@@ -201,7 +202,11 @@ impl RunState {
                     }
                 })?;
             }
-            EventPayload::Scope(e) => self.grants.apply(e, &meta),
+            EventPayload::Scope(e) => {
+                self.grants
+                    .apply(e, &meta)
+                    .map_err(|_| ReplayError::UngrantableSubject { seq: event.seq })?;
+            }
             EventPayload::Findings(e) => self.findings.apply(event.node_id.as_ref(), e),
             EventPayload::Artifacts(e) => {
                 self.artifacts.apply(event.node_id.as_ref(), event.seq, e);
@@ -345,6 +350,21 @@ impl RunState {
         }
         Ok(())
     }
+
+    /// A session fact is read against the node its session ran on: one
+    /// that names none cannot be read back, so the replay stops at it.
+    fn session_fact(
+        &mut self,
+        fact: &SessionEvent,
+        stored: &StoredEvent,
+    ) -> Result<(), ReplayError> {
+        self.nodes
+            .apply_session(fact, &EventMeta::of(stored))
+            .map_err(|_| ReplayError::SessionWithoutNode {
+                seq: stored.seq,
+                kind: stored.body.kind_name().to_string(),
+            })
+    }
 }
 
 /// A run's log read once and its [`RunState`] derived once — the pair
@@ -452,4 +472,8 @@ pub enum ReplayError {
     AskedNothing { seq: Seq, node: NodeId },
     #[error("seq {seq}: task `{task}` got task_status_changed without a prior task_registered")]
     StatusWithoutTask { seq: Seq, task: TaskId },
+    #[error("seq {seq}: a grant names neither a task nor a node")]
+    UngrantableSubject { seq: Seq },
+    #[error("seq {seq}: `{kind}` is a session fact with no node")]
+    SessionWithoutNode { seq: Seq, kind: String },
 }

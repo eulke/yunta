@@ -15,7 +15,7 @@ use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
     ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
 };
-use yunta_core::events::{ChildEvent, FindingEvent, RunEvent, TaskEvent};
+use yunta_core::events::{ChildEvent, FindingEvent, PauseReason, RunEvent, TaskEvent};
 use yunta_core::{AdapterId, ContentHash, Manifest, NodeId, RunId, Workflow};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{
@@ -331,8 +331,8 @@ nodes:
     assert!(children_finished(&bench.events()).is_empty());
     let child_id = created[0].0.clone();
     assert!(
-        reason.contains(child_id.as_str()),
-        "the pause reason must name the child run: {reason}"
+        matches!(&reason, PauseReason::ChildPaused { run, .. } if run == &child_id),
+        "the pause reason must name the child run: {reason:?}"
     );
     assert!(bench
         .storage
@@ -560,8 +560,8 @@ limits:
         panic!("expected the over-deep composition to pause, got {terminal:?}");
     };
     assert!(
-        reason.contains("max_workflow_depth"),
-        "the pause must name the limit: {reason}"
+        yunta_render::pause::sentence(&reason).contains("max_workflow_depth"),
+        "the pause must name the limit: {reason:?}"
     );
 }
 
@@ -1892,7 +1892,7 @@ nodes:
     let RunTerminal::Paused { reason } = terminal else {
         panic!("an interrupted birth pauses the parent, got {terminal:?}");
     };
-    assert_eq!(reason, "cancelled by user");
+    assert_eq!(reason, PauseReason::Cancelled);
     let linked = children_created(&bench.events());
     assert!(
         linked.is_empty()

@@ -231,71 +231,113 @@ pub struct EnvironmentDrift {
     pub reordered: bool,
 }
 
-impl std::fmt::Display for EnvironmentDrift {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut said: Vec<String> = Vec::new();
-        if let Some((before, after)) = &self.shell {
-            said.push(format!("the shell went from {before} to {after}"));
+/// Where a run's promotion leads: the node that exhausted its re-routes,
+/// and the node it was routed to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PromotionCause {
+    pub node: NodeId,
+    pub goto: NodeId,
+}
+
+/// A run asked to be run wider than the mode it started in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(transform = without_legacy_reason)]
+pub struct PromotionSignaledPayload {
+    /// What asked for the promotion. Absent from a log written before the
+    /// cause was recorded, which carries only the sentence `reason` holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<PromotionCause>,
+    /// The record the promotion rests on, kept apart so a surface can show
+    /// it under its own heading.
+    pub evidence: Evidence,
+    pub suggested_mode: ModeName,
+    /// The sentence an older writer stored in place of `cause`. Read from
+    /// such a log, never written.
+    #[serde(default, skip_serializing)]
+    reason: Option<String>,
+}
+
+impl PromotionSignaledPayload {
+    /// A promotion the run asks for, with the cause that asks it.
+    pub fn new(cause: PromotionCause, evidence: Evidence, suggested_mode: ModeName) -> Self {
+        PromotionSignaledPayload {
+            cause: Some(cause),
+            evidence,
+            suggested_mode,
+            reason: None,
         }
-        if !self.gained.is_empty() {
-            said.push(format!("PATH gained {}", self.gained.join(", ")));
-        }
-        if !self.lost.is_empty() {
-            said.push(format!("PATH lost {}", self.lost.join(", ")));
-        }
-        if self.reordered {
-            said.push("PATH looks its directories up in another order".to_string());
-        }
-        write!(
-            f,
-            "commands now run in another environment than the run was born in: {}",
-            said.join("; ")
-        )
+    }
+
+    /// The sentence an older log stored in place of the cause, as written.
+    pub fn legacy_reason(&self) -> Option<&str> {
+        self.reason.as_deref()
     }
 }
 
+/// Why the run is parked: the pause the engine recorded, as a fact.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct PromotionSignaledPayload {
-    /// Why the run promoted, on one line — the claim and the facts
-    /// behind it, since this is the only field a reader of the event
-    /// itself gets.
-    pub reason: String,
-    /// The record `reason` is built from, kept apart so a surface can
-    /// show it under its own heading.
-    pub evidence: Evidence,
-    pub suggested_mode: ModeName,
+#[serde(try_from = "RunPausedWire", into = "RunPausedLine")]
+// The published shape is the one a writer writes. The read shape would
+// publish an optional pause and the sentence an older writer stored.
+#[schemars(with = "RunPausedLine")]
+pub struct RunPausedPayload {
+    pub pause: PauseReason,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct RunPausedPayload {
-    reason: String,
+/// What a `run_paused` line may hold on reading: the pause, or the sentence
+/// an older writer stored in its place. Only reading produces `reason`.
+#[derive(Deserialize)]
+struct RunPausedWire {
+    #[serde(default)]
+    pause: Option<PauseReason>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// What a writer writes: the pause, which every line carries. The published
+/// schema is this shape, so `pause` is required and no sentence appears.
+#[derive(Serialize, schemars::JsonSchema)]
+struct RunPausedLine {
+    pause: PauseReason,
+}
+
+impl TryFrom<RunPausedWire> for RunPausedPayload {
+    type Error = String;
+
+    /// A line with neither field names no pause, so it does not fit its
+    /// kind and a read refuses it.
+    fn try_from(wire: RunPausedWire) -> Result<Self, Self::Error> {
+        let pause = match (wire.pause, wire.reason) {
+            (Some(pause), _) => pause,
+            (None, Some(sentence)) => PauseReason::Recorded { sentence },
+            (None, None) => return Err("a run_paused names its pause or its reason".to_string()),
+        };
+        Ok(RunPausedPayload { pause })
+    }
+}
+
+impl From<RunPausedPayload> for RunPausedLine {
+    fn from(payload: RunPausedPayload) -> Self {
+        RunPausedLine {
+            pause: payload.pause,
+        }
+    }
 }
 
 impl RunPausedPayload {
-    /// A run parked, with the one line a reader gets for why.
-    ///
-    /// The reason is what every surface prints for a stopped run — the
-    /// listing's row, the status page's heading, the line a resume
-    /// echoes — so it is composed once, here, rather than invented at
-    /// each place that decides to stop.
-    pub fn new(reason: &PauseReason) -> Self {
+    /// A run parked for `pause`.
+    pub fn new(pause: &PauseReason) -> Self {
         RunPausedPayload {
-            reason: reason.to_string(),
+            pause: pause.clone(),
         }
     }
+}
 
-    /// A pause read back off a log, whose reason is already the line a
-    /// writer produced. The only way to build one from prose, and it is
-    /// for reading: a run that parks states the fact.
-    pub fn recorded(reason: impl Into<String>) -> Self {
-        RunPausedPayload {
-            reason: reason.into(),
-        }
-    }
-
-    /// Why the run is parked.
-    pub fn reason(&self) -> &str {
-        &self.reason
+/// Keeps a legacy field out of a published shape: a writer never writes
+/// it, so the schema shows only what a writer writes.
+fn without_legacy_reason(schema: &mut schemars::Schema) {
+    if let Some(serde_json::Value::Object(properties)) = schema.get_mut("properties") {
+        properties.remove("reason");
     }
 }
 
@@ -309,11 +351,6 @@ pub struct RunMovedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunResumedPayload {
-    /// The one `on_interrupt` every orphan of this resume resolved to;
-    /// absent when the resume found no orphan or their policies differ
-    /// — `policies` is the record either way.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume_policy_applied: Option<String>,
     /// Every node the log left running with no terminal event, and the
     /// `on_interrupt` it resolved to: its own, or the config's default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -332,24 +369,22 @@ pub struct RunResumedPayload {
 impl RunResumedPayload {
     /// A run woken, with what it found still running and what each of
     /// those resolved to.
-    ///
-    /// `resume_policy_applied` is derived, never passed: it is the one
-    /// policy every orphan agreed on, and there is no such policy when
-    /// the resume found no orphan or when two of them resolved
-    /// differently. Deriving it here is what keeps the summary and the
-    /// record from disagreeing.
     pub fn new(policies: Vec<ResumePolicy>, environment: Option<ExecutionEnvironment>) -> Self {
-        let agreed = policies.split_first().and_then(|(first, rest)| {
-            rest.iter()
-                .all(|policy| policy.on_interrupt == first.on_interrupt)
-                .then(|| first.on_interrupt.as_str().to_string())
-        });
         RunResumedPayload {
-            resume_policy_applied: agreed,
             policies,
             environment,
             checkout: None,
         }
+    }
+
+    /// The one `on_interrupt` every orphan of this wake resolved to. There
+    /// is no such policy when the wake found no orphan, or when two of
+    /// them resolved differently; `policies` is the record either way.
+    pub fn agreed_policy(&self) -> Option<String> {
+        let (first, rest) = self.policies.split_first()?;
+        rest.iter()
+            .all(|policy| policy.on_interrupt == first.on_interrupt)
+            .then(|| first.on_interrupt.as_str().to_string())
     }
 
     /// The same wake, in `checkout` from now on.
@@ -410,4 +445,55 @@ pub struct RunMetrics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cptv: Option<f64>,
     pub tokens: TokenUsage,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use schemars::schema_for;
+
+    fn orphan(node: &'static str, on_interrupt: OnInterrupt) -> ResumePolicy {
+        ResumePolicy {
+            node: NodeId::from_static(node),
+            on_interrupt,
+        }
+    }
+
+    /// Orphans that resolved alike agree on their policy; orphans that
+    /// resolved differently, or none at all, agree on none.
+    #[test]
+    fn orphans_agree_on_a_policy_only_when_they_resolved_alike() {
+        let (restart, fail) = (OnInterrupt::RestartNode, OnInterrupt::FailIfUncertain);
+        let alike = RunResumedPayload::new(vec![orphan("a", restart), orphan("b", restart)], None);
+        let unlike = RunResumedPayload::new(vec![orphan("a", restart), orphan("b", fail)], None);
+        let empty = RunResumedPayload::new(Vec::new(), None);
+        assert_eq!(alike.agreed_policy().as_deref(), Some("restart_node"));
+        assert_eq!(unlike.agreed_policy(), None);
+        assert_eq!(empty.agreed_policy(), None);
+    }
+
+    /// A `run_resumed` an older writer stamped with the policy it agreed on
+    /// reads back, with that field ignored.
+    #[test]
+    fn a_legacy_resume_policy_field_is_ignored() {
+        let legacy = serde_json::json!({
+            "resume_policy_applied": "restart_node",
+            "policies": [{ "node": "build", "on_interrupt": "restart_node" }],
+        });
+        let read: RunResumedPayload = serde_json::from_value(legacy).unwrap();
+        assert_eq!(read.agreed_policy().as_deref(), Some("restart_node"));
+    }
+
+    /// The published shapes carry the pause and the cause, and never the
+    /// legacy sentences a log may still hold.
+    #[test]
+    fn the_published_shapes_leave_the_legacy_sentences_out() {
+        let run = serde_json::to_value(schema_for!(RunPausedPayload)).unwrap();
+        let promotion = serde_json::to_value(schema_for!(PromotionSignaledPayload)).unwrap();
+        let (run, promotion) = (&run["properties"], &promotion["properties"]);
+        assert!(run.get("pause").is_some(), "{run}");
+        assert!(run.get("reason").is_none(), "{run}");
+        assert!(promotion.get("cause").is_some(), "{promotion}");
+        assert!(promotion.get("reason").is_none(), "{promotion}");
+    }
 }

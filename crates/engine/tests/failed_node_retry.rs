@@ -4,7 +4,7 @@
 //! the run asks, or later through `resolve_gate` — and a plain resume
 //! never spends on a retry nobody chose.
 
-use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::events::{GateEvent, NodeEvent, PauseReason};
 use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::{write, Bench};
 
@@ -83,7 +83,7 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     assert_eq!(node.as_str(), "gate");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["abort"]);
-    let said = escalation.evidence().lines().join("\n");
+    let said = yunta_render::evidence::lines(escalation.evidence()).join("\n");
     assert!(
         said.contains("`coverage.cmd`") && said.contains("start a new run"),
         "{said}"
@@ -127,7 +127,10 @@ async fn a_plain_resume_never_retries_a_failed_node_by_itself() {
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the resume to pause again, got {terminal:?}");
     };
-    assert!(reason.starts_with("node `broken` failed"), "{reason}");
+    assert!(
+        matches!(&reason, PauseReason::NodeFailed { node, .. } if node.as_str() == "broken"),
+        "{reason:?}"
+    );
     assert_eq!(attempts(&bench, "broken"), 1);
 }
 
@@ -221,7 +224,10 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the abort to pause, got {terminal:?}");
     };
-    assert!(reason.starts_with("node `broken` failed"), "{reason}");
+    assert!(
+        matches!(&reason, PauseReason::NodeFailed { node, .. } if node.as_str() == "broken"),
+        "{reason:?}"
+    );
 
     // The abort was consumed by its own pause: a later resume asks again
     // rather than re-applying it, and the menu is still there to answer.

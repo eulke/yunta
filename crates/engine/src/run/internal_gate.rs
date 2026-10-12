@@ -5,8 +5,9 @@
 use indexmap::IndexMap;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactId, Escalation, EscalationError, EventPayload, Fact, GateEvent, GateResolvedPayload,
-    HumanChoice, NodeEvent, PauseReason, Shown, TokenUsage, Withheld,
+    ArtifactId, EngineFact, Escalation, EscalationError, EventPayload, Fact, GateEvent,
+    GateResolvedPayload, HumanChoice, NodeEvent, NodeOutcome, PauseReason, Shown, TokenUsage,
+    Withheld,
 };
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
 
@@ -260,7 +261,7 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     let escalation = gate
         .asked(&ctx.manifest.workflow, ctx.run_dir, &state)
         .await?
-        .map_err(|source| broken(source.to_string()))?;
+        .map_err(|source| unbuilt(node, source))?;
     if gate.shows_the_run_findings() {
         super::gate_findings::keep(ctx, &state).await?;
     }
@@ -302,6 +303,21 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     Ok(GateStep::Resolved)
 }
 
+/// Why a gate's question could not be put together. A refused claim keeps
+/// the fact it repeats as data, for the surface that shows the error; any
+/// other way the question fails is said in words here.
+fn unbuilt(node: &Node, source: GateEscalationError) -> RunError {
+    match source {
+        GateEscalationError::Escalation(source) => RunError::Escalation {
+            context: format!("node `{}`'s gate", node.id),
+            source,
+        },
+        other => RunError::Broken {
+            diagnostic: format!("node `{}`'s gate: {other}", node.id),
+        },
+    }
+}
+
 /// The question and the answer, together, on the log.
 async fn record(
     ctx: &RunCtx<'_>,
@@ -340,13 +356,29 @@ async fn land(
         if let Some(decided) = decided_at(ctx, node).await? {
             super::gate_findings::settle(ctx, node, shown, decided).await?;
         }
-        finish_node(ctx, node, chosen.to_string(), TokenUsage::default()).await?;
+        finish_node(
+            ctx,
+            node,
+            NodeOutcome::Fact(EngineFact::OptionChosen { option: chosen }),
+            TokenUsage::default(),
+        )
+        .await?;
         return Ok(());
     };
-    // Same shape as any other reroute: the gate fails (retryable — a
-    // person chose a correction lap, not a dead end) and control
-    // re-routes; the scheduler brings it back to ask again once
-    // `target`'s subgraph completes.
+    route_back_to(ctx, node, &chosen, target, choice.free_text.as_deref()).await
+}
+
+/// A correction lap: the gate fails retryably, and control re-routes to
+/// `target` with the person's words as the cause. Same shape as any other
+/// reroute; the scheduler brings the gate back to ask again once `target`'s
+/// subgraph completes.
+async fn route_back_to(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    chosen: &OptionId,
+    target: &NodeId,
+    free_text: Option<&str>,
+) -> Result<(), RunError> {
     fail(
         ctx,
         node,
@@ -356,14 +388,14 @@ async fn land(
     .await?;
     let cause = yunta_core::text::detailed(
         format!("gate `{}` chose `{chosen}`", node.id),
-        choice.free_text.as_deref().unwrap_or_default(),
+        free_text.unwrap_or_default(),
     );
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Rerouted(
             yunta_core::events::NodeReroutedPayload::new(
                 target.clone(),
-                yunta_core::events::RerouteCause(yunta_core::events::Failure::message(cause)),
+                yunta_core::events::Failure::message(cause),
                 yunta_core::events::RerouteOrigin::GateChoice,
                 None,
                 None,

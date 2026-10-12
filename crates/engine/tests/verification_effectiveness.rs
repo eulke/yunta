@@ -242,9 +242,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                 "lint",
                 EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
                     "fix".into(),
-                    yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
-                        "lint failed",
-                    )),
+                    yunta_core::events::Failure::message("lint failed"),
                     yunta_core::events::RerouteOrigin::OnFailure,
                     Some(1),
                     Some(2),
@@ -260,7 +258,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
 fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
     // The strongest version of "this re-route never fired": the node
     // ran every time and never even needed it.
-    use yunta_core::events::NodeFinishedPayload;
+    use yunta_core::events::{NodeFinishedPayload, NodeOutcome};
     let on_failure = OnFailure {
         goto: "fix".into(),
         max_reroutes: 2,
@@ -272,7 +270,7 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
                 .node(
                     "lint",
                     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                        "clean".to_string(),
+                        NodeOutcome::Summary("clean".to_string()),
                         Default::default(),
                     ))),
                 )
@@ -469,7 +467,7 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
     // true` nodes — a verification node that never fails is doing its job;
     // its never-fired re-route and its always-approved gate are
     // excluded from the findings by construction.
-    use yunta_core::events::NodeFinishedPayload;
+    use yunta_core::events::{NodeFinishedPayload, NodeOutcome};
     let mut lint = node(
         "lint",
         Some(OnFailure {
@@ -485,7 +483,7 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
                 .node(
                     "lint",
                     EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                        "clean".to_string(),
+                        NodeOutcome::Summary("clean".to_string()),
                         Default::default(),
                     ))),
                 )

@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use yunta_core::events::Failure;
-use yunta_core::events::{FindingSeverity, TokenUsage};
+use yunta_core::events::{EngineFact, FindingSeverity, NodeOutcome, TokenUsage};
 use yunta_core::{CheckBuiltin, ConfigKey, Node};
 
 use super::node_close::{close_node, fail, fail_with, Close};
@@ -134,12 +134,11 @@ async fn execute_baseline_compare(
     // show that anything stopped passing, so running it again would
     // spend its whole duration on an answer known before it starts.
     if !captured.passed() {
-        return close_node(
-            ctx,
-            node,
-            Close::new(nothing_to_compare(&captured), TokenUsage::default()),
-        )
-        .await;
+        let outcome = NodeOutcome::Fact(EngineFact::NothingToCompare {
+            command: captured.command.clone(),
+            exit_code: captured.results.exit_code,
+        });
+        return close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await;
     }
 
     // The same memo the criteria use: two comparisons of one suite on a
@@ -156,12 +155,13 @@ async fn execute_baseline_compare(
     if ran.exit_code != 0 {
         fail(ctx, node, regression(&captured, &ran), false).await
     } else {
-        close_node(
-            ctx,
-            node,
-            Close::new(no_regression(&ran), TokenUsage::default()),
-        )
-        .await
+        // The memo does not say who asked first, so the fact says only
+        // whether this invocation already had the answer.
+        let outcome = NodeOutcome::Fact(EngineFact::NoRegression {
+            exit_code: ran.exit_code,
+            reused: ran.reused,
+        });
+        close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
     }
 }
 
@@ -184,30 +184,6 @@ fn regression(
         ),
         &said,
     )
-}
-
-/// What a comparison closes with when the measurement it would compare
-/// against was already red: there was nothing that passed, so nothing
-/// could be seen to stop passing.
-fn nothing_to_compare(captured: &yunta_core::events::BaselineCapturedPayload) -> String {
-    format!(
-        "nothing to compare: `{}` was already red when the lineage measured it (exit {})",
-        captured.command, captured.results.exit_code
-    )
-}
-
-/// What a comparison that found no regression closes with: the suite's
-/// exit code, and whether this invocation already had the answer. The
-/// memo does not say who asked first — an earlier comparison or a task's
-/// guard on the tree the loop left — so neither is named.
-fn no_regression(ran: &crate::task_cycle::Memoized) -> String {
-    match ran.reused {
-        false => format!("no regression vs baseline (exit {})", ran.exit_code),
-        true => format!(
-            "no regression vs baseline (exit {}, reused: the suite already ran on this same tree)",
-            ran.exit_code
-        ),
-    }
 }
 
 /// `coverage_gate`: `coverage.cmd`'s stdout must contain a bare
@@ -252,18 +228,11 @@ async fn execute_coverage_gate(
         )
         .await
     } else {
-        close_node(
-            ctx,
-            node,
-            Close::new(
-                format!(
-                    "coverage {measured}% meets the {}% threshold",
-                    coverage.threshold
-                ),
-                TokenUsage::default(),
-            ),
-        )
-        .await
+        let outcome = NodeOutcome::Fact(EngineFact::CoverageMet {
+            measured,
+            threshold: coverage.threshold,
+        });
+        close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
     }
 }
 
@@ -320,15 +289,10 @@ async fn execute_findings_gate(
         .collect();
 
     if offending.is_empty() {
-        close_node(
-            ctx,
-            node,
-            Close::new(
-                format!("no finding at or above {}", max_severity.as_str()),
-                TokenUsage::default(),
-            ),
-        )
-        .await
+        let outcome = NodeOutcome::Fact(EngineFact::NoFinding {
+            severity: max_severity,
+        });
+        close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
     } else {
         fail(
             ctx,

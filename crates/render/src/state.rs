@@ -156,7 +156,9 @@ impl NodeDisplay {
             modifier: match state {
                 None => None,
                 Some(NodeState::Running { attempt }) => Some(format!("attempt {attempt}")),
-                Some(NodeState::Finished { outcome, .. }) => detail(outcome),
+                Some(NodeState::Finished { outcome, .. }) => {
+                    detail(&crate::outcome::sentence(outcome))
+                }
                 // The claim, not the lines a command printed: those are
                 // evidence, one step away on every surface that has room.
                 Some(NodeState::Failed { failure, .. }) => detail(&failure.headline()),
@@ -223,7 +225,7 @@ impl serde::Serialize for StateWord {
 mod tests {
     use super::*;
     use crate::cell_width;
-    use yunta_core::events::{Failure, TokenUsage};
+    use yunta_core::events::{Failure, NodeOutcome, TokenUsage};
 
     #[test]
     fn every_state_word_fits_the_state_column() {
@@ -250,7 +252,7 @@ mod tests {
     #[test]
     fn a_finished_node_reads_as_its_outcome_on_one_line() {
         let state = NodeState::Finished {
-            outcome: "exit 0\nwith a second line".to_string(),
+            outcome: NodeOutcome::Summary("exit 0\nwith a second line".to_string()),
             tokens: TokenUsage::default(),
         };
         let display = NodeDisplay::of(Some(&state));

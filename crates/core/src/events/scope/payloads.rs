@@ -69,7 +69,9 @@ pub struct ScopeExpansionGrantedPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionDeniedPayload {
-    pub task_id: TaskId,
+    /// Absent when the denied request was the node's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
     pub decided_by: Decider,
     pub mode: ScopeExpansionMode,
     pub count_this_run: u32,

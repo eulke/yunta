@@ -6,8 +6,19 @@ use yunta_testkit::Bench;
 mod common;
 use common::*;
 use yunta_core::events::{
-    ArtifactEvent, Failure, FindingEvent, NodeEvent, ScopeEvent, SessionEvent,
+    ArtifactEvent, Failure, FindingEvent, NodeEvent, NodeOutcome, PauseReason, ScopeEvent,
+    SessionEvent,
 };
+use yunta_core::port::{Policy, PolicyApplied};
+
+/// Whether a pause is the failure of `node`, and the headline its failure states.
+fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
+    matches!(
+        pause,
+        PauseReason::NodeFailed { node: named, failure }
+            if named.as_str() == node && failure.headline() == headline
+    )
+}
 
 #[tokio::test]
 async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() {
@@ -87,14 +98,12 @@ sessions:
         .unwrap();
     assert_eq!(tool.tool_name.as_deref(), Some("edit"));
     assert_eq!(
-        tool.target.as_ref().map(|target| target.digest.clone()),
+        tool.target.as_ref().map(|target| target.digest().clone()),
         Some(yunta_core::sha256_hex(b"abc123")),
         "the mock hands over what the fixture scripted, identified by its hash"
     );
     assert_eq!(
-        tool.target
-            .as_ref()
-            .and_then(|target| target.display.clone()),
+        tool.target.as_ref().and_then(|target| target.display()),
         None,
         "and never shown: a tool's argument is the session's own text"
     );
@@ -142,13 +151,11 @@ sessions:
         .await;
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                *reason,
-                format!(
-                    "node `work` failed: skill `grill` not found under `{}` — add the directory, fix `skills.paths` in the config, or install the pack that declares it",
-                    bench.worktree.join(".yunta/skills").display()
-                )
+            let headline = format!(
+                "skill `grill` not found under `{}` — add the directory, fix `skills.paths` in the config, or install the pack that declares it",
+                bench.worktree.join(".yunta/skills").display()
             );
+            assert!(node_failed(reason, "work", &headline), "{reason:?}");
         }
         other => panic!("a missing skill must fail the node, got {other:?}"),
     }
@@ -745,16 +752,17 @@ nodes:
             bench
                 .storage
                 .append(
-                    &yunta_core::events::EventDraft {
-                        run_id: bench.run_id.clone(),
-                        node_id: Some("ghost".into()),
-                        payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                    &yunta_core::events::EventDraft::new(
+                        bench.run_id.clone(),
+                        Some("ghost".into()),
+                        yunta_core::events::EventPayload::Node(NodeEvent::Finished(
                             yunta_core::events::NodeFinishedPayload::new(
-                                "??".to_string(),
+                                NodeOutcome::Summary("??".to_string()),
                                 yunta_core::events::TokenUsage::default(),
                             ),
                         )),
-                    },
+                    )
+                    .expect("a draft names its subject"),
                     &yunta_core::SystemClock,
                 )
                 .unwrap();
@@ -837,7 +845,7 @@ sessions:
         events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied().contains("restart_node")
+                    && p.policy == PolicyApplied::Known(Policy::FreshSession)
         )),
         "degrading to a fresh session must be an event, never a silence"
     );
@@ -864,7 +872,7 @@ sessions:
         events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied() == yunta_core::events::Policy::FreshSession.to_string()
+                    && p.policy == PolicyApplied::Known(Policy::FreshSession)
         )),
         "a crash before the session opened restarts WITH an explicit event"
     );
@@ -976,11 +984,15 @@ sessions:
     };
     let state = yunta_engine::derive(&events);
     let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("work") else {
-        panic!("`work` failed: {reason}");
+        panic!("`work` failed: {reason:?}");
     };
     assert!(
-        reason.contains("report.md") && failure.to_string().contains("never produced"),
-        "nothing the replaced session left becomes this session's artifact: {reason} / {failure}"
+        matches!(
+            reason,
+            PauseReason::NodeFailed { node, failure: cause }
+                if node.as_str() == "work" && cause.headline().contains("report.md")
+        ) && failure.to_string().contains("never produced"),
+        "nothing the replaced session left becomes this session's artifact: {reason:?} / {failure}"
     );
 }
 
@@ -1024,10 +1036,7 @@ sessions:
         })
         .expect("network: false the adapter cannot enforce must be an event, never silence");
     assert_eq!(degraded.adapter, "mock");
-    assert_eq!(
-        degraded.policy_applied(),
-        yunta_core::events::Policy::NetworkOpen.to_string()
-    );
+    assert_eq!(degraded.policy, PolicyApplied::Known(Policy::NetworkOpen));
 }
 
 /// On an adapter that isolates the network, the node's `network: false`
@@ -1423,10 +1432,11 @@ nodes:
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("the loop is refused, and the run waits on it: {terminal:?}");
     };
+    let sentence = yunta_render::pause::sentence(reason);
     assert!(
-        reason.contains("node `implement` is a loop")
-            && reason.contains("declares no `run_tools` capability"),
-        "{reason}"
+        sentence.contains("node `implement` is a loop")
+            && sentence.contains("declares no `run_tools` capability"),
+        "{reason:?}"
     );
     assert!(
         bench.mock().requests_seen().is_empty(),

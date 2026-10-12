@@ -158,12 +158,50 @@ outcome: { type: completed, summary: "done" }
     // the repository, which is what a reader needs to see.
     let refused = events.iter().any(|e| {
         matches!(e, AgentEvent::WriteRefused { target }
-            if target.display.as_deref() == Some("outside/scope.rs"))
+            if target.display() == Some("outside/scope.rs"))
     });
     assert!(
         refused,
         "the refused write is recorded, naming the path: {events:?}"
     );
+}
+
+/// A filesystem sandbox keeps a write out without a word, as a CLI's own
+/// sandbox does: the effect is left unwritten and unreported, and the
+/// session goes on to its outcome.
+#[tokio::test]
+async fn a_filesystem_fence_leaves_the_denied_effect_unwritten_and_unreported() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let denied = outside.path().join("scope.rs");
+    let fixture = MockAdapter::from_yaml(&format!(
+        r#"
+capabilities: {{ fence: filesystem }}
+effects:
+  - {{ path: "{}", content: "should never land" }}
+outcome: {{ type: completed, summary: "done" }}
+"#,
+        denied.display()
+    ))
+    .unwrap();
+
+    let session = fixture
+        .spawn(request(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    let events = drain(session).await;
+
+    assert!(!denied.exists(), "the denied write landed: {denied:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::WriteRefused { .. })),
+        "the sandbox reports nothing for the write it kept out: {events:?}"
+    );
+    assert!(matches!(
+        events.last().unwrap(),
+        AgentEvent::Completed { result } if result.summary == "done"
+    ));
 }
 
 #[tokio::test]

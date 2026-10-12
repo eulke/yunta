@@ -32,7 +32,7 @@ pub(super) async fn of_refusals(
     let worktree = params.unit.worktree.as_path();
     let refused: Vec<String> = refused
         .iter()
-        .filter_map(|target| relative(worktree, target.display.as_deref()?))
+        .filter_map(|target| relative(worktree, target.display()?))
         .collect();
     let mut evidence = None;
     for run in post {
@@ -190,7 +190,7 @@ pub(crate) fn locates_a_refusal(printed: &str, worktree: &Path, refused: &[ToolT
     let text = relative_text(printed.to_string(), worktree);
     refused
         .iter()
-        .filter_map(|target| relative(worktree, target.display.as_deref()?))
+        .filter_map(|target| relative(worktree, target.display()?))
         .any(|path| locates(&text, &path))
 }
 

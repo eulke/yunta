@@ -16,8 +16,9 @@ use super::session::SessionTools;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio_util::sync::CancellationToken;
-use yunta_core::port::RunToolsEndpoint;
-use yunta_core::RunTool;
+use yunta_core::events::{CapabilityDegradedPayload, EventPayload, SessionEvent};
+use yunta_core::port::{Policy, RunToolsEndpoint};
+use yunta_core::{AdapterId, Capability, RunTool};
 
 /// One live listener, tied to one session attempt. Dropping it tears
 /// the server down — the structured-concurrency shape (the spawner owns
@@ -28,7 +29,8 @@ pub struct RunToolsSession {
     /// Where the session's hooks reach the engine, on the same socket
     /// and behind the same credential.
     rail: yunta_core::rail::RailEndpoint,
-    /// What those hooks are judged against, and what they were refused.
+    /// What those hooks are judged against, and the refusal the log could
+    /// not keep, if one was.
     rails: Arc<super::rail::SessionRails>,
     /// Whether the session's CLI ever listed these tools or called one.
     listed: Arc<std::sync::atomic::AtomicBool>,
@@ -46,8 +48,8 @@ impl RunToolsSession {
         self.rail.clone()
     }
 
-    /// What the session's hooks are judged against, and what they were
-    /// refused.
+    /// What the session's hooks are judged against, and the refusal the log
+    /// could not keep, if one was.
     pub fn rails(&self) -> &super::rail::SessionRails {
         &self.rails
     }
@@ -143,6 +145,15 @@ pub async fn open_session_listener(
         shutdown,
         server,
     })
+}
+
+/// The record that a session's run tools never reached it. The one
+/// constructor of `NoRunTools`: a listener that never bound and a session
+/// that never listed its tools both record it through here.
+pub(crate) fn run_tools_unreachable(adapter: &AdapterId) -> EventPayload {
+    EventPayload::Session(SessionEvent::CapabilityDegraded(
+        CapabilityDegradedPayload::new(Capability::RunTools, adapter.clone(), Policy::NoRunTools),
+    ))
 }
 
 /// `access` with a host whose log also takes `token` out of what it

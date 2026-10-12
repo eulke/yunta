@@ -171,7 +171,7 @@ async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::ToolUse { name, target }
-            if name == "Edit" && target.display.as_deref() == Some("src/lib.rs")
+            if name == "Edit" && target.display() == Some("src/lib.rs")
     )));
 }
 
@@ -1080,39 +1080,6 @@ async fn no_per_run_endpoint_mounts_no_server() {
     );
 }
 
-// --- What the session actually mounted --------------------------------
-
-/// The events of a session whose init line names `tools`.
-async fn init_with_tools(tools: &str) -> Vec<AgentEvent> {
-    events_of(&[
-        &format!(
-            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta-run","status":"connected"}}],"tools":{tools}}}"#
-        ),
-        r#"{"type":"result","is_error":false,"result":"done"}"#,
-    ])
-    .await
-}
-
-fn run_tools_mounted(events: &[AgentEvent]) -> Option<usize> {
-    events.iter().find_map(|event| match event {
-        AgentEvent::RunToolsMounted { count } => Some(*count),
-        _ => None,
-    })
-}
-
-#[tokio::test]
-async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
-    let events = init_with_tools(
-        r#"["Bash","mcp__yunta-run__yunta_check_artifact","mcp__yunta-run__yunta_post_finding"]"#,
-    )
-    .await;
-    assert_eq!(
-        run_tools_mounted(&events),
-        Some(2),
-        "the CLI named the session's tools: {events:?}"
-    );
-}
-
 #[tokio::test]
 async fn interleaved_tool_results_are_matched_by_id_and_ignore_other_servers() {
     let events = events_of(&[
@@ -1143,32 +1110,6 @@ async fn interleaved_tool_results_are_matched_by_id_and_ignore_other_servers() {
         ]
     );
     assert!(!format!("{failed:?}").contains("top-secret"));
-}
-
-#[tokio::test]
-async fn a_session_the_run_tools_never_reached_reports_none_of_them() {
-    // What a `tools/list` the CLI rejected looks like from here: the
-    // server is connected, and not one of its tools is in the set.
-    let events = init_with_tools(r#"["Bash","Read","mcp__other__thing"]"#).await;
-    assert_eq!(
-        run_tools_mounted(&events),
-        Some(0),
-        "a named tool set with no run tool in it is a count, not silence: {events:?}"
-    );
-}
-
-#[tokio::test]
-async fn an_init_line_that_names_no_tool_set_reports_nothing_about_run_tools() {
-    let events = events_of(&[
-        r#"{"type":"system","subtype":"init","session_id":"sess-quiet","model":"claude-sonnet-5"}"#,
-        r#"{"type":"result","is_error":false,"result":"done"}"#,
-    ])
-    .await;
-    assert_eq!(
-        run_tools_mounted(&events),
-        None,
-        "a CLI that says nothing is unknown, never zero: {events:?}"
-    );
 }
 
 #[tokio::test]
@@ -1204,7 +1145,8 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
         .collect();
     assert_eq!(targets.len(), 1, "the stream carries the one call it made");
     assert_eq!(
-        targets[0].display, None,
+        targets[0].display(),
+        None,
         "a command is the session's own text: identified, never shown"
     );
     let carried = format!("{:?}", targets[0]);
@@ -1215,7 +1157,7 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
         );
     }
     assert_eq!(
-        targets[0].digest,
+        *targets[0].digest(),
         yunta_core::sha256_hex(command.as_bytes())
     );
 }
@@ -1538,11 +1480,15 @@ async fn a_refusal_in_the_stream_is_left_to_the_engine_that_judged_it() {
         &[INIT_LINE, &user_line, RESULT_LINE],
     )
     .await;
+    let without_the_refusal = spawn_with(
+        &dir,
+        request(dir.path().to_path_buf()),
+        &[INIT_LINE, RESULT_LINE],
+    )
+    .await;
 
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, AgentEvent::WriteRefused { .. })),
-        "the adapter reports no refusal of its own: {events:?}"
+    assert_eq!(
+        events, without_the_refusal,
+        "the refusal adds no event to the stream: {events:?}"
     );
 }

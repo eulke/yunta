@@ -256,7 +256,7 @@ impl Page<'_> {
                 self.state
                     .run
                     .environment_drift()
-                    .map(|drift| drift.to_string())
+                    .map(|drift| yunta_render::outcome::environment_drift(&drift))
                     .unwrap_or_default(),
             )
             .push_if("host", suspended.unwrap_or_default())

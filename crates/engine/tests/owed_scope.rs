@@ -84,7 +84,7 @@ async fn retry_denies_with_a_finding() {
     let events = bench.events();
     let denied = events.iter().any(|event| {
         matches!(event.payload(), Some(EventPayload::Scope(ScopeEvent::Denied(p)))
-            if p.task_id.as_str() == "task-h")
+            if p.task_id.as_ref().is_some_and(|task| task.as_str() == "task-h"))
     });
     assert!(denied, "any answer but a grant denies the request");
     let finding = findings_posted(&events)

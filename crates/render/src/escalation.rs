@@ -6,7 +6,8 @@
 //! all three: a reader who picked `retry` off a menu and then reads the
 //! same run's page has to see the same option, not two renderings of it.
 
-use yunta_core::events::{GateOption, GateWaitingPayload};
+use yunta_core::events::{EscalationError, GateOption, GateWaitingPayload};
+use yunta_core::text;
 
 /// What an option does, when that says more than its id: an older log
 /// labelled a declared option with its own id, and a menu that prints
@@ -23,7 +24,30 @@ pub fn label(option: &GateOption) -> Option<&str> {
 /// side: the second is what the first is audited against. Neither one
 /// repeats the other, so a surface with room for both shows both.
 pub fn evidence(escalation: &GateWaitingPayload) -> Vec<String> {
-    escalation.evidence().lines()
+    crate::evidence::lines(escalation.evidence())
+}
+
+/// The escalation on one line, its claim and then the facts behind it,
+/// for a surface with room for exactly one: the reason a run is parked
+/// with, and the row a listing gives a run.
+///
+/// A surface with room for two parts heads each separately; a line has
+/// room for neither heading. Composing them here is what keeps the page
+/// and the line from disagreeing about what an escalation says.
+pub fn sentence(payload: &GateWaitingPayload) -> String {
+    text::aside(
+        payload.summary(),
+        &crate::evidence::one_line(payload.evidence()),
+    )
+}
+
+/// The fact a refused claim repeats, on the one line the record shows it
+/// on. The refusal's own sentence names no fact, so a surface that names
+/// the fact adds this line to it.
+pub fn repeated_fact(refused: &EscalationError) -> String {
+    match refused {
+        EscalationError::SummaryRepeatsEvidence { fact } => crate::evidence::line(fact),
+    }
 }
 
 #[cfg(test)]
@@ -102,5 +126,33 @@ mod tests {
             Evidence::Prose("assignee: lead".into()),
         );
         assert_eq!(evidence(&older), vec!["assignee: lead"]);
+    }
+
+    #[test]
+    fn an_escalation_reads_as_its_claim_then_the_facts_behind_it() {
+        let capped = escalation(
+            "run `r` exhausted its token budget",
+            vec![Fact::labelled("limits.max_tokens_per_run", "400")].into(),
+        );
+        assert_eq!(
+            sentence(&capped),
+            "run `r` exhausted its token budget — limits.max_tokens_per_run: 400"
+        );
+        assert_eq!(
+            sentence(&escalation("Approve the release?", Evidence::none())),
+            "Approve the release?"
+        );
+    }
+
+    #[test]
+    fn a_refused_claim_shows_the_fact_it_repeats_on_the_line_the_record_uses() {
+        let labelled = EscalationError::SummaryRepeatsEvidence {
+            fact: Fact::labelled("limits.max_tokens_per_run", "400"),
+        };
+        assert_eq!(repeated_fact(&labelled), "limits.max_tokens_per_run: 400");
+        let bare = EscalationError::SummaryRepeatsEvidence {
+            fact: Fact::bare("exit 1"),
+        };
+        assert_eq!(repeated_fact(&bare), "exit 1");
     }
 }

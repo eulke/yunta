@@ -156,11 +156,8 @@ impl<'a> SourceLog<'a> {
     pub fn record(&self, payload: EventPayload) -> Seq {
         self.storage
             .append(
-                &EventDraft {
-                    run_id: self.run_id.clone(),
-                    node_id: None,
-                    payload,
-                },
+                &EventDraft::new(self.run_id.clone(), None, payload)
+                    .expect("a draft names its subject"),
                 self.clock.as_ref(),
             )
             .expect("append to the source log")

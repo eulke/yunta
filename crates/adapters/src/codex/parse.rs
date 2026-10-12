@@ -106,13 +106,6 @@ fn thread_started(value: &Value, fence: &Coverage) -> Option<AgentEvent> {
     })
 }
 
-/// Whether a finished process item is one the sandbox refused. The CLI
-/// says so in the item's own status; a command that merely exited
-/// non-zero did run.
-fn sandbox_denied(item: &Value) -> bool {
-    item.get("status").and_then(Value::as_str) == Some("sandbox_denied")
-}
-
 fn item_completed(value: &Value) -> Vec<AgentEvent> {
     let Some(item) = value.get("item") else {
         return Vec::new();
@@ -125,11 +118,6 @@ fn item_completed(value: &Value) -> Vec<AgentEvent> {
                     text: text.to_string(),
                 })
         }
-        // A command the sandbox refused is a write that did not
-        // happen, not activity to chronicle as a tool call.
-        Some("command_execution") if sandbox_denied(item) => Some(AgentEvent::WriteRefused {
-            target: opaque_field(item, "command"),
-        }),
         Some("command_execution") => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),
             target: opaque_field(item, "command"),
@@ -206,10 +194,7 @@ fn mcp_tool_call_target(item: &Value) -> ToolTarget {
         item.get("server").and_then(Value::as_str),
         item.get("tool").and_then(Value::as_str),
     ) {
-        (Some(server), Some(tool)) => ToolTarget {
-            digest: yunta_core::sha256_hex(format!("{server}:{tool}").as_bytes()),
-            display: Some(format!("{server}:{tool}")),
-        },
+        (Some(server), Some(tool)) => ToolTarget::named(&format!("{server}:{tool}")),
         _ => ToolTarget::opaque(item.to_string().as_bytes()),
     }
 }

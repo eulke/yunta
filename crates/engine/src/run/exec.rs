@@ -32,8 +32,8 @@ use yunta_core::Location;
 /// event on the log is emitted by the engine through one injected clock.
 /// The run-level `run_paused` event — built in one place so every path
 /// that stops a run (the scheduler's [`record_pause`], a crash's
-/// [`record_pause_after_crash`]) writes the same event, and its line is
-/// the reason's own `Display`.
+/// [`record_pause_after_crash`]) writes the same event, which stores the
+/// pause as typed data.
 fn run_paused(reason: &PauseReason) -> EventPayload {
     EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason)))
 }
@@ -60,9 +60,7 @@ pub async fn record_pause_after_crash(
 pub(super) async fn pause(ctx: &RunCtx<'_>, reason: PauseReason) -> Result<RunReport, RunError> {
     record_pause(ctx, &reason).await?;
     Ok(RunReport {
-        terminal: RunTerminal::Paused {
-            reason: reason.to_string(),
-        },
+        terminal: RunTerminal::Paused { reason },
         state: ctx.run_view().await?.state,
     })
 }

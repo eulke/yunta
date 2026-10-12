@@ -3,8 +3,8 @@
 //! DB.
 
 use yunta_core::events::{
-    EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, StoredEvent,
-    TokenUsage,
+    EventPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunCreatedPayload,
+    StoredEvent, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_engine::{derive, render_events_jsonl};
@@ -32,7 +32,7 @@ fn sample_events() -> Vec<StoredEvent> {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "criteria green".to_string(),
+                NodeOutcome::Summary("criteria green".to_string()),
                 TokenUsage {
                     input: 10,
                     output: 5,
@@ -76,7 +76,7 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
             .node(
                 "a",
                 EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                    "broken from the start".to_string(),
+                    NodeOutcome::Summary("broken from the start".to_string()),
                     TokenUsage::default(),
                 ))),
             )

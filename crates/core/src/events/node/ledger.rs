@@ -14,7 +14,9 @@ use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
-use crate::events::node::payloads::{DiscardedCandidate, NodeReroutedPayload, RerouteOrigin};
+use crate::events::node::payloads::{
+    DiscardedCandidate, NodeOutcome, NodeReroutedPayload, RerouteOrigin,
+};
 use crate::events::{Failure, TokenUsage};
 use crate::ids::{NodeId, QuestionId, RunnerName, Seq};
 use crate::{NonEmpty, RunnerCandidate, TreeId};
@@ -31,7 +33,7 @@ pub enum NodeState {
         attempt: u32,
     },
     Finished {
-        outcome: String,
+        outcome: NodeOutcome,
         tokens: TokenUsage,
     },
     Failed {
@@ -78,10 +80,10 @@ impl NodeState {
 }
 
 /// A re-route as `node_rerouted` recorded it, on the node it left.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reroute {
     pub to: NodeId,
-    pub cause: String,
+    pub cause: Failure,
     /// The retry count and the cap it counts against — both `None` for a
     /// gate's routing choice, which is a decision, not a retry.
     pub attempt: Option<u32>,

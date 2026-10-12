@@ -156,10 +156,11 @@ pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        BaselineCapturedPayload, BaselineOrigin, BaselineResults, CriteriaCheckedPayload,
-        CriterionResult, EventBody, EventPayload, Evidence, Failure, Finding, FindingPostedPayload,
-        FindingSeverity, NodeEvent, NodeFinishedPayload, NodeReroutedPayload, Phase,
-        PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunEvent, StoredEvent,
+        BaselineCapturedPayload, BaselineOrigin, BaselineResults, CapabilityDegradedPayload,
+        CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Evidence, Failure,
+        Finding, FindingPostedPayload, FindingSeverity, NodeEvent, NodeFinishedPayload,
+        NodeOutcome, NodeReroutedPayload, Phase, PromotionCause, PromotionSignaledPayload,
+        RerouteOrigin, RunEvent, SessionEvent, StoredEvent,
     };
     use yunta_core::events::{FindingEvent, TokenUsage};
     use yunta_engine::chronicle as derive_chronicle;
@@ -190,7 +191,7 @@ mod tests {
     fn rerouted(cause: &str) -> EventPayload {
         EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
             "fix-lint".into(),
-            RerouteCause(Failure::message(cause)),
+            Failure::message(cause),
             RerouteOrigin::GateChoice,
             None,
             None,
@@ -311,13 +312,16 @@ mod tests {
     }
 
     #[test]
-    fn a_promotion_with_no_reason_recorded_reads_as_the_mode_alone() {
-        let payload = EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
-            reason: String::new(),
-            evidence: Evidence::none(),
-            suggested_mode: "ship".into(),
-        }));
-        assert_eq!(said_for(payload), "run — promotion to `ship`");
+    fn a_promotion_names_the_node_whose_reroutes_ran_out() {
+        let cause = PromotionCause {
+            node: "lint".into(),
+            goto: "fix-lint".into(),
+        };
+        let promoted = PromotionSignaledPayload::new(cause, Evidence::none(), "ship".into());
+        assert_eq!(
+            said_for(EventPayload::Run(RunEvent::PromotionSignaled(promoted))),
+            "run — promotion to `ship`: node `lint` exhausted its re-routes to `fix-lint`"
+        );
     }
 
     fn baseline(exit_code: i32) -> EventPayload {
@@ -393,24 +397,23 @@ mod tests {
     #[test]
     fn a_node_that_finished_saying_nothing_is_still_said_to_have_finished() {
         let payload = EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-            String::new(),
+            NodeOutcome::Summary(String::new()),
             TokenUsage::default(),
         )));
         assert_eq!(said_for(payload), "run — finished");
     }
 
-    /// A log written before the engine named its fallbacks carries an
-    /// empty `policy_applied`. The words state what was missing and
-    /// claim nothing about what was done instead.
+    /// A degradation whose recorded policy is an empty sentence, as an
+    /// older log stores it, says what was missing and claims nothing
+    /// about what was done instead.
     #[test]
     fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
-        let payload: EventPayload = serde_json::from_value(serde_json::json!({
-            "kind": "capability_degraded",
-            "capability": "run_tools",
-            "adapter": "codex",
-            "policy_applied": "",
-        }))
-        .expect("the wire form of a degradation with no policy");
+        let degraded = CapabilityDegradedPayload {
+            capability: yunta_core::Capability::RunTools,
+            adapter: "codex".into(),
+            policy: yunta_core::port::PolicyApplied::Recorded(String::new()),
+        };
+        let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(degraded));
         assert_eq!(said_for(payload), "run — run_tools not declared by codex");
     }
 

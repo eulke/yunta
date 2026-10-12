@@ -66,7 +66,7 @@ async fn continuation(
                 yunta_core::events::CapabilityDegradedPayload::new(
                     yunta_core::Capability::ResumeSession,
                     adapter.id().clone(),
-                    yunta_core::events::Policy::FreshSession,
+                    yunta_core::port::Policy::FreshSession,
                 ),
             )),
         )

@@ -4,7 +4,7 @@
 //! lets `resolve_gate` (a separate `yunta mcp` invocation, not the
 //! process that paused the run) know what it's answering.
 
-use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
+use yunta_core::events::{EngineFact, GateEvent, NodeEvent, NodeOutcome, PauseReason, RunEvent};
 use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunState, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
@@ -251,7 +251,14 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
 
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
-        Some(yunta_engine::NodeState::Finished { outcome, .. }) => assert_eq!(outcome, "proceed"),
+        Some(yunta_engine::NodeState::Finished { outcome, .. }) => {
+            assert_eq!(
+                outcome,
+                &NodeOutcome::Fact(EngineFact::OptionChosen {
+                    option: yunta_core::OptionId::from_static("proceed"),
+                })
+            );
+        }
         other => panic!("expected the gate finished with the chosen option, got {other:?}"),
     }
     assert!(bench.worktree.join("shipped.txt").exists());
@@ -299,7 +306,13 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
     };
-    assert_eq!(reason, "node `lint`'s gate was resolved to abort");
+    assert_eq!(
+        reason,
+        PauseReason::GateAborted {
+            node: "lint".into(),
+            free_text: None,
+        }
+    );
 
     // A later manual resume must NOT re-apply the stale abort — the
     // decision was consumed; with no live surface it parks on the
@@ -308,9 +321,12 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the second resume to pause, got {terminal:?}");
     };
+    let words = yunta_render::pause::sentence(&reason);
     assert!(
-        !reason.contains("abort") && reason.contains("exhausted"),
-        "a stale abort must not be re-applied: {reason}"
+        matches!(reason, PauseReason::Escalation(_))
+            && !words.contains("abort")
+            && words.contains("exhausted"),
+        "a stale abort must not be re-applied: {words}"
     );
     assert_eq!(
         events_matching(&bench, |p| matches!(
@@ -459,13 +475,14 @@ nodes:
     bench
         .storage
         .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("only".into()),
-                payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+            &yunta_core::events::EventDraft::new(
+                bench.run_id.clone(),
+                Some("only".into()),
+                yunta_core::events::EventPayload::Node(NodeEvent::Started(
                     yunta_core::events::NodeStartedPayload::attempt(1),
                 )),
-            },
+            )
+            .expect("a draft names its subject"),
             &FixedClock,
         )
         .unwrap();

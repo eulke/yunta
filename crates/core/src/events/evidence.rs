@@ -3,8 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::text;
-
 /// One fact the engine read off the log: the label a reader scans for,
 /// and the value under it.
 ///
@@ -39,15 +37,6 @@ impl Fact {
             value: value.into(),
         }
     }
-
-    /// The fact on one line: its label and value joined the way every
-    /// labelled value in this workspace is joined, or the value alone.
-    pub fn line(&self) -> String {
-        match &self.label {
-            Some(label) => text::detailed(label, &self.value),
-            None => self.value.trim().to_string(),
-        }
-    }
 }
 
 /// The facts behind an escalation's summary, attached by the engine
@@ -62,7 +51,7 @@ impl Fact {
 /// Untagged, with `Prose` last: a payload carrying a list reads as
 /// [`Evidence::Facts`], and a log written before evidence was data
 /// carries one string and reads back as [`Evidence::Prose`], which
-/// renders as the single unlabelled fact it always was. That tolerance
+/// reads as the single unlabelled fact it always was. That tolerance
 /// is the rule for what is persisted and versioned, and it is why no
 /// reader needs to know which version wrote the line it is looking at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -84,9 +73,8 @@ impl Evidence {
     }
 
     /// The facts, with an older log's prose read as the one unlabelled
-    /// fact it is — the one place that tolerance is applied, and what
-    /// every rendering below is built on.
-    pub(crate) fn facts(&self) -> Vec<Fact> {
+    /// fact it is: the one place that tolerance is applied.
+    pub fn facts(&self) -> Vec<Fact> {
         match self {
             Evidence::Facts(facts) => facts.clone(),
             Evidence::Prose(text) => vec![Fact::bare(text.clone())],
@@ -99,22 +87,6 @@ impl Evidence {
         let mut facts = self.facts();
         facts.push(fact);
         *self = Evidence::Facts(facts);
-    }
-
-    /// One rendered line per fact, for a surface with room to list
-    /// them.
-    pub fn lines(&self) -> Vec<String> {
-        self.facts()
-            .iter()
-            .map(Fact::line)
-            .filter(|line| !line.is_empty())
-            .collect()
-    }
-
-    /// Every fact on one line, for a surface with room for exactly one.
-    /// Empty when nothing is attached.
-    pub fn one_line(&self) -> String {
-        self.lines().join("; ")
     }
 }
 
@@ -129,45 +101,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_labelled_fact_puts_its_label_in_front_of_its_value() {
-        assert_eq!(
-            Fact::labelled("limits.max_tokens_per_run", "400").line(),
-            "limits.max_tokens_per_run: 400"
-        );
-    }
-
-    #[test]
-    fn a_fact_that_names_itself_is_read_as_it_was_written() {
-        assert_eq!(Fact::bare("exit 1").line(), "exit 1");
-    }
-
-    #[test]
-    fn facts_read_as_one_line_in_the_order_they_were_attached() {
+    fn facts_are_kept_in_the_order_they_were_attached() {
         let evidence = Evidence::from(vec![
             Fact::labelled("limits.max_tokens_per_run", "400"),
             Fact::labelled("spent", "500"),
         ]);
         assert_eq!(
-            evidence.one_line(),
-            "limits.max_tokens_per_run: 400; spent: 500"
-        );
-        assert_eq!(
-            evidence.lines(),
-            vec!["limits.max_tokens_per_run: 400", "spent: 500"]
+            evidence.facts(),
+            vec![
+                Fact::labelled("limits.max_tokens_per_run", "400"),
+                Fact::labelled("spent", "500"),
+            ]
         );
     }
 
     #[test]
-    fn evidence_with_nothing_attached_shows_nothing() {
-        assert_eq!(Evidence::none().one_line(), "");
+    fn evidence_with_nothing_attached_has_no_facts() {
+        assert!(Evidence::none().facts().is_empty());
     }
 
     #[test]
     fn a_log_that_recorded_evidence_as_one_string_still_reads() {
         let from_an_older_log: Evidence = serde_json::from_str(r#""exit 1""#).unwrap();
         assert_eq!(from_an_older_log, Evidence::Prose("exit 1".to_string()));
-        assert_eq!(from_an_older_log.one_line(), "exit 1");
-        assert_eq!(from_an_older_log.lines(), vec!["exit 1"]);
+        assert_eq!(from_an_older_log.facts(), vec![Fact::bare("exit 1")]);
     }
 
     #[test]

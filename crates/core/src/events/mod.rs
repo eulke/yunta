@@ -20,7 +20,10 @@ pub mod gates;
 pub mod meta;
 pub mod node;
 mod redact;
+mod registry;
 pub mod run;
+#[cfg(feature = "testkit")]
+mod samples;
 pub mod scope;
 pub mod session;
 pub mod tasks;
@@ -31,14 +34,17 @@ pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
-    CommandExit, CommandOrigin, Failure, OwedScope, RequestedScope, SessionDeath, SessionEnd,
-    SessionExit, TAIL_LINES,
+    loop_overrun_failure, node_failed_line, CommandExit, CommandOrigin, Failure, OwedScope,
+    RequestedScope, SessionDeath, SessionEnd, SessionExit, PAST_THE_CAP, TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
 pub use gates::{ledger::*, payloads::*, GateEvent, Withheld};
 pub use meta::EventMeta;
 pub use node::{ledger::*, payloads::*, NodeEvent};
 pub use redact::Unredactable;
+#[cfg(feature = "testkit")]
+pub use registry::sample_payloads;
+pub use registry::KIND_VERSION;
 pub use run::{ledger::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
 pub use session::{ledger::*, payloads::*, SessionEvent};
@@ -57,12 +63,58 @@ use crate::ids::{ModeName, NodeId, RunId, Seq};
 /// What the engine hands to storage: what happened, in which run, for
 /// which node. Storage assigns the position (`seq`) and the timestamp
 /// (from the injected clock) — a draft carries neither, so no caller can
-/// invent them.
+/// invent them. [`EventDraft::new`] is the only way to build one, and it
+/// refuses a draft whose subject the log could not be read against.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventDraft {
-    pub run_id: RunId,
-    pub node_id: Option<NodeId>,
-    pub payload: EventPayload,
+    run_id: RunId,
+    node_id: Option<NodeId>,
+    payload: EventPayload,
+}
+
+/// A draft whose subject the log cannot be read against.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SubjectError {
+    #[error("a grant names neither a task nor a node")]
+    UngrantableSubject,
+    #[error("a session fact is written with no node")]
+    SessionWithoutNode,
+}
+
+impl EventDraft {
+    /// Builds a draft. A grant names what it widens: a task, or the node
+    /// it is written under when it has no task.
+    pub fn new(
+        run_id: RunId,
+        node_id: Option<NodeId>,
+        payload: EventPayload,
+    ) -> Result<Self, SubjectError> {
+        if let EventPayload::Scope(ScopeEvent::Granted(grant)) = &payload {
+            if grant.task_id.is_none() && node_id.is_none() {
+                return Err(SubjectError::UngrantableSubject);
+            }
+        }
+        Ok(EventDraft {
+            run_id,
+            node_id,
+            payload,
+        })
+    }
+
+    /// The run the event belongs to.
+    pub fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+
+    /// The node the event is written under, if it has one.
+    pub fn node_id(&self) -> Option<&NodeId> {
+        self.node_id.as_ref()
+    }
+
+    /// What happened.
+    pub fn payload(&self) -> &EventPayload {
+        &self.payload
+    }
 }
 
 /// One event as persisted and read back. On the wire (`events.jsonl`,
@@ -108,10 +160,11 @@ impl EventBody {
         }
     }
 
-    /// The version the event was written under.
+    /// The schema version of the event: [`KIND_VERSION`] for a kind this
+    /// binary knows, the version it was stored with for one it does not.
     pub fn schema_version(&self) -> u32 {
         match self {
-            EventBody::Known(payload) => payload.schema_version(),
+            EventBody::Known(_) => KIND_VERSION,
             EventBody::Unknown(unknown) => unknown.schema_version,
         }
     }
@@ -305,16 +358,19 @@ impl schemars::JsonSchema for StoredEvent {
 
 /// What happened, in the terms of the domain it happened to.
 ///
-/// Nine arms, one per domain; each domain declares its own kinds, their
-/// payloads and their names. Nothing outside a domain has to know all
-/// forty-five, and a kind that gains a domain gains it in one file.
+/// Nine arms, one per domain; each domain declares its own kinds and
+/// their payloads. Nothing outside a domain has to know every kind, and a
+/// kind's name and sample are its row in the registry.
 ///
 /// On the wire this is still one flat object tagged by `kind`: `serde`
-/// goes through a private flat enum holding the forty-five in the
-/// order the log has always written them, so the shape a log carries is
-/// independent of the shape the engine reads.
+/// goes through a private flat enum that the registry generates, in the
+/// order the log has always written its kinds, so the shape a log carries
+/// is independent of the shape the engine reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(from = "wire::EventPayloadWire", into = "wire::EventPayloadWire")]
+#[serde(
+    from = "registry::EventPayloadWire",
+    into = "registry::EventPayloadWire"
+)]
 pub enum EventPayload {
     Run(RunEvent),
     Node(NodeEvent),
@@ -328,7 +384,7 @@ pub enum EventPayload {
 }
 
 /// The schema published for an event payload is the wire shape's: a
-/// `oneOf` of forty-five branches, each pinning its own `kind`, in the
+/// `oneOf` with one branch per kind, each pinning its own `kind`, in the
 /// order the log writes them. The nine domains are an internal shape and
 /// no reader of `events.json` ever learns about them.
 impl schemars::JsonSchema for EventPayload {
@@ -337,11 +393,11 @@ impl schemars::JsonSchema for EventPayload {
     }
 
     fn schema_id() -> std::borrow::Cow<'static, str> {
-        wire::EventPayloadWire::schema_id()
+        registry::EventPayloadWire::schema_id()
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        wire::EventPayloadWire::json_schema(generator)
+        registry::EventPayloadWire::json_schema(generator)
     }
 }
 
@@ -366,133 +422,21 @@ pub fn run_left_out(events: &[StoredEvent]) -> Vec<crate::LeftOut> {
     }
 }
 
-/// Every kind this binary knows, in the order the wire writes them.
-///
-/// Derived from [`wire::EventPayloadWire`]'s own variants, so the list a
-/// reader checks a stored `kind` against and the shapes `serde` can
-/// actually read are the same declaration. `every_domain_declares_the_kinds_the_wire_carries`
-/// proves the domains account for exactly this set.
-macro_rules! wire_kinds {
-    ($($variant:ident => $name:literal),* $(,)?) => {
-        const WIRE_KINDS: &[&str] = &[$($name),*];
-        #[allow(dead_code)]
-        fn wire_kinds_are_the_wire_variants(wire: &wire::EventPayloadWire) -> &'static str {
-            match wire { $(wire::EventPayloadWire::$variant(_) => $name),* }
-        }
-    };
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::ScopeExpansionMode;
 
-wire_kinds! {
-    RunCreated => "run_created",
-    RunnerResolved => "runner_resolved",
-    BaselineCaptured => "baseline_captured",
-    BaselineHeld => "baseline_held",
-    NodeStarted => "node_started",
-    AgentSessionOpened => "agent_session_opened",
-    AgentMessage => "agent_message",
-    ArtifactWritten => "artifact_written",
-    ContextAssembled => "context_assembled",
-    TaskRegistered => "task_registered",
-    CriteriaChecked => "criteria_checked",
-    TaskStatusChanged => "task_status_changed",
-    TaskCheckStarted => "task_check_started",
-    TaskCheckAnswered => "task_check_answered",
-    DeviationDeclared => "deviation_declared",
-    DeviationResolved => "deviation_resolved",
-    ScopeChecked => "scope_checked",
-    ScopeExpansionRequested => "scope_expansion_requested",
-    ScopeExpansionGranted => "scope_expansion_granted",
-    ScopeExpansionDenied => "scope_expansion_denied",
-    ScopeDerived => "scope_derived",
-    NodeFinished => "node_finished",
-    NodeFailed => "node_failed",
-    HookExecuted => "hook_executed",
-    NodeRerouted => "node_rerouted",
-    PullRequestOpened => "pull_request_opened",
-    GateWaiting => "gate_waiting",
-    GateResolved => "gate_resolved",
-    QuestionsAsked => "questions_asked",
-    QuestionsAnswered => "questions_answered",
-    AskingOpened => "asking_opened",
-    LoopIteration => "loop_iteration",
-    FindingPosted => "finding_posted",
-    FindingUpdated => "finding_updated",
-    FindingWithdrawn => "finding_withdrawn",
-    FindingRefused => "finding_refused",
-    FindingAnswered => "finding_answered",
-    FindingProved => "finding_proved",
-    FindingSettled => "finding_settled",
-    ArtifactSubmitted => "artifact_submitted",
-    ArtifactAccepted => "artifact_accepted",
-    PromotionSignaled => "promotion_signaled",
-    ChildRunCreated => "child_run_created",
-    ChildRunFinished => "child_run_finished",
-    CapabilityDegraded => "capability_degraded",
-    WriteRefused => "write_refused",
-    StopRefused => "stop_refused",
-    WriteFormatted => "write_formatted",
-    RunToolFailed => "run_tool_failed",
-    RunToolRefused => "run_tool_refused",
-    ServiceUnreachable => "service_unreachable",
-    ServiceReachable => "service_reachable",
-    HostSuspended => "host_suspended",
-    RunPaused => "run_paused",
-    RunResumed => "run_resumed",
-    RunMoved => "run_moved",
-    RunFinished => "run_finished",
-}
-
-impl EventPayload {
-    /// Every kind this binary knows, as persisted — what the reader checks
-    /// a stored `kind` against before deciding it is unknown.
-    pub const KINDS: &'static [&'static str] = WIRE_KINDS;
-
-    /// The persisted `kind` string — what storage writes to its `kind`
-    /// column, independent of re-serializing the whole payload. The
-    /// domain answers for its own kinds.
-    pub fn kind_name(&self) -> &'static str {
-        match self {
-            Self::Run(e) => e.kind_name(),
-            Self::Node(e) => e.kind_name(),
-            Self::Session(e) => e.kind_name(),
-            Self::Tasks(e) => e.kind_name(),
-            Self::Scope(e) => e.kind_name(),
-            Self::Findings(e) => e.kind_name(),
-            Self::Artifacts(e) => e.kind_name(),
-            Self::Gates(e) => e.kind_name(),
-            Self::Children(e) => e.kind_name(),
-        }
-    }
-
-    /// Whether this kind is audit: the log carries it so a reader can
-    /// see what the engine did, and no ledger moves when it arrives.
-    pub fn is_audit(&self) -> bool {
-        match self {
-            Self::Run(e) => e.is_audit(),
-            Self::Node(e) => e.is_audit(),
-            Self::Session(e) => e.is_audit(),
-            Self::Tasks(e) => e.is_audit(),
-            Self::Scope(e) => e.is_audit(),
-            Self::Findings(e) => e.is_audit(),
-            Self::Artifacts(e) => e.is_audit(),
-            Self::Gates(e) => e.is_audit(),
-            Self::Children(e) => e.is_audit(),
-        }
-    }
-
-    /// The shape version of this event's kind. Per kind, never global:
-    /// the domain that declares the kind declares its version.
-    pub fn schema_version(&self) -> u32 {
-        match self {
-            Self::Run(e) => e.schema_version(),
-            Self::Node(e) => e.schema_version(),
-            Self::Session(e) => e.schema_version(),
-            Self::Tasks(e) => e.schema_version(),
-            Self::Scope(e) => e.schema_version(),
-            Self::Findings(e) => e.schema_version(),
-            Self::Artifacts(e) => e.schema_version(),
-            Self::Gates(e) => e.schema_version(),
-            Self::Children(e) => e.schema_version(),
-        }
+    #[test]
+    fn a_grant_naming_no_subject_is_refused_at_the_draft() {
+        let grant = ScopeEvent::Granted(ScopeExpansionGrantedPayload {
+            task_id: None,
+            decided_by: Decider::Rule,
+            mode: ScopeExpansionMode::Rules,
+            count_this_run: 1,
+            paths: vec![],
+        });
+        let draft = EventDraft::new(RunId::from("run-1"), None, EventPayload::Scope(grant));
+        assert!(matches!(draft, Err(SubjectError::UngrantableSubject)));
     }
 }

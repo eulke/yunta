@@ -308,7 +308,9 @@ fn probe_context(
 fn ended(terminal: &yunta_engine::RunTerminal) -> String {
     match terminal {
         yunta_engine::RunTerminal::Finished => "finished".to_string(),
-        yunta_engine::RunTerminal::Paused { reason } => format!("waiting ({reason})"),
+        yunta_engine::RunTerminal::Paused { reason } => {
+            format!("waiting ({})", yunta_render::pause::sentence(reason))
+        }
         yunta_engine::RunTerminal::Failed { reason } => format!("failed ({reason})"),
         yunta_engine::RunTerminal::Promoted { suggested_mode } => {
             format!("promoted to mode `{suggested_mode}`")
@@ -321,7 +323,7 @@ mod tests {
     use super::*;
     use yunta_core::events::{
         AgentSessionOpenedPayload, ArtifactAcceptedPayload, EventPayload, NodeFinishedPayload,
-        RecordedOrigin, RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
+        NodeOutcome, RecordedOrigin, RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
     };
     use yunta_testkit_core::Log;
 
@@ -346,7 +348,7 @@ mod tests {
                 RecordedOrigin::Submitted,
             )));
         let finished = EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-            "done",
+            NodeOutcome::Summary("done".to_string()),
             TokenUsage::default(),
         )));
         let closed = EventPayload::Run(RunEvent::Finished(RunFinishedPayload {

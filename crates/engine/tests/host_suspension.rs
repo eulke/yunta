@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EventPayload, NodeEvent, RunEvent, SessionEvent, StoredEvent};
+use yunta_core::events::{
+    EventPayload, NodeEvent, PauseReason, RunEvent, SessionEvent, StoredEvent,
+};
 use yunta_engine::{RunReport, RunTerminal, SETTLE_AFTER_SUSPENSION};
 use yunta_testkit::{wait_until_async, Bench, WAIT_DEADLINE};
 use yunta_testkit_core::HostClock;
@@ -218,7 +220,12 @@ async fn a_cancelled_run_stops_waiting_for_the_host() {
     let RunReport { terminal, .. } = report.expect("the cancellation ends the wait");
 
     assert!(
-        matches!(&terminal, RunTerminal::Paused { reason } if reason == "cancelled by user"),
+        matches!(
+            &terminal,
+            RunTerminal::Paused {
+                reason: PauseReason::Cancelled
+            }
+        ),
         "{terminal:?}"
     );
     assert!(!a_session_opened(&bench.events()));

@@ -1,20 +1,22 @@
-//! Why a run is parked, as a fact, and the one line every surface says
-//! for it.
+//! Why a run is parked, as a fact.
+
+use serde::{Deserialize, Serialize};
 
 use crate::events::gates::payloads::Escalation;
 use crate::events::Failure;
-use crate::ids::{NodeId, QuestionId};
+use crate::ids::{NodeId, QuestionId, RunId};
 
 /// Why a run is parked, as a fact rather than a sentence.
 ///
-/// Ten call sites used to compose the line a reader sees, each in its own
-/// words, and the one line every surface shows for a stopped run
-/// therefore said ten different kinds of thing. The fact is stated here
-/// and the prose is produced once, by `Display`, at the border.
-#[derive(Debug, Clone, PartialEq)]
+/// The log stores this fact. The line a reader sees for a parked run is
+/// composed from it at the border, by the render crate, so every surface
+/// that shows the pause says it the same way.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum PauseReason {
     /// A decision is waiting on a person, with the escalation that asks
-    /// it.
+    /// it. Serde goes through `GateWaitingPayload`; a read does not
+    /// re-check the claim.
     Escalation(Box<Escalation>),
     /// A person stopped the run while it was running.
     Cancelled,
@@ -38,7 +40,7 @@ pub enum PauseReason {
     /// A gate is published and the forge has not answered it.
     ExternalGate { url: String },
     /// A resume found nodes still running whose fate it cannot tell.
-    UncertainOrphans(Vec<NodeId>),
+    UncertainOrphans { nodes: Vec<NodeId> },
     /// A node failed and nothing re-routed it.
     NodeFailed { node: NodeId, failure: Failure },
     /// Nothing is runnable: `node` waits on `on`, which this pass left
@@ -49,11 +51,13 @@ pub enum PauseReason {
         node: NodeId,
         free_text: Option<String>,
     },
-    /// A run this node bore is parked, with the reason that run stated.
-    /// The child's own line is carried through rather than restated: the
-    /// parent has nothing to add to it, and two sentences about one
-    /// pause is one too many.
-    ChildPaused { node: NodeId, reason: String },
+    /// A child run paused on its own log; the parent names it and keeps
+    /// the child's pause.
+    ChildPaused {
+        node: NodeId,
+        run: RunId,
+        child: Box<PauseReason>,
+    },
     /// A node asked questions and no surface could answer them.
     Questions {
         node: NodeId,
@@ -65,88 +69,56 @@ pub enum PauseReason {
         node: NodeId,
         report: crate::diagnostic::Report,
     },
+    /// Prose a log carries as one sentence; shown as written.
+    Recorded { sentence: String },
 }
 
-/// The half every cap's sentence ends with: a reader who hit a declared
-/// limit has the same two ways past it whichever limit it was.
-const PAST_THE_CAP: &str = "resume with an interactive surface to continue past the cap or abort";
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{Evidence, GateOption};
+    use crate::ids::OptionId;
 
-impl std::fmt::Display for PauseReason {
-    /// The one line a reader sees for a parked run. Every surface — the
-    /// listing's row, the status heading, the line a resume echoes —
-    /// prints this, so none of them can say something different.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PauseReason::Escalation(escalation) => write!(f, "{}", escalation.sentence()),
-            PauseReason::Cancelled => f.write_str("cancelled by user"),
-            PauseReason::CancelledAfterCrash => f.write_str("cancelled after crash"),
-            PauseReason::BudgetExhausted { spent, cap } => write!(
-                f,
-                "budget: run spent {} with `limits.max_tokens_per_run: {cap}` — {PAST_THE_CAP}",
-                crate::units::Tokens(*spent).exact()
-            ),
-            PauseReason::NoRoom {
-                available,
-                need,
-                keep_free,
-            } => f.write_str(&no_room(*available, *need, *keep_free)),
-            PauseReason::LoopOverrun { node, cap } => write!(
-                f,
-                "loop `{node}` exceeded `limits.max_loop_iterations` ({cap}) — {PAST_THE_CAP}"
-            ),
-            PauseReason::ExternalGate { url } => write!(f, "waiting on external gate: {url}"),
-            PauseReason::UncertainOrphans(nodes) => f.write_str(&uncertain(nodes)),
-            // The claim; what a command printed travels as the
-            // escalation's evidence, not inside the one line a pause is.
-            PauseReason::NodeFailed { node, failure } => {
-                write!(f, "node `{node}` failed: {}", failure.headline())
-            }
-            PauseReason::Blocked { node, on } => write!(
-                f,
-                "no node is runnable: `{node}` waits on {}, which this run left unresolved",
-                crate::text::listed(on.iter().map(NodeId::as_str))
-            ),
-            PauseReason::GateAborted { node, free_text } => f.write_str(&crate::text::detailed(
-                format!("node `{node}`'s gate was resolved to abort"),
-                free_text.as_deref().unwrap_or_default(),
-            )),
-            PauseReason::ChildPaused { node, reason } => {
-                write!(f, "node `{node}`'s child run is parked: {reason}")
-            }
-            PauseReason::Questions { node, pending } => write!(
-                f,
-                "node `{node}` {}",
-                crate::text::asked_questions(pending.as_slice())
-            ),
-            PauseReason::AnswersRefused { node, report } => {
-                write!(f, "node `{node}`'s answers were refused: {report}")
-            }
+    /// Every reason a run can park on reads back as the fact it was
+    /// written as, including the ones that nest a payload or a pause.
+    #[test]
+    fn every_pause_reads_back_as_the_fact_it_was_written_as() {
+        let option = GateOption {
+            id: OptionId::from_static("approve"),
+            label: "Approve".to_string(),
+            tradeoff: "none".to_string(),
+            asks: None,
+        };
+        let escalation = Escalation::new(
+            "the gate waits",
+            Evidence::none(),
+            crate::NonEmpty::from((option, Vec::new())),
+        )
+        .expect("the claim does not repeat its record");
+        let pauses = [
+            PauseReason::Escalation(Box::new(escalation)),
+            PauseReason::Cancelled,
+            PauseReason::BudgetExhausted { spent: 5, cap: 4 },
+            PauseReason::UncertainOrphans {
+                nodes: vec![NodeId::from_static("review")],
+            },
+            PauseReason::ChildPaused {
+                node: NodeId::from_static("child"),
+                run: RunId::from_static("run-1"),
+                child: Box::new(PauseReason::Cancelled),
+            },
+            PauseReason::Questions {
+                node: NodeId::from_static("ask"),
+                pending: crate::NonEmpty::from((QuestionId::from_static("q-1"), Vec::new())),
+            },
+            PauseReason::Recorded {
+                sentence: "waiting".to_string(),
+            },
+        ];
+        for pause in pauses {
+            let written = serde_json::to_value(&pause).unwrap();
+            let read: PauseReason = serde_json::from_value(written.clone()).unwrap();
+            assert_eq!(read, pause, "{written}");
         }
     }
-}
-
-/// Why a run stops for want of room on the disk, and how to make some.
-fn no_room(available: u64, need: u64, keep_free: u64) -> String {
-    use crate::units::Bytes;
-    let building = match need {
-        0 => String::new(),
-        need => format!(", and a build here takes about {} more", Bytes(need)),
-    };
-    format!(
-        "no room: the disk has {} free{building}, where {} stays free — make room \
-         (`yunta gc`, close a parked run, or lower `storage.pool.keep_free`) and resume",
-        Bytes(available),
-        Bytes(keep_free)
-    )
-}
-
-/// Why a run stops when it cannot tell how `nodes` ended.
-fn uncertain(nodes: &[NodeId]) -> String {
-    format!(
-        "{} running with no terminal event when the engine last stopped: {} — \
-         `on_interrupt: fail_if_uncertain` refuses to guess how each ended; verify manually \
-         before resuming",
-        crate::text::agreeing(nodes.len(), "a node was", "nodes were"),
-        crate::text::listed(nodes.iter().map(NodeId::as_str))
-    )
 }
