@@ -20,6 +20,7 @@ impl NodeRecord {
             agent: p.agent.clone(),
             model: p.model.clone(),
             fence: p.fence.clone(),
+            confinement: p.confinement.clone(),
             opened_at: at,
         });
     }
@@ -73,6 +74,9 @@ pub struct OpenSession {
     /// How much of this session the adapter's fence covered; `None`
     /// when it built none.
     pub fence: Option<crate::fence::Coverage>,
+    /// What the session was opened to write and reach; `None` on a log
+    /// written before sessions recorded it.
+    pub confinement: Option<crate::events::ConfinementRecord>,
     pub opened_at: DateTime<Utc>,
 }
 

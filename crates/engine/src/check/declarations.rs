@@ -1,7 +1,10 @@
 //! See [`super`]. One family of workflow-check rules.
 
+use super::capabilities::{all_known_hold, candidate_adapters, opens_session};
 use super::*;
 use yunta_core::events::ArtifactId;
+use yunta_core::port::PermissionProfile;
+use yunta_core::AdapterId;
 
 /// Config `defaults:` values that only `check` can catch before a run:
 /// a `max_parallel_nodes` of zero (which would schedule nothing), and a
@@ -56,15 +59,40 @@ pub(crate) fn check_ask(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     }
 }
 
-/// `network: false` on a node whose sessions run `full`: a full session's
-/// commands run unconfined on every adapter, so the network cannot be
-/// kept closed for it — the two cannot both hold.
-pub(crate) fn check_network(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+/// A closed network on a session that runs unconfined: an unconfined
+/// session's commands reach the network on every adapter, so nothing keeps
+/// them off it. A `full` node is unconfined on its own word; an `edit`
+/// session is unconfined when every known candidate's `sandbox` is
+/// `danger-full-access`. The network a node gets is its own `network:`,
+/// else the project's default. A node that opens no session has no session
+/// to be unconfined, so it is not judged here.
+pub(crate) fn check_network(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    declared: &dyn Fn(&AdapterId) -> Option<AdapterFacts>,
+    errors: &mut Vec<CheckError>,
+) {
+    let project = config.network_permissions();
     for node in workflow.iter_nodes() {
-        if node.network == Some(false)
-            && node.permissions == Some(yunta_core::NodePermissions::Full)
-        {
-            errors.push(CheckError::ClosedNetworkUnderFull {
+        if !opens_session(node) || yunta_core::network_asked(node.network, project) {
+            continue;
+        }
+        let profile = node.permissions.map_or(
+            PermissionProfile::Edit,
+            yunta_core::NodePermissions::profile,
+        );
+        let unconfined = match profile {
+            PermissionProfile::Full => true,
+            PermissionProfile::ReadOnly => false,
+            PermissionProfile::Edit => {
+                all_known_hold(&candidate_adapters(node, config), declared, |facts| {
+                    yunta_core::Commands::of(profile, facts.edit_sandbox)
+                        == yunta_core::Commands::Unconfined
+                })
+            }
+        };
+        if unconfined {
+            errors.push(CheckError::ClosedNetworkUnconfined {
                 node: node.id.clone(),
             });
         }

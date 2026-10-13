@@ -1,19 +1,19 @@
-//! What an exact fence claims, and what the diff finds past it. A breach is
-//! filed only where a session claimed an exact fence and a write reached the
-//! diff anyway; under widened or sandboxed coverage the same write is a
-//! violation and nothing more.
+//! What a session's confinement says its fence must stop, and what the diff
+//! finds past it. A breach is filed only where nothing of the checkout is
+//! writable except through the fence; under any other confinement the same
+//! write is a violation and nothing more.
 
 use yunta_core::events::{EventPayload, Finding, FindingEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
-/// An adapter that says it judged every write before it happened, and a write
-/// that reached the diff anyway: that is something to look at in the adapter,
+/// A read-only session's checkout is writable by nothing but its fence, and a
+/// write that reached the diff anyway is something to look at in the adapter:
 /// filed beside the failure the violation causes either way.
 #[tokio::test]
-async fn a_write_that_escapes_an_exact_fence_is_an_engine_finding() {
-    // No fence judges the write, so it lands. A read-only node claims exact
-    // coverage, and the diff audits it against no scope at all.
+async fn a_write_that_escapes_a_read_only_node_is_an_engine_finding() {
+    // No fence judges the write, so it lands. A read-only node's session fences
+    // its checkout whole, and the diff audits it against no scope at all.
     let bench = Bench::new().with_capabilities(yunta_core::Capabilities {
         run_tools: true,
         permission_profiles: true,
@@ -54,9 +54,9 @@ outcome: { type: completed, summary: "done" }
     );
 }
 
-/// A breach is filed only when a session claims an exact fence and a write
-/// reaches the diff anyway. A workspace-write session claims its worktree as
-/// widened roots instead, so the same write is a violation and nothing more.
+/// A breach is filed only where nothing but the fence could have written the
+/// checkout. A workspace-write session may write its worktree, so the same
+/// write is a violation and nothing more.
 #[tokio::test]
 async fn a_write_that_escapes_a_widened_coverage_is_a_violation_and_no_breach() {
     // No fence judges the write, so it lands and the post-check diff finds it.
@@ -89,13 +89,13 @@ outcome: { type: completed, summary: "done" }
 
     assert!(
         breaches(&bench).is_empty(),
-        "a widened coverage claims no judgement of each write, so no breach: {:?}",
+        "a session that may write its checkout is not fenced whole, so no breach: {:?}",
         breaches(&bench)
     );
 }
 
-/// Under a widened or tool-only coverage a violation is what it always
-/// was: the node fails with the list, and nobody claimed more.
+/// Under a filesystem fence a violation is what it always was: the node fails
+/// with the list, and nobody claimed more.
 #[tokio::test]
 async fn a_write_inside_widened_roots_is_a_scope_violation_and_nothing_more() {
     // A filesystem sandbox judges writes by directory alone, so the write inside the worktree lands.
@@ -126,7 +126,7 @@ outcome: { type: completed, summary: "done" }
     );
     assert!(
         breaches(&bench).is_empty(),
-        "a sandbox never claimed to judge by glob: {:?}",
+        "a session that may write its checkout is not fenced whole, so no breach: {:?}",
         breaches(&bench)
     );
 }

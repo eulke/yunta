@@ -182,6 +182,23 @@ sessions:
     assert_eq!(stated[0], PolicyApplied::Known(Policy::PostCheckOnly));
 }
 
+/// A read-only node is held to a fence like a scoped one, so an adapter
+/// that builds none states it once for that node too.
+#[tokio::test]
+async fn a_read_only_node_on_an_adapter_without_a_fence_says_so_once() {
+    let bench = Bench::new().with_capabilities(yunta_core::Capabilities {
+        fence: yunta_core::FenceLevel::None,
+        ..Default::default()
+    });
+    let workflow = "name: w\nnodes:\n  - id: r\n    kind: prompt\n    runner: executor\n    permissions: read-only\n    prompt: \"Read.\"\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: r }\n";
+    bench.run(workflow, fixture).await;
+    assert_eq!(
+        degradations_of(&bench, yunta_core::Capability::Fence).len(),
+        1
+    );
+}
+
 /// A run whose adapter reports no usage cannot count what it spends, so
 /// it neither hands sessions a cap it cannot enforce nor stays silent
 /// about the cap it was given.

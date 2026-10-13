@@ -1,5 +1,6 @@
-//! What a scripted session writes, which of it its fence keeps out, and
-//! how the writes its CLI judges one by one are asked of the engine.
+//! What a scripted session writes, which of it its fence or its confinement
+//! keeps out, and how the writes its CLI judges one by one are asked of the
+//! engine.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -30,9 +31,10 @@ pub(super) struct Asked {
 }
 
 impl Asked {
-    /// Asks the engine about each effect and writes the ones it allows. A
-    /// write made through a shell command reaches no write hook, so it is
-    /// written as it is made, with nothing asked and nothing reported.
+    /// Asks the engine about each tool effect and writes the ones it allows.
+    /// A write made through a shell command reaches no write hook, so the
+    /// command effects handed here, which have landed, are written as they
+    /// are made, with nothing asked and nothing reported.
     pub(super) async fn written(&self, session: &SessionId) -> std::result::Result<(), String> {
         for effect in &self.effects {
             if effect.via == Via::Command {
@@ -106,30 +108,49 @@ pub(super) async fn ask_hook(
 }
 
 impl MockAdapter {
-    /// Whether the fence refuses an effect at `path` — by the same
-    /// judge every adapter asks, so a fixture exercises the rule the
-    /// real ones enforce.
-    ///
-    /// A filesystem sandbox knows nothing of globs: at that level the
-    /// judgement is against the directories alone. A fixture with no
-    /// fence at all writes whatever it scripts, and the engine's own
-    /// post-check diff is what catches it. A fence judged per tool call
-    /// is not judged here: its writes are asked of the engine's rail.
-    fn refuses(&self, req: &SessionRequest, path: &Path) -> bool {
-        let fence = match self.capabilities.fence {
-            FenceLevel::None | FenceLevel::ToolCalls => return false,
-            FenceLevel::Filesystem => Fence::everything(req.fence.roots.clone(), req.fence.advice),
-        };
-        matches!(fence.judge(&req.cwd, path), Verdict::Refused(_))
+    /// Whether an effect lands. A command effect lands by the confinement's
+    /// judgement of its write by directory, as a filesystem sandbox judges it.
+    /// A tool effect under a filesystem fence lands by the same judgement of
+    /// its path: that sandbox knows nothing of globs, so no scope is judged
+    /// here. A fence judged per tool call, or none at all, lets a tool effect
+    /// land, and the engine's rail or its post-check judges what follows.
+    fn lands(&self, req: &SessionRequest, effect: &MockEffect) -> bool {
+        match effect.via {
+            Via::Command => req
+                .confinement
+                .command_may_write(&req.cwd, &req.cwd.join(&effect.path)),
+            Via::Tool => match self.capabilities.fence {
+                FenceLevel::None | FenceLevel::ToolCalls => true,
+                FenceLevel::Filesystem => matches!(
+                    Fence::everything(req.fence.advice).judge(
+                        &req.cwd,
+                        &effect.path,
+                        &req.confinement
+                    ),
+                    Verdict::Allowed
+                ),
+            },
+        }
     }
 
-    /// Applies one session's filesystem effects under the request's
-    /// `cwd`, leaving out the ones the fence refuses: an adapter that
-    /// can judge a write blocks it before it lands. A refused write is
-    /// reported by nothing, as a CLI's own sandbox reports nothing.
+    /// The effects a session that asks the engine per write is handed: every
+    /// tool effect, which the rail judges as it is asked, and each command
+    /// effect that lands, since no hook sees a command's write.
+    pub(super) fn landing(&self, req: &SessionRequest, effects: &[MockEffect]) -> Vec<MockEffect> {
+        effects
+            .iter()
+            .filter(|effect| effect.via == Via::Tool || self.lands(req, effect))
+            .cloned()
+            .collect()
+    }
+
+    /// Applies one session's effects under the request's `cwd`, leaving out
+    /// the ones that do not land: a write the fence or the confinement refuses
+    /// is blocked before it lands. A refused write is reported by nothing, as
+    /// a CLI's own sandbox reports nothing.
     pub(super) fn apply_effects(&self, script: &SessionScript, req: &SessionRequest) -> Result<()> {
         for effect in &script.effects {
-            if self.refuses(req, &effect.path) {
+            if !self.lands(req, effect) {
                 continue;
             }
             write_effect(&req.cwd, effect)?;

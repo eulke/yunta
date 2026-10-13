@@ -45,7 +45,7 @@ adapters:
     binary: ~/.local/bin/claude     # override local (capa usuario)
   codex:
     binary: /usr/local/bin/codex
-    adapter_settings: { sandbox: workspace-write }
+    adapter_settings: { sandbox: workspace-write }   # sandbox de las sesiones edit: workspace-write (por defecto), read-only o danger-full-access. Las tres dan raíces el directorio del artefacto y los shared_dirs. Red: la del nodo con workspace-write; cerrada con read-only; exigida abierta con danger-full-access, que corre sin confinar
 
 defaults:
   runner: executor
@@ -73,7 +73,7 @@ format:                             # qué comando formatea qué archivos en cua
   - { paths: ["**/*.rs"], run: format }   # la primera regla que cubre un archivo; recibe las rutas como argumentos
 
 shared_dirs:                        # caches que comparten todos los comandos y sesiones de un run; nunca la salida de un build (D236)
-  PIP_CACHE_DIR: ~/.cache/yunta/pip   # exportado bajo la variable; escribible en cada sandbox que escribe
+  PIP_CACHE_DIR: ~/.cache/yunta/pip   # exportado bajo la variable; escribible solo en las sesiones que no son read-only, y fuera del worktree
 baseline:
   suite: "cargo test --workspace"
   held: [lint]                      # comandos de `commands:` medidos al lado de la suite: el que pasa
@@ -103,7 +103,7 @@ permissions:                        # techo; las capas inferiores solo estrechan
     executors: prompt               # allow | prompt | deny
     publishers: { allow: [acme] }
   network:
-    default: true
+    default: true                   # red de los nodos que no la dicen; un nodo read-only nunca la tiene
   scope_expansion: { max_mode: ask }   # rules | ask | deny: lo más permisivo que un nodo puede pedir
 
 limits:

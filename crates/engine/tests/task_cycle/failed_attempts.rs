@@ -73,7 +73,7 @@ sessions:
   - outcome: { type: completed, summary: "attempt 1" }
 "#,
     );
-    let report = run_once(&owner, &unit, run.path(), &t, &adapter).await;
+    let report = run_once(&owner, &unit, run.path(), &t, &adapter, Budget::default()).await;
     let TaskOutcome::Blocked {
         cause: TaskCause::Unmet {
             attempts: 1, red, ..

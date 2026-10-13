@@ -41,8 +41,8 @@ use yunta_core::port::{
 };
 use yunta_core::process::subprocess::{Held, LineParser};
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, AgentName, Capabilities, FenceLevel, ModelName,
-    Result, ScopeGlob, SessionId,
+    AdapterError, AdapterId, AdapterSettings, AgentName, Capabilities, EditSandbox, FenceLevel,
+    ModelName, Result, ScopeGlob, SessionId,
 };
 
 use crate::dialect::DialectName;
@@ -229,6 +229,10 @@ impl Adapter for MockAdapter {
         self.fixture.dialect().own_config()
     }
 
+    fn edit_sandbox(&self) -> EditSandbox {
+        self.fixture.dialect().edit_sandbox(&self.settings)
+    }
+
     /// The settings are read the way the fixture's CLI reads them, so a key
     /// it does not know is an error here, as it is for the real adapter.
     async fn probe(&self) -> Result<ProbeReport> {
@@ -350,7 +354,7 @@ impl MockAdapter {
                     dialect,
                     rail,
                     cwd: req.cwd.clone(),
-                    effects: script.effects.clone(),
+                    effects: self.landing(req, &script.effects),
                     formats: req.formats,
                 }),
             before_stop: rail.zip(script.before_stop.as_ref()).map(|(rail, stop)| {
@@ -359,7 +363,7 @@ impl MockAdapter {
                         dialect,
                         rail,
                         cwd: req.cwd.clone(),
-                        effects: stop.writes.clone(),
+                        effects: self.landing(req, &stop.writes),
                         formats: req.formats,
                     },
                     steps: stop.steps.clone(),

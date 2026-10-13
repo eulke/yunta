@@ -55,22 +55,19 @@ pub(crate) async fn verdict(
     conflicts: Vec<String>,
     reach: Reach,
 ) -> Result<Verdict, CliError> {
-    let mut errors = yunta_engine::check(workflow, config, &super::declared_capabilities);
+    let facts = super::declared_facts(config);
+    let mut errors = yunta_engine::check(workflow, config, &facts);
     let mut warnings: Vec<String> = yunta_engine::check_warnings(workflow, config)
         .iter()
         .map(ToString::to_string)
         .collect();
+    let token_caps = yunta_engine::check_token_cap_warnings(workflow, config, &facts);
+    warnings.extend(token_caps.iter().map(ToString::to_string));
     // Composition references (`use:`) resolve against the repo catalog
     // under the current directory, then packs — the same catalog a run's
     // children resolve against at birth.
     let origin = yunta_engine::origin_of(&ctx.cwd, path);
-    let refs = yunta_engine::check_workflow_refs(
-        workflow,
-        config,
-        &ctx.cwd,
-        &origin,
-        &super::declared_capabilities,
-    );
+    let refs = yunta_engine::check_workflow_refs(workflow, config, &ctx.cwd, &origin, &facts);
     errors.extend(refs.errors);
     warnings.extend(refs.warnings.iter().map(ToString::to_string));
     let (unprovided, missing_programs) =

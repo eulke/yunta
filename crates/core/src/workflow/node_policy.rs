@@ -3,6 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::Node;
+use crate::port::PermissionProfile;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum NodePermissions {
@@ -19,6 +22,24 @@ impl NodePermissions {
             NodePermissions::Edit => "edit",
             NodePermissions::Full => "full",
         }
+    }
+
+    /// The session profile this permission asks the adapter for.
+    pub fn profile(self) -> PermissionProfile {
+        match self {
+            NodePermissions::ReadOnly => PermissionProfile::ReadOnly,
+            NodePermissions::Edit => PermissionProfile::Edit,
+            NodePermissions::Full => PermissionProfile::Full,
+        }
+    }
+}
+
+impl Node {
+    /// Whether this node's session may write under the checkout. An absent
+    /// `permissions` is `edit`, which writes.
+    pub fn writes_worktree(&self) -> bool {
+        self.permissions
+            .is_none_or(|permissions| permissions.profile().writes_worktree())
     }
 }
 

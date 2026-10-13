@@ -5,10 +5,11 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::confinement::{Commands, Confinement, Worktree};
 use crate::fence::Coverage;
 use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId, TaskId};
-use crate::port::{Policy, PolicyApplied};
+use crate::port::{PermissionProfile, Policy, PolicyApplied};
 use crate::{Capabilities, Capability};
 
 /// The closed reason a run tool call failed, without adapter error text.
@@ -153,6 +154,38 @@ impl std::iter::Sum for TokenUsage {
     }
 }
 
+/// What the session was allowed to reach; absent on logs written before it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ConfinementRecord {
+    pub profile: PermissionProfile,
+    pub commands: Commands,
+    /// What the session's file tools may write under the checkout.
+    pub worktree: Worktree,
+    pub network: bool,
+}
+
+impl ConfinementRecord {
+    /// What the session's confinement allows it, as the log keeps it.
+    pub fn of(confinement: &Confinement) -> Self {
+        ConfinementRecord {
+            profile: confinement.profile,
+            commands: confinement.commands,
+            worktree: confinement.worktree,
+            network: confinement.network,
+        }
+    }
+
+    /// Whether the checkout is fenced whole: the commands are confined and the
+    /// worktree is `Nothing`, so the sandbox admits no command write under it.
+    /// The fence refuses a file tool's write under the checkout whatever the
+    /// scope admits, since `Fence::judge` admits nothing under a worktree the
+    /// confinement does not write. Only a root the confinement holds, such as
+    /// the artifact directory or a shared directory, lets such a write through.
+    pub fn fences_the_checkout(&self) -> bool {
+        self.commands == Commands::Confined && self.worktree == Worktree::Nothing
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentSessionOpenedPayload {
     pub session_id: SessionId,
@@ -172,6 +205,9 @@ pub struct AgentSessionOpenedPayload {
     /// The level travels once, in `capabilities.fence`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fence: Option<Coverage>,
+    /// The confinement the session was opened under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confinement: Option<ConfinementRecord>,
     /// The task a loop's session works. Absent for a node's own session,
     /// and on a log written before sessions named their task.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6,9 +6,9 @@
 //! `probe()`.
 
 use serde::Deserialize;
-use yunta_core::{AdapterSettings, Result};
+use yunta_core::{AdapterSettings, EditSandbox, Result};
 
-use crate::session::{typed_settings, Sandbox};
+use crate::session::typed_settings;
 
 /// The keys `adapter_settings` may carry for this CLI.
 pub(crate) const KNOWN: &[&str] = &["sandbox"];
@@ -17,7 +17,7 @@ pub(crate) const KNOWN: &[&str] = &["sandbox"];
 #[serde(deny_unknown_fields)]
 pub(super) struct CodexSettings {
     #[serde(default)]
-    pub sandbox: Option<Sandbox>,
+    pub sandbox: Option<EditSandbox>,
 }
 
 impl CodexSettings {

@@ -15,8 +15,8 @@ use yunta_core::port::{HookReply, RailCodec, SessionRequest};
 use yunta_core::process::subprocess::LineParser;
 use yunta_core::rail::{RailAnswer, RailCommand, RailEndpoint, RailEvent};
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, ModelName, Result, ScopeGlob,
-    SessionId, ToolNaming, Unbuildable,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, EditSandbox, ModelName, Result,
+    ScopeGlob, SessionId, ToolNaming, Unbuildable,
 };
 
 use crate::failure::classify;
@@ -52,6 +52,15 @@ impl DialectName {
         match self {
             Self::ClaudeCode => claude_code::capabilities(),
             Self::Codex => codex::capabilities(),
+        }
+    }
+
+    /// The `sandbox` an `edit` session of this CLI runs under, as the settings
+    /// name it.
+    pub(crate) fn edit_sandbox(self, settings: &AdapterSettings) -> EditSandbox {
+        match self {
+            Self::ClaudeCode => claude_code::edit_sandbox(settings),
+            Self::Codex => codex::edit_sandbox(settings),
         }
     }
 

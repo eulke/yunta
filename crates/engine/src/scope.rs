@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::git::GitError;
 use crate::process::Supervision;
+use yunta_core::events::ConfinementRecord;
 use yunta_core::fence::Coverage;
 use yunta_core::protected::{Closing, Pathspecs, Protected, Protection, Trespass};
 use yunta_core::{Location, NodeScope, RelativePath, ScopeGlob, TreeId};
@@ -232,7 +233,7 @@ pub(crate) fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
 /// session's tools happened to permit, a read-only node that wrote the
 /// project fails for it.
 pub fn audits(node: &yunta_core::Node) -> bool {
-    node.permissions == Some(yunta_core::NodePermissions::ReadOnly) || node.scope.is_declared()
+    !node.writes_worktree() || node.scope.is_declared()
 }
 
 /// The scope in force for a node's work on this run: the globs it declares —
@@ -244,7 +245,7 @@ pub fn audits(node: &yunta_core::Node) -> bool {
 /// A read-only node is held to its word alone: nothing ever offers it a
 /// grant, and one on the log would still widen nothing.
 pub fn node_scope_in_force(node: &yunta_core::Node, state: &RunState) -> Option<Vec<ScopeGlob>> {
-    if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
+    if !node.writes_worktree() {
         return Some(Vec::new());
     }
     let declared: &[ScopeGlob] = match &node.scope {
@@ -275,24 +276,45 @@ pub async fn changed_between(
     Ok(nul_separated_paths(&bytes))
 }
 
-/// A write that reached the diff despite an exact fence.
+/// A write that reached the diff where nothing but the fence could have
+/// written it.
 ///
-/// Only an exact fence makes this a finding: the adapter said it judged
-/// every write before it happened and one got through anyway, which is
-/// something to look at in the adapter. Under a widened or tool-only
-/// coverage a violation is what it always was — the task fails with the
-/// list, and nobody claimed more.
+/// A session whose commands are confined and whose file tools write nothing
+/// under the checkout cannot write the checkout from a command, so only its
+/// file tools could have written there, and the fence judges each of those
+/// writes before it happens. A write that reached the diff anyway is something
+/// to look at in the adapter. Under any other confinement the same write is a
+/// violation and nothing more: the task fails with the list, and nobody claimed
+/// the fence had stopped it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Breach {
     pub paths: Vec<PathBuf>,
 }
 
-/// Pure: what the coverage and the diff together mean.
-pub fn fence_breach(coverage: Option<&Coverage>, result: &ScopeCheckResult) -> Option<Breach> {
-    if coverage != Some(&Coverage::Exact) || result.violations.is_empty() {
+/// Whether the violations of a scope check are a breach: a write the
+/// session's fence should have stopped. A function of what the session's
+/// coverage reports and what its confinement recorded, and of nothing else.
+///
+/// A session that reported no coverage files none. A coverage of `Exact`,
+/// which a log written before sessions recorded their confinement carries,
+/// files one for any violation. Any other coverage files one only when the
+/// recorded confinement fences the checkout whole, and files none when there
+/// is no record.
+pub fn fence_breach(
+    coverage: Option<&Coverage>,
+    confinement: Option<&ConfinementRecord>,
+    result: &ScopeCheckResult,
+) -> Option<Breach> {
+    if result.violations.is_empty() {
         return None;
     }
-    Some(Breach {
+    let files = match coverage? {
+        Coverage::Exact => true,
+        Coverage::WidenedToRoots { .. } | Coverage::ToolsOnly => {
+            confinement.is_some_and(ConfinementRecord::fences_the_checkout)
+        }
+    };
+    files.then(|| Breach {
         paths: result.violations.clone(),
     })
 }
@@ -302,9 +324,10 @@ impl Breach {
     /// scheme the engine's own findings use.
     pub const ID: &'static str = "engine-fence-breach";
 
-    /// What the finding says, for one adapter.
+    /// What the finding says: the fence let a write through where nothing
+    /// else could write.
     pub fn title() -> String {
-        "the fence declared exact let a write through".to_string()
+        "the fence let a write through where nothing else could write".to_string()
     }
 
     /// The first path, which is where a reader looks. Under the work:
@@ -316,7 +339,7 @@ impl Breach {
 
     pub fn detail(&self, adapter: &yunta_core::AdapterId) -> String {
         format!(
-            "fence exact on {adapter}; {} paths reached the diff outside it: {}",
+            "fence on {adapter}; {} paths reached the diff outside it: {}",
             self.paths.len(),
             self.paths
                 .iter()
@@ -326,6 +349,9 @@ impl Breach {
         )
     }
 }
+
+#[cfg(test)]
+mod breach_tests;
 
 #[cfg(test)]
 mod tests {

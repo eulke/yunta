@@ -3,6 +3,8 @@
 //! written, and the new pack is checked and its own case run before the
 //! command reports success.
 
+use std::path::Path;
+
 use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
 
@@ -139,13 +141,20 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
     write(".yunta/tests/fixtures/example.yaml", PACK_FIXTURE_TEMPLATE)?;
     println!("wrote {}", dir.display());
 
-    // Verify against the pack's own self-test config, then run its case.
+    verify_scaffold(&dir, &workflow).await
+}
+
+/// Checks the scaffolded workflow against the pack's own self-test config,
+/// and runs the pack's case when the check passes. A check that fails
+/// reports every problem and runs nothing.
+async fn verify_scaffold(dir: &Path, workflow: &Workflow) -> Result<Outcome, CliError> {
     let config = ConfigLayer::merge_layers(
-        crate::project::load_named_layers(&dir)?
+        crate::project::load_named_layers(dir)?
             .into_iter()
             .map(|(_, layer)| layer),
     );
-    let errors = yunta_engine::check(&workflow, &config, &crate::commands::declared_capabilities);
+    let facts = crate::commands::declared_facts(&config);
+    let errors = yunta_engine::check(workflow, &config, &facts);
     if !errors.is_empty() {
         note(problems(
             dir.join(".yunta/workflows/example.yaml").display(),
@@ -153,5 +162,5 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
         ));
         return Ok(Outcome::Reported);
     }
-    crate::commands::test::test(Some(&dir)).await
+    crate::commands::test::test(Some(dir)).await
 }

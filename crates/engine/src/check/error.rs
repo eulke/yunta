@@ -396,14 +396,19 @@ pub enum CheckError {
     )]
     AskOnANodeThatAsksNothing { node: NodeId },
 
-    /// `network: false` on a `full` node: a full session's commands run
-    /// unconfined, so nothing can keep its network closed.
+    /// `network: true` on a session that runs read-only, which gets none.
     #[error(
-        "node `{node}`: `network: false` cannot hold under `permissions: full` — a full \
-         session's commands run unconfined — lower `permissions` to `edit`, or drop \
-         `network: false`"
+        "node `{node}` asks for `network: true`, but its session runs read-only and gets no network: \
+         drop `network: true`, or let it write with `permissions: edit` under a non-read-only `sandbox`"
     )]
-    ClosedNetworkUnderFull { node: NodeId },
+    NetworkOpenUnderReadOnly { node: NodeId },
+
+    /// A closed network on a session that runs unconfined, which nothing keeps closed.
+    #[error(
+        "node `{node}`: the network is closed, but its session runs unconfined, so nothing keeps its \
+         commands off it — lower `permissions` to `edit` under a confining `sandbox`, or set `network: true`"
+    )]
+    ClosedNetworkUnconfined { node: NodeId },
 
     /// The node asks for a scope-expansion mode more
     /// permissive than the merged `permissions.scope_expansion.max_mode`
@@ -484,4 +489,11 @@ pub enum CheckError {
         declared: &'static str,
         effective: &'static str,
     },
+
+    /// A pack's `declares.network: false` closes the network for each node.
+    #[error(
+        "node `{node}` asks for `network: true`, but pack `{pack}` declares the network closed, \
+         so drop `network: true`"
+    )]
+    PackNetworkCeilingExceeded { node: NodeId, pack: String },
 }

@@ -137,9 +137,9 @@ async fn every_session_after_the_spec_is_accepted_is_fenced_from_every_test() {
     let glob: yunta_core::ScopeGlob = "tests/greet.sh".into();
     for (session, request) in requests.iter().enumerate().skip(2) {
         assert!(
-            request.fence.protected.every().contains(&glob),
+            request.confinement.protected.every().contains(&glob),
             "session {session} is fenced from the test: {:?}",
-            request.fence.protected.every()
+            request.confinement.protected.every()
         );
     }
 }

@@ -15,7 +15,7 @@ use yunta_core::events::{
 };
 use yunta_core::fence::{Fence, Verdict};
 use yunta_core::rail::{unasked, RailAct, RailAnswer, RailCall, RailEvent};
-use yunta_core::{SessionId, Unredactable};
+use yunta_core::{Confinement, SessionId, Unredactable};
 use yunta_storage::StorageError;
 
 use super::session::{RunToolError, SessionTools};
@@ -23,11 +23,14 @@ use super::session::{RunToolError, SessionTools};
 /// What one session's hooks are judged against, and the refusal the log
 /// could not keep, if one was.
 ///
-/// The fence is set once the session's request is built, which is
-/// before the session is dispatched and so before any hook can ask.
+/// The fence and the confinement are set once the session's request is
+/// built, which is before the session is dispatched and so before any hook
+/// can ask.
 #[derive(Default)]
 pub struct SessionRails {
     fence: OnceLock<Fence>,
+    /// What the session may write and reach, which its fence is judged beside.
+    confinement: OnceLock<Confinement>,
     /// The most recent refusal whose log append failed. The engine answered
     /// it all the same; the attempt that dispatched the session reads it
     /// and fails with the storage cause.
@@ -35,15 +38,17 @@ pub struct SessionRails {
 }
 
 impl SessionRails {
-    /// Holds the session to `fence`. A second fence is ignored: the one a
-    /// session was opened with is the one it is judged against.
-    pub fn fence(&self, fence: Fence) {
+    /// Holds the session to `fence`, judged beside `confinement`. A second
+    /// pair is ignored: the one a session was opened with is the one it is
+    /// judged against.
+    pub fn fence(&self, fence: Fence, confinement: Confinement) {
         self.fence.get_or_init(|| fence);
+        self.confinement.get_or_init(|| confinement);
     }
 
-    /// The fence the session was opened with, once it is set.
-    pub(super) fn fence_of(&self) -> Option<&Fence> {
-        self.fence.get()
+    /// The fence and the confinement the session was opened with, once set.
+    pub(super) fn fence_of(&self) -> Option<(&Fence, &Confinement)> {
+        Some((self.fence.get()?, self.confinement.get()?))
     }
 
     /// The refusal whose log append failed, taken: read once the session
@@ -75,12 +80,12 @@ impl SessionTools {
     /// path is recorded before the session hears of it; the refusal it
     /// reads is the fence's own text, one per path.
     async fn before_write(&self, session: &SessionId, paths: &[PathBuf]) -> RailAnswer {
-        let Some(fence) = self.rails.fence.get() else {
+        let Some((fence, confinement)) = self.rails.fence_of() else {
             return unasked(RailEvent::BeforeWrite, "this session has no fence yet");
         };
         let mut reasons = Vec::new();
         for path in paths {
-            let Verdict::Refused(refusal) = fence.judge(&self.cwd, path) else {
+            let Verdict::Refused(refusal) = fence.judge(&self.cwd, path, confinement) else {
                 continue;
             };
             let target = shown(&refusal.target, &self.cwd);
@@ -90,7 +95,7 @@ impl SessionTools {
             if let Err(error) = self.append(payload).await {
                 self.rails.keep_unrecorded(error);
             }
-            reasons.push(refusal.to_string());
+            reasons.push(refusal.message(self.naming));
         }
         match reasons.is_empty() {
             true => RailAnswer::Proceed,

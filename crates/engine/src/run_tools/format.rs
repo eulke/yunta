@@ -49,12 +49,12 @@ impl SessionTools {
     /// Of `paths`, the files this session may write that exist now, each
     /// once and relative to the worktree.
     async fn formattable(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
-        let Some(fence) = self.rails.fence_of() else {
+        let Some((fence, confinement)) = self.rails.fence_of() else {
             return Vec::new();
         };
         let mut files = Vec::new();
         for path in paths {
-            if !matches!(fence.judge(&self.cwd, path), Verdict::Allowed) {
+            if !matches!(fence.judge(&self.cwd, path, confinement), Verdict::Allowed) {
                 continue;
             }
             let absolute = self.cwd.join(path);

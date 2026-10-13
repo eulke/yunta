@@ -43,7 +43,10 @@ pub enum DispatchError {
 pub(crate) struct Dispatched {
     pub outcome: DispatchOutcome,
     pub tokens: TokenUsage,
+    /// How much of the writes the session's fence covered, as its opening reported it.
     pub fence: Option<yunta_core::fence::Coverage>,
+    /// The confinement the session that reported `fence` was opened under.
+    pub confinement: Option<yunta_core::events::ConfinementRecord>,
     /// The sessions the stream opened, in order. The last is what the next
     /// attempt resumes when something it asked for changes.
     pub sessions: Vec<yunta_core::SessionId>,
@@ -159,6 +162,7 @@ fn joined(before: Dispatched, after: Dispatched) -> Dispatched {
         outcome: after.outcome,
         tokens,
         fence: after.fence.or(before.fence),
+        confinement: after.confinement.or(before.confinement),
         sessions,
     }
 }

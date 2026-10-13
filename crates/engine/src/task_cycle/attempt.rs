@@ -89,6 +89,7 @@ pub(super) async fn run_one_attempt(
             outcome: dispatch_outcome,
             tokens,
             fence: covered,
+            confinement,
             sessions,
             ..
         },
@@ -213,7 +214,7 @@ pub(super) async fn run_one_attempt(
         session,
         dispatch: dispatch_outcome,
         tokens,
-        fence_breach: crate::scope::fence_breach(covered.as_ref(), &scope),
+        fence_breach: crate::scope::fence_breach(covered.as_ref(), confinement.as_ref(), &scope),
         post_check: post_runs,
         post_results,
         scope,

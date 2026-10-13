@@ -74,6 +74,40 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
     crate::run_dir::worktrees_root(ctx.manifest, ctx.run_dir)
 }
 
+/// The child's static check, asked of it as it is born with what its node
+/// mounts into it: the diagnostics that fail it, joined, or `None` when it
+/// passes. Each adapter the check names is read as the run holds it, with
+/// the sandbox its edits run under.
+fn check_child(
+    ctx: &RunCtx<'_>,
+    child: &yunta_core::Workflow,
+    mounts: &[MountSpec],
+) -> Option<String> {
+    let errors = crate::check::check_mounted(
+        child,
+        &ctx.manifest.config,
+        &|adapter| {
+            ctx.adapters
+                .get(adapter)
+                .map(|adapter| crate::check::AdapterFacts {
+                    capabilities: adapter.capabilities(),
+                    edit_sandbox: adapter.edit_sandbox(),
+                })
+        },
+        mounts,
+    );
+    if errors.is_empty() {
+        return None;
+    }
+    Some(
+        errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
 /// What a `kind: workflow` node declares: which workflow to run, what
 /// to hand it, and how much of the parent's tree it sees. One value
 /// because it is one clause of the node, read together and never apart.
@@ -170,22 +204,7 @@ pub(super) async fn execute_workflow(
     // — a child born broken is refused at birth, with the check's own
     // diagnostics — asked of the child as it is born: holding what this
     // node mounts into it.
-    let check_errors = crate::check::check_mounted(
-        &child_workflow,
-        &ctx.manifest.config,
-        &|adapter| {
-            ctx.adapters
-                .get(adapter)
-                .map(|adapter| adapter.capabilities())
-        },
-        mounts,
-    );
-    if !check_errors.is_empty() {
-        let listed = check_errors
-            .iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("; ");
+    if let Some(listed) = check_child(ctx, &child_workflow, mounts) {
         return fail(
             ctx,
             node,

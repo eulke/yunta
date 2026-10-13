@@ -38,6 +38,9 @@ pub enum Policy {
     /// `resume_session` absent, or nothing to resume: a fresh session
     /// replaces the interrupted one.
     FreshSession,
+    /// `mid_session_token_cap` absent: the CLI reports no usage while a
+    /// session runs, so the run's token cap is checked when the session ends.
+    CapAtSessionEnd,
 }
 
 impl Policy {
@@ -50,6 +53,7 @@ impl Policy {
             Policy::NoRunTools => "no_run_tools",
             Policy::NetworkOpen => "network_open",
             Policy::FreshSession => "fresh_session",
+            Policy::CapAtSessionEnd => "cap_at_session_end",
         }
     }
 }
@@ -106,7 +110,7 @@ pub enum Absence {
 /// Every capability and what its absence means. Exhaustive by test: a
 /// capability added to [`Capability`] without a row here is a capability
 /// whose absence nobody decided.
-pub const POLICY: [(Capability, Absence); 9] = [
+pub const POLICY: [(Capability, Absence); 10] = [
     (
         Capability::ResumeSession,
         Absence::DegradeWith(Policy::FreshSession),
@@ -139,6 +143,10 @@ pub const POLICY: [(Capability, Absence); 9] = [
         Absence::DegradeWith(Policy::NetworkOpen),
     ),
     (Capability::StopRefusals, Absence::FailAtCheck),
+    (
+        Capability::MidSessionTokenCap,
+        Absence::DegradeWith(Policy::CapAtSessionEnd),
+    ),
 ];
 
 /// What this capability's absence means.
@@ -168,6 +176,7 @@ mod tests {
             (Policy::NoRunTools, "no_run_tools"),
             (Policy::NetworkOpen, "network_open"),
             (Policy::FreshSession, "fresh_session"),
+            (Policy::CapAtSessionEnd, "cap_at_session_end"),
         ];
         for (policy, name) in names {
             assert_eq!(policy.as_str(), name);

@@ -16,9 +16,7 @@ impl Board<'_> {
     /// owed failure widens each task by its own request, so it is offered
     /// when one of those requests would be applied.
     pub(super) fn grantable(&self, node: &Node, failure: &Failure) -> bool {
-        let widenable = self.policy.grants_scope
-            && node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
-            && failure.wants_scope();
+        let widenable = self.policy.grants_scope && node.writes_worktree() && failure.wants_scope();
         let protected = &self.policy.protected;
         match failure {
             Failure::ScopeOwed { owed } => owed

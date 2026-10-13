@@ -40,11 +40,28 @@ impl ScopeGlob {
     /// The directory every path the glob selects lies under: its text
     /// before the first wildcard, cut at the last `/`. `.codex/**` gives
     /// `.codex` and `src/a*.rs` gives `src`; `**/*.md` and `.mcp.json` name
-    /// no directory and give `None`.
+    /// no directory and give `None`. This answers the git pathspecs, which
+    /// look through that directory. It is not a deny: `src` holds paths
+    /// `src/a*.rs` does not select, so a sandbox denies
+    /// [`ScopeGlob::whole_tree`] instead.
     pub fn tree(&self) -> Option<&str> {
         let before = prefix(self);
         let cut = before.rfind('/')?;
         before.get(..cut).filter(|tree| !tree.is_empty())
+    }
+
+    /// The directory the glob selects every path of, when it selects every
+    /// path under one: its text is `dir/**` or `dir/**/*` with `dir` free of
+    /// glob syntax. `.codex/**` gives `.codex` and `src/generated/**/*` gives
+    /// `src/generated`; `src/a*.rs`, `config/secrets.yaml`, `**/AGENTS.md`,
+    /// `src/*/gen/**` and `**` give `None`: each selects a file, part of a
+    /// directory, or paths under no one directory.
+    pub fn whole_tree(&self) -> Option<&str> {
+        let text = self.as_str();
+        let dir = text
+            .strip_suffix("/**/*")
+            .or_else(|| text.strip_suffix("/**"))?;
+        (!dir.is_empty() && !dir.contains(['*', '?', '[', '{', '\\'])).then_some(dir)
     }
 }
 
@@ -368,5 +385,23 @@ mod tests {
         assert_eq!(tree("**/AGENTS.md"), None);
         assert_eq!(tree(".mcp.json"), None);
         assert_eq!(tree("*.lock"), None);
+    }
+
+    #[test]
+    fn only_a_directory_then_a_double_star_selects_a_whole_tree() {
+        let whole = |glob: &str| ScopeGlob::from(glob).whole_tree().map(str::to_string);
+        assert_eq!(whole(".codex/**").as_deref(), Some(".codex"));
+        assert_eq!(whole(".git/**").as_deref(), Some(".git"));
+        assert_eq!(
+            whole("src/generated/**/*").as_deref(),
+            Some("src/generated")
+        );
+        assert_eq!(whole("src/a*.rs"), None);
+        assert_eq!(whole("config/secrets.yaml"), None);
+        assert_eq!(whole(".mcp.json"), None);
+        assert_eq!(whole("**/AGENTS.md"), None);
+        assert_eq!(whole("*.lock"), None);
+        assert_eq!(whole("src/*/gen/**"), None);
+        assert_eq!(whole("**"), None);
     }
 }

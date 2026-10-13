@@ -1,21 +1,21 @@
-//! The fence: what a session may write, said once and judged by one
-//! pure function.
+//! The fence: which of a session's file-tool writes its scope admits,
+//! judged by one pure function against the session's confinement.
 //!
-//! A node declares a scope; a run grants expansions; a run's own
-//! directories stay writable wherever a session sits. The fence is all
-//! of that as one value, and [`Fence::judge`] is the only thing that
-//! decides whether a path is inside it — the engine asks it for every
-//! write a session's hook reports, whichever adapter opened the session.
-//! Nothing here reads the disk: a judgement about a path is about the
-//! path.
+//! A node declares a scope and a run grants expansions; the fence holds
+//! that scope as one value. What a session may write beyond the scope is
+//! the [`Confinement`]'s: its roots, and the paths no session writes.
+//! [`Fence::judge`] is the only thing that decides whether a path is inside
+//! both, and the engine asks it for every write a session's hook reports,
+//! whichever adapter opened the session. Nothing here reads the disk: a
+//! judgement about a path is about the path.
 //!
 //! The post-check diff remains the guarantee. The fence is what keeps a
-//! write outside the scope from happening at all, and the coverage it
-//! reports is what says how much of that it could actually do.
+//! write outside the scope from happening at all, and the coverage the
+//! confinement reports is what says how much of that the sandbox could do.
 
-use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
+use crate::confinement::Confinement;
 use crate::glob::{listed_globs, scope_globset, ScopeGlob};
 use crate::port::PermissionProfile;
 use crate::protected::{is_register, Protected, Protection};
@@ -25,28 +25,16 @@ use serde::{Deserialize, Serialize};
 /// person reading its transcript — knows it was the fence.
 pub const REFUSAL_MARKER: &str = "yunta: write refused: ";
 
-/// What a session may write: the globs it may write under the worktree,
-/// and the absolute roots it may write outside it.
+/// What a session's file tools may write under the worktree: the globs
+/// its scope admits, and what a refusal advises.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fence {
     /// What may be written under the worktree. `None` is no ceiling at
     /// all — every path under it — and is a different fact from
-    /// `Some([])`, which is a ceiling that admits nothing: the
-    /// `read_only` profile, whose roots stay writable because they are
-    /// the run's register and not the task's work.
+    /// `Some([])`, which is a ceiling that admits nothing: the read-only
+    /// profile's.
     pub allowed: Option<Vec<ScopeGlob>>,
-    pub roots: Vec<PathBuf>,
     pub advice: Advice,
-    /// What no session of the run may write under the worktree — what the
-    /// project denies to every run, the agents' own configuration, the
-    /// instruction files, the tests a person approved — refused whatever
-    /// `allowed` and `roots` admit.
-    #[serde(default, skip_serializing_if = "Protected::is_empty")]
-    pub protected: Protected,
-    /// How the session's CLI names the run's tools, which is what a
-    /// refusal that advises one names it by.
-    #[serde(default)]
-    pub naming: crate::ToolNaming,
 }
 
 /// What a refusal tells the model to do instead. A session that mounted
@@ -72,17 +60,15 @@ pub enum Verdict {
 pub struct Refusal {
     pub target: PathBuf,
     pub worktree: PathBuf,
-    /// The ceiling the write broke, as the fence carries it: `None`
-    /// never refuses under the worktree, so a refusal with `None` here
-    /// is one for a path outside it.
+    /// The ceiling the write broke: the scope's, or none under a worktree
+    /// the confinement does not write. `None` never refuses under the
+    /// worktree, so a refusal with `None` here is one for a path outside it.
     pub allowed: Option<Vec<ScopeGlob>>,
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
     /// The protection that refuses the path, which no request widens
     /// unless it is an instruction file a person grants.
     pub protection: Option<Protection>,
-    /// How the model the refusal reaches calls the run's tools.
-    pub naming: crate::ToolNaming,
 }
 
 /// How much of a session the fence actually covered, derived from what
@@ -104,127 +90,98 @@ pub enum Fenced {
 }
 
 impl Fence {
-    /// Everything under the worktree, plus the roots: what a session
-    /// whose node declared no scope may write.
-    pub fn everything(roots: Vec<PathBuf>, advice: Advice) -> Self {
+    /// Everything under the worktree: what a session whose node declared
+    /// no scope may write.
+    pub fn everything(advice: Advice) -> Self {
         Fence {
             allowed: None,
-            roots,
             advice,
-            protected: Protected::default(),
-            naming: crate::ToolNaming::default(),
-        }
-    }
-
-    /// Nothing under the worktree; the roots stay writable, because they
-    /// are the run's own register and not the task's work.
-    pub fn read_only(roots: Vec<PathBuf>, advice: Advice) -> Self {
-        Fence {
-            allowed: Some(Vec::new()),
-            roots,
-            advice,
-            protected: Protected::default(),
-            naming: crate::ToolNaming::default(),
         }
     }
 
     /// The fence one session runs behind: its profile, the scope it
-    /// declared, the expansions already granted to it, and the directory
-    /// its declared files are written to.
+    /// declared and the expansions already granted to it. A read-only
+    /// profile admits nothing under the worktree.
     pub fn for_session(
         profile: PermissionProfile,
         scope: Option<&[ScopeGlob]>,
         granted: &[ScopeGlob],
-        artifact_dir: Option<&Path>,
         advice: Advice,
     ) -> Self {
-        let roots: Vec<PathBuf> = artifact_dir.map(Path::to_path_buf).into_iter().collect();
         match (profile, scope) {
-            (PermissionProfile::ReadOnly, _) => Fence::read_only(roots, advice),
-            (_, None) => Fence::everything(roots, advice),
+            (PermissionProfile::ReadOnly, _) => Fence {
+                allowed: Some(Vec::new()),
+                advice,
+            },
+            (_, None) => Fence::everything(advice),
             (_, Some(scope)) => Fence {
                 allowed: Some(scope.iter().chain(granted).cloned().collect()),
-                roots,
                 advice,
-                protected: Protected::default(),
-                naming: crate::ToolNaming::default(),
             },
         }
     }
 
-    /// The same fence, keeping `dirs` writable beside the checkout as
-    /// well — the directories every session of a run shares.
-    pub fn sharing(mut self, dirs: &[PathBuf]) -> Self {
-        self.roots.extend(dirs.iter().cloned());
-        self
-    }
-
-    /// The same fence, refusing what `protected` holds whatever it otherwise admits.
-    pub fn protecting(self, protected: Protected) -> Self {
-        Fence { protected, ..self }
-    }
-
-    /// The same fence, its refusals naming a run tool the way a CLI that
-    /// names tools by `naming` hands it to its model.
-    pub fn naming(self, naming: crate::ToolNaming) -> Self {
-        Fence { naming, ..self }
-    }
-
-    /// Whether `target` is inside the fence. Pure: `target` is resolved
-    /// lexically against `worktree` and nothing is read from disk, so
-    /// the answer is the same wherever it is asked.
-    pub fn judge(&self, worktree: &Path, target: &Path) -> Verdict {
+    /// Whether `target` is inside the fence and the confinement. Pure:
+    /// `target` is resolved lexically against `worktree` and nothing is
+    /// read from disk, so the answer is the same wherever it is asked.
+    pub fn judge(&self, worktree: &Path, target: &Path, confinement: &Confinement) -> Verdict {
         let target = lexical_absolute(worktree, target);
         let inside = target.strip_prefix(worktree).ok();
-        let protection = inside.and_then(|relative| self.protection_of(relative));
-        if protection.is_none() && self.roots.iter().any(|root| target.starts_with(root)) {
-            return Verdict::Allowed;
-        }
-        self.scope_verdict(worktree, inside, &target, protection)
-    }
-
-    /// The reason a worktree-relative path is refused whatever the fence
-    /// admits: the set's reason, else the run's own register. The register
-    /// holds in every fence, even one built without the set.
-    fn protection_of(&self, relative: &Path) -> Option<Protection> {
-        self.protected
-            .reason_of(relative)
-            .or_else(|| is_register(relative).then_some(Protection::GitRegister))
-    }
-
-    /// The scope half of the judgement: a path no protection holds is
-    /// allowed when `allowed` admits it, and a refusal carries what the
-    /// fence was built from.
-    fn scope_verdict(
-        &self,
-        worktree: &Path,
-        inside: Option<&Path>,
-        target: &Path,
-        protection: Option<Protection>,
-    ) -> Verdict {
+        let protection =
+            inside.and_then(|relative| protection_of(&confinement.protected, relative));
         let allowed = protection.is_none()
-            && match inside {
-                Some(_) if self.allowed.is_none() => true,
-                Some(relative) => self
-                    .allowed
-                    .as_deref()
-                    .and_then(|globs| scope_globset(globs).ok())
-                    .is_some_and(|set| set.is_match(relative)),
-                None => false,
-            };
+            && (confinement
+                .roots
+                .iter()
+                .any(|root| target.starts_with(root))
+                || self.admits(confinement, inside));
         if allowed {
             return Verdict::Allowed;
         }
         Verdict::Refused(Refusal {
-            target: target.to_path_buf(),
+            target,
             worktree: worktree.to_path_buf(),
-            allowed: self.allowed.clone(),
-            roots: self.roots.clone(),
+            allowed: self.worktree_ceiling(confinement),
+            roots: confinement.roots.clone(),
             advice: self.advice,
             protection,
-            naming: self.naming,
         })
     }
+
+    /// Whether the scope admits a path no protection holds. Under the
+    /// worktree that takes a confinement which writes it, and a scope that
+    /// names it; outside the worktree nothing is admitted here.
+    fn admits(&self, confinement: &Confinement, inside: Option<&Path>) -> bool {
+        match inside {
+            None => false,
+            Some(_) if !confinement.writes_worktree() => false,
+            Some(_) if self.allowed.is_none() => true,
+            Some(relative) => self
+                .allowed
+                .as_deref()
+                .and_then(|globs| scope_globset(globs).ok())
+                .is_some_and(|set| set.is_match(relative)),
+        }
+    }
+
+    /// The ceiling a refusal reports: the scope's, or nothing when the
+    /// confinement writes no worktree.
+    fn worktree_ceiling(&self, confinement: &Confinement) -> Option<Vec<ScopeGlob>> {
+        if confinement.writes_worktree() {
+            self.allowed.clone()
+        } else {
+            Some(Vec::new())
+        }
+    }
+}
+
+/// The reason a worktree-relative path is refused whatever the scope
+/// admits: the set's reason, else the run's own register. The register
+/// holds in every confinement, even one built without the set.
+fn protection_of(protected: &Protected, relative: &Path) -> Option<Protection> {
+    protected
+        .reason_of(relative)
+        .or_else(|| is_register(relative).then_some(Protection::GitRegister))
 }
 
 impl Coverage {
@@ -259,27 +216,22 @@ fn merged_roots(tools: Fenced, others: Fenced) -> Vec<PathBuf> {
     roots
 }
 
-impl fmt::Display for Refusal {
-    /// The one text of a refusal, read by the model that tried the
-    /// write.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Refusal {
+    /// The one text of a refusal, read by the model that tried the write.
+    /// `naming` is how the session's CLI calls the run's tools.
+    pub fn message(&self, naming: crate::ToolNaming) -> String {
         if let Some(protection) = self.protection {
-            return write!(
-                f,
+            return format!(
                 "{REFUSAL_MARKER}{} is outside what this session may ever write. {} Do not write \
                  here.",
                 self.target.display(),
                 protection_sentence(protection)
             );
         }
-        writeln!(
-            f,
-            "{REFUSAL_MARKER}{} is outside this session's scope.",
-            self.target.display()
-        )?;
-        writeln!(
-            f,
-            "Allowed under {}: {}; also writable: {}.",
+        format!(
+            "{REFUSAL_MARKER}{} is outside this session's scope.\n\
+             Allowed under {}: {}; also writable: {}.\n{}",
+            self.target.display(),
             self.worktree.display(),
             match &self.allowed {
                 None => "everything".to_string(),
@@ -291,20 +243,22 @@ impl fmt::Display for Refusal {
                     .map(|root| root.display().to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
-            )
-        )?;
+            ),
+            self.advice_sentence(naming)
+        )
+    }
+
+    /// What the refusal tells the model to do instead.
+    fn advice_sentence(&self, naming: crate::ToolNaming) -> String {
         match self.advice {
-            Advice::RequestExpansion => write!(
-                f,
+            Advice::RequestExpansion => format!(
                 "Ask for more scope with the run tool {}; a granted expansion applies from \
                  the next attempt. When one of your task's own criteria fails pointing at \
                  this file as `path:line`, the engine grants it itself once the attempt \
                  ends. Do not write here.",
-                crate::RunTool::RequestScopeExpansion.called(self.naming)
+                crate::RunTool::RequestScopeExpansion.called(naming)
             ),
-            Advice::ReportFinding => {
-                f.write_str("Report the need as a finding; do not write here.")
-            }
+            Advice::ReportFinding => "Report the need as a finding; do not write here.".to_string(),
         }
     }
 }

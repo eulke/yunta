@@ -883,6 +883,7 @@ pub async fn resume_orphan_with_mock(
                             model: Some("mock-model".into()),
                             capabilities: yunta_core::Capabilities::default(),
                             fence: None,
+                            confinement: None,
                             task_id: None,
                             continues: None,
                         },

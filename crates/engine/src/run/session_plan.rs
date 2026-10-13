@@ -1,8 +1,8 @@
 //! The one door a session opens through.
 //!
 //! A `SessionRequest` is the whole contract between the engine and an
-//! adapter: what to run, on which model, with which permissions, which
-//! skills, which tools, and where it may write. Written in two places it
+//! adapter: what to run, on which model, which skills, which tools, and
+//! what it may write and reach. Written in two places it
 //! became two contracts — a task session that reached its node's model
 //! and agent only by accident, and a typed-artifact gate that guarded
 //! prompt nodes and not loop nodes.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
-use yunta_core::{Node, Task};
+use yunta_core::{Confinement, ConfinementInput, Node, Task, Unbuildable};
 
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
@@ -73,7 +73,7 @@ pub(crate) async fn resolve_setup(
         rail_command: ctx.rail_command.clone(),
         agent,
         cli_config: super::session_policy::cli_config(ctx, node),
-        network: super::session_policy::network(ctx, node),
+        network: yunta_core::network_asked(node.network, ctx.manifest.config.network_permissions()),
         run_dir: ctx.run_dir.to_path_buf(),
         node: node.id.clone(),
         chosen: chosen.clone(),
@@ -112,9 +112,12 @@ async fn state_run_wide_absences(
 }
 
 /// Whether this node's sessions carry edit constraints: its own declared
-/// scope, or — for a loop — the scope every task it runs declares.
+/// scope, the scope every task of a loop declares, or the empty scope of a
+/// read-only node.
 fn declares_edit_scope(node: &Node) -> bool {
-    node.scope.is_declared() || matches!(node.kind, yunta_core::NodeKind::Loop { .. })
+    node.scope.is_declared()
+        || matches!(node.kind, yunta_core::NodeKind::Loop { .. })
+        || node.permissions == Some(yunta_core::NodePermissions::ReadOnly)
 }
 
 /// The skill directories this node's sessions mount. Names are resolved
@@ -254,6 +257,11 @@ pub(crate) enum OpenSessionError {
     Audit(#[from] yunta_storage::StorageError),
     #[error(transparent)]
     RunTools(#[from] RunToolsSetupError),
+    /// What the session may write and reach cannot be built, or the engine
+    /// refuses it outright: an unconfined session with its network closed,
+    /// or a shared directory inside the checkout.
+    #[error(transparent)]
+    Confinement(Unbuildable),
 }
 
 /// A session opened and waiting on its dispatch: the request to hand the
@@ -265,13 +273,15 @@ pub(crate) struct OpenedSession {
     pub run_tools: Option<RunToolsSession>,
 }
 
-/// Opens one session against `adapter`: mounts the per-session tools
-/// listener when the node's setup allows one, tells the session what it
-/// owes, and writes the request.
+/// Opens one session against `adapter`: resolves what the session may write
+/// and reach, mounts the per-session tools listener when the node's setup
+/// allows one, tells the session what it owes, and writes the request.
 ///
-/// A listener that fails to bind degrades — the session runs without
-/// tools and the log says so — unless the node cannot do without them:
-/// a task session reads its task and checks its work nowhere else.
+/// The confinement is resolved first, so a session that cannot be confined is
+/// refused before any listener is bound. A listener that fails to bind
+/// degrades — the session runs without tools and the log says so — unless the
+/// node cannot do without them: a task session reads its task and checks its
+/// work nowhere else.
 pub(crate) async fn open_session(
     setup: &SessionSetup,
     plan: SessionPlan<'_>,
@@ -279,23 +289,22 @@ pub(crate) async fn open_session(
     observer: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
 ) -> Result<OpenedSession, OpenSessionError> {
     let held_to = HeldTo::of(setup, &plan);
+    let confinement = confine(setup, &plan, &held_to, adapter)?;
     let run_tools = mount_tools(setup, &plan, &held_to, adapter, observer).await?;
     let scratch_dir = scratch_dir(setup, &plan);
-    let fence = fence(setup, &plan, &held_to, run_tools.as_ref());
+    let fence = fence(&plan, &held_to, run_tools.as_ref());
     // No hook can ask before the session is dispatched, so the fence its
     // writes are judged against is in place before the first one does.
     if let Some(session) = &run_tools {
-        session.rails().fence(fence.clone());
+        session.rails().fence(fence.clone(), confinement.clone());
     }
-    let task = plan.task.clone();
 
     let request = SessionRequest {
-        prompt: told(setup, plan.prompt, run_tools.as_ref(), task.as_deref()),
+        prompt: told(setup, plan.prompt, run_tools.as_ref(), plan.task.as_deref()),
         cwd: plan.cwd,
         model: Some(setup.chosen.model.clone()),
         agent: setup.agent.clone(),
         effort: setup.chosen.effort,
-        permissions: plan.profile,
         // Only a session the engine listens to can be told what was
         // formatted.
         formats: run_tools.is_some()
@@ -304,7 +313,7 @@ pub(crate) async fn open_session(
                 .as_ref()
                 .is_some_and(|access| access.host.formats()),
         cli_config: setup.cli_config,
-        network: setup.network,
+        confinement,
         env: setup.env.clone(),
         fence,
         rail_command: setup.rail_command.clone(),
@@ -319,13 +328,18 @@ pub(crate) async fn open_session(
         artifact_dir: setup.artifact_dir.clone(),
         scratch_dir,
     };
-    // What the adapter stages for its own mechanics is known only now,
-    // and no call can reach the session's tools before it is dispatched:
-    // a check the session asks for leaves out exactly what its close will.
-    if let Some(staged) = held_to.staged() {
-        let _ = staged.set(adapter.staged_paths(&request));
-    }
+    record_staged(&held_to, adapter, &request);
     Ok(OpenedSession { request, run_tools })
+}
+
+/// Records the paths the adapter stages for its own mechanics. They are known
+/// only now, and no call can reach the session's tools before it is dispatched:
+/// a check the session asks for leaves out exactly what its close will.
+fn record_staged(held_to: &HeldTo, adapter: &dyn Adapter, request: &SessionRequest) {
+    if let Some(staged) = held_to.staged() {
+        // best-effort: the staged paths are set once, and a second set would keep the first.
+        let _ = staged.set(adapter.staged_paths(request));
+    }
 }
 
 /// The session's prompt with every sentence its mount produces: which
@@ -360,41 +374,41 @@ fn told(
     prompt
 }
 
-/// What this session may write: its profile, the scope it works to — a
-/// task session its task's, a node's own session the node's, the
-/// expansions already granted included either way — and the one
-/// directory outside the worktree its declared files belong in. What no
-/// session of the run may write is refused whatever that scope admits.
-///
-/// A session that mounted the scope-expansion tool is told to ask for
-/// more when it is refused; one that did not is told to report the need
-/// and move on, because asking is not something it can do.
-fn fence(
+/// What this session may write and reach, resolved by the one resolution the
+/// engine has. A refusal here is the session's refusal to open: no listener
+/// is bound and no token is spent.
+fn confine(
     setup: &SessionSetup,
     plan: &SessionPlan<'_>,
     held_to: &HeldTo,
-    run_tools: Option<&RunToolsSession>,
-) -> Fence {
+    adapter: &dyn Adapter,
+) -> Result<Confinement, OpenSessionError> {
+    Confinement::of(ConfinementInput {
+        profile: plan.profile,
+        edit: adapter.edit_sandbox(),
+        scoped: declares_edit_scope(plan.node),
+        network: setup.network,
+        checkout: &plan.cwd,
+        artifact_dir: setup.artifact_dir.as_deref(),
+        shared_dirs: &setup.shared_dirs,
+        protected: Arc::new(held_to.protected(setup)),
+    })
+    .map_err(OpenSessionError::Confinement)
+}
+
+/// What this session's fence holds it to: its profile and the scope its work
+/// is held to, with the expansions already granted. A session that mounted
+/// the scope-expansion tool is told to ask for more when it is refused; one
+/// that did not is told to report the need and move on, because asking is
+/// not something it can do. What no session may write, and where it may write
+/// beyond its worktree, is the confinement's to judge beside this fence.
+fn fence(plan: &SessionPlan<'_>, held_to: &HeldTo, run_tools: Option<&RunToolsSession>) -> Fence {
     let advice = if run_tools.is_some() && held_to.may_ask() {
         Advice::RequestExpansion
     } else {
         Advice::ReportFinding
     };
-    let naming = run_tools.map(RunToolsSession::naming).unwrap_or_default();
-    let fence = Fence::for_session(
-        plan.profile,
-        held_to.scope(),
-        &[],
-        setup.artifact_dir.as_deref(),
-        advice,
-    )
-    .protecting(held_to.protected(setup))
-    .naming(naming);
-    // A session that writes nothing keeps nothing writable.
-    match plan.profile {
-        yunta_core::port::PermissionProfile::ReadOnly => fence,
-        _ => fence.sharing(&setup.shared_dirs),
-    }
+    Fence::for_session(plan.profile, held_to.scope(), &[], advice)
 }
 
 /// Where this session may drop its own scaffolding. Concurrent sessions

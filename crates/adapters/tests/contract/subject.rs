@@ -1,12 +1,11 @@
 //! What the contract cases run against: the mock, and the two real adapters
 //! driving their scripted stubs.
 //!
-//! A subject plays one `Script` and reports the events its adapter emitted
-//! and the argv its CLI was launched with. A case reads a CLI's flags only
-//! through `read_back`, so no assertion depends on how an adapter builds
-//! its argv.
+//! A subject plays one `Script` and reports the events its adapter emitted,
+//! the argv its CLI was launched with and the worktree it ran in. A case
+//! reads a CLI's flags only through `read_back`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde_json::{json, Value};
@@ -24,9 +23,6 @@ use super::wire;
 /// stop. The harness writes it, and the stubs recognise a turn by it.
 pub const STOP_TURN: &str = "a refused stop, and the work goes on: ";
 
-/// The version the mock's probe reports.
-const MOCK_VERSION: &str = "mock-0.1";
-
 /// The hook events a CLI's settings name, each with the engine's rail event.
 const HOOK_EVENTS: [(&str, RailEvent); 3] = [
     ("PreToolUse", RailEvent::BeforeWrite),
@@ -34,12 +30,13 @@ const HOOK_EVENTS: [(&str, RailEvent); 3] = [
     ("PostToolUse", RailEvent::AfterWrite),
 ];
 
-/// What one played session produced: the events its adapter emitted, and
-/// the argv its CLI was launched with.
+/// What one played session produced: the events its adapter emitted, the
+/// argv its CLI was launched with, and the worktree it ran in.
 #[derive(Debug)]
 pub struct Played {
     pub events: Vec<AgentEvent>,
     pub argv: Vec<String>,
+    pub cwd: PathBuf,
 }
 
 /// One scripted session: the model its CLI reports, what it does, and how
@@ -71,9 +68,8 @@ pub enum Step {
     },
     /// A call to one of the run tools, named the way the CLI names it.
     RunToolCalled(RunTool),
-    /// Tokens the session spent. `input` is everything it read, cache
-    /// included, and `cached` is the part of that read from the cache; an
-    /// absent `cached` means the CLI reports none.
+    /// Tokens the session spent: `input` is all it read, and `cached` the part
+    /// of that read from the cache, absent when the CLI reports none.
     Usage {
         input: u64,
         output: u64,
@@ -122,8 +118,9 @@ pub trait Subject: Sync {
     /// it was given.
     async fn play(&self, cwd: &Path, req: SessionRequest, script: &Script) -> Played;
 
-    /// What an argv asks of its CLI, read back from its flags.
-    fn read_back(&self, argv: &[String]) -> Asks;
+    /// What a played session asks of its CLI, read back from its argv and
+    /// from the worktree it ran in.
+    fn read_back(&self, played: &Played) -> Asks;
 
     /// The version the subject's CLI reports when it is probed.
     fn version(&self) -> &'static str;
@@ -136,8 +133,7 @@ pub trait Subject: Sync {
     fn stub_var(&self, knob: &str) -> String;
 }
 
-/// The mock adapter, playing each script as a session of the claude-code
-/// dialect.
+/// The mock adapter, playing each script as a claude-code session.
 pub struct MockSubject;
 
 /// The real claude-code adapter, driving its scripted stub.
@@ -156,20 +152,21 @@ impl Subject for MockSubject {
         Box::new(MockAdapter::with_settings(mock_fixture(&idle()), settings))
     }
 
-    async fn play(&self, _cwd: &Path, req: SessionRequest, script: &Script) -> Played {
+    async fn play(&self, cwd: &Path, req: SessionRequest, script: &Script) -> Played {
         let mock = MockAdapter::new(mock_fixture(script));
         let session = mock.spawn(req).await.expect("the scripted session opens");
         let events = drain(session).await;
         let argv = mock.argvs_seen().into_iter().next().unwrap_or_default();
-        Played { events, argv }
+        let cwd = cwd.to_path_buf();
+        Played { events, argv, cwd }
     }
 
-    fn read_back(&self, argv: &[String]) -> Asks {
-        read_claude(argv)
+    fn read_back(&self, played: &Played) -> Asks {
+        read_claude(played)
     }
 
     fn version(&self) -> &'static str {
-        MOCK_VERSION
+        "mock-0.1"
     }
 
     fn expected_capabilities(&self) -> Capabilities {
@@ -199,8 +196,8 @@ impl Subject for ClaudeCodeSubject {
         play_stub(self, cwd, req, &wire::claude_lines(script)).await
     }
 
-    fn read_back(&self, argv: &[String]) -> Asks {
-        read_claude(argv)
+    fn read_back(&self, played: &Played) -> Asks {
+        read_claude(played)
     }
 
     fn version(&self) -> &'static str {
@@ -234,8 +231,8 @@ impl Subject for CodexSubject {
         play_stub(self, cwd, req, &wire::codex_lines(script)).await
     }
 
-    fn read_back(&self, argv: &[String]) -> Asks {
-        read_codex(argv)
+    fn read_back(&self, played: &Played) -> Asks {
+        read_codex(played)
     }
 
     fn version(&self) -> &'static str {
@@ -265,21 +262,22 @@ fn claude_capabilities() -> Capabilities {
         network_isolation: true,
         tool_naming: ToolNaming::McpPrefixed,
         stop_refusals: true,
+        mid_session_token_cap: true,
     }
 }
 
 /// What codex declares: the same set as claude-code, with its run tools
-/// named with the server's `-` written `_`.
+/// named with the server's `-` written `_`, and no mid-session token cap.
 fn codex_capabilities() -> Capabilities {
     Capabilities {
         tool_naming: ToolNaming::McpPrefixedUnderscored,
+        mid_session_token_cap: false,
         ..claude_capabilities()
     }
 }
 
-/// Plays `lines` through the subject's scripted CLI. The stub streams them
-/// from a file, and records the argv it was launched with in another; both
-/// paths reach it through the subject's own knobs.
+/// Plays `lines` through the subject's scripted CLI, which streams them from a
+/// file and records its argv in another, both reached through the subject's knobs.
 async fn play_stub(
     subject: &dyn Subject,
     cwd: &Path,
@@ -308,7 +306,8 @@ async fn play_stub(
         .lines()
         .map(str::to_string)
         .collect();
-    Played { events, argv }
+    let cwd = cwd.to_path_buf();
+    Played { events, argv, cwd }
 }
 
 /// The fixture that plays `script` as one session of the claude-code
@@ -324,9 +323,8 @@ fn mock_fixture(script: &Script) -> MockFixture {
     MockFixture::parse_without_a_run(&yaml).expect("the script is a fixture")
 }
 
-/// One step of a script as the mock's fixture spells it. A run tool is named
-/// the way the claude-code dialect names it, and a stop refusal is a turn of
-/// the CLI's own text.
+/// One step of a script as the mock's fixture spells it: a run tool named the
+/// way the claude-code dialect names it, and a stop refusal as the CLI's text.
 fn mock_step(step: &Step) -> Value {
     match step {
         Step::Note(text) => json!({ "type": "note", "text": text }),
@@ -365,8 +363,7 @@ fn mock_outcome(outcome: &Outcome) -> Value {
     }
 }
 
-/// A script that completes at once, for a subject asked for its adapter
-/// rather than for a session.
+/// A script that completes at once, for a subject asked only for its adapter.
 fn idle() -> Script {
     Script {
         model: None,
@@ -375,26 +372,30 @@ fn idle() -> Script {
     }
 }
 
-/// What a claude-code argv asks, read back from its flags and from the
+/// What a claude-code session asks, read back from its flags and from the
 /// `--settings` document that carries its hooks and sandbox.
 ///
-/// A CLI given no sandbox in its settings runs its commands unconfined, so
-/// that absence reads as `danger-full-access`.
-fn read_claude(argv: &[String]) -> Asks {
+/// A CLI given no sandbox runs its commands unconfined, with the network open.
+/// A sandbox that denies the worktree is `read-only`; any other is `workspace-write`.
+fn read_claude(played: &Played) -> Asks {
+    let argv = &played.argv;
     let settings: Value = serde_json::from_str(
         flag_value(argv, "--settings").expect("the hooks travel in --settings"),
     )
     .expect("--settings is JSON");
     let sandbox = settings.get("sandbox");
+    let worktree = json!(played.cwd);
+    let denies_worktree = sandbox
+        .and_then(|sandbox| sandbox.pointer("/filesystem/denyWrite"))
+        .and_then(Value::as_array)
+        .is_some_and(|denied| denied.contains(&worktree));
     let mode = match sandbox {
         None => "danger-full-access",
-        Some(sandbox) if sandbox.get("filesystem").is_some() => "read-only",
+        Some(_) if denies_worktree => "read-only",
         Some(_) => "workspace-write",
     };
-    let network = sandbox
-        .and_then(|sandbox| sandbox.get("network"))
-        .and_then(|network| network.get("allowedDomains"))
-        .is_some();
+    let network =
+        sandbox.is_none_or(|sandbox| sandbox.pointer("/network/allowedDomains").is_some());
     let hooks: Vec<(RailEvent, u64)> = HOOK_EVENTS
         .iter()
         .filter_map(|(key, event)| {
@@ -418,9 +419,14 @@ fn read_claude(argv: &[String]) -> Asks {
     }
 }
 
-/// What a codex argv asks, read back from its flags and from its `-c`
+/// What a codex session asks, read back from its flags and from its `-c`
 /// overrides, which are TOML assignments read together as one document.
-fn read_codex(argv: &[String]) -> Asks {
+///
+/// A confined session names its permissions profile, whose base says what its
+/// commands write and whose switch says whether they reach the network; an
+/// unconfined one passes `--sandbox danger-full-access`.
+fn read_codex(played: &Played) -> Asks {
+    let argv = &played.argv;
     let overrides: Vec<&str> = argv
         .windows(2)
         .filter_map(|pair| match pair {
@@ -446,15 +452,21 @@ fn read_codex(argv: &[String]) -> Asks {
             Some((*event, u64::try_from(timeout).ok()?))
         })
         .collect();
-    let network = config
-        .get("sandbox_workspace_write")
-        .and_then(toml::Value::as_table)
-        .and_then(|table| table.get("network_access"))
-        .and_then(toml::Value::as_bool)
-        == Some(true);
+    let permissions = config.get("permissions");
+    let profile = permissions.and_then(|table| table.get("yunta-session"));
+    let enabled = profile
+        .and_then(|table| table.get("network")?.get("enabled"))
+        .and_then(toml::Value::as_bool);
+    let base = profile.and_then(|table| table.get("extends"));
+    let sandbox = flag_value(argv, "--sandbox").or(match base.and_then(toml::Value::as_str) {
+        Some(":read-only") => Some("read-only"),
+        Some(":workspace") => Some("workspace-write"),
+        _ => None,
+    });
     Asks {
-        sandbox: flag_value(argv, "--sandbox").map(str::to_string),
-        network,
+        sandbox: sandbox.map(str::to_string),
+        // A session with no profile is the unconfined one, and its network is open.
+        network: enabled.unwrap_or(true),
         hooks,
         effort: text("model_reasoning_effort"),
         model: flag_value(argv, "--model").map(str::to_string),
@@ -475,13 +487,10 @@ static INTERRUPT: Mutex<Option<Signal>> = Mutex::new(None);
 
 /// Catches SIGINT in this process before a real CLI is spawned from it.
 ///
-/// A test binary started with SIGINT ignored, as a backgrounded job of a
-/// non-interactive shell starts it, hands that ignore to every child, and a
-/// child cannot trap a signal it inherits as ignored. Catching the signal
-/// replaces the ignore with a handler, and a child resets a caught signal to
-/// its default when it execs, so the CLI meets SIGINT as it does when the
-/// engine runs it. The listener is kept in a static so it outlives every
-/// test that spawns a CLI.
+/// A test binary started with SIGINT ignored hands that ignore to every child,
+/// and a child cannot trap a signal it inherits as ignored. A caught signal is
+/// reset to its default at exec, so the CLI meets SIGINT as it does under the
+/// engine. The listener lives in a static, so it outlasts every test.
 fn catch_interrupt() {
     let mut held = INTERRUPT.lock().unwrap_or_else(PoisonError::into_inner);
     if held.is_none() {

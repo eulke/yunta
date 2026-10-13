@@ -288,12 +288,29 @@ _Evitar_: constraint, chequeo semántico, validación extra.
 
 ## El cerco
 
+**Confinación** (`Confinement`):
+Lo que una sesión puede escribir y alcanzar, resuelto una vez al abrirla: su
+perfil (`read-only`, `edit` o `full`), el sandbox de `edit` (`workspace-write`,
+`read-only` o `danger-full-access`) y su red. Sus comandos escriben el worktree
+según el perfil y el sandbox de `edit`, las raíces del run y el directorio
+temporal (`$TMPDIR` y `/tmp`), que toda sesión puede escribir. El directorio de
+artefactos lo escriben todas las sesiones, y los directorios compartidos, las que
+no son `read-only`. La red la fija el `network:` del nodo o, si no lo dice, el del
+proyecto, y por defecto queda abierta; solo la tiene una sesión que escribe su
+worktree. Una sesión que no lo escribe —un nodo `read-only`, o `edit` con sandbox
+`read-only`— no la tiene nunca, y una sesión sin confinar exige red abierta. Cada
+adapter la aplica exacta o la rechaza, y el log la guarda en
+`agent_session_opened.confinement`, con sus campos `profile`, `commands`,
+`worktree` y `network`: lo que la sesión pudo hacer, no lo que hizo.
+_Evitar_: sandbox (es la forma que toma en un CLI), permisos de sesión.
+
 **Cerco** (`Fence`):
-Lo que una sesión puede escribir: los globs que puede escribir bajo el
-worktree —el scope declarado más las ampliaciones ya concedidas— y las raíces
-absolutas fuera de él, que son el registro del run y no el trabajo de la
-tarea. Es la única fuente de permiso de escritura de una sesión, y viaja
-siempre (D172).
+Lo que una sesión puede escribir bajo el worktree con sus herramientas: los
+globs —el scope declarado más las ampliaciones ya concedidas— que el riel juzga
+escritura por escritura. Las raíces del run y los árboles protegidos enteros
+(`dir/**`) los juzga la confinación. Un archivo protegido, un patrón que cubre
+parte de un directorio y uno que no nombra directorio los juzgan el riel y el
+cierre: denegar su directorio negaría paths que nadie protege. Viaja siempre (D172).
 _Evitar_: edit_constraints, restricciones de edición, permisos de escritura.
 
 **Nivel** (`FenceLevel`):
@@ -305,8 +322,9 @@ _Evitar_: edit_hooks, modo de enforcement.
 
 **Cobertura** (`Coverage`):
 Cuánto de una sesión concreta cercó lo que su adapter construyó: exacta,
-ensanchada a raíces, o solo herramientas. Se calcula de lo construido, nunca
-se declara, y viaja en `agent_session_opened.fence`.
+ensanchada a raíces (con el directorio temporal de los comandos), o solo
+herramientas. Se calcula de lo construido, nunca se declara, y viaja en
+`agent_session_opened.fence`.
 _Evitar_: nivel de la sesión, enforcement efectivo.
 
 **Canal**:
@@ -473,11 +491,12 @@ esa frontera (D165).
 _Evitar_: interfaz del adapter, capa de integración, puerto de red.
 
 **Política de degradación** (`Policy`, `PolicyApplied`):
-Lo que una sesión dejó de tener cuando faltó una capacidad de su adapter: uno de seis
+Lo que una sesión dejó de tener cuando faltó una capacidad de su adapter: uno de siete
 nombres de un conjunto cerrado (`post_check_only`, `no_token_budget`, `no_skills`,
-`no_run_tools`, `network_open`, `fresh_session`), que `capability_degraded` guarda como
-dato. La frase que lo explica la produce el crate `render`. Un log escrito antes guarda
-un texto: si no es el nombre de una política, se lee tal cual.
+`no_run_tools`, `network_open`, `fresh_session`, `cap_at_session_end`), que
+`capability_degraded` guarda como dato. La frase que lo explica la produce el crate
+`render`. Un log escrito antes guarda un texto: si no es el nombre de una política, se
+lee tal cual.
 _Evitar_: policy_applied, frase de degradación.
 
 **Descarte de runner** (`RunnerRejection`):

@@ -18,11 +18,16 @@ use yunta_core::fence::{Advice, Fence};
 use futures::StreamExt;
 use yunta_adapters::ClaudeCodeAdapter;
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, SessionRequest};
-use yunta_core::{AdapterSettings, SessionId};
-use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
+use yunta_core::{AdapterSettings, EditSandbox, SessionId};
+use yunta_testkit_core::adapter::{
+    child_pid_fifo, confine, drain, grandchild_pid, request, write_lines,
+};
 
 #[path = "claude_code/refusals.rs"]
 mod refusals;
+
+#[path = "claude_code/confinement.rs"]
+mod confinement;
 
 fn stub_path() -> PathBuf {
     yunta_testkit_core::stubs::claude_code()
@@ -90,7 +95,14 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.permissions = PermissionProfile::ReadOnly;
+    confine(
+        &mut req,
+        PermissionProfile::ReadOnly,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string(),
@@ -129,7 +141,14 @@ async fn capability_permission_profiles_leave_full_the_whole_tool_set_unattended
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.permissions = PermissionProfile::Full;
+    confine(
+        &mut req,
+        PermissionProfile::Full,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string(),
@@ -353,7 +372,14 @@ async fn capability_permission_profiles_give_edit_a_bounded_tool_set() {
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
     let mut req = request(dir.path().to_path_buf());
-    req.permissions = PermissionProfile::Edit;
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     req.env.plain.insert(
         "CLAUDE_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string(),
@@ -546,22 +572,28 @@ async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing
     std::fs::create_dir_all(&artifacts).unwrap();
 
     let mut req = request(dir.path().to_path_buf());
+    req.artifact_dir = Some(artifacts.clone());
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        true,
+        true,
+    )
+    .unwrap();
     req.fence = Fence {
         allowed: Some(vec!["src/**".into()]),
-        roots: vec![artifacts.clone()],
         advice: Advice::ReportFinding,
-        protected: yunta_core::protected::Protected::default(),
-        naming: yunta_core::ToolNaming::Bare,
     };
     let args = argv_for(dir.path(), req).await;
 
     // The CLI confines writes to its working directory, and a root the
-    // fence keeps writable is never inside it: without this the agent
+    // session keeps writable is never inside it: without this the agent
     // is told to write a file it is then refused permission to create.
     let pos = args
         .iter()
         .position(|a| a == "--add-dir")
-        .expect("every fence root is added to the writable set");
+        .expect("every root is added to the writable set");
     assert_eq!(args[pos + 1], artifacts.display().to_string());
 
     let settings = args
@@ -654,17 +686,24 @@ async fn a_fence_with_no_roots_widens_nothing() {
 }
 
 /// `read_only` means the node does not touch the project. Its own
-/// declared file is the node's output, written to a root the fence keeps
-/// writable — so the writing tools stay exactly when there is such a
-/// root, and go when there is not.
+/// declared file is the node's output, written to a root the session
+/// keeps writable — so the writing tools stay exactly when there is such
+/// a root, and go when there is not.
 #[tokio::test]
 async fn a_read_only_claude_session_keeps_write_only_for_its_declared_files() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join("run/artifacts");
 
     let mut req = request(dir.path().to_path_buf());
-    req.permissions = PermissionProfile::ReadOnly;
-    req.fence = Fence::read_only(vec![artifacts], Advice::ReportFinding);
+    req.artifact_dir = Some(artifacts);
+    confine(
+        &mut req,
+        PermissionProfile::ReadOnly,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     let args = argv_for(dir.path(), req).await;
     let pos = args.iter().position(|a| a == "--tools").unwrap();
     assert!(
@@ -674,8 +713,14 @@ async fn a_read_only_claude_session_keeps_write_only_for_its_declared_files() {
     );
 
     let mut req = request(dir.path().to_path_buf());
-    req.permissions = PermissionProfile::ReadOnly;
-    req.fence = Fence::read_only(Vec::new(), Advice::ReportFinding);
+    confine(
+        &mut req,
+        PermissionProfile::ReadOnly,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     let args = argv_for(dir.path(), req).await;
     let pos = args.iter().position(|a| a == "--tools").unwrap();
     assert!(
@@ -840,15 +885,15 @@ async fn usage_is_reported_per_message_once_and_reconciled_by_the_result() {
 
 /// The settings a session is handed carry the sandbox its commands run in:
 /// one that fails rather than run unconfined, whose network the request
-/// opens or keeps closed, that writes nothing of the checkout under
-/// `read_only`, and that a `full` session runs without.
+/// opens or keeps closed, that lets the commands write the temporary
+/// directories and nothing of the checkout under `read_only`, and that a
+/// `full` session runs without.
 #[tokio::test]
 async fn a_session_s_commands_run_in_the_sandbox_its_profile_and_request_say() {
     let sandbox = |profile: PermissionProfile, network: bool| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut req = request(dir.path().to_path_buf());
-        req.permissions = profile;
-        req.network = network;
+        confine(&mut req, profile, EditSandbox::default(), false, network).unwrap();
         let args = argv_for(dir.path(), req).await;
         let settings = args
             .iter()
@@ -865,12 +910,20 @@ async fn a_session_s_commands_run_in_the_sandbox_its_profile_and_request_say() {
     assert_eq!(open["allowUnsandboxedCommands"], false);
     assert_eq!(open["network"]["allowedDomains"], serde_json::json!(["*"]));
     assert_eq!(open["network"]["allowLocalBinding"], true);
+    assert!(open["filesystem"]["allowWrite"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("/tmp")));
 
     let (closed, _dir) = sandbox(PermissionProfile::Edit, false).await;
     assert_eq!(closed["network"], serde_json::json!({}));
 
     let (read_only, dir) = sandbox(PermissionProfile::ReadOnly, true).await;
     assert_eq!(read_only["network"], serde_json::json!({}));
+    assert!(read_only["filesystem"]["allowWrite"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("/tmp")));
     assert_eq!(
         read_only["filesystem"]["denyWrite"],
         serde_json::json!([dir.path()])
@@ -893,14 +946,13 @@ async fn a_refusal_in_the_stream_is_left_to_the_engine_that_judged_it() {
         roots: Vec::new(),
         advice: yunta_core::fence::Advice::ReportFinding,
         protection: None,
-        naming: yunta_core::ToolNaming::Bare,
     };
     let user_line = serde_json::json!({
         "type": "user",
         "message": { "content": [{
             "type": "tool_result",
             "is_error": true,
-            "content": refusal.to_string(),
+            "content": refusal.message(yunta_core::ToolNaming::Bare),
         }] },
     })
     .to_string();

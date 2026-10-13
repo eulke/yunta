@@ -90,12 +90,6 @@ pub(crate) fn independent_top_level_pairs(workflow: &Workflow) -> Vec<(usize, us
     pairs
 }
 
-/// A top-level node that can write the shared worktree (same rule as
-/// `parallel`'s children): anything not declared `read-only`.
-pub(crate) fn writes(node: &Node) -> bool {
-    node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
-}
-
 /// The error half: overlapping *declared* scope on an unordered
 /// pair — verifiable in advance, so an error, same rank as `parallel`.
 pub(crate) fn check_fanout_scopes(
@@ -112,7 +106,7 @@ pub(crate) fn check_fanout_scopes(
         let (Some(a), Some(b)) = (workflow.nodes.get(i), workflow.nodes.get(j)) else {
             continue;
         };
-        if !(writes(a) && writes(b)) {
+        if !(a.writes_worktree() && b.writes_worktree()) {
             continue;
         }
         for glob_a in &a.scope.overlap_globs() {
@@ -145,7 +139,7 @@ pub(crate) fn collect_fanout_warnings(
     let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     let eligible: Vec<bool> = nodes
         .iter()
-        .map(|node| writes(node) && !node.scope.is_declared())
+        .map(|node| node.writes_worktree() && !node.scope.is_declared())
         .collect();
     for (i, j) in independent_top_level_pairs(workflow) {
         let both_eligible =
@@ -159,6 +153,21 @@ pub(crate) fn collect_fanout_warnings(
             }
         }
     }
+    for component in connected_components(nodes, &adjacency) {
+        warnings.push(CheckWarning::UndeclaredFanOutScope {
+            nodes: component
+                .iter()
+                .map(|id| format!("`{id}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+}
+
+/// The connected components of the fan-out graph that have an edge, each as
+/// the sorted ids of its nodes, in the order of their first node.
+fn connected_components(nodes: &[Node], adjacency: &[Vec<usize>]) -> Vec<Vec<NodeId>> {
+    let mut components = Vec::new();
     let mut seen = vec![false; nodes.len()];
     for start in 0..nodes.len() {
         let no_edges = adjacency.get(start).is_none_or(Vec::is_empty);
@@ -182,14 +191,9 @@ pub(crate) fn collect_fanout_warnings(
             }
         }
         component.sort();
-        warnings.push(CheckWarning::UndeclaredFanOutScope {
-            nodes: component
-                .iter()
-                .map(|id| format!("`{id}`"))
-                .collect::<Vec<_>>()
-                .join(", "),
-        });
+        components.push(component);
     }
+    components
 }
 
 /// One `parallel` group's scope-collision status: every pair of
@@ -259,7 +263,7 @@ pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<Check
             // declaring `permissions: read-only` is out by declaration.
             let writers: Vec<&Node> = children
                 .iter()
-                .filter(|child| child.permissions != Some(yunta_core::NodePermissions::ReadOnly))
+                .filter(|child| child.writes_worktree())
                 .collect();
             if writers.len() >= 2 {
                 let group = evaluate_group_scope(children);

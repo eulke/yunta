@@ -6,16 +6,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
-use yunta_core::port::{Adapter, SessionRequest};
+use yunta_core::port::{Adapter, AgentSession, SessionRequest};
 use yunta_core::protected::Protected;
 use yunta_storage::StorageError;
 
-use super::dispatch::{DispatchError, Dispatched, Opening};
+use super::dispatch::{DispatchError, Dispatched, Opening, Resume};
+use super::stream::{counts_tokens_mid_session, emit_audit, read_stream, Terms, Totals};
 use super::DispatchOutcome;
-use crate::run_tools::Arrivals;
 
 /// Everything about *how* one node's sessions open, resolved
 /// once by the engine and threaded through the cycle: the mounted
@@ -88,7 +87,10 @@ pub struct SessionSetup {
     /// Whose configuration of the CLI this node's sessions load beside
     /// what the run mounts.
     pub cli_config: yunta_core::CliConfig,
-    /// Whether this node's sessions' commands may reach the network.
+    /// Whether this node's sessions' commands may reach the network, as
+    /// `network_asked` resolves it: the node's own word, else the project's
+    /// default, else open. What a session reaches is decided by its
+    /// confinement, which refuses an unconfined session with its network closed.
     pub network: bool,
     /// What a node's own session works to: the scope the node declared
     /// plus every path a person granted it on this run, which fences the
@@ -172,7 +174,7 @@ impl SessionSetup {
             rail_command: Some(yunta_core::rail::RailCommand::new(PathBuf::from("yunta"))),
             agent: None,
             cli_config: yunta_core::CliConfig::Inherit,
-            network: true,
+            network: yunta_core::network_asked(None, None),
             run_dir,
             node,
             chosen,
@@ -299,175 +301,66 @@ pub(super) async fn stream_session(
     // A host that just woke may sleep again within the minute, and a
     // session opened then hangs until its timeout: none opens until the
     // host has stayed awake.
-    if let Some((observer, _)) = audit {
-        if !observer
-            .host_settled(cancel)
-            .await
-            .map_err(DispatchError::Audit)?
-        {
-            let nothing = Dispatched {
-                outcome: DispatchOutcome::Cancelled,
-                tokens: TokenUsage::default(),
-                fence: None,
-                sessions: Vec::new(),
-            };
-            return Ok((nothing, false));
-        }
+    if !host_settled(audit, cancel).await? {
+        let nothing = Dispatched {
+            outcome: DispatchOutcome::Cancelled,
+            tokens: TokenUsage::default(),
+            fence: None,
+            confinement: None,
+            sessions: Vec::new(),
+        };
+        return Ok((nothing, false));
     }
-    let budget = request.budget;
-    let requested_agent = request.agent.as_ref().map(|agent| agent.name.clone());
-    let requested_effort = request.effort;
-    // A resume continues a conversation instead of opening a new one. One
-    // the adapter cannot pick up — it declares no resume, or its CLI
-    // refuses this one — opens fresh on what the caller gave for that, and
-    // the log says so; with nothing given, the caller already verified
-    // the capability and not resuming is its failure to report.
-    let (mut session, continues) = match opening.resume {
-        None => (adapter.spawn(request).await?, None),
-        Some(resume) => {
-            let can_resume = adapter
-                .capabilities()
-                .declares(yunta_core::Capability::ResumeSession);
-            let resumed = match (resume.fresh_prompt, can_resume) {
-                (Some(_), false) => None,
-                _ => Some(adapter.resume(resume.session, request.clone()).await),
-            };
-            match resumed {
-                Some(Ok(session)) => (session, Some(resume.session)),
-                Some(Err(error)) if resume.fresh_prompt.is_none() => return Err(error.into()),
-                _ => {
-                    let brief = resume.fresh_prompt.unwrap_or_default();
-                    crate::task_cycle::stream::emit_audit(
-                        audit,
-                        EventPayload::Session(SessionEvent::CapabilityDegraded(
-                            yunta_core::events::CapabilityDegradedPayload::new(
-                                yunta_core::Capability::ResumeSession,
-                                adapter.id().clone(),
-                                yunta_core::port::Policy::FreshSession,
-                            ),
-                        )),
-                    )
-                    .await
-                    .map_err(DispatchError::Audit)?;
-                    let fresh = crate::run::session_plan::with_prompt(request, brief.to_string());
-                    (adapter.spawn(fresh).await?, None)
-                }
-            }
-        }
+    let terms = Terms {
+        adapter,
+        audit,
+        agent: request.agent.as_ref().map(|agent| agent.name.clone()),
+        effort: request.effort,
+        budget: request.budget,
+        confinement: yunta_core::events::ConfinementRecord::of(&request.confinement),
+        counts_cap_mid_session: counts_tokens_mid_session(adapter),
     };
+    record_cap_at_session_end(&terms).await?;
+    let (mut session, continues) = spawn_or_resume(adapter, request, audit, opening.resume).await?;
     // On the map for a separate `yunta cancel` while it lives.
     let _pgid_registration = crate::process_registry::register(
         audit.and_then(|(observer, _)| observer.process_registry()),
         session.pgid(),
     );
-    // Carries the timeout `Duration` alongside its computed `Instant` so
-    // the timeout-exceeded branch can report it without re-deriving it
-    // from `budget.timeout`.
-    let deadline = budget
-        .timeout
-        .map(|timeout| (tokio::time::Instant::now() + timeout, timeout));
-    let mut tokens = TokenUsage::default();
-    let mut opened: Option<yunta_core::SessionId> = None;
-    let mut fence: Option<yunta_core::fence::Coverage> = None;
-    let mut cut_off = false;
-    let mut terminal = None;
-    let mut cancelled = false;
-    // A session with no run tools has no call that reached a server.
-    let no_run_tools = Arrivals::default();
+    drain(&mut *session, cancel, &terms, opening, continues).await
+}
 
-    {
-        let mut stream = session.events();
-        loop {
-            // A node outside a `join: any` race passes a token nothing
-            // ever cancels, so that branch simply never wins for it —
-            // same `select!` shape either way.
-            let next = if let Some((deadline_at, timeout)) = deadline {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        cancelled = true;
-                        None
-                    }
-                    result = tokio::time::timeout_at(deadline_at, stream.next()) => {
-                        match result {
-                            Ok(next) => next,
-                            Err(_) => {
-                                terminal = Some(DispatchOutcome::BudgetExceeded {
-                                    reason: format!(
-                                        "exceeded timeout of {}",
-                                        yunta_core::units::duration(timeout)
-                                    ),
-                                });
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        cancelled = true;
-                        None
-                    }
-                    next = stream.next() => next,
-                }
-            };
-            if cancelled {
-                break;
-            }
-
-            let Some(event) = next else { break };
-
-            if let Some(outcome) = crate::task_cycle::stream::apply_agent_event(
-                crate::task_cycle::stream::AgentEventCtx {
-                    event,
-                    adapter,
-                    requested_agent: &requested_agent,
-                    requested_effort,
-                    max_tokens: budget.max_tokens,
-                    audit,
-                    tokens: &mut tokens,
-                    opened: &mut opened,
-                    fence: &mut fence,
-                    cut_off: &mut cut_off,
-                    task: opening.task,
-                    continues,
-                    arrivals: opening.arrivals.unwrap_or(&no_run_tools),
-                },
-            )
-            .await?
-            {
-                terminal = Some(outcome);
-                break;
-            }
-        }
-    } // the stream's borrow of `session` ends here — interrupt/kill need &mut self too.
-
+/// Reads an opened session to its terminal outcome, ends it when the read was
+/// cut short, and says what it spent and whether it ended on a lost service.
+async fn drain(
+    session: &mut dyn AgentSession,
+    cancel: &CancellationToken,
+    terms: &Terms<'_>,
+    opening: Opening<'_>,
+    continues: Option<&yunta_core::SessionId>,
+) -> Result<(Dispatched, bool), DispatchError> {
+    let mut totals = Totals::default();
+    let (terminal, cancelled) =
+        read_stream(session, cancel, terms, opening, continues, &mut totals).await?;
     if cancelled || matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
-        // Never leave anything running: ordered termination first,
-        // then forceful — mock has nothing to distinguish them, but a
-        // real adapter's session may still close cleanly on interrupt.
-        let _ = session.interrupt().await;
-        session.allow_exit(INTERRUPT_GRACE_PERIOD).await;
-        let _ = session.kill().await;
+        end_running(session).await;
     }
     session.release().await?;
-
-    if cancelled {
-        let cancelled = Dispatched {
-            outcome: DispatchOutcome::Cancelled,
-            tokens,
-            fence,
-            sessions: opened.into_iter().collect(),
-        };
-        return Ok((cancelled, false));
-    }
-
-    let outcome = match terminal {
-        Some(outcome) => outcome,
+    let Totals {
+        tokens,
+        opened,
+        cut_off,
+        fence,
+        confinement,
+    } = totals;
+    let sessions: Vec<yunta_core::SessionId> = opened.into_iter().collect();
+    let outcome = match (cancelled, terminal) {
+        (true, _) => DispatchOutcome::Cancelled,
+        (false, Some(outcome)) => outcome,
         // Only the one that fell silent is asked: a session that closed
         // its turn said everything it had to say, and asking it would
         // cost a kill and a wait for nothing.
-        None => DispatchOutcome::Crashed {
+        (false, None) => DispatchOutcome::Crashed {
             exit: session.exit().await?,
         },
     };
@@ -475,7 +368,102 @@ pub(super) async fn stream_session(
         outcome,
         tokens,
         fence,
-        sessions: opened.into_iter().collect(),
+        confinement,
+        sessions,
     };
     Ok((dispatched, cut_off))
+}
+
+/// Waits until the host has stayed awake long enough to open a session on,
+/// as the observer reads it. `false` when `cancel` fired first; an attempt
+/// with no observer has no host to wait on.
+async fn host_settled(
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    cancel: &CancellationToken,
+) -> Result<bool, DispatchError> {
+    match audit {
+        Some((observer, _)) => observer
+            .host_settled(cancel)
+            .await
+            .map_err(DispatchError::Audit),
+        None => Ok(true),
+    }
+}
+
+/// Records the degradation a session owes when its budget caps tokens and its
+/// adapter does not count the cap mid-session: the cap is read once, when the
+/// session closes. Recorded before the session opens, so the log says so
+/// before the session can spend anything.
+async fn record_cap_at_session_end(terms: &Terms<'_>) -> Result<(), DispatchError> {
+    if terms.budget.max_tokens.is_none() || terms.counts_cap_mid_session {
+        return Ok(());
+    }
+    let degraded = yunta_core::events::CapabilityDegradedPayload::new(
+        yunta_core::Capability::MidSessionTokenCap,
+        terms.adapter.id().clone(),
+        yunta_core::port::Policy::CapAtSessionEnd,
+    );
+    emit_audit(
+        terms.audit,
+        EventPayload::Session(SessionEvent::CapabilityDegraded(degraded)),
+    )
+    .await
+    .map_err(DispatchError::Audit)
+}
+
+/// Opens the session `request` describes, or picks back up the conversation
+/// `resume` names when the adapter can. A conversation the adapter cannot
+/// pick up opens fresh on the brief `resume` carries, and the log says so;
+/// with no brief, the caller already verified the capability and not
+/// resuming is its failure to report. Returns the session, and the
+/// conversation it continues when it continues one.
+async fn spawn_or_resume<'a>(
+    adapter: &dyn Adapter,
+    request: SessionRequest,
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    resume: Option<Resume<'a>>,
+) -> Result<(Box<dyn AgentSession>, Option<&'a yunta_core::SessionId>), DispatchError> {
+    let Some(resume) = resume else {
+        return Ok((adapter.spawn(request).await?, None));
+    };
+    let can_resume = adapter
+        .capabilities()
+        .declares(yunta_core::Capability::ResumeSession);
+    let resumed = match (resume.fresh_prompt, can_resume) {
+        (Some(_), false) => None,
+        _ => Some(adapter.resume(resume.session, request.clone()).await),
+    };
+    match resumed {
+        Some(Ok(session)) => Ok((session, Some(resume.session))),
+        Some(Err(error)) if resume.fresh_prompt.is_none() => Err(error.into()),
+        _ => {
+            let brief = resume.fresh_prompt.unwrap_or_default();
+            let degraded = yunta_core::events::CapabilityDegradedPayload::new(
+                yunta_core::Capability::ResumeSession,
+                adapter.id().clone(),
+                yunta_core::port::Policy::FreshSession,
+            );
+            emit_audit(
+                audit,
+                EventPayload::Session(SessionEvent::CapabilityDegraded(degraded)),
+            )
+            .await
+            .map_err(DispatchError::Audit)?;
+            let fresh = crate::run::session_plan::with_prompt(request, brief.to_string());
+            Ok((adapter.spawn(fresh).await?, None))
+        }
+    }
+}
+
+/// Ends a session the read stopped short of its own end, by a cancel or a
+/// budget: ordered termination first, then forceful.
+async fn end_running(session: &mut dyn AgentSession) {
+    // Never leave anything running: ordered termination first,
+    // then forceful — mock has nothing to distinguish them, but a
+    // real adapter's session may still close cleanly on interrupt.
+    // best-effort: a session that refuses the interrupt is ended by the kill below.
+    let _ = session.interrupt().await;
+    session.allow_exit(INTERRUPT_GRACE_PERIOD).await;
+    // best-effort: a session that already ended has nothing left for the kill to end.
+    let _ = session.kill().await;
 }

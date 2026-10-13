@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
+    ConfinementRecord, EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
 };
+use yunta_core::fence::Coverage;
 use yunta_core::port::{Adapter, Forge};
 use yunta_core::protected::Protected;
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
@@ -349,21 +350,18 @@ impl<'a> RunCtx<'a> {
         Ok(())
     }
 
-    /// How much of its last session's writes the adapter's fence
-    /// covered. What a post-check diff is read against: a violation
-    /// under an exact fence is one the adapter said could not happen.
-    pub(crate) async fn last_coverage(
+    /// The coverage and the confinement record of the node's last session,
+    /// as the log holds them: what a post-check diff is read against.
+    pub(crate) async fn last_fence(
         &self,
         node: &NodeId,
-    ) -> Result<Option<yunta_core::fence::Coverage>, RunError> {
-        Ok(self
-            .run_view()
-            .await?
-            .state
-            .nodes
-            .get(node)
-            .and_then(|record| record.sessions.last())
-            .and_then(|session| session.fence.clone()))
+    ) -> Result<(Option<Coverage>, Option<ConfinementRecord>), RunError> {
+        let view = self.run_view().await?;
+        let last = view.state.nodes.get(node).and_then(|n| n.sessions.last());
+        Ok((
+            last.and_then(|session| session.fence.clone()),
+            last.and_then(|session| session.confinement.clone()),
+        ))
     }
 
     /// The adapter this node's runner resolved to; `None` before it
@@ -382,23 +380,25 @@ impl<'a> RunCtx<'a> {
             .map(|resolved| resolved.chosen.adapter.clone()))
     }
 
-    /// Records a write the fence should have stopped, when the coverage
-    /// says it should have. A breach is the adapter's to answer for, so
-    /// it is filed beside the failure the violation already causes,
-    /// never instead of it.
+    /// Records a write the fence should have stopped, filed against the
+    /// adapter the node resolved to. A breach is the adapter's to answer
+    /// for, so it is filed beside the failure the violation causes, never
+    /// instead of it. A node that resolved no adapter files nothing.
     pub(crate) async fn record_breach(
         &self,
         node: &NodeId,
-        adapter: &AdapterId,
         breach: &crate::scope::Breach,
     ) -> Result<(), RunError> {
+        let Some(adapter) = self.resolved_adapter(node).await? else {
+            return Ok(());
+        };
         self.engine_finding(
             Some(node),
             crate::scope::Breach::ID,
             FindingSeverity::Major,
             crate::scope::Breach::title(),
             breach.location(),
-            breach.detail(adapter),
+            breach.detail(&adapter),
         )
         .await
     }

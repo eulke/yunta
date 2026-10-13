@@ -182,9 +182,7 @@ fn may_write(node: &Node, path: &str, defaults: Option<&yunta_core::Hooks>) -> b
         NodeKind::Check(builtin) => {
             !matches!(builtin, yunta_core::CheckBuiltin::FindingsGate { .. })
         }
-        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => {
-            node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
-        }
+        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => node.writes_worktree(),
         // A pull request carries the run's branch; it writes nothing into
         // the tree.
         NodeKind::Gate { .. } | NodeKind::PullRequest { .. } => false,

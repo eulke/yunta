@@ -17,11 +17,11 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, ScopeGlob,
-    SessionId, ToolNaming,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, EditSandbox, FenceLevel, Result,
+    ScopeGlob, SessionId, ToolNaming,
 };
 
-use yunta_core::fence::{Coverage, Fenced};
+use yunta_core::fence::Coverage;
 use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
@@ -31,7 +31,6 @@ use yunta_core::rail::RailCommand;
 
 use crate::dialect::{require_hook, Plan};
 use crate::mount::MountPlan;
-use crate::session::Sandbox;
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("claude-code");
@@ -57,18 +56,20 @@ pub(crate) fn plan(
     req: &SessionRequest,
     resume: Option<&SessionId>,
 ) -> Result<Plan> {
-    let typed = read_settings(settings)?;
+    read_settings(settings)?;
     let (command, _) = require_hook(&ID, req)?;
-    let sandbox = Sandbox::of(req.permissions, typed.sandbox.unwrap_or_default());
+    let conf = &req.confinement;
+    let sandbox =
+        permissions::settings(conf, &req.cwd).map_err(|source| AdapterError::FenceUnbuildable {
+            adapter: ID.clone(),
+            source,
+        })?;
     Ok(Plan {
         args: launch_args(req, resume, command, sandbox),
         env: session_env(req),
         scratch: scratch_files(req)?,
         mounts: MountPlan::of(SKILLS_MOUNT, req),
-        coverage: Coverage::of(
-            Fenced::Exact,
-            sandbox.command_fence(&req.cwd, &req.fence.roots),
-        ),
+        coverage: conf.coverage(&req.cwd),
     })
 }
 
@@ -143,12 +144,12 @@ fn launch_args(
     req: &SessionRequest,
     resume: Option<&SessionId>,
     command: &RailCommand,
-    sandbox: Sandbox,
+    sandbox: Option<serde_json::Value>,
 ) -> Vec<String> {
     let mut args = session_args(req, resume);
     args.extend(permissions::permission_args(
-        req.permissions,
-        !req.fence.roots.is_empty(),
+        req.confinement.profile,
+        !req.confinement.roots.is_empty(),
     ));
     args.extend(fence_args(req, command, sandbox));
     // An isolated session loads none of the person's own settings, and no
@@ -194,25 +195,29 @@ fn session_args(req: &SessionRequest, resume: Option<&SessionId>) -> Vec<String>
     args
 }
 
-/// How the fence reaches this CLI: the roots it would otherwise refuse to
-/// write, and the engine as the hook it asks before every writing tool.
+/// How the fence reaches this CLI: the roots the confinement keeps writable,
+/// and the engine as the hook it asks before every writing tool.
 ///
 /// The CLI confines file writes to its working directory, and a root the
-/// fence keeps writable is never inside it — without this the session is
-/// told to write a file it is then refused permission to create. The same
-/// settings carry the sandbox its commands run in under `mode`. `plan`
-/// refuses before this runs when there is no hook to run, so a session
-/// never opens without one.
-fn fence_args(req: &SessionRequest, command: &RailCommand, mode: Sandbox) -> Vec<String> {
+/// confinement keeps writable is never inside it — without this the session
+/// is told to write a file it is then refused permission to create. The
+/// same settings carry the sandbox its commands run in. `plan` refuses
+/// before this runs when there is no hook to run, so a session never opens
+/// without one.
+fn fence_args(
+    req: &SessionRequest,
+    command: &RailCommand,
+    sandbox: Option<serde_json::Value>,
+) -> Vec<String> {
     let mut args = Vec::new();
-    for root in &req.fence.roots {
+    for root in &req.confinement.roots {
         args.push("--add-dir".to_string());
         args.push(root.display().to_string());
     }
     args.push("--settings".to_string());
     args.push(rail::settings_json(
         command,
-        permissions::sandbox(mode, &req.cwd, req.network),
+        sandbox,
         RunToolsEndpoint::call_timeout(&req.budget),
         req.formats,
     ));
@@ -346,6 +351,9 @@ pub(crate) fn capabilities() -> Capabilities {
         // in its own init line, and that is the only name a call
         // reaches them by.
         tool_naming: ToolNaming::McpPrefixed,
+        // Each assistant message reports its usage as the session spends
+        // it, so the token cap is checked as the stream runs.
+        mid_session_token_cap: true,
     }
 }
 
@@ -358,6 +366,16 @@ pub(crate) fn own_config() -> Vec<ScopeGlob> {
         .into_iter()
         .filter_map(|tree| tree.parse().ok())
         .collect()
+}
+
+/// The `sandbox` an `edit` session's commands run under, as the settings
+/// name it: `workspace-write` when they name none. A setting that does not
+/// read is refused when the session is planned.
+pub(crate) fn edit_sandbox(settings: &AdapterSettings) -> EditSandbox {
+    settings::ClaudeSettings::read(settings)
+        .ok()
+        .and_then(|typed| typed.sandbox)
+        .unwrap_or_default()
 }
 
 #[async_trait]
@@ -392,6 +410,10 @@ impl Adapter for ClaudeCodeAdapter {
 
     fn own_config(&self) -> Vec<ScopeGlob> {
         own_config()
+    }
+
+    fn edit_sandbox(&self) -> EditSandbox {
+        edit_sandbox(&self.raw)
     }
 
     fn service_vars(&self) -> &'static [&'static str] {

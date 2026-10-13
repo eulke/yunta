@@ -4,9 +4,6 @@
 //!
 //! The port these adapters implement is `yunta_core::port`.
 
-use std::path::{Path, PathBuf};
-
-use yunta_core::fence::Fenced;
 use yunta_core::{AdapterError, AdapterId, Result};
 
 /// Reads an adapter's `adapter_settings` map into its typed settings:
@@ -30,63 +27,6 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
         adapter: adapter.clone(),
         message: format!("`adapter_settings`: {e}"),
     })
-}
-
-/// The confinement a session's commands run under, as both CLIs name
-/// their modes: nothing written but the run's roots, the workspace and the
-/// roots, or anything. `adapter_settings.sandbox` picks the mode an `edit`
-/// session runs under; `read_only` and `full` map to their own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum Sandbox {
-    ReadOnly,
-    #[default]
-    WorkspaceWrite,
-    DangerFullAccess,
-}
-
-impl Sandbox {
-    /// The mode a session under `profile` runs in, `edit` taking the
-    /// configured one.
-    pub(crate) fn of(profile: yunta_core::port::PermissionProfile, edit: Sandbox) -> Sandbox {
-        match profile {
-            yunta_core::port::PermissionProfile::ReadOnly => Sandbox::ReadOnly,
-            yunta_core::port::PermissionProfile::Edit => edit,
-            yunta_core::port::PermissionProfile::Full => Sandbox::DangerFullAccess,
-        }
-    }
-
-    /// The mode as a command line spells it.
-    pub(crate) fn as_flag(self) -> &'static str {
-        match self {
-            Sandbox::ReadOnly => "read-only",
-            Sandbox::WorkspaceWrite => "workspace-write",
-            Sandbox::DangerFullAccess => "danger-full-access",
-        }
-    }
-
-    /// What a session's commands are fenced by under this mode; `None` is
-    /// unconfined. A workspace-write session writes its worktree, so the
-    /// worktree comes first among the roots.
-    pub(crate) fn command_fence(self, cwd: &Path, roots: &[PathBuf]) -> Option<Fenced> {
-        match self {
-            Sandbox::ReadOnly if roots.is_empty() => Some(Fenced::Exact),
-            Sandbox::ReadOnly => Some(Fenced::Roots(roots.to_vec())),
-            Sandbox::WorkspaceWrite => Some(Fenced::Roots(
-                std::iter::once(cwd.to_path_buf())
-                    .chain(roots.iter().cloned())
-                    .collect(),
-            )),
-            Sandbox::DangerFullAccess => None,
-        }
-    }
-
-    /// Whether the session's commands reach the network: the request's word,
-    /// which only `workspace-write` reads. `read-only` has no network to open,
-    /// and `danger-full-access` never closed it.
-    pub(crate) fn opens_network(self, requested: bool) -> bool {
-        requested && self == Sandbox::WorkspaceWrite
-    }
 }
 
 /// How long a CLI waits for its write hook to answer. A hook that does not

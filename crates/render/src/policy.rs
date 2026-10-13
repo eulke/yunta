@@ -31,6 +31,10 @@ pub fn sentence(policy: &Policy) -> String {
              not enforced"
         }
         Policy::FreshSession => "restart_node — a fresh session replaces the interrupted one",
+        Policy::CapAtSessionEnd => {
+            "the turn's token cap is checked when the session ends, because the CLI reports \
+             no usage mid-session"
+        }
     };
     said.to_string()
 }
@@ -58,6 +62,15 @@ mod tests {
             sentence(&Policy::NoRunTools),
             "run tools unreachable — the session holds none of the run's tools, so this node \
              ends owing every document it declares"
+        );
+    }
+
+    #[test]
+    fn a_token_cap_checked_at_session_end_reads_as_when_it_is_checked() {
+        assert_eq!(
+            sentence(&Policy::CapAtSessionEnd),
+            "the turn's token cap is checked when the session ends, because the CLI reports no \
+             usage mid-session"
         );
     }
 

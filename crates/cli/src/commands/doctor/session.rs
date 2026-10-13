@@ -366,6 +366,7 @@ mod tests {
             model: None,
             capabilities: yunta_core::Capabilities::default(),
             fence: None,
+            confinement: None,
             task_id: None,
             continues: None,
         }));

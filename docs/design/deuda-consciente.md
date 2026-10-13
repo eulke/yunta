@@ -17,9 +17,6 @@ fuente de verdad (I2).
 **A-02 · Notificaciones locales.** Canal de comando local y eventos suscribibles.
 Los canales de equipo (Slack, dashboard) son del proyecto de servidor separado.
 
-**A-03 · Perfiles de permisos de red y filesystem por nodo.** Más allá de
-ReadOnly/Edit/Full, como extensión del modelo unificado de §6.1 del Contrato.
-
 **A-04 · `yunta serve`.** Fuera de alcance (D77): las capacidades de equipo (estado
 compartido, gates remotos, dashboard, notificaciones de equipo, triggers sin padre
 común) pertenecen a un proyecto separado con su propio repositorio y modelo de
@@ -150,8 +147,14 @@ Se conservan para que nadie los reabra por accidente; el ADR citado manda.
   `claude-code` lo instala como `PreToolUse`, `codex` como `PreToolUse` sobre
   `apply_patch` y cerca además sus comandos por el sandbox de su proceso, y el mock
   juzga cada efecto de su fixture por la misma función. Lo que el cerco no pudo
-  evitar sigue atrapándolo el diff del post-check, y una escritura que cruza un
-  cerco declarado exacto es además un `engine_finding`.
+  evitar sigue atrapándolo el diff del post-check, y una escritura que llega al diff
+  de una sesión que deja el checkout solo al cerco es además un `engine_finding`.
+- **A-03 · Perfiles de permisos de red y filesystem por nodo** → `core::confinement`:
+  `Confinement::of` es la única resolución de lo que una sesión escribe y alcanza.
+  El filesystem sale del perfil del nodo (`read-only`, `edit` o `full`) y del sandbox
+  de `edit`; la red, del `network:` del nodo o del proyecto. Cada adapter lo aplica
+  exacto o lo rechaza, y el log guarda la confinación de cada sesión en
+  `agent_session_opened.confinement`. Los tres perfiles siguen siendo los únicos.
 - Durabilidad de las escrituras del engine → `core::durable`, con dos clases:
   `Atomic` (un rename, sin fsync) para el estado que se reescribe, manifest de cada
   run incluido, y `Synced` (fsync del archivo y de su directorio) para los objetos

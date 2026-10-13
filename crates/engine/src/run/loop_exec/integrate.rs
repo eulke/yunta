@@ -90,7 +90,7 @@ pub(super) async fn integrate_batch(
             // `run_task` has no ctx to record on, so it hands the
             // breach here, after the check that found it.
             if let Some(breach) = &attempt.fence_breach {
-                record_breach(ctx, node, breach).await?;
+                ctx.record_breach(&node.id, breach).await?;
             }
 
             if let Some(outcome) = &attempt.scope_expansion {
@@ -426,9 +426,15 @@ async fn record_judgement(
         })),
     )
     .await?;
-    let coverage = ctx.last_coverage(&node.id).await?;
-    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &judgement.scope) {
-        record_breach(ctx, node, &breach).await?;
+    // Only a violation can be a breach, so the log is read for the session's
+    // fence only when the check found one.
+    if !judgement.scope.violations.is_empty() {
+        let (coverage, confinement) = ctx.last_fence(&node.id).await?;
+        if let Some(breach) =
+            crate::scope::fence_breach(coverage.as_ref(), confinement.as_ref(), &judgement.scope)
+        {
+            ctx.record_breach(&node.id, &breach).await?;
+        }
     }
     Ok(criteria_at)
 }
@@ -475,17 +481,4 @@ fn conflict_list(paths: &[PathBuf]) -> String {
         .map(|path| path.display().to_string())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// A write the adapter said its fence would have stopped, filed against
-/// the adapter that said so.
-async fn record_breach(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    breach: &crate::scope::Breach,
-) -> Result<(), RunError> {
-    if let Some(adapter) = ctx.resolved_adapter(&node.id).await? {
-        ctx.record_breach(&node.id, &adapter, breach).await?;
-    }
-    Ok(())
 }

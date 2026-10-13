@@ -12,6 +12,9 @@ use yunta_core::events::{
 use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::Capabilities;
 
+#[path = "run_sessions/confinement.rs"]
+mod confinement;
+
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(
@@ -1070,6 +1073,15 @@ sessions:
         .expect("network: false the adapter cannot enforce must be an event, never silence");
     assert_eq!(degraded.adapter, "mock");
     assert_eq!(degraded.policy, PolicyApplied::Known(Policy::NetworkOpen));
+
+    // The policy still reaches the session, which the adapter cannot enforce.
+    let networks: Vec<bool> = bench
+        .mock()
+        .requests_seen()
+        .iter()
+        .map(|req| req.confinement.network)
+        .collect();
+    assert_eq!(networks, [false]);
 }
 
 /// On an adapter that isolates the network, the node's `network: false`
@@ -1087,7 +1099,10 @@ sessions:
 
     let requests = bench.mock().requests_seen();
     assert_eq!(
-        requests.iter().map(|req| req.network).collect::<Vec<_>>(),
+        requests
+            .iter()
+            .map(|req| req.confinement.network)
+            .collect::<Vec<_>>(),
         [false]
     );
     assert!(!bench.events().iter().any(|e| matches!(
@@ -1289,7 +1304,7 @@ nodes:
 
     assert_eq!(prompt.model, task.model, "the same runner, the same model");
     assert_eq!(prompt.agent, task.agent);
-    assert_eq!(prompt.permissions, task.permissions);
+    assert_eq!(prompt.confinement.profile, task.confinement.profile);
     assert_eq!(prompt.skills, task.skills);
     assert_eq!(
         prompt
@@ -1523,6 +1538,14 @@ sessions:
         Some([].as_slice()),
         "a read-only node may write nothing under the worktree"
     );
+    assert!(
+        requests[0].confinement.writes_worktree(),
+        "a node with a declared scope may write its checkout"
+    );
+    assert!(
+        !requests[1].confinement.writes_worktree(),
+        "a read-only node writes nothing of its checkout"
+    );
 }
 
 /// A session that can ask for more scope is told to ask; one that
@@ -1716,6 +1739,14 @@ sessions:
             "every session finds the directory under its variable"
         );
     }
-    assert!(write.fence.roots.contains(&dir), "{:?}", write.fence.roots);
-    assert!(!read.fence.roots.contains(&dir), "{:?}", read.fence.roots);
+    assert!(
+        write.confinement.roots.contains(&dir),
+        "{:?}",
+        write.confinement.roots
+    );
+    assert!(
+        !read.confinement.roots.contains(&dir),
+        "{:?}",
+        read.confinement.roots
+    );
 }

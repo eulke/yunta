@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 use crate::ids::AdapterId;
@@ -62,7 +64,8 @@ pub enum AdapterError {
     },
 }
 
-/// Why an adapter cannot build a session's fence.
+/// Why a session's confinement cannot be built as asked, or an adapter
+/// cannot apply it.
 #[derive(Debug, thiserror::Error)]
 pub enum Unbuildable {
     #[error(
@@ -70,6 +73,15 @@ pub enum Unbuildable {
          or no engine listener to ask"
     )]
     HookUnavailable,
+    /// A session whose commands run unconfined has no sandbox to close its network with.
+    #[error("this session runs its commands unconfined, so its network cannot be closed")]
+    NetworkUnclosable,
+    /// A writable root inside the checkout would admit writes the scope does not.
+    #[error(
+        "the shared directory `{}` lies inside the checkout; a shared directory must lie outside it",
+        dir.display()
+    )]
+    SharedDirInCheckout { dir: PathBuf },
 }
 
 /// Convenience alias for an adapter's typed `Result`.

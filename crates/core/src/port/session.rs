@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::confinement::{Confinement, EditSandbox};
 use crate::events::SessionExit;
 use crate::fence::{Coverage, Fence};
 use crate::rail::{RailAnswer, RailCall, RailCommand, RailEndpoint, RailEvent};
@@ -25,9 +26,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use futures::stream::BoxStream;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The profile a session runs under. The log reads it as `read_only`,
+/// `edit` or `full`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum PermissionProfile {
     ReadOnly,
     Edit,
@@ -56,24 +61,23 @@ pub struct SessionRequest {
     /// absent leaves it to the CLI. Every adapter hands it over, a resumed
     /// session included.
     pub effort: Option<crate::Effort>,
-    pub permissions: PermissionProfile,
+    /// What this session may write and reach. The engine resolves it once,
+    /// through `Confinement::of`; every adapter maps it exactly or refuses
+    /// it with `Unbuildable`.
+    pub confinement: Confinement,
     /// Whether the engine formats what this session writes, the moment it
     /// writes it: the adapter installs the hook that tells it only then.
     pub formats: bool,
     /// Whose configuration of the CLI the session loads beside what the
     /// run mounts: the person's own, or none but the run's.
     pub cli_config: crate::CliConfig,
-    /// Whether the commands the session runs may reach the network —
-    /// loopback included. A session that may write the workspace keeps
-    /// it closed when this says so; a read-only one never has it, and an
-    /// unconfined one always does.
-    pub network: bool,
     /// The environment, already resolved from the manifest — never any
     /// other way — and its secrets stay wrapped until the child process
     /// is spawned.
     pub env: SessionEnv,
-    /// What this session may write: the one source of write permission,
-    /// always present. An adapter builds as much of it as its CLI can
+    /// The scope the session's file-tool writes are judged against; what
+    /// it may write beyond that is `confinement`. Always present. An
+    /// adapter builds as much of it as its CLI can
     /// (`capabilities().fence`) and reports how much that was; an
     /// adapter that can build none of it ignores the field, and the
     /// engine already recorded the degradation.
@@ -89,7 +93,7 @@ pub struct SessionRequest {
     pub rail: Option<RailEndpoint>,
     pub budget: Budget,
     /// Adapter-specific settings with no portable expression — model,
-    /// agent and permissions are typed fields above precisely so this
+    /// agent and confinement are typed fields above precisely so this
     /// stays for what genuinely has nowhere else to go.
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     /// Skill directories to expose to the agent — absolute paths the
@@ -334,6 +338,14 @@ pub trait Adapter: Send + Sync {
     /// Default: none.
     fn own_config(&self) -> Vec<crate::ScopeGlob> {
         Vec::new()
+    }
+
+    /// The `sandbox` setting the adapter's CLI applies to `edit` sessions.
+    /// The engine hands it to `Confinement::of` as one of its inputs, so the
+    /// setting's effect is recorded with the session. Default: the
+    /// workspace-write sandbox.
+    fn edit_sandbox(&self) -> EditSandbox {
+        EditSandbox::default()
     }
 
     /// How this adapter translates between its CLI's hooks and the

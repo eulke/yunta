@@ -76,16 +76,17 @@ the node's `permissions:`.
 ## What a session may write
 
 A node declares a `scope:`, and every session runs behind a **fence**: the
-globs it may write under the worktree, plus the run's own directories, which
-stay writable wherever the session sits. One function decides whether a path
-is inside it, and every adapter asks that same function — what differs is how
-much of the fence each CLI can be made to enforce, and each session's opening
-says which:
+globs its tools may write under the worktree. The run's own directories sit
+beside it: the artifact directory is writable in every session, and the shared
+directories in every session that is not `read-only`. One function decides
+whether a tool's write is inside the fence, and every adapter asks that same
+function — what differs is how much of the fence each CLI can be made to
+enforce, and each session's opening says which:
 
 | Adapter | How it fences | What it covers |
 |---|---|---|
-| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens; commands stay inside the CLI's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `edit`, only the run's directories under `read-only`, anything under `full`. |
-| `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree and the run's directories under `workspace-write`, nothing under `read-only`, anything under `full`. |
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens; commands stay inside the CLI's sandbox. | Edits exactly; commands by directory — the worktree, the run's directories and the temporary directories under `edit` with the `workspace-write` sandbox (the default); the run's directories and the temporary directories under `read-only`, and under `edit` with the `read-only` sandbox; anything under `full`, and under `edit` with `danger-full-access`. |
+| `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree, the run's directories and the temporary directories under `edit` with the `workspace-write` sandbox (the default); the run's directories and the temporary directories under `read-only`, and under `edit` with the `read-only` sandbox; anything under `full`, and under `edit` with `danger-full-access`. |
 | `mock` | The fixture's `dialect:` (`claude-code` or `codex`) decides what the mock declares, as that CLI's adapter does; each scripted effect asks the engine the way that CLI's hook does. | What that CLI's adapter covers. |
 
 Every session also loads its person's own configuration of the CLI — settings,
@@ -97,18 +98,31 @@ for `codex`). The trees a CLI loads that configuration from inside a checkout �
 `codex` — are never written by any session of any run. The instruction files,
 `AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. The
 close judges what each session wrote against these trees and files, git-ignored
-files included, so a write the fence let through is still refused. The one place it
-does not look is inside a directory the project ignores whole, such as a build
-output or a dependency tree, for a pattern that names no directory of its own
-(`**/AGENTS.md`): what lies there belongs to the build or the dependency. A run
-never commits what git ignores.
+files included, so a write the fence let through is still refused. No CLI sandbox
+covers a protected file, a pattern that covers part of a directory, or a glob
+that names no directory of its own, such as `**/AGENTS.md` or `**/CLAUDE.md`:
+the sandbox settings take only whole trees, `dir/**`. The rail judges those for
+the file tools. The close finds them through git: a pattern that names its
+directory, such as `config/secrets.yaml`, is looked for inside that directory even
+when the project ignores it; a pattern that names no directory is not looked for
+inside a directory the project ignores whole, such as a build output or a
+dependency tree, since what lies there belongs to the build or the dependency. A
+run never commits what git ignores.
 
 A refusal reaches the model with the reason and the way out — ask for more
 scope, or report the need as a finding — and reaches the log as
 `write_refused`. The fence is what keeps a write outside the scope from
-happening; the diff Yunta takes after the session is still the guarantee, and
-a write that reaches that diff despite an exact fence is reported as a finding
-against the adapter.
+happening; the diff Yunta takes after the session is still the guarantee. A
+write that reaches that diff is a violation: the node fails with the list of
+paths. It is also filed as the engine finding `engine-fence-breach`, beside that
+failure and against the adapter, when the session's recorded confinement leaves
+the checkout to the fence alone: its commands are confined and write nothing of
+the checkout, which is a `read-only` profile, or an `edit` profile under the
+`read-only` sandbox. Only the fence could have stopped such a write. Under any
+other confinement a command may write the checkout, so the violation is all that
+is filed. The coverage a session reports does not decide this: a confined
+session names the temporary directories among its roots, so its coverage is
+never `exact`.
 
 No adapter reports a denial of its CLI's sandbox, so none writes one to the log.
 Claude returns a command its sandbox refuses as an ordinary failed tool result,
@@ -154,8 +168,10 @@ model, agent, permissions and budget are typed fields a node or runner sets,
 never settings. Each adapter reads its own, and `yunta doctor` (and every
 `run`, before opening a session) refuses a key it does not read, naming the
 keys it does. Both read `sandbox`: the mode the `edit` profile's commands run
-under (`workspace-write` by default; `read-only` narrows it,
-`danger-full-access` widens it).
+under (`workspace-write` by default; `read-only` narrows it, and
+`danger-full-access` widens it, which needs the session's network open). The
+setting is one input to the resolution of what a session may write and reach,
+and the session's log entry records its effect.
 
 ```yaml
 adapters:
@@ -167,16 +183,30 @@ adapters:
 The three permission profiles map onto the same confinement on both CLIs. A
 session's commands run in its CLI's own sandbox, enforced by the operating
 system: under `read-only` they write nothing of the checkout, under `edit` they
-write the checkout and the run's directories, and under `full` nothing confines
-them. One difference is still open: under `read-only` with run directories, the
-two CLIs confine commands differently, as the table above shows, until a later
-change aligns them. Whether they reach the network — loopback included — is the
-node's `network:`, else the project's `permissions.network.default`, else open; a
-closed network keeps a test suite from listening on `127.0.0.1`, so leave it
-open where one does. `check` refuses `network: false` on a `full` node, whose
-commands nothing confines. The engine's own timeout and token budget bound every
-session, whichever CLI runs it. The timeout counts time the host is awake: a
-machine that sleeps spends none of it, and the run's log records the suspension.
+write the checkout and the run's directories (under the `read-only` sandbox, only
+the run's directories), and under `full` nothing confines them. Under every
+profile the commands may also write the temporary directories, `$TMPDIR` and
+`/tmp`. Codex applies a confined session's permissions through a
+profile of its own, `yunta-session`, which that session names; a session that is
+not confined runs under `--sandbox danger-full-access`, which has no profile.
+Claude Code takes the same permissions through the `sandbox` setting of its
+session, and an unconfined session has none. The Codex profile's keys were
+measured on Codex 0.157.0, so `yunta doctor` reports an older Codex, or one whose
+version it cannot read, as unhealthy. Whether a session's commands reach the
+network — loopback included — is the node's `network:`, else the project's
+`permissions.network.default`, else open, and only a session that writes its
+worktree can have one. A session that writes nothing of the checkout — a
+`read-only` one, or an `edit` one under the `read-only` sandbox — never has
+network, and `check` refuses `network: true` on a prompt or loop node that writes
+nothing of the checkout. A closed network keeps a test suite from listening on
+`127.0.0.1`, so leave it open where one does. An unconfined session refuses a
+closed network: `check` refuses one on a prompt or loop node whose session nothing
+confines — a `full` node, or an `edit` node on an adapter whose `sandbox` is
+`danger-full-access` — and the run refuses such a session when it opens. Both
+refusals judge prompt and loop nodes only: a `bash` node opens no session, so
+`check` judges neither network. The engine's own timeout and token budget bound
+every session, whichever CLI runs it. The timeout counts time the host is awake:
+a machine that sleeps spends none of it, and the run's log records the suspension.
 After a suspension, no session opens until the host has been awake for two
 minutes, so a session is not lost to a laptop that wakes briefly and sleeps
 again.

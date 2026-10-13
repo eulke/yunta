@@ -21,16 +21,20 @@ use yunta_adapters::{
 };
 use yunta_core::events::{FailureCause, RefusalCause};
 use yunta_core::port::{
-    Adapter, AgentEvent, Forge, ForgeError, GateDecision, ProbeReport, PublishRequest,
-    PullRequestRef, ReviewOutcome, RunToolsEndpoint, SessionRequest,
+    Adapter, AgentEvent, Forge, ForgeError, GateDecision, PermissionProfile, ProbeReport,
+    PublishRequest, PullRequestRef, ReviewOutcome, RunToolsEndpoint, SessionRequest,
 };
 use yunta_core::{
-    AdapterSettings, Capabilities, Capability, FenceLevel, RunTool, Secret, SessionId, ToolNaming,
+    AdapterSettings, Capabilities, Capability, Confinement, EditSandbox, FenceLevel, RunTool,
+    Secret, SessionId, ToolNaming,
 };
-use yunta_testkit_core::adapter::{drain, request};
+use yunta_testkit_core::adapter::{confine, drain, request};
 
 #[path = "mock/outcomes.rs"]
 mod outcomes;
+
+#[path = "mock/confinement.rs"]
+mod confinement;
 
 #[tokio::test]
 async fn a_successful_session_opens_then_completes() {
@@ -181,13 +185,13 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
     ));
 }
 
-/// A `/rail` that rules as the engine's rail does: a write is judged by
-/// `fence` under `worktree`, and each path it refuses is answered with the
-/// fence's own refusal.
-async fn judging_rail(fence: Fence, worktree: PathBuf) -> RailEndpoint {
+/// A `/rail` that rules as the engine's rail does: a write is judged by the
+/// judge's fence under its confinement, and each path it refuses is answered
+/// with the fence's own refusal, named as the adapter names tools.
+async fn judging_rail(judge: Judge) -> RailEndpoint {
     let app = Router::new()
         .route("/rail/{moment}", post(rule))
-        .with_state(Judge { fence, worktree });
+        .with_state(judge);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -199,25 +203,30 @@ async fn judging_rail(fence: Fence, worktree: PathBuf) -> RailEndpoint {
     }
 }
 
-/// What a `/rail` judge decides by.
+/// What a `/rail` judge decides by, and the names its refusals use.
 #[derive(Clone)]
 struct Judge {
     fence: Fence,
     worktree: PathBuf,
+    confinement: Confinement,
+    naming: ToolNaming,
 }
 
 /// The engine's answer to one hook call: a write is refused when the fence
-/// refuses any path it names; every other moment goes on.
+/// refuses any path it names, judged under the confinement; every other
+/// moment goes on.
 async fn rule(State(judge): State<Judge>, Json(call): Json<RailCall>) -> Json<RailAnswer> {
     let RailAct::BeforeWrite { paths } = call.act else {
         return Json(RailAnswer::Proceed);
     };
     let reasons: Vec<String> = paths
         .iter()
-        .filter_map(|path| match judge.fence.judge(&judge.worktree, path) {
-            Verdict::Refused(refusal) => Some(refusal.to_string()),
-            Verdict::Allowed => None,
-        })
+        .filter_map(
+            |path| match judge.fence.judge(&judge.worktree, path, &judge.confinement) {
+                Verdict::Refused(refusal) => Some(refusal.message(judge.naming)),
+                Verdict::Allowed => None,
+            },
+        )
         .collect();
     Json(if reasons.is_empty() {
         RailAnswer::Proceed
@@ -228,11 +237,17 @@ async fn rule(State(judge): State<Judge>, Json(call): Json<RailCall>) -> Json<Ra
     })
 }
 
-/// The request with its hooks pointed at a judge of its own fence. A session
-/// scripted to write asks before each write, as a CLI's write hook does, and
-/// a write the fence refuses is not made.
-async fn judged(mut req: SessionRequest) -> SessionRequest {
-    req.rail = Some(judging_rail(req.fence.clone(), req.cwd.clone()).await);
+/// The request with its hooks pointed at a judge of its own fence, which names
+/// tools as `adapter` does. A session scripted to write asks before each
+/// write, as a CLI's write hook does, and a write the fence refuses is not made.
+async fn judged(mut req: SessionRequest, adapter: &MockAdapter) -> SessionRequest {
+    let judge = Judge {
+        fence: req.fence.clone(),
+        worktree: req.cwd.clone(),
+        confinement: req.confinement.clone(),
+        naming: adapter.capabilities().tool_naming,
+    };
+    req.rail = Some(judging_rail(judge).await);
     req
 }
 
@@ -256,12 +271,17 @@ outcome: { type: completed, summary: "done" }
     let mut req = request(dir.path().to_path_buf());
     req.fence = Fence {
         allowed: Some(vec!["src/**".into()]),
-        roots: Vec::new(),
         advice: Advice::ReportFinding,
-        protected: yunta_core::protected::Protected::default(),
-        naming: ToolNaming::Bare,
     };
-    let session = fixture.spawn(judged(req).await).await.unwrap();
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        true,
+        true,
+    )
+    .unwrap();
+    let session = fixture.spawn(judged(req, &fixture).await).await.unwrap();
     drain(session).await;
 
     assert!(dir.path().join("src/lib.rs").exists());
@@ -288,12 +308,17 @@ outcome: { type: completed, summary: "done" }
     let mut req = request(dir.path().to_path_buf());
     req.fence = Fence {
         allowed: Some(vec!["src/**".into()]),
-        roots: Vec::new(),
         advice: Advice::ReportFinding,
-        protected: yunta_core::protected::Protected::default(),
-        naming: ToolNaming::Bare,
     };
-    let session = fixture.spawn(judged(req).await).await.unwrap();
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        true,
+        true,
+    )
+    .unwrap();
+    let session = fixture.spawn(judged(req, &fixture).await).await.unwrap();
     drain(session).await;
 
     assert!(dir.path().join("src/lib.rs").exists());
@@ -490,7 +515,7 @@ sessions:
 
     drain(
         adapter
-            .spawn(judged(request(dir.path().to_path_buf())).await)
+            .spawn(judged(request(dir.path().to_path_buf()), &adapter).await)
             .await
             .unwrap(),
     )
@@ -500,7 +525,7 @@ sessions:
 
     drain(
         adapter
-            .spawn(judged(request(dir.path().to_path_buf())).await)
+            .spawn(judged(request(dir.path().to_path_buf()), &adapter).await)
             .await
             .unwrap(),
     )
@@ -556,13 +581,15 @@ sessions:
     let adapter = MockAdapter::from_yaml(fixture).unwrap();
 
     // Spawned in the OPPOSITE order the fixture declares them.
+    let prompt_a = prompt_request(dir_a.path().to_path_buf(), "do task-a now");
     let session_a = adapter
-        .spawn(judged(prompt_request(dir_a.path().to_path_buf(), "do task-a now")).await)
+        .spawn(judged(prompt_a, &adapter).await)
         .await
         .unwrap();
     drain(session_a).await;
+    let prompt_b = prompt_request(dir_b.path().to_path_buf(), "do task-b now");
     let session_b = adapter
-        .spawn(judged(prompt_request(dir_b.path().to_path_buf(), "do task-b now")).await)
+        .spawn(judged(prompt_b, &adapter).await)
         .await
         .unwrap();
     drain(session_b).await;
@@ -624,7 +651,7 @@ sessions:
 
     drain(
         adapter
-            .spawn(judged(request(dir.path().to_path_buf())).await)
+            .spawn(judged(request(dir.path().to_path_buf()), &adapter).await)
             .await
             .unwrap(),
     )
@@ -632,7 +659,7 @@ sessions:
     assert!(dir.path().join("first.txt").exists());
     drain(
         adapter
-            .spawn(judged(request(dir.path().to_path_buf())).await)
+            .spawn(judged(request(dir.path().to_path_buf()), &adapter).await)
             .await
             .unwrap(),
     )

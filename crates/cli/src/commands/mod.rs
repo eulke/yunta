@@ -169,15 +169,32 @@ pub(crate) fn service_vars() -> Vec<&'static str> {
     names
 }
 
-/// What every adapter this binary builds declares it can do — what
-/// `check` judges a workflow's `permissions:` and `agent:` against.
-/// `None` for an adapter this binary does not build: a capability it
-/// cannot see is not one it can call absent.
-pub(crate) fn declared_capabilities(adapter: &AdapterId) -> Option<yunta_core::Capabilities> {
-    built_adapters(|_| AdapterSettings::default())
-        .iter()
-        .find(|built| built.id() == adapter)
-        .map(|built| built.capabilities())
+/// What every adapter this binary builds declares it can do, and what its
+/// sandbox is set to for an `edit` session, each under the settings the
+/// config gives it: what `check` judges a workflow's `permissions:` and
+/// `agent:` against. `None` for an adapter this binary does not build: a
+/// capability it cannot see is not one it can call absent.
+pub(crate) fn declared_facts(
+    config: &ConfigLayer,
+) -> impl Fn(&AdapterId) -> Option<yunta_engine::AdapterFacts> {
+    let configured = config.adapters.clone().unwrap_or_default();
+    let built_facts: Vec<(AdapterId, yunta_engine::AdapterFacts)> =
+        built_adapters(|id| configured.get(id).cloned().unwrap_or_default())
+            .iter()
+            .map(|built| {
+                let facts = yunta_engine::AdapterFacts {
+                    capabilities: built.capabilities(),
+                    edit_sandbox: built.edit_sandbox(),
+                };
+                (built.id().clone(), facts)
+            })
+            .collect();
+    move |id| {
+        built_facts
+            .iter()
+            .find(|(built, _)| built == id)
+            .map(|(_, facts)| facts.clone())
+    }
 }
 
 /// The adapter this binary built under `id`, constructed without a

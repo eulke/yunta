@@ -19,7 +19,7 @@ pub fn check_workflow_refs(
     config: &ConfigLayer,
     repo_root: &std::path::Path,
     workflow_origin: &crate::catalog::WorkflowOrigin,
-    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
 ) -> RefsCheck {
     let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
     let max_depth = config.resolved_max_workflow_depth();
@@ -71,7 +71,7 @@ pub fn check_workflow_refs(
 pub(crate) struct Walk<'a> {
     repo_root: &'a std::path::Path,
     config: &'a ConfigLayer,
-    declared: &'a dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+    declared: &'a dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
     max_depth: u32,
 }
 

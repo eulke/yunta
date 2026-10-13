@@ -11,19 +11,22 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::StreamExt;
-use yunta_core::fence::{Advice, Fence};
 
 use yunta_adapters::CodexAdapter;
 use yunta_core::events::{FailureCause, RefusalCause, SessionEnd};
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile};
 use yunta_core::Pid;
-use yunta_core::{AdapterSettings, SessionId};
+use yunta_core::{AdapterSettings, EditSandbox, SessionId};
 use yunta_testkit_core::adapter::{
-    child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, wait_until_gone, write_lines,
+    child_pid_fifo, confine, drain, drain_for_exit, grandchild_pid, request, wait_until_gone,
+    write_lines,
 };
 
 #[path = "codex/refusals.rs"]
 mod refusals;
+
+#[path = "codex/confinement.rs"]
+mod confinement;
 
 fn stub_path() -> PathBuf {
     yunta_testkit_core::stubs::codex()
@@ -433,8 +436,8 @@ async fn a_codex_session_reports_no_model_from_its_stream() {
 #[tokio::test]
 async fn capability_permission_profiles_map_to_their_own_sandbox_modes() {
     for (profile, expected) in [
-        (PermissionProfile::ReadOnly, "read-only"),
-        (PermissionProfile::Edit, "workspace-write"),
+        (PermissionProfile::ReadOnly, ":read-only"),
+        (PermissionProfile::Edit, ":workspace"),
         (PermissionProfile::Full, "danger-full-access"),
     ] {
         let dir = tempfile::tempdir().unwrap();
@@ -442,7 +445,7 @@ async fn capability_permission_profiles_map_to_their_own_sandbox_modes() {
         let lines = write_lines(dir.path(), "lines.jsonl", &[]);
 
         let mut req = request(dir.path().to_path_buf());
-        req.permissions = profile;
+        confine(&mut req, profile, EditSandbox::default(), false, true).unwrap();
         req.env.plain.insert(
             "CODEX_STUB_ARGS_FILE".to_string(),
             args_file.display().to_string(),
@@ -459,8 +462,7 @@ async fn capability_permission_profiles_map_to_their_own_sandbox_modes() {
             .lines()
             .map(str::to_string)
             .collect();
-        let pos = args.iter().position(|a| a == "--sandbox").unwrap();
-        assert_eq!(args[pos + 1], expected);
+        assert_eq!(mode_of(&args), expected, "{profile:?}: {args:?}");
     }
 }
 
@@ -544,8 +546,15 @@ async fn resume_places_every_parent_option_before_the_subcommand() {
 
     let mut req = request(dir.path().to_path_buf());
     req.model = Some("gpt-5-codex".into());
-    req.permissions = PermissionProfile::Edit;
-    req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
+    req.artifact_dir = Some(artifacts);
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string(),
@@ -559,7 +568,18 @@ async fn resume_places_every_parent_option_before_the_subcommand() {
         .await
         .unwrap();
     let events = drain(session).await;
+    assert_resumed_session_opens(&events);
 
+    let args: Vec<String> = std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_parent_options_precede_the_subcommand(&args);
+}
+
+/// The CLI accepts the resumed invocation, and the session opens.
+fn assert_resumed_session_opens(events: &[AgentEvent]) {
     assert!(
         !events
             .iter()
@@ -572,12 +592,11 @@ async fn resume_places_every_parent_option_before_the_subcommand() {
             .any(|e| matches!(e, AgentEvent::SessionOpened { .. })),
         "the resumed session opens: {events:?}"
     );
+}
 
-    let args: Vec<String> = std::fs::read_to_string(&args_file)
-        .unwrap()
-        .lines()
-        .map(str::to_string)
-        .collect();
+/// The parent command's options all come before `resume`, and the
+/// subcommand takes the thread id and the stdin prompt and nothing else.
+fn assert_parent_options_precede_the_subcommand(args: &[String]) {
     let position = |flag: &str| {
         args.iter()
             .position(|a| a == flag)
@@ -589,8 +608,8 @@ async fn resume_places_every_parent_option_before_the_subcommand() {
         "the model is the parent command's option: {args:?}"
     );
     assert!(
-        resume_pos > position("--sandbox"),
-        "the sandbox is the parent command's option: {args:?}"
+        resume_pos > position(r#"default_permissions="yunta-session""#),
+        "the permissions profile is the parent command's option: {args:?}"
     );
     for (at, arg) in args.iter().enumerate() {
         assert!(
@@ -657,13 +676,12 @@ async fn the_sandbox_setting_governs_the_edit_profile_only() {
         binary: Some(stub_path()),
     });
     for (profile, expected) in [
-        (PermissionProfile::ReadOnly, "read-only"),
+        (PermissionProfile::ReadOnly, ":read-only"),
         (PermissionProfile::Edit, "danger-full-access"),
         (PermissionProfile::Full, "danger-full-access"),
     ] {
         let args = argv_under(&adapter, profile).await;
-        let pos = args.iter().position(|a| a == "--sandbox").unwrap();
-        assert_eq!(args[pos + 1], expected, "{profile:?}");
+        assert_eq!(mode_of(&args), expected, "{profile:?}");
     }
 }
 
@@ -693,9 +711,8 @@ async fn argv_of(
     let args_file = dir.path().join("args.txt");
     let lines = write_lines(dir.path(), "lines.jsonl", &[]);
     let mut req = request(dir.path().to_path_buf());
-    req.permissions = profile;
+    confine(&mut req, profile, adapter.edit_sandbox(), false, network).unwrap();
     req.cli_config = cli_config;
-    req.network = network;
     req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string(),
@@ -711,6 +728,18 @@ async fn argv_of(
         .lines()
         .map(str::to_string)
         .collect()
+}
+
+/// The mode a session runs under, as its argv names it: the `--sandbox` the
+/// CLI is handed, or else the base its own permissions profile extends.
+fn mode_of(args: &[String]) -> String {
+    if let Some(pos) = args.iter().position(|arg| arg == "--sandbox") {
+        return args[pos + 1].clone();
+    }
+    args.iter()
+        .find_map(|arg| arg.strip_prefix("permissions.yunta-session.extends="))
+        .map(|base| base.trim_matches('"').to_string())
+        .unwrap_or_default()
 }
 
 /// An isolated session loads none of the person's own configuration or
@@ -743,41 +772,24 @@ async fn an_isolated_session_ignores_the_person_s_own_config_and_rules() {
     );
 }
 
-/// A session's request says whether its commands reach the network; only
-/// `workspace-write` reads it — `read-only` has none to open and
-/// `danger-full-access` never closed it.
+/// A session's confinement says whether its commands reach the network. A
+/// confined session carries that answer in its permissions profile: the
+/// network opens only for a session that may write and whose request asks
+/// for it. An unconfined session has no profile to say it in.
 #[tokio::test]
 async fn the_request_opens_the_network_only_where_workspace_write_closed_it() {
-    const OPENS: &str = "sandbox_workspace_write.network_access=true";
-    for (network, settings, profile, opened) in [
-        (true, serde_json::json!({}), PermissionProfile::Edit, true),
-        (false, serde_json::json!({}), PermissionProfile::Edit, false),
-        (
-            true,
-            serde_json::json!({}),
-            PermissionProfile::ReadOnly,
-            false,
-        ),
-        (true, serde_json::json!({}), PermissionProfile::Full, false),
-        (
-            true,
-            serde_json::json!({ "sandbox": "danger-full-access" }),
-            PermissionProfile::Edit,
-            false,
-        ),
+    const OPENS: &str = "permissions.yunta-session.network.enabled=true";
+    for (network, profile, opened) in [
+        (true, PermissionProfile::Edit, true),
+        (false, PermissionProfile::Edit, false),
+        (true, PermissionProfile::ReadOnly, false),
+        (true, PermissionProfile::Full, false),
     ] {
-        let serde_json::Value::Object(extra) = settings.clone() else {
-            unreachable!()
-        };
-        let adapter = CodexAdapter::new(&AdapterSettings {
-            adapter_settings: Some(extra),
-            binary: Some(stub_path()),
-        });
-        let args = argv_of(&adapter, profile, yunta_core::CliConfig::Inherit, network).await;
+        let args = argv_of(&adapter(), profile, yunta_core::CliConfig::Inherit, network).await;
         assert_eq!(
             args.iter().any(|arg| arg == OPENS),
             opened,
-            "network {network}, {settings} under {profile:?}: {args:?}"
+            "network {network} under {profile:?}: {args:?}"
         );
     }
 }
@@ -807,35 +819,16 @@ async fn events_with(
     drain(session).await
 }
 
-#[tokio::test]
-async fn a_codex_session_keeps_the_fence_roots_writable_beside_the_workspace() {
-    let dir = tempfile::tempdir().unwrap();
-    let artifacts = dir.path().join("run/artifacts");
-    std::fs::create_dir_all(&artifacts).unwrap();
-    let args_file = dir.path().join("args.txt");
-
-    let mut req = request(dir.path().to_path_buf());
-    req.fence = Fence::everything(vec![artifacts.clone()], Advice::ReportFinding);
-    req.env.plain.insert(
-        "CODEX_STUB_ARGS_FILE".to_string(),
-        args_file.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let _ = drain(session).await;
-    let args = std::fs::read_to_string(&args_file).unwrap();
-
-    // `workspace-write` confines writes to the workspace, and the run's
-    // artifact directory is never inside it. The expectation spells the
-    // TOML out rather than deriving it the way the adapter does, so a
-    // wrong rendering cannot agree with itself.
-    let expected = format!(
-        "sandbox_workspace_write.writable_roots=[\"{}/run/artifacts\"]",
-        dir.path().display()
-    );
-    assert!(
-        args.lines().any(|arg| arg == expected),
-        "a fence root joins the writable roots as {expected}: {args}"
-    );
+/// The filesystem table of the session's permissions profile, read back
+/// from the assignment that carries it.
+fn filesystem_of(args: &str) -> toml::Value {
+    let assignment = args
+        .lines()
+        .find(|arg| arg.starts_with("permissions.yunta-session.filesystem="))
+        .unwrap_or_else(|| panic!("the profile carries its filesystem: {args}"));
+    let table: toml::Table = toml::from_str(assignment)
+        .unwrap_or_else(|e| panic!("`{assignment}` is not readable TOML: {e}"));
+    table["permissions"]["yunta-session"]["filesystem"].clone()
 }
 
 /// A path is arbitrary bytes; a TOML string is not. A directory whose
@@ -852,7 +845,15 @@ async fn a_writable_root_with_toml_metacharacters_reaches_the_cli_whole() {
 
     let expected_dir = artifacts.clone();
     let mut req = request(dir.path().to_path_buf());
-    req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
+    req.artifact_dir = Some(artifacts);
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
     req.env.plain.insert(
         "CODEX_STUB_ARGS_FILE".to_string(),
         args_file.display().to_string(),
@@ -861,18 +862,12 @@ async fn a_writable_root_with_toml_metacharacters_reaches_the_cli_whole() {
     let _ = drain(session).await;
     let args = std::fs::read_to_string(&args_file).unwrap();
 
-    let assignment = args
-        .lines()
-        .find(|arg| arg.starts_with("sandbox_workspace_write.writable_roots="))
-        .unwrap_or_else(|| panic!("the writable roots reach the CLI: {args}"));
-    let table: toml::Table = toml::from_str(assignment)
-        .unwrap_or_else(|e| panic!("`{assignment}` is not readable TOML: {e}"));
+    let filesystem = filesystem_of(&args);
+    let key = expected_dir.display().to_string();
     assert_eq!(
-        table["sandbox_workspace_write"]["writable_roots"],
-        toml::Value::Array(vec![toml::Value::String(
-            expected_dir.display().to_string()
-        )]),
-        "the path the CLI reads is the path it was given: {assignment}"
+        filesystem[key.as_str()],
+        toml::Value::String("write".to_string()),
+        "the path the CLI reads is the path it was given: {args}"
     );
 }
 
@@ -1038,13 +1033,21 @@ async fn no_dead_config_override_reaches_the_cli() {
 
 /// Edits are judged exactly; commands are confined by the sandbox's
 /// directories, so the coverage a session reports is the widened one,
-/// naming them.
+/// naming the checkout, the artifact directory and the temporary ones.
 #[tokio::test]
 async fn a_codex_session_reports_widened_coverage_with_its_roots() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join("run/artifacts");
     let mut req = request(dir.path().to_path_buf());
-    req.fence = Fence::everything(vec![artifacts.clone()], Advice::ReportFinding);
+    req.artifact_dir = Some(artifacts.clone());
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
 
     let events = events_with(&dir, req, &[THREAD_STARTED_LINE, TURN_COMPLETED_LINE]).await;
 
@@ -1054,63 +1057,13 @@ async fn a_codex_session_reports_widened_coverage_with_its_roots() {
     assert_eq!(
         fence.as_ref(),
         Some(&yunta_core::fence::Coverage::WidenedToRoots {
-            roots: vec![dir.path().to_path_buf(), artifacts],
+            roots: [
+                vec![dir.path().to_path_buf(), artifacts],
+                yunta_core::temp_dirs()
+            ]
+            .concat(),
         })
     );
-}
-
-/// `read-only` seals the run's roots along with everything else, so a
-/// read-only session that must write a declared file runs under
-/// `workspace-write`: its edits are refused by the hook everywhere but
-/// the roots, and its commands are confined to the workspace and the
-/// roots, which its coverage says.
-#[tokio::test]
-async fn a_read_only_codex_session_with_declared_files_writes_them_under_workspace_write() {
-    let dir = tempfile::tempdir().unwrap();
-    let artifacts = dir.path().join("run/artifacts");
-    let mut req = request(dir.path().to_path_buf());
-    req.permissions = PermissionProfile::ReadOnly;
-    req.fence = Fence::read_only(vec![artifacts.clone()], Advice::ReportFinding);
-
-    let events = events_with(&dir, req, &[THREAD_STARTED_LINE, TURN_COMPLETED_LINE]).await;
-
-    let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
-        panic!("a session opens first: {events:?}");
-    };
-    assert_eq!(
-        fence.as_ref(),
-        Some(&yunta_core::fence::Coverage::WidenedToRoots {
-            roots: vec![dir.path().to_path_buf(), artifacts],
-        })
-    );
-}
-
-/// A read-only sandbox from the settings seals the roots along with the rest,
-/// so the commands of an edit session cover no root and the session reports
-/// exact coverage.
-#[tokio::test]
-async fn a_read_only_sandbox_from_the_settings_leaves_the_commands_no_root() {
-    let dir = tempfile::tempdir().unwrap();
-    let artifacts = dir.path().join("run/artifacts");
-    let mut extra = serde_json::Map::new();
-    extra.insert("sandbox".to_string(), serde_json::Value::from("read-only"));
-    let adapter = CodexAdapter::new(&AdapterSettings {
-        adapter_settings: Some(extra),
-        binary: Some(stub_path()),
-    });
-    let mut req = request(dir.path().to_path_buf());
-    req.fence = Fence::everything(vec![artifacts], Advice::ReportFinding);
-    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let events = drain(adapter.spawn(req).await.unwrap()).await;
-
-    let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
-        panic!("a session opens first: {events:?}");
-    };
-    assert_eq!(fence.as_ref(), Some(&yunta_core::fence::Coverage::Exact));
 }
 
 /// The hook reaches the CLI as an override it trusts in the same call:

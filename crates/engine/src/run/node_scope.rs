@@ -11,7 +11,7 @@ use yunta_core::events::{Decider, EventPayload, Failure, NodeEvent, TokenUsage};
 use yunta_core::expansion::{node_offer, Decision, Waiting};
 use yunta_core::protected::{Closing, Protected};
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{Node, NodePermissions, ScopeGlob, TreeId};
+use yunta_core::{Node, ScopeGlob, TreeId};
 
 use super::node_close::{fail_with_staged, fail_with_tokens_staged};
 use super::node_exec::NodeEnd;
@@ -32,7 +32,7 @@ pub(super) async fn session_access(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Option<Arc<NodeScopeAccess>>, RunError> {
-    if !node.scope.is_declared() || node.permissions == Some(NodePermissions::ReadOnly) {
+    if !node.scope.is_declared() || !node.writes_worktree() {
         return Ok(None);
     }
     let state = ctx.run_view().await?.state;
@@ -288,15 +288,14 @@ pub(super) async fn scope_violation(
     if result.violations.is_empty() {
         return Ok(None);
     }
-    // A write the adapter said it judged before it happened, and which
-    // reached the diff anyway: the adapter answers for it, beside the
-    // failure the violation causes either way.
-    let coverage = ctx.last_coverage(&node.id).await?;
-    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &result) {
-        let adapter = ctx.resolved_adapter(&node.id).await?;
-        if let Some(adapter) = adapter {
-            ctx.record_breach(&node.id, &adapter, &breach).await?;
-        }
+    // A write that reached the diff where nothing but the fence could have
+    // stopped it: the adapter answers for it, beside the failure the
+    // violation causes either way.
+    let (coverage, confinement) = ctx.last_fence(&node.id).await?;
+    if let Some(breach) =
+        crate::scope::fence_breach(coverage.as_ref(), confinement.as_ref(), &result)
+    {
+        ctx.record_breach(&node.id, &breach).await?;
     }
     let failure = Failure::scope_violated(result.violations);
     Ok(Some(
@@ -325,11 +324,10 @@ pub(super) fn judged_by(protected: &Protected, state: &RunState, node: &Node) ->
 }
 
 /// Whether a person may widen `node`'s scope on this run: the run's ceiling
-/// lets one grant, and the node is not read-only. The menu asks the same
+/// lets one grant, and the node writes the worktree. The menu asks the same
 /// question.
 fn widenable(ctx: &RunCtx<'_>, node: &Node) -> bool {
-    node.permissions != Some(NodePermissions::ReadOnly)
-        && super::schedule::person_may_grant_scope(&ctx.manifest.config)
+    node.writes_worktree() && super::schedule::person_may_grant_scope(&ctx.manifest.config)
 }
 
 /// Records the engine's decision about one of the node's own scope

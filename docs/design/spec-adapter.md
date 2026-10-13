@@ -61,14 +61,19 @@ pub struct Capabilities {
     /// (blackboard, tareas, findings, solicitud de ampliación de scope).
     pub run_tools: bool,
     /// Puede confinar los comandos de la sesión sin acceso a red, que es
-    /// lo que hace cumplir el `network: false` de un nodo (`network` del
-    /// pedido). Donde esta capacidad falta, `network: false` degrada con
+    /// lo que hace cumplir el `network: false` de un nodo (`confinement.network`
+    /// del pedido). Donde esta capacidad falta, `network: false` degrada con
     /// `capability_degraded` — queda registrado para política y
     /// auditoría, nunca exigido (D252).
     pub network_isolation: bool,
     /// Sigue la sesión después de que el engine le rechaza dos paradas
     /// seguidas sobre estados distintos del trabajo.
     pub stop_refusals: bool,
+    /// Puede cortar la sesión al pasar `budget.max_tokens` mientras corre, con el
+    /// uso que trae cada línea del stream. Sin ella, el tope se verifica al cerrar
+    /// la sesión, y `capability_degraded` lo registra con la política
+    /// `cap_at_session_end`.
+    pub mid_session_token_cap: bool,
 }
 
 pub struct SessionRequest {
@@ -94,21 +99,23 @@ pub struct SessionRequest {
     /// también al retomar: `claude-code` como `--effort`, `codex` como
     /// `-c model_reasoning_effort`.
     pub effort: Option<Effort>,
-    /// Perfil de permisos del nodo.
-    pub permissions: PermissionProfile,   // ReadOnly | Edit | Full
+    /// Lo que esta sesión puede escribir y alcanzar: el perfil del nodo, el
+    /// sandbox de `edit`, la red, las raíces y los árboles protegidos. El engine lo
+    /// resuelve una vez (`Confinement::of`); cada adapter lo aplica exacto o lo
+    /// rechaza con `Unbuildable`.
+    pub confinement: Confinement,
     /// Env vars para la sesión. Los secretos llegan SOLO por acá,
     /// ya resueltos por el engine desde el manifest (I12), envueltos en
     /// `Secret`: `Debug` imprime `[redacted]` y el valor se expone una
     /// sola vez, al construir el entorno del hijo.
     pub env: HashMap<String, Secret<String>>,
-    /// Lo que esta sesión puede escribir: la única fuente de permiso de
-    /// escritura, siempre presente. `allowed` es `None` cuando el nodo
-    /// no declaró scope (todo bajo el worktree) y `Some([])` bajo
-    /// `read_only` (nada bajo el worktree; las raíces siguen escribibles).
-    /// El adapter construye tanto de él como su CLI permita y reporta
-    /// cuánto fue; uno que no puede construir nada lo ignora, sin fallar
-    /// — el engine ya degradó y avisó (D172).
-    pub fence: Fence,   // { allowed: Option<Vec<ScopeGlob>>, roots: Vec<PathBuf>, advice }
+    /// Lo que esta sesión puede escribir bajo el worktree con sus herramientas,
+    /// siempre presente. `allowed` es `None` cuando el nodo no declaró scope (todo
+    /// bajo el worktree) y `Some([])` bajo `read_only` (nada bajo el worktree). Las
+    /// raíces y los árboles protegidos los dice `confinement`. El adapter construye
+    /// tanto de él como su CLI permita y reporta cuánto fue; uno que no puede
+    /// construir nada lo ignora, sin fallar — el engine ya degradó y avisó (D172).
+    pub fence: Fence,   // { allowed: Option<Vec<ScopeGlob>>, advice }
     /// El comando que los hooks de un CLI ejecutan para preguntarle al
     /// engine — antes de escribir, primero que nada. `None` solo en un
     /// arnés sin binario que correr; un adapter cuyo cerco lo necesita y
@@ -162,6 +169,12 @@ pub trait Adapter: Send + Sync {
     /// run este adapter: el núcleo protege los de todos, y una prueba exige que
     /// su lista coincida con lo que declaran los adapters. Default: ninguno.
     fn own_config(&self) -> Vec<ScopeGlob>;
+
+    /// El `sandbox` que el adapter aplica a las sesiones `edit`: `workspace-write`,
+    /// `read-only` o `danger-full-access`. Es una entrada de `Confinement::of`, no un
+    /// permiso aparte: su efecto queda en `agent_session_opened.confinement`.
+    /// Default: `EditSandbox::default()`.
+    fn edit_sandbox(&self) -> EditSandbox;
 
     /// Cómo traduce este adapter entre los hooks de su CLI y el riel del engine.
     /// `Some` exactamente cuando `capabilities().fence` es `ToolCalls`: un cerco por
@@ -316,9 +329,11 @@ telemetría, no evidencia.
   comando que su sandbox niega, y Claude devuelve esa negativa como un `tool_result`
   con `is_error`, igual que cualquier comando que falla. Un adapter con nivel `None`
   ignora el campo sin error. Un adapter que necesita un mecanismo que no tiene —el
-  hook, o raíces escribibles bajo un sandbox de solo lectura— falla la sesión antes
-  de spawn con `AdapterError::FenceUnbuildable`, porque una capacidad ausente falla
-  en vez de gastar la sesión (D172).
+  hook— falla la sesión antes de spawn con `AdapterError::FenceUnbuildable`, lo
+  mismo que una confinación que no puede aplicar exacta (`Unbuildable`), porque una
+  capacidad ausente falla en vez de gastar la sesión (D172). `Confinement::of`
+  rechaza antes de abrir la sesión una red cerrada en una sesión sin confinar y un
+  directorio compartido dentro del checkout.
 - **O7. Sin estado propio**: un adapter no persiste nada entre sesiones fuera de lo
   que el CLI ya persiste. Todo lo que el engine necesita recordar viaja en eventos.
 
@@ -339,8 +354,9 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `usage_reporting` | presupuesto de tokens no exigible → solo timeout; warning por run |
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
 | `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
-| `network_isolation` | `network: false` queda registrado para política y auditoría, no exigido · `capability_degraded` |
+| `network_isolation` | `network: false` del nodo queda registrado para política y auditoría, no exigido · `capability_degraded`. Con esta capacidad, el CLI cierra la red que la confinación de la sesión pide cerrar; un nodo `read-only` no la tiene nunca |
 | `stop_refusals` | `yunta check` rechaza un nodo que abre sesión (un `prompt` o un `loop`) cuando ningún candidato de su runner la declara; no hay degradación |
+| `mid_session_token_cap` | el tope `budget.max_tokens` se verifica en cada línea del stream; sin la capacidad, la sesión se cierra al `Completed` como excedida de presupuesto si su total lo supera · `capability_degraded` con la política `cap_at_session_end`. `yunta check` avisa cuando `limits.max_tokens_per_run` está puesto y ningún candidato la declara |
 | `run_tools` montado y sin efecto | el listener de la sesión sabe si su CLI listó o llamó alguna de sus tools —los dos CLIs las listan antes de su primer turno—; el adapter no informa cuántas trae. Un listener que no abrió emite `capability_degraded` con la política `no_run_tools` al abrir la sesión, antes de gastarla. Una sesión que cerró sin listar ni llamar ninguna emite la misma degradación al cerrar |
 
 ## 6. Adapters builtin
@@ -362,6 +378,7 @@ el engine consulta antes de pedir nada (§5).
 | `run_tools` | `true` |
 | `network_isolation` | `true` |
 | `stop_refusals` | `true` |
+| `mid_session_token_cap` | `true` |
 
 Lanza `claude -p` headless con salida en streaming JSON y traduce ese stream a
 `AgentEvent`; `resume` reutiliza la sesión vía el flag de reanudación del CLI con el
@@ -374,20 +391,28 @@ D254); cuando el run formatea, uno `PostToolUse` sobre las mismas herramientas
 ejecuta `yunta rail claude-code after-write` y lo que el engine dice llega al
 modelo como `additionalContext` (D255); las raíces
 del cerco entran por `--add-dir`. Las ediciones se cubren exactas; los comandos, por
-directorio: `WidenedToRoots { [cwd, …raíces] }` bajo `edit`, `WidenedToRoots { raíces }`
-bajo `read_only` con raíces y `Exact` sin ellas, `ToolsOnly` bajo `full`. `read_only`
-conserva `Write`/`Edit` solo cuando el cerco tiene raíces, que es donde van los
-archivos declarados. Límite declarado: si el hook no responde en su timeout, el CLI
-deja pasar la llamada; el post-check la atrapa y `fence_breach` la nombra.
+directorio: `WidenedToRoots { [cwd, …raíces, temporal] }` bajo `edit` con
+`workspace-write`, `WidenedToRoots { [raíces, temporal] }` bajo `read_only` y bajo
+`edit` con `read-only`, y `ToolsOnly` bajo `full` y bajo `edit` con
+`danger-full-access`. `read_only` conserva `Write`/`Edit` solo cuando el cerco
+tiene raíces, que es donde van los archivos declarados. Límite declarado: si el
+hook no responde en su timeout, el CLI deja pasar la llamada; el post-check la
+atrapa como violación, y el nodo falla con la lista de paths. Cuando la sesión
+deja el checkout solo al cerco (comandos confinados y `worktree: nothing`), la
+escritura es además un `engine_finding` (`engine-fence-breach`) contra el adapter
+(D265).
 `custom_agents`: las instrucciones del agente llegan por
 `--append-system-prompt-file`, desde un archivo del directorio de la sesión;
 `permission_profiles` mapea a los modos de permisos del CLI;
 skills y MCP por-run se inyectan por la configuración de sesión. Los comandos corren
 en el sandbox del CLI (`sandbox` en `--settings`, que falla en vez de correr sin
-confinar): bajo `edit` escriben el workspace y las raíces, bajo `read_only` solo las
-raíces (`denyWrite` sobre el workspace), y bajo `full` no se confinan; la red, loopback
-incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
-`allowLocalBinding`), así que `network_isolation` se declara (D252). Las banderas viven
+confinar): bajo `edit` con `workspace-write` escriben el workspace, las raíces y el
+temporal (`$TMPDIR` y `/tmp`); bajo `read_only`, o `edit` con `read-only`, solo las
+raíces y el temporal (`denyWrite` sobre el workspace); bajo `full`, y bajo `edit` con
+`danger-full-access`, no se confinan. La red, loopback incluido, se abre solo cuando el
+pedido la abre y la sesión escribe su workspace (`allowedDomains: ["*"]`,
+`allowLocalBinding`), así que `network_isolation` se declara (D252). Una sesión sin
+confinar con red cerrada no se abre. Las banderas viven
 en el adapter; `probe()` comprueba la versión que reporta el binario instalado y los
 settings que lee, no las banderas, y el engine no conoce ninguna.
 Un límite de cuenta se lee de los campos del stream, no del texto: un
@@ -412,30 +437,43 @@ por marcas de palabra entera; un `result` sin `is_error` es una negativa `Final`
 | `run_tools` | `true` |
 | `network_isolation` | `true` |
 | `stop_refusals` | `true` |
+| `mid_session_token_cap` | `false` |
 
-`codex exec` headless con salida JSON; `permission_profiles` mapea a sus modos de
-sandbox. El cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse` sobre
+`codex exec` headless con salida JSON; `permission_profiles` mapea a un perfil de
+permisos propio de la sesión. El cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse` sobre
 `apply_patch` ejecuta `yunta rail codex before-write`, que le pregunta al engine por
 cada path que el patch nombra, uno `Stop` ejecuta `yunta rail codex before-stop`
 (D254) y, cuando el run formatea, uno `PostToolUse` sobre `apply_patch` ejecuta
 `yunta rail codex after-write` (D255); los hooks llegan como overrides `-c` junto con su propia
 confianza en `hooks.state` (el hash con que Codex confía en un hook), así que ningún
-hook ajeno corre sin revisar (D251). Los comandos quedan confinados por el sandbox:
-`--sandbox workspace-write` más las raíces del cerco en
-`sandbox_workspace_write.writable_roots`, de modo que la cobertura es
-`WidenedToRoots { [cwd, …raíces] }`; bajo `read-only` sin raíces es `Exact` y bajo
-`danger-full-access`, `ToolsOnly`. Un perfil `read_only` con raíces que mantener
-escribibles corre bajo `workspace-write` —`read-only` sella también las raíces— y el
-hook rechaza toda edición que no sea a ellas. Límite declarado: la política partida del sandbox
-(`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. Las skills se montan
+hook ajeno corre sin revisar (D251). Los comandos quedan confinados por un perfil de
+permisos propio de la sesión, `yunta-session`, que la sesión nombra con
+`default_permissions`: extiende `:workspace` cuando la sesión escribe su worktree y
+`:read-only` cuando no. Su sistema de archivos da escritura al temporal (`:tmpdir` y
+`:slash_tmp`) y a las raíces del cerco, da escritura al checkout solo si la sesión
+escribe, y lectura a los árboles protegidos que cuelgan de él (la política partida: un
+`read` anidado gana al `write` del checkout). La cobertura es
+`WidenedToRoots { [cwd si escribe, …raíces, temporal] }`. Una sesión sin confinar
+(`edit` con `danger-full-access`, o `full`) corre con `--sandbox danger-full-access`,
+sin perfil, y su cobertura es `ToolsOnly`. Un perfil `read_only` con raíces escribe esas
+raíces sin escribir el checkout, y el hook rechaza toda edición fuera de ellas. El
+perfil exige Codex 0.157.0 o posterior: `probe()` reporta no sano uno anterior, o uno
+cuya versión no se lee, porque ahí se midieron sus claves. Límite declarado: el
+sistema de archivos del perfil recibe solo los árboles protegidos enteros (`dir/**`),
+como prefijos literales, no globs. Un archivo protegido, un patrón que cubre parte de un
+directorio y uno sin directorio, como `**/AGENTS.md`, no los cubre el sandbox: los
+juzgan el riel y el cierre. Las skills se montan
 como en `claude-code`: un enlace por skill bajo `.agents/skills/` del directorio de la
 sesión, donde el CLI descubre las de un proyecto, declarado como staging y retirado al
 cerrar. `custom_agents`: las instrucciones del agente llegan como
 `-c developer_instructions=…`, que Codex suma a las suyas; el modelo es el del runner,
 no el de un perfil de Codex (D253). La
-red de los comandos la abre el pedido (`sandbox_workspace_write.network_access`); bajo
-`read-only` no hay red y bajo `danger-full-access` no se cierra, y `check` rechaza
-`network: false` en un nodo `full` (D252).
+red de los comandos la abre el pedido solo cuando la sesión escribe su worktree
+(`permissions.yunta-session.network.enabled`); bajo `read-only`, o `edit` con sandbox
+`read-only`, no hay red. `check` rechaza `network: true` en un nodo que abre una
+sesión y no escribe el checkout, y una sesión sin confinar con red cerrada no se
+abre: `check` rechaza esa red cerrada en un nodo que abre una sesión y la dejaría
+sin confinar (D252). Un nodo `bash` no abre sesión, y `check` no juzga su red.
 Un fallo se clasifica por el `message` de `turn.failed` o de `error`, que traen el mismo
 texto. Las frases de límite de Codex —`You've hit your usage limit`, con apóstrofo
 recto o curvo, y `exceeded retry limit, last status: 429`— son `Limit` sin hora: Codex
@@ -480,6 +518,10 @@ una corrida real: los fixtures entran por `yunta test`.
   siempre e íntegra.
 - **A8.** `mock` implementa el trait completo y es suficiente para ejercitar todo
   camino del engine en CI.
+- **A9.** El `sandbox` que el adapter da a `edit` es una entrada de la única
+  resolución de la confinación (`Confinement::of`), no un permiso aparte: su efecto
+  queda en `agent_session_opened.confinement`, y una confinación que no se puede
+  cumplir, como una red cerrada sin confinar, se rechaza antes de abrir la sesión.
 
 ## 8. Suite de contrato
 

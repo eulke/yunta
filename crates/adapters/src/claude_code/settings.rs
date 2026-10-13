@@ -6,9 +6,9 @@
 //! `probe()`.
 
 use serde::Deserialize;
-use yunta_core::{AdapterSettings, Result};
+use yunta_core::{AdapterSettings, EditSandbox, Result};
 
-use crate::session::{typed_settings, Sandbox};
+use crate::session::typed_settings;
 
 /// The keys this adapter reads. A key outside them is an unknown setting.
 pub(crate) const KNOWN: &[&str] = &["sandbox"];
@@ -17,7 +17,7 @@ pub(crate) const KNOWN: &[&str] = &["sandbox"];
 #[serde(deny_unknown_fields)]
 pub(super) struct ClaudeSettings {
     #[serde(default)]
-    pub sandbox: Option<Sandbox>,
+    pub sandbox: Option<EditSandbox>,
 }
 
 impl ClaudeSettings {

@@ -3,7 +3,7 @@ number: D172
 title: "El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía"
 status: revised
 revises: [D13, D167]
-revised_by: [D249, D250, D251]
+revised_by: [D249, D250, D251, D265]
 ---
 
 # D172 — El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía
@@ -119,3 +119,10 @@ sesión.
   existe y alcanza.
 - **La política partida del sandbox de Codex** (`/repo/a=none`). No expresa
   globs; el post-check ya cubre lo que ella cubriría.
+
+*(Revisada por D265: la cobertura ya no marca la brecha, porque toda sesión
+confinada nombra el directorio temporal entre sus raíces. La brecha se registra
+cuando la confinación guardada en `agent_session_opened.confinement` deja el
+checkout solo al cerco: comandos confinados y `worktree: nothing`. Las demás
+escrituras que llegan al diff son solo violaciones. Un log escrito antes de ese
+registro se lee por su cobertura, donde `exact` marcaba la brecha.)*

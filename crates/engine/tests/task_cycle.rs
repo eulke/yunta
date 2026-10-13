@@ -27,6 +27,9 @@ use yunta_testkit_core::Log;
 #[path = "task_cycle/failed_attempts.rs"]
 mod failed_attempts;
 
+#[path = "task_cycle/mid_stream_cap.rs"]
+mod mid_stream_cap;
+
 /// The setup a task session of node `build` runs under: the mock
 /// runner every fixture here answers as, and nothing else.
 /// The setup those task sessions run under, rooted at a run directory
@@ -109,14 +112,15 @@ fn unpriced() -> TaskLedger {
     TaskLedger::default()
 }
 
-/// Runs `t` once, as its first attempt runs, on `adapter` in `unit`'s tree,
-/// and returns what the cycle reports.
+/// Runs `t` once, as its first attempt runs, on `adapter` in `unit`'s tree
+/// under `budget`, and returns what the cycle reports.
 async fn run_once(
     owner: &Owner,
     unit: &Unit,
     run: &std::path::Path,
     t: &Task,
     adapter: &MockAdapter,
+    budget: Budget,
 ) -> TaskCycleReport {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let grants = GrantWindow::seeded(0);
@@ -124,7 +128,7 @@ async fn run_once(
         node: &build_node(),
         adapter,
         unit,
-        budget: Budget::default(),
+        budget,
         memo: &memo,
         history: &unpriced(),
         supervision: owner.supervision(),
@@ -375,7 +379,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         r#"dialect: claude-code
 outcome: { type: completed, summary: "ok" }"#,
     );
-    let report = run_once(&owner, &unit, run.path(), &t, &adapter).await;
+    let report = run_once(&owner, &unit, run.path(), &t, &adapter, Budget::default()).await;
     assert!(report.attempts.is_empty());
     match report.outcome {
         TaskOutcome::Blocked {

@@ -75,3 +75,23 @@ fn the_only_capabilities_a_check_refuses_are_the_ones_a_workflow_declares_a_need
          the same way; everything else degrades"
     );
 }
+
+/// The closed set has ten capabilities, and the mid-session token cap is
+/// one of them: a capability the set does not name is one nothing checks.
+#[test]
+fn the_closed_set_has_ten_capabilities_and_the_token_cap_is_one() {
+    assert_eq!(Capability::ALL.len(), 10);
+    assert!(Capability::ALL.contains(&Capability::MidSessionTokenCap));
+}
+
+/// An adapter that declares the mid-session token cap is answered so by
+/// `declares`, and no other capability changes with it.
+#[test]
+fn declares_answers_the_mid_session_token_cap_from_its_own_field() {
+    let declared = Capabilities {
+        mid_session_token_cap: true,
+        ..Capabilities::default()
+    };
+    assert!(declared.declares(Capability::MidSessionTokenCap));
+    assert!(!declared.declares(Capability::StopRefusals));
+}

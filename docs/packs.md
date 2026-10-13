@@ -190,10 +190,12 @@ Field by field:
   pack will ever request. Set it to the *lowest* value your workflows
   actually need — `check` enforces this as a hard ceiling on every
   `prompt`/`loop` node, including ones that don't set `permissions:`
-  explicitly (which still fall back to `edit`). `executors` lists any
-  executable code you ship (empty means the pack is 100% declarative YAML
-  and prompts, auditable by reading) — a non-empty list makes `add`/`update`
-  require confirmation on the installing side by default.
+  explicitly (which still fall back to `edit`). `network` is a ceiling of the
+  same kind: it defaults to `false`, and while the pack declares it closed,
+  `check` refuses a node inside the pack that sets `network: true`.
+  `executors` lists any executable code you ship (empty means the pack is 100%
+  declarative YAML and prompts, auditable by reading) — a non-empty list makes
+  `add`/`update` require confirmation on the installing side by default.
 - **`requires`** — the floor the installing team's config must provide:
   `runners` (the runner names your workflows use in `runner:`, optionally
   with the permission profile you expect them resolvable at), `mcp_servers` (names

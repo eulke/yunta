@@ -69,11 +69,6 @@ impl RunToolsSession {
         &self.arrivals
     }
 
-    /// How this session's CLI names these tools to its model.
-    pub fn naming(&self) -> yunta_core::ToolNaming {
-        self.naming
-    }
-
     /// What this session's model calls `tool` by — the one name every
     /// text it is shown gives that tool.
     pub fn called(&self, tool: RunTool) -> String {

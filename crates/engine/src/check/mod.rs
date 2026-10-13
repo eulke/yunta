@@ -29,7 +29,10 @@
 //!
 //! What a node declares of its adapter is checked against what this
 //! binary builds: a declaration no candidate adapter can honor is
-//! refused.
+//! refused. An adapter's `sandbox` setting counts the same way: a node
+//! asking for the network under one that keeps its sessions read-only is
+//! refused, and a session that runs unconfined cannot keep its network
+//! closed.
 //!
 //! The rules live in families — one submodule per subject; this file owns
 //! the two entries that run them all and the shared re-exports each family
@@ -53,6 +56,7 @@ mod sources;
 mod unset;
 mod warning;
 
+pub use capabilities::{check_token_cap_warnings, AdapterFacts};
 pub use context_files::{
     check_context_files, ContextFilesCheck, MissingContextFile, RunTreeOrigin,
 };
@@ -99,7 +103,7 @@ pub(crate) static DEFAULTS: NodeId = NodeId::from_static("defaults");
 pub fn check(
     workflow: &Workflow,
     config: &ConfigLayer,
-    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
 ) -> Vec<CheckError> {
     check_mounted(workflow, config, declared, &[])
 }
@@ -110,7 +114,7 @@ pub fn check(
 pub fn check_mounted(
     workflow: &Workflow,
     config: &ConfigLayer,
-    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
     mounts: &[yunta_core::MountSpec],
 ) -> Vec<CheckError> {
     // `read` hands back the expanded graph, and this is asked of a
@@ -119,66 +123,106 @@ pub fn check_mounted(
     // a fan-out declaration, a `kind: workflow` node's own, a mount's.
     let mut workflow = workflow.clone();
     let mut errors = Vec::new();
-    check_runner_fanout(&workflow, &mut errors);
-    check_workflow_nodes(&workflow.nodes, None, &mut errors);
-    check_mounts(&workflow, &mut errors);
-    check_retired_within(&workflow, &mut errors);
-    for node in workflow.iter_nodes() {
-        check_expansion_mode(node, config, &mut errors);
-    }
+    check_as_written(&workflow, config, &mut errors);
     yunta_core::workflow::read::expand_runner_fanout(&mut workflow);
     yunta_core::workflow::read::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
+    check_declarations(workflow, config, declared, mounts, &mut errors);
+    check_command_policy(workflow, config, &mut errors);
+    check_node_bindings(workflow, config, &mut errors);
+
+    check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
+    check_no_questions_in_parallel(&workflow.nodes, None, &mut errors);
+
+    if let Some(cycle) = find_depends_on_cycle(&workflow.nodes) {
+        errors.push(CheckError::DependsOnCycle { cycle });
+    }
+
+    check_input_specs(&workflow.inputs, &mut errors);
+    check_input_references(workflow, &mut errors);
+
+    errors
+}
+
+/// The rules about the workflow as it is written, before its fan-outs and
+/// implicit dependencies are expanded into it.
+fn check_as_written(workflow: &Workflow, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    check_runner_fanout(workflow, errors);
+    check_workflow_nodes(&workflow.nodes, None, errors);
+    check_mounts(workflow, errors);
+    check_retired_within(workflow, errors);
+    for node in workflow.iter_nodes() {
+        check_expansion_mode(node, config, errors);
+    }
+}
+
+/// The rules about what the workflow's nodes declare and what its reads are
+/// answered by: adapters, config keys, artifacts and inputs.
+fn check_declarations(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
+    mounts: &[yunta_core::MountSpec],
+    errors: &mut Vec<CheckError>,
+) {
     // What a node asks of its adapter, checked against what this binary
     // built. `permissions:` and `agent:` have no fallback — refusing
     // here is the whole of that policy.
-    capabilities::check_adapter_capabilities(workflow, config, declared, &mut errors);
+    capabilities::check_adapter_capabilities(workflow, config, declared, errors);
 
-    check_fanout_scopes(workflow, config, &mut errors);
-    check_resume_session(workflow, &mut errors);
-    check_ask(workflow, &mut errors);
-    check_network(workflow, &mut errors);
-    check_yunta_schema(workflow, &mut errors);
-    check_config_defaults(config, &mut errors);
-    check_unset_keys(workflow, config, &mut errors);
-    check_config_commands(config, &mut errors);
-    check_distill_paths(workflow, &mut errors);
-    check_artifact_declarations(workflow, &mut errors);
-    check_asking_nodes(workflow, &mut errors);
-    check_input_documents(workflow, &mut errors);
-    check_reserved_artifact_names(workflow, &mut errors);
-    check_answer_sources(workflow, &mut errors);
+    check_fanout_scopes(workflow, config, errors);
+    check_resume_session(workflow, errors);
+    check_ask(workflow, errors);
+    check_network(workflow, config, declared, errors);
+    check_yunta_schema(workflow, errors);
+    check_config_defaults(config, errors);
+    check_unset_keys(workflow, config, errors);
+    check_config_commands(config, errors);
+    check_distill_paths(workflow, errors);
+    check_artifact_declarations(workflow, errors);
+    check_asking_nodes(workflow, errors);
+    check_input_documents(workflow, errors);
+    check_reserved_artifact_names(workflow, errors);
+    check_answer_sources(workflow, errors);
     errors.extend(check_reads(workflow, &Birth::of(workflow, mounts), None).errors);
-    check_named_artifact_sources(workflow, &mut errors);
-    check_node_outputs(workflow, &mut errors);
+    check_named_artifact_sources(workflow, errors);
+    check_node_outputs(workflow, errors);
+}
 
-    if let Some(permissions) = &config.permissions {
-        check_commands(&workflow.nodes, config, permissions, &mut errors);
-        if let Some(default_hooks) = workflow
-            .node_defaults
-            .as_ref()
-            .and_then(|defaults| defaults.hooks.as_ref())
+/// The project's command rules, applied to the commands the workflow's nodes
+/// run and to the hooks its `node_defaults` gives them.
+fn check_command_policy(workflow: &Workflow, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    let Some(permissions) = &config.permissions else {
+        return;
+    };
+    check_commands(&workflow.nodes, config, permissions, errors);
+    if let Some(default_hooks) = workflow
+        .node_defaults
+        .as_ref()
+        .and_then(|defaults| defaults.hooks.as_ref())
+    {
+        // node_defaults hooks run on every node that declares none of
+        // its own — their commands are as real as any node's.
+        for command in default_hooks
+            .before
+            .iter()
+            .chain(&default_hooks.after)
+            .filter_map(|step| step.run.text(config))
         {
-            // node_defaults hooks run on every node that declares none of
-            // its own — their commands are as real as any node's.
-            for command in default_hooks
-                .before
-                .iter()
-                .chain(&default_hooks.after)
-                .filter_map(|step| step.run.text(config))
-            {
-                if let Some(rule) =
-                    crate::permissions::command_violation(command, Some(permissions))
-                {
-                    errors.push(CheckError::CommandDenied {
-                        node: NODE_DEFAULTS.clone(),
-                        rule,
-                    });
-                }
+            if let Some(rule) = crate::permissions::command_violation(command, Some(permissions)) {
+                errors.push(CheckError::CommandDenied {
+                    node: NODE_DEFAULTS.clone(),
+                    rule,
+                });
             }
         }
     }
+}
 
+/// Each node's runner is one the config defines with candidates, its
+/// `context:` sits only on a kind that opens a session, and its gate is
+/// checked by `check_gate`.
+fn check_node_bindings(workflow: &Workflow, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     for node in &workflow.nodes {
         if let Some(runner) = &node.runner {
             match config.runners.as_ref().and_then(|r| r.get(runner)) {
@@ -197,28 +241,14 @@ pub fn check_mounted(
             }
         }
 
-        if !node.context.is_empty()
-            && !matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. })
-        {
+        if !node.context.is_empty() && !capabilities::opens_session(node) {
             errors.push(CheckError::ContextOnUnsupportedNode {
                 node: node.id.clone(),
             });
         }
 
-        check_gate(node, config, &mut errors);
+        check_gate(node, config, errors);
     }
-
-    check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
-    check_no_questions_in_parallel(&workflow.nodes, None, &mut errors);
-
-    if let Some(cycle) = find_depends_on_cycle(&workflow.nodes) {
-        errors.push(CheckError::DependsOnCycle { cycle });
-    }
-
-    check_input_specs(&workflow.inputs, &mut errors);
-    check_input_references(workflow, &mut errors);
-
-    errors
 }
 
 /// What starting a run in `mode` — fresh, not promoted into it — would
@@ -261,10 +291,9 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
     );
     // A node's `network: false` that its resolved adapter cannot enforce is
     // reported at run time, before the session, as `capability_degraded`
-    // — the record that survives on the log. The matching
-    // pre-flight warning ("no candidate of this runner declares network
-    // isolation") waits for capability-aware `check`: this entry takes no
-    // adapter registry, so it cannot yet tell which candidates enforce it.
+    // — the record that survives on the log. This entry takes no adapter
+    // registry, so it does not judge which candidates enforce network
+    // isolation; the adapter-aware warnings are `check_token_cap_warnings`'s.
     warnings
 }
 

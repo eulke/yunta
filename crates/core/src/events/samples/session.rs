@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
+use crate::confinement::{Commands, Worktree};
 use crate::events::*;
+use crate::port::PermissionProfile;
 
 pub(crate) fn agent_session_opened() -> AgentSessionOpenedPayload {
     AgentSessionOpenedPayload {
@@ -14,6 +16,12 @@ pub(crate) fn agent_session_opened() -> AgentSessionOpenedPayload {
         model: Some("mock-model".into()),
         capabilities: Capabilities::default(),
         fence: None,
+        confinement: Some(ConfinementRecord {
+            profile: PermissionProfile::Edit,
+            commands: Commands::Confined,
+            worktree: Worktree::ExactFiles,
+            network: true,
+        }),
         task_id: None,
         continues: None,
     }

@@ -25,6 +25,7 @@ mod capabilities;
 mod clock;
 pub mod commit_message;
 mod config;
+pub mod confinement;
 pub mod diagnostic;
 pub mod disk;
 pub mod durable;
@@ -69,7 +70,7 @@ pub mod yaml;
 pub use capabilities::{Capabilities, Capability, FenceLevel, ToolNaming};
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
+    network_asked, permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
     CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
     DiskShare, Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig,
     HomeExpansionError, Isolation, LimitsConfig, McpServerConfig, NetworkPermissions,
@@ -77,6 +78,7 @@ pub use config::{
     ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor, RunnerCandidate, SecretSource,
     ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS, REDACTED,
 };
+pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
     Subject,

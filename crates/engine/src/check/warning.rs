@@ -104,4 +104,15 @@ pub enum CheckWarning {
         base: Option<String>,
         missing: super::context_files::MissingContextFile,
     },
+
+    /// The run's token cap is checked when a session ends, because the
+    /// candidate adapters report no usage mid-session: none declares
+    /// `mid_session_token_cap`, so the cap cannot stop a session as it runs.
+    #[error(
+        "node `{node}`: `limits.max_tokens_per_run` is checked when the session ends, because \
+         no candidate adapter declares `mid_session_token_cap` and so reports no usage \
+         mid-session — a session can spend past the cap before the check; use an adapter that \
+         declares `mid_session_token_cap` to check the cap as the session runs"
+    )]
+    TokenCapAtSessionEnd { node: NodeId },
 }

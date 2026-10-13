@@ -258,6 +258,13 @@ pub(super) fn merge_permissions(
     })
 }
 
+/// Whether a session's commands may reach the network: the node's word
+/// when it gives one, else the project's default, else open.
+pub fn network_asked(node: Option<bool>, project: Option<NetworkPermissions>) -> bool {
+    node.or(project.map(|network| network.default))
+        .unwrap_or(true)
+}
+
 /// Detects loosening attempts across ordered permission layers — the
 /// case this guards is a repo layer trying to re-allow a pattern the org
 /// layer denied: `check` rejects it, citing the offending layer.

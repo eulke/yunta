@@ -16,9 +16,12 @@ impl CheckError {
     /// Where in the workflow file this is about, from its root, or
     /// `None` when what it refuses is written somewhere else.
     pub fn pointer(&self) -> Option<Pointer> {
-        let inputs =
-            |name: &yunta_core::InputName| Pointer::root().key("inputs").key(name.as_str());
-        let produces = |id: &NodeId| node(id).key("artifacts").key("produces");
+        self.node_pointer().or_else(|| self.document_pointer())
+    }
+
+    /// The place of a refusal about one node: the node, or the key of it
+    /// that the refusal is about. `None` for a refusal that names no node.
+    fn node_pointer(&self) -> Option<Pointer> {
         Some(match self {
             CheckError::DependsOnCycle { cycle } => node(cycle.first()?).key("depends_on"),
             CheckError::CapabilityUnsupported {
@@ -29,7 +32,6 @@ impl CheckError {
             CheckError::Unset { node: id, key, .. } => unset(id, key),
             CheckError::ContextFileUnreachable { node: id, .. }
             | CheckError::ContextOnUnsupportedNode { node: id } => node(id).key("context"),
-            CheckError::Unanswerable(unanswerable) => unanswerable.pointer(),
             CheckError::BothRunnerAndRunners { node: id } => node(id).key("runners"),
             CheckError::FanOutTarget { node: id, .. }
             | CheckError::UndeclaredInput { node: id, .. }
@@ -39,6 +41,38 @@ impl CheckError {
             | CheckError::GateRouteNeverTaken { node: id, .. }
             | CheckError::InheritChildWithoutScope { node: id, .. }
             | CheckError::ScopeExpansionModeOverCeiling { node: id, .. } => node(id),
+            CheckError::OverlappingFanOutScope { a, .. } => node(a).key("scope"),
+            CheckError::CommandDenied { node: id, .. } => node(id).key("run"),
+            CheckError::ExternalGateWithoutForge { node: id } => node(id).key("external"),
+            CheckError::ShowsOnExternalGate { node: id } => node(id).key("shows"),
+            CheckError::WorkflowNodeRunnerBinding { node: id, field } => node(id).key(*field),
+            CheckError::MountOnSelf { node: id }
+            | CheckError::MountOnFanOut { node: id, .. }
+            | CheckError::MountInsideParallel { node: id, .. } => node(id).key("mounts"),
+            CheckError::ResumeSessionOnSessionlessNode { node: id } => node(id).key("on_interrupt"),
+            CheckError::AskOnANodeThatAsksNothing { node: id } => node(id).key("ask"),
+            CheckError::NetworkOpenUnderReadOnly { node: id }
+            | CheckError::ClosedNetworkUnconfined { node: id }
+            | CheckError::PackNetworkCeilingExceeded { node: id, .. } => node(id).key("network"),
+            CheckError::ScopeExpansionWithinRetired { node: id } => {
+                node(id).key("scope_expansion").key("within")
+            }
+            CheckError::Composition(composition) => composition.pointer()?,
+            CheckError::PackPermissionsCeilingExceeded { node: id, .. } => {
+                node(id).key("permissions")
+            }
+            _ => return None,
+        })
+    }
+
+    /// The place of a refusal about what a node produces or reads, a key of
+    /// the document, or an input. `None` for a refusal that names none of
+    /// these.
+    fn document_pointer(&self) -> Option<Pointer> {
+        let inputs =
+            |name: &yunta_core::InputName| Pointer::root().key("inputs").key(name.as_str());
+        let produces = |id: &NodeId| node(id).key("artifacts").key("produces");
+        Some(match self {
             CheckError::DistillUnknownArtifact { .. } => Pointer::root().key("on_finish"),
             CheckError::DuplicateArtifactKind { node: id, .. }
             | CheckError::ArtifactNameRefused { node: id, .. }
@@ -49,39 +83,11 @@ impl CheckError {
             CheckError::ReservedArtifactName { site, .. }
             | CheckError::AnswersFromNodeThatNeverAsks { site, .. } => site.pointer().clone(),
             CheckError::YuntaSchemaOutside { .. } => Pointer::root().key("yunta_schema"),
-            CheckError::OverlappingFanOutScope { a, .. } => node(a).key("scope"),
-            CheckError::CommandDenied { node: id, .. } => node(id).key("run"),
             CheckError::InputEmptyEnumValues { name } => inputs(name).key("values"),
             CheckError::InputMinExceedsMax { name, .. } => inputs(name).key("min"),
             CheckError::InputInvalidPattern { name, .. } => inputs(name).key("pattern"),
-            CheckError::ExternalGateWithoutForge { node: id } => node(id).key("external"),
-            CheckError::ShowsOnExternalGate { node: id } => node(id).key("shows"),
-            CheckError::WorkflowNodeRunnerBinding { node: id, field } => node(id).key(*field),
-            CheckError::MountOnSelf { node: id }
-            | CheckError::MountOnFanOut { node: id, .. }
-            | CheckError::MountInsideParallel { node: id, .. } => node(id).key("mounts"),
-            CheckError::ResumeSessionOnSessionlessNode { node: id } => node(id).key("on_interrupt"),
-            CheckError::AskOnANodeThatAsksNothing { node: id } => node(id).key("ask"),
-            CheckError::ClosedNetworkUnderFull { node: id } => node(id).key("network"),
-            CheckError::ScopeExpansionWithinRetired { node: id } => {
-                node(id).key("scope_expansion").key("within")
-            }
-            CheckError::Composition(Composition::Missing { node: id, .. })
-            | CheckError::Composition(Composition::Ambiguous { node: id, .. })
-            | CheckError::Composition(Composition::CrossPack { node: id, .. })
-            | CheckError::Composition(Composition::Fails { node: id, .. }) => node(id).key("use"),
-            CheckError::PackPermissionsCeilingExceeded { node: id, .. } => {
-                node(id).key("permissions")
-            }
-            CheckError::PackManifestUnreadable { .. }
-            | CheckError::PackManifestMalformed { .. }
-            | CheckError::MaxParallelNodesZero
-            | CheckError::Composition(Composition::Unparseable { .. })
-            | CheckError::BaselineWithoutSuite { .. }
-            | CheckError::CommandUnsetIn { .. }
-            | CheckError::Composition(Composition::Cycle { .. })
-            | CheckError::Composition(Composition::TooDeep { .. })
-            | CheckError::PackRequirementUnmet { .. } => return None,
+            CheckError::Unanswerable(unanswerable) => unanswerable.pointer(),
+            _ => return None,
         })
     }
 }
@@ -97,6 +103,23 @@ fn unset(id: &NodeId, key: &ConfigKey) -> Pointer {
         | ConfigKey::Coverage
         | ConfigKey::Forge
         | ConfigKey::RunBranch => node(id),
+    }
+}
+
+impl Composition {
+    /// The `use:` a composition refusal names in the node that composes;
+    /// the refusals about a cycle, a depth or a file that does not parse
+    /// name none.
+    fn pointer(&self) -> Option<Pointer> {
+        match self {
+            Composition::Missing { node: id, .. }
+            | Composition::Ambiguous { node: id, .. }
+            | Composition::CrossPack { node: id, .. }
+            | Composition::Fails { node: id, .. } => Some(node(id).key("use")),
+            Composition::Unparseable { .. }
+            | Composition::Cycle { .. }
+            | Composition::TooDeep { .. } => None,
+        }
     }
 }
 

@@ -152,7 +152,7 @@
       }
     },
     "shared_dirs": {
-      "description": "`shared_dirs:` — `{VARIABLE: directory}`, directories every\ncommand and every session of a run shares: each is exported under\nits variable and stays writable inside every session's sandbox,\nso a build cache outlives the checkout each task works in.",
+      "description": "`shared_dirs:` — `{VARIABLE: directory}`, directories every\ncommand and every session of a run shares: each is exported under\nits variable and stays writable inside every session that may\nwrite, so a build cache outlives the checkout each task works in.",
       "type": [
         "object",
         "null"

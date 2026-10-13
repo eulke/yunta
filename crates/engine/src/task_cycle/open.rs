@@ -119,6 +119,12 @@ async fn open_the_session(
             task: params.task.id.clone(),
             source,
         },
+        crate::run::session_plan::OpenSessionError::Confinement(source) => {
+            TaskCycleError::Confinement {
+                task: params.task.id.clone(),
+                source,
+            }
+        }
     })
 }
 

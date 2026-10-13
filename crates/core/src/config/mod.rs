@@ -35,8 +35,8 @@ pub use env::{
 };
 pub use keys::ConfigKey;
 pub use permissions::{
-    permission_layer_conflicts, CommandPermissions, NetworkPermissions, PackExecutorPolicy,
-    PackPermissions, PermissionsConfig, PublisherPermissions,
+    network_asked, permission_layer_conflicts, CommandPermissions, NetworkPermissions,
+    PackExecutorPolicy, PackPermissions, PermissionsConfig, PublisherPermissions,
 };
 pub use pool::{DiskShare, PoolConfig};
 pub use sections::{
@@ -83,8 +83,8 @@ pub struct ConfigLayer {
     pub format: Option<Vec<FormatRule>>,
     /// `shared_dirs:` — `{VARIABLE: directory}`, directories every
     /// command and every session of a run shares: each is exported under
-    /// its variable and stays writable inside every session's sandbox,
-    /// so a build cache outlives the checkout each task works in.
+    /// its variable and stays writable inside every session that may
+    /// write, so a build cache outlives the checkout each task works in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_dirs: Option<BTreeMap<SharedDirVar, PathBuf>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,6 +126,14 @@ impl ConfigLayer {
             .as_ref()
             .and_then(|permissions| permissions.paths.as_ref())
             .map_or(&[], |paths| paths.deny.as_slice())
+    }
+
+    /// The network permissions this layer declares: the project's default
+    /// and its own `permissions.network`, as `network_asked` reads them.
+    pub fn network_permissions(&self) -> Option<NetworkPermissions> {
+        self.permissions
+            .as_ref()
+            .and_then(|permissions| permissions.network)
     }
 
     /// Every secret name this layer declares, each once, at its first place:

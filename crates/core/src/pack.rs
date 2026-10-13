@@ -98,11 +98,10 @@ pub struct RequiredRunner {
 #[serde(deny_unknown_fields)]
 pub struct PackDeclares {
     pub permissions: NodePermissions,
-    /// The pack's `bash`/`command` nodes never assume network access —
-    /// declarative only, mirrors `NetworkPermissions`'s own "no
-    /// enforcement, audit-only" stance: this field is
-    /// carried for `pack audit` and org policy
-    /// (`permissions.packs`), the engine itself never blocks on it.
+    /// Whether the pack's nodes may reach the network. `false`, the
+    /// default, is a ceiling the pack promises: `check` refuses a node of
+    /// the pack that asks for the network with `network: true`, and
+    /// `pack audit` prints the value.
     #[serde(default)]
     pub network: bool,
     /// Executable code shipped with the pack — empty means the pack is

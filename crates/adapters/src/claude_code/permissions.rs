@@ -20,19 +20,19 @@
 //!
 //! Each profile is a distinct tool set, which is what makes the
 //! `permission_profiles` capability true: `ReadOnly` gets the
-//! non-mutating tools and a shell that writes nothing but the run's
-//! roots; `Edit` gets the file-editing tools and a shell confined to the
-//! workspace and the roots; `Full` gets the CLI's whole tool set and an
-//! unconfined shell. Where a file tool writes is the fence: every writing
-//! tool goes through the hook that asks the engine before the write
-//! happens. Where a command writes, and whether it reaches the network, is
-//! the CLI's own sandbox, enforced by the operating system.
+//! non-mutating tools and a shell that writes nothing of the checkout,
+//! only temp and the run's roots; `Edit` gets the file-editing tools and a
+//! shell confined to the workspace, temp and the roots; `Full` gets the
+//! CLI's whole tool set and an unconfined shell. Where a file tool writes
+//! is the fence: every writing tool goes through the hook that asks the
+//! engine before the write happens. Where a command writes, and whether it
+//! reaches the network, is the CLI's own sandbox, enforced by the operating
+//! system.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use yunta_core::port::PermissionProfile;
-
-use crate::session::Sandbox;
+use yunta_core::{temp_dirs, Commands, Confinement, Unbuildable};
 
 /// The tools a profile allows, as the CLI names them; `None` leaves the
 /// CLI's whole tool set available.
@@ -40,7 +40,7 @@ use crate::session::Sandbox;
 /// `ReadOnly` keeps `Write` and `Edit` only when the session has
 /// somewhere declared to write: a profile says what the session may do
 /// to *the project*, and a node's declared file is not the project —
-/// it is the node's own output, written to a root the fence keeps
+/// it is the node's own output, written to a root the confinement keeps
 /// writable. With no such root, a read-only session has nothing at all
 /// to write and the tools go with it.
 pub(super) fn tools(profile: PermissionProfile, has_declared_files: bool) -> Option<&'static str> {
@@ -54,44 +54,43 @@ pub(super) fn tools(profile: PermissionProfile, has_declared_files: bool) -> Opt
     }
 }
 
-/// The CLI's `sandbox` settings for a session's commands under `mode`, or
-/// `None` for one left unconfined. The sandbox fails the session rather
-/// than run unconfined, and never lets a command leave it. A command
-/// writes the working directory — except under `read-only` — and the
-/// roots the CLI was handed with `--add-dir`; it reaches the network,
-/// loopback included, only where `network` says so and the mode lets it.
-pub(super) fn sandbox(mode: Sandbox, cwd: &Path, network: bool) -> Option<serde_json::Value> {
-    let network = if mode.opens_network(network) {
-        serde_json::json!({
-            "allowLocalBinding": true,
-            "allowedDomains": ["*"],
-        })
+/// The CLI's `sandbox` setting for a session's commands under `conf`: what
+/// they may write and reach. It is `None` only when the commands run
+/// unconfined with the network open, where the CLI takes no setting. The
+/// sandbox fails the session rather than run unconfined, and never lets a
+/// command leave it: a command writes the working directory unless the
+/// session denies it, and the roots and temp directories, and it reaches
+/// the network, loopback included, only where the confinement says so.
+pub(super) fn settings(
+    conf: &Confinement,
+    cwd: &Path,
+) -> Result<Option<serde_json::Value>, Unbuildable> {
+    if conf.commands == Commands::Unconfined {
+        return if conf.network {
+            Ok(None)
+        } else {
+            Err(Unbuildable::NetworkUnclosable)
+        };
+    }
+    let network = if conf.network {
+        serde_json::json!({ "allowLocalBinding": true, "allowedDomains": ["*"] })
     } else {
         serde_json::json!({})
     };
-    let mut settings = serde_json::Map::from_iter([
-        ("enabled".to_string(), serde_json::Value::Bool(true)),
-        (
-            "failIfUnavailable".to_string(),
-            serde_json::Value::Bool(true),
-        ),
-        (
-            "allowUnsandboxedCommands".to_string(),
-            serde_json::Value::Bool(false),
-        ),
-        ("network".to_string(), network),
-    ]);
-    match mode {
-        Sandbox::DangerFullAccess => return None,
-        Sandbox::ReadOnly => {
-            settings.insert(
-                "filesystem".to_string(),
-                serde_json::json!({ "denyWrite": [cwd] }),
-            );
-        }
-        Sandbox::WorkspaceWrite => {}
+    // The trees the run protects are denied in every session, and a session
+    // that writes nothing of the checkout has the checkout itself denied.
+    let mut deny = conf.protected_trees(cwd);
+    if !conf.writes_worktree() {
+        deny.push(cwd.to_path_buf());
     }
-    Some(serde_json::Value::Object(settings))
+    let allow: Vec<PathBuf> = conf.roots.iter().cloned().chain(temp_dirs()).collect();
+    Ok(Some(serde_json::json!({
+        "enabled": true,
+        "failIfUnavailable": true,
+        "allowUnsandboxedCommands": false,
+        "network": network,
+        "filesystem": { "allowWrite": allow, "denyWrite": deny },
+    })))
 }
 
 pub(super) fn permission_args(profile: PermissionProfile, has_declared_files: bool) -> Vec<String> {

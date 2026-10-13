@@ -411,11 +411,10 @@ pub(super) async fn render_or_fail(
 /// adapter's session profile — absent means the engine's long-standing
 /// default, `edit`.
 pub(super) fn session_profile(node: &Node) -> PermissionProfile {
-    match node.permissions {
-        Some(yunta_core::NodePermissions::ReadOnly) => PermissionProfile::ReadOnly,
-        Some(yunta_core::NodePermissions::Full) => PermissionProfile::Full,
-        Some(yunta_core::NodePermissions::Edit) | None => PermissionProfile::Edit,
-    }
+    node.permissions.map_or(
+        PermissionProfile::Edit,
+        yunta_core::NodePermissions::profile,
+    )
 }
 
 /// The artifacts a node declares, with every templated opaque name

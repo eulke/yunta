@@ -35,6 +35,12 @@ pub enum TaskCycleError {
         #[source]
         source: crate::run::runner_resolve::RunToolsSetupError,
     },
+    #[error("task `{task}`'s session could not be confined as its node asks")]
+    Confinement {
+        task: TaskId,
+        #[source]
+        source: yunta_core::Unbuildable,
+    },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
     #[error("failed to put the work task `{task}` left back into its checkout")]

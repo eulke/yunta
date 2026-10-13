@@ -3,18 +3,23 @@
 //! a fact a subject cannot express fails for it, and is never skipped. The
 //! process cases need a live CLI process, so only the real subjects expand them.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::StreamExt;
 use yunta_core::agent::AgentDefinition;
 use yunta_core::events::{FailureCause, RefusalCause};
 use yunta_core::fence::Coverage;
-use yunta_core::port::{AgentEvent, PermissionProfile, ProbeReport};
+use yunta_core::port::PermissionProfile::{Edit, Full, ReadOnly};
+use yunta_core::port::{AgentEvent, ProbeReport};
 use yunta_core::port::{RunToolsEndpoint, SessionRequest};
 use yunta_core::rail::RailEvent;
-use yunta_core::{sha256_hex, AdapterError, AdapterSettings, CliConfig, Effort, FenceLevel};
+use yunta_core::{
+    sha256_hex, temp_dirs, AdapterError, AdapterSettings, CliConfig, EditSandbox, Effort,
+    FenceLevel,
+};
 use yunta_core::{ModelName, RunTool};
-use yunta_testkit_core::adapter::request;
+use yunta_testkit_core::adapter::{confine, request};
 
 use super::subject::{Outcome, Played, Script, Step, Subject, STOP_TURN};
 
@@ -111,28 +116,66 @@ pub async fn same_run_tool_call_is_logged_under_one_name(subject: &dyn Subject) 
     assert!(logged, "{}: {:?}", subject.name(), played.events);
 }
 
-/// Each permission profile gives the same sandbox mode and fence coverage under every CLI.
+/// What a session's commands may write, beside the temporary directories.
+#[derive(Clone, Copy)]
+enum Writes {
+    TempOnly,
+    /// The directory the session's own files go to, given beside the checkout.
+    Artifact,
+    Checkout,
+    /// Not confined, so no coverage names what the commands write.
+    Anywhere,
+}
+
+impl Writes {
+    /// The sandbox mode a session that writes this is given.
+    fn mode(self) -> &'static str {
+        match self {
+            Writes::TempOnly | Writes::Artifact => "read-only",
+            Writes::Checkout => "workspace-write",
+            Writes::Anywhere => "danger-full-access",
+        }
+    }
+}
+
+/// The coverage of a confined session whose commands write `dirs`, and the
+/// temporary directories.
+fn widened(dirs: &[PathBuf]) -> Coverage {
+    let roots = dirs.iter().cloned().chain(temp_dirs()).collect();
+    Coverage::WidenedToRoots { roots }
+}
+
+/// Each permission profile, under each way of confining it, gives the same
+/// sandbox mode and fence coverage under every CLI.
 pub async fn profile_gives_the_same_mode_and_coverage(subject: &dyn Subject) {
-    for (profile, mode) in [
-        (PermissionProfile::ReadOnly, "read-only"),
-        (PermissionProfile::Edit, "workspace-write"),
-        (PermissionProfile::Full, "danger-full-access"),
-    ] {
+    let rows = [
+        (ReadOnly, EditSandbox::default(), Writes::TempOnly),
+        (ReadOnly, EditSandbox::default(), Writes::Artifact),
+        (Edit, EditSandbox::default(), Writes::Checkout),
+        (Edit, EditSandbox::ReadOnly, Writes::TempOnly),
+        (Full, EditSandbox::default(), Writes::Anywhere),
+    ];
+    for (profile, edit, writes) in rows {
         let (dir, mut req) = fresh();
-        req.permissions = profile;
-        let roots = vec![dir.path().to_path_buf()];
+        let artifact_dir = dir.path().join("run/artifacts");
+        if matches!(writes, Writes::Artifact) {
+            req.artifact_dir = Some(artifact_dir.clone());
+        }
+        confine(&mut req, profile, edit, false, true).expect("the profile is buildable");
         let played = subject.play(dir.path(), req, &completed(Vec::new())).await;
-        let expected = match profile {
-            PermissionProfile::ReadOnly => Coverage::Exact,
-            PermissionProfile::Edit => Coverage::WidenedToRoots { roots },
-            PermissionProfile::Full => Coverage::ToolsOnly,
+        let expected = match writes {
+            Writes::TempOnly => widened(&[]),
+            Writes::Artifact => widened(&[artifact_dir]),
+            Writes::Checkout => widened(&[dir.path().to_path_buf()]),
+            Writes::Anywhere => Coverage::ToolsOnly,
         };
         let Some(AgentEvent::SessionOpened { fence, .. }) = played.events.first() else {
             panic!("a session opens first");
         };
-        assert_eq!(fence.as_ref(), Some(&expected), "{profile:?}");
-        let sandbox = subject.read_back(&played.argv).sandbox;
-        assert_eq!(sandbox.as_deref(), Some(mode), "{profile:?}");
+        assert_eq!(fence.as_ref(), Some(&expected), "{profile:?}, {edit:?}");
+        let sandbox = subject.read_back(&played).sandbox;
+        let mode = writes.mode();
+        assert_eq!(sandbox.as_deref(), Some(mode), "{profile:?}, {edit:?}");
     }
 }
 
@@ -173,7 +216,7 @@ pub async fn launch_installs_the_hooks_it_needs(subject: &dyn Subject) {
             expected.push((RailEvent::AfterWrite, HOOK_TIMEOUT_SECS));
         }
         let played = subject.play(dir.path(), req, &completed(Vec::new())).await;
-        let hooks = subject.read_back(&played.argv).hooks;
+        let hooks = subject.read_back(&played).hooks;
         let same = hooks.len() == expected.len() && expected.iter().all(|h| hooks.contains(h));
         assert!(same, "expected {expected:?}, got {hooks:?}");
     }
@@ -251,7 +294,7 @@ pub async fn a_named_agent_reaches_the_cli(subject: &dyn Subject) {
     let (dir, mut req) = fresh();
     req.agent = Some(agent);
     let played = subject.play(dir.path(), req, &completed(Vec::new())).await;
-    let asks = subject.read_back(&played.argv);
+    let asks = subject.read_back(&played);
     let text = asks.instructions.unwrap_or_default();
     assert!(text.contains("Review like Benito."), "{text:?}");
 }
@@ -259,36 +302,37 @@ pub async fn a_named_agent_reaches_the_cli(subject: &dyn Subject) {
 /// A session asked for an effort passes it to its CLI; one asked for none leaves it there.
 pub async fn effort_reaches_the_cli_or_is_left_to_it(subject: &dyn Subject) {
     let asked = run(subject, Vec::new(), |req| req.effort = Some(Effort::Low)).await;
-    let effort = subject.read_back(&asked.argv).effort;
+    let effort = subject.read_back(&asked).effort;
     assert_eq!(effort.as_deref(), Some(Effort::Low.as_str()));
     let unasked = run(subject, Vec::new(), |_| {}).await;
-    assert_eq!(subject.read_back(&unasked.argv).effort, None);
+    assert_eq!(subject.read_back(&unasked).effort, None);
 }
 
 /// An isolated session loads none of the person's own configuration; an inheriting one loads it.
 pub async fn isolated_session_loads_no_user_config(subject: &dyn Subject) {
     for (cli_config, isolated) in [(CliConfig::Isolated, true), (CliConfig::Inherit, false)] {
         let played = run(subject, Vec::new(), |req| req.cli_config = cli_config).await;
-        let reads = subject.read_back(&played.argv).isolated;
+        let reads = subject.read_back(&played).isolated;
         assert_eq!(reads, isolated, "{cli_config:?}");
     }
 }
 
-/// The network opens only for a workspace-write session that asked for it.
+/// The network opens only where the confinement leaves it open: for a session
+/// that may write the workspace and asked for it, and for an unconfined one.
 pub async fn network_opens_only_under_workspace_write(subject: &dyn Subject) {
-    for (profile, network, opens) in [
-        (PermissionProfile::Edit, true, true),
-        (PermissionProfile::Edit, false, false),
-        (PermissionProfile::ReadOnly, true, false),
-        (PermissionProfile::Full, true, false),
+    for (profile, edit, network, opens) in [
+        (Edit, EditSandbox::WorkspaceWrite, true, true),
+        (Edit, EditSandbox::WorkspaceWrite, false, false),
+        (Edit, EditSandbox::ReadOnly, true, false),
+        (ReadOnly, EditSandbox::default(), true, false),
+        (Full, EditSandbox::default(), true, true),
     ] {
         let played = run(subject, Vec::new(), |req| {
-            req.permissions = profile;
-            req.network = network;
+            confine(req, profile, edit, false, network).expect("the profile is buildable");
         })
         .await;
-        let reads = subject.read_back(&played.argv).network;
-        assert_eq!(reads, opens, "{profile:?}, network {network}");
+        let reads = subject.read_back(&played).network;
+        assert_eq!(reads, opens, "{profile:?}, {edit:?}, network {network}");
     }
 }
 

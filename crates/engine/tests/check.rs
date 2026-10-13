@@ -14,9 +14,12 @@ use yunta_core::{
     RunnerCandidate, Workflow,
 };
 use yunta_engine::{
-    check as check_against, check_warnings, CheckError, CheckWarning, Composition, Unanswerable,
-    UntakenRoute,
+    check as check_against, check_warnings, AdapterFacts, CheckError, CheckWarning, Composition,
+    Unanswerable, UntakenRoute,
 };
+
+#[path = "check/confinement.rs"]
+mod confinement;
 
 /// The rules under test here are about the workflow, not about which
 /// adapter would run it: these check against a binary that builds none,
@@ -1638,7 +1641,7 @@ nodes:
     let refused: Vec<String> = check(&wf, &ConfigLayer::default())
         .iter()
         .filter_map(|e| match e {
-            CheckError::ClosedNetworkUnderFull { node } => Some(node.to_string()),
+            CheckError::ClosedNetworkUnconfined { node } => Some(node.to_string()),
             _ => None,
         })
         .collect();
@@ -2039,8 +2042,18 @@ fn only(capability: yunta_core::Capability) -> yunta_core::Capabilities {
         yunta_core::Capability::RunTools => declared.run_tools = true,
         yunta_core::Capability::NetworkIsolation => declared.network_isolation = true,
         yunta_core::Capability::StopRefusals => declared.stop_refusals = true,
+        yunta_core::Capability::MidSessionTokenCap => declared.mid_session_token_cap = true,
     }
     declared
+}
+
+/// What `check` is told of an adapter that declares `capabilities` and keeps
+/// its edits in the default sandbox.
+fn facts(capabilities: yunta_core::Capabilities) -> Option<AdapterFacts> {
+    Some(AdapterFacts {
+        capabilities,
+        edit_sandbox: yunta_core::EditSandbox::default(),
+    })
 }
 
 /// A `bash`-free node on runner `planner`, declaring `permissions:` or
@@ -2056,7 +2069,11 @@ fn check_refuses_read_only_on_an_adapter_without_permission_profiles() {
     );
     let config = config_with_runner("planner", 1);
 
-    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    let errors = check_against(
+        &wf,
+        &config,
+        &|_| facts(yunta_core::Capabilities::default()),
+    );
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -2067,7 +2084,7 @@ fn check_refuses_read_only_on_an_adapter_without_permission_profiles() {
     );
 
     let allowed = check_against(&wf, &config, &|_| {
-        Some(yunta_core::Capabilities {
+        facts(yunta_core::Capabilities {
             stop_refusals: true,
             ..only(yunta_core::Capability::PermissionProfiles)
         })
@@ -2085,7 +2102,11 @@ fn check_refuses_an_agent_on_an_adapter_without_custom_agents() {
     );
     let config = config_with_runner("planner", 1);
 
-    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    let errors = check_against(
+        &wf,
+        &config,
+        &|_| facts(yunta_core::Capabilities::default()),
+    );
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -2096,7 +2117,7 @@ fn check_refuses_an_agent_on_an_adapter_without_custom_agents() {
     );
 
     let allowed = check_against(&wf, &config, &|_| {
-        Some(yunta_core::Capabilities {
+        facts(yunta_core::Capabilities {
             stop_refusals: true,
             ..only(yunta_core::Capability::CustomAgents)
         })
@@ -2112,7 +2133,11 @@ fn a_prompt_node_is_refused_by_an_adapter_that_cannot_keep_a_refused_stop_going(
     let wf = asking_node("{ id: audit, kind: prompt, runner: planner, prompt: \"look\" }");
     let config = config_with_runner("planner", 1);
 
-    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    let errors = check_against(
+        &wf,
+        &config,
+        &|_| facts(yunta_core::Capabilities::default()),
+    );
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -2123,7 +2148,7 @@ fn a_prompt_node_is_refused_by_an_adapter_that_cannot_keep_a_refused_stop_going(
     );
 
     let allowed = check_against(&wf, &config, &|_| {
-        Some(only(yunta_core::Capability::StopRefusals))
+        facts(only(yunta_core::Capability::StopRefusals))
     });
     assert!(
         allowed.is_empty(),
@@ -2170,7 +2195,7 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
     };
 
     let one_can = check_against(&wf, &config, &|adapter| {
-        Some(if adapter.as_str() == "fancy" {
+        facts(if adapter.as_str() == "fancy" {
             yunta_core::Capabilities {
                 stop_refusals: true,
                 ..only(yunta_core::Capability::PermissionProfiles)
@@ -2185,7 +2210,7 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
     );
 
     let neither_can = check_against(&wf, &config, &|_| {
-        Some(yunta_core::Capabilities {
+        facts(yunta_core::Capabilities {
             stop_refusals: true,
             ..Default::default()
         })
@@ -2806,7 +2831,7 @@ fn check_refuses_a_document_or_a_loop_on_an_adapter_without_run_tools() {
         let wf = asking_node(node);
         let config = config_with_runner("planner", 1);
         let refused: Vec<CheckError> = check_against(&wf, &config, &|_| {
-            Some(yunta_core::Capabilities {
+            facts(yunta_core::Capabilities {
                 stop_refusals: true,
                 ..Default::default()
             })
@@ -2824,7 +2849,7 @@ fn check_refuses_a_document_or_a_loop_on_an_adapter_without_run_tools() {
         );
 
         let allowed = check_against(&wf, &config, &|_| {
-            Some(yunta_core::Capabilities {
+            facts(yunta_core::Capabilities {
                 stop_refusals: true,
                 ..only(yunta_core::Capability::RunTools)
             })

@@ -9,8 +9,10 @@
 //! being possible.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use yunta_core::fence::{Advice, Fence};
+use yunta_core::protected::Protected;
 use yunta_core::rail::{RailCommand, RailEndpoint};
 
 use futures::StreamExt;
@@ -18,24 +20,38 @@ use yunta_core::events::SessionExit;
 use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{AgentEvent, AgentSession, Budget, PermissionProfile, SessionRequest};
 use yunta_core::process::signal::{liveness, Liveness};
-use yunta_core::Pid;
+use yunta_core::{Confinement, ConfinementInput, EditSandbox, Pid, Unbuildable};
 
 /// A session request with nothing declared: the baseline a test varies
-/// one field of, so what it asserts about is the field it set.
+/// one field of, so what it asserts about is the field it set. Its
+/// confinement is the edit session a node that declares nothing gets
+/// under the default network.
 pub fn request(cwd: PathBuf) -> SessionRequest {
     let cwd_scratch = cwd.join(".yunta-scratch");
+    // An edit session with its network open is always buildable, so the
+    // base request never refuses.
+    let confinement = Confinement::of(ConfinementInput {
+        profile: PermissionProfile::Edit,
+        edit: EditSandbox::default(),
+        scoped: false,
+        network: yunta_core::network_asked(None, None),
+        checkout: &cwd,
+        artifact_dir: None,
+        shared_dirs: &[],
+        protected: Arc::new(Protected::default()),
+    })
+    .expect("an edit session with its network open is buildable");
     SessionRequest {
         prompt: "do the thing".to_string(),
         cwd,
         model: None,
         agent: None,
         effort: None,
-        permissions: PermissionProfile::Edit,
         formats: false,
         cli_config: yunta_core::CliConfig::Inherit,
-        network: true,
+        confinement,
         env: SessionEnv::default(),
-        fence: Fence::everything(Vec::new(), Advice::ReportFinding),
+        fence: Fence::everything(Advice::ReportFinding),
         rail_command: Some(RailCommand::new(PathBuf::from("yunta"))),
         // Where a hook would reach the engine: nothing listens there, and
         // a stub CLI never runs its hooks. The token is a value no output
@@ -52,6 +68,29 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         artifact_dir: None,
         scratch_dir: cwd_scratch,
     }
+}
+
+/// Resolves `req`'s confinement for the profile, edit sandbox, scope and
+/// network a test states, the way the engine resolves one for a session
+/// with no shared directories. Its artifact directory is the request's.
+pub fn confine(
+    req: &mut SessionRequest,
+    profile: PermissionProfile,
+    edit: EditSandbox,
+    scoped: bool,
+    network: bool,
+) -> Result<(), Unbuildable> {
+    req.confinement = Confinement::of(ConfinementInput {
+        profile,
+        edit,
+        scoped,
+        network,
+        checkout: &req.cwd,
+        artifact_dir: req.artifact_dir.as_deref(),
+        shared_dirs: &[],
+        protected: Arc::new(Protected::default()),
+    })?;
+    Ok(())
 }
 
 /// Every event `session` produces, to the end of its stream.

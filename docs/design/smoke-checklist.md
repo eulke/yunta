@@ -39,11 +39,11 @@ autenticada (`codex login status`).
      reales (nombres de campo literales — cualquier rename del CLI
      rompe `parse.rs` y se ve acá).
    - Cierre `Completed` y el nodo `verify` en verde.
-3. **Mapeo de sandbox** (el único mapeo NO probado en vivo): un nodo con
-   `permissions: read-only` → la sesión de codex corre con
-   `-s read-only` y un intento de escritura del agente falla dentro del
-   sandbox de codex, no por el scope-check de yunta. Repetir con `edit`
-   (`workspace-write`).
+3. **Mapeo de sandbox** (las claves del perfil se midieron en la sección G; esta
+   corrida prueba el argv que arma el adapter): un nodo con `permissions: read-only`
+   → la sesión de codex corre con su perfil `yunta-session`, sin `--sandbox`, y un
+   intento de escritura del agente en el checkout falla dentro del sandbox de codex,
+   no por el scope-check de yunta. Repetir con `edit` (perfil sobre `:workspace`).
 4. **Resume**: matar el engine a mitad de sesión (Ctrl-C dos veces o
    `kill -9` al engine), `yunta resume <run>` → re-corre el nodo
    (`restart_node`, el default). Repetir con `on_interrupt:
@@ -177,10 +177,13 @@ engine relies on.
   with a message on stderr refuses the patch, and the model reads the message
   verbatim. The `--json` stream shows nothing for a refused patch.
 - Every hook gets `session_id` (equal to `thread.started.thread_id`) and
-  `model`. A hook reaches a server on `127.0.0.1` under `workspace-write`.
-- `--sandbox read-only --add-dir R` does not make `R` writable, for patches
-  or the shell: a read-only session that must write its run's roots runs
-  under `workspace-write`, with the hook refusing everything else.
+  `model`. Under `--sandbox workspace-write`, a hook reaches a server on
+  `127.0.0.1`.
+- Under the `--sandbox` flag, which a confined session no longer passes (section
+  G names the profile that replaced it), `--sandbox read-only --add-dir R` does
+  not make `R` writable, for patches or the shell: a read-only session that must
+  write its run's roots ran under `workspace-write`, with the hook refusing
+  everything else.
 - `Stop` answering `{"decision":"block","reason":…}` makes the session go on
   within the same turn; the next `Stop` gets `stop_hook_active: true`. The
   stream still ends with a single `turn.completed`.
@@ -299,8 +302,9 @@ the rail started from; "after" carries it.
   a cache to the temporary directory, which Codex's `read-only` sandbox
   refuses, and a reviewer took the errors for a failed diff. Claude Code's
   `read_only` sandbox only refuses the checkout, so the same reviewer reads the
-  diff there; Codex has no sandbox that leaves the temporary directory writable
-  and the checkout not.
+  diff there. That run used `--sandbox read-only` for read-only sessions; Codex
+  now names its own profile for a confined session, which leaves the temporary
+  directory writable and the checkout not (section G).
 - Machine load differed between runs — up to three ran at once on 8 cores —
   so `checks` compares only runs that ran side by side.
 

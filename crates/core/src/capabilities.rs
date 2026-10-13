@@ -49,6 +49,11 @@ pub struct Capabilities {
     /// different states of the work.
     #[serde(default)]
     pub stop_refusals: bool,
+    /// Whether the CLI reports a session's token use while the session
+    /// runs, so the run's token cap can end the session as it passes the
+    /// cap. Absent, the cap is checked when the session ends.
+    #[serde(default)]
+    pub mid_session_token_cap: bool,
     /// How the model in this adapter's sessions calls a tool of a server
     /// the adapter mounts — the name every text the engine shows a
     /// session gives a run tool, so a session never calls a name its CLI
@@ -128,6 +133,7 @@ pub enum Capability {
     RunTools,
     NetworkIsolation,
     StopRefusals,
+    MidSessionTokenCap,
 }
 
 impl Capability {
@@ -135,7 +141,7 @@ impl Capability {
     /// order [`Capabilities`] declares them — what a table about
     /// capabilities is checked against, so one added here and nowhere
     /// else stops compiling or fails its test.
-    pub const ALL: [Capability; 9] = [
+    pub const ALL: [Capability; 10] = [
         Capability::ResumeSession,
         Capability::Fence,
         Capability::PermissionProfiles,
@@ -145,6 +151,7 @@ impl Capability {
         Capability::RunTools,
         Capability::NetworkIsolation,
         Capability::StopRefusals,
+        Capability::MidSessionTokenCap,
     ];
 
     /// The field name, as the log and the spec spell it.
@@ -159,6 +166,7 @@ impl Capability {
             Capability::RunTools => "run_tools",
             Capability::NetworkIsolation => "network_isolation",
             Capability::StopRefusals => "stop_refusals",
+            Capability::MidSessionTokenCap => "mid_session_token_cap",
         }
     }
 }
@@ -185,6 +193,7 @@ impl Capabilities {
             Capability::RunTools => self.run_tools,
             Capability::NetworkIsolation => self.network_isolation,
             Capability::StopRefusals => self.stop_refusals,
+            Capability::MidSessionTokenCap => self.mid_session_token_cap,
         }
     }
 }
@@ -205,6 +214,7 @@ mod tests {
             Capability::RunTools,
             Capability::NetworkIsolation,
             Capability::StopRefusals,
+            Capability::MidSessionTokenCap,
         ] {
             let written = serde_json::to_value(capability).unwrap();
             assert_eq!(written, serde_json::json!(capability.as_str()));

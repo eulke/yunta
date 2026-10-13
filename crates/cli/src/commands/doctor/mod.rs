@@ -193,17 +193,14 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut V
 /// Every catalog workflow that names a runner the config lacks, with
 /// what `check` says about each.
 fn needing_a_runner(ctx: &Context) -> Vec<(String, Vec<yunta_engine::CheckError>)> {
+    let facts = super::declared_facts(&ctx.project.config);
     super::list::catalog_workflows(&ctx.cwd)
         .into_iter()
         .map(|(name, workflow)| {
-            let errors = yunta_engine::check(
-                &workflow,
-                &ctx.project.config,
-                &super::declared_capabilities,
-            )
-            .into_iter()
-            .filter(names_a_runner)
-            .collect();
+            let errors = yunta_engine::check(&workflow, &ctx.project.config, &facts)
+                .into_iter()
+                .filter(names_a_runner)
+                .collect();
             (name, errors)
         })
         .filter(|(_, errors): &(String, Vec<_>)| !errors.is_empty())
@@ -301,6 +298,7 @@ async fn check_installed_pack_workflows(
 ) -> Result<(), CliError> {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();
+    let facts = super::declared_facts(config);
     let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
@@ -314,15 +312,11 @@ async fn check_installed_pack_workflows(
                     publisher: publisher.clone(),
                     pack_name: manifest.name.clone(),
                 };
-                let refused = yunta_engine::check(&workflow, config, &super::declared_capabilities)
+                let refused = yunta_engine::check(&workflow, config, &facts)
                     .into_iter()
                     .chain(
                         yunta_engine::check_workflow_refs(
-                            &workflow,
-                            config,
-                            &ctx.cwd,
-                            &origin,
-                            &super::declared_capabilities,
+                            &workflow, config, &ctx.cwd, &origin, &facts,
                         )
                         .errors,
                     );

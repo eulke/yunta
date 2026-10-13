@@ -16,6 +16,9 @@ use yunta_core::{
     PermissionsConfig, RunnerCandidate, SkillsConfig, StorageConfig,
 };
 
+#[path = "config/network.rs"]
+mod network;
+
 fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
     RunnerCandidate {
         adapter: adapter.into(),

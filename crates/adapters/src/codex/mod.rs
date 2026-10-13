@@ -15,8 +15,8 @@
 //! one adapter justifies on its own.
 
 mod config;
-mod fence;
 mod parse;
+mod profile;
 pub(crate) mod rail;
 pub(crate) mod settings;
 pub(crate) mod wire;
@@ -26,7 +26,7 @@ pub(crate) use parse::failure_cause;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use yunta_core::fence::{Coverage, Fenced};
+use yunta_core::fence::Coverage;
 use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
@@ -34,13 +34,12 @@ use yunta_core::port::{
 use yunta_core::process::subprocess::{self, Launch, LineParser};
 use yunta_core::rail::RailCommand;
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
-    ToolNaming,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, EditSandbox, FenceLevel, Result,
+    SessionId, ToolNaming,
 };
 
 use crate::dialect::{require_hook, Plan};
 use crate::mount::MountPlan;
-use crate::session::Sandbox;
 use config::ConfigOverride;
 
 /// The id config names this adapter by.
@@ -111,7 +110,7 @@ pub(crate) fn plan(
     // Settings that do not read fail the session rather than fall back: a
     // `sandbox:` nobody could parse would run the agent under a confinement
     // the team never asked for, and silently.
-    let typed = settings::CodexSettings::read(settings).map_err(|unreadable| {
+    settings::CodexSettings::read(settings).map_err(|unreadable| {
         AdapterError::UnreadableSettings {
             adapter: ID.clone(),
             detail: unreadable.to_string(),
@@ -121,23 +120,18 @@ pub(crate) fn plan(
     // a listener the hook can reach. Without both there is no fence to build,
     // and a session that opens anyway writes wherever its sandbox lets it.
     let (command, _) = require_hook(&ID, req)?;
-    let sandbox = fence::mode(
-        &req.fence,
-        req.permissions,
-        typed.sandbox.unwrap_or_default(),
-    );
-    // A read-only sandbox seals the roots along with everything else, so its
-    // commands write none of them.
-    let roots: &[PathBuf] = match sandbox {
-        Sandbox::ReadOnly => &[],
-        Sandbox::WorkspaceWrite | Sandbox::DangerFullAccess => &req.fence.roots,
-    };
+    let overrides = profile::overrides(&req.confinement, &req.cwd).map_err(|source| {
+        AdapterError::FenceUnbuildable {
+            adapter: ID.clone(),
+            source,
+        }
+    })?;
     Ok(Plan {
-        args: argv(req, resume, command, sandbox),
+        args: argv(req, resume, command, overrides),
         env: session_env(req),
         scratch: Vec::new(),
         mounts: MountPlan::of(SKILLS_MOUNT, req),
-        coverage: Coverage::of(Fenced::Exact, sandbox.command_fence(&req.cwd, roots)),
+        coverage: req.confinement.coverage(&req.cwd),
     })
 }
 
@@ -147,14 +141,15 @@ fn argv(
     req: &SessionRequest,
     resume: Option<&SessionId>,
     command: &RailCommand,
-    sandbox: Sandbox,
+    profile_args: Vec<String>,
 ) -> Vec<String> {
     let mut args = vec!["exec".to_string(), "--json".to_string()];
     if let Some(model) = &req.model {
         args.push("--model".to_string());
         args.push(model.to_string());
     }
-    args.extend(confinement_args(req, sandbox));
+    args.extend(profile_args);
+    args.extend(config_overrides(req));
     args.extend(rail::hook_overrides(
         command,
         RunToolsEndpoint::call_timeout(&req.budget),
@@ -181,16 +176,6 @@ fn argv(
     args
 }
 
-/// The sandbox the session's commands run in, and the configuration it opens
-/// with inside it.
-fn confinement_args(req: &SessionRequest, sandbox: Sandbox) -> Vec<String> {
-    let mut args = fence::sandbox_args(sandbox);
-    // Only `workspace-write` reads the switch: `read-only` has no network to
-    // open and `danger-full-access` never closed it.
-    args.extend(config_overrides(req, sandbox.opens_network(req.network)));
-    args
-}
-
 /// The environment one session's CLI runs in: the request's own, the
 /// credential the config names, and where the hooks reach the engine.
 /// Credentials go in `secret`, which a log never carries; the rail's
@@ -213,29 +198,12 @@ fn session_env(req: &SessionRequest) -> SessionEnv {
 
 /// The `-c` overrides one request needs, in the order they are written.
 ///
-/// What a session may reach beyond its working directory, and how it
-/// reaches the run's own tools: both are settings of the CLI's config
-/// file, which `-c` overrides for this invocation alone rather than
-/// writing to the user's own `~/.codex/config.toml`.
-fn config_overrides(req: &SessionRequest, opens_network: bool) -> Vec<String> {
+/// The effort, the agent's instructions and the run's own tools are
+/// settings of the CLI's config file, which `-c` overrides for this
+/// invocation alone rather than writing to the user's own
+/// `~/.codex/config.toml`.
+fn config_overrides(req: &SessionRequest) -> Vec<String> {
     let mut args = Vec::new();
-    // `workspace-write` confines writes to the workspace, and the
-    // fence's roots are what sits outside it and stays writable — the
-    // directory a declared file belongs in, first of all. Without this
-    // the session is told to write a file the sandbox then refuses it.
-    let roots = fence::writable_roots(&req.fence);
-    if !roots.is_empty() {
-        args.extend(
-            ConfigOverride::list("sandbox_workspace_write.writable_roots", roots).into_args(),
-        );
-    }
-    // The same sandbox keeps every socket off, loopback included, so a
-    // command the session runs cannot even listen on 127.0.0.1.
-    if opens_network {
-        args.extend(
-            ConfigOverride::bool("sandbox_workspace_write.network_access", true).into_args(),
-        );
-    }
     if let Some(effort) = req.effort {
         args.extend(ConfigOverride::string("model_reasoning_effort", effort.as_str()).into_args());
     }
@@ -332,10 +300,9 @@ pub(crate) fn capabilities() -> Capabilities {
         // off the CLI's own source rather than confirmed live —
         // see this module's doc comment.
         run_tools: true,
-        // The `read-only` and `workspace-write` sandboxes keep a
-        // session off the network unless its request opens it; a
-        // `full` session, unconfined on every adapter, is one `check`
-        // refuses `network: false` for.
+        // The session's profile keeps it off the network unless its
+        // request opens it; an unconfined session cannot close it, so
+        // the confinement refuses one whose network is closed.
         network_isolation: true,
         // The CLI names an MCP server's tools `mcp__<server>__<tool>`
         // with the server's `-` written `_`: a session finds
@@ -344,6 +311,9 @@ pub(crate) fn capabilities() -> Capabilities {
         // The CLI takes another turn after each stop the engine refuses,
         // over whatever state the work is in.
         stop_refusals: true,
+        // The CLI reports a turn's usage when the turn completes, so the
+        // token cap is checked when the session completes, not line by line.
+        mid_session_token_cap: false,
     }
 }
 
@@ -356,6 +326,16 @@ pub(crate) fn own_config() -> Vec<yunta_core::ScopeGlob> {
         .into_iter()
         .filter_map(|tree| tree.parse().ok())
         .collect()
+}
+
+/// The `sandbox` an `edit` session's commands run under, as the settings
+/// name it: `workspace-write` when they name none. A setting that does not
+/// read is refused when the session is planned.
+pub(crate) fn edit_sandbox(settings: &AdapterSettings) -> EditSandbox {
+    settings::CodexSettings::read(settings)
+        .ok()
+        .and_then(|typed| typed.sandbox)
+        .unwrap_or_default()
 }
 
 #[async_trait]
@@ -385,11 +365,17 @@ impl Adapter for CodexAdapter {
                 message: e.to_string(),
             });
         }
-        Ok(subprocess::probe_version(&self.binary).await)
+        Ok(profile::held_to_floor(
+            subprocess::probe_version(&self.binary).await,
+        ))
     }
 
     fn own_config(&self) -> Vec<yunta_core::ScopeGlob> {
         own_config()
+    }
+
+    fn edit_sandbox(&self) -> EditSandbox {
+        edit_sandbox(&self.raw)
     }
 
     fn service_vars(&self) -> &'static [&'static str] {
