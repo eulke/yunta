@@ -1,12 +1,14 @@
 ---
 number: D206
 title: "A project's denied paths are never written by a run"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D259]
 ---
 
 # D206 — A project's denied paths are never written by a run
+
+*(Revised by D259: `within` is retired as a ceiling, and `check` refuses a workflow that still declares it, naming `permissions.paths.deny`.)*
 
 ## Context
 

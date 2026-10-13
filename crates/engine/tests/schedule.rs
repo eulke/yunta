@@ -6,6 +6,7 @@
 //! thing, so an audit event nobody's state reads can never move the run.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
@@ -14,8 +15,9 @@ use yunta_core::events::{
     NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload,
     RunCreatedPayload, RunEvent, SessionEvent, StoredEvent, TokenUsage,
 };
+use yunta_core::protected::Protected;
 use yunta_core::{
-    CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, Workflow,
+    CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, ScopeGlob, Workflow,
 };
 use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
 
@@ -48,7 +50,7 @@ fn policy() -> SchedulingPolicy {
         measures_aside: false,
         may_promote: false,
         grants_scope: true,
-        denied: Vec::new(),
+        protected: Arc::new(Protected::default()),
         follows_builds: false,
     }
 }
@@ -371,8 +373,10 @@ fn grant_is_not_offered_for_a_denied_path() {
         Decision::EscalateFailure { grantable, .. } => grantable,
         other => panic!("a failed node is a decision, got {other:?}"),
     };
+    let protected =
+        Protected::new(&[ScopeGlob::from(".github/**")], &[]).expect("the one glob builds");
     let denying_ci = SchedulingPolicy {
-        denied: vec![".github/**".into()],
+        protected: Arc::new(protected),
         follows_builds: false,
         ..policy()
     };

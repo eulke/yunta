@@ -1,12 +1,14 @@
 ---
 number: D240
 title: "A file the task's own red output locates widens its scope by itself"
-status: accepted
+status: revised
 revises: [D191, D73]
-revised_by: []
+revised_by: [D259]
 ---
 
 # D240 — A file the task's own red output locates widens its scope by itself
+
+*(Revised by D259: decision 3 grants evidence under `ask` and `rules` and never under `deny`, a path no session may write is never granted, and `within` no longer bounds the grant.)*
 
 ## Context
 

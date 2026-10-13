@@ -12,6 +12,7 @@ use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
 };
 use yunta_core::port::{Adapter, Forge};
+use yunta_core::protected::Protected;
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
 
@@ -118,6 +119,10 @@ pub(crate) struct RunCtx<'a> {
     /// invocation makes, so a suspension of the host is recorded once,
     /// before whatever comes after it.
     pub(crate) awake: Arc<crate::wakefulness::Wakefulness>,
+    /// What no session of this run may write, as the last wake or spec
+    /// acceptance read it. One cell for every context of the run, so each
+    /// reads the set the latest read stored.
+    pub(crate) protected: Arc<std::sync::RwLock<Arc<Protected>>>,
 }
 
 /// A node's own checkout, and the tree its work lands in.
@@ -180,6 +185,7 @@ impl<'a> RunCtx<'a> {
             observer: self.observer.clone(),
             landing: self.landing.clone(),
             awake: self.awake.clone(),
+            protected: self.protected.clone(),
             unit: Some(NodeUnit {
                 unit,
                 into: self.worktree,
@@ -225,6 +231,7 @@ impl<'a> RunCtx<'a> {
             observer: self.observer.clone(),
             landing: self.landing.clone(),
             awake: self.awake.clone(),
+            protected: self.protected.clone(),
             unit: None,
         }
     }

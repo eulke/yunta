@@ -3,20 +3,21 @@
 //! while the loop ran.
 //!
 //! The answer is the failure's: `grant` widens each task's scope by what it
-//! asked for, and the task's next attempt picks its work back up with the
-//! wider scope. Any other answer denies every request — with the finding a
-//! denial becomes — and the tasks go on within what they declared, however
-//! the answer runs the loop again.
+//! asked for, when the protected set allows every one of those paths, and
+//! the task's next attempt picks its work back up with the wider scope. Any
+//! other answer denies the request, with the choice as its reason, and the
+//! tasks go on within what they declared, however the answer runs the loop
+//! again.
 
-use yunta_core::events::{
-    Decider, EventPayload, Failure, Finding, FindingEvent, FindingPostedPayload, FindingSeverity,
-    OwedScope, ScopeEvent, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
-};
-use yunta_core::{FindingId, Location, Node, RelativePath, ScopeExpansionMode, ScopeGlob, Seq};
+use yunta_core::events::{Decider, EventPayload, Failure, OwedScope, ScopeEvent, StoredEvent};
+use yunta_core::expansion::Decision;
+use yunta_core::{Node, Seq};
 
+use super::scope_record::{self, Recording, Subject};
 use super::{RunCtx, RunError};
 use crate::replay::NodeState;
-use crate::reserved::ReservedOption;
+use crate::reserved::decision_of_choice;
+use crate::scope_expansion::ScopeExpansionRequest;
 
 /// Answers the scope requests `node`'s loop ended owing, when a person
 /// answered that failure: every request, with that answer. Once per
@@ -33,53 +34,65 @@ pub(super) async fn answer(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError
     else {
         return Ok(());
     };
-    let grant = ReservedOption::of(&choice.option) == Some(ReservedOption::Grant);
-    let denied = super::denied::Denied::of(ctx).await?.every();
-    let mut granted = view.state.grants.granted();
-    for request in owed {
-        if answered_since(&view.events, request, decided_at) {
-            continue;
-        }
-        let decided_by = Decider::Person {
-            id: choice.by.clone(),
+    let attempt = finding_number(decided_at)?;
+    let by = Decider::Person {
+        id: choice.by.clone(),
+    };
+    let protected = ctx.protected();
+    let log = ctx.log();
+    let unanswered = owed
+        .iter()
+        .filter(|request| !answered_since(&view.events, request, decided_at));
+    for request in unanswered {
+        let decision = decision_of_choice(choice, &request.paths, &protected, &by);
+        // A grant has no finding to word. A refusal's finding keeps the
+        // session's own reason, so the request it answers is passed for it.
+        let asked = match &decision {
+            Decision::Deny(_) => Some(request_of(request)),
+            Decision::Grant { .. } | Decision::Escalate { .. } => None,
         };
-        let event = if grant {
-            granted += 1;
-            ScopeEvent::Granted(ScopeExpansionGrantedPayload {
-                task_id: Some(request.task_id.clone()),
-                decided_by,
-                mode: ScopeExpansionMode::Ask,
-                count_this_run: granted,
-                paths: request
-                    .paths
-                    .iter()
-                    .filter(|glob| !yunta_core::reaches_any(glob, &denied))
-                    .cloned()
-                    .collect(),
-            })
-        } else {
-            ScopeEvent::Denied(ScopeExpansionDeniedPayload {
-                task_id: Some(request.task_id.clone()),
-                decided_by,
-                mode: ScopeExpansionMode::Ask,
-                count_this_run: granted,
-                denial_reason: Some(format!("{} chose `{}`", choice.by, choice.option)),
-            })
-        };
-        ctx.emit(Some(&node.id), EventPayload::Scope(event)).await?;
-        if !grant {
-            post_denial(ctx, node, request, decided_at).await?;
-        }
+        scope_record::record(
+            &log,
+            node,
+            Recording {
+                subject: Subject::Task(&request.task_id),
+                mode: Some(super::loop_exec::mode_in_force(node)),
+                by: by.clone(),
+                asked: asked.as_ref(),
+                decision: &decision,
+                count: view.state.grants.granted(),
+                located: false,
+                precheck: None,
+                attempt,
+            },
+        )
+        .await?;
     }
     Ok(())
 }
 
+/// The number an answer's finding takes: the answer's own position on the log,
+/// which no other answer of the run shares.
+fn finding_number(decided_at: Seq) -> Result<u32, RunError> {
+    u32::try_from(decided_at.get()).map_err(|_| RunError::Broken {
+        diagnostic: format!("the answer at event {decided_at} is past what a finding numbers"),
+    })
+}
+
+/// The request an owed decision answers, as the failure keeps it: the paths
+/// and the reason. Its criterion stays on the log, where the request was
+/// first recorded.
+fn request_of(owed: &OwedScope) -> ScopeExpansionRequest {
+    ScopeExpansionRequest {
+        paths: owed.paths.clone(),
+        reason: owed.reason.clone(),
+        proposed_criterion: None,
+        evidence: None,
+    }
+}
+
 /// Whether the log answered `request` after `decided_at`.
-fn answered_since(
-    events: &[yunta_core::events::StoredEvent],
-    request: &OwedScope,
-    decided_at: Seq,
-) -> bool {
+fn answered_since(events: &[StoredEvent], request: &OwedScope, decided_at: Seq) -> bool {
     events
         .iter()
         .filter(|event| event.seq > decided_at)
@@ -92,34 +105,4 @@ fn answered_since(
             }
             _ => false,
         })
-}
-
-/// The finding a denied request becomes, carrying the session's own reason.
-async fn post_denial(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    request: &OwedScope,
-    decided_at: Seq,
-) -> Result<(), RunError> {
-    let finding = Finding {
-        id: FindingId::try_from(format!("scope-owed-{}-{decided_at}", request.task_id))?,
-        severity: FindingSeverity::Minor,
-        title: format!("scope expansion denied for task `{}`", request.task_id),
-        location: Location::work(
-            RelativePath::of(request.paths.first().map(ScopeGlob::as_str)),
-            None,
-        ),
-        detail: format!(
-            "denied by a person at the gate — paths asked for: {}; agent's stated reason: {}",
-            yunta_core::listed_globs(&request.paths),
-            request.reason
-        ),
-        proposed_criterion: None,
-    };
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload { finding })),
-    )
-    .await?;
-    Ok(())
 }

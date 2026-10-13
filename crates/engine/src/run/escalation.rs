@@ -7,10 +7,13 @@
 //! live process involved) — one construction site each, not two copies
 //! that could drift apart.
 
+use std::sync::Arc;
+
 use yunta_core::events::{
     Escalation, EscalationError, EventPayload, Fact, Failure, GateResolvedPayload,
     GateWaitingPayload, HumanChoice, Refusal,
 };
+use yunta_core::protected::Protected;
 use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Workflow};
 
 use super::schedule::{self, Decision};
@@ -156,7 +159,10 @@ pub async fn current_escalation(
     state: &RunState,
 ) -> Result<Option<(NodeId, Escalation)>, RunError> {
     let mode_name = state.run.mode().clone();
-    let Some(decision) = current_decision(manifest, state, &mode_name) else {
+    // The set the wake decides with, read from the state: a grant this menu
+    // offers is one the wake does not refuse.
+    let protected = Arc::new(super::protected::of_state(manifest, run_dir, state).await?);
+    let Some(decision) = current_decision(manifest, state, &mode_name, protected) else {
         return Ok(None);
     };
     if let Decision::ResolveInternalGate { node } = &decision {
@@ -180,7 +186,9 @@ pub async fn current_escalation(
 /// asks them.
 pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> {
     let mode_name = state.run.mode().clone();
-    match current_decision(manifest, state, &mode_name)? {
+    // Which node waits does not depend on what the set protects, and no
+    // document is read here, so the empty set decides the same node.
+    match current_decision(manifest, state, &mode_name, Arc::default())? {
         Decision::GateExhaustedReroutes { node, .. }
         | Decision::EscalateFailure { node, .. }
         | Decision::ResolveInternalGate { node } => Some(node),
@@ -235,11 +243,12 @@ fn current_decision(
     manifest: &Manifest,
     state: &RunState,
     mode_name: &ModeName,
+    protected: Arc<Protected>,
 ) -> Option<Decision> {
     let decision = schedule::decide(
         &manifest.workflow,
         state,
-        &schedule::Policy::of(manifest, mode_name, &state.run),
+        &schedule::Policy::of(manifest, mode_name, &state.run, protected),
     );
     match decision {
         Decision::GateExhaustedReroutes { .. }

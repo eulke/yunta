@@ -11,7 +11,7 @@ use yunta_core::{Node, PromptSource};
 use crate::run_dir::Opening;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
-use super::node_close::{close_node, fail_with_tokens, Close};
+use super::node_close::{close_node, fail_with_staged, fail_with_tokens_staged, Close};
 use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_profile, NodeEnd};
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
@@ -276,24 +276,18 @@ pub(super) async fn execute_prompt(
             close_node(ctx, node, Close::new(node_outcome, tokens).staged(&staged)).await
         }
         DispatchOutcome::Failed { message, retryable } => {
-            fail_with_tokens(ctx, node, message, retryable, tokens).await
+            fail_with_tokens_staged(ctx, node, message, retryable, tokens, &staged).await
         }
         // No terminal event means the engine records the death — the
         // adapter never invents a terminal of its own — with how the
         // process went, which is what a reader needs to tell a CLI that
         // refused its configuration from one that merely stopped.
         DispatchOutcome::Crashed { exit } => {
-            super::node_close::fail_with(
-                ctx,
-                node,
-                Failure::session_died(adapter.id().clone(), exit),
-                true,
-                tokens,
-            )
-            .await
+            let death = Failure::session_died(adapter.id().clone(), exit);
+            fail_with_staged(ctx, node, death, true, tokens, &staged).await
         }
         DispatchOutcome::BudgetExceeded { reason } => {
-            fail_with_tokens(ctx, node, reason, false, tokens).await
+            fail_with_tokens_staged(ctx, node, reason, false, tokens, &staged).await
         }
         DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
     }

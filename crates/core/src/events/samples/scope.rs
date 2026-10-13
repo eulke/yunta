@@ -2,6 +2,7 @@
 //! answer to it, and the scope a task derives from its shapes.
 
 use crate::events::*;
+use crate::expansion::Denial;
 use crate::ScopeExpansionMode;
 
 pub(crate) fn scope_expansion_requested() -> ScopeExpansionRequestedPayload {
@@ -18,7 +19,7 @@ pub(crate) fn scope_expansion_granted() -> ScopeExpansionGrantedPayload {
     ScopeExpansionGrantedPayload {
         task_id: Some("graph-cmd".into()),
         decided_by: Decider::Rule,
-        mode: ScopeExpansionMode::Rules,
+        mode: Some(ScopeExpansionMode::Rules),
         count_this_run: 1,
         paths: vec!["crates/cli/src/**".into()],
     }
@@ -28,9 +29,13 @@ pub(crate) fn scope_expansion_denied() -> ScopeExpansionDeniedPayload {
     ScopeExpansionDeniedPayload {
         task_id: Some("graph-cmd".into()),
         decided_by: Decider::Person { id: "eulke".into() },
-        mode: ScopeExpansionMode::Ask,
+        mode: Some(ScopeExpansionMode::Ask),
         count_this_run: 2,
-        denial_reason: Some("out of declared scope".to_string()),
+        why: Some(Denial::Chosen {
+            option: "deny".to_string(),
+            note: None,
+        }),
+        legacy_text: None,
     }
 }
 

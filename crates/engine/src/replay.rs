@@ -260,9 +260,9 @@ impl RunState {
     /// timestamp and no derivation behind it.
     ///
     /// What a kind of event states about the run, told apart from the
-    /// envelope every event carries: `a_kind_that_moves_no_state_says_so_by_name`
-    /// pairs this with an explicit list of the kinds that move no state.
-    /// The clock and the activity are not compared, as in equality.
+    /// envelope every event carries. The kinds that move no state are listed
+    /// explicitly beside this check. The clock and the activity are not
+    /// compared, as in equality.
     pub fn derives_nothing(&self) -> bool {
         let heard_from_only = self.nodes.iter().all(|(_, record)| {
             *record

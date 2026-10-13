@@ -1,15 +1,18 @@
 //! `hooks:` around a node — the `before`/`after` commands, the node's
 //! own list merged over `node_defaults`, and how a hook failure lands.
 
+use std::path::PathBuf;
+
 use yunta_core::events::{
-    CommandExit, CommandOrigin, EventPayload, HookExecutedPayload, HookPhase,
+    CommandExit, CommandOrigin, EventPayload, Failure, HookExecutedPayload, HookPhase, TokenUsage,
 };
-use yunta_core::{ConfigKey, HookStep, Hooks, Node, Resolved};
+use yunta_core::{ConfigKey, HookFailurePolicy, HookStep, Hooks, Node, Resolved};
 
 use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome};
 use yunta_core::template::render_template;
 
-use super::node_exec::template_vars;
+use super::node_close::{fail_with_staged, fail_with_tokens_staged};
+use super::node_exec::{template_vars, NodeEnd};
 use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
 
@@ -177,4 +180,31 @@ pub(super) fn effective_hooks(ctx: &RunCtx<'_>, node: &Node) -> Hooks {
         .unwrap_or_default();
 
     Hooks { before, after }
+}
+
+/// Runs the node's after-hooks in order. The first that fails the node ends
+/// its close with that failure; a hook that passes lets the close go on.
+pub(super) async fn after_hooks(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    tokens: TokenUsage,
+    staged: &[PathBuf],
+) -> Result<Option<NodeEnd>, RunError> {
+    for step in &effective_hooks(ctx, node).after {
+        let end = match run_hook(ctx, node, HookPhase::After, step).await? {
+            HookRun::Violation(rule) => {
+                fail_with_tokens_staged(ctx, node, rule, false, tokens, staged).await?
+            }
+            HookRun::Unset(key) => {
+                fail_with_staged(ctx, node, Failure::unset(key), false, tokens, staged).await?
+            }
+            HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
+                let failure = Failure::exited(exit);
+                fail_with_staged(ctx, node, failure, false, tokens, staged).await?
+            }
+            HookRun::Passed | HookRun::Failed(_) => continue,
+        };
+        return Ok(Some(end));
+    }
+    Ok(None)
 }

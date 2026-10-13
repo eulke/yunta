@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::fence::{Advice, Coverage, Fence, Fenced, Verdict, REFUSAL_MARKER};
+use yunta_core::protected::{Protected, ProtectedError, Protection};
 use yunta_core::ScopeGlob;
 
 fn worktree() -> PathBuf {
@@ -14,7 +15,7 @@ fn fence(allowed: &[&str], roots: &[&str]) -> Fence {
         allowed: Some(allowed.iter().map(|g| ScopeGlob::from(*g)).collect()),
         roots: roots.iter().map(PathBuf::from).collect(),
         advice: Advice::ReportFinding,
-        denied: Vec::new(),
+        protected: Protected::default(),
         naming: yunta_core::ToolNaming::Bare,
     }
 }
@@ -146,7 +147,7 @@ fn a_refusal_message_names_its_target_and_says_its_advice() {
             allowed: Some(vec![ScopeGlob::from("src/**")]),
             roots: Vec::new(),
             advice,
-            denied: Vec::new(),
+            protected: Protected::default(),
             naming: yunta_core::ToolNaming::Bare,
         };
         let Verdict::Refused(refusal) = fence.judge(&worktree(), Path::new("docs/readme.md"))
@@ -197,13 +198,14 @@ fn coverage_is_the_weakest_channel() {
 /// What the project denies to every run is refused whatever the scope
 /// admits, and the refusal says no request widens it.
 #[test]
-fn a_denied_path_is_refused_where_the_scope_allows_it() {
-    let fence = fence(&["**"], &[]).denying(&[ScopeGlob::from(".github/**")]);
+fn a_denied_path_is_refused_where_the_scope_allows_it() -> Result<(), ProtectedError> {
+    let protected = Protected::new(&[ScopeGlob::from(".github/**")], &[])?;
+    let fence = fence(&["**"], &[]).protecting(protected);
 
     let Verdict::Refused(refusal) = fence.judge(&worktree(), Path::new(".github/ci.yml")) else {
         panic!("a denied path is refused");
     };
-    assert!(refusal.denied);
+    assert_eq!(refusal.protection, Some(Protection::ProjectDeny));
     let said = refusal.to_string();
     assert!(said.contains("no request widens"), "{said}");
     assert!(said.contains(".github/ci.yml"), "{said}");
@@ -211,12 +213,13 @@ fn a_denied_path_is_refused_where_the_scope_allows_it() {
         fence.judge(&worktree(), Path::new("src/lib.rs")),
         Verdict::Allowed
     );
+    Ok(())
 }
 
 #[test]
-fn an_unscoped_fence_still_refuses_denied_paths() {
-    let fence = Fence::everything(Vec::new(), Advice::ReportFinding)
-        .denying(&[ScopeGlob::from(".github/**")]);
+fn an_unscoped_fence_still_refuses_denied_paths() -> Result<(), ProtectedError> {
+    let protected = Protected::new(&[ScopeGlob::from(".github/**")], &[])?;
+    let fence = Fence::everything(Vec::new(), Advice::ReportFinding).protecting(protected);
     assert!(matches!(
         fence.judge(&worktree(), Path::new(".github/ci.yml")),
         Verdict::Refused(_)
@@ -225,4 +228,21 @@ fn an_unscoped_fence_still_refuses_denied_paths() {
         fence.judge(&worktree(), Path::new("README.md")),
         Verdict::Allowed
     );
+    Ok(())
+}
+
+/// A root inside the checkout does not admit what the project protects.
+#[test]
+fn a_protected_path_under_a_root_is_refused() -> Result<(), ProtectedError> {
+    let root = PathBuf::from("/work/tree");
+    let protected = Protected::new(&[ScopeGlob::from(".claude/**")], &[])?;
+    let fence =
+        Fence::everything(vec![root.join(".claude")], Advice::ReportFinding).protecting(protected);
+    let verdict = fence.judge(&root, Path::new(".claude/settings.json"));
+    let by_project = matches!(
+        &verdict,
+        Verdict::Refused(refusal) if refusal.protection == Some(Protection::ProjectDeny)
+    );
+    assert!(by_project, "{verdict:?}");
+    Ok(())
 }

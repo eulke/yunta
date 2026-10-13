@@ -69,15 +69,24 @@ fn owners(tasks: &TasksFile) -> Vec<Diagnostic> {
             ));
             continue;
         };
-        if !covers(owner, &shape.file) {
-            broken.push(document(
+        match covers(owner, &shape.file) {
+            Ok(true) => {}
+            Ok(false) => broken.push(document(
                 RuleCode::ShapeOutsideOwnerScope,
                 format!(
                     "shape `{}` lives in `{}`, which its owner `{}`'s scope does not cover; \
                      the task that builds a shape may write its file",
                     shape.name, shape.file, shape.owner
                 ),
-            ));
+            )),
+            Err(error) => broken.push(document(
+                RuleCode::ShapeOutsideOwnerScope,
+                format!(
+                    "shape `{}` lives in `{}`, but its owner `{}`'s scope does not compile into \
+                     one set of paths, so it cannot be shown to cover the file: {error}",
+                    shape.name, shape.file, shape.owner
+                ),
+            )),
         }
     }
     broken
@@ -120,29 +129,33 @@ fn uses(tasks: &TasksFile) -> Vec<Diagnostic> {
     broken
 }
 
-/// A change a task declares in a file its scope does not cover.
+/// A change a task declares in a file its scope does not cover, or whose
+/// scope does not compile into one set and so cannot judge it.
 fn changes(index: usize, task: &Task) -> Vec<Diagnostic> {
     task.changes
         .iter()
-        .filter(|change| !covers(task, change.file()))
-        .map(|change| {
-            of_task(
-                index,
-                task,
-                RuleCode::ChangeOutsideScope,
-                format!(
-                    "changes `{}`, which its scope does not cover; widen the scope, or leave \
-                     the change to the task that owns the file",
-                    change.file()
+        .filter_map(|change| {
+            let file = change.file();
+            let detail = match covers(task, file) {
+                Ok(true) => return None,
+                Ok(false) => format!(
+                    "changes `{file}`, which its scope does not cover; widen the scope, or leave \
+                     the change to the task that owns the file"
                 ),
-            )
+                Err(error) => format!(
+                    "changes `{file}`, but its scope does not compile into one set of paths, so \
+                     the change cannot be judged against it: {error}"
+                ),
+            };
+            Some(of_task(index, task, RuleCode::ChangeOutsideScope, detail))
         })
         .collect()
 }
 
-/// Whether `task`'s scope lets it write `file`.
-fn covers(task: &Task, file: &str) -> bool {
-    scope_globset(&task.scope).is_ok_and(|set| set.is_match(file))
+/// Whether `task`'s scope lets it write `file`. A scope that does not compile
+/// into one set cannot say, and that error is the answer.
+fn covers(task: &Task, file: &str) -> Result<bool, globset::Error> {
+    Ok(scope_globset(&task.scope)?.is_match(file))
 }
 
 /// Every `(task, earlier)` pair where `task` waits, directly or through

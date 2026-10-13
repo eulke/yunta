@@ -473,7 +473,7 @@ prompt: "do it"
 }
 
 #[test]
-fn a_loop_node_can_declare_scope_expansion_ask_with_within_and_cap() {
+fn a_loop_node_reads_a_retired_within_as_a_tombstone_beside_its_mode_and_cap() {
     let yaml = r#"
 id: implement
 kind: loop
@@ -491,7 +491,7 @@ scope_expansion:
         } => {
             let se = scope_expansion.unwrap();
             assert_eq!(se.mode, yunta_core::ScopeExpansionMode::Ask);
-            assert_eq!(se.within, vec![yunta_core::ScopeGlob::from("src/**")]);
+            assert!(se.retired_within.is_some());
             assert_eq!(se.max_per_run, Some(3));
         }
         other => panic!("expected Loop, got {other:?}"),
@@ -513,10 +513,9 @@ scope_expansion:
         NodeKind::Loop {
             scope_expansion, ..
         } => {
-            assert_eq!(
-                scope_expansion.unwrap().mode,
-                yunta_core::ScopeExpansionMode::Deny
-            );
+            let scope_expansion = scope_expansion.unwrap();
+            assert_eq!(scope_expansion.mode, yunta_core::ScopeExpansionMode::Deny);
+            assert!(scope_expansion.retired_within.is_some());
         }
         other => panic!("expected Loop, got {other:?}"),
     }

@@ -39,7 +39,7 @@ pub use failure::{
     RequestedScope, SessionDeath, SessionEnd, SessionExit, PAST_THE_CAP, TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
-pub use gates::{ledger::*, payloads::*, GateEvent, Withheld};
+pub use gates::{ledger::*, payloads::*, scope_wait::*, GateEvent, Withheld};
 pub use meta::EventMeta;
 pub use node::{ledger::*, payloads::*, NodeEvent};
 pub use redact::Unredactable;
@@ -413,7 +413,7 @@ mod tests {
         let grant = ScopeEvent::Granted(ScopeExpansionGrantedPayload {
             task_id: None,
             decided_by: Decider::Rule,
-            mode: ScopeExpansionMode::Rules,
+            mode: Some(ScopeExpansionMode::Rules),
             count_this_run: 1,
             paths: vec![],
         });

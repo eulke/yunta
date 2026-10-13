@@ -649,7 +649,7 @@ async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing
         allowed: Some(vec!["src/**".into()]),
         roots: vec![artifacts.clone()],
         advice: Advice::ReportFinding,
-        denied: Vec::new(),
+        protected: yunta_core::protected::Protected::default(),
         naming: yunta_core::ToolNaming::Bare,
     };
     let args = argv_for(dir.path(), req).await;
@@ -1026,7 +1026,7 @@ async fn a_refusal_in_the_stream_is_left_to_the_engine_that_judged_it() {
         allowed: Some(vec!["src/**".into()]),
         roots: Vec::new(),
         advice: yunta_core::fence::Advice::ReportFinding,
-        denied: false,
+        protection: None,
         naming: yunta_core::ToolNaming::Bare,
     };
     let user_line = serde_json::json!({

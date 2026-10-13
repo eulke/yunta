@@ -11,9 +11,10 @@ use std::collections::BTreeMap;
 use crate::events::meta::EventMeta;
 use crate::events::scope::kinds::ScopeEvent;
 use crate::events::scope::payloads::{
-    ScopeDerivedPayload, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
+    Decider, ScopeDerivedPayload, ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload,
 };
 use crate::events::SubjectError;
+use crate::expansion::Denial;
 use crate::glob::ScopeGlob;
 use crate::ids::{NodeId, Seq, TaskId};
 
@@ -21,6 +22,9 @@ use crate::ids::{NodeId, Seq, TaskId};
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GrantLedger {
     per_task: BTreeMap<TaskId, Vec<ScopeGlob>>,
+    /// The paths a person granted each task, a part of `per_task`: what
+    /// lifts the protection of those paths for that task alone.
+    person_per_task: BTreeMap<TaskId, Vec<ScopeGlob>>,
     /// The last answer each task's request got.
     answers: BTreeMap<TaskId, ScopeAnswer>,
     /// The last answer each node's own request got: a denial that names
@@ -52,8 +56,9 @@ struct NodeGrants {
 pub enum ScopeAnswer {
     /// Granted these paths.
     Granted(Vec<ScopeGlob>),
-    /// Refused, with the reason the decider gave, when it gave one.
-    Denied(Option<String>),
+    /// Refused, with the typed reason the decider gave, when the log
+    /// states one.
+    Denied(Option<Denial>),
 }
 
 impl GrantLedger {
@@ -87,6 +92,15 @@ impl GrantLedger {
             .unwrap_or(&[])
     }
 
+    /// The paths a person granted `task`, in grant order: the only paths
+    /// whose protection a grant lifts for that task.
+    pub fn person_granted_to_task(&self, task: &TaskId) -> &[ScopeGlob] {
+        self.person_per_task
+            .get(task)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// The last answer `task`'s scope request got.
     pub fn answer_for(&self, task: &TaskId) -> Option<&ScopeAnswer> {
         self.answers.get(task)
@@ -110,8 +124,9 @@ impl GrantLedger {
         self.per_node.get(node).map(|grants| grants.last_at)
     }
 
-    /// How many grants this run made — the count `max_per_run` is
-    /// checked against. A derived reach is no grant, and is not counted.
+    /// How many grants the engine made this run — the count `max_per_run`
+    /// is checked against. A person's grant and a derived reach are not
+    /// counted.
     pub fn granted(&self) -> u32 {
         self.granted
     }
@@ -129,14 +144,18 @@ impl GrantLedger {
     /// Folds one scope-domain event. A grant that names no task widens
     /// the node it is written under. A grant or a denial that names
     /// neither a task nor a node has no subject to widen or to answer: it
-    /// is refused, and counts for nothing. A derivation replaces the
-    /// task's last one.
+    /// is refused, and counts for nothing. A person's grant widens its
+    /// subject but counts toward no cap. A derivation replaces the task's
+    /// last one.
     pub fn apply(&mut self, event: &ScopeEvent, meta: &EventMeta<'_>) -> Result<(), SubjectError> {
         match event {
             ScopeEvent::Requested(_) => self.requested += 1,
             ScopeEvent::Granted(p) => {
                 self.widen(p, meta)?;
-                self.granted += 1;
+                match &p.decided_by {
+                    Decider::Rule | Decider::Evidence { .. } => self.granted += 1,
+                    Decider::Person { .. } => {}
+                }
             }
             ScopeEvent::Denied(p) => {
                 self.answer_denial(p, meta)?;
@@ -162,6 +181,12 @@ impl GrantLedger {
                     .entry(task.clone())
                     .or_default()
                     .extend(p.paths.iter().cloned());
+                if matches!(p.decided_by, Decider::Person { .. }) {
+                    self.person_per_task
+                        .entry(task.clone())
+                        .or_default()
+                        .extend(p.paths.iter().cloned());
+                }
                 self.answers
                     .insert(task.clone(), ScopeAnswer::Granted(p.paths.clone()));
             }
@@ -190,11 +215,11 @@ impl GrantLedger {
         match (&p.task_id, meta.node) {
             (Some(task), _) => {
                 self.answers
-                    .insert(task.clone(), ScopeAnswer::Denied(p.denial_reason.clone()));
+                    .insert(task.clone(), ScopeAnswer::Denied(p.why()));
             }
             (None, Some(node)) => {
                 self.node_answers
-                    .insert(node.clone(), ScopeAnswer::Denied(p.denial_reason.clone()));
+                    .insert(node.clone(), ScopeAnswer::Denied(p.why()));
             }
             (None, None) => return Err(SubjectError::UngrantableSubject),
         }
@@ -205,6 +230,7 @@ impl GrantLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::ScopeExpansionDeniedPayload;
     use crate::events::ScopeExpansionGrantedPayload;
     use crate::policy::ScopeExpansionMode;
 
@@ -253,7 +279,7 @@ mod tests {
             ScopeEvent::Granted(ScopeExpansionGrantedPayload {
                 task_id: Some(TaskId::from_static("task-h")),
                 decided_by: crate::events::Decider::Rule,
-                mode: ScopeExpansionMode::Rules,
+                mode: Some(ScopeExpansionMode::Rules),
                 count_this_run: 1,
                 paths: vec![ScopeGlob::from("b.rs")],
             }),
@@ -266,5 +292,110 @@ mod tests {
             [ScopeGlob::from("caller.rs"), ScopeGlob::from("b.rs")]
         );
         assert_eq!(ledger.granted(), 1);
+    }
+
+    #[test]
+    fn an_old_denial_log_still_answers_with_its_text() {
+        let mut ledger = GrantLedger::default();
+        let old: ScopeExpansionDeniedPayload = serde_json::from_value(serde_json::json!({
+            "task_id": "task-h", "decided_by": {"type": "rule"}, "mode": "rules",
+            "count_this_run": 1, "denial_reason": "outside the declared `within` ceiling"}))
+        .unwrap();
+        fold(&mut ledger, 1, ScopeEvent::Denied(old));
+        assert_eq!(
+            ledger.answer_for(&TaskId::from_static("task-h")),
+            Some(&ScopeAnswer::Denied(Some(Denial::Legacy {
+                text: "outside the declared `within` ceiling".to_string(),
+            })))
+        );
+    }
+
+    /// A person's grant widens its task and lifts the protection of its
+    /// paths for that task alone, and counts toward no cap: an engine
+    /// grant still does.
+    #[test]
+    fn a_person_grant_widens_its_task_and_counts_toward_no_cap() {
+        let mut ledger = GrantLedger::default();
+        let task = TaskId::from_static("task-h");
+        let grant = |decided_by: Decider, path: &str| {
+            ScopeEvent::Granted(ScopeExpansionGrantedPayload {
+                task_id: Some(TaskId::from_static("task-h")),
+                decided_by,
+                mode: Some(ScopeExpansionMode::Ask),
+                count_this_run: 1,
+                paths: vec![ScopeGlob::from(path)],
+            })
+        };
+
+        fold(
+            &mut ledger,
+            1,
+            grant(Decider::Person { id: "eulke".into() }, "AGENTS.md"),
+        );
+        assert_eq!(ledger.granted(), 0);
+
+        fold(
+            &mut ledger,
+            2,
+            grant(
+                Decider::Evidence {
+                    criterion: "tests".to_string(),
+                },
+                "b.rs",
+            ),
+        );
+        assert_eq!(ledger.granted(), 1);
+        assert_eq!(
+            ledger.reach_for(&task),
+            [ScopeGlob::from("AGENTS.md"), ScopeGlob::from("b.rs")]
+        );
+        assert_eq!(
+            ledger.person_granted_to_task(&task).to_vec(),
+            vec![ScopeGlob::from("AGENTS.md")]
+        );
+    }
+
+    /// A typed denial is written with its reason and no text beside it,
+    /// reads back with the same reason, and answers its task with it.
+    #[test]
+    fn a_typed_denial_is_written_with_its_reason_only() {
+        let reason = Denial::Chosen {
+            option: "deny".to_string(),
+            note: None,
+        };
+        let denied = ScopeExpansionDeniedPayload {
+            task_id: Some(TaskId::from_static("task-h")),
+            decided_by: Decider::Rule,
+            mode: Some(ScopeExpansionMode::Ask),
+            count_this_run: 1,
+            why: Some(reason.clone()),
+            legacy_text: None,
+        };
+        let written = serde_json::to_value(&denied).unwrap();
+        assert!(written.get("denial_reason").is_none(), "{written}");
+
+        let read: ScopeExpansionDeniedPayload = serde_json::from_value(written).unwrap();
+        assert_eq!(read.why(), Some(reason.clone()));
+
+        let mut ledger = GrantLedger::default();
+        fold(&mut ledger, 1, ScopeEvent::Denied(denied));
+        assert_eq!(
+            ledger.answer_for(&TaskId::from_static("task-h")),
+            Some(&ScopeAnswer::Denied(Some(reason)))
+        );
+    }
+
+    /// A grant a node made carries no mode, and writes none.
+    #[test]
+    fn a_node_grant_without_a_mode_writes_none() {
+        let line = serde_json::json!({
+            "decided_by": {"type": "rule"},
+            "count_this_run": 1,
+            "paths": ["Cargo.toml"]
+        });
+        let grant: ScopeExpansionGrantedPayload = serde_json::from_value(line).unwrap();
+        assert_eq!(grant.mode, None);
+        let written = serde_json::to_value(&grant).unwrap();
+        assert!(written.get("mode").is_none(), "{written}");
     }
 }

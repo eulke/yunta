@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use std::path::{Component, Path};
 
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
+use crate::protected::is_register;
 use crate::{RelativePath, Spec, SpecFile};
 
 /// Every rule this document is held to — see `crate::tasks::rules` for
@@ -145,5 +146,6 @@ fn inside(path: &str) -> bool {
         .components()
         .filter(|component| *component != Component::CurDir);
     path.parse::<RelativePath>().is_ok()
-        && matches!(names.next(), Some(Component::Normal(first)) if first != ".git")
+        && matches!(names.next(), Some(Component::Normal(_)))
+        && !is_register(Path::new(path))
 }

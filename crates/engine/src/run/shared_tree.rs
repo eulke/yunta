@@ -11,17 +11,31 @@
 use std::path::{Path, PathBuf};
 use yunta_core::commit_message::CommitMessage;
 
-use yunta_core::{Isolation, Node, NodeId, NodeKind};
+use yunta_core::events::TokenUsage;
+use yunta_core::protected::{Closing, Protected, Trespass};
+use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind};
 
+use super::node_close::fail_with_tokens_staged;
+use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::replay::{NodeState, RunState};
 
-/// How the attempt whose work is being committed closed — what its
-/// commit says about it.
+/// How the attempt whose work is being committed ended — what its commit
+/// says about it, and which closing judges it.
 #[derive(Clone, Copy)]
-pub(super) enum Closing {
+pub(super) enum Landing {
     Finished,
     Failed,
+}
+
+/// The closing a node's own close judges its diff by. A loop's close leaves
+/// approved tests out: each of its tasks judged them when it landed.
+pub(super) fn closing_of(node: &Node) -> Closing {
+    if matches!(node.kind, NodeKind::Loop { .. }) {
+        Closing::LoopClose
+    } else {
+        Closing::Every
+    }
 }
 
 /// What a close did to the run's tree: the commit it made and the tree
@@ -34,7 +48,7 @@ pub(super) struct AtClose {
     /// What the work left that no session of the run may write: never
     /// committed, and in a run with a worktree of its own put back as the
     /// branch had it.
-    pub(super) refused: Vec<PathBuf>,
+    pub(super) refused: Vec<Trespass>,
 }
 
 /// Commits what `node` left in the run's tree as it closes, and answers
@@ -47,26 +61,28 @@ pub(super) struct AtClose {
 /// nodes' work at once, so it is committed by whichever of them closes
 /// last, naming the others. The close that commits answers for the whole
 /// commit: what it would add that no session of the run may write is
-/// refused and put back first.
+/// refused and put back first. `staged` is what the adapter wrote for
+/// itself, which is never a trespass.
 pub(super) async fn at_close(
     ctx: &RunCtx<'_>,
     node: &Node,
-    closing: Closing,
+    landing: Landing,
+    staged: &[PathBuf],
 ) -> Result<AtClose, RunError> {
     if !shares_the_tree(ctx, node) {
         return Ok(AtClose::default());
     }
     if !commits_here(ctx) {
-        return Box::pin(refused_in_place(ctx, node)).await;
+        return Box::pin(refused_in_place(ctx, node, staged)).await;
     }
     let _landing = ctx.landing.lock().await;
-    let Some(message) = commit_message(ctx, node, closing).await? else {
+    let Some(message) = commit_message(ctx, node, landing).await? else {
         return Ok(AtClose::default());
     };
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
     // Boxed: a close runs at the bottom of every composed run's stack.
-    let refused = Box::pin(refuse_denied(ctx, node, &index)).await?;
+    let refused = Box::pin(refuse_denied(ctx, node, &index, staged)).await?;
     let captured = Box::pin(crate::worktree::commit_tree(
         ctx.worktree,
         &index,
@@ -80,46 +96,94 @@ pub(super) async fn at_close(
     })
 }
 
-/// What the run's tree would commit that the run denies `node`, put back
-/// as `HEAD` has it.
+/// What `node`'s close judges its diff by, as the log stands: the set the
+/// run protects, with the instruction files a person granted `node` lifted.
+async fn node_judged(ctx: &RunCtx<'_>, node: &Node) -> Result<Protected, RunError> {
+    let state = ctx.run_view().await?.state;
+    Ok(super::node_scope::judged_by(&ctx.protected(), &state, node))
+}
+
+/// What the run's tree would commit that `node`'s close judges by protects,
+/// put back as `HEAD` has it.
 async fn refuse_denied(
     ctx: &RunCtx<'_>,
     node: &Node,
     index: &Path,
-) -> Result<Vec<PathBuf>, RunError> {
-    let deny = super::denied::Denied::of(ctx).await?.closing(node);
-    if deny.is_empty() {
-        return Ok(Vec::new());
-    }
+    staged: &[PathBuf],
+) -> Result<Vec<Trespass>, RunError> {
+    let protected = node_judged(ctx, node).await?;
+    let pathspecs = ctx.protected().pathspecs();
     let supervision = ctx.root_supervision();
-    let tree = crate::worktree::capture_tree(ctx.worktree, index, supervision).await?;
+    let tree = crate::worktree::capture_tree(ctx.worktree, index, &pathspecs, supervision).await?;
     let head = crate::worktree::head_commit(ctx.worktree, supervision).await?;
     let added =
         crate::scope::changed_between(ctx.worktree, head.as_str(), tree.as_str(), supervision)
             .await?;
-    let refused = crate::scope::denied(&added, &deny, &[])?;
-    crate::worktree::restore(ctx.worktree, &refused, supervision).await?;
+    let refused = protected.trespasses(&added, staged, closing_of(node));
+    let paths: Vec<PathBuf> = refused
+        .iter()
+        .map(|trespass| trespass.path.clone())
+        .collect();
+    crate::worktree::restore(ctx.worktree, &paths, supervision).await?;
     Ok(refused)
 }
 
 /// In a person's own checkout nothing is committed or put back: what
-/// `node` wrote there that the run denies it is only refused, for the
-/// node to fail with.
-async fn refused_in_place(ctx: &RunCtx<'_>, node: &Node) -> Result<AtClose, RunError> {
-    let deny = super::denied::Denied::of(ctx).await?.closing(node);
+/// `node` wrote there that its close judges by protects is only refused,
+/// for the node to fail with.
+async fn refused_in_place(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    staged: &[PathBuf],
+) -> Result<AtClose, RunError> {
     let state = ctx.run_view().await?.state;
-    let from = state.nodes.from_tree(&node.id).cloned();
-    let (false, Some(from)) = (deny.is_empty(), from) else {
-        return Ok(AtClose::default());
-    };
+    let protected = super::node_scope::judged_by(&ctx.protected(), &state, node);
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
-    let diff =
-        crate::scope::changed_since(ctx.worktree, &from, &index, ctx.root_supervision()).await?;
+    let refused = match state.nodes.from_tree(&node.id).cloned() {
+        Some(from) => {
+            let pathspecs = ctx.protected().pathspecs();
+            let diff = crate::scope::changed_since(
+                ctx.worktree,
+                &from,
+                &index,
+                &pathspecs,
+                ctx.root_supervision(),
+            )
+            .await?;
+            protected.trespasses(&diff, staged, closing_of(node))
+        }
+        // A log written before a start named its tree is judged from the
+        // commit untreed attempts start from, as its close is.
+        None => {
+            let base = untreed_base(ctx).await?;
+            crate::scope::protection_audit(
+                ctx.worktree,
+                base.as_str(),
+                &index,
+                &protected,
+                closing_of(node),
+                staged,
+                ctx.root_supervision(),
+            )
+            .await?
+            .trespasses()
+        }
+    };
     Ok(AtClose {
         captured: None,
-        refused: crate::scope::denied(&diff, &deny, &[])?,
+        refused,
     })
+}
+
+/// The commit a node's diff is judged from when no start recorded the tree it
+/// began from: HEAD where the run commits its own tree, else the commit the
+/// run began on.
+pub(super) async fn untreed_base(ctx: &RunCtx<'_>) -> Result<CommitSha, RunError> {
+    match commits_here(ctx) {
+        true => Ok(crate::worktree::head_commit(ctx.worktree, ctx.root_supervision()).await?),
+        false => Ok(ctx.manifest.base_commit.clone()),
+    }
 }
 
 /// What `node`'s commit says, read off the run's state — or `None` while
@@ -128,13 +192,13 @@ async fn refused_in_place(ctx: &RunCtx<'_>, node: &Node) -> Result<AtClose, RunE
 async fn commit_message(
     ctx: &RunCtx<'_>,
     node: &Node,
-    closing: Closing,
+    landing: Landing,
 ) -> Result<Option<String>, RunError> {
     let state = ctx.run_view().await?.state;
     if working_beside(&ctx.manifest.workflow, &state, &node.id) {
         return Ok(None);
     }
-    let said = message(&ctx.manifest.workflow, &state, node, closing);
+    let said = message(&ctx.manifest.workflow, &state, node, landing);
     Ok(Some(
         CommitMessage::new(said, ctx.run_id).node(&node.id).text(),
     ))
@@ -184,6 +248,69 @@ pub(super) async fn found(
         ))
         .await?,
     ))
+}
+
+/// Lands what a node did in its own checkout onto the run's tree, and says
+/// nothing for a node that never had one.
+///
+/// A unit lands the moment its work passes its audit: from there what it
+/// wrote is the run's, and a later failure about what the node
+/// *declared* — a missing artifact — is about the node, not about its
+/// edits, exactly as it is for a node that worked in the run's own tree
+/// all along. A node that failed its audit never reaches here, so a
+/// write outside every glob never becomes the run's.
+///
+/// A replay git cannot finish fails the node naming the paths: two nodes
+/// that can be open at once had their scopes proved disjoint by `check`,
+/// so a conflict here is a workflow that got past it.
+pub(super) async fn land_unit(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    staged: &[PathBuf],
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
+    let Some(mine) = ctx.unit else {
+        return Ok(None);
+    };
+    let supervision = ctx.root_supervision();
+    let said = CommitMessage::new(
+        yunta_core::text::detailed(format!("node {}", node.id), &close_title(node)),
+        ctx.run_id,
+    )
+    .node(&node.id)
+    .text();
+    crate::worktree::commit_work(mine.unit, &said, supervision).await?;
+    let landing = ctx.landing.lock().await;
+    match crate::worktree::rebase_onto(mine.unit, mine.into, supervision).await? {
+        crate::worktree::Rebase::Onto(_) => {}
+        crate::worktree::Rebase::Conflicts(paths) => {
+            // Released before the node fails: a close takes the same lock
+            // to decide what it commits.
+            drop(landing);
+            let outcome = format!(
+                "landing `{}` on the run's tree: git could not replay it over {}",
+                node.id,
+                yunta_core::text::counted(paths.len(), "path"),
+            );
+            return fail_with_tokens_staged(ctx, node, outcome, false, tokens, staged)
+                .await
+                .map(Some);
+        }
+    }
+    crate::worktree::land(mine.unit, mine.into, supervision).await?;
+    // Landed, its refs go; the checkout stays the node's, so a person who
+    // sends the run back to it finds its session where it saw it.
+    crate::worktree::forget_attempts(mine.unit, supervision).await?;
+    Ok(None)
+}
+
+/// What a node's landing commit is about, for a person reading the
+/// branch: what the node declares it does, or its id when it says
+/// nothing about itself.
+fn close_title(node: &Node) -> String {
+    node.description
+        .clone()
+        .unwrap_or_else(|| node.id.to_string())
 }
 
 /// Whether `mine` is `node`'s own checkout, not one its group opened.
@@ -260,15 +387,15 @@ fn message(
     workflow: &yunta_core::Workflow,
     state: &RunState,
     node: &Node,
-    closing: Closing,
+    landing: Landing,
 ) -> String {
     let record = state.nodes.get(&node.id);
-    let title = match closing {
-        Closing::Finished => node
+    let title = match landing {
+        Landing::Finished => node
             .description
             .clone()
             .unwrap_or_else(|| node.id.to_string()),
-        Closing::Failed => format!(
+        Landing::Failed => format!(
             "what attempt {} left when it failed",
             record.map_or(1, |record| record.attempts)
         ),

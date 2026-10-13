@@ -1559,7 +1559,6 @@ nodes:
     prompt: "work"
     scope_expansion:
       mode: rules
-      within: ["src/**"]
 "#;
     let wf: Workflow = yunta_core::yaml::parse(workflow).unwrap();
     let ceiling: ConfigLayer =

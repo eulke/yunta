@@ -14,6 +14,7 @@ use std::sync::{Arc, OnceLock};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
+use yunta_core::protected::Protected;
 use yunta_core::{
     sha256_hex, Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
 };
@@ -198,7 +199,7 @@ impl ToolsHost {
             index: self.run_dir.join("node-check-index"),
             may_ask,
             staged: Arc::new(OnceLock::from(Vec::new())),
-            denied: Vec::new(),
+            protected: Arc::new(Protected::default()),
         };
         self.open(node, (None, Some(access)), cwd, Vec::new()).await
     }
@@ -213,7 +214,7 @@ impl ToolsHost {
             index: self.run_dir.join("check-index"),
             cancel: CancellationToken::new(),
             staged: Arc::new(OnceLock::from(Vec::new())),
-            denied: Vec::new(),
+            protected: Arc::new(Protected::default()),
             checks: Default::default(),
             plan: None,
             held: Vec::new(),

@@ -1318,6 +1318,166 @@
         }
       ]
     },
+    "Denial": {
+      "description": "Why a request was denied, typed. The event log keeps this value, and its\nsentence is written from it by the `Display` impl.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reached": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Reach"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "reaches_protected"
+            }
+          },
+          "required": [
+            "type",
+            "reached"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "mode_deny"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "no_criterion"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "precheck_passes"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "criterion_could_not_run"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "bound": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "touched": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "too_many_files"
+            }
+          },
+          "required": [
+            "type",
+            "touched",
+            "bound"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "nothing_left"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "not_widenable"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A person chose an option other than a grant.",
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "option": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "chosen"
+            }
+          },
+          "required": [
+            "type",
+            "option"
+          ]
+        },
+        {
+          "description": "A refusal read from its text, from logs written before reasons were typed.",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "legacy"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ]
+        }
+      ]
+    },
     "DepartsFrom": {
       "description": "What of the plan a task session departs from: one of the plan's\nshapes or decisions by name, one of its own changes by where it is,\none of its criteria by its command, or what it said a person would\nsee once it was done.",
       "oneOf": [
@@ -1984,6 +2144,17 @@
           "items": {
             "$ref": "#/$defs/GateOption"
           }
+        },
+        "scope": {
+          "description": "Why the loop waits on a scope request a person answers.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeWait"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "shows": {
           "description": "The artifacts the decision is about, as the person was shown\nthem. Empty for an escalation about something that happened.",
@@ -2911,13 +3082,20 @@
           ]
         },
         {
-          "description": "The work reached paths no session of the run may write: what the\nproject denies to every run (`permissions.paths.deny`), or a test a\nperson approved. No grant widens a deny, so a person is never\noffered one: the work goes, or the project changes its\nconfig.",
+          "description": "The work reached paths no session of the run may write, each with\nthe reason it is protected: `reasons` lines up with `denied_paths`\nby index. No failure widens them: a person grants an instruction file\nonly to a session that asks for it, so the work goes, or the project\nchanges its config.",
           "type": "object",
           "properties": {
             "denied_paths": {
               "type": "array",
               "items": {
                 "type": "string"
+              }
+            },
+            "reasons": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Protection"
               }
             }
           },
@@ -3336,6 +3514,17 @@
           "items": {
             "$ref": "#/$defs/GateOption"
           }
+        },
+        "scope": {
+          "description": "Why the loop waits on a scope request a person answers.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeWait"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "shows": {
           "description": "The artifacts the decision is about, as the person was shown\nthem. Empty for an escalation about something that happened.",
@@ -3757,13 +3946,20 @@
           ]
         },
         {
-          "description": "The work reached paths no session of the run may write: what the\nproject denies to every run (`permissions.paths.deny`), or a test a\nperson approved. No grant widens a deny, so a person is never\noffered one: the work goes, or the project changes its\nconfig.",
+          "description": "The work reached paths no session of the run may write, each with\nthe reason it is protected: `reasons` lines up with `denied_paths`\nby index. No failure widens them: a person grants an instruction file\nonly to a session that asks for it, so the work goes, or the project\nchanges its config.",
           "type": "object",
           "properties": {
             "denied_paths": {
               "type": "array",
               "items": {
                 "type": "string"
+              }
+            },
+            "reasons": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Protection"
               }
             }
           },
@@ -4347,6 +4543,66 @@
         }
       ]
     },
+    "Precheck": {
+      "description": "What running a proposed criterion found.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "passes"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The criterion fails with this exit: the red output a request may cite.",
+          "type": "object",
+          "properties": {
+            "exit": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "red"
+            }
+          },
+          "required": [
+            "type",
+            "exit"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "could_not_run"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The criterion is not run, so no exit is known.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "not_run"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
     "PromotionCause": {
       "description": "Where a run's promotion leads: the node that exhausted its re-routes,\nand the node it was routed to.",
       "type": "object",
@@ -4391,6 +4647,24 @@
         "suggested_mode"
       ]
     },
+    "ProposedCheck": {
+      "description": "A criterion a session proposed, and what running it found.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "description": "The command as the session wrote it.",
+          "type": "string"
+        },
+        "precheck": {
+          "description": "What the engine's own run of the command found.",
+          "$ref": "#/$defs/Precheck"
+        }
+      },
+      "required": [
+        "cmd",
+        "precheck"
+      ]
+    },
     "ProposedCriterion": {
       "type": "object",
       "properties": {
@@ -4412,6 +4686,36 @@
       },
       "required": [
         "exit_code"
+      ]
+    },
+    "Protection": {
+      "description": "Why a path is protected. The first reason that holds a path names it.",
+      "oneOf": [
+        {
+          "description": "The project's own `permissions.paths.deny`.",
+          "type": "string",
+          "const": "project_deny"
+        },
+        {
+          "description": "The configuration tree of the agent CLI a session runs under.",
+          "type": "string",
+          "const": "agent_config"
+        },
+        {
+          "description": "The instruction files an agent reads: the one reason a person may grant.",
+          "type": "string",
+          "const": "agent_instructions"
+        },
+        {
+          "description": "A test a person approved for a spec: no task writes it.",
+          "type": "string",
+          "const": "approved_test"
+        },
+        {
+          "description": "The run's own git register: `.git`, and what lies under it.",
+          "type": "string",
+          "const": "git_register"
+        }
       ]
     },
     "PullRequestOpenedPayload": {
@@ -4496,6 +4800,22 @@
         "questions_hash",
         "questions",
         "tokens_used"
+      ]
+    },
+    "Reach": {
+      "description": "A path a request reaches, and the protection that holds it.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/ScopeGlob"
+        },
+        "reason": {
+          "$ref": "#/$defs/Protection"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
       ]
     },
     "Report": {
@@ -5283,7 +5603,7 @@
       ]
     },
     "ScopeDerivedPayload": {
-      "description": "What a task may write beyond its declared scope because a shape it owns\nis named there — derived by the engine from the plan and the run's\ntree, never asked for and never decided.",
+      "description": "What a task may write beyond its declared scope because a shape it owns\nis named there — derived by the engine from the workflow's tasks and the\nrun's tree, never asked for and never decided.",
       "type": "object",
       "properties": {
         "at": {
@@ -5333,14 +5653,16 @@
         "decided_by": {
           "$ref": "#/$defs/Decider"
         },
-        "denial_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "mode": {
-          "$ref": "#/$defs/ScopeExpansionMode"
+          "description": "The mode in force when a loop denied it. A node's own denial has\nnone, and reads back without one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeExpansionMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "task_id": {
           "description": "Absent when the denied request was the node's own.",
@@ -5352,11 +5674,21 @@
               "type": "null"
             }
           ]
+        },
+        "why": {
+          "description": "Why it was denied, when the decider said. A denial logged as text\nbefore reasons were typed is read by `why()` instead.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Denial"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "decided_by",
-        "mode",
         "count_this_run"
       ]
     },
@@ -5372,7 +5704,15 @@
           "$ref": "#/$defs/Decider"
         },
         "mode": {
-          "$ref": "#/$defs/ScopeExpansionMode"
+          "description": "The mode in force when a loop granted it. A node's own grant has\nnone, and reads back without one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScopeExpansionMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "paths": {
           "description": "The exact paths this grant authorized — self-contained\naudit, and what a later attempt's effective scope derives from\nthe log, instead of re-pairing the grant with the\n`requested` event that preceded it. `default` for logs written\nbefore the field existed (tolerant reader).",
@@ -5396,7 +5736,6 @@
       },
       "required": [
         "decided_by",
-        "mode",
         "count_this_run"
       ]
     },
@@ -5462,6 +5801,30 @@
       "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
       "type": "string",
       "minLength": 1
+    },
+    "ScopeWait": {
+      "description": "What a loop waits on in one scope request.",
+      "type": "object",
+      "properties": {
+        "because": {
+          "description": "Why the request is not decided without a person.",
+          "$ref": "#/$defs/Waiting"
+        },
+        "proposed": {
+          "description": "The criterion the session proposed for the request, if it proposed one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposedCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "because"
+      ]
     },
     "Seq": {
       "description": "A position in a run's log: a positive number",
@@ -6017,6 +6380,87 @@
       "required": [
         "since",
         "failure"
+      ]
+    },
+    "Waiting": {
+      "description": "Why a request waits for a person instead of being decided.",
+      "oneOf": [
+        {
+          "description": "`ask` mode: every request waits.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "mode_ask"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Another task of the batch may write one of the paths.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "shared_with_batch"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cap": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "granted": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "cap_exhausted"
+            }
+          },
+          "required": [
+            "type",
+            "granted",
+            "cap"
+          ]
+        },
+        {
+          "description": "The request reaches an instruction file, which only a person grants.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "instructions"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A node's request that a person answers.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "person"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
       ]
     },
     "Withheld": {

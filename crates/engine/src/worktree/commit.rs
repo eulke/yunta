@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{CommitSha, InvalidId, TreeId};
 
-use super::{capture_tree, head_commit, head_tree, WorktreeError};
+use super::capture::capture_for_commit;
+use super::{head_commit, head_tree, WorktreeError};
 use crate::git::{self, Effect};
 use crate::process::Supervision;
 
@@ -19,9 +20,9 @@ pub struct Captured {
 
 /// Commits everything `repo` holds — its `HEAD` plus whatever lies in it
 /// uncommitted, less what git ignores — on top of `HEAD`, moving its
-/// branch, and answers with the tree it holds and the commit made of it.
-/// A tree that is `HEAD`'s already makes no commit: nothing changed. The
-/// tree is answered either way, so nobody reads it again.
+/// branch, and answers with the tree it holds and the commit made of it. A
+/// tree that is `HEAD`'s already makes no commit: nothing changed. The tree
+/// is answered either way, so nobody reads it again.
 ///
 /// No hook runs. The tree committed is exactly the one captured, the
 /// same tree id the log names, and a hook that reformats a file or fails
@@ -34,7 +35,7 @@ pub async fn commit_tree(
     message: &str,
     supervision: Supervision<'_>,
 ) -> Result<Captured, WorktreeError> {
-    let tree = capture_tree(repo, index, supervision).await?;
+    let tree = capture_for_commit(repo, index, supervision).await?;
     if tree == head_tree(repo, supervision).await? {
         return Ok(Captured { tree, commit: None });
     }

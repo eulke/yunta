@@ -345,18 +345,15 @@ pub(crate) fn capabilities() -> Capabilities {
     }
 }
 
-/// The files of a checkout this CLI loads configuration from that runs
-/// code or mounts tools: its settings with their hooks, and its MCP
-/// servers.
+/// The trees of a checkout this CLI loads configuration from that runs
+/// code or mounts tools: `.claude/`, with its settings and their hooks,
+/// and the MCP servers in `.mcp.json`. A tree covers every file under
+/// it, including files a session creates later.
 pub(crate) fn own_config() -> Vec<ScopeGlob> {
-    [
-        ".claude/settings.json",
-        ".claude/settings.local.json",
-        ".mcp.json",
-    ]
-    .into_iter()
-    .filter_map(|path| ScopeGlob::exact(Path::new(path)).ok())
-    .collect()
+    [".claude/**", ".mcp.json"]
+        .into_iter()
+        .filter_map(|tree| tree.parse().ok())
+        .collect()
 }
 
 #[async_trait]

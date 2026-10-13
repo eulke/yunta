@@ -35,15 +35,14 @@ async fn from_here(
         })?;
     let scratch = tempfile::tempdir().expect("a scratch outside the checkout");
     let index = scratch.path().join("index");
-    audit(
-        dir,
-        &from,
-        &index,
-        yunta_engine::Ceiling::scope(scope),
-        staged,
-        owner.supervision(),
-    )
-    .await
+    // Nothing is protected here: these cases judge the scope alone.
+    let protected = yunta_core::protected::Protected::default();
+    let ceiling = yunta_engine::Ceiling {
+        scope,
+        protected: &protected,
+        closing: yunta_core::protected::Closing::Every,
+    };
+    audit(dir, &from, &index, ceiling, staged, owner.supervision()).await
 }
 
 fn setup_repo(dir: &std::path::Path) {

@@ -28,11 +28,13 @@ mod stream;
 mod tree;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Phase, TaskLedger};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
+use yunta_core::protected::Protected;
 use yunta_core::Task;
 
 pub use outcome::{
@@ -50,7 +52,6 @@ pub(crate) use criteria::{
 pub use criteria::{post_check, pre_check, PostCheck};
 pub use dispatch::DispatchError;
 pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
-pub(crate) use evidence::locates_a_refusal;
 pub use held::HeldGate;
 pub(crate) use judge::{judge, Judgement, Work};
 pub use memo::{Memo, Memoized};
@@ -123,8 +124,8 @@ impl CriterionRun {
 /// ladder, forwarded to every session this cycle opens. `scope_expansion`
 /// carries the loop node's own settings (absent means the schema's
 /// own default, `deny`); `grants` is the batch's shared
-/// [`crate::scope_expansion::GrantLedger`] — `max_per_run` is
-/// run-scoped, not task-scoped, and the ledger's atomic cap window is
+/// [`crate::scope_expansion::GrantWindow`] — `max_per_run` is
+/// run-scoped, not task-scoped, and the window's atomic cap check is
 /// what makes the count exact when several batch members request at
 /// once. `already_granted_paths` are the paths every *prior*
 /// `scope_expansion_granted` on the log authorized for this task — a
@@ -138,11 +139,13 @@ pub struct ScopeGovernance<'a> {
     /// the caller — a `rules`-mode request touching more files than this
     /// is denied.
     pub max_expansion_files: usize,
-    pub grants: &'a crate::scope_expansion::GrantLedger,
+    pub grants: &'a crate::scope_expansion::GrantWindow,
     pub already_granted_paths: &'a [ScopeGlob],
     /// What the other tasks of the batch may write: a path the evidence
     /// locates there is a person's to grant, never the engine's.
     pub beside: &'a [ScopeGlob],
+    /// What no session may write, lifted by what a person granted this task.
+    pub protected: Arc<Protected>,
 }
 
 /// The resources and retry policy one task's attempts run under —
@@ -247,6 +250,7 @@ async fn cycle(
         grants,
         already_granted_paths,
         beside,
+        protected,
     } = governance;
     // Every check reaches the log the moment it runs. A cycle records a
     // pre-check even when it ran no criterion — denied, or cut before it
@@ -298,9 +302,6 @@ async fn cycle(
         guarded,
     } = laid;
     let unit = &overlaid;
-    // What the run denies every session: the project's deny and every
-    // test a person approved, this task's own among them.
-    let denied = setup.denied.clone();
     let params = AttemptParams {
         task,
         instruction,
@@ -315,7 +316,7 @@ async fn cycle(
         grants,
         already_granted_paths,
         beside,
-        denied: &denied,
+        protected: &protected,
         resume: None,
         audit,
         cancel,
@@ -444,11 +445,7 @@ async fn cycle(
             }
             AttemptStep::Again(record) => {
                 last_check = record.recorded.or(last_check);
-                let widened: Vec<ScopeGlob> = record
-                    .scope_expansion
-                    .iter()
-                    .flat_map(|outcome| outcome.request.paths.iter().cloned())
-                    .collect();
+                let widened = expansion::paths_granted(record.scope_expansion.as_ref()).to_vec();
                 granted.extend(widened.iter().cloned());
                 continuing = record.session.clone().map(|session| Continuing {
                     session,

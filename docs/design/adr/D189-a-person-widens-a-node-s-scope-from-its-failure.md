@@ -3,10 +3,12 @@ number: D189
 title: "A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first"
 status: revised
 revises: []
-revised_by: [D192, D238]
+revised_by: [D192, D238, D259]
 ---
 
 # D189 — A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first
+
+*(Revised by D259: a node's failure offers `grant` only where the close would apply it, and a denied node request leaves a finding.)*
 
 ## Context
 

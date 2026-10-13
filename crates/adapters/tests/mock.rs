@@ -227,7 +227,7 @@ outcome: { type: completed, summary: "done" }
         allowed: Some(vec!["src/**".into()]),
         roots: Vec::new(),
         advice: Advice::ReportFinding,
-        denied: Vec::new(),
+        protected: yunta_core::protected::Protected::default(),
         naming: ToolNaming::Bare,
     };
     let session = fixture.spawn(judged(req).await).await.unwrap();
@@ -259,7 +259,7 @@ outcome: { type: completed, summary: "done" }
         allowed: Some(vec!["src/**".into()]),
         roots: Vec::new(),
         advice: Advice::ReportFinding,
-        denied: Vec::new(),
+        protected: yunta_core::protected::Protected::default(),
         naming: ToolNaming::Bare,
     };
     let session = fixture.spawn(judged(req).await).await.unwrap();

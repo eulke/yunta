@@ -5,9 +5,11 @@ pub mod happening;
 pub mod kinds;
 pub mod ledger;
 pub mod payloads;
+pub mod scope_wait;
 pub mod withheld;
 
 pub use kinds::GateEvent;
 pub use ledger::*;
 pub use payloads::*;
+pub use scope_wait::*;
 pub use withheld::Withheld;

@@ -45,7 +45,7 @@ async fn a_red_stop_is_sent_back_once_and_the_same_session_closes_its_task() {
     );
 
     let RunReport { terminal, state } = bench
-        .run(&scope_expansion_workflow("deny", &[], None), &fixture)
+        .run(&scope_expansion_workflow("deny", None), &fixture)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -89,7 +89,7 @@ async fn a_stop_on_the_same_work_is_sent_back_only_once() {
     );
 
     let RunReport { terminal, state } = bench
-        .run(&scope_expansion_workflow("deny", &[], None), &fixture)
+        .run(&scope_expansion_workflow("deny", None), &fixture)
         .await;
 
     assert!(
@@ -127,10 +127,7 @@ async fn a_session_that_asked_for_scope_is_never_sent_back() {
     ));
 
     let RunReport { terminal, state } = bench
-        .run(
-            &scope_expansion_workflow("rules", &["b.txt"], None),
-            &fixture,
-        )
+        .run(&scope_expansion_workflow("rules", None), &fixture)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -194,7 +191,7 @@ async fn a_session_whose_refused_write_its_red_output_locates_is_never_sent_back
     );
 
     let RunReport { terminal, state } = bench
-        .run(&scope_expansion_workflow("ask", &[], None), &fixture)
+        .run(&scope_expansion_workflow("ask", None), &fixture)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);

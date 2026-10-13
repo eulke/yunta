@@ -26,15 +26,7 @@ impl CheckError {
             } => node(id).key(field.as_str()),
             CheckError::UnknownRunner { node: id, .. }
             | CheckError::RunnerHasNoCandidates { node: id, .. } => node(id).key("runner"),
-            CheckError::Unset { node: id, key, .. } => match key {
-                ConfigKey::Command { .. } => node(id).key("run").key("command"),
-                ConfigKey::Executor { .. } => node(id).key("executor"),
-                ConfigKey::Runner => node(id).key("runner"),
-                ConfigKey::BaselineSuite
-                | ConfigKey::Coverage
-                | ConfigKey::Forge
-                | ConfigKey::RunBranch => node(id),
-            },
+            CheckError::Unset { node: id, key, .. } => unset(id, key),
             CheckError::ContextFileUnreachable { node: id, .. }
             | CheckError::ContextOnUnsupportedNode { node: id } => node(id).key("context"),
             CheckError::Unanswerable(unanswerable) => unanswerable.pointer(),
@@ -71,6 +63,9 @@ impl CheckError {
             CheckError::ResumeSessionOnSessionlessNode { node: id } => node(id).key("on_interrupt"),
             CheckError::AskOnANodeThatAsksNothing { node: id } => node(id).key("ask"),
             CheckError::ClosedNetworkUnderFull { node: id } => node(id).key("network"),
+            CheckError::ScopeExpansionWithinRetired { node: id } => {
+                node(id).key("scope_expansion").key("within")
+            }
             CheckError::Composition(Composition::Missing { node: id, .. })
             | CheckError::Composition(Composition::Ambiguous { node: id, .. })
             | CheckError::Composition(Composition::CrossPack { node: id, .. })
@@ -88,6 +83,20 @@ impl CheckError {
             | CheckError::Composition(Composition::TooDeep { .. })
             | CheckError::PackRequirementUnmet { .. } => return None,
         })
+    }
+}
+
+/// Where a config key left unset is named in its node: the node's own key
+/// that sets it, or the node itself for a key the project configures.
+fn unset(id: &NodeId, key: &ConfigKey) -> Pointer {
+    match key {
+        ConfigKey::Command { .. } => node(id).key("run").key("command"),
+        ConfigKey::Executor { .. } => node(id).key("executor"),
+        ConfigKey::Runner => node(id).key("runner"),
+        ConfigKey::BaselineSuite
+        | ConfigKey::Coverage
+        | ConfigKey::Forge
+        | ConfigKey::RunBranch => node(id),
     }
 }
 

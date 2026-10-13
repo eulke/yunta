@@ -130,7 +130,7 @@ impl SessionTools {
         // the tree the loop's first check of the task reads, which then
         // takes these answers instead of running them again.
         for (index, one) in spec.specs.iter().enumerate().filter(|(_, one)| asked(one)) {
-            crate::worktree::clear_work(&checkout, supervision)
+            crate::worktree::clear_work(&checkout, &self.host.pool.pathspecs(), supervision)
                 .await
                 .map_err(|source| RunToolError::Handover {
                     detail: source.to_string(),

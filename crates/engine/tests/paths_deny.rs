@@ -5,8 +5,10 @@
 use yunta_core::events::{
     EventPayload, Failure, NodeEvent, ScopeEvent, SessionEvent, StoredEvent, ToolTarget,
 };
+use yunta_core::expansion::Denial;
+use yunta_core::protected::Protection;
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{git_output, Bench, MOCK_CONFIG};
+use yunta_testkit::{git, git_output, Bench, MOCK_CONFIG};
 
 mod common;
 use common::{plan_session, request_step, scope_expansion_workflow, task_yaml};
@@ -60,7 +62,10 @@ async fn a_scoped_node_writing_a_denied_path_fails_without_a_grant_and_never_lan
     let failed = failures(&events, "tidy");
     assert_eq!(
         failed,
-        vec![Failure::paths_denied(vec![".github/ci.yml".into()])]
+        vec![Failure::paths_denied(
+            vec![".github/ci.yml".into()],
+            vec![Protection::ProjectDeny]
+        )]
     );
     assert!(!failed[0].wants_scope(), "no grant widens a deny");
     assert_eq!(
@@ -92,15 +97,37 @@ async fn a_node_writing_an_agent_s_own_config_fails_without_a_grant_and_never_la
     let failed = failures(&bench.events(), "tidy");
     assert_eq!(
         failed,
-        vec![Failure::paths_denied(vec![".codex/hooks.json".into()])]
+        vec![Failure::paths_denied(
+            vec![".codex/hooks.json".into()],
+            vec![Protection::AgentConfig]
+        )]
     );
     assert!(!failed[0].wants_scope(), "no grant widens it");
     let landed = git_output(&bench.worktree, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(!landed.contains(".codex/hooks.json"), "{landed}");
 }
 
+/// Every agent CLI's configuration is protected, not only the configuration
+/// of the CLIs a run drives: a run on Claude Code alone still refuses a
+/// write to what Codex reads.
+#[tokio::test]
+async fn a_run_on_one_cli_refuses_a_write_to_another_cli_s_config() {
+    let bench = Bench::new();
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"mkdir -p .codex && echo x > .codex/hooks.json\" }\n";
+    let fixture = "dialect: claude-code\nsessions: []\n";
+    bench.run_with_config(workflow, fixture, MOCK_CONFIG).await;
+
+    assert_eq!(
+        failures(&bench.events(), "tidy"),
+        vec![Failure::paths_denied(
+            vec![".codex/hooks.json".into()],
+            vec![Protection::AgentConfig]
+        )]
+    );
+}
+
 /// The planner's plan and one task scoped to `scope` whose session writes
-/// `writes`, under an `ask` expansion mode.
+/// `writes`, under a `rules` expansion mode.
 fn one_task(scope: &str, writes: &str, request: Option<&str>) -> (String, String) {
     let tasks = format!(
         "tasks:\n{}",
@@ -118,10 +145,7 @@ fn one_task(scope: &str, writes: &str, request: Option<&str>) -> (String, String
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {writes:?}, content: \"x\" }}\n{request}    outcome: {{ type: completed, summary: did-w }}\n"
     ));
-    (
-        scope_expansion_workflow("rules", &[".github/**"], None),
-        fixture,
-    )
+    (scope_expansion_workflow("rules", None), fixture)
 }
 
 #[tokio::test]
@@ -149,8 +173,8 @@ async fn a_task_writing_a_denied_path_is_rejected() {
     assert!(!landed.contains(".github/ci.yml"), "{landed}");
 }
 
-/// Under `rules` whose `within` would admit it, a request for a denied
-/// path is still refused by rule, without asking anyone.
+/// Under `rules`, a request for a denied path is refused by rule, without
+/// asking anyone, and the refusal names the project's deny as its reason.
 #[tokio::test]
 async fn a_task_request_for_a_denied_path_is_refused_by_rule_without_asking() {
     let bench = Bench::new();
@@ -159,18 +183,20 @@ async fn a_task_request_for_a_denied_path_is_refused_by_rule_without_asking() {
         .run_with_config(&workflow, &fixture, &denying_ci())
         .await;
 
-    let reasons: Vec<String> = bench
+    let reasons: Vec<Denial> = bench
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Scope(ScopeEvent::Denied(p))) => p.denial_reason.clone(),
+            Some(EventPayload::Scope(ScopeEvent::Denied(p))) => p.why(),
             _ => None,
         })
         .collect();
     assert!(
-        reasons
-            .iter()
-            .any(|reason| reason.contains("the project denies it to every run")),
+        reasons.iter().any(|reason| matches!(
+            reason,
+            Denial::ReachesProtected { reached }
+                if reached.iter().any(|hit| hit.reason == Protection::ProjectDeny)
+        )),
         "{reasons:?}"
     );
     assert!(!bench.events().iter().any(|event| matches!(
@@ -192,4 +218,50 @@ async fn a_nodes_request_for_a_denied_path_is_never_put_to_a_person() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(failures(&bench.events(), "fix").is_empty());
+}
+
+/// A node's request for a path the project denies is recorded as denied,
+/// with the finding that says why, and the node's close goes on.
+#[tokio::test]
+async fn a_node_request_for_a_denied_path_is_denied_and_leaves_a_finding() {
+    let bench = Bench::new();
+    let workflow = "name: w\nnodes:\n  - { id: fix, kind: bash, scope: [\"src/**\"], run: \"printf 'paths: [\\\".github/ci.yml\\\"]\\nreason: ci\\n' > .yunta-scope-expansion-request.yaml\" }\n";
+    bench
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            &denying_ci(),
+        )
+        .await;
+    let denied = bench.events().iter().any(|e| {
+        matches!(
+            e.payload(),
+            Some(EventPayload::Scope(ScopeEvent::Denied(_)))
+        )
+    });
+    assert!(denied, "{:?}", bench.events());
+    assert_eq!(bench.findings_by("fix").len(), 1);
+}
+
+/// An ignored file under a protected tree is judged like any other changed
+/// file: the node fails naming it, though git would not have shown it.
+#[tokio::test]
+async fn an_ignored_file_under_a_protected_tree_fails_the_node() {
+    let bench = Bench::new();
+    std::fs::write(
+        bench.worktree.join(".gitignore"),
+        ".claude/settings.local.json\n",
+    )
+    .unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "ignore"]);
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"mkdir -p .claude && echo x > .claude/settings.local.json && echo y > notes.txt\" }\n";
+    let config = format!("{MOCK_CONFIG}permissions:\n  paths:\n    deny: [\".claude/**\"]\n");
+    bench
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", &config)
+        .await;
+
+    let ignored = std::path::PathBuf::from(".claude/settings.local.json");
+    assert!(failures(&bench.events(), "tidy").iter().any(|f| matches!(f,
+        Failure::PathsDenied { denied_paths, .. } if *denied_paths == vec![ignored.clone()])));
 }

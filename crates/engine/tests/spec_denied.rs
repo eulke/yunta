@@ -11,7 +11,8 @@ use common::spec::*;
 use yunta_core::events::{
     EventPayload, Failure, NodeEvent, SessionEvent, StoredEvent, TaskStatus, ToolTarget,
 };
-use yunta_engine::{RunReport, RunTerminal};
+use yunta_core::protected::Protection;
+use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, write, Bench, MOCK_CONFIG};
 
 /// Each failure of `node`.
@@ -96,7 +97,10 @@ async fn a_node_after_the_loop_that_changes_an_approved_test_fails_and_its_chang
     );
     assert_eq!(
         failures(&bench.events(), "tamper"),
-        vec![Failure::paths_denied(vec![the_test()])]
+        vec![Failure::paths_denied(
+            vec![the_test()],
+            vec![Protection::ApprovedTest]
+        )]
     );
     assert_eq!(at_head(&bench, "tests/greet.sh"), GREETS.trim_end());
     let left = tokio::fs::read_to_string(bench.worktree.join("tests/greet.sh"))
@@ -133,9 +137,9 @@ async fn every_session_after_the_spec_is_accepted_is_fenced_from_every_test() {
     let glob: yunta_core::ScopeGlob = "tests/greet.sh".into();
     for (session, request) in requests.iter().enumerate().skip(2) {
         assert!(
-            request.fence.denied.contains(&glob),
+            request.fence.protected.every().contains(&glob),
             "session {session} is fenced from the test: {:?}",
-            request.fence.denied
+            request.fence.protected.every()
         );
     }
 }
@@ -286,4 +290,46 @@ nodes:
     bench.run(workflow, &fixture).await;
 
     assert!(!task_prompt(&bench).contains("tests a person approved"));
+}
+
+/// The option ids the decision a parked bench waits on offers.
+async fn menu_of(bench: &Bench) -> Vec<String> {
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a failed node is a pause with a menu");
+    escalation
+        .options()
+        .iter()
+        .map(|option| option.id.to_string())
+        .collect()
+}
+
+/// A node that rewrites an approved test and fails on it is offered no
+/// grant: no node may be widened to a test a person approved.
+#[tokio::test]
+async fn a_node_offers_no_grant_for_an_approved_test() {
+    let bench = Bench::new();
+    let workflow = format!(
+        "{}  - id: fix
+    kind: bash
+    depends_on: [implement]
+    scope: [\"src/**\"]
+    run: \"printf 'exit 0\\\\n' > tests/greet.sh\"
+",
+        specified_loop()
+    );
+    bench
+        .run_with_config(
+            &workflow,
+            &building("      - { path: greeting.txt, content: Hello }\n"),
+            MOCK_CONFIG,
+        )
+        .await;
+    let menu = menu_of(&bench).await;
+    assert!(!menu.iter().any(|id| id.starts_with("grant")), "{menu:?}");
 }

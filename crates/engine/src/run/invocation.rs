@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
+use yunta_core::protected::Protected;
 use yunta_core::Pid;
 
 use super::{RunCtx, RunEnv, RunError};
@@ -43,8 +44,6 @@ pub(super) fn build_ctx(
     // every append this invocation makes takes the same values back out,
     // and a run that declares no secret builds an empty one and pays nothing.
     let redactor = yunta_core::Redactor::of(&manifest.config.secret_names(), &*secrets)?;
-    let root_cancel = cancel.clone();
-    let root_cancel_for_ctx = root_cancel.clone();
     let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
         run_dir,
         Pid::current(),
@@ -87,7 +86,7 @@ pub(super) fn build_ctx(
         human_interaction,
         budget_lifted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         process_registry: registry,
-        root_cancel: root_cancel_for_ctx,
+        root_cancel: cancel.clone(),
         forge,
         depth,
         ambient,
@@ -98,6 +97,7 @@ pub(super) fn build_ctx(
         unit: None,
         landing: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         awake,
+        protected: Arc::new(std::sync::RwLock::new(Arc::new(Protected::default()))),
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own
         // clone of the log handle.
@@ -126,7 +126,7 @@ pub(super) fn build_ctx(
             },
         )),
     };
-    Ok((ctx, root_cancel, registry_error))
+    Ok((ctx, cancel.clone(), registry_error))
 }
 
 /// Every variable layered onto a subprocess of the run: the ambient

@@ -421,6 +421,15 @@ pub enum CheckError {
         ceiling: &'static str,
     },
 
+    /// `scope_expansion.within` is retired: a loop that still declares it
+    /// is refused, because the key would otherwise be read as a ceiling
+    /// it no longer is.
+    #[error(
+        "node `{node}`: `scope_expansion.within` moved to `permissions.paths.deny`, the \
+         project's list of paths no run may write — remove `within` from this node"
+    )]
+    ScopeExpansionWithinRetired { node: NodeId },
+
     /// A 0 would starve every ready node forever — a config
     /// mistake surfaced here as a refusal (the scheduler's clamp to 1
     /// stays as defense in depth).

@@ -71,7 +71,7 @@ A pack is code from someone else, and it can be audited by reading it:
 workflow it ships — every `bash`/hook/loop command, every context source and
 exactly what it points at, permissions and required agent per node, `mcp`
 servers reached, executors flagged as code, the repository paths a node's
-`scope:` or a loop's `scope_expansion.within` names, and each workflow's
+`scope:` names, and each workflow's
 **complete, untrimmed prompt text**. It's inventory, never a verdict: nothing here flags
 content as "suspicious" — that would be trivially evadible and would only
 give false confidence. It also reports whether the pack ships its own tests
@@ -234,9 +234,9 @@ Field by field:
   context instead of failing the node — and name the files your pack reads in
   its README. `yunta check` and `yunta doctor` tell the person installing it
   which required ones their last commit lacks.
-- **No repository layout in a scope.** `scope: ["src/**"]` or
-  `within: ["**/*.rs"]` holds only where the code sits there. A node that
-  fixes what the run itself wrote declares `scope: run` — what the run
+- **No repository layout in a scope.** `scope: ["src/**"]` holds only where
+  the code sits there. A node that fixes what the run itself wrote declares
+  `scope: run` — what the run
   changed so far, whatever the language or layout — and what must never be
   touched is the installing project's to say, under `permissions.paths.deny`
   (see [scope and permissions](guide.md#scope-and-permissions)). `yunta pack

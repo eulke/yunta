@@ -5,8 +5,10 @@
 
 use std::str::FromStr;
 
-use yunta_core::events::GateOption;
-use yunta_core::OptionId;
+use yunta_core::events::{Decider, GateOption, HumanChoice};
+use yunta_core::expansion::{node_offer, Decision, Denial};
+use yunta_core::protected::Protected;
+use yunta_core::{OptionId, ScopeGlob};
 
 /// An option the engine appends to an escalation and acts on when a human
 /// picks it — as opposed to an author-declared option, which the engine
@@ -211,8 +213,7 @@ pub(crate) mod offers {
     pub(crate) fn grant(paths: &str) -> GateOption {
         ReservedOption::Grant.offer(
             format!("Grant access to {paths}"),
-            "The task's final diff is evaluated against its scope plus these paths; \
-             consumes 1 of max_per_run",
+            "The task's final diff is evaluated against its scope plus these paths",
         )
     }
 
@@ -289,6 +290,31 @@ pub(crate) mod offers {
     }
 }
 
+/// What a person's choice decides about a request the loop escalated: the
+/// grant the choice names, unless the protected set refuses one of its paths,
+/// or else the refusal the choice is. A task's own request is always
+/// widenable.
+pub(crate) fn decision_of_choice(
+    choice: &HumanChoice,
+    paths: &[ScopeGlob],
+    protected: &Protected,
+    by: &Decider,
+) -> Decision {
+    if ReservedOption::of(&choice.option) != Some(ReservedOption::Grant) {
+        return Decision::Deny(Denial::Chosen {
+            option: choice.option.as_str().to_string(),
+            note: choice.free_text.clone(),
+        });
+    }
+    match node_offer(paths, protected, true) {
+        Ok(granted) => Decision::Grant {
+            paths: granted,
+            by: by.clone(),
+        },
+        Err(denial) => Decision::Deny(denial),
+    }
+}
+
 impl FromStr for ReservedOption {
     type Err = ();
 
@@ -314,6 +340,19 @@ mod tests {
     use yunta_core::{ModeName, NodeId, OptionId};
 
     use super::*;
+
+    #[test]
+    fn a_task_grant_names_its_widening_and_no_cap() {
+        // Only the engine's own grants count toward `max_per_run`, so a grant
+        // a person picks from this menu does not say it consumes the cap.
+        let grant = offers::grant("src/a.rs");
+        assert_eq!(grant.id.as_str(), "grant");
+        assert!(
+            !grant.tradeoff.contains("max_per_run"),
+            "{}",
+            grant.tradeoff
+        );
+    }
 
     /// Every option this module offers, built with stand-in arguments —
     /// the closed set an escalation draws from, so a new offer added

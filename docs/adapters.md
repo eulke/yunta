@@ -92,8 +92,16 @@ Every session also loads its person's own configuration of the CLI — settings,
 extensions, MCP servers, hooks — unless its node says `cli_config: isolated`, which
 leaves it with only what the run mounts (`--setting-sources ""` and
 `--strict-mcp-config` for `claude-code`, `--ignore-user-config` and `--ignore-rules`
-for `codex`). The files a CLI loads that configuration from inside a checkout are
-never written by any session of any run.
+for `codex`). The trees a CLI loads that configuration from inside a checkout —
+`.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/**` for
+`codex` — are never written by any session of any run. The instruction files,
+`AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. The
+close judges what each session wrote against these trees and files, git-ignored
+files included, so a write the fence let through is still refused. The one place it
+does not look is inside a directory the project ignores whole, such as a build
+output or a dependency tree, for a pattern that names no directory of its own
+(`**/AGENTS.md`): what lies there belongs to the build or the dependency. A run
+never commits what git ignores.
 
 A refusal reaches the model with the reason and the way out — ask for more
 scope, or report the need as a finding — and reaches the log as

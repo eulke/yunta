@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use yunta_core::protected::Protected;
 use yunta_core::ScopeGlob;
 
 use super::SessionPlan;
@@ -38,13 +39,14 @@ impl HeldTo {
         }
     }
 
-    /// What the session may never write: what the project denies to every
-    /// run, and for a task's session what its task is denied besides —
-    /// the files its tests live in.
-    pub(super) fn denied<'a>(&'a self, project: &'a [ScopeGlob]) -> &'a [ScopeGlob] {
+    /// What no session of the run may write, as this session's work is held
+    /// to it: its task's set or its node's set, each with the instruction
+    /// files a person granted lifted, or the run's set when neither holds it.
+    pub(super) fn protected(&self, setup: &SessionSetup) -> Protected {
         match self {
-            HeldTo::Task(task) => &task.denied,
-            HeldTo::NodeScope(_) | HeldTo::Nothing => project,
+            HeldTo::Task(task) => task.protected.as_ref().clone(),
+            HeldTo::NodeScope(access) => access.protected.as_ref().clone(),
+            HeldTo::Nothing => setup.protected.as_ref().clone(),
         }
     }
 

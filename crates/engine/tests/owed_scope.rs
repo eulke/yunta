@@ -19,7 +19,7 @@ fn asking(tasks: &[&str]) -> (String, String) {
 
 /// The same, with the second session writing `a.txt` and `more`.
 fn asking_then(tasks: &[&str], more: &str) -> (String, String) {
-    let workflow = scope_expansion_workflow("ask", &[], None);
+    let workflow = scope_expansion_workflow("ask", None);
     let declared: String = tasks.iter().copied().collect();
     let mut fixture = plan_session(&format!("tasks:\n{declared}"));
     fixture.push_str(&requesting_session("task-h"));
@@ -91,6 +91,29 @@ async fn retry_denies_with_a_finding() {
         .into_iter()
         .any(|finding| finding.detail.contains("adjacent fix in b.txt"));
     assert!(finding, "and the denial becomes a finding");
+}
+
+#[tokio::test]
+async fn an_owed_grant_records_the_loop_mode_in_force() {
+    let bench = Bench::new();
+    // The fixture `asking` builds, run under `rules` with no grant to spend:
+    // the request is owed at once, and the person's grant records that mode.
+    let (_, fixture) = asking(&[&task_yaml("task-h", "h", "a.txt", "test -f a.txt")]);
+    bench
+        .run(&scope_expansion_workflow("rules", Some(0)), &fixture)
+        .await;
+
+    bench.wake_answering(&chosen("grant")).await;
+
+    let granted = bench
+        .events()
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Scope(ScopeEvent::Granted(payload))) => Some(payload.clone()),
+            _ => None,
+        })
+        .expect("a grant");
+    assert_eq!(serde_json::to_value(&granted).unwrap()["mode"], "rules");
 }
 
 #[tokio::test]

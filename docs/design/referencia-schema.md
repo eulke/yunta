@@ -209,7 +209,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     concurrency: 2                  # tareas simultáneas con scopes disjuntos (§5.5); default 1
     scope_expansion:                # §6.2 — default deny si se omite
       mode: ask
-      max_per_run: 3
+      max_per_run: 3                # cuenta solo las concesiones que decide el engine (§6.2)
     prompt: |
       Read your task in the tasks document. Implement it within its scope.
 

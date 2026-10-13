@@ -45,14 +45,12 @@ fn refused_targets(events: &[StoredEvent]) -> Vec<ToolTarget> {
 
 #[tokio::test]
 async fn writing_outside_scope_without_a_request_is_refused_never_an_implicit_expansion() {
-    // Nothing but the request protocol lets an agent widen its own scope. A
-    // `within` that technically covers the path does not save the write when
-    // no request was ever written: the test declares
-    // `scope_expansion: { mode: rules, within: [b.txt] }`, but the agent
-    // never writes the request file.
+    // Nothing but the request protocol lets an agent widen its own scope: a
+    // `rules` loop refuses a write outside the task's scope when the agent
+    // never wrote a request for it, so the write never lands.
     let bench = Bench::new();
 
-    let workflow = scope_expansion_workflow("rules", &["b.txt"], None);
+    let workflow = scope_expansion_workflow("rules", None);
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-s", "s", "a.txt", "test -f a.txt")
@@ -97,7 +95,7 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
     // and pause the run.
     let bench = Bench::new();
 
-    let workflow = scope_expansion_workflow("ask", &[], None);
+    let workflow = scope_expansion_workflow("ask", None);
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-p", "p", "a.txt", "test -f a.txt")
@@ -137,11 +135,10 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
             _ => None,
         })
         .expect("a Denied event must be recorded");
-    assert!(denied
-        .denial_reason
-        .as_deref()
-        .unwrap_or_default()
-        .contains("already passes"));
+    assert_eq!(
+        denied.why(),
+        Some(yunta_core::expansion::Denial::PrecheckPasses)
+    );
 
     let findings = findings_posted(&events);
     assert!(
@@ -195,10 +192,7 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
             _ => None,
         })
         .expect("a Denied event must be recorded under the default deny mode");
-    assert_eq!(
-        denied.denial_reason.as_deref(),
-        Some("scope_expansion mode is deny (the default)")
-    );
+    assert_eq!(denied.why(), Some(yunta_core::expansion::Denial::ModeDeny));
 
     let findings = findings_posted(&events);
     let finding = findings
@@ -238,9 +232,9 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
         })),
     );
 
-    // Granted: `rules` mode, `within` covers b.txt.
+    // Granted: `rules` mode, a red criterion and one file in bounds.
     let granted_bench = fenceless_bench();
-    let granted_workflow = scope_expansion_workflow("rules", &["b.txt"], None);
+    let granted_workflow = scope_expansion_workflow("rules", None);
     let mut granted_fixture = plan_session(&tasks);
     granted_fixture.push_str(&session);
     let RunReport {
@@ -258,7 +252,7 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     // same write is now a real violation and the task never satisfies
     // its own scope check.
     let denied_bench = fenceless_bench();
-    let denied_workflow = scope_expansion_workflow("deny", &[], None);
+    let denied_workflow = scope_expansion_workflow("deny", None);
     let mut denied_fixture = plan_session(&tasks);
     denied_fixture.push_str(&session);
     let RunReport {
@@ -295,7 +289,7 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
     let mut requested_payloads = Vec::new();
     for mode in ["rules", "ask", "deny"] {
         let bench = Bench::new();
-        let workflow = scope_expansion_workflow(mode, &[], None);
+        let workflow = scope_expansion_workflow(mode, None);
         let mut fixture = plan_session(&tasks);
         fixture.push_str(&session);
         // The terminal deliberately differs by mode (rules grants, ask
@@ -378,10 +372,7 @@ async fn an_engine_granted_expansion_is_followed_by_the_one_attempt_it_makes_dif
     fixture.push_str(&asks);
     fixture.push_str(writes);
     let RunReport { terminal, state } = bench
-        .run(
-            &scope_expansion_workflow("rules", &["b.txt"], None),
-            &fixture,
-        )
+        .run(&scope_expansion_workflow("rules", None), &fixture)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -401,7 +392,7 @@ async fn an_engine_granted_expansion_is_followed_by_the_one_attempt_it_makes_dif
     fixture.push_str(&asks);
     fixture.push_str(writes);
     let RunReport { state, .. } = bench
-        .run(&scope_expansion_workflow("deny", &[], None), &fixture)
+        .run(&scope_expansion_workflow("deny", None), &fixture)
         .await;
     assert_eq!(
         state.tasks.status("task-w"),
@@ -418,7 +409,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     // engine derives from the log's own `scope_expansion_granted.paths`.
     let bench = Bench::new();
 
-    let workflow = scope_expansion_workflow("ask", &[], None);
+    let workflow = scope_expansion_workflow("ask", None);
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-h", "h", "a.txt", "test -f a.txt")
@@ -487,87 +478,13 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
 }
 
 #[tokio::test]
-async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_retries_in_scope() {
-    let bench = Bench::new();
-
-    let workflow = scope_expansion_workflow("ask", &[], None);
-    let tasks = format!(
-        "tasks:\n{}",
-        task_yaml("task-n", "n", "a.txt", "test -f a.txt")
-    );
-    let mut fixture = plan_session(&tasks);
-    // Attempt 1 writes what its scope allows and asks for b.txt, which a
-    // fence would have refused; the human denies. The work it left already
-    // closes the task within its scope, so no second session opens.
-    fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
-        request_step(serde_json::json!({
-            "paths": ["b.txt"],
-            "reason": "adjacent fix in b.txt",
-            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
-        })),
-    ));
-
-    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
-        option: "deny".into(),
-        by: "eulke".into(),
-        free_text: Some("out of this sprint".to_string()),
-    });
-    let RunReport { terminal, state } = bench
-        .run_with_interaction(&workflow, &fixture, &interaction)
-        .await;
-
-    assert_eq!(terminal, RunTerminal::Finished);
-    assert_eq!(
-        state.tasks.status("task-n"),
-        Some(yunta_core::events::TaskStatus::Done)
-    );
-
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let denied = events
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
-                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-n") =>
-            {
-                Some(p)
-            }
-            _ => None,
-        })
-        .expect("the human denial must be recorded");
-    assert_eq!(
-        denied.decided_by,
-        yunta_core::events::Decider::Person { id: "eulke".into() }
-    );
-    assert!(denied
-        .denial_reason
-        .as_deref()
-        .unwrap_or_default()
-        .contains("out of this sprint"));
-
-    // Every denial — human ones included — becomes a finding
-    // carrying the agent's own reason and proposed criterion.
-    let findings = findings_posted(&events);
-    let finding = findings
-        .iter()
-        .find(|f| f.detail.contains("adjacent fix in b.txt"))
-        .expect("the denial must convert into a finding");
-    assert_eq!(
-        finding.proposed_criterion,
-        Some(yunta_core::events::ProposedCriterion {
-            cmd: "test -f nonexistent-marker".to_string()
-        })
-    );
-}
-
-#[tokio::test]
 async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     // A live surface must not change the headless behavior: NoInteraction (yunta
     // test, CI) keeps degrading to a pause, with no gate recorded (an
     // unresolved question re-asks on resume, same convention as any gate).
     let bench = Bench::new();
 
-    let workflow = scope_expansion_workflow("ask", &[], None);
+    let workflow = scope_expansion_workflow("ask", None);
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-p", "p", "a.txt", "test -f a.txt")
@@ -1069,7 +986,7 @@ fn asks_then(answered: &str) -> (String, String) {
         })),
     );
     let fixture = plan_session(&tasks) + &asks + answered;
-    (scope_expansion_workflow("ask", &[], None), fixture)
+    (scope_expansion_workflow("ask", None), fixture)
 }
 
 fn grants() -> ScriptedInteraction {
@@ -1173,10 +1090,7 @@ async fn the_attempt_after_an_engine_grant_resumes_the_session_that_asked() {
     );
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
-        .run(
-            &scope_expansion_workflow("rules", &["b.txt"], None),
-            &fixture,
-        )
+        .run(&scope_expansion_workflow("rules", None), &fixture)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
     let opened = task_sessions(&bench, "task-h");

@@ -16,6 +16,7 @@ use crate::diagnostic::{ArtifactFailure, Report};
 use crate::glob::{listed_globs, InvalidScopeGlob, ScopeGlob};
 use crate::hash::ContentHash;
 use crate::ids::AdapterId;
+use crate::protected::Protection;
 
 mod exit;
 mod sentences;
@@ -67,12 +68,16 @@ pub enum Failure {
     /// very tree an earlier attempt failed on: it is refused before
     /// running, since the same command on the same tree answers the same.
     Unchanged { unchanged: Unchanged },
-    /// The work reached paths no session of the run may write: what the
-    /// project denies to every run (`permissions.paths.deny`), or a test a
-    /// person approved. No grant widens a deny, so a person is never
-    /// offered one: the work goes, or the project changes its
-    /// config.
-    PathsDenied { denied_paths: Vec<PathBuf> },
+    /// The work reached paths no session of the run may write, each with
+    /// the reason it is protected: `reasons` lines up with `denied_paths`
+    /// by index. No failure widens them: a person grants an instruction file
+    /// only to a session that asks for it, so the work goes, or the project
+    /// changes its config.
+    PathsDenied {
+        denied_paths: Vec<PathBuf>,
+        #[serde(default)]
+        reasons: Vec<Protection>,
+    },
     /// A command the node ran exited non-zero, and what it printed last
     /// is the reason a person reads.
     Exited { exited: CommandExit },
@@ -280,10 +285,12 @@ impl Failure {
         }
     }
 
-    /// Work that reached `paths`, which no session of the run may write.
-    pub fn paths_denied(paths: Vec<PathBuf>) -> Self {
+    /// Work that reached `paths`, which no session of the run may write,
+    /// each path with the reason at the same index in `reasons`.
+    pub fn paths_denied(paths: Vec<PathBuf>, reasons: Vec<Protection>) -> Self {
         Failure::PathsDenied {
             denied_paths: paths,
+            reasons,
         }
     }
 
@@ -419,10 +426,9 @@ impl fmt::Display for Failure {
                 }
                 Ok(())
             }
-            Failure::PathsDenied { denied_paths } => write!(
+            Failure::PathsDenied { denied_paths, .. } => write!(
                 f,
-                "wrote what no session of the run may write (`permissions.paths.deny`, or a \
-                 test a person approved) — {}; no grant widens it: undo those changes",
+                "wrote what no session of the run may write — {}: undo those changes",
                 denied_paths
                     .iter()
                     .map(|path| path.display().to_string())

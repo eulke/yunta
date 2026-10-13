@@ -219,6 +219,7 @@ async fn a_seeded_private_index_captures_what_a_fresh_one_does() {
     let captured = yunta_engine::capture_tree(
         &world.repo,
         &scratch.path().join("seeded-index"),
+        &yunta_core::protected::Pathspecs::default(),
         world.owner.supervision(),
     )
     .await

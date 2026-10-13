@@ -346,11 +346,14 @@ pub trait Adapter: Send + Sync {
         Vec::new()
     }
 
-    /// The files of a checkout this adapter's CLI loads configuration from
+    /// The trees of a checkout this adapter's CLI loads configuration from
     /// that runs code or mounts tools — its settings with their hooks, its
-    /// MCP servers. No session of any run writes them: a pooled checkout
-    /// outlives the session that wrote one, and the next session to open
-    /// there would run what it says outside its sandbox. Default: none.
+    /// MCP servers. No session of any run writes under them, whichever
+    /// adapter the run drives: a pooled checkout outlives the session that
+    /// wrote one, and the next session to open there would run what it says
+    /// outside its sandbox. Every run protects the trees in
+    /// [`crate::protected::AGENT_CONFIG`], which holds every adapter's.
+    /// Default: none.
     fn own_config(&self) -> Vec<crate::ScopeGlob> {
         Vec::new()
     }

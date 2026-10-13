@@ -9,7 +9,7 @@
 //! task the cycle holds and the checks the log holds; what
 //! `yunta_check_task` answers is the judgement the attempt's close makes.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -17,7 +17,8 @@ use yunta_core::events::{
     CriterionResult, CriterionType, EventPayload, ExecutionEnvironment, NodeEvent, Phase,
     StoredEvent, TaskCheckAnsweredPayload, TaskCheckStartedPayload, TaskEvent, TaskStatus,
 };
-use yunta_core::{ScopeGlob, TaskId};
+use yunta_core::protected::Closing;
+use yunta_core::{ScopeGlob, TaskId, TreeId};
 
 use super::catalog::RunTool;
 use super::host::TaskAccess;
@@ -72,16 +73,25 @@ impl SessionTools {
         self.check_verdict(judgement)
     }
 
+    /// The tree `worktree` holds now, captured under the run's protected
+    /// pathspecs: an ignored file no session may write is part of it.
+    async fn tree_now(&self, worktree: &Path) -> Result<TreeId, RunToolError> {
+        crate::task_cycle::content_of(
+            worktree,
+            &self.host.memo.pathspecs(),
+            self.host.supervision(&self.stop),
+        )
+        .await
+        .map_err(|source| RunToolError::Check { source })
+    }
+
     /// The judgement `access`'s task gets on its checkout as it stands,
     /// on the log as one check of the task, and the tree it judged.
     pub(super) async fn judged_now(
         &self,
         access: &TaskAccess,
     ) -> Result<(Judgement, yunta_core::TreeId), RunToolError> {
-        let tree =
-            crate::task_cycle::content_of(&access.unit.worktree, self.host.supervision(&self.stop))
-                .await
-                .map_err(|source| RunToolError::Check { source })?;
+        let tree = self.tree_now(&access.unit.worktree).await?;
         let (_turn, stop) = access
             .checks
             .take(tree.clone(), &self.stop, &access.index)
@@ -97,7 +107,8 @@ impl SessionTools {
             &access.task,
             crate::scope::Ceiling {
                 scope: &access.scope,
-                deny: &access.denied,
+                protected: &access.protected,
+                closing: Closing::Every,
             },
             Work {
                 unit: &access.unit,
@@ -197,11 +208,11 @@ struct TaskSheet<'a> {
     invariants: &'a [String],
     /// What the diff is held to: declared plus granted.
     scope: &'a [ScopeGlob],
-    /// What the diff may never touch, whatever its scope: what the project
-    /// denies to every run, and the files of every test a person approved,
-    /// this task's own among them.
-    #[serde(skip_serializing_if = "<[ScopeGlob]>::is_empty")]
-    denied: &'a [ScopeGlob],
+    /// What the diff may never touch, whatever its scope: every path the
+    /// run protects, and the files of every test a person approved, this
+    /// task's own among them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    denied: Vec<ScopeGlob>,
     criteria: Vec<Declared<'a>>,
     cycles: Vec<Cycle>,
     /// What the engine ran these checks with, told only when one of them
@@ -228,7 +239,7 @@ impl<'a> TaskSheet<'a> {
             uses: &task.uses,
             invariants: &task.invariants,
             scope: &access.scope,
-            denied: &access.denied,
+            denied: access.protected.every(),
             criteria: task
                 .criteria
                 .iter()

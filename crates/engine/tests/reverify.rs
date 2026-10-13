@@ -3,12 +3,14 @@
 //! finishes, once a later node leaves the run at another tree.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeFinishedPayload,
     NodeOutcome, NodeStartedPayload, RunCreatedPayload, RunEvent, StoredEvent, TokenUsage,
 };
+use yunta_core::protected::Protected;
 use yunta_core::{CommitSha, ContentHash, DefaultOnFailure, OnInterrupt, TreeId, Workflow};
 use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
 
@@ -42,7 +44,7 @@ fn policy() -> SchedulingPolicy {
         measures_aside: false,
         may_promote: false,
         grants_scope: true,
-        denied: Vec::new(),
+        protected: Arc::new(Protected::default()),
         follows_builds: false,
     }
 }

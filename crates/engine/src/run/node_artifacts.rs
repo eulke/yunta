@@ -7,6 +7,8 @@
 //! than the lifecycle around them: not how a node ends, but what the run
 //! holds once it has.
 
+use std::path::PathBuf;
+
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, TokenUsage};
 use yunta_core::{ArtifactSpec, Node, NodeKind, QuestionId, RunId};
@@ -18,7 +20,7 @@ use crate::artifacts::{
 use crate::replay::RunView;
 use crate::tasks::{Provenance, Standing};
 
-use super::node_close::{fail_with_tokens, ChildRun};
+use super::node_close::{fail_with_tokens_staged, ChildRun};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use yunta_core::events::FindingEvent;
@@ -50,6 +52,7 @@ pub(super) async fn derive_findings(
     ctx: &RunCtx<'_>,
     node: &Node,
     ceiling: Option<u64>,
+    staged: &[PathBuf],
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
     if !matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. }) {
@@ -64,7 +67,8 @@ pub(super) async fn derive_findings(
         Ok(derived) => derived,
         Err(error) => {
             return Ok(Some(
-                fail_with_tokens(ctx, node, error.to_string(), false, tokens).await?,
+                fail_with_tokens_staged(ctx, node, error.to_string(), false, tokens, staged)
+                    .await?,
             ))
         }
     };

@@ -346,8 +346,8 @@ fn scope_notice(
             "The scope you asked for was granted: {}. You may write there now.",
             yunta_core::listed_globs(paths)
         ),
-        ScopeAnswer::Denied(Some(reason)) => format!(
-            "The scope you asked for was refused: {reason}. Stay within the scope you have."
+        ScopeAnswer::Denied(Some(denial)) => format!(
+            "The scope you asked for was refused: {denial}. Stay within the scope you have."
         ),
         ScopeAnswer::Denied(None) => {
             "The scope you asked for was refused. Stay within the scope you have.".to_string()

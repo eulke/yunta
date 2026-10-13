@@ -6,16 +6,20 @@ use std::path::PathBuf;
 use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, EventPayload, Phase, ScopeCheckedPayload, TaskStatus,
-    TaskStatusChangedPayload,
+    CriteriaCheckedPayload, CriterionResult, Decider, EventPayload, Phase, ScopeCheckedPayload,
+    TaskStatus, TaskStatusChangedPayload,
 };
+use yunta_core::expansion::Decision;
+use yunta_core::protected::{Closing, Protected};
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
 
+use crate::replay::RunState;
+use crate::run::scope_record::{self, Recording, Subject};
 use crate::task_cycle::{post_check, BlockedCause, Memo, TaskOutcome};
 use crate::worktree::{commit_work, land, rebase_onto, Rebase, Unit};
 
 use super::depart::PendingDeparture;
-use super::escalate::{emit_scope_expansion_events, PendingEscalation};
+use super::escalate::PendingEscalation;
 use super::{BatchIntegration, LoopState};
 use crate::run::{RunCtx, RunError};
 use yunta_core::events::{NodeEvent, TaskEvent};
@@ -32,10 +36,8 @@ pub(super) async fn integrate_batch(
     ctx: &RunCtx<'_>,
     node: &Node,
     dispatches: Vec<Result<super::dispatch::Dispatched<'_>, RunError>>,
-    scope_expansion: Option<&yunta_core::ScopeExpansion>,
     cancel: &tokio_util::sync::CancellationToken,
     state: &mut LoopState,
-    expansions_granted_this_run: &mut u32,
 ) -> Result<BatchIntegration, RunError> {
     let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
     let mut departures: Vec<PendingDeparture> = Vec::new();
@@ -76,17 +78,8 @@ pub(super) async fn integrate_batch(
             }
 
             if let Some(outcome) = &attempt.scope_expansion {
-                emit_scope_expansion_events(
-                    ctx,
-                    node,
-                    &task.id,
-                    attempt.attempt,
-                    outcome,
-                    scope_expansion,
-                    expansions_granted_this_run,
-                )
-                .await?;
-                if outcome.decision == crate::scope_expansion::Decision::Escalate {
+                record_attempt(ctx, node, task, attempt.attempt, outcome).await?;
+                if matches!(outcome.decision, Decision::Escalate { .. }) {
                     escalated = Some((attempt.attempt, outcome.clone()));
                 }
             }
@@ -207,6 +200,33 @@ pub(super) async fn integrate_batch(
     })
 }
 
+/// Records what the engine decided on one attempt's scope request, numbered
+/// as that attempt. A refusal here is the rules' own, never a person's.
+async fn record_attempt(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    attempt_no: u32,
+    outcome: &crate::scope_expansion::ScopeExpansionOutcome,
+) -> Result<(), RunError> {
+    scope_record::record(
+        &ctx.log(),
+        node,
+        Recording {
+            subject: Subject::Task(&task.id),
+            mode: Some(super::mode_in_force(node)),
+            by: Decider::Rule,
+            asked: outcome.asked.as_ref(),
+            decision: &outcome.decision,
+            count: outcome.count,
+            located: outcome.asked.is_none(),
+            precheck: outcome.precheck,
+            attempt: attempt_no,
+        },
+    )
+    .await
+}
+
 /// What a blocked task's last attempt left in its unit, committed on the
 /// unit's own branch so a person can have the next cycle continue from
 /// it. `None` when the attempt changed nothing.
@@ -258,6 +278,31 @@ struct VerifiedTask<'a> {
     staged: &'a [PathBuf],
 }
 
+/// Commits the work a task left in its unit as the task's own commit, before
+/// anything judges it. What git ignores stays out of it: the close of the
+/// task's attempt judged the ignored paths the run protects.
+async fn commit_task_work(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    unit: &Unit,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(), RunError> {
+    commit_work(
+        unit,
+        &CommitMessage::new(
+            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
+        supervision,
+    )
+    .await?;
+    Ok(())
+}
+
 /// Integrates one task verified `Done` in isolation: rebase
 /// its branch onto the run's *current* integration HEAD (which may have
 /// moved since this batch started, if an earlier-declared sibling
@@ -284,18 +329,7 @@ async fn integrate_task(
     } = verified;
     // This task's own token: a cancelled task takes its git with it.
     let supervision = ctx.supervision(cancel);
-    commit_work(
-        unit,
-        &CommitMessage::new(
-            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
-        supervision,
-    )
-    .await?;
+    commit_task_work(ctx, node, task, unit, supervision).await?;
 
     let onto = match rebase_onto(unit, ctx.worktree, supervision).await? {
         Rebase::Onto(tree) => tree,
@@ -360,14 +394,15 @@ async fn integrate_task(
     // reject work a human already allowed.
     // Every test a person approved, the task's own among them: its own
     // are what it staged, which the audit leaves out of its diff.
-    let deny = crate::run::denied::Denied::of(ctx).await?.every();
+    let (allowed, lifted) = judged_against(ctx, task).await?;
     let scope = crate::scope::audit_tree(
         task_worktree,
         &onto,
         &checked.tree,
         crate::scope::Ceiling {
-            scope: &effective_scope(ctx, task).await?,
-            deny: &deny,
+            scope: &allowed,
+            protected: &lifted,
+            closing: Closing::Every,
         },
         staged,
         supervision,
@@ -408,14 +443,25 @@ async fn integrate_task(
 /// authorized for it. Derived from the log rather than carried from the
 /// attempt, so a re-verification after a crash grants exactly what the
 /// attempt was granted.
-async fn effective_scope(ctx: &RunCtx<'_>, task: &Task) -> Result<Vec<ScopeGlob>, RunError> {
-    let view = ctx.run_view().await?;
-    Ok(task
-        .scope
+fn effective_scope(task: &Task, state: &RunState) -> Vec<ScopeGlob> {
+    task.scope
         .iter()
         .cloned()
-        .chain(view.state.grants.reach_for(&task.id))
-        .collect())
+        .chain(state.grants.reach_for(&task.id))
+        .collect()
+}
+
+/// What a task's landing is audited against: the scope it may touch, and the
+/// protected set lifted by what a person granted that task alone.
+async fn judged_against(
+    ctx: &RunCtx<'_>,
+    task: &Task,
+) -> Result<(Vec<ScopeGlob>, Protected), RunError> {
+    let view = ctx.run_view().await?;
+    let lifted = ctx
+        .protected()
+        .lifting(view.state.grants.person_granted_to_task(&task.id));
+    Ok((effective_scope(task, &view.state), lifted))
 }
 
 /// The paths a replay stopped on, as the criterion line names them.

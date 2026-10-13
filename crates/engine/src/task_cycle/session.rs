@@ -10,6 +10,7 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
 use yunta_core::port::{Adapter, SessionRequest};
+use yunta_core::protected::Protected;
 use yunta_storage::StorageError;
 
 use super::dispatch::{DispatchError, Dispatched, Opening};
@@ -22,10 +23,9 @@ use super::DispatchOutcome;
 /// binds (values never touch the log, nothing undeclared leaks).
 #[derive(Clone)]
 pub struct SessionSetup {
-    /// What no session of the run may write: what the project denies to
-    /// every run, and every test a person approved. Every session's fence
-    /// refuses it, whatever its scope.
-    pub denied: Vec<yunta_core::ScopeGlob>,
+    /// What no session of the run may write, whatever its scope allows:
+    /// the run's protected set. Every session's fence refuses it.
+    pub protected: Arc<Protected>,
     /// The directories every session of the run shares, which a session
     /// that may write keeps writable beside its checkout.
     pub shared_dirs: Vec<PathBuf>,
@@ -145,8 +145,8 @@ impl SessionSetup {
     /// A setup that carries nothing but the run it belongs to, the node
     /// its sessions are of and the runner they run on: no skills, no
     /// settings, no secrets, no per-run tools, no declared files and no
-    /// denied paths. Its hook is named `yunta`, as a harness names it, and
-    /// no session of a harness runs it.
+    /// protected paths. Its hook is named `yunta`, as a harness names it,
+    /// and no session of a harness runs it.
     ///
     /// The run directory is not among what a bare setup leaves out: a
     /// session writes its working files under it, and a path that names
@@ -158,7 +158,7 @@ impl SessionSetup {
         chosen: yunta_core::RunnerCandidate,
     ) -> Self {
         Self {
-            denied: Vec::new(),
+            protected: Arc::new(Protected::default()),
             shared_dirs: Vec::new(),
             plan: None,
             spec: None,

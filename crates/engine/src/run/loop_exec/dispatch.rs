@@ -6,6 +6,7 @@ use yunta_core::ScopeGlob;
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
 use yunta_core::{CommitSha, Node, Task};
 
+use crate::scope_expansion::GrantWindow;
 use crate::task_cycle::{run_task, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport};
 use crate::worktree::{Lease, Unit, UnitHome, UnitId};
 
@@ -84,6 +85,19 @@ fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<Scop
     state.grants.reach_for(task_id)
 }
 
+/// The protected set one task is judged by: the run's own, lifted by what a
+/// person granted that task.
+fn protection_of(
+    ctx: &RunCtx<'_>,
+    state: &RunState,
+    task_id: &yunta_core::TaskId,
+) -> std::sync::Arc<yunta_core::protected::Protected> {
+    std::sync::Arc::new(
+        ctx.protected()
+            .lifting(state.grants.person_granted_to_task(task_id)),
+    )
+}
+
 /// Isolates one batch member in its own worktree — each task in the
 /// batch gets its own worktree derived from the current base commit —
 /// and runs it through the ordinary task cycle there — pre-check,
@@ -108,7 +122,7 @@ pub(super) struct BatchDispatchEnv<'a> {
     pub(super) base_commit: &'a CommitSha,
     pub(super) adapter: &'a dyn yunta_core::port::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
-    pub(super) grants: &'a crate::scope_expansion::GrantLedger,
+    pub(super) grants: &'a GrantWindow,
     pub(super) cancel: &'a tokio_util::sync::CancellationToken,
     pub(super) setup: &'a crate::task_cycle::SessionSetup,
 }
@@ -146,7 +160,6 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         .filter(|other| other.id != task.id)
         .flat_map(|other| super::batch::reach(other, state))
         .collect();
-    let attempt = attempt_number(state, &task.id);
     let continuation = continuation(ctx, node, task, state, adapter).await?;
     let (unit, lease, resume) = match continuation {
         Some((unit, lease, continuing)) => (unit, lease, Some(continuing)),
@@ -161,7 +174,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
                         base: base_commit,
                     },
                     UnitId::Task(task.id.clone()),
-                    attempt,
+                    attempt_number(state, &task.id),
                     ctx.root_supervision(),
                 )
                 .await?;
@@ -222,6 +235,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             scope_expansion,
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
+            protected: protection_of(ctx, state, &task.id),
             already_granted_paths: &granted_paths_for(state, &task.id),
             beside: &beside,
         },

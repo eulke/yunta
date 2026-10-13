@@ -17,13 +17,14 @@ mod respecify;
 
 use yunta_core::events::{
     loop_overrun_failure, EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome,
-    SessionDeath, StoredEvent, TaskStatus, TokenUsage,
+    SessionDeath, TaskStatus, TokenUsage,
 };
-use yunta_core::{Node, NodeKind, PromptSource, TaskId, TasksFile};
+use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TaskId, TasksFile};
 
 use crate::task_cycle::BlockedCause;
 
 use crate::replay::RunState;
+use crate::scope_expansion::GrantWindow;
 
 use super::node_close::{close_node, fail, fail_with_tokens, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
@@ -38,7 +39,7 @@ use escalate::{resolve_escalations, PendingEscalation};
 use integrate::integrate_batch;
 
 use crate::worktree::head_commit;
-use yunta_core::events::{ChildEvent, ScopeEvent};
+use yunta_core::events::ChildEvent;
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
@@ -86,7 +87,7 @@ pub(super) async fn execute_loop(
             // A decision owed a person is what nothing else can stand in
             // for: the loop ends on it, done or not, and the person grants
             // or denies each request from there.
-            if let Some(failure) = escalate::owed(&state.owed) {
+            if let Some(failure) = escalate::owed(&state.owed)? {
                 let fail =
                     crate::run::node_close::fail_with(ctx, node, failure, false, state.tokens);
                 return fail.await;
@@ -170,10 +171,10 @@ pub(super) async fn execute_loop(
             }
         }
 
-        // One grant ledger per batch, seeded from the log — the atomic cap
-        // window every concurrent member's evaluation commits through, so
-        // `max_per_run` holds exactly.
-        let grants = crate::scope_expansion::GrantLedger::new(granted_count(&view.events));
+        // One grant window per batch, seeded from the grants the log holds —
+        // the atomic cap every concurrent member's evaluation commits through,
+        // so `max_per_run` holds exactly.
+        let grants = GrantWindow::seeded(view.state.grants.granted());
         let batch_env = BatchDispatchEnv {
             events: &view.events,
             state: &view.state,
@@ -191,36 +192,19 @@ pub(super) async fn execute_loop(
             }))
             .await;
 
-        // Cumulative grants this run, kept live across the integration and
-        // escalation phases below so each emitted `ScopeExpansionGranted`
-        // carries an accurate `count_this_run` — the cap *decision* already
-        // happened atomically in the batch's `GrantLedger`; this count only
-        // feeds the event payload.
-        let mut expansions_granted_this_run = granted_count(&view.events);
-        let (pending, departures) = match integrate_batch(
-            ctx,
-            node,
-            dispatches,
-            prep.scope_expansion,
-            cancel,
-            &mut state,
-            &mut expansions_granted_this_run,
-        )
-        .await?
-        {
-            BatchIntegration::Cancelled(end) => return Ok(end),
-            BatchIntegration::Done {
-                escalations,
-                departures,
-            } => (escalations, departures),
-        };
+        let (pending, departures) =
+            match integrate_batch(ctx, node, dispatches, cancel, &mut state).await? {
+                BatchIntegration::Cancelled(end) => return Ok(end),
+                BatchIntegration::Done {
+                    escalations,
+                    departures,
+                } => (escalations, departures),
+            };
 
         if !pending.is_empty() {
             // What was decided re-dispatches next iteration with the
             // decision on the log; what was not stays owed.
-            let scope = prep.scope_expansion;
-            let granted = &mut expansions_granted_this_run;
-            let unresolved = resolve_escalations(ctx, node, pending, scope, granted).await?;
+            let unresolved = resolve_escalations(ctx, node, pending, &grants).await?;
             state.owed.extend(unresolved);
         }
         if !departures.is_empty() {
@@ -424,23 +408,18 @@ async fn prepare_loop<'a>(
     })))
 }
 
-/// How many `scope_expansion_granted` events the run's whole log already
-/// has — `max_per_run` is run-scoped, never per-task. Read once per
-/// batch to seed that batch's `GrantLedger`: grants from prior
-/// batches are already events by then (integration is serial and
-/// completes before the next batch dispatches), and grants *within* the
-/// batch go through the ledger's atomic window — so the cap holds
-/// exactly, with dispatch itself still fully concurrent.
-fn granted_count(events: &[StoredEvent]) -> u32 {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::Scope(ScopeEvent::Granted(_)))
-            )
-        })
-        .count() as u32
+/// The mode a loop's scope requests are decided by: the one it declares, or
+/// the default one where it declares no `scope_expansion:` block. Every
+/// request the loop records or owes carries this mode.
+pub(super) fn mode_in_force(node: &Node) -> ScopeExpansionMode {
+    match &node.kind {
+        NodeKind::Loop {
+            scope_expansion, ..
+        } => scope_expansion
+            .as_ref()
+            .map_or_else(ScopeExpansionMode::default, |scope| scope.mode),
+        _ => ScopeExpansionMode::default(),
+    }
 }
 
 /// Refuses a document whose tasks this run never registered, naming

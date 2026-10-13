@@ -345,11 +345,14 @@ pub(crate) fn capabilities() -> Capabilities {
     }
 }
 
-/// The files of a checkout this CLI loads its configuration from.
+/// The trees of a checkout this CLI loads its configuration from: the
+/// `.codex/` tree, with its config and hooks, and the `.agents/` tree,
+/// where it finds skills. A tree covers every file under it, including
+/// files a session creates later.
 pub(crate) fn own_config() -> Vec<yunta_core::ScopeGlob> {
-    [".codex/config.toml", ".codex/hooks.json"]
+    [".codex/**", ".agents/**"]
         .into_iter()
-        .filter_map(|path| yunta_core::ScopeGlob::exact(std::path::Path::new(path)).ok())
+        .filter_map(|tree| tree.parse().ok())
         .collect()
 }
 

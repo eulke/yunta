@@ -16,13 +16,15 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     EventPayload, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
 };
-use yunta_core::{Clock, ModeName, NodeId, Redactor, RunId};
+use yunta_core::{Clock, ContentHash, ModeName, NodeId, Redactor, RunId};
 use yunta_storage::AsyncStorage;
 
 use crate::run_log::RunLog;
 
 use super::schedule::{self, Decision};
-use super::{baseline, gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
+use super::{
+    baseline, gate_exec, protected, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal,
+};
 use yunta_core::events::RunEvent;
 use yunta_core::Location;
 
@@ -89,7 +91,17 @@ struct Ready<'a> {
     ctx: RunCtx<'a>,
     root_cancel: CancellationToken,
     mode_name: ModeName,
+    /// Locked for each drive of the run, which is the only reader and the
+    /// only writer of it, and which carries it across every move.
+    scheduling: tokio::sync::Mutex<Scheduling>,
+}
+
+/// What the scheduler decides with: the policy every decision reads, and
+/// the accepted spec whose tests the policy's protected set was read from.
+/// A spec the run accepts later renews the set, and the policy takes it.
+struct Scheduling {
     policy: schedule::Policy,
+    spec: Option<ContentHash>,
 }
 
 /// [`execute_run`] with an explicit composition depth:
@@ -165,12 +177,9 @@ async fn drive_where_it_works(ready: &Ready<'_>) -> Result<RunReport, RunError> 
 /// records nothing, and the next wake takes it again. A run moves only
 /// while nothing measures, so no move stops one.
 async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> {
-    let Ready {
-        root_cancel,
-        mode_name,
-        policy,
-        ..
-    } = ready;
+    let root_cancel = &ready.root_cancel;
+    let mode_name = &ready.mode_name;
+    let mut scheduling = ready.scheduling.lock().await;
     let mut aside = super::aside::Aside::new(root_cancel);
     let ended = loop {
         // A Ctrl-C (or any root cancellation) between scheduler
@@ -185,17 +194,18 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
         }
         // One read and one replay per iteration: the decision and every
         // handler that needs the run's state read the same derivation.
-        let state = ctx.run_view().await?.state;
-        if let Some(owed) = schedule::owed_baseline(&state, policy) {
-            if policy.measures_aside {
+        let state = read_state(ctx, &mut scheduling).await?;
+        if let Some(owed) = schedule::owed_baseline(&state, &scheduling.policy) {
+            if scheduling.policy.measures_aside {
                 aside.start(ctx, owed);
             }
         }
-        let decision = schedule::decide(&ctx.manifest.workflow, &state, policy);
+        let decision = schedule::decide(&ctx.manifest.workflow, &state, &scheduling.policy);
         if matches!(decision, Decision::MeasureBaseline { .. }) && aside.finish().await? {
             continue;
         }
-        if let Some(checkout) = moves_before(ctx, &state, policy, &aside, &decision).await? {
+        let moved = moves_before(ctx, &state, &scheduling.policy, &aside, &decision).await?;
+        if let Some(checkout) = moved {
             break Ok(Driven::Moved(checkout));
         }
         match aside
@@ -213,6 +223,24 @@ async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> 
     };
     aside.stop().await;
     ended
+}
+
+/// One read and one replay of the run's log, which the decision and every
+/// step read together. A spec the log accepted since the protected set was
+/// read renews the set, and the policy takes the renewed one: the set is
+/// read again only for that, never for any other event.
+async fn read_state(
+    ctx: &RunCtx<'_>,
+    scheduling: &mut Scheduling,
+) -> Result<Box<crate::replay::RunState>, RunError> {
+    let crate::replay::RunView { events, state } = ctx.run_view().await?;
+    let accepted = protected::accepted_spec(&state.artifacts).map(|held| held.content_hash.clone());
+    if accepted != scheduling.spec {
+        ctx.renew_protected(protected::of(ctx, &events).await?);
+        scheduling.policy.protected = ctx.protected();
+        scheduling.spec = accepted;
+    }
+    Ok(state)
 }
 
 /// Moves the run, before it executes `decision`, into a checkout of its
@@ -405,13 +433,28 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // same name back off the log's state, same "resolved once, reused
     // forever" discipline runner resolution already follows.
     let mode_name = view.state.run.mode().clone();
-    let policy = schedule::Policy::of(ctx.manifest, &mode_name, &view.state.run);
+    let scheduling = scheduling_of(&ctx, &view, &mode_name).await?;
     Ok(Startup::Ready(Box::new(Ready {
         ctx,
         root_cancel,
         mode_name,
-        policy,
+        scheduling: tokio::sync::Mutex::new(scheduling),
     })))
+}
+
+/// Reads what no session of the run may write from the events the wake
+/// loaded, and freezes the policy the wake's decisions read, with the
+/// accepted spec the set was read from.
+async fn scheduling_of(
+    ctx: &RunCtx<'_>,
+    view: &crate::replay::RunView,
+    mode_name: &ModeName,
+) -> Result<Scheduling, RunError> {
+    ctx.renew_protected(protected::of(ctx, &view.events).await?);
+    Ok(Scheduling {
+        policy: schedule::Policy::of(ctx.manifest, mode_name, &view.state.run, ctx.protected()),
+        spec: protected::accepted_spec(&view.state.artifacts).map(|held| held.content_hash.clone()),
+    })
 }
 
 pub(super) fn find_node<'a>(

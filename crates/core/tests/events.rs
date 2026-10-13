@@ -885,7 +885,7 @@ fn a_grant_naming_no_subject_counts_for_nothing() {
     let grant = ScopeEvent::Granted(ScopeExpansionGrantedPayload {
         task_id: None,
         decided_by: Decider::Rule,
-        mode: ScopeExpansionMode::Rules,
+        mode: Some(ScopeExpansionMode::Rules),
         count_this_run: 1,
         paths: vec![],
     });

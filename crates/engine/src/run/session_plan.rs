@@ -54,9 +54,8 @@ pub(crate) async fn resolve_setup(
     };
     state_run_wide_absences(ctx, node, adapter.as_ref()).await?;
     let node_scope = super::node_scope::session_access(ctx, node).await?;
-    let denied = super::denied::Denied::of(ctx).await?.every();
     Ok(Ok(SessionSetup {
-        denied,
+        protected: ctx.protected(),
         shared_dirs: ctx
             .manifest
             .config
@@ -366,7 +365,8 @@ fn told(
 /// What this session may write: its profile, the scope it works to — a
 /// task session its task's, a node's own session the node's, the
 /// expansions already granted included either way — and the one
-/// directory outside the worktree its declared files belong in.
+/// directory outside the worktree its declared files belong in. What no
+/// session of the run may write is refused whatever that scope admits.
 ///
 /// A session that mounted the scope-expansion tool is told to ask for
 /// more when it is refused; one that did not is told to report the need
@@ -390,7 +390,7 @@ fn fence(
         setup.artifact_dir.as_deref(),
         advice,
     )
-    .denying(held_to.denied(&setup.denied))
+    .protecting(held_to.protected(setup))
     .naming(naming);
     // A session that writes nothing keeps nothing writable.
     match plan.profile {

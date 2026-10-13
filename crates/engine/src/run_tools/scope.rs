@@ -12,6 +12,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use yunta_core::durable::{self, Durability};
+use yunta_core::protected::Closing;
 use yunta_core::ScopeGlob;
 
 use super::catalog::RunTool;
@@ -53,7 +54,8 @@ impl SessionTools {
             &access.index,
             crate::scope::Ceiling {
                 scope: &access.scope,
-                deny: &access.denied,
+                protected: &access.protected,
+                closing: Closing::Every,
             },
             access.staged.get().map_or(&[], Vec::as_slice),
             self.host.supervision(&self.stop),

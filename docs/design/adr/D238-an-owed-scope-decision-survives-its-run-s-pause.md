@@ -1,12 +1,14 @@
 ---
 number: D238
 title: "A scope decision owed to a person survives the run's pause, and a refused tool says why"
-status: accepted
+status: revised
 revises: [D73, D189]
-revised_by: []
+revised_by: [D259]
 ---
 
 # D238 — A scope decision owed to a person survives the run's pause, and a refused tool says why
+
+*(Revised by D259: a person's grant records the loop's mode in force, and a node's grant records no mode.)*
 
 ## Context
 

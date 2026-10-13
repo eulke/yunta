@@ -3,9 +3,12 @@
 
 use std::path::Path;
 
+use yunta_core::protected::Pathspecs;
+
 use super::{space, CheckoutPool, Lease};
 use crate::git::{self, Effect};
 use crate::process::Supervision;
+use crate::worktree::capture::clean_covered;
 use crate::worktree::WorktreeError;
 
 impl CheckoutPool {
@@ -31,11 +34,12 @@ impl CheckoutPool {
     }
 
     /// Puts the checkout `lease` holds back to the commit it is on, with
-    /// nothing a probe wrote left in it but what git ignores, and gives it
-    /// back. One that cannot be put back stays out of the pool.
+    /// nothing a probe wrote left in it but what git ignores outside the
+    /// protected paths, and gives it back. One that cannot be put back stays
+    /// out of the pool.
     pub async fn put_back(&self, lease: Lease, supervision: Supervision<'_>) {
         let checkout = lease.checkout();
-        match clear_work(&checkout, supervision).await {
+        match clear_work(&checkout, &self.pathspecs(), supervision).await {
             Ok(()) => {
                 if let Err(error) = self.give_back(lease, supervision).await {
                     tracing::debug!(%error, "a checkout's use and build went unrecorded");
@@ -47,9 +51,11 @@ impl CheckoutPool {
 }
 
 /// Clears what a probe wrote in `checkout`: back to the commit it is on,
-/// with nothing left in it but what git ignores.
+/// with nothing left in it but what git ignores outside the protected
+/// paths `covered` reaches.
 pub async fn clear_work(
     checkout: &Path,
+    covered: &Pathspecs,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     git::change(
@@ -66,5 +72,6 @@ pub async fn clear_work(
         supervision,
     )
     .await?;
+    clean_covered(checkout, covered, supervision).await?;
     Ok(())
 }

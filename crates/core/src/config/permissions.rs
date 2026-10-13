@@ -54,7 +54,7 @@ pub struct PathPermissions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionPermissions {
-    pub max_mode: crate::policy::ScopeExpansionMode,
+    pub max_mode: crate::policy::ScopeCeiling,
 }
 
 /// `permissions.commands` — patterns matched against every hook, criterion,
@@ -220,10 +220,8 @@ pub(super) fn merge_permissions(
 
     // Ceiling semantics, same as packs: the strictest declared wins.
     let scope_expansion = match (ceiling.scope_expansion, lower.scope_expansion) {
-        (Some(c), Some(l)) => Some(if c.max_mode.strictness() >= l.max_mode.strictness() {
-            c
-        } else {
-            l
+        (Some(c), Some(l)) => Some(ScopeExpansionPermissions {
+            max_mode: c.max_mode.stricter(l.max_mode),
         }),
         (c, l) => c.or(l),
     };
@@ -333,11 +331,11 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
             if let (Some(lower_se), Some(higher_se)) =
                 (lower.scope_expansion, higher.scope_expansion)
             {
-                if lower_se.max_mode.strictness() < higher_se.max_mode.strictness() {
+                if !higher_se.max_mode.allows(lower_se.max_mode.0) {
                     conflicts.push(format!(
                         "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
-                        lower_se.max_mode.as_str(),
-                        higher_se.max_mode.as_str()
+                        lower_se.max_mode.0.as_str(),
+                        higher_se.max_mode.0.as_str()
                     ));
                 }
             }

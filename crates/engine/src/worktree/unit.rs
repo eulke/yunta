@@ -15,6 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
+use yunta_core::protected::Pathspecs;
 use yunta_core::{CommitSha, NodeId, RunId, TaskId, TreeId};
 
 use super::{head_commit, WorktreeError};
@@ -90,7 +91,8 @@ pub struct UnitHome<'a> {
 }
 
 /// A commit naming exactly what `repo` holds this moment: its `HEAD`
-/// plus whatever is lying in its working tree uncommitted.
+/// plus whatever is lying in its working tree uncommitted, less what git
+/// ignores.
 ///
 /// A unit branches from what it would have found, not from the last
 /// thing anybody committed: a node's close commits what it left in the
@@ -105,7 +107,7 @@ pub async fn snapshot_commit(
     message: &str,
     supervision: Supervision<'_>,
 ) -> Result<CommitSha, WorktreeError> {
-    let tree = super::capture_tree(repo, index, supervision).await?;
+    let tree = super::capture::capture_for_commit(repo, index, supervision).await?;
     let head = head_commit(repo, supervision).await?;
     let printed = git::change(
         repo,
@@ -177,12 +179,13 @@ pub enum Carried {
 /// changes on top of the tree the unit began from — exactly where an
 /// attempt's own edits sit, so the unit's audit answers for all of it.
 /// When it no longer applies there, the checkout is put back as it
-/// began and the paths it stopped on are named. A pick git refuses
-/// without leaving a path unmerged is an error, and the checkout is
-/// left as it was.
+/// began, without the ignored paths `covered` reaches, and the paths it
+/// stopped on are named. A pick git refuses without leaving a path
+/// unmerged is an error, and the checkout is left as it was.
 pub async fn carry_work(
     unit: &Unit,
     left: &CommitSha,
+    covered: &Pathspecs,
     supervision: Supervision<'_>,
 ) -> Result<Carried, WorktreeError> {
     let tree = unit.worktree.as_path();
@@ -205,14 +208,16 @@ pub async fn carry_work(
             // `--no-commit` records no pick in progress, so there is no
             // `cherry-pick --abort` to run. The reset puts the index and the
             // tree back on the base, which clears the conflict, and the clean
-            // removes what the pick added; each must succeed for the checkout
-            // to be back as it began.
+            // removes what the pick added. The clean of the protected paths
+            // takes the ignored ones the plain clean keeps. Each must succeed
+            // for the checkout to be back as it began.
             for undo in [
                 ["reset", "-q", "--hard", unit.base.as_str()].as_slice(),
                 ["clean", "-q", "-fd"].as_slice(),
             ] {
                 git::change(tree, Effect::Checkout, undo, supervision).await?;
             }
+            super::capture::clean_covered(tree, covered, supervision).await?;
             Ok(Carried::NoLongerApplies { stopped, paths })
         }
     }
@@ -224,7 +229,7 @@ pub async fn carry_work(
 ///
 /// A unit that changed nothing produces no commit and is not an error:
 /// work whose criteria are met by side effects that leave no diff is
-/// still work done.
+/// still work done. What git ignores is never committed.
 pub async fn commit_work(
     unit: &Unit,
     message: &str,

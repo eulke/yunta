@@ -31,14 +31,15 @@
 //! `concurrency:`, both separate mechanisms.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use yunta_core::events::{node_failed_line, Failure, NodeWait, PauseReason, ResumePolicy};
-use yunta_core::{
-    DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, ScopeExpansionMode, Workflow,
-};
+use yunta_core::protected::Protected;
+use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 mod baseline;
 mod follow;
+mod grant;
 mod reverify;
 
 pub use baseline::owed_baseline;
@@ -291,8 +292,9 @@ pub struct Policy {
     /// failure it had on that scope: `false` only under a permission
     /// ceiling of `scope_expansion.max_mode: deny`.
     pub grants_scope: bool,
-    /// What the project denies to every run: never offered as a grant.
-    pub denied: Vec<yunta_core::ScopeGlob>,
+    /// What no session of the run may write: a grant that reaches it is
+    /// never offered.
+    pub protected: Arc<Protected>,
     /// Whether the run may move into the checkout its last unit built in:
     /// it works in a checkout of the project's pool of its own.
     pub follows_builds: bool,
@@ -300,14 +302,16 @@ pub struct Policy {
 
 impl Policy {
     /// The knobs `manifest` froze, for the mode this invocation runs and
-    /// the nodes its birth left out. Built once when the run wakes: the
-    /// node set is a pure function of the workflow, the mode and what the
-    /// log recorded, and re-deriving it per decision would be the same
-    /// answer at scheduler cost.
+    /// the nodes its birth left out, with the set of paths no session may
+    /// write. Built once when the run wakes: the node set is a pure
+    /// function of the workflow, the mode and what the log recorded, and
+    /// re-deriving it per decision would be the same answer at scheduler
+    /// cost.
     pub fn of(
         manifest: &yunta_core::Manifest,
         mode_name: &ModeName,
         run: &yunta_core::events::RunLedger,
+        protected: Arc<Protected>,
     ) -> Self {
         Policy {
             max_parallel_nodes: manifest.max_parallel_nodes,
@@ -319,7 +323,7 @@ impl Policy {
             measures_aside: run.opens_on_base(),
             may_promote: next_mode_after(&manifest.workflow, mode_name).is_some(),
             grants_scope: person_may_grant_scope(&manifest.config),
-            denied: manifest.config.denied_paths().to_vec(),
+            protected,
             follows_builds: manifest.isolation == yunta_core::Isolation::Worktree
                 && run.checkout().is_some(),
         }
@@ -335,7 +339,7 @@ pub(crate) fn person_may_grant_scope(config: &yunta_core::ConfigLayer) -> bool {
         .permissions
         .as_ref()
         .and_then(|permissions| permissions.scope_expansion)
-        .is_none_or(|ceiling| ceiling.max_mode != ScopeExpansionMode::Deny)
+        .is_none_or(|ceiling| ceiling.max_mode.lets_a_person_grant())
 }
 
 /// Everything the seven questions read, resolved once so none of them
@@ -416,22 +420,6 @@ impl<'a> Board<'a> {
     /// failure — see [`RunState::run_again_chosen`].
     fn retry_chosen(&self, id: &NodeId) -> bool {
         self.state.run_again_chosen(id)
-    }
-
-    /// Whether a person may widen `node`'s scope by what `failure`
-    /// needs: the failure is about scope, the node is not read-only —
-    /// its word is the whole of its ceiling — the run's permission
-    /// ceiling lets a person grant, and nothing it would grant is a path
-    /// the project denies.
-    fn grantable(&self, node: &Node, failure: &Failure) -> bool {
-        self.policy.grants_scope
-            && node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
-            && failure.wants_scope()
-            && failure.scope_wanted().is_ok_and(|wanted| {
-                !wanted
-                    .iter()
-                    .any(|glob| yunta_core::reaches_any(glob, &self.policy.denied))
-            })
     }
 
     /// How a ready or re-opened gate is driven: poll the handle it was

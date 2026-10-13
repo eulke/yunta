@@ -77,7 +77,10 @@ async fn in_the_runs_tree(
     }
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
-    let tree = crate::worktree::capture_tree(ctx.worktree, &index, ctx.root_supervision()).await?;
+    let pathspecs = ctx.protected().pathspecs();
+    let tree =
+        crate::worktree::capture_tree(ctx.worktree, &index, &pathspecs, ctx.root_supervision())
+            .await?;
     Ok((None, tree))
 }
 

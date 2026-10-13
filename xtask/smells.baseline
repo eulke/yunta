@@ -13,7 +13,7 @@ git_command_outside_git_rs 0
 let_underscore_in_prod 10
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
-prod_fns_over_50_lines 71
+prod_fns_over_50_lines 69
 reason_built_by_format 2
 run_tool_named_outside_vocabulary 1
 separator_literal_outside_glyphs 2
@@ -22,10 +22,10 @@ sgr_outside_ink 0
 sleep_outside_mock_latency 3
 space_runs_in_prod_strings 0
 src_files_over_500_lines 3
-sync_fs_in_async 210
+sync_fs_in_async 207
 system_clock_outside_boundary 75
-tense_markers 80
+tense_markers 79
 test_files_over_500_lines 35
-test_fns_over_50_lines 127
+test_fns_over_50_lines 126
 token_count_formatted_outside_units 0
 wildcard_in_ledger_apply 0

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+use yunta_core::protected::Pathspecs;
 use yunta_core::ContentHash;
 
 use super::criteria::{could_not_run, exit_code_of};
@@ -41,6 +42,10 @@ pub struct Memo {
     /// What the lineage's measurement says about the commands every task
     /// is held to, as this invocation learns it.
     held: super::HeldGate,
+    /// The git pathspecs of what no session may write. A tree a criterion
+    /// is answered on includes the ignored files under them, which a
+    /// checkout's own listing leaves out.
+    pathspecs: Mutex<Pathspecs>,
 }
 
 /// What a command answered on one tree. A red answer keeps what the
@@ -61,6 +66,7 @@ impl Memo {
             cache: Mutex::new(HashMap::new()),
             asking: Mutex::new(HashMap::new()),
             held: super::HeldGate::default(),
+            pathspecs: Mutex::new(Pathspecs::default()),
         }
     }
 
@@ -68,6 +74,21 @@ impl Memo {
     /// them.
     pub fn held(&self) -> &super::HeldGate {
         &self.held
+    }
+
+    /// Names what no session may write, so the trees captured from now on
+    /// include its ignored files. The run calls it whenever its protected
+    /// set changes.
+    pub fn protect(&self, pathspecs: Pathspecs) {
+        *self.pathspecs.lock().unwrap_or_else(|e| e.into_inner()) = pathspecs;
+    }
+
+    /// The pathspecs the trees this memo captures are read under.
+    pub(crate) fn pathspecs(&self) -> Pathspecs {
+        self.pathspecs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub(super) fn key(&self, cmd: &str, tree: &Tree) -> ContentHash {
@@ -166,7 +187,7 @@ impl Memo {
         cwd: &Path,
         supervision: Supervision<'_>,
     ) -> Result<Tree, TaskCycleError> {
-        Tree::of(cwd, asks_git(cmd), supervision).await
+        Tree::of(cwd, asks_git(cmd), &self.pathspecs(), supervision).await
     }
 
     /// Remembers that `cmd` passed on `tree`, measured by a caller rather

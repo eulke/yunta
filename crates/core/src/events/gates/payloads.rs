@@ -83,6 +83,9 @@ pub struct GateWaitingPayload {
     /// against them is part of the decision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) withheld: Vec<super::Withheld>,
+    /// Why the loop waits on a scope request a person answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) scope: Option<super::ScopeWait>,
 }
 
 /// Why an answer does not count as a decision on an escalation.
@@ -141,6 +144,7 @@ impl Escalation {
             external_ref: None,
             shows: Vec::new(),
             withheld: Vec::new(),
+            scope: None,
         }))
     }
 
@@ -168,6 +172,7 @@ impl Escalation {
             external_ref: Some(external_ref.into()),
             shows: Vec::new(),
             withheld: Vec::new(),
+            scope: None,
         }))
     }
 

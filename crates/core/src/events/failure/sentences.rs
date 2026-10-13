@@ -25,3 +25,26 @@ pub fn loop_overrun_failure(node: &NodeId, cap: u32) -> String {
 pub fn node_failed_line(node: &NodeId, failure: &Failure) -> String {
     format!("node `{node}` failed: {}", failure.headline())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_denial_read_from_a_log_without_reasons_names_its_paths() {
+        let failure: Failure =
+            serde_json::from_value(serde_json::json!({"denied_paths": ["a.txt", ".claude/x"]}))
+                .expect("a log written before reasons existed reads back");
+        assert_eq!(
+            failure,
+            Failure::PathsDenied {
+                denied_paths: vec!["a.txt".into(), ".claude/x".into()],
+                reasons: Vec::new(),
+            }
+        );
+        assert_eq!(
+            failure.to_string(),
+            "wrote what no session of the run may write — a.txt, .claude/x: undo those changes"
+        );
+    }
+}

@@ -728,7 +728,7 @@ fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
             .scope_expansion
             .unwrap()
             .max_mode,
-        yunta_core::ScopeExpansionMode::Deny
+        yunta_core::ScopeCeiling(yunta_core::ScopeExpansionMode::Deny)
     );
 
     // The other way around the ceiling still holds: a softer lower
@@ -743,7 +743,7 @@ fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
             .scope_expansion
             .unwrap()
             .max_mode,
-        yunta_core::ScopeExpansionMode::Ask
+        yunta_core::ScopeCeiling(yunta_core::ScopeExpansionMode::Ask)
     );
 }
 

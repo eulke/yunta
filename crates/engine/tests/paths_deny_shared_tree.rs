@@ -3,6 +3,7 @@
 //! the branch had it, and fails the node that answers for the commit.
 
 use yunta_core::events::{EventPayload, Failure, NodeEvent, StoredEvent};
+use yunta_core::protected::Protection;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git_output, write, Bench, MOCK_CONFIG};
 
@@ -50,7 +51,10 @@ async fn an_unscoped_node_writing_a_denied_path_fails_and_head_never_holds_it() 
     let ci = std::path::PathBuf::from(".github/ci.yml");
     assert_eq!(
         failures(&bench.events(), "tidy"),
-        vec![(Failure::paths_denied(vec![ci.clone()]), vec![ci])]
+        vec![(
+            Failure::paths_denied(vec![ci.clone()], vec![Protection::ProjectDeny]),
+            vec![ci]
+        )]
     );
     let head = at_head(&bench);
     assert!(head.contains("notes.txt"), "the rest is committed: {head}");

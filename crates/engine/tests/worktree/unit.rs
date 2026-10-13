@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use tokio_util::sync::CancellationToken;
+use yunta_core::protected::Pathspecs;
 use yunta_engine::git::Cause;
 use yunta_engine::process::Supervision;
 use yunta_engine::{
@@ -320,7 +321,7 @@ async fn a_refused_pick_is_an_error_and_leaves_the_checkout_as_it_was() {
         env: &env,
         ..Supervision::outside_any_run(&cancel, &FixedClock)
     };
-    let result = carry_work(&unit, &left, supervision).await;
+    let result = carry_work(&unit, &left, &Pathspecs::default(), supervision).await;
 
     assert!(
         matches!(result, Err(WorktreeError::Git(ref e)) if matches!(e.cause, Cause::Exit { code: Some(1), .. })),

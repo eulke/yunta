@@ -76,9 +76,8 @@ pub struct NodeAudit {
     /// flagged separately from everything else in the inventory.
     pub executor: Option<ExecutorName>,
     /// The repository paths the node names: the globs its `scope:`
-    /// declares and, for a loop, those its tasks may grow within — what
-    /// makes a workflow assume the layout of a repository it may never
-    /// see. `scope: run` names none.
+    /// declares — what makes a workflow assume the layout of a repository
+    /// it may never see. `scope: run` names none.
     pub paths: Vec<String>,
 }
 
@@ -204,19 +203,7 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
 }
 
 fn named_paths(node: &Node) -> Vec<String> {
-    let within = match &node.kind {
-        NodeKind::Loop {
-            scope_expansion: Some(expansion),
-            ..
-        } => expansion.within.as_slice(),
-        _ => &[],
-    };
-    node.scope
-        .globs()
-        .iter()
-        .chain(within)
-        .map(ToString::to_string)
-        .collect()
+    node.scope.globs().iter().map(ToString::to_string).collect()
 }
 
 fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {

@@ -30,6 +30,7 @@ async fn tree_now(bench: &Bench) -> TreeId {
     yunta_engine::capture_tree(
         &bench.worktree,
         &index.path().join("index"),
+        &yunta_core::protected::Pathspecs::default(),
         owner.supervision(),
     )
     .await

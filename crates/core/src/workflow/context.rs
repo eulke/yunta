@@ -5,7 +5,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::parse::{describe, keyed_entry, nested, take};
 use super::ArtifactRefId;
-use crate::glob::ScopeGlob;
 use crate::ids::{McpServerName, NodeId};
 use crate::yaml::{Mapping, Value};
 
@@ -328,18 +327,20 @@ pub struct NodeOutputParams {
 /// the adapter's session profile. The names come
 /// straight from the reference schema's own spelling.
 /// `scope_expansion:` — governs how a loop's tasks may
-/// grow past their own declared scope. `within` is a hard ceiling
-/// ("never outside this") checked in `rules` mode; `max_per_run` caps
-/// how many expansions this run may grant before exhaustion escalates
-/// ("ten grants in a row are not re-scoping, they are a badly-cut
-/// plan") — absent means uncapped.
+/// grow past their own declared scope. `mode` decides what a request may
+/// get; `max_per_run` caps how many expansions the engine may grant in one
+/// run before exhaustion escalates ("ten grants in a row are not
+/// re-scoping, they are a badly-cut plan") — absent means uncapped.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansion {
     #[serde(default)]
     pub mode: crate::policy::ScopeExpansionMode,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub within: Vec<ScopeGlob>,
+    /// The retired `within:` key: read so `check` can say where the ceiling
+    /// moved, never written.
+    #[serde(default, rename = "within", skip_serializing)]
+    #[schemars(skip)]
+    pub retired_within: Option<serde::de::IgnoredAny>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_per_run: Option<u32>,
 }

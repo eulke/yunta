@@ -122,6 +122,10 @@ pub fn check_mounted(
     check_runner_fanout(&workflow, &mut errors);
     check_workflow_nodes(&workflow.nodes, None, &mut errors);
     check_mounts(&workflow, &mut errors);
+    check_retired_within(&workflow, &mut errors);
+    for node in workflow.iter_nodes() {
+        check_expansion_mode(node, config, &mut errors);
+    }
     yunta_core::workflow::read::expand_runner_fanout(&mut workflow);
     yunta_core::workflow::read::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
@@ -202,29 +206,6 @@ pub fn check_mounted(
         }
 
         check_gate(node, config, &mut errors);
-
-        // The loop's declared expansion mode against the
-        // merged ceiling. An absent block is `deny` — the strictest —
-        // so only an explicit, too-permissive declaration can trip.
-        if let NodeKind::Loop {
-            scope_expansion: Some(se),
-            ..
-        } = &node.kind
-        {
-            if let Some(ceiling) = config
-                .permissions
-                .as_ref()
-                .and_then(|permissions| permissions.scope_expansion)
-            {
-                if se.mode.strictness() < ceiling.max_mode.strictness() {
-                    errors.push(CheckError::ScopeExpansionModeOverCeiling {
-                        node: node.id.clone(),
-                        mode: se.mode.as_str(),
-                        ceiling: ceiling.max_mode.as_str(),
-                    });
-                }
-            }
-        }
     }
 
     check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
@@ -295,4 +276,49 @@ fn needs_nothing(node: &Node) -> bool {
             NodeKind::Parallel { nodes, .. } => nodes.iter().all(needs_nothing),
             _ => true,
         }
+}
+
+/// A loop's declared expansion mode against the merged ceiling. It holds every
+/// loop, wherever it sits, a `parallel` child included. An absent block is
+/// `deny` — the strictest — so only an explicit, too-permissive declaration
+/// can trip.
+fn check_expansion_mode(node: &Node, config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    if let NodeKind::Loop {
+        scope_expansion: Some(se),
+        ..
+    } = &node.kind
+    {
+        if let Some(ceiling) = config
+            .permissions
+            .as_ref()
+            .and_then(|permissions| permissions.scope_expansion)
+        {
+            if !ceiling.max_mode.allows(se.mode) {
+                errors.push(CheckError::ScopeExpansionModeOverCeiling {
+                    node: node.id.clone(),
+                    mode: se.mode.as_str(),
+                    ceiling: ceiling.max_mode.0.as_str(),
+                });
+            }
+        }
+    }
+}
+
+/// Every loop that still declares `scope_expansion.within`, wherever it
+/// sits: the key is no longer read, so a loop keeping it would look bounded
+/// when it is not.
+fn check_retired_within(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
+        if let NodeKind::Loop {
+            scope_expansion: Some(expansion),
+            ..
+        } = &node.kind
+        {
+            if expansion.retired_within.is_some() {
+                errors.push(CheckError::ScopeExpansionWithinRetired {
+                    node: node.id.clone(),
+                });
+            }
+        }
+    }
 }

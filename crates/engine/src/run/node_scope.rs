@@ -7,53 +7,55 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use yunta_core::events::{
-    Decider, EventPayload, Failure, NodeEvent, ScopeEvent, ScopeExpansionGrantedPayload,
-    ScopeExpansionRequestedPayload, TokenUsage,
-};
-use yunta_core::{Node, ScopeExpansionMode};
+use yunta_core::events::{Decider, EventPayload, Failure, NodeEvent, TokenUsage};
+use yunta_core::expansion::{node_offer, Decision, Waiting};
+use yunta_core::protected::Protected;
+use yunta_core::{Node, NodePermissions, ScopeGlob};
 
-use super::node_close::{fail_with, fail_with_tokens};
+use super::node_close::{fail_with_staged, fail_with_tokens_staged};
 use super::node_exec::NodeEnd;
+use super::scope_record::{record, Recording, Subject};
+use super::shared_tree::closing_of;
 use super::{RunCtx, RunError};
-use crate::replay::NodeState;
+use crate::replay::{NodeState, RunState};
 use crate::reserved::ReservedOption;
 use crate::run_tools::NodeScopeAccess;
 use crate::scope::audit;
+use crate::scope_expansion::ScopeExpansionRequest;
 use crate::worktree::UnitId;
 
-/// What a node's own session works to, when the node declares a scope
-/// and is not read-only: its effective scope as the log stands when the
-/// attempt begins, where a check keeps its index, and whether a person
-/// may widen it on this run.
+/// What a node's session works to, when the node declares a scope and is
+/// not read-only: its effective scope as the log stands when the attempt
+/// begins, where a check keeps its index, whether a person may widen it on
+/// this run, and what the run protects from it.
 pub(super) async fn session_access(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Option<Arc<NodeScopeAccess>>, RunError> {
-    if !node.scope.is_declared() || node.permissions == Some(yunta_core::NodePermissions::ReadOnly)
-    {
+    if !node.scope.is_declared() || node.permissions == Some(NodePermissions::ReadOnly) {
         return Ok(None);
     }
     let state = ctx.run_view().await?.state;
-    let denied = super::denied::Denied::of(ctx).await?.every();
+    let protected = judged_by(&ctx.protected(), &state, node);
     Ok(crate::effective_scope(node, &state).map(|scope| {
         Arc::new(NodeScopeAccess {
             scope,
             index: crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()))
                 .with_extension("check"),
             may_ask: super::schedule::person_may_grant_scope(&ctx.manifest.config),
-            denied,
+            protected: Arc::new(protected),
             staged: Default::default(),
         })
     }))
 }
 
 /// A person chose to widen this node's scope after it failed on it: the
-/// grant goes on the log once, before the attempt it widens starts, so
-/// that attempt's fence and its close both read it from there.
+/// choice is decided as the menu offered it, and the outcome goes on the
+/// log once, before the attempt it widens starts, so that attempt's fence
+/// and its close both read it from there.
 ///
-/// Once per decision. A restart finds the grant already after the
-/// decision and leaves it alone, and any other choice — or none — grants
+/// Once per decision. A restart finds the grant already after the decision,
+/// or an attempt begun after it, and leaves it alone. Any other choice grants
 /// nothing: widening a scope is a person's call, never the engine's.
 pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
     // A loop's owed requests are answered task by task.
@@ -63,12 +65,16 @@ pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<
     let Some((decided_at, choice)) = state.choice_after_failure(&node.id) else {
         return Ok(());
     };
-
-    let granted_since = state
+    let widened = state
         .grants
         .last_granted_to_node(&node.id)
         .is_some_and(|at| at > decided_at);
-    if ReservedOption::of(&choice.option) != Some(ReservedOption::Grant) || granted_since {
+    let begun = state
+        .nodes
+        .get(&node.id)
+        .and_then(|record| record.last_started)
+        .is_some_and(|at| at > decided_at);
+    if ReservedOption::of(&choice.option) != Some(ReservedOption::Grant) || widened || begun {
         return Ok(());
     }
     let Some(NodeState::Failed { failure, .. }) = state.nodes.state(&node.id) else {
@@ -81,30 +87,21 @@ pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<
             yunta_core::describe(&error)
         ),
     })?;
-    // The menu never offers a grant that reaches a denied path; a choice
-    // recorded anyway widens nothing the run denies.
-    let denied = super::denied::Denied::of(ctx).await?.every();
-    let paths: Vec<yunta_core::ScopeGlob> = wanted
-        .into_iter()
-        .filter(|glob| !yunta_core::reaches_any(glob, &denied))
-        .collect();
-    if paths.is_empty() {
+    // A failure that widens nothing of the node (an owed request, answered
+    // task by task above) has no node decision to record.
+    if wanted.is_empty() {
         return Ok(());
     }
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
-            task_id: None,
-            decided_by: Decider::Person {
+    let decision = match node_offer(&wanted, &ctx.protected(), widenable(ctx, node)) {
+        Ok(paths) => Decision::Grant {
+            paths,
+            by: Decider::Person {
                 id: choice.by.clone(),
             },
-            mode: ScopeExpansionMode::Ask,
-            count_this_run: state.grants.granted() + 1,
-            paths,
-        })),
-    )
-    .await?;
-    Ok(())
+        },
+        Err(denial) => Decision::Deny(denial),
+    };
+    record_node_decision(ctx, node, state, None, &decision).await
 }
 
 /// What the node changed and what of it falls outside its declared
@@ -129,21 +126,23 @@ async fn audited_diff(
     let Some(scope) = crate::effective_scope(node, &view.state) else {
         return Ok(None);
     };
+    let judged = judged_by(&ctx.protected(), &view.state, node);
+    let index = crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()));
+    let closing = closing_of(node);
     let Some(from) = view.state.nodes.from_tree(&node.id).cloned() else {
-        // A log written before a start named its tree. Nothing to
-        // compare against but the run's own base, which is what that log
-        // meant, so the audit it asks for is the one it always got.
-        return Ok(None);
+        return untreed_protection(ctx, &index, &judged, closing, staged)
+            .await
+            .map(Some);
     };
-    let deny = super::denied::Denied::of(ctx).await?.closing(node);
     let ceiling = crate::scope::Ceiling {
         scope: &scope,
-        deny: &deny,
+        protected: &judged,
+        closing,
     };
     let result = audit(
         ctx.worktree,
         &from,
-        &crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone())),
+        &index,
         ceiling,
         staged,
         ctx.root_supervision(),
@@ -164,17 +163,44 @@ async fn audited_diff(
     Ok(Some(result))
 }
 
+/// The judgement of an attempt whose start recorded no tree, as a log written
+/// before starts recorded one does. Its scope has no starting point to be
+/// audited from, so the scope is not audited and no scope check is recorded;
+/// what the run protects is still judged on the diff from the commit
+/// [`untreed_base`](super::shared_tree::untreed_base) names.
+async fn untreed_protection(
+    ctx: &RunCtx<'_>,
+    index: &std::path::Path,
+    judged: &Protected,
+    closing: yunta_core::protected::Closing,
+    staged: &[PathBuf],
+) -> Result<crate::ScopeCheckResult, RunError> {
+    let base = super::shared_tree::untreed_base(ctx).await?;
+    Ok(crate::scope::protection_audit(
+        ctx.worktree,
+        base.as_str(),
+        index,
+        judged,
+        closing,
+        staged,
+        ctx.root_supervision(),
+    )
+    .await?)
+}
+
 /// A request the node's session made for more scope, taken out of its
-/// checkout before the audit — a control file is not the node's work —
-/// and recorded as `scope_expansion_requested`.
+/// checkout before the audit — a control file is not the node's work — and
+/// recorded as the session wrote it.
 ///
-/// Where a person may grant it, the node fails on the request, so the
-/// failure's menu puts it to them with the session's own reason: its
-/// work is not done until they answer. Where nobody may, the close goes
-/// on under the scope the node has, and the log still says it asked.
+/// Where the offer holds, a person may answer it: the node fails on the
+/// request, so the failure's menu puts it to them with the session's own
+/// reason, and its work is not done until they answer. Where the offer
+/// refuses it, the refusal is recorded with its finding, and the close goes
+/// on under the scope the node has.
 pub(super) async fn scope_request(
     ctx: &RunCtx<'_>,
     node: &Node,
+    staged: &[PathBuf],
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
     if !crate::audits(node) {
@@ -184,44 +210,30 @@ pub(super) async fn scope_request(
         Ok(Some(request)) => request,
         Ok(None) => return Ok(None),
         Err(error) => {
-            return fail_with_tokens(ctx, node, yunta_core::describe(&error), false, tokens)
+            let outcome = yunta_core::describe(&error);
+            return fail_with_tokens_staged(ctx, node, outcome, false, tokens, staged)
+                .await
+                .map(Some);
+        }
+    };
+    let decision = match node_offer(&request.paths, &ctx.protected(), widenable(ctx, node)) {
+        Ok(paths) => Decision::Escalate {
+            paths,
+            because: Waiting::Person,
+        },
+        Err(denial) => Decision::Deny(denial),
+    };
+    let state = ctx.run_view().await?.state;
+    record_node_decision(ctx, node, &state, Some(&request), &decision).await?;
+    match decision {
+        Decision::Escalate { paths, .. } => {
+            let failure = Failure::scope_requested(paths, request.reason);
+            fail_with_staged(ctx, node, failure, false, tokens, staged)
                 .await
                 .map(Some)
         }
-    };
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Scope(ScopeEvent::Requested(ScopeExpansionRequestedPayload {
-            task_id: None,
-            paths: request.paths.clone(),
-            reason: request.reason.clone(),
-            proposed_criterion: request.proposed_criterion.map(Into::into),
-            proposed_criterion_precheck: None,
-        })),
-    )
-    .await?;
-    let grantable = node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
-        && super::schedule::person_may_grant_scope(&ctx.manifest.config);
-    // What the run denies every session is never put to a person: the
-    // node answers for what it asked beside it, if anything.
-    let denied = super::denied::Denied::of(ctx).await?.every();
-    let paths: Vec<yunta_core::ScopeGlob> = request
-        .paths
-        .into_iter()
-        .filter(|glob| !yunta_core::reaches_any(glob, &denied))
-        .collect();
-    if !grantable || paths.is_empty() {
-        return Ok(None);
+        _ => Ok(None),
     }
-    fail_with(
-        ctx,
-        node,
-        Failure::scope_requested(paths, request.reason),
-        false,
-        tokens,
-    )
-    .await
-    .map(Some)
 }
 
 /// The node's whole diff against its declared `scope:`, audited as
@@ -243,8 +255,10 @@ pub(super) async fn scope_violation(
     // What no session of the run may write is not the node's scope to
     // widen: the failure offers no grant, and the work never lands.
     if !result.denied.is_empty() {
-        let failure = Failure::paths_denied(result.denied);
-        return Ok(Some(fail_with(ctx, node, failure, false, tokens).await?));
+        let failure = Failure::paths_denied(result.denied, result.denied_by);
+        return Ok(Some(
+            fail_with_staged(ctx, node, failure, false, tokens, staged).await?,
+        ));
     }
     if result.violations.is_empty() {
         return Ok(None);
@@ -259,14 +273,68 @@ pub(super) async fn scope_violation(
             ctx.record_breach(&node.id, &adapter, &breach).await?;
         }
     }
+    let failure = Failure::scope_violated(result.violations);
     Ok(Some(
-        fail_with(
-            ctx,
-            node,
-            Failure::scope_violated(result.violations),
-            false,
-            tokens,
-        )
-        .await?,
+        fail_with_staged(ctx, node, failure, false, tokens, staged).await?,
     ))
+}
+
+/// What the run protects from `node`'s own work, as the log stands:
+/// `protected`, with the instruction files a person granted the node lifted.
+///
+/// A grant lifts only while it still reaches nothing a person may not grant,
+/// so a path the run has protected since the grant stays protected.
+pub(super) fn judged_by(protected: &Protected, state: &RunState, node: &Node) -> Protected {
+    let granted: Vec<ScopeGlob> = state
+        .grants
+        .paths_for_node(&node.id)
+        .iter()
+        .filter(|glob| {
+            protected
+                .reached_by(glob)
+                .is_none_or(|reason| reason.person_may_grant())
+        })
+        .cloned()
+        .collect();
+    protected.lifting(&granted)
+}
+
+/// Whether a person may widen `node`'s scope on this run: the run's ceiling
+/// lets one grant, and the node is not read-only. The menu asks the same
+/// question.
+fn widenable(ctx: &RunCtx<'_>, node: &Node) -> bool {
+    node.permissions != Some(NodePermissions::ReadOnly)
+        && super::schedule::person_may_grant_scope(&ctx.manifest.config)
+}
+
+/// Records the engine's decision about one of the node's own scope
+/// choices: the session's request when it made one, and the decision.
+async fn record_node_decision(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    state: &RunState,
+    asked: Option<&ScopeExpansionRequest>,
+    decision: &Decision,
+) -> Result<(), RunError> {
+    let attempt = state
+        .nodes
+        .get(&node.id)
+        .map(|record| record.attempts)
+        .unwrap_or_default();
+    record(
+        &ctx.log(),
+        node,
+        Recording {
+            subject: Subject::Node,
+            mode: None,
+            by: Decider::Rule,
+            asked,
+            decision,
+            count: state.grants.granted(),
+            located: false,
+            precheck: None,
+            attempt,
+        },
+    )
+    .await
 }

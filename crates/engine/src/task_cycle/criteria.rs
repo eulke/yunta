@@ -85,7 +85,7 @@ async fn run_all_criteria(
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let tree = Tree::for_criteria(criteria, cwd, supervision).await?;
+    let tree = Tree::for_criteria(criteria, cwd, &memo.pathspecs(), supervision).await?;
     run_on(task_id, criteria, &tree, cwd, memo, supervision).await
 }
 
@@ -266,7 +266,7 @@ pub async fn post_check(
 ) -> Result<PostCheck, TaskCycleError> {
     let (guards, own): (Vec<Criterion>, Vec<Criterion>) =
         task.criteria.iter().cloned().partition(Criterion::is_guard);
-    let tree = Tree::for_criteria(&task.criteria, cwd, supervision).await?;
+    let tree = Tree::for_criteria(&task.criteria, cwd, &memo.pathspecs(), supervision).await?;
     let mut runs = run_on(&task.id, &own, &tree, cwd, memo, supervision).await?;
     if !runs.iter().all(|run| run.exit_code == 0) {
         let waiting = guards.into_iter().map(|guard| guard.cmd).collect();

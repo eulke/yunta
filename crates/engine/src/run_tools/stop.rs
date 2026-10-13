@@ -157,9 +157,13 @@ impl SessionTools {
         if why.is_empty() {
             return Ok(None);
         }
-        let tree = crate::task_cycle::content_of(&self.cwd, self.host.supervision(&self.stop))
-            .await
-            .map_err(|source| RunToolError::Check { source })?;
+        let tree = crate::task_cycle::content_of(
+            &self.cwd,
+            &self.host.memo.pathspecs(),
+            self.host.supervision(&self.stop),
+        )
+        .await
+        .map_err(|source| RunToolError::Check { source })?;
         let found = told.join("\n\n");
         let state = ContentHash::sha256(format!("{tree}\n{found}").as_bytes());
         let told = format!(
@@ -235,10 +239,9 @@ impl SessionTools {
         }
         let refused = refused_writes(&self.events().await?, std::slice::from_ref(session));
         Ok(!refused.is_empty()
-            && unfinished
-                .red
-                .iter()
-                .any(|printed| crate::task_cycle::locates_a_refusal(printed, &self.cwd, &refused)))
+            && unfinished.red.iter().any(|printed| {
+                crate::scope_expansion::locates_a_refusal(printed, &self.cwd, &refused)
+            }))
     }
 
     /// Whether `session` was sent back already with its work at `state`.

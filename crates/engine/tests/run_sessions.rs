@@ -683,7 +683,6 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: rules
-      within: ["extra-*.txt"]
       max_per_run: 2
 "#;
     let mut tasks = String::from("tasks:\n");

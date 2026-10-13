@@ -6,7 +6,9 @@ use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Phase, SessionDeath};
+use yunta_core::expansion::Decision;
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
+use yunta_core::protected::{Closing, Protected};
 use yunta_core::Task;
 
 use super::dispatch::{dispatch_session, DispatchError};
@@ -32,16 +34,15 @@ pub(super) struct AttemptParams<'a> {
     pub(super) profile: PermissionProfile,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) max_expansion_files: usize,
-    pub(super) grants: &'a crate::scope_expansion::GrantLedger,
+    pub(super) grants: &'a crate::scope_expansion::GrantWindow,
     /// Every path granted before this attempt: on the log when the cycle
     /// began, and what the engine granted in the cycle's earlier attempts.
     pub(super) already_granted_paths: &'a [ScopeGlob],
     /// What the other tasks of the batch may write.
     pub(super) beside: &'a [ScopeGlob],
-    /// What no session of the run may write — what the project denies to
-    /// every run, and every test a person approved: never written, never
-    /// granted.
-    pub(super) denied: &'a [ScopeGlob],
+    /// What no session of the run may write, as this task's lifted set
+    /// judges it: never written, never granted.
+    pub(super) protected: &'a Protected,
     /// The session this attempt picks back up, and the answer it is told,
     /// instead of opening a fresh one.
     pub(super) resume: Option<&'a super::Continuing>,
@@ -96,8 +97,8 @@ pub(super) async fn run_one_attempt(
         unit,
         memo,
         already_granted_paths,
+        protected,
         supervision,
-        audit,
         ..
     } = params;
     // A cancelled dispatch ends the cycle right here — no post-check, no
@@ -118,11 +119,7 @@ pub(super) async fn run_one_attempt(
     }
 
     let expansion_outcome = super::expansion::evaluate_scope_expansion(params).await?;
-    let granted_paths: &[ScopeGlob] = expansion_outcome
-        .as_ref()
-        .filter(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted)
-        .map(|outcome| outcome.request.paths.as_slice())
-        .unwrap_or(&[]);
+    let granted_paths = super::expansion::paths_granted(expansion_outcome.as_ref());
     let effective_scope: Vec<ScopeGlob> = task
         .scope
         .iter()
@@ -138,7 +135,8 @@ pub(super) async fn run_one_attempt(
         task,
         crate::scope::Ceiling {
             scope: &effective_scope,
-            deny: params.denied,
+            protected,
+            closing: Closing::Every,
         },
         Work {
             unit,
@@ -168,31 +166,14 @@ pub(super) async fn run_one_attempt(
     let recorded = recorder.post_check(&post_runs, &waiting).await?;
     recorder.scope(&scope).await?;
 
-    // A write the fence refused, or a request the loop's rules did not
-    // grant, that a red criterion of this attempt points at is decided
-    // here, before anything reads the request: the engine verified it, so
-    // no one is asked.
-    let expansion_outcome = match expansion_outcome {
-        _ if succeeded => expansion_outcome,
-        None => {
-            let refused = super::stream::read_refusals(audit, &sessions, &post_runs)
-                .await
-                .map_err(|source| TaskCycleError::Audit {
-                    task: task.id.clone(),
-                    source,
-                })?;
-            super::evidence::of_refusals(params, &refused, &post_runs).await
-        }
-        Some(outcome) if outcome.decision == crate::scope_expansion::Decision::Granted => {
-            Some(outcome)
-        }
-        Some(outcome) => super::evidence::of_red(params, &outcome.request, &post_runs)
-            .await
-            .or(Some(outcome)),
-    };
+    // A write the fence refused, or a request the decision left open, that a
+    // red criterion of this attempt points at is decided here, before anything
+    // reads the request: the engine verified it, so no one is asked.
+    let expansion_outcome =
+        located_outcome(params, &sessions, expansion_outcome, &post_runs, succeeded).await?;
     let escalated = matches!(
         expansion_outcome.as_ref().map(|o| &o.decision),
-        Some(crate::scope_expansion::Decision::Escalate)
+        Some(Decision::Escalate { .. })
     );
     // The session declared its failure won't yield to another try — captured
     // before the outcome moves into the record below.
@@ -308,7 +289,7 @@ pub(super) async fn run_one_attempt(
     let granted = record
         .scope_expansion
         .as_ref()
-        .is_some_and(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted);
+        .is_some_and(|outcome| matches!(outcome.decision, Decision::Grant { .. }));
     Ok((
         last_staged,
         match granted {
@@ -316,6 +297,38 @@ pub(super) async fn run_one_attempt(
             false => AttemptStep::Unmet(record),
         },
     ))
+}
+
+/// The scope request an attempt is decided by once its red output is read: the
+/// request it made, or the refused write its red criterion locates. A request
+/// refused for what no session may write, or for its mode, stays refused.
+async fn located_outcome(
+    params: &AttemptParams<'_>,
+    sessions: &[yunta_core::SessionId],
+    decided: Option<crate::scope_expansion::ScopeExpansionOutcome>,
+    post_runs: &[super::CriterionRun],
+    succeeded: bool,
+) -> Result<Option<crate::scope_expansion::ScopeExpansionOutcome>, TaskCycleError> {
+    match decided {
+        _ if succeeded => Ok(decided),
+        None => {
+            let refused = super::stream::read_refusals(params.audit, sessions, post_runs)
+                .await
+                .map_err(|source| TaskCycleError::Audit {
+                    task: params.task.id.clone(),
+                    source,
+                })?;
+            let located = super::evidence::of_refusals(params, &refused, post_runs).await;
+            super::expansion::decide_located(params, located).await
+        }
+        Some(outcome) if super::expansion::standing(&outcome.decision) => Ok(Some(outcome)),
+        Some(outcome) => {
+            let located = super::evidence::of_red(params, &outcome, post_runs).await;
+            Ok(super::expansion::decide_located(params, located)
+                .await?
+                .or(Some(outcome)))
+        }
+    }
 }
 
 /// Opens a fresh session for one attempt and drives it to a terminal
@@ -355,7 +368,7 @@ async fn open_and_dispatch(
             .chain(already_granted_paths)
             .cloned()
             .collect(),
-        denied: params.denied.to_vec(),
+        protected: std::sync::Arc::new(params.protected.clone()),
         unit: unit.clone(),
         index: crate::run_dir::index_for(&setup.run_dir, &unit.who).with_extension("check"),
         cancel: supervision.cancel.clone(),

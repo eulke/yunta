@@ -158,7 +158,9 @@ pub trait Adapter: Send + Sync {
 
     /// Archivos del checkout de los que la CLI del adapter toma configuración
     /// que ejecuta código o monta herramientas (sus settings con hooks, sus
-    /// servidores MCP). Ninguna sesión de ningún run los escribe. Default: ninguno.
+    /// servidores MCP). Ninguna sesión de ningún run los escribe, use o no el
+    /// run este adapter: el núcleo protege los de todos, y una prueba exige que
+    /// su lista coincida con lo que declaran los adapters. Default: ninguno.
     fn own_config(&self) -> Vec<ScopeGlob>;
 
     /// Cómo traduce este adapter entre los hooks de su CLI y el riel del engine.

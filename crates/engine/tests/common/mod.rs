@@ -15,6 +15,8 @@ use yunta_core::events::{FindingEvent, NodeEvent, SessionEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
+pub mod menu;
+
 pub mod spec;
 
 // --- kind: questions ------------------------------------
@@ -280,20 +282,9 @@ pub fn independent_tasks_fixture(count: usize) -> String {
 
 // --- scope_expansion ------------------------------------
 
-/// A loop node declaring `scope_expansion:` — `within` is only rendered
-/// when the caller passes something, so `rules`-mode tests can still omit
-/// it when a test wants an empty ceiling.
-pub fn scope_expansion_workflow(mode: &str, within: &[&str], max_per_run: Option<u32>) -> String {
-    let within_line = if within.is_empty() {
-        String::new()
-    } else {
-        let items = within
-            .iter()
-            .map(|w| format!("\"{w}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("      within: [{items}]\n")
-    };
+/// A loop node declaring `scope_expansion:` with the given mode and, when
+/// the caller passes one, a cap on the grants the engine makes per run.
+pub fn scope_expansion_workflow(mode: &str, max_per_run: Option<u32>) -> String {
     let cap_line = max_per_run
         .map(|n| format!("      max_per_run: {n}\n"))
         .unwrap_or_default();
@@ -315,14 +306,13 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: {mode}
-{within_line}{cap_line}"#
+{cap_line}"#
     )
 }
 
 /// The same loop shape with no `scope_expansion:` key at all — the
 /// default (an absent block behaves exactly like `mode: deny` with no
-/// `within`/`max_per_run`) — proving that default is really live, not
-/// just documented.
+/// `max_per_run`) — proving that default is really live, not just documented.
 pub fn no_scope_expansion_workflow() -> String {
     r#"
 name: scope-expansion-default

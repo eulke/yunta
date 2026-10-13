@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::git::GitError;
 use crate::process::Supervision;
 use yunta_core::fence::Coverage;
+use yunta_core::protected::{Closing, Pathspecs, Protected, Protection, Trespass};
 use yunta_core::{Location, NodeScope, RelativePath, ScopeGlob, TreeId};
 
 use crate::replay::RunState;
@@ -54,27 +55,38 @@ impl ScopeCheckError {
 pub struct ScopeCheckResult {
     pub diff: Vec<PathBuf>,
     /// Every path of the diff the work may not have changed: outside its
-    /// scope, or denied to every session of the run.
+    /// scope, or protected from every session of the run.
     pub violations: Vec<PathBuf>,
-    /// The violations no session of the run may write — what the project
-    /// denies to every run (`permissions.paths.deny`), and the tests a
-    /// person approved — which no grant widens.
+    /// The violations of protected paths: what no session of the run may
+    /// write, whatever its scope says. A person's grant lifts only the
+    /// instruction files, and the caller's set already carries that lift.
     pub denied: Vec<PathBuf>,
+    /// Why each of `denied` is protected, in the same order.
+    pub denied_by: Vec<Protection>,
+}
+
+impl ScopeCheckResult {
+    /// The refused paths with the reason each is protected, in order.
+    pub fn trespasses(&self) -> Vec<Trespass> {
+        self.denied
+            .iter()
+            .zip(&self.denied_by)
+            .map(|(path, reason)| Trespass {
+                path: path.clone(),
+                reason: *reason,
+            })
+            .collect()
+    }
 }
 
 /// What a unit of work is held to: the scope it may change, and what no
-/// session of the run may write whatever that scope allows.
+/// session of the run may write whatever that scope allows, judged as
+/// `closing` says.
 #[derive(Debug, Clone, Copy)]
 pub struct Ceiling<'a> {
     pub scope: &'a [ScopeGlob],
-    pub deny: &'a [ScopeGlob],
-}
-
-impl<'a> Ceiling<'a> {
-    /// `scope`, with nothing denied beyond it.
-    pub fn scope(scope: &'a [ScopeGlob]) -> Self {
-        Ceiling { scope, deny: &[] }
-    }
+    pub protected: &'a Protected,
+    pub closing: Closing,
 }
 
 /// What changed in `cwd` since `from`: the paths a unit of work is
@@ -92,9 +104,10 @@ pub async fn changed_since(
     cwd: &Path,
     from: &TreeId,
     index: &Path,
+    covered: &Pathspecs,
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let now = crate::worktree::capture_tree(cwd, index, supervision).await?;
+    let now = crate::worktree::capture_tree(cwd, index, covered, supervision).await?;
     changed_between(cwd, from.as_str(), now.as_str(), supervision).await
 }
 
@@ -129,7 +142,8 @@ pub async fn audit(
     staged: &[PathBuf],
     supervision: Supervision<'_>,
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
-    let now = crate::worktree::capture_tree(cwd, index, supervision).await?;
+    let pathspecs = ceiling.protected.pathspecs();
+    let now = crate::worktree::capture_tree(cwd, index, &pathspecs, supervision).await?;
     audit_tree(cwd, from, &now, ceiling, staged, supervision).await
 }
 
@@ -145,38 +159,52 @@ pub async fn audit_tree(
     supervision: Supervision<'_>,
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
     let diff = changed_between(cwd, from.as_str(), now.as_str(), supervision).await?;
-    let denied = denied(&diff, ceiling.deny, staged)?;
+    let trespasses = ceiling.protected.trespasses(&diff, staged, ceiling.closing);
     let mut violations = violations(&diff, ceiling.scope, staged)?;
-    for path in &denied {
-        if !violations.contains(path) {
-            violations.push(path.clone());
+    let mut denied = Vec::with_capacity(trespasses.len());
+    let mut denied_by = Vec::with_capacity(trespasses.len());
+    for trespass in trespasses {
+        if !violations.contains(&trespass.path) {
+            violations.push(trespass.path.clone());
         }
+        denied.push(trespass.path);
+        denied_by.push(trespass.reason);
     }
     Ok(ScopeCheckResult {
         diff,
         violations,
         denied,
+        denied_by,
     })
 }
 
-/// The paths of `diff` that `deny` selects, less what the adapter staged
-/// for its own mechanics.
-pub fn denied(
-    diff: &[PathBuf],
-    deny: &[ScopeGlob],
+/// The protection half of [`audit_tree`], for a unit whose scope is not
+/// audited: what the diff from `from` to the checkout reaches that
+/// `protected` refuses, as `closing` judges it. Each such path is a violation,
+/// as an audit reports it, and the diff is the one the audit would have read.
+pub async fn protection_audit(
+    cwd: &Path,
+    from: &str,
+    index: &Path,
+    protected: &Protected,
+    closing: Closing,
     staged: &[PathBuf],
-) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    if deny.is_empty() {
-        return Ok(Vec::new());
-    }
-    let set =
-        yunta_core::scope_globset(deny).map_err(|source| ScopeCheckError::GlobSet { source })?;
-    Ok(diff
-        .iter()
-        .filter(|path| !staged.iter().any(|mount| path.starts_with(mount)))
-        .filter(|path| set.is_match(path))
-        .cloned()
-        .collect())
+    supervision: Supervision<'_>,
+) -> Result<ScopeCheckResult, ScopeCheckError> {
+    let pathspecs = protected.pathspecs();
+    let now = crate::worktree::capture_tree(cwd, index, &pathspecs, supervision).await?;
+    let diff = changed_between(cwd, from, now.as_str(), supervision).await?;
+    let (denied, denied_by): (Vec<PathBuf>, Vec<Protection>) = protected
+        .trespasses(&diff, staged, closing)
+        .into_iter()
+        .map(|trespass| (trespass.path, trespass.reason))
+        .unzip();
+    Ok(ScopeCheckResult {
+        diff,
+        violations: denied.clone(),
+        denied,
+        denied_by,
+    })
 }
 
 /// The paths from a `-z` git listing: NUL-separated, and — because `-z`
@@ -296,5 +324,53 @@ impl Breach {
                 .collect::<Vec<_>>()
                 .join(", ")
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A checkout of one commit, and that commit, with a protected file and an
+    /// ordinary one written on top of it.
+    fn checkout_changed_since_its_commit() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(dir.path());
+        let base = yunta_testkit::git_output(dir.path(), &["rev-parse", "HEAD"]);
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(dir.path().join(".claude/settings.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("src.rs"), "fn main() {}").unwrap();
+        (dir, base)
+    }
+
+    #[tokio::test]
+    async fn a_protection_audit_judges_the_diff_from_the_base_it_is_given() {
+        let (dir, base) = checkout_changed_since_its_commit();
+        let protected = Protected::new(&[yunta_core::ScopeGlob::from(".claude/**")], &[])
+            .expect("a protected set that builds");
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let supervision =
+            crate::process::Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock);
+
+        let result = protection_audit(
+            dir.path(),
+            base.trim(),
+            &dir.path().join("audit.check"),
+            &protected,
+            Closing::Every,
+            &[],
+            supervision,
+        )
+        .await
+        .expect("the protection audit reads the checkout");
+
+        assert_eq!(result.denied, vec![PathBuf::from(".claude/settings.json")]);
+        assert_eq!(result.denied_by, vec![Protection::ProjectDeny]);
+        assert_eq!(result.violations, result.denied);
+        assert!(
+            result.diff.contains(&PathBuf::from("src.rs")),
+            "the diff holds every change from the base: {:?}",
+            result.diff
+        );
     }
 }

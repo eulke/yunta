@@ -5,11 +5,12 @@
 //! process that paused the run) know what it's answering.
 
 use yunta_core::events::{EngineFact, GateEvent, NodeEvent, NodeOutcome, PauseReason, RunEvent};
-use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunState, RunTerminal};
+use yunta_engine::{ResolveGateError, RunReport, RunState, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
 
 mod common;
+use common::menu::rebuilt_menu;
 use common::*;
 
 /// A claude-code fixture that scripts no session, so a run reaches only its gates.
@@ -65,11 +66,9 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
         )))
     )));
 
-    let (node_id, escalation) =
-        current_escalation(&manifest, &bench.run_dir(), &yunta_engine::derive(&events))
-            .await
-            .unwrap()
-            .expect("an exhausted re-route must reconstruct an escalation");
+    let (node_id, escalation) = rebuilt_menu(&manifest, &bench.run_dir(), &events)
+        .await
+        .expect("an exhausted re-route must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "lint");
     assert!(escalation.summary().contains("lint"));
     assert!(escalation.summary().contains("fix-lint"));
@@ -105,11 +104,9 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
         )))
     )));
 
-    let (node_id, escalation) =
-        current_escalation(&manifest, &bench.run_dir(), &yunta_engine::derive(&events))
-            .await
-            .unwrap()
-            .expect("an unresolved internal gate must reconstruct an escalation");
+    let (node_id, escalation) = rebuilt_menu(&manifest, &bench.run_dir(), &events)
+        .await
+        .expect("an unresolved internal gate must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "approve");
     assert_eq!(escalation.summary(), "Approve the plan?");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();

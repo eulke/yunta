@@ -43,10 +43,12 @@ mod units;
 mod walk;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use yunta_core::protected::{Pathspecs, Protected};
 use yunta_core::{Clock, CommitSha};
 
+use super::capture::clean_covered;
 use super::{head_tree, Unit, UnitHome, UnitId, WorktreeError};
 use crate::git::Effect;
 use crate::lock::{self, LockOwner};
@@ -81,6 +83,10 @@ pub struct CheckoutPool {
     walking: space::Walking,
     /// Where the pool is, read once.
     located: tokio::sync::OnceCell<Located>,
+    /// The pathspecs of the paths the project protects, which a checkout
+    /// given out or back is cleaned of even where git ignores them. Shared
+    /// by every handle of the pool, so `protect` on one reaches all of them.
+    protected: Arc<RwLock<Pathspecs>>,
 }
 
 /// Where a pool is: its own directory, and the common git directory of
@@ -186,6 +192,8 @@ impl CheckoutPool {
     /// The pool of the project a run's manifest names, for that run: what
     /// the manifest recorded of the project is taken rather than asked
     /// for again, and what it may keep of the disk is the run's config's.
+    /// It cleans what the run protects from its first take on, before any
+    /// wake of the run adds the tests a person approves.
     pub fn of_run(
         root: &Path,
         repo: &Path,
@@ -202,7 +210,15 @@ impl CheckoutPool {
             .storage
             .as_ref()
             .and_then(|storage| storage.pool.as_ref());
-        Self::reached(root, repo, Some(holder.to_path_buf()), known, limits, clock)
+        let pool = Self::reached(root, repo, Some(holder.to_path_buf()), known, limits, clock);
+        // A deny that does not build is the wake's diagnostic; what every
+        // run protects is cleaned all the same.
+        let protected = Protected::new(manifest.config.denied_paths(), &[])
+            .or_else(|_| Protected::new(&[], &[]))
+            .map(|set| set.pathspecs())
+            .unwrap_or_default();
+        pool.protect(protected);
+        pool
     }
 
     /// The pool of the project `repo` is a checkout of, for the run whose
@@ -254,6 +270,7 @@ impl CheckoutPool {
             limits: limits.cloned().unwrap_or_default(),
             walking: space::Walking::new(clock),
             located: tokio::sync::OnceCell::new(),
+            protected: Arc::new(RwLock::new(Pathspecs::default())),
         })
     }
 
@@ -269,7 +286,26 @@ impl CheckoutPool {
             limits: self.limits.clone(),
             walking: self.walking.clone(),
             located: tokio::sync::OnceCell::new_with(self.located.get().cloned()),
+            protected: Arc::clone(&self.protected),
         })
+    }
+
+    /// Sets the pathspecs of the paths the project protects. From now on each
+    /// checkout the pool hands out or takes back is cleaned of what git
+    /// ignores under them too, on every handle of the pool.
+    pub fn protect(&self, pathspecs: Pathspecs) {
+        *self
+            .protected
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = pathspecs;
+    }
+
+    /// The pathspecs `protect` set, as a copy a git call takes.
+    pub(crate) fn pathspecs(&self) -> Pathspecs {
+        self.protected
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
     }
 
     /// The pool's directory, which exists once the pool has a checkout.
@@ -342,7 +378,8 @@ impl CheckoutPool {
         let user = fit::User::Unit { refs: &refs };
         let (checkout, lease) = match Box::pin(self.take(user, home.base, supervision)).await? {
             Taken::Held(checkout, lease) => {
-                reset(&checkout, None, home.base, supervision).await?;
+                let protected = self.pathspecs();
+                reset(&checkout, None, home.base, &protected, supervision).await?;
                 (checkout, lease)
             }
             Taken::Nothing { listed } => {
@@ -388,6 +425,7 @@ impl CheckoutPool {
                     supervision,
                 )
                 .await?;
+                clean_covered(&checkout, &self.pathspecs(), supervision).await?;
                 Ok((checkout, lease))
             }
             Taken::Nothing { listed } => {
@@ -424,11 +462,13 @@ async fn settled(path: &Path) -> PathBuf {
 }
 
 /// Puts `checkout` at `base` — on `branch`, cut anew there, or on none —
-/// with nothing of whoever worked there before but what git ignores.
+/// with nothing of whoever worked there before but what git ignores
+/// outside the protected paths `protected` names.
 async fn reset(
     checkout: &Path,
     branch: Option<&str>,
     base: &CommitSha,
+    protected: &Pathspecs,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     let mut switch = vec!["switch", "--discard-changes", "-q"];
@@ -445,6 +485,7 @@ async fn reset(
         supervision,
     )
     .await?;
+    clean_covered(checkout, protected, supervision).await?;
     let request = checkout.join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
     match tokio::fs::remove_file(&request).await {
         Err(source) if source.kind() != std::io::ErrorKind::NotFound => Err(WorktreeError::Io {

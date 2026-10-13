@@ -30,6 +30,7 @@ pub mod disk;
 pub mod durable;
 mod error;
 pub mod events;
+pub mod expansion;
 pub mod fence;
 mod findings;
 mod glob;
@@ -45,6 +46,7 @@ pub mod persisted;
 pub mod policy;
 pub mod port;
 pub mod process;
+pub mod protected;
 mod questions;
 pub mod rail;
 pub mod receipt;
@@ -104,7 +106,7 @@ pub use pack::{
     PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackManifestError,
     PackRequires, RequiredRunner,
 };
-pub use policy::ScopeExpansionMode;
+pub use policy::{ScopeCeiling, ScopeExpansionMode};
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use run_tool::RunTool;
 pub use schema_range::{SchemaRange, SchemaRangeError};

@@ -9,6 +9,7 @@ use yunta_core::CommitSha;
 
 use super::{fit, reset, CheckoutPool, Fresh, Lease, Taken};
 use crate::process::Supervision;
+use crate::worktree::capture::clean_covered;
 use crate::worktree::WorktreeError;
 
 /// Which free checkout of the pool a run is born in.
@@ -55,7 +56,8 @@ impl CheckoutPool {
         };
         match Box::pin(self.take(user, base, supervision)).await? {
             Taken::Held(checkout, lease) => {
-                reset(&checkout, Some(&branch), base, supervision).await?;
+                let protected = self.pathspecs();
+                reset(&checkout, Some(&branch), base, &protected, supervision).await?;
                 Ok((checkout, lease))
             }
             Taken::Nothing { listed } => {
@@ -114,6 +116,7 @@ impl CheckoutPool {
                         supervision,
                     )
                     .await?;
+                    clean_covered(&checkout, &self.pathspecs(), supervision).await?;
                 }
                 Ok((checkout, lease))
             }

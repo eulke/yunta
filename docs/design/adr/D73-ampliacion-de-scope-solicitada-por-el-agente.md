@@ -3,10 +3,12 @@ number: D73
 title: "Ampliación de scope solicitada por el agente y concedida por el engine o por una persona (Contrato §6.2)"
 status: revised
 revises: []
-revised_by: [D238, D239, D240]
+revised_by: [D238, D239, D240, D259]
 ---
 
 # D73 — Ampliación de scope solicitada por el agente y concedida por el engine o por una persona (Contrato §6.2)
+
+*(Revisada por D259: `within` se retiró como techo de la ampliación; un workflow que todavía lo declara no pasa `check`.)*
 
 Cubre el caso intermedio entre `finding_posted` (no me corresponde) y
 `promotion_signaled` (excede el modo): el arreglo chico y adyacente que sale

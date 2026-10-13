@@ -446,7 +446,8 @@ async fn holds_its_base(
     base: &yunta_core::CommitSha,
     supervision: crate::process::Supervision<'_>,
 ) -> Result<bool, RunError> {
-    let holds = match crate::task_cycle::content_of(worktree, supervision).await {
+    let nothing_covered = yunta_core::protected::Pathspecs::default();
+    let holds = match crate::task_cycle::content_of(worktree, &nothing_covered, supervision).await {
         Ok(holds) => holds,
         Err(error) => match RunError::from(error) {
             RunError::Cancelled => return Err(RunError::Cancelled),

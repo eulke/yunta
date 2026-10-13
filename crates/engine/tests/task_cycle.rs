@@ -15,7 +15,7 @@ use yunta_core::events::{
 use yunta_core::port::{Budget, PermissionProfile};
 use yunta_core::Task;
 use yunta_core::{Capabilities, Criterion};
-use yunta_engine::scope_expansion::GrantLedger;
+use yunta_engine::scope_expansion::GrantWindow;
 use yunta_engine::{
     run_task, surprises, AttemptEnv, BlockedCause, CriterionRun, DispatchOutcome, Memo,
     ScopeGovernance, Surprise, TaskOutcome, Unit, UnitId,
@@ -140,8 +140,8 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
 
 /// The governance a cycle test runs under when governance is not what
 /// it is about: no permissions model, the edit rung of the ladder, no
-/// scope expansion, and a ledger that has granted nothing.
-fn ungoverned(grants: &GrantLedger) -> ScopeGovernance<'_> {
+/// scope expansion, nothing protected, and a window that has granted nothing.
+fn ungoverned(grants: &GrantWindow) -> ScopeGovernance<'_> {
     ScopeGovernance {
         permissions: None,
         profile: PermissionProfile::Edit,
@@ -150,6 +150,7 @@ fn ungoverned(grants: &GrantLedger) -> ScopeGovernance<'_> {
         grants,
         already_granted_paths: &[],
         beside: &[],
+        protected: std::sync::Arc::new(yunta_core::protected::Protected::default()),
     }
 }
 
@@ -202,7 +203,7 @@ outcome: { type: completed, summary: "wrote it" }
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -254,7 +255,7 @@ outcome: { type: completed, summary: "all done, trust me" }"#,
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -294,7 +295,7 @@ outcome: { type: completed, summary: "ok" }"#,
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -346,7 +347,7 @@ outcome: { type: completed, summary: "ok" }"#,
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -404,7 +405,7 @@ outcome: { type: completed, summary: "done" }
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -456,7 +457,7 @@ sessions:
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -506,7 +507,7 @@ sessions:
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -561,7 +562,7 @@ sessions:
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -607,7 +608,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -649,7 +650,7 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -1049,7 +1050,7 @@ async fn a_hung_session_is_cut_by_its_timeout() {
                 carry: None,
                 resume: None,
             },
-            ungoverned(&GrantLedger::new(0)),
+            ungoverned(&GrantWindow::seeded(0)),
             None,
             &tokio_util::sync::CancellationToken::new(),
             &bare_setup(run.path()),
@@ -1108,7 +1109,7 @@ outcome: { type: completed, summary: "should never be reached" }
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -1452,7 +1453,7 @@ outcome: { type: completed, summary: "wrote it" }
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),
@@ -1549,7 +1550,7 @@ async fn cycle(
             carry: None,
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run_dir),
@@ -1709,7 +1710,7 @@ async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_
             carry: Some(&left),
             resume: None,
         },
-        ungoverned(&GrantLedger::new(0)),
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(run.path()),

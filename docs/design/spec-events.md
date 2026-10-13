@@ -357,18 +357,20 @@ they are gone, and the task's next cycle reads the answer.
 | `proposed_criterion` | `Option<{cmd}>` | no | si el agente propone además un criterio nuevo |
 | `proposed_criterion_precheck` [inferido] | `Option<{exit_code}>` | solo si hay `proposed_criterion` | un criterio que ya pasa se rechaza automático sin consultar |
 
+`scope_expansion_requested` guarda lo que la sesión pidió, tal como lo pidió: nunca un pedido que el engine haya reescrito, ni uno que la sesión no hizo.
+
 ### 5.14 `scope_expansion_granted` / `scope_expansion_denied` — engine
-**Fuente:** task_id, decisor (regla o persona), modo, conteo del run
+**Fuente:** task_id, decisor (regla, persona o evidencia), modo, conteo del run, razón tipada
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | `Option<string>` | no, en `scope_expansion_denied` | ausente cuando la denegación es la del propio nodo, que no nombra tarea: el nodo del evento es su sujeto |
 | `task_id` | `Option<string>` | no, en `scope_expansion_granted` | la tarea que la concesión amplía; ausente en la concesión al scope de un nodo — el que figura en el evento — que una persona hace desde el menú de su falla. Una concesión sin tarea ni nodo no se escribe |
 | `decided_by` | enum `rule \| person \| evidence` + identificador | sí | `person` lleva quién; `evidence`, el criterio rojo de la tarea cuya salida ubicó cada path (`ruta:línea`) — un hecho que el engine verificó, no una decisión (D240) |
-| `mode` | enum `rules \| ask \| deny` | sí | modo vigente en el momento de la decisión |
-| `count_this_run` | `u32` | sí | para el cap `max_per_run` |
+| `mode` | enum `rules \| ask \| deny` | no, en las de nodo | modo vigente en el momento de la decisión; una decisión sobre el scope de un nodo no lleva modo, porque el nodo no tiene modos |
+| `count_this_run` | `u32` | sí | para el cap `max_per_run`, que cuenta solo las concesiones que decide el engine (regla o evidencia), no las de persona |
 | `paths` | lista de globs | solo en `scope_expansion_granted` | los paths exactos que la concesión autorizó: el scope efectivo de un intento posterior se deriva del log sin volver a aparear la concesión con el pedido que la precedió. Un log escrito antes del campo lo lee vacío |
-| `denial_reason` | `Option<string>` | solo en `scope_expansion_denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
+| `why` | `Option<Denial>` | solo en `scope_expansion_denied` | la razón tipada de la negativa: un objeto con `type` en snake_case (`reaches_protected`, `mode_deny`, `no_criterion`, …) y los campos de su variante. Toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña. Un log escrito antes de `why` guarda el texto en `denial_reason`: ese campo no se escribe más, y al leerlo la razón es `legacy` con ese texto |
 
 ### 5.14a `scope_derived` — engine
 **Fuente:** task_id, los archivos que nombran una shape suya fuera de su scope, las shapes, las demasiado comunes y el commit
@@ -393,11 +395,11 @@ la tarea.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | `NodeOutcome`: un hecho del engine (objeto con `type`: `exit_status`, `pull_request_opened`, `children_finished`, `succeeded_first`, `tasks_done`, `child_run_finished`, `nothing_to_compare`, `no_regression`, `coverage_met`, `no_finding`), o un texto: el resumen del agente, o una frase que un log escrito antes guardó tal cual | solo en `node_finished` | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter: el hecho es el veredicto; el resumen del agente es telemetría |
-| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` / `reasons` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y ninguna sesión del run puede escribir \| la protección de cada path de `denied_paths`, en su mismo orden: `project_deny`, `agent_config`, `agent_instructions`, `approved_test` o `git_register`; en un log viejo, vacía | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage`. Un cierre diferido por una ronda de preguntas lleva cero: no abre sesión, y la ronda ya asentó lo que gastó la sesión que preguntó. El gasto del intento es lo que asentaron sus rondas más este valor |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
-| `refused` | lista de paths | sí; solo en `node_failed`, vacía —y omitida del log— si no hubo ninguno | lo que el intento dejó en el árbol del run y el proyecto niega a todo run (`permissions.paths.deny`): no se commiteó y, en un run con worktree propio, volvió a como la rama lo tenía. La falla propia del nodo sigue siendo su causa (D206) |
+| `refused` | lista de paths | sí; solo en `node_failed`, vacía —y omitida del log— si no hubo ninguno | lo que el intento dejó en el árbol del run y ninguna sesión del run puede escribir —lo que niega el proyecto (`permissions.paths.deny`), la configuración de la CLI de un agente, un archivo de instrucciones, un test que aprobó una persona o el registro de git—: no se commiteó y, en un run con worktree propio, volvió a como la rama lo tenía. La falla propia del nodo sigue siendo su causa (D206) |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
 **La falla es dato, no prosa.** La falla toma una de nueve formas, planas sobre el
@@ -423,9 +425,11 @@ sobre el mismo árbol en que falló su intento `since`: no se corre, porque el m
 comando sobre el mismo árbol responde lo mismo, y `failure` es la falla de ese
 intento —una negativa sobre otra negativa sigue nombrando el intento que corrió—. Su
 menú sigue ofreciendo `retry`: la persona puede cambiar el árbol mientras decide
-(D197), o `denied_paths: [...]`, cada path que el trabajo escribió y el proyecto niega
-a todo run (`permissions.paths.deny`): su menú nunca ofrece `grant`, porque ningún
-grant ensancha lo negado (D206). Cada elemento de `artifacts`
+(D197), o `denied_paths: [...]`, cada path que el trabajo escribió y que ninguna sesión
+del run puede escribir, con su razón por índice en `reasons`: lo que el proyecto niega a
+todo run (`permissions.paths.deny`), la configuración que carga la CLI de un agente, un
+archivo de instrucciones, un test que aprobó una persona o el registro de git. Su menú
+nunca ofrece `grant`, porque la falla no pide alcance. Cada elemento de `artifacts`
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
 `artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
 nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`
@@ -496,6 +500,7 @@ mismo número (D207).
 | `external_ref` | `Option<string>` | solo en `gate_waiting` | la referencia propia del forge para este gate: la URL del pull request (Contrato §5.6); ausente en la escalación interna, que no sale del run |
 | `shows` | lista de `{producer?, artifact, content_hash}` | solo en `gate_waiting` (puede ser vacía) | los artifacts que el gate puso delante de quien decide, con el hash exacto que vio: la decisión queda atada a esos bytes. Los hallazgos del run (`findings` sin `producer`) son una vista que el log deriva —cada hallazgo en pie con su nodo y sus respuestas—, guardada en `objects/` por ese hash. Omitida si no muestra nada, y en logs anteriores al campo |
 | `withheld` | lista de `{option, because}` | solo en `gate_waiting` (puede ser vacía) | las opciones que el gate no ofrece y por qué: con un plan que no se puede probar como está escrito, las que siguen el run más allá del gate (D227). Cada razón es también un hecho de `evidence` con la etiqueta `withheld`. Una respuesta que elige una opción retenida se rechaza en toda superficie. Omitida si no retiene nada, y en logs anteriores al campo |
+| `scope` | `Option<{because, proposed?}>` | solo en `gate_waiting` (puede faltar) | por qué el loop espera a una persona en un pedido de scope: `because` es la razón tipada (`type`: `mode_ask`, `shared_with_batch`, `cap_exhausted`, `instructions` o `person`) y `proposed` el criterio que propuso la sesión (`cmd`) con el `precheck` que el engine halló al correrlo (`type`: `passes`, `red`, `could_not_run` o `not_run`). Omitido en las escalaciones que no vienen de un pedido de scope, y en logs anteriores al campo |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `approved_sha` | `Option<CommitSha>` | solo en `gate_resolved` | el commit que cubre la aprobación del forge: contra él se compara la cabeza del pull request para decidir si la aprobación sigue en pie |

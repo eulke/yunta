@@ -382,7 +382,7 @@ nodes:
     until: all_tasks_complete
     prompt: x
     concurrency: 2
-    scope_expansion: { mode: ask, within: ["src/**"], max_per_run: 1 }
+    scope_expansion: { mode: ask, max_per_run: 1 }
   - id: g
     kind: parallel
     join: any

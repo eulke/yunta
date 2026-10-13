@@ -155,6 +155,11 @@ async fn a_grant_chosen_while_parked_widens_the_scope_once_and_the_next_attempt_
     assert_eq!(node.as_deref(), Some("fix"));
     assert_eq!(grant.task_id, None, "the node's own scope, not a task's");
     assert_eq!(grant.paths, ["Cargo.toml"]);
+    assert_eq!(grant.mode, None, "a node's own grant carries no mode");
+    assert_eq!(
+        grant.count_this_run, 0,
+        "a person's grant is not counted toward the run's cap"
+    );
 }
 
 #[tokio::test]
@@ -192,7 +197,7 @@ async fn a_restart_after_the_grant_never_grants_it_twice() {
                 EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
                     task_id: None,
                     decided_by: yunta_core::events::Decider::Person { id: "mcp".into() },
-                    mode: yunta_core::ScopeExpansionMode::Ask,
+                    mode: None,
                     count_this_run: 1,
                     paths: vec!["Cargo.toml".into()],
                 })),

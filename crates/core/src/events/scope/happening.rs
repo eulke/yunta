@@ -58,7 +58,7 @@ impl From<&ScopeEvent> for Happening {
                 task: p.task_id.clone(),
                 step: Step::Denied {
                     by: p.decided_by.clone(),
-                    reason: p.denial_reason.clone(),
+                    reason: p.why().map(|why| why.to_string()),
                 },
             },
             ScopeEvent::Derived(p) => Happening::Derived {

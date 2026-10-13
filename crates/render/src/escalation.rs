@@ -6,7 +6,10 @@
 //! all three: a reader who picked `retry` off a menu and then reads the
 //! same run's page has to see the same option, not two renderings of it.
 
-use yunta_core::events::{EscalationError, GateOption, GateWaitingPayload};
+use yunta_core::events::{
+    EscalationError, Fact, GateOption, GateWaitingPayload, ProposedCheck, ScopeWait,
+};
+use yunta_core::expansion::{Precheck, Waiting};
 use yunta_core::text;
 
 /// What an option does, when that says more than its id: an older log
@@ -19,12 +22,46 @@ pub fn label(option: &GateOption) -> Option<&str> {
 /// The lines the engine's own record is shown on, one fact to a line.
 /// Empty when nothing is attached.
 ///
+/// The record includes why a loop waits on a scope request, and what the
+/// request's proposed criterion found, after the facts attached to it.
+///
 /// The summary is an account of what happened and this is what the
 /// engine read off the log, which is why a surface puts them side by
 /// side: the second is what the first is audited against. Neither one
 /// repeats the other, so a surface with room for both shows both.
 pub fn evidence(escalation: &GateWaitingPayload) -> Vec<String> {
-    crate::evidence::lines(escalation.evidence())
+    let mut lines = crate::evidence::lines(escalation.evidence());
+    if let Some(scope) = escalation.scope() {
+        lines.extend(scope_facts(scope).iter().map(crate::evidence::line));
+    }
+    lines
+}
+
+/// The facts a scope request is shown with: why the loop waits, and what its pre-check found.
+fn scope_facts(wait: &ScopeWait) -> [Fact; 2] {
+    let because = match wait.because {
+        Waiting::ModeAsk => "the loop's scope mode is `ask`, so a person grants scope".to_string(),
+        Waiting::SharedWithBatch => "another task of the batch may write these paths".to_string(),
+        Waiting::CapExhausted { granted, cap } => format!(
+            "{granted}/{cap} {} used",
+            text::agreeing(cap as usize, "grant", "grants")
+        ),
+        Waiting::Instructions => "an instruction file, which only a person grants".to_string(),
+        Waiting::Person => "a node's own request, which a person answers".to_string(),
+    };
+    let precheck = match &wait.proposed {
+        None => "no criterion proposed".to_string(),
+        Some(ProposedCheck { cmd, precheck }) => match precheck {
+            Precheck::Passes => format!("`{cmd}` passes"),
+            Precheck::Red { exit } => format!("`{cmd}` exits {exit}"),
+            Precheck::CouldNotRun => format!("`{cmd}` could not run"),
+            Precheck::NotRun => format!("`{cmd}` was not run"),
+        },
+    };
+    [
+        Fact::labelled("waiting", because),
+        Fact::labelled("pre-check", precheck),
+    ]
 }
 
 /// The escalation on one line, its claim and then the facts behind it,
@@ -35,10 +72,7 @@ pub fn evidence(escalation: &GateWaitingPayload) -> Vec<String> {
 /// room for neither heading. Composing them here is what keeps the page
 /// and the line from disagreeing about what an escalation says.
 pub fn sentence(payload: &GateWaitingPayload) -> String {
-    text::aside(
-        payload.summary(),
-        &crate::evidence::one_line(payload.evidence()),
-    )
+    text::aside(payload.summary(), &evidence(payload).join("; "))
 }
 
 /// The fact a refused claim repeats, on the one line the record shows it
@@ -154,5 +188,34 @@ mod tests {
             fact: Fact::bare("exit 1"),
         };
         assert_eq!(repeated_fact(&bare), "exit 1");
+    }
+
+    #[test]
+    fn a_scope_gate_says_why_the_loop_waits_and_what_its_pre_check_found() {
+        let payload = Escalation::published_to(
+            "task `t` requests scope expansion: needs a.rs",
+            vec![Fact::labelled("paths", "src/a.rs")].into(),
+            "https://forge/pr/1",
+        )
+        .expect("the summary states no fact the evidence holds")
+        .with_scope(ScopeWait {
+            because: Waiting::CapExhausted { granted: 1, cap: 1 },
+            proposed: Some(ProposedCheck {
+                cmd: "test -f a".to_string(),
+                precheck: Precheck::Red { exit: 1 },
+            }),
+        })
+        .into_payload();
+        assert_eq!(
+            evidence(&payload),
+            vec![
+                "paths: src/a.rs",
+                "waiting: 1/1 grant used",
+                "pre-check: `test -f a` exits 1",
+            ]
+        );
+        assert!(
+            sentence(&payload).ends_with("waiting: 1/1 grant used; pre-check: `test -f a` exits 1")
+        );
     }
 }

@@ -18,6 +18,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::glob::{listed_globs, scope_globset, ScopeGlob};
 use crate::port::PermissionProfile;
+use crate::protected::{is_register, Protected, Protection};
 use serde::{Deserialize, Serialize};
 
 /// Every refusal starts with this, so whoever reads one — the model, a
@@ -37,10 +38,11 @@ pub struct Fence {
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
     /// What no session of the run may write under the worktree — what the
-    /// project denies to every run, and the tests a person approved —
-    /// refused whatever `allowed` admits.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub denied: Vec<ScopeGlob>,
+    /// project denies to every run, the agents' own configuration, the
+    /// instruction files, the tests a person approved — refused whatever
+    /// `allowed` and `roots` admit.
+    #[serde(default, skip_serializing_if = "Protected::is_empty")]
+    pub protected: Protected,
     /// How the session's CLI names the run's tools, which is what a
     /// refusal that advises one names it by.
     #[serde(default)]
@@ -76,9 +78,9 @@ pub struct Refusal {
     pub allowed: Option<Vec<ScopeGlob>>,
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
-    /// Whether the path is one no session of the run may write, which no
-    /// request widens.
-    pub denied: bool,
+    /// The protection that refuses the path, which no request widens
+    /// unless it is an instruction file a person grants.
+    pub protection: Option<Protection>,
     /// How the model the refusal reaches calls the run's tools.
     pub naming: crate::ToolNaming,
 }
@@ -109,7 +111,7 @@ impl Fence {
             allowed: None,
             roots,
             advice,
-            denied: Vec::new(),
+            protected: Protected::default(),
             naming: crate::ToolNaming::default(),
         }
     }
@@ -121,7 +123,7 @@ impl Fence {
             allowed: Some(Vec::new()),
             roots,
             advice,
-            denied: Vec::new(),
+            protected: Protected::default(),
             naming: crate::ToolNaming::default(),
         }
     }
@@ -144,7 +146,7 @@ impl Fence {
                 allowed: Some(scope.iter().chain(granted).cloned().collect()),
                 roots,
                 advice,
-                denied: Vec::new(),
+                protected: Protected::default(),
                 naming: crate::ToolNaming::default(),
             },
         }
@@ -157,12 +159,9 @@ impl Fence {
         self
     }
 
-    /// The same fence, refusing `denied` whatever it otherwise admits.
-    pub fn denying(self, denied: &[ScopeGlob]) -> Self {
-        Fence {
-            denied: denied.to_vec(),
-            ..self
-        }
+    /// The same fence, refusing what `protected` holds whatever it otherwise admits.
+    pub fn protecting(self, protected: Protected) -> Self {
+        Fence { protected, ..self }
     }
 
     /// The same fence, its refusals naming a run tool the way a CLI that
@@ -176,18 +175,35 @@ impl Fence {
     /// the answer is the same wherever it is asked.
     pub fn judge(&self, worktree: &Path, target: &Path) -> Verdict {
         let target = lexical_absolute(worktree, target);
-        if self.roots.iter().any(|root| target.starts_with(root)) {
+        let inside = target.strip_prefix(worktree).ok();
+        let protection = inside.and_then(|relative| self.protection_of(relative));
+        if protection.is_none() && self.roots.iter().any(|root| target.starts_with(root)) {
             return Verdict::Allowed;
         }
-        let inside = target.strip_prefix(worktree).ok();
-        let denied = inside.is_some_and(|relative| {
-            scope_globset(&self.denied).is_ok_and(|set| set.is_match(relative))
-        });
-        let allowed = !denied
+        self.scope_verdict(worktree, inside, &target, protection)
+    }
+
+    /// The reason a worktree-relative path is refused whatever the fence
+    /// admits: the set's reason, else the run's own register. The register
+    /// holds in every fence, even one built without the set.
+    fn protection_of(&self, relative: &Path) -> Option<Protection> {
+        self.protected
+            .reason_of(relative)
+            .or_else(|| is_register(relative).then_some(Protection::GitRegister))
+    }
+
+    /// The scope half of the judgement: a path no protection holds is
+    /// allowed when `allowed` admits it, and a refusal carries what the
+    /// fence was built from.
+    fn scope_verdict(
+        &self,
+        worktree: &Path,
+        inside: Option<&Path>,
+        target: &Path,
+        protection: Option<Protection>,
+    ) -> Verdict {
+        let allowed = protection.is_none()
             && match inside {
-                // The run's own register is never a task's work. `.git`
-                // bare is the file a `git worktree` leaves behind.
-                Some(relative) if is_git(relative) => false,
                 Some(_) if self.allowed.is_none() => true,
                 Some(relative) => self
                     .allowed
@@ -197,18 +213,17 @@ impl Fence {
                 None => false,
             };
         if allowed {
-            Verdict::Allowed
-        } else {
-            Verdict::Refused(Refusal {
-                target,
-                worktree: worktree.to_path_buf(),
-                allowed: self.allowed.clone(),
-                roots: self.roots.clone(),
-                advice: self.advice,
-                denied,
-                naming: self.naming,
-            })
+            return Verdict::Allowed;
         }
+        Verdict::Refused(Refusal {
+            target: target.to_path_buf(),
+            worktree: worktree.to_path_buf(),
+            allowed: self.allowed.clone(),
+            roots: self.roots.clone(),
+            advice: self.advice,
+            protection,
+            naming: self.naming,
+        })
     }
 }
 
@@ -248,13 +263,13 @@ impl fmt::Display for Refusal {
     /// The one text of a refusal, read by the model that tried the
     /// write.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.denied {
+        if let Some(protection) = self.protection {
             return write!(
                 f,
-                "{REFUSAL_MARKER}{} is outside what this session may ever write: the project \
-                 denies it to every run (permissions.paths.deny), or it holds a test a person \
-                 approved, and no request widens that. Do not write here.",
-                self.target.display()
+                "{REFUSAL_MARKER}{} is outside what this session may ever write. {} Do not write \
+                 here.",
+                self.target.display(),
+                protection_sentence(protection)
             );
         }
         writeln!(
@@ -302,6 +317,28 @@ fn or_none(list: String) -> String {
     }
 }
 
+/// The one sentence a refusal gives for the reason a path is protected.
+fn protection_sentence(protection: Protection) -> &'static str {
+    match protection {
+        Protection::ProjectDeny => {
+            "The project denies it to every run (permissions.paths.deny), \
+             and no request widens that."
+        }
+        Protection::AgentConfig => {
+            "It is the agent CLI's own configuration, which no session writes, \
+             and no request widens that."
+        }
+        Protection::AgentInstructions => "It is an instruction file: only a person may grant it.",
+        Protection::ApprovedTest => {
+            "It holds a test a person approved, and no request widens that."
+        }
+        Protection::GitRegister => {
+            "It is the run's own git register, which no session writes, \
+             and no request widens that."
+        }
+    }
+}
+
 /// `path` as an absolute path, resolved against `base` when relative,
 /// with `.` and `..` collapsed. Never reads the disk, so a path that
 /// does not exist resolves exactly like one that does — and a symlink
@@ -324,12 +361,4 @@ pub fn lexical_absolute(base: &Path, path: &Path) -> PathBuf {
         }
     }
     resolved
-}
-
-/// Whether a worktree-relative path is the run's own git register.
-fn is_git(relative: &Path) -> bool {
-    relative
-        .components()
-        .next()
-        .is_some_and(|first| first.as_os_str() == ".git")
 }

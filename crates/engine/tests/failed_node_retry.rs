@@ -267,7 +267,7 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     assert!(current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
-        &yunta_engine::derive(&bench.events())
+        &yunta_engine::derive(&bench.events()),
     )
     .await
     .unwrap()

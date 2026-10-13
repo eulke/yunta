@@ -205,8 +205,8 @@ fn a_missing_prompt_file_is_reported_with_its_path_and_cause() {
     assert!(error.to_string().contains("prompts/missing.md"));
 }
 
-/// The paths a node would write, and those its tasks may grow within,
-/// are what ties a workflow to one repository's layout.
+/// The paths a node names are what ties a workflow to one repository's
+/// layout: a loop's scope expansion names none.
 #[test]
 fn the_inventory_lists_the_repository_paths_a_node_names() {
     let root = tempfile::tempdir().unwrap();
@@ -226,7 +226,7 @@ fn the_inventory_lists_the_repository_paths_a_node_names() {
          \x20   depends_on: [plan]\n\
          \x20   until: all_tasks_complete\n\
          \x20   prompt: \"i\"\n\
-         \x20   scope_expansion: { mode: ask, within: [\"src/**\"] }\n\
+         \x20   scope_expansion: { mode: ask }\n\
          \x20 - { id: fix, kind: prompt, depends_on: [implement], prompt: \"f\", scope: [\"**/*.rs\", \"docs/**\"] }\n\
          \x20 - { id: polish, kind: prompt, depends_on: [fix], prompt: \"p\", scope: run }\n",
     );
@@ -249,7 +249,7 @@ fn the_inventory_lists_the_repository_paths_a_node_names() {
         paths,
         [
             ("plan", vec![]),
-            ("implement", vec!["src/**"]),
+            ("implement", vec![]),
             ("fix", vec!["**/*.rs", "docs/**"]),
             ("polish", vec![]),
         ]

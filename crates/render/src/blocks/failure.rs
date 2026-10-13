@@ -72,11 +72,9 @@ impl FailureDetail<'_> {
             Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => {
                 listed("outside the declared globs:", outside_scope)
             }
-            Failure::PathsDenied { denied_paths } if denied_paths.len() > 1 => listed(
-                "denied to every session of the run — by the project (permissions.paths.deny), \
-                 or as a test a person approved:",
-                denied_paths,
-            ),
+            Failure::PathsDenied { denied_paths, .. } if denied_paths.len() > 1 => {
+                listed("what no session of the run may write:", denied_paths)
+            }
             Failure::Message { outcome } if outcome.contains('\n') => text(outcome.clone()),
             Failure::Unchanged { .. } => text(self.failure.to_string()),
             Failure::ScopeOwed { .. } => FailureSays::Text(self.failure.detail()),

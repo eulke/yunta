@@ -10,6 +10,7 @@
 //! cycle has no pre-check of its own, because its tree holds the work.
 
 use yunta_core::events::Phase;
+use yunta_core::protected::Closing;
 use yunta_core::{CommitSha, ScopeGlob};
 
 use super::attempt::AttemptParams;
@@ -39,10 +40,11 @@ pub(super) async fn continue_from(
     let &AttemptParams {
         task,
         unit,
+        memo,
         supervision,
         ..
     } = params;
-    let carried = carry_work(unit, left, supervision)
+    let carried = carry_work(unit, left, &memo.pathspecs(), supervision)
         .await
         .map_err(|source| TaskCycleError::Carry {
             task: task.id.clone(),
@@ -97,6 +99,7 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
         unit,
         memo,
         already_granted_paths,
+        protected,
         supervision,
         ..
     } = params;
@@ -110,7 +113,8 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
         task,
         crate::scope::Ceiling {
             scope: &scope,
-            deny: params.denied,
+            protected,
+            closing: Closing::Every,
         },
         Work { unit, staged: &[] },
         memo,

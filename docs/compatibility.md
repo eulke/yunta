@@ -102,10 +102,18 @@ pass all of it doesn't ship.
 
 ## Scope globs
 
-A scope pattern — a node's or task's `scope`, an expansion's `within` — reads
-with a literal separator: `*` never crosses a `/`, so `src/*.rs` names the
-files directly under `src/` and `src/**` names everything beneath it. A
-workflow that expects `*` to descend into subdirectories writes `**`.
+A scope pattern — a node's or task's `scope`, or an entry of
+`permissions.paths.deny` — reads with a literal separator: `*` never crosses a
+`/`, so `src/*.rs` names the files directly under `src/` and `src/**` names
+everything beneath it. A workflow that expects `*` to descend into
+subdirectories writes `**`.
+
+A denied pattern covers only the paths it can select: `**/*.lock` denies
+`Cargo.lock` and `crates/x/Cargo.lock`, never `src/main.rs`. Two patterns with
+wildcards are taken to overlap unless their literal prefixes (the text before
+the first wildcard) or their literal suffixes (the text after the last one)
+contradict each other: `src/**` and `docs/**` do not overlap, while `src/**`
+and `**/*.rs` do.
 
 ## Identifiers
 
