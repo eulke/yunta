@@ -411,7 +411,7 @@ fn judged(
                          — a test filter that matches no test passes, and so does a test \
                          that checks nothing",
                         run.cmd,
-                        concluded(run)
+                        quoted_conclusion(run)
                     ),
                 )
             } else if independent && run.is_guard && run.exit_code != 0 {
@@ -421,7 +421,7 @@ fn judged(
                         "`{}` already exits {}, before any work{}",
                         run.cmd,
                         run.exit_code,
-                        concluded(run)
+                        quoted_conclusion(run)
                     ),
                 )
             } else {
@@ -440,9 +440,9 @@ fn judged(
 
 /// What a command that answered concluded with, quoted after its verdict:
 /// the line a writer reads to see why it passed or failed.
-fn concluded(run: &CriterionRun) -> String {
-    run.concluded()
-        .map(|said| format!(" — it said `{said}`"))
+fn quoted_conclusion(run: &CriterionRun) -> String {
+    run.conclusion()
+        .map(|line| format!(" — it said `{line}`"))
         .unwrap_or_default()
 }
 
@@ -454,8 +454,8 @@ fn cannot_run(run: &CriterionRun, environment: Option<&ExecutionEnvironment>) ->
         run.cmd,
         run.exit_described()
     );
-    if let Some(said) = run.said() {
-        detail.push_str(&format!(" — it said `{said}`"));
+    if let Some(line) = run.conclusion() {
+        detail.push_str(&format!(" — it said `{line}`"));
     }
     if let Some(environment) = environment {
         detail.push_str(&format!(" — under {environment}"));

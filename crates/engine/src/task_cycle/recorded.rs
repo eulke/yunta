@@ -74,6 +74,7 @@ fn of_result(result: &CriterionResult) -> Option<Recorded> {
         printed: (result.exit_code != 0).then(|| Printed::Recorded {
             object: result.output.clone(),
             tail: result.tail.clone(),
+            conclusion: result.conclusion.clone(),
         }),
     })
 }
@@ -162,6 +163,7 @@ mod tests {
             tail: vec!["said this".to_string()],
             tree: tree.map(|tree| tree.parse::<TreeId>().expect("a tree id")),
             head: head.map(str::to_string),
+            conclusion: None,
         }
     }
 

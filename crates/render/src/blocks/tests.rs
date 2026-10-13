@@ -45,13 +45,13 @@ fn decision() -> Decision {
             DecisionOption {
                 id: "retry".to_string(),
                 label: Some("runs `fix-lint` once more".to_string()),
-                tradeoff: "one more correction attempt beyond `max_reroutes`".to_string(),
+                tradeoff: Some("one more correction attempt beyond `max_reroutes`".to_string()),
                 asks: None,
             },
             DecisionOption {
                 id: "adjust".to_string(),
                 label: None,
-                tradeoff: "the run goes on with what you say".to_string(),
+                tradeoff: Some("the run goes on with what you say".to_string()),
                 asks: Some("what to change".to_string()),
             },
         ],

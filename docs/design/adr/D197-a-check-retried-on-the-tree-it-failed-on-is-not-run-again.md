@@ -1,12 +1,18 @@
 ---
 number: D197
 title: "A check retried on the tree it failed on is not run again"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D261]
 ---
 
 # D197 — A check retried on the tree it failed on is not run again
+
+*(Revised by D261: point 2 changes. The menu offers `retry` on a tree the attempt did
+not change only once the log has seen the tree move since the failed attempt. A wake
+that finds the failure waiting records the run's tree in `run_resumed.tree`, so a
+person's change to the tree reaches the log through the next `yunta resume`. Until
+then the menu offers no `retry`. Point 1 and points 3 and 4 stand.)*
 
 ## Context
 

@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use yunta_core::events::{ArtifactId, Failure, SessionDeath};
+use yunta_core::events::{ArtifactId, Failure, PauseReason, SessionDeath};
 use yunta_core::{ArtifactKind, NodeId, RunnerCandidate, RunnerName};
 
 use crate::commands::test::{init_git, sandboxed_checkout, SandboxedCheckout};
@@ -116,7 +116,13 @@ impl SessionProbe {
                 Found::Holds,
                 format!("ok — {}", yunta_core::units::Tokens(*tokens)),
             ),
-            Outcome::Died(died) => (Found::Problem, format!("session died — {died}")),
+            Outcome::Died(died) => (
+                Found::Problem,
+                format!(
+                    "session died — {}",
+                    crate::render::failure::session_death(died)
+                ),
+            ),
             Outcome::NoDelivery(why) => (
                 Found::Problem,
                 format!("session opened, no questions document — {why}"),
@@ -204,9 +210,9 @@ fn verdict(report: &yunta_engine::RunReport) -> Outcome {
         Some(Failure::SessionDied { died }) => Outcome::Died(Box::new(died)),
         other if facts.opened && !facts.accepted => Outcome::NoDelivery(other.map_or_else(
             || "the run ended without artifact_accepted".to_string(),
-            |failure| failure.to_string(),
+            |failure| crate::render::failure::sentence(&failure),
         )),
-        Some(other) => Outcome::Refused(other.to_string()),
+        Some(other) => Outcome::Refused(crate::render::failure::sentence(&other)),
         None => match &report.terminal {
             yunta_engine::RunTerminal::Finished
                 if facts.accepted && facts.node_finished && facts.run_finished =>
@@ -288,7 +294,13 @@ fn ended(terminal: &yunta_engine::RunTerminal) -> String {
         yunta_engine::RunTerminal::Paused { reason } => {
             format!("waiting ({})", yunta_render::pause::sentence(reason))
         }
-        yunta_engine::RunTerminal::Failed { reason } => format!("failed ({reason})"),
+        yunta_engine::RunTerminal::Failed { node, failure } => {
+            let said = PauseReason::NodeFailed {
+                node: node.clone(),
+                failure: failure.clone(),
+            };
+            format!("failed ({})", yunta_render::pause::sentence(&said))
+        }
         yunta_engine::RunTerminal::Promoted { suggested_mode } => {
             format!("promoted to mode `{suggested_mode}`")
         }
@@ -315,7 +327,6 @@ mod tests {
     fn node_failed(text: &str) -> EventPayload {
         EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
             Failure::message(text),
-            true,
             TokenUsage::default(),
         )))
     }

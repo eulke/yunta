@@ -11,13 +11,11 @@ fn config(extra: &str) -> String {
     format!("{MOCK_CONFIG}{extra}")
 }
 
-fn node_failures(events: &[StoredEvent]) -> Vec<(Failure, bool)> {
+fn node_failures(events: &[StoredEvent]) -> Vec<Failure> {
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Node(NodeEvent::Failed(p))) => {
-                Some((p.failure.clone(), p.retryable))
-            }
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.failure.clone()),
             _ => None,
         })
         .collect()
@@ -68,10 +66,10 @@ async fn a_hook_runs_a_project_command() {
     assert!(bench.worktree.join("noted.txt").exists());
 }
 
-/// No attempt of the run can change its frozen config, so nothing
-/// retries the node.
+/// No attempt of the run can change its frozen config, so the failure
+/// is the unset key itself.
 #[tokio::test]
-async fn a_command_the_frozen_config_lacks_fails_unset_and_not_retryably() {
+async fn a_command_the_frozen_config_lacks_fails_unset() {
     let bench = Bench::new();
     let RunReport { terminal, .. } = bench
         .run_with_config(
@@ -87,12 +85,9 @@ async fn a_command_the_frozen_config_lacks_fails_unset_and_not_retryably() {
     );
     assert_eq!(
         node_failures(&bench.events()),
-        vec![(
-            Failure::unset(ConfigKey::Command {
-                command: CommandName::from("lint")
-            }),
-            false
-        )]
+        vec![Failure::unset(ConfigKey::Command {
+            command: CommandName::from("lint")
+        })]
     );
 }
 

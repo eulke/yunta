@@ -104,7 +104,7 @@ async fn retry_denies_with_a_finding() {
     let workflow = scope_expansion_workflow("ask", None);
     bench.run(&workflow, &fixture).await;
 
-    bench.wake_answering(&chosen("retry")).await;
+    bench.wake_answering(&chosen("deny")).await;
 
     let events = bench.events();
     let denied = events.iter().any(|event| {

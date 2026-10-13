@@ -37,7 +37,8 @@ pub(crate) enum Standing {
     /// it waits on a person as surely as a decision does, but what it
     /// takes is a resume, not an answer.
     Stalled,
-    /// Moving on its own, or created and not yet started.
+    /// Moving on its own, parked until a limit resets, or created and not
+    /// yet started.
     InFlight,
     /// Closed, however it closed.
     Closed,
@@ -63,7 +64,7 @@ impl Standing {
         match word {
             RunWord::NeedsYou | RunWord::Broken => Standing::NeedsYou,
             RunWord::Stalled => Standing::Stalled,
-            RunWord::Created | RunWord::Running => Standing::InFlight,
+            RunWord::Created | RunWord::Running | RunWord::Waiting => Standing::InFlight,
             RunWord::Finished
             | RunWord::Reported
             | RunWord::Failed
@@ -297,7 +298,7 @@ fn held(
             RunPhase::Failed {
                 failure: Some(failure),
             },
-        ) => (Some(failure.headline()), None),
+        ) => (Some(crate::render::failure::headline(failure)), None),
         (
             _,
             RunPhase::Finished
@@ -392,7 +393,7 @@ mod tests {
         for word in [RunWord::NeedsYou, RunWord::Broken] {
             assert_eq!(Standing::of(word), Standing::NeedsYou, "{word}");
         }
-        for word in [RunWord::Created, RunWord::Running] {
+        for word in [RunWord::Created, RunWord::Running, RunWord::Waiting] {
             assert_eq!(Standing::of(word), Standing::InFlight, "{word}");
         }
         for word in [

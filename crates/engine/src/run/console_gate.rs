@@ -8,18 +8,19 @@ use yunta_core::events::{
     Approval, EngineFact, Escalation, EventPayload, Fact, GateEvent, GateResolvedPayload,
     NodeOutcome, PauseReason, Shown, TokenUsage, Withheld,
 };
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{ExternalGate, Node, NodeKind, NonEmpty};
 
 use super::gate_exec::{emit_started, GateStep};
 use super::node_close::{fail, finish_node};
 use super::{RunCtx, RunError};
-use crate::reserved::{offers, ReservedOption};
+use crate::reserved::offers;
 
 /// The escalation object, reused verbatim for the no-forge
 /// degradation — two options wide enough to cover every review mapping
 /// a human can decide from the console: approve (finishes the node) or
-/// reject (fails it, retryable — so a declared `on_failure.goto` still
-/// gets a chance, same as a real "changes requested"). A plan among what
+/// reject (fails it, so a declared `on_failure.goto` still gets a
+/// chance, same as a real "changes requested"). A plan among what
 /// it would publish that cannot be proven withholds approve.
 pub(super) async fn degrade_to_console(
     ctx: &RunCtx<'_>,
@@ -58,7 +59,7 @@ pub(super) async fn degrade_to_console(
         )
         .await?;
     } else {
-        fail(ctx, node, "rejected from the console".to_string(), true).await?;
+        fail(ctx, node, "rejected from the console".to_string()).await?;
     }
     Ok(GateStep::Resolved)
 }

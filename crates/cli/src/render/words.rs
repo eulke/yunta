@@ -2,7 +2,7 @@
 //! invocation that drove a run exits for the word it ended on.
 
 use chrono::{DateTime, Utc};
-use yunta_engine::{EngineLiveness, NodeStanding, Prompt, RunFrame, RunPhase};
+use yunta_engine::{EngineLiveness, NodeStanding, Prompt, RunFrame, RunPhase, WaitingOn};
 use yunta_render::{NodeDisplay, RunWord};
 
 use crate::error::Outcome;
@@ -16,6 +16,9 @@ pub(crate) enum RunExit {
     NeedsYou = 3,
     /// The run finished holding blocking findings.
     Reported = 4,
+    /// The run paused until a limit resets and resumes on its own, so there
+    /// is nothing for a person to do.
+    Waiting = 5,
     /// A person interrupted the invocation, as a shell reports a process
     /// SIGINT ended.
     Interrupted = 130,
@@ -33,6 +36,10 @@ pub(crate) fn run_word(frame: &RunFrame) -> RunWord {
     match &frame.phase {
         RunPhase::Created => RunWord::Created,
         RunPhase::Running => RunWord::Running,
+        // A limit's reset resumes the run on its own, so the wait is not a stop a person answers.
+        RunPhase::Waiting {
+            on: WaitingOn::Run { reason },
+        } if reason.reset_wait().is_some() => RunWord::Waiting,
         RunPhase::Waiting { .. } => RunWord::NeedsYou,
         RunPhase::Finished if frame.blocking_findings > 0 => RunWord::Reported,
         RunPhase::Finished => RunWord::Finished,
@@ -95,13 +102,15 @@ pub(crate) fn observed_word(frame: &RunFrame, engine: &Engine) -> RunWord {
 
 /// How the invocation that drove a run to `word` exits: 0 for a run that
 /// finished, 3 for one that stopped on a person, 4 for one that finished
-/// holding blocking findings, 1 for every other stop. One mapping,
-/// because "did the command succeed" is one question.
+/// holding blocking findings, 5 for one parked until a limit resets, 1 for
+/// every other stop. One mapping, because "did the command succeed" is one
+/// question.
 pub(crate) fn exit(word: RunWord) -> Outcome {
     match word {
         RunWord::Finished => Outcome::Success,
         RunWord::NeedsYou => RunExit::NeedsYou.outcome(),
         RunWord::Reported => RunExit::Reported.outcome(),
+        RunWord::Waiting => RunExit::Waiting.outcome(),
         RunWord::Created
         | RunWord::Running
         | RunWord::Stalled
@@ -120,5 +129,46 @@ pub(crate) fn standing(standing: &NodeStanding) -> NodeDisplay {
         NodeStanding::LeftOut(because) => NodeDisplay::left_out(&because.to_string()),
         NodeStanding::ToGo => NodeDisplay::of(None),
         NodeStanding::Reached(state) => NodeDisplay::of(Some(state)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use yunta_core::events::PauseReason;
+    use yunta_core::{NodeId, RunId};
+
+    use super::*;
+
+    /// The frame of a run paused on `reason`, the rest of it as the test
+    /// kit draws a run.
+    fn paused_on(reason: PauseReason) -> RunFrame {
+        RunFrame {
+            phase: RunPhase::Waiting {
+                on: WaitingOn::Run { reason },
+            },
+            ..yunta_testkit::run_frame(&RunId::from_static("run-1"))
+        }
+    }
+
+    #[test]
+    fn a_run_paused_until_a_limit_resets_reads_waiting_and_exits_on_its_own() {
+        let at = chrono::Utc
+            .with_ymd_and_hms(2026, 10, 13, 12, 0, 0)
+            .unwrap();
+        let frame = paused_on(PauseReason::AwaitingReset {
+            node: NodeId::from_static("build"),
+            at,
+        });
+        assert_eq!(run_word(&frame), RunWord::Waiting);
+        assert_eq!(run_word(&frame).word(), "waiting");
+        assert_eq!(exit(run_word(&frame)), Outcome::Code(5));
+    }
+
+    #[test]
+    fn a_run_paused_on_a_person_still_reads_needs_you() {
+        let frame = paused_on(PauseReason::BudgetExhausted { spent: 5, cap: 4 });
+        assert_eq!(run_word(&frame), RunWord::NeedsYou);
+        assert_eq!(exit(run_word(&frame)), Outcome::Code(3));
     }
 }

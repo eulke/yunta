@@ -122,7 +122,7 @@ pub(super) async fn first_located(
 pub(super) async fn text_of(kept: &Kept<'_>, checkout: &Path, printed: &Printed) -> String {
     let text = match printed {
         Printed::Ran(output) => String::from_utf8_lossy(output.bytes()).into_owned(),
-        Printed::Recorded { object, tail } => {
+        Printed::Recorded { object, tail, .. } => {
             let kept = match (object, kept) {
                 (Some(hash), Kept::Observer(observer)) => observer.kept_output(hash).await,
                 (Some(hash), Kept::Run(run_dir)) => ObjectStore::at(run_dir).get(hash).await.ok(),
@@ -167,6 +167,7 @@ mod tests {
         let printed = Printed::Recorded {
             object: Some(object),
             tail: vec!["last line".to_string()],
+            conclusion: None,
         };
         let kept = Kept::Run(dir.path());
         assert!(locates(

@@ -1,8 +1,9 @@
 //! Why a run is parked, as a fact.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::events::gates::payloads::Escalation;
+use crate::events::gates::escalation::Escalation;
 use crate::events::Failure;
 use crate::ids::{NodeId, QuestionId, RunId};
 
@@ -43,6 +44,8 @@ pub enum PauseReason {
     UncertainOrphans { nodes: Vec<NodeId> },
     /// A node failed and nothing re-routed it.
     NodeFailed { node: NodeId, failure: Failure },
+    /// The account's limit resets at `at`; the run resumes detached then.
+    AwaitingReset { node: NodeId, at: DateTime<Utc> },
     /// Nothing is runnable: `node` waits on `on`, which this pass left
     /// unresolved.
     Blocked { node: NodeId, on: Vec<NodeId> },
@@ -73,6 +76,18 @@ pub enum PauseReason {
     Recorded { sentence: String },
 }
 
+impl PauseReason {
+    /// The node a limit's reset holds the run for, and the moment the run
+    /// resumes at by itself. A pause of that kind is a wait nobody answers,
+    /// not a stop a person has to. `None` for every other pause.
+    pub fn reset_wait(&self) -> Option<(&NodeId, DateTime<Utc>)> {
+        match self {
+            PauseReason::AwaitingReset { node, at } => Some((node, *at)),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,8 +100,8 @@ mod tests {
     fn every_pause_reads_back_as_the_fact_it_was_written_as() {
         let option = GateOption {
             id: OptionId::from_static("approve"),
-            label: "Approve".to_string(),
-            tradeoff: "none".to_string(),
+            label: Some("Approve".to_string()),
+            tradeoff: Some("none".to_string()),
             asks: None,
         };
         let escalation = Escalation::new(
@@ -98,6 +113,10 @@ mod tests {
         let pauses = [
             PauseReason::Escalation(Box::new(escalation)),
             PauseReason::Cancelled,
+            PauseReason::AwaitingReset {
+                node: NodeId::from_static("limited"),
+                at: chrono::DateTime::UNIX_EPOCH,
+            },
             PauseReason::BudgetExhausted { spent: 5, cap: 4 },
             PauseReason::UncertainOrphans {
                 nodes: vec![NodeId::from_static("review")],
@@ -120,5 +139,18 @@ mod tests {
             let read: PauseReason = serde_json::from_value(written.clone()).unwrap();
             assert_eq!(read, pause, "{written}");
         }
+    }
+
+    #[test]
+    fn only_a_limit_reset_is_a_wait_nobody_answers() {
+        let node = NodeId::from_static("limited");
+        let at = DateTime::UNIX_EPOCH;
+        let reset = PauseReason::AwaitingReset {
+            node: node.clone(),
+            at,
+        };
+        assert_eq!(reset.reset_wait(), Some((&node, at)));
+        let budget = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
+        assert!(budget.reset_wait().is_none());
     }
 }

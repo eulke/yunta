@@ -115,10 +115,7 @@ pub(super) async fn close_node(
     // name to render: its kind is its identity, in every sibling.
     let node_rendered = match render_artifact_names(ctx, node) {
         Ok(rendered) => rendered,
-        Err(error) => {
-            let outcome = error.to_string();
-            return fail_with_tokens_staged(ctx, node, outcome, false, tokens, staged).await;
-        }
+        Err(failure) => return fail_with_staged(ctx, node, failure, tokens, staged).await,
     };
     let node = &node_rendered;
 
@@ -145,7 +142,7 @@ pub(super) async fn close_node(
             Ok(acquired) => Some(acquired),
             Err(problem) => {
                 let failure: Failure = problem.into();
-                return fail_with_staged(ctx, node, failure, false, tokens, staged).await;
+                return fail_with_staged(ctx, node, failure, tokens, staged).await;
             }
         },
         None => None,
@@ -159,12 +156,12 @@ pub(super) async fn close_node(
                 Ok(verified) => verified,
                 Err(failures) => {
                     let failure = Failure::artifacts(failures);
-                    return fail_with_staged(ctx, node, failure, false, tokens, staged).await;
+                    return fail_with_staged(ctx, node, failure, tokens, staged).await;
                 }
             };
             if let Some(failure) = unexplained_plan(ctx, node, &own).await? {
                 let failure = Failure::artifacts(vec![failure]);
-                return fail_with_staged(ctx, node, failure, false, tokens, staged).await;
+                return fail_with_staged(ctx, node, failure, tokens, staged).await;
             }
             (own.as_slice(), None)
         }
@@ -281,7 +278,7 @@ pub(super) async fn finish_node_staged(
     // finished: it fails, and nothing denied was committed.
     if !closed.refused.is_empty() {
         let failure = refused_failure(&closed.refused);
-        return emit_failed(ctx, node, failure, false, tokens, closed).await;
+        return emit_failed(ctx, node, failure, tokens, closed).await;
     }
     ctx.emit(
         Some(&node.id),
@@ -309,7 +306,7 @@ async fn closed(
     let at_close = super::shared_tree::at_close(ctx, node, landing, staged).await?;
     let (commit, tree) = match at_close.captured {
         Some(captured) => (captured.commit, captured.tree),
-        None => (None, left_tree(ctx, node).await?),
+        None => (None, super::shared_tree::recorded_tree(ctx, node).await?),
     };
     Ok(Closed {
         commit,
@@ -335,10 +332,12 @@ fn refused_failure(refused: &[Trespass]) -> Failure {
     Failure::paths_denied(paths, reasons)
 }
 
-/// The run's tree as `node` leaves it, after whatever the node landed
-/// there: a node with a checkout of its own names the tree it landed in,
-/// not its checkout.
-async fn left_tree(ctx: &RunCtx<'_>, node: &Node) -> Result<yunta_core::TreeId, RunError> {
+/// The run's tree as `node` leaves it when no commit holds its work, with the
+/// ignored paths the project protects forced in, through that node's index.
+/// A node with a checkout of its own names the tree it landed in, not its
+/// checkout. `shared_tree::recorded_tree` chooses between this and a commit's
+/// tree, for every record of the node.
+pub(super) async fn tree_of(ctx: &RunCtx<'_>, node: &Node) -> Result<yunta_core::TreeId, RunError> {
     let run_tree = ctx.unit.as_ref().map_or(ctx.worktree, |mine| mine.into);
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
@@ -346,13 +345,14 @@ async fn left_tree(ctx: &RunCtx<'_>, node: &Node) -> Result<yunta_core::TreeId, 
     Ok(crate::worktree::capture_tree(run_tree, &index, &pathspecs, ctx.root_supervision()).await?)
 }
 
+/// Fails a node with one sentence the engine states. The close stages
+/// nothing: see [`fail_with_tokens_staged`].
 pub(super) async fn fail(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
-    retryable: bool,
 ) -> Result<NodeEnd, RunError> {
-    fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default()).await
+    fail_with_tokens(ctx, node, outcome, TokenUsage::default()).await
 }
 
 /// Fails a node with a failure the engine states in one sentence — a
@@ -363,10 +363,9 @@ pub(super) async fn fail_with_tokens(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
-    retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    fail_with_tokens_staged(ctx, node, outcome, retryable, tokens, &[]).await
+    fail_with_tokens_staged(ctx, node, outcome, tokens, &[]).await
 }
 
 /// [`fail_with_tokens`] for a close that staged `staged` in the worktree,
@@ -375,27 +374,23 @@ pub(super) async fn fail_with_tokens_staged(
     ctx: &RunCtx<'_>,
     node: &Node,
     outcome: String,
-    retryable: bool,
     tokens: TokenUsage,
     staged: &[PathBuf],
 ) -> Result<NodeEnd, RunError> {
     let failure = Failure::message(outcome);
-    fail_with_staged(ctx, node, failure, retryable, tokens, staged).await
+    fail_with_staged(ctx, node, failure, tokens, staged).await
 }
 
-/// The one place `node_failed` is written. The failure reaches the log
-/// as the data it is — one sentence, or the declared artifacts that did
-/// not close — and every surface produces its own prose from that, so
-/// none of them can disagree with the facts behind it. The close stages
+/// Fails a node with its typed failure: the cause the engine decided, kept
+/// as data, which every surface words from the log. The close stages
 /// nothing: see [`fail_with_staged`].
 pub(super) async fn fail_with(
     ctx: &RunCtx<'_>,
     node: &Node,
     failure: Failure,
-    retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    fail_with_staged(ctx, node, failure, retryable, tokens, &[]).await
+    fail_with_staged(ctx, node, failure, tokens, &[]).await
 }
 
 /// [`fail_with`] for a close that staged `staged` in the worktree, which
@@ -404,19 +399,21 @@ pub(super) async fn fail_with_staged(
     ctx: &RunCtx<'_>,
     node: &Node,
     failure: Failure,
-    retryable: bool,
     tokens: TokenUsage,
     staged: &[PathBuf],
 ) -> Result<NodeEnd, RunError> {
     let closed = Box::pin(closed(ctx, node, Landing::Failed, staged)).await?;
-    emit_failed(ctx, node, failure, retryable, tokens, closed).await
+    emit_failed(ctx, node, failure, tokens, closed).await
 }
 
+/// The one place `node_failed` is written. The failure reaches the log as
+/// the data it is — one sentence, or the declared artifacts that did not
+/// close — and every surface produces its own prose from that, so none of
+/// them can disagree with the facts behind it.
 async fn emit_failed(
     ctx: &RunCtx<'_>,
     node: &Node,
     failure: Failure,
-    retryable: bool,
     tokens: TokenUsage,
     closed: Closed,
 ) -> Result<NodeEnd, RunError> {
@@ -428,7 +425,7 @@ async fn emit_failed(
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Failed(
-            NodeFailedPayload::new(failure, retryable, tokens)
+            NodeFailedPayload::new(failure, tokens)
                 .leaving(closed.tree)
                 .committed(closed.commit)
                 .refusing(refused),

@@ -16,6 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use yunta_core::{CommitSha, Responder};
@@ -79,6 +80,8 @@ struct Inner {
     prs: Vec<MockPr>,
     next_number: u64,
     next_sha: u64,
+    /// The wait the next `open_pull_request` is refused with, once.
+    rate_limit: Option<Duration>,
 }
 
 impl Inner {
@@ -104,6 +107,12 @@ pub struct MockForgeState(Arc<Mutex<Inner>>);
 impl MockForgeState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The next `open_pull_request` is refused as a rate limit that names
+    /// `retry_after` as its wait; the call after it answers as usual.
+    pub fn rate_limit_next(&self, retry_after: Duration) {
+        self.0.lock().unwrap().rate_limit = Some(retry_after);
     }
 
     /// Person B approves — no Yunta involved on their end, just this
@@ -290,6 +299,13 @@ impl Forge for MockForge {
         &self,
         req: &PullRequestRequest,
     ) -> Result<PullRequestRef, ForgeError> {
+        let refused = self.state.0.lock().unwrap().rate_limit.take();
+        if let Some(retry_after) = refused {
+            return Err(ForgeError::RateLimited {
+                action: "open the pull request",
+                retry_after: Some(retry_after),
+            });
+        }
         // The body a forge's page would show, composed the one way every
         // forge composes it, so a test reads what a reviewer reads.
         let body = super::pull_request_body(req);

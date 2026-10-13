@@ -55,6 +55,7 @@ pub(crate) fn promotion_signaled() -> PromotionSignaledPayload {
         PromotionCause {
             node: crate::NodeId::from("implement"),
             goto: crate::NodeId::from("fix-lint"),
+            failure: None,
         },
         vec![Fact::labelled("criteria", "log")].into(),
         "standard".into(),
@@ -78,6 +79,7 @@ pub(crate) fn run_resumed() -> RunResumedPayload {
         checkout: None,
         policies: Vec::new(),
         environment: None,
+        tree: Some("deadbeef".into()),
     }
 }
 

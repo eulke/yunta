@@ -81,7 +81,7 @@ impl NodePage<'_> {
     fn said(&self, node: &NodeFrame, look: &Look) -> Vec<Line> {
         let (tone, text) = match &node.state {
             NodeStanding::Reached(NodeState::Failed { failure, .. }) => {
-                (Tone::Failed, failure.headline())
+                (Tone::Failed, crate::render::failure::headline(failure))
             }
             NodeStanding::Reached(NodeState::Finished { outcome, .. }) => {
                 (Tone::Plain, yunta_render::outcome::sentence(outcome))

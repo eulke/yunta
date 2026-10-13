@@ -3,6 +3,7 @@
 //! project configures — the same one when it runs again.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{EventPayload, Failure, NodeEvent, PauseReason, StoredEvent};
@@ -196,6 +197,29 @@ async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
         } => assert!(outcome.contains("token_env"), "{outcome}"),
         other => panic!("expected the run to pause, got {other:?}"),
     }
+}
+
+/// A forge that answers with a rate limit and a retry-after waits for the
+/// reset: the run pauses awaiting it, and nothing asks a person.
+#[tokio::test]
+async fn a_forge_rate_limit_with_a_reset_waits_for_it() {
+    let (bench, state) = forged();
+    // Any retry-after serves: the run only has to pause on the reset it names.
+    state.rate_limit_next(Duration::from_secs(60));
+    bench
+        .run_with_config(
+            WRITES_THEN_OPENS,
+            "dialect: claude-code\nsessions: []\n",
+            &config(""),
+        )
+        .await;
+    let log = tokio::fs::read_to_string(bench.run_dir().join("events.jsonl"))
+        .await
+        .unwrap();
+    assert!(
+        log.contains("\"awaiting_reset\""),
+        "a forge limit with a reset pauses as awaiting_reset"
+    );
 }
 
 #[tokio::test]

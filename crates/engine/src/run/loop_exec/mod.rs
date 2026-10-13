@@ -17,16 +17,14 @@ mod respecify;
 
 use yunta_core::events::{
     loop_overrun_failure, EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome,
-    SessionDeath, TaskStatus, TokenUsage, UnpassableTask,
+    TaskCause, TaskStatus, TaskStop, TokenUsage, UnpassableTask,
 };
-use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TaskId, TasksFile};
-
-use crate::task_cycle::BlockedCause;
+use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TasksFile};
 
 use crate::replay::RunState;
 use crate::scope_expansion::GrantWindow;
 
-use super::node_close::{close_node, fail, fail_with_tokens, Close};
+use super::node_close::{close_node, fail, fail_with, fail_with_tokens, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::prompt_exec::prompt_text;
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
@@ -57,7 +55,6 @@ pub(super) async fn execute_loop(
         tokens: TokenUsage::default(),
         iteration: 0,
         iterations_lifted: false,
-        blocked: Vec::new(),
         owed: Vec::new(),
     };
     loop {
@@ -84,9 +81,27 @@ pub(super) async fn execute_loop(
                 })),
             )
             .await?;
+            let stopped = view.state.tasks.stops();
+            // A departure no person has answered is put again on each invocation
+            // that finds nothing to run: a resume after an abort asks it again.
+            let owed = depart::owed_by(&stopped);
+            if !owed.is_empty() {
+                let holders = depart::Holders {
+                    held: &prep.setup.held,
+                    spec: prep.setup.spec.as_deref(),
+                    writer: prep.writer.as_ref(),
+                };
+                if let Some(end) =
+                    resolve_departures(ctx, node, owed, &holders, state.tokens).await?
+                {
+                    return Ok(end);
+                }
+                prep.rejudge(ctx).await?;
+                continue;
+            }
             // A criterion no task can pass is for the planner to rewrite; a
             // repeat of the declaration that failed the node before is not.
-            if let Some(unpassable) = unpassable_of(&state.blocked) {
+            if let Some(unpassable) = unpassable_of(&stopped) {
                 let earlier = view
                     .state
                     .nodes
@@ -98,16 +113,13 @@ pub(super) async fn execute_loop(
                     }
                     _ => unpassable,
                 };
-                return crate::run::node_close::fail_with(ctx, node, failure, false, state.tokens)
-                    .await;
+                return fail_with(ctx, node, failure, state.tokens).await;
             }
             // A decision owed a person is what nothing else can stand in
             // for: the loop ends on it, done or not, and the person grants
             // or denies each request from there.
             if let Some(failure) = escalate::owed(&state.owed)? {
-                let fail =
-                    crate::run::node_close::fail_with(ctx, node, failure, false, state.tokens);
-                return fail.await;
+                return fail_with(ctx, node, failure, state.tokens).await;
             }
             if all_done {
                 let outcome = NodeOutcome::Fact(EngineFact::TasksDone {
@@ -115,31 +127,20 @@ pub(super) async fn execute_loop(
                 });
                 return close_node(ctx, node, Close::new(outcome, state.tokens)).await;
             }
-            // A session that died is the actionable fact among them, and
-            // it reaches the log as the fact rather than inside a
-            // sentence: the node failed because a CLI would not start,
-            // and that is retryable in a way an unmet criterion is not.
-            if let Some(died) = state.first_death() {
-                return crate::run::node_close::fail_with(
-                    ctx,
-                    node,
-                    Failure::SessionDied { died },
-                    true,
-                    state.tokens,
-                )
-                .await;
+            // What the tasks the ledger holds stopped on ends the loop: each
+            // stop is kept as data, and an account's limit is the failure
+            // itself, since it waits for its reset.
+            if let Some(failure) = stopped_failure(stopped) {
+                return fail_with(ctx, node, failure, state.tokens).await;
             }
-            let mut diagnostic = "no task is ready and not all are done — blocked or failed \
-                                  tasks need a decision"
-                .to_string();
-            for (task, cause) in &state.blocked {
-                diagnostic.push_str("; ");
-                diagnostic.push_str(&yunta_core::text::detailed(
-                    format!("task `{task}` blocked"),
-                    &cause.to_string(),
-                ));
-            }
-            return fail_with_tokens(ctx, node, diagnostic, false, state.tokens).await;
+            return fail_with_tokens(
+                ctx,
+                node,
+                "no task is ready and not all are done — blocked or failed tasks need a decision"
+                    .to_string(),
+                state.tokens,
+            )
+            .await;
         }
 
         if state.iteration > prep.max_iterations && !state.iterations_lifted {
@@ -156,7 +157,7 @@ pub(super) async fn execute_loop(
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { .. } => {
                     let failure = loop_overrun_failure(&node.id, prep.max_iterations);
-                    return fail_with_tokens(ctx, node, failure, false, state.tokens).await;
+                    return fail_with_tokens(ctx, node, failure, state.tokens).await;
                 }
             }
         }
@@ -271,13 +272,6 @@ struct LoopState {
     tokens: TokenUsage,
     iteration: u32,
     iterations_lifted: bool,
-    /// What blocked each task this invocation, so the loop's own failure
-    /// can cite them. Typed rather than a sentence: the node closes with
-    /// the first death among them as the fact it is, and writes prose
-    /// only at the edge. A resume starts empty — the log carries each
-    /// task's status, and the empty-batch tail still names which tasks
-    /// are blocked.
-    blocked: Vec<(TaskId, BlockedCause)>,
     /// The scope requests nobody was there to decide, owed once nothing
     /// else of the loop can run.
     owed: Vec<escalate::PendingEscalation>,
@@ -300,23 +294,13 @@ impl LoopPrep<'_> {
     }
 }
 
-impl LoopState {
-    /// The first session death among this invocation's blocked tasks.
-    fn first_death(&self) -> Option<SessionDeath> {
-        self.blocked.iter().find_map(|(_, cause)| match cause {
-            BlockedCause::SessionDied(died) => Some(died.clone()),
-            _ => None,
-        })
-    }
-}
-
-/// The plan-unpassable failure of the tasks this invocation blocked on a
+/// The plan-unpassable failure of the tasks the ledger holds stopped on a
 /// declared criterion, or `None` when none did.
-fn unpassable_of(blocked: &[(TaskId, BlockedCause)]) -> Option<Failure> {
-    let unpassable: Vec<UnpassableTask> = blocked
+fn unpassable_of(stopped: &[TaskStop]) -> Option<Failure> {
+    let unpassable: Vec<UnpassableTask> = stopped
         .iter()
-        .filter_map(|(_, cause)| match cause {
-            BlockedCause::CriterionUnpassable { declared } => Some(UnpassableTask {
+        .filter_map(|stop| match &stop.cause {
+            TaskCause::CriterionUnpassable { declared } => Some(UnpassableTask {
                 task_id: declared.task_id.clone(),
                 cmd: declared.criterion.clone(),
                 why: declared.why.clone(),
@@ -325,6 +309,20 @@ fn unpassable_of(blocked: &[(TaskId, BlockedCause)]) -> Option<Failure> {
         })
         .collect();
     (!unpassable.is_empty()).then_some(Failure::PlanUnpassable { unpassable })
+}
+
+/// What the tasks the ledger holds stopped end the loop on: the account's
+/// limit when a session hit one, and otherwise the stops themselves as data.
+/// `None` when no task stopped.
+fn stopped_failure(stopped: Vec<TaskStop>) -> Option<Failure> {
+    let limit = stopped.iter().find_map(|stop| match &stop.cause {
+        TaskCause::SessionLimited(limit) => Some(limit.clone()),
+        _ => None,
+    });
+    if let Some(limit) = limit {
+        return Some(Failure::Limit { limit });
+    }
+    (!stopped.is_empty()).then_some(Failure::TasksStopped { stopped })
 }
 
 /// Whether `failure` names only tasks and criteria `earlier` named too. The
@@ -384,7 +382,6 @@ async fn prepare_loop<'a>(
              or the workflow declares a `type: document` input of `kind: tasks` and the run \
              is given one"
                 .to_string(),
-            false,
         )
         .await?;
         return Ok(LoopReady::Ended(end));

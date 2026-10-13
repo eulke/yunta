@@ -173,9 +173,7 @@ async fn assemble(
         Err(ContextResolveError::Cancelled { .. }) => {
             Ok(Step::Ended(cancelled_end(ctx, node).await?))
         }
-        Err(error) => Ok(Step::Ended(
-            fail(ctx, node, error.to_string(), false).await?,
-        )),
+        Err(error) => Ok(Step::Ended(fail(ctx, node, error.to_string()).await?)),
     }
 }
 

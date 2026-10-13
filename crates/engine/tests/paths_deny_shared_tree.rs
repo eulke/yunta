@@ -84,8 +84,9 @@ async fn a_failing_node_names_the_denied_paths_its_close_refused() {
         panic!("one failure: {failed:?}");
     };
     assert!(
-        failure.to_string().starts_with("exit 3"),
-        "its own cause stands: {failure}"
+        yunta_render::failure::sentence(failure).starts_with("exit 3"),
+        "its own cause stands: {}",
+        yunta_render::failure::sentence(failure)
     );
     assert_eq!(refused, &[std::path::PathBuf::from(".github/ci.yml")]);
     assert!(!at_head(&bench).contains(".github/ci.yml"));

@@ -1,17 +1,19 @@
-//! What one task cycle produced, as data: what the pre-check found
-//! wrong before any work started, how each attempt's session ended, and
-//! why the cycle stopped.
+//! What one task cycle produced, as data: what the pre-check found wrong
+//! before any work started, how each attempt's session ended, and why the
+//! cycle stopped.
 //!
-//! Every one of these is a fact with a `Display` of its own, so the
-//! sentence a reader sees is produced once, here, and no site building
-//! a report can say it differently.
+//! Every one of these is a fact the log can hold. The sentences a reader
+//! sees are written from them by the render crate, and the words an agent
+//! reads are written by the run tools, so no prose about them lives here.
 
-use std::path::PathBuf;
-
-use yunta_core::events::{CriterionUnpassablePayload, SessionDeath, SessionExit, TokenUsage};
+use yunta_core::events::{
+    CriterionResult, FailureCause, SessionExit, Surprise, TaskCause, TokenUsage, Unanswered,
+};
 use yunta_core::expansion::Decision;
+use yunta_core::port::AgentError;
 use yunta_core::{ScopeGlob, Seq, TaskId};
 
+use crate::process::Printed;
 use crate::scope::ScopeCheckResult;
 
 /// What one criterion's command printed and answered, on the tree it ran on.
@@ -31,7 +33,7 @@ pub struct CriterionRun {
     /// a red answer the cache reused, in the run that gave it. `None` for
     /// a green answer reused, and for a check the engine states rather
     /// than runs.
-    pub output: Option<crate::process::Printed>,
+    pub output: Option<Printed>,
     /// The tree the answer is for — what the checkout held — and, for a
     /// command that runs `git`, the commit it stood on. `None` for a
     /// check the engine states rather than runs.
@@ -41,84 +43,33 @@ pub struct CriterionRun {
 
 impl CriterionRun {
     /// Why this criterion never answered, if it did not.
-    pub fn could_not_run(&self) -> Option<&'static str> {
+    pub fn could_not_run(&self) -> Option<Unanswered> {
         super::criteria::could_not_run(self.exit_code)
     }
 
-    /// The last line it printed, if it ran and printed anything.
-    pub fn said(&self) -> Option<String> {
-        self.output.as_ref().and_then(|output| output.last_words())
+    /// The line it concluded with, if it printed anything: see
+    /// [`Printed::concluded`].
+    pub fn conclusion(&self) -> Option<String> {
+        self.output.as_ref().and_then(Printed::concluded)
     }
 
-    /// The line it concluded with, if it printed anything: the last one
-    /// on stdout, where a test runner says what it ran.
-    pub fn concluded(&self) -> Option<String> {
-        self.output.as_ref().and_then(|output| output.concluded())
-    }
-
-    /// How its exit code reads to a person: the code, and what it means
+    /// How its exit code reads to an agent: the code, and what it means
     /// when the command never answered.
     pub fn exit_described(&self) -> String {
         match self.could_not_run() {
-            Some(why) => format!("{} ({why})", self.exit_code),
+            Some(why) => format!(
+                "{} ({})",
+                self.exit_code,
+                super::criteria::unanswered_words(why)
+            ),
             None => self.exit_code.to_string(),
         }
     }
 }
 
-/// A criterion the pre-check found wrong before any work: "this pre-check
-/// validates the validator" — a non-guard that already passes, or a guard
-/// that is already red, means the criteria themselves need fixing, not
-/// the task nobody has started.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Surprise {
-    TrivialCriterion {
-        cmd: String,
-    },
-    /// A guard already red on the tree the task starts from: what broke
-    /// it came before the task. `proves` is what the guard is there to
-    /// show, when the task or the run says so.
-    BrokenGuard {
-        cmd: String,
-        proves: Option<String>,
-    },
-    /// A criterion that never answered: its command could not be found
-    /// or executed where the engine runs criteria, or it was stopped.
-    /// No work on the tree changes that.
-    Unrunnable {
-        run: CriterionRun,
-    },
-}
-
-impl std::fmt::Display for Surprise {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Surprise::TrivialCriterion { cmd } => write!(
-                f,
-                "criterion `{cmd}` already passes before any work — the criteria need \
-                 fixing, not the task"
-            ),
-            Surprise::BrokenGuard { cmd, proves } => {
-                write!(f, "guard `{cmd}` is already red before any work started")?;
-                match proves {
-                    Some(proves) => write!(f, " — it is there to show that {proves}"),
-                    None => Ok(()),
-                }
-            }
-            Surprise::Unrunnable { run } => write!(
-                f,
-                "criterion `{}` could not run: exit {} — the criteria need fixing, or \
-                 the environment the engine runs them in does",
-                run.cmd,
-                run.exit_described()
-            ),
-        }
-    }
-}
-
-/// Everything the pre-check found wrong, in the order the task declares
-/// its criteria; empty when every non-guard is red and every guard
-/// green, which is the normal case.
+/// The pre-check's findings, read from what the criteria ran: a non-guard
+/// that already passes, a guard already red, or a criterion that never
+/// answered. Empty when every non-guard is red and every guard green.
 ///
 /// A function of what ran and nothing else: the learned order decides
 /// when the evidence arrives, never what is verified or what is
@@ -136,7 +87,10 @@ pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise
                 .iter()
                 .find(|run| run.cmd == criterion.cmd && run.is_guard == is_guard)?;
             if run.could_not_run().is_some() {
-                return Some(Surprise::Unrunnable { run: run.clone() });
+                return Some(Surprise::Unrunnable {
+                    cmd: run.cmd.clone(),
+                    exit_code: run.exit_code,
+                });
             }
             match (run.is_guard, run.exit_code) {
                 (true, code) if code != 0 => Some(Surprise::BrokenGuard {
@@ -152,180 +106,16 @@ pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise
         .collect()
 }
 
-/// Why a task stopped without being done. One type for every answer the
-/// cycle gives, so the sentence a reader sees is produced once, here,
-/// from the fact rather than from a `format!` at each site.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BlockedCause {
-    /// The criteria were wrong before any work started.
-    PreCheck(yunta_core::NonEmpty<Surprise>),
-    /// Every attempt ran and the criteria are still red, or the work
-    /// left the scope the task declared. `red` and `outside` are what the
-    /// last attempt left: the criteria still failing, and the paths it
-    /// changed outside the scope.
-    Unmet {
-        attempts: u32,
-        red: Vec<CriterionRun>,
-        outside: Vec<PathBuf>,
-    },
-    /// A scope-expansion request is owed a human decision, and no
-    /// further session spends budget while one is owed.
-    ScopeDecisionOwed,
-    /// The session reported a failure nothing will retry, and the
-    /// criteria the engine checked itself are still red.
-    NonRetryable,
-    /// After an attempt, a criterion never answered: its command could
-    /// not be found or executed where the engine runs criteria. Another
-    /// attempt would change the tree, never that.
-    Unrunnable { runs: Vec<CriterionRun> },
-    /// The session declared a criterion impossible on the plan's work. No
-    /// further session retries it, and the planner rewrites the tasks.
-    CriterionUnpassable {
-        declared: CriterionUnpassablePayload,
-    },
-    /// A person chose to continue from the work the task's last attempt
-    /// left, and that work no longer applies on the run's tree: these are
-    /// the paths it stopped on.
-    CarriedWorkNoLongerApplies { paths: Vec<PathBuf> },
-    /// A criterion's own command is one the run's permissions refuse,
-    /// so the task cannot be verified at all. `rule` is the refusal the
-    /// permission check wrote, naming the pattern and the field.
-    CommandDenied { rule: String },
-    /// The session declared that its work departs from the plan, and a
-    /// person answers each departure before the task closes.
-    DeviationOwed {
-        deviations: yunta_core::NonEmpty<yunta_core::events::DeviationDeclaredPayload>,
-    },
-    /// The session an attempt worked in ended without a terminal event.
-    /// It left no work behind and said why, and another attempt would
-    /// open the same session against the same configuration.
-    SessionDied(SessionDeath),
-}
-
-/// One line per departure, each in the session's own words.
-fn departed(
-    deviations: &yunta_core::NonEmpty<yunta_core::events::DeviationDeclaredPayload>,
-) -> String {
-    deviations
-        .as_slice()
-        .iter()
-        .map(|d| {
-            format!(
-                "its session departs from the plan: {}: {} — {}",
-                d.from, d.instead, d.why
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-impl std::fmt::Display for BlockedCause {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            // One line per surprise: a task whose criteria are wrong in
-            // two ways is wrong in two ways, and a reader fixes both.
-            BlockedCause::PreCheck(found) => {
-                let said: Vec<String> = found.as_slice().iter().map(ToString::to_string).collect();
-                write!(f, "{}", said.join("\n"))
-            }
-            BlockedCause::Unmet {
-                attempts,
-                red,
-                outside,
-            } => write_unmet(f, *attempts, red, outside),
-            BlockedCause::ScopeDecisionOwed => {
-                write!(f, "a scope expansion request needs a human decision")
-            }
-            BlockedCause::DeviationOwed { deviations } => write!(f, "{}", departed(deviations)),
-            BlockedCause::NonRetryable => write!(
-                f,
-                "the session reported a non-retryable failure and the criteria are still red"
-            ),
-            BlockedCause::Unrunnable { runs } => write!(
-                f,
-                "a criterion could not run, and another attempt would not change that: {}",
-                exits(runs, "exits")
-            ),
-            BlockedCause::CriterionUnpassable { declared } => write!(
-                f,
-                "criterion `{}` cannot pass on the work of this plan: {}",
-                declared.criterion, declared.why
-            ),
-            BlockedCause::CarriedWorkNoLongerApplies { paths } => {
-                let listed: Vec<String> = paths
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect();
-                write!(
-                    f,
-                    "the work its last attempt left no longer applies on the run's tree \
-                     (conflicts in {}); run it again from scratch",
-                    listed.join(", ")
-                )
-            }
-            BlockedCause::CommandDenied { rule } => write!(f, "{rule}"),
-            BlockedCause::SessionDied(died) => write!(f, "{died}"),
-        }
-    }
-}
-
-/// Each run as "`cmd` <verb> <exit code and what it means>", and the
-/// last line it printed, in order: a person deciding about the task reads
-/// why it fails without opening what the run kept of it.
-fn exits(runs: &[CriterionRun], verb: &str) -> String {
-    runs.iter()
-        .map(|run| {
-            yunta_core::text::aside(
-                format!("`{}` {verb} {}", run.cmd, run.exit_described()),
-                &run.said().unwrap_or_default(),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
-}
-
-/// What an exhausted task's last attempt left: the criteria still red,
-/// and the paths it changed outside the scope.
-fn write_unmet(
-    f: &mut std::fmt::Formatter<'_>,
-    attempts: u32,
-    red: &[CriterionRun],
-    outside: &[PathBuf],
-) -> std::fmt::Result {
-    write!(
-        f,
-        "not done after {}",
-        yunta_core::text::counted(attempts as usize, "attempt")
-    )?;
-    let outside: Vec<String> = outside
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect();
-    match (red.is_empty(), outside.is_empty()) {
-        (false, false) => write!(
-            f,
-            ": {}, and the work changed {} outside its scope",
-            exits(red, "still exits"),
-            outside.join(", ")
-        ),
-        (false, true) => write!(f, ": {}", exits(red, "still exits")),
-        (true, false) => write!(
-            f,
-            ": the criteria pass, but the work changed {} outside its scope",
-            outside.join(", ")
-        ),
-        (true, true) => Ok(()),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchOutcome {
     Completed {
         summary: String,
     },
+    /// The session ended in a failure the adapter stated, and the cause it
+    /// gave. The error keeps whatever the adapter caught under its message.
     Failed {
-        message: String,
-        retryable: bool,
+        error: AgentError,
+        cause: FailureCause,
     },
     /// No terminal event at all — the engine synthesizes this, the
     /// adapter never emits it, and asks the session that fell silent how
@@ -358,6 +148,10 @@ pub struct AttemptRecord {
     /// Tokens this attempt's session consumed, from its `Usage` events.
     pub tokens: TokenUsage,
     pub post_check: Vec<CriterionRun>,
+    /// What the post-check answered, one result per criterion of
+    /// `post_check`, as the log holds it. Kept whether or not a log
+    /// records it, so a cause quotes the same answers either way.
+    pub post_results: Vec<CriterionResult>,
     pub scope: ScopeCheckResult,
     pub succeeded: bool,
     /// The request the session left, as the judgement decided it on this
@@ -410,8 +204,9 @@ impl AttemptRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskOutcome {
     Done,
+    /// Why the task stopped short of done, as the cycle found it.
     Blocked {
-        cause: BlockedCause,
+        cause: TaskCause,
     },
     /// The cycle's cancellation token fired mid-attempt — the
     /// session was cut (interrupt→kill) and the cycle stopped without a
@@ -437,7 +232,7 @@ pub struct TaskCycleReport {
     /// its own mechanics during the last attempt — what the scope
     /// check at integration leaves out, exactly as the cycle's own
     /// check did.
-    pub staged: Vec<PathBuf>,
+    pub staged: Vec<std::path::PathBuf>,
     /// The sequence number of the last check this cycle recorded — what
     /// the status change closing the cycle cites. `None` only for a
     /// cycle run without an observer, which records nothing.

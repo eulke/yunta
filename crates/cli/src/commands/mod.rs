@@ -36,10 +36,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
+use yunta_core::events::PauseReason;
 use yunta_core::port::{Adapter, ProbeReport};
 use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
-use yunta_engine::UnknownKindCount;
+use yunta_engine::{RunState, UnknownKindCount};
 
 use crate::error::CliError;
 
@@ -115,9 +117,21 @@ pub(crate) async fn spawn_detached_resume(
         .and_then(|id| Pid::try_from(id).ok())
         .ok_or_else(|| std::io::Error::other("the detached child reported no usable process id"))?;
     tokio::spawn(async move {
+        // best-effort: the reaper only collects the child's exit; the child's
+        // own log says how the run went.
         let _ = child.wait().await;
     });
     Ok(pid)
+}
+
+/// The instant a run paused on a limit's reset resumes at, or `None` for
+/// any other run. A resume of such a run waits for that instant before it
+/// takes anything.
+pub(crate) fn reset_at(state: &RunState) -> Option<DateTime<Utc>> {
+    match state.run.paused() {
+        Some((PauseReason::AwaitingReset { at, .. }, _)) => Some(*at),
+        _ => None,
+    }
 }
 
 /// The adapters a run executes its sessions on, by the name `runners:`

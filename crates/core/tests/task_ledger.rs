@@ -5,10 +5,11 @@
 //! a cost counted for an execution that never happened, or held apart
 //! per task, would order real work by a number nobody measured.
 
+use yunta_core::events::tasks::{TaskCause, TaskStop};
 use yunta_core::events::{
     AcceptedDeparture, CriteriaCheckedPayload, CriterionResult, DepartsFrom,
     DeviationDeclaredPayload, DeviationResolvedPayload, EventMeta, NodeEvent, Phase, TaskEvent,
-    TaskLedger, TaskRegisteredPayload,
+    TaskLedger, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
 };
 use yunta_core::NodeId;
 
@@ -25,6 +26,7 @@ fn result(cmd: &str, duration_ms: Option<u64>) -> CriterionResult {
         tail: Vec::new(),
         tree: None,
         head: None,
+        conclusion: None,
     }
 }
 
@@ -181,5 +183,60 @@ fn a_task_whose_tests_a_person_accepted_are_wrong_names_who_writes_them_again() 
     assert!(
         sent_back.get("T001").unwrap().respecified.is_none(),
         "nothing is written again for a departure sent back"
+    );
+}
+
+/// A task moved to `status`, with no stop named.
+fn moved_to(task: &str, status: TaskStatus) -> TaskEvent {
+    TaskEvent::StatusChanged(TaskStatusChangedPayload::to(task.into(), status, 1.into()))
+}
+
+/// A task blocked by `cause`.
+fn blocked(task: &str, cause: TaskCause) -> TaskEvent {
+    TaskEvent::StatusChanged(TaskStatusChangedPayload::blocked(
+        task.into(),
+        1.into(),
+        None,
+        cause,
+    ))
+}
+
+#[test]
+fn stops_name_each_blocked_task_in_task_order_until_its_status_moves_on() {
+    let first = TaskCause::ScopeDecisionOwed;
+    let second = TaskCause::CommandDenied {
+        rule: "`cargo` is denied".to_string(),
+    };
+    let ledger = fold(&[
+        registered("T002"),
+        registered("T001"),
+        registered("T003"),
+        blocked("T002", second.clone()),
+        blocked("T001", first.clone()),
+        moved_to("T003", TaskStatus::Blocked),
+    ]);
+    assert_eq!(
+        ledger.stops(),
+        vec![
+            TaskStop {
+                task_id: "T001".into(),
+                cause: first,
+            },
+            TaskStop {
+                task_id: "T002".into(),
+                cause: second.clone(),
+            },
+        ],
+        "a blocked task that names no stop is not listed"
+    );
+
+    let moved_on = fold(&[
+        registered("T001"),
+        blocked("T001", second),
+        moved_to("T001", TaskStatus::Pending),
+    ]);
+    assert!(
+        moved_on.stops().is_empty(),
+        "a status change that names no stop clears the one before it"
     );
 }

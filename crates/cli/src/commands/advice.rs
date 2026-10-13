@@ -16,6 +16,7 @@
 //! id printed as an example gets pasted, and no id printed beside a run
 //! is ever one that run's own menu does not offer.
 
+use yunta_core::events::{GateWaitingPayload, Stuck};
 use yunta_engine::{NodeWait, RunPhase, WaitingOn};
 
 use crate::render::state::RunWord;
@@ -165,24 +166,167 @@ pub(crate) fn verify(run: &str) -> String {
 }
 
 /// What a person types next for a run its word describes, each command
-/// with what it does. `menu` says whether a run that needs the person
-/// stopped on a menu, whose options carry their own commands.
-pub(crate) fn after(word: RunWord, run: &str, menu: bool) -> Vec<(String, &'static str)> {
+/// with what it does. `decision` is the decision a run that needs the
+/// person stopped on, when the log rebuilds one: its options carry their
+/// own commands, and a failure that no retry can change until the tree
+/// moves says so beside the command that hands the run back.
+pub(crate) fn after(
+    word: RunWord,
+    run: &str,
+    decision: Option<&GateWaitingPayload>,
+) -> Vec<(String, &'static str)> {
     match word {
         RunWord::Stalled => vec![
             (resume(run), "continues it from its log"),
             (close(run), "closes it for good"),
         ],
-        RunWord::NeedsYou if !menu => vec![
-            (resume(run), "hands it back once that is settled"),
-            (close(run), "closes it for good"),
-        ],
-        RunWord::NeedsYou => vec![(close(run), "closes it for good")],
+        RunWord::Waiting => after_reset(run),
+        RunWord::NeedsYou => match decision {
+            None => vec![
+                (resume(run), "hands it back once that is settled"),
+                (close(run), "closes it for good"),
+            ],
+            Some(decision) => {
+                let mut steps = Vec::new();
+                if waits_for_tree(decision) {
+                    steps.push((resume(run), "offers a retry once the run's tree changed"));
+                }
+                steps.push((close(run), "closes it for good"));
+                steps
+            }
+        },
         RunWord::Finished | RunWord::Reported => vec![(receipt(run), "certifies what it did")],
         RunWord::Broken => vec![(verify(run), "says where its log stops reading")],
         RunWord::Created | RunWord::Running => {
             vec![(cancel(run), "stops it and everything under it")]
         }
         RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => Vec::new(),
+    }
+}
+
+/// What a person types next for a run paused on a limit's reset. The resume
+/// that hands it back waits for the reset before it takes anything, so the
+/// words say when it moves rather than asking a person to settle something
+/// first.
+pub(crate) fn after_reset(run: &str) -> Vec<(String, &'static str)> {
+    vec![
+        (resume(run), "waits for the reset, then drives on"),
+        (close(run), "closes it for good"),
+    ]
+}
+
+/// Whether the failure a decision is about offers no retry until the run's
+/// tree changes. The same check on the same tree answers the same, so the
+/// menu says that much and the way back is a resume once the tree moved.
+fn waits_for_tree(decision: &GateWaitingPayload) -> bool {
+    decision
+        .failure
+        .as_ref()
+        .and_then(|menu| menu.stuck.as_ref())
+        == Some(&Stuck::TreeUnchanged)
+}
+
+/// The node a run paused on a limit's reset is held for, and the moment
+/// the run resumes at by itself. `None` for a run in any other state.
+pub(crate) fn reset_pause(
+    phase: &RunPhase,
+) -> Option<(&yunta_core::NodeId, chrono::DateTime<chrono::Utc>)> {
+    match phase {
+        RunPhase::Waiting {
+            on: WaitingOn::Run { reason },
+        } => reason.reset_wait(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use yunta_core::events::{Escalation, Evidence, Failure, FailureMenu, GateOption, PauseReason};
+    use yunta_core::{NodeId, NonEmpty, OptionId};
+
+    use super::*;
+
+    #[test]
+    fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
+        let at = chrono::Utc
+            .with_ymd_and_hms(2026, 10, 13, 12, 0, 0)
+            .unwrap();
+        let phase = RunPhase::Waiting {
+            on: WaitingOn::Run {
+                reason: PauseReason::AwaitingReset {
+                    node: NodeId::from_static("build"),
+                    at,
+                },
+            },
+        };
+        let (node, resumes) = reset_pause(&phase).expect("a run paused on a reset");
+        assert_eq!((node.as_str(), resumes), ("build", at));
+        assert!(reset_pause(&RunPhase::Running).is_none());
+    }
+
+    /// A decision on a failed node whose menu gives `stuck` as the reason no
+    /// remedy is offered, with nothing but abort on it.
+    fn decision_stuck_on(stuck: Stuck) -> GateWaitingPayload {
+        let menu = FailureMenu {
+            attempt: 1,
+            failure: Failure::message("exit 1"),
+            remedies: Vec::new(),
+            stuck: Some(stuck),
+            reroute: None,
+        };
+        let abort = GateOption {
+            id: OptionId::from_static("abort"),
+            label: Some("Abort".to_string()),
+            tradeoff: None,
+            asks: None,
+        };
+        Escalation::new(
+            "node `build` failed",
+            Evidence::none(),
+            NonEmpty::from((abort, Vec::new())),
+        )
+        .expect("the claim does not repeat its record")
+        .with_failure(menu)
+        .into_payload()
+    }
+
+    #[test]
+    fn a_failure_stuck_on_an_unchanged_tree_lists_the_resume_that_retries_once_it_changed() {
+        let stuck = decision_stuck_on(Stuck::TreeUnchanged);
+        assert_eq!(
+            after(RunWord::NeedsYou, "run-1", Some(&stuck)),
+            vec![
+                (
+                    "yunta resume run-1".to_string(),
+                    "offers a retry once the run's tree changed",
+                ),
+                ("yunta close run-1".to_string(), "closes it for good"),
+            ]
+        );
+        let denied = decision_stuck_on(Stuck::ProjectDenies);
+        assert_eq!(
+            after(RunWord::NeedsYou, "run-1", Some(&denied)),
+            vec![("yunta close run-1".to_string(), "closes it for good")]
+        );
+    }
+
+    #[test]
+    fn a_run_that_needs_a_person_without_a_decision_is_handed_back_once_settled() {
+        assert_eq!(
+            after(RunWord::NeedsYou, "run-1", None),
+            vec![
+                (
+                    "yunta resume run-1".to_string(),
+                    "hands it back once that is settled",
+                ),
+                ("yunta close run-1".to_string(), "closes it for good"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_waiting_on_a_reset_is_offered_the_reset_words() {
+        assert_eq!(after(RunWord::Waiting, "run-1", None), after_reset("run-1"));
     }
 }

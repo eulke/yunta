@@ -12,9 +12,12 @@ use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
 use yunta_core::{
     AdapterId, Capability, ConfigKey, NonEmpty, QuestionId, Redactor, RunId, ScopeExpansionMode,
-    ScopeGlob, Secret,
+    ScopeGlob, Secret, TaskId,
 };
 use yunta_testkit_core::all_kinds;
+
+#[path = "events/failure.rs"]
+mod failure;
 
 #[test]
 fn every_wire_kind_is_sampled() {
@@ -44,8 +47,8 @@ fn an_escalation_whose_summary_repeats_a_fact_is_refused() {
         NonEmpty::from((
             GateOption {
                 id: "abort".into(),
-                label: "Abort the run".to_string(),
-                tradeoff: "Pauses here; nothing further executes".to_string(),
+                label: Some("Abort the run".to_string()),
+                tradeoff: Some("Pauses here; nothing further executes".to_string()),
                 asks: None,
             },
             Vec::new(),
@@ -596,210 +599,6 @@ fn questions_awaiting_an_answer_are_said_one_way() {
             QuestionId::from("q-api")
         ]),
         "asked 2 questions: `q-scope`, `q-api`"
-    );
-}
-
-#[test]
-fn a_node_failed_by_a_dead_session_round_trips_with_its_exit() {
-    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::session_died(
-            "codex".parse().unwrap(),
-            Some(SessionExit {
-                end: SessionEnd::Code { code: 2 },
-                stderr_tail: vec!["url is not supported for stdio".to_string()],
-            }),
-        ),
-        true,
-        TokenUsage::default(),
-    )));
-
-    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
-    assert_eq!(json["died"]["adapter"], "codex");
-    assert_eq!(json["died"]["exit"]["end"]["type"], "code");
-    assert_eq!(json["died"]["exit"]["end"]["code"], 2);
-
-    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
-    assert_eq!(payload, parsed, "{json}");
-}
-
-/// A command that exited 101 having printed a compiler's error on
-/// stdout, the way `cargo build` prints one.
-fn compiler_exit(origin: Option<CommandOrigin>) -> Failure {
-    Failure::exited(CommandExit {
-        origin,
-        code: 101,
-        tail: vec![
-            "error[E0425]: cannot find value `x` in this scope".to_string(),
-            " --> src/lib.rs:3:5".to_string(),
-        ],
-        output: Some(yunta_core::sha256_hex(b"everything it printed")),
-    })
-}
-
-#[test]
-fn a_node_failed_by_a_command_round_trips_with_what_it_printed() {
-    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        compiler_exit(None),
-        false,
-        TokenUsage::default(),
-    )));
-
-    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
-    assert_eq!(json["exited"]["code"], 101);
-    assert_eq!(json["exited"]["tail"][1], " --> src/lib.rs:3:5");
-    assert!(json["exited"]["output"].is_string(), "{json}");
-    assert!(
-        json.get("outcome").is_none(),
-        "the prose is produced from the data, never stored beside it: {json}"
-    );
-
-    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
-    assert_eq!(payload, parsed, "{json}");
-}
-
-#[test]
-fn a_failure_logged_as_a_sentence_before_commands_were_data_still_reads_as_one() {
-    let parsed: Failure =
-        serde_json::from_value(serde_json::json!({ "outcome": "exit 1: no such file" })).unwrap();
-    assert_eq!(parsed, Failure::message("exit 1: no such file"));
-}
-
-#[test]
-fn a_failed_command_names_itself_and_quotes_its_last_lines() {
-    let node = compiler_exit(None);
-    assert_eq!(node.headline(), "exit 101");
-    assert_eq!(
-        node.to_string(),
-        "exit 101: error[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:3:5"
-    );
-
-    let executor = compiler_exit(Some(CommandOrigin::Executor {
-        executor: "probe".to_string(),
-    }));
-    assert_eq!(executor.headline(), "executor `probe` exited 101");
-
-    let hook = compiler_exit(Some(CommandOrigin::Hook {
-        phase: HookPhase::Before,
-        command: "cargo fmt --check".to_string(),
-    }));
-    assert_eq!(hook.headline(), "before hook `cargo fmt --check` failed");
-
-    let silent = Failure::exited(CommandExit {
-        origin: None,
-        code: 1,
-        tail: Vec::new(),
-        output: None,
-    });
-    assert_eq!(
-        silent.to_string(),
-        "exit 1",
-        "a command that printed nothing reads as how it ended"
-    );
-}
-
-#[test]
-fn a_check_refused_on_an_unchanged_tree_still_quotes_what_the_attempt_that_ran_printed() {
-    let refused = Failure::unchanged(1, compiler_exit(None));
-    assert_eq!(refused.tail(), compiler_exit(None).tail());
-    assert_eq!(refused.output(), compiler_exit(None).output());
-    assert!(
-        refused.headline().ends_with("Attempt 1 failed: exit 101"),
-        "{}",
-        refused.headline()
-    );
-    assert!(
-        refused.to_string().ends_with(" --> src/lib.rs:3:5"),
-        "{refused}"
-    );
-}
-
-#[test]
-fn a_node_failed_outside_its_scope_round_trips_naming_each_path() {
-    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]),
-        false,
-        TokenUsage::default(),
-    )));
-
-    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
-    assert_eq!(
-        json["outside_scope"],
-        serde_json::json!(["crates/cli/Cargo.toml", "clippy.toml"])
-    );
-
-    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
-    assert_eq!(payload, parsed, "{json}");
-}
-
-/// A check refused on an unchanged tree carries the failure of the
-/// attempt that ran, and a refusal of a refusal still names that one.
-#[test]
-fn a_check_refused_on_an_unchanged_tree_round_trips_naming_the_attempt_that_ran() {
-    let refused = Failure::unchanged(1, Failure::message("regression: exit 101"));
-    let again = Failure::unchanged(2, refused.clone());
-    assert_eq!(again, refused, "the second refusal names attempt 1 too");
-
-    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        refused,
-        false,
-        TokenUsage::default(),
-    )));
-    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
-    assert_eq!(json["unchanged"]["since"], 1);
-    assert_eq!(
-        json["unchanged"]["failure"]["outcome"],
-        "regression: exit 101"
-    );
-    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
-    assert_eq!(payload, parsed, "{json}");
-}
-
-/// Every failure variant, sampled, is written as JSON and reads back as itself.
-#[test]
-fn every_failure_variant_reads_back_as_itself() {
-    let samples = [
-        Failure::message("exit 1"),
-        Failure::artifacts(Vec::new()),
-        Failure::session_died(AdapterId::from_static("mock"), None),
-        Failure::scope_violated(vec!["clippy.toml".into()]),
-        Failure::scope_requested(vec![ScopeGlob::from("src/a.rs")], "needs it"),
-        Failure::ScopeOwed { owed: Vec::new() },
-        Failure::unset(ConfigKey::Runner),
-        Failure::unchanged(1, Failure::message("regression: exit 101")),
-        Failure::paths_denied(vec!["secret.env".into()], Vec::new()),
-        Failure::exited(CommandExit {
-            origin: None,
-            code: 1,
-            tail: vec!["exit 1".into()],
-            output: None,
-        }),
-        Failure::PlanUnpassable {
-            unpassable: vec![UnpassableTask {
-                task_id: "task-u".into(),
-                cmd: "false".to_string(),
-                why: "false exits 1".to_string(),
-            }],
-        },
-    ];
-    for failure in samples {
-        let json = serde_json::to_value(&failure).unwrap();
-        let parsed: Failure = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(parsed, failure, "{json}");
-    }
-}
-
-#[test]
-fn a_scope_violation_says_which_files_fell_outside() {
-    let failure =
-        Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]);
-    assert_eq!(
-        failure.to_string(),
-        "scope violated: 2 files outside the declared globs — crates/cli/Cargo.toml, clippy.toml"
-    );
-    assert_eq!(failure.outside_scope().len(), 2);
-    assert!(
-        Failure::message("exit 1").outside_scope().is_empty(),
-        "a failure that is not about scope names no path outside it"
     );
 }
 

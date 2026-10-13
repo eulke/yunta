@@ -21,6 +21,9 @@ use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, SessionRequest};
 use yunta_core::{AdapterSettings, SessionId};
 use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
 
+#[path = "claude_code/refusals.rs"]
+mod refusals;
+
 fn stub_path() -> PathBuf {
     yunta_testkit_core::stubs::claude_code()
 }
@@ -50,35 +53,6 @@ async fn a_run_tool_is_named_the_way_this_cli_lists_it_in_its_init_line() {
         yunta_core::RunTool::from_called("mcp__yunta-run__yunta_task", naming),
         Some(yunta_core::RunTool::Task)
     );
-}
-
-#[tokio::test]
-async fn a_failed_result_ends_the_stream_with_failed_and_retryable() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            INIT_LINE,
-            r#"{"type":"result","is_error":true,"result":"rate limited","usage":{"input_tokens":5,"output_tokens":0}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CLAUDE_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    match events.last().unwrap() {
-        AgentEvent::Failed { error, cause } => {
-            assert_eq!(error.message, "rate limited");
-            assert!(cause.retryable());
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -541,79 +515,6 @@ async fn spawn_with(
     drain(session).await
 }
 
-fn non_retryable_failure(event: &AgentEvent) -> &str {
-    match event {
-        AgentEvent::Failed { error, cause } => {
-            assert!(
-                !cause.retryable(),
-                "not a failure to retry: {}",
-                error.message
-            );
-            &error.message
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn init_without_session_id_fails_non_retryable() {
-    let events = events_of(&[
-        r#"{"type":"system","subtype":"init","model":"claude-sonnet-5"}"#,
-        r#"{"type":"result","is_error":false,"result":"all done"}"#,
-    ])
-    .await;
-
-    let message = non_retryable_failure(&events[0]);
-    assert!(
-        message.contains("session_id"),
-        "the failure names the missing field: {message}"
-    );
-    assert_eq!(
-        events.len(),
-        1,
-        "nothing follows a session's terminal event: {events:?}"
-    );
-}
-
-#[tokio::test]
-async fn an_invalid_model_is_not_retried() {
-    let events = events_of(&[
-        INIT_LINE,
-        r#"{"type":"result","is_error":true,"result":"API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: claude-nope\"}}"}"#,
-    ])
-    .await;
-
-    non_retryable_failure(events.last().unwrap());
-}
-
-#[tokio::test]
-async fn a_result_line_without_is_error_is_a_non_retryable_failure() {
-    let events = events_of(&[INIT_LINE, r#"{"type":"result","result":"all done"}"#]).await;
-
-    let message = non_retryable_failure(events.last().unwrap());
-    assert!(
-        message.contains("is_error"),
-        "the failure names the missing field: {message}"
-    );
-}
-
-#[tokio::test]
-async fn an_event_before_the_session_opens_fails_the_session() {
-    let events = events_of(&[
-        r#"{"type":"assistant","message":{"id":"msg-0","content":[{"type":"text","text":"hi"}]}}"#,
-        INIT_LINE,
-        r#"{"type":"result","is_error":false,"result":"all done"}"#,
-    ])
-    .await;
-
-    let message = non_retryable_failure(&events[0]);
-    assert!(
-        message.contains("before"),
-        "the failure says what came before the session opened: {message}"
-    );
-    assert_eq!(events.len(), 1, "got: {events:?}");
-}
-
 /// Helper: spawn with the stub, return the argv it was launched with.
 async fn argv_for(dir: &std::path::Path, mut req: SessionRequest) -> Vec<String> {
     let args_file = dir.join("args.txt");
@@ -863,27 +764,21 @@ async fn interleaved_tool_results_are_matched_by_id_and_ignore_other_servers() {
         r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"top-secret"}]}}"#,
         RESULT_LINE,
     ]).await;
-    let failed: Vec<_> = events
+    let rejected: Vec<_> = events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::RunToolFailed { tool, cause } => Some((*tool, *cause)),
+            AgentEvent::RunToolRejected { tool } => Some(*tool),
             _ => None,
         })
         .collect();
     assert_eq!(
-        failed,
+        rejected,
         vec![
-            (
-                yunta_core::RunTool::CheckArtifact,
-                yunta_core::events::RunToolFailureCause::CallFailed
-            ),
-            (
-                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
-                yunta_core::events::RunToolFailureCause::CallFailed
-            ),
+            yunta_core::RunTool::CheckArtifact,
+            yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
         ]
     );
-    assert!(!format!("{failed:?}").contains("top-secret"));
+    assert!(!format!("{rejected:?}").contains("top-secret"));
 }
 
 /// Usage is reported as the session spends it: each assistant message
@@ -941,35 +836,6 @@ async fn usage_is_reported_per_message_once_and_reconciled_by_the_result() {
         .fold((0, 0, 0), |(i, c, o), (a, b, d)| (i + a, c + b, o + d));
     assert_eq!(total, (4 + 8599 + 9072, 8599, 896));
     assert!(spent.iter().all(|(input, cached, _)| cached <= input));
-}
-
-/// A field the CLI filled with something that cannot be a session id
-/// fails the session, and the failure keeps what rejected the value so a
-/// reader following the chain reaches the rule it broke.
-#[tokio::test]
-async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
-    let events = events_of(&[
-        r#"{"type":"system","subtype":"init","session_id":"","model":"claude-sonnet-5"}"#,
-    ])
-    .await;
-
-    let AgentEvent::Failed { error, cause } = &events[0] else {
-        panic!("expected Failed, got {:?}", events[0]);
-    };
-    assert!(!cause.retryable(), "not a failure to retry: {error}");
-    let described = yunta_core::describe(error);
-    assert!(
-        described.starts_with("the CLI's init line's `session_id`"),
-        "the failure names the field: {described}"
-    );
-    assert!(
-        error.source().is_some(),
-        "the failure keeps what rejected the value: {described}"
-    );
-    assert!(
-        described.len() > error.message.len(),
-        "the cause is read, not dropped: {described}"
-    );
 }
 
 /// The settings a session is handed carry the sandbox its commands run in:

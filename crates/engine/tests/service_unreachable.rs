@@ -98,7 +98,9 @@ async fn past_bound_fails_as_today() {
     let events = bench.events();
     assert!(said(&events, "service_unreachable") && !said(&events, "service_reachable"));
     let failed = events.iter().find_map(|event| match event.payload() {
-        Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.failure.to_string()),
+        Some(EventPayload::Node(NodeEvent::Failed(p))) => {
+            Some(yunta_render::failure::sentence(&p.failure))
+        }
         _ => None,
     });
     assert!(failed.is_some_and(|failure| failure.contains("ENOTFOUND")));

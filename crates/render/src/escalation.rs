@@ -10,17 +10,69 @@ use yunta_core::events::{
     EscalationError, Fact, GateOption, GateWaitingPayload, ProposedCheck, ScopeWait,
 };
 use yunta_core::expansion::{Precheck, Waiting};
+use yunta_core::reserved::ReservedOption;
 use yunta_core::text;
 
-/// What an option does, when that says more than its id: an older log
-/// labelled a declared option with its own id, and a menu that prints
-/// both says one word twice.
+use crate::blocks::{departure_facts, departure_words, remedy_words, reroute_words, stuck_words};
+
+/// What an option does, when that says more than its id: a menu that
+/// prints both says one word twice. Only the label the option stores;
+/// [`option_words`] writes the label an option does not store.
 pub fn label(option: &GateOption) -> Option<&str> {
-    (option.label != option.id.as_str()).then_some(option.label.as_str())
+    option
+        .label
+        .as_deref()
+        .filter(|label| *label != option.id.as_str())
+}
+
+/// The label and the tradeoff a person reads beside `option`, whatever the
+/// option stores: the words it stores, else the words render writes for the
+/// menu it is on. The label is the id when nothing else says it.
+pub fn option_words(payload: &GateWaitingPayload, option: &GateOption) -> (String, Option<String>) {
+    let (written_label, written_tradeoff) = menu_words(payload, option).unzip();
+    let label = option
+        .label
+        .clone()
+        .or(written_label)
+        .unwrap_or_else(|| option.id.as_str().to_string());
+    let tradeoff = option.tradeoff.clone().or(written_tradeoff.flatten());
+    (label, tradeoff)
+}
+
+/// The words a menu writes for `option` when the option stores none: a
+/// failure's, a re-route's or a departure's, and the abort every menu offers.
+fn menu_words(
+    payload: &GateWaitingPayload,
+    option: &GateOption,
+) -> Option<(String, Option<String>)> {
+    let id = ReservedOption::of(&option.id)?;
+    let written = match (&payload.failure, &payload.departure) {
+        (Some(menu), _) => match &menu.reroute {
+            Some(reroute) => reroute_words(reroute, id),
+            None => remedy_words(menu, id),
+        },
+        (None, Some(menu)) => departure_words(menu, id),
+        (None, None) => None,
+    };
+    written.or_else(|| abort_words(id))
+}
+
+/// The words of an abort, which pauses the run on every menu that offers it.
+fn abort_words(id: ReservedOption) -> Option<(String, Option<String>)> {
+    (id == ReservedOption::Abort).then(|| {
+        (
+            "Abort the run".to_string(),
+            Some("Pauses here; nothing further executes".to_string()),
+        )
+    })
 }
 
 /// The lines the engine's own record is shown on, one fact to a line.
 /// Empty when nothing is attached.
+///
+/// A menu's escalation shows the facts its menu carries first: a failure's
+/// headline and detail, and the way out when it offers no remedy, or what
+/// each departure said.
 ///
 /// The record includes why a loop waits on a scope request, and what the
 /// request's proposed criterion found, after the facts attached to it.
@@ -30,11 +82,34 @@ pub fn label(option: &GateOption) -> Option<&str> {
 /// side: the second is what the first is audited against. Neither one
 /// repeats the other, so a surface with room for both shows both.
 pub fn evidence(escalation: &GateWaitingPayload) -> Vec<String> {
-    let mut lines = crate::evidence::lines(escalation.evidence());
+    let mut lines: Vec<String> = menu_facts(escalation)
+        .iter()
+        .map(crate::evidence::line)
+        .filter(|line| !line.is_empty())
+        .collect();
+    lines.extend(crate::evidence::lines(escalation.evidence()));
     if let Some(scope) = escalation.scope() {
         lines.extend(scope_facts(scope).iter().map(crate::evidence::line));
     }
     lines
+}
+
+/// The facts a menu's escalation carries beside its claim: a failure's own
+/// lines and, when it offers no remedy, the way out; or a departure's facts.
+fn menu_facts(escalation: &GateWaitingPayload) -> Vec<Fact> {
+    match (&escalation.failure, &escalation.departure) {
+        (Some(menu), _) => {
+            let mut facts = crate::failure::facts(&menu.failure);
+            facts.extend(
+                menu.stuck
+                    .as_ref()
+                    .map(|stuck| Fact::labelled("way out", stuck_words(stuck))),
+            );
+            facts
+        }
+        (None, Some(menu)) => departure_facts(menu),
+        (None, None) => Vec::new(),
+    }
 }
 
 /// The facts a scope request is shown with: why the loop waits, and what its pre-check found.
@@ -86,8 +161,11 @@ pub fn repeated_fact(refused: &EscalationError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::Escalation;
-    use yunta_core::events::{Evidence, Fact};
+    use yunta_core::events::{
+        CommandExit, DepartsFrom, DepartureMenu, DeviationDeclaredPayload, Escalation, Evidence,
+        Fact, Failure, FailureMenu, Precondition, Remedy, Stuck,
+    };
+    use yunta_core::NonEmpty;
 
     use super::*;
 
@@ -102,10 +180,30 @@ mod tests {
     fn option(id: &'static str, label: &str) -> GateOption {
         GateOption {
             id: yunta_core::OptionId::from_static(id),
-            label: label.to_string(),
-            tradeoff: "Uses one extra correction attempt".to_string(),
+            label: Some(label.to_string()),
+            tradeoff: Some("Uses one extra correction attempt".to_string()),
             asks: None,
         }
+    }
+
+    /// An option the engine stores with no words: a menu writes them.
+    fn bare(id: &str) -> GateOption {
+        GateOption {
+            id: id.into(),
+            label: None,
+            tradeoff: None,
+            asks: None,
+        }
+    }
+
+    /// The words of the option `id` on `payload`.
+    fn words_of(payload: &GateWaitingPayload, id: &str) -> (String, Option<String>) {
+        let option = payload
+            .options()
+            .iter()
+            .find(|option| option.id.as_str() == id)
+            .expect("the option is on the menu");
+        option_words(payload, option)
     }
 
     #[test]
@@ -217,5 +315,125 @@ mod tests {
         assert!(
             sentence(&payload).ends_with("waiting: 1/1 grant used; pre-check: `test -f a` exits 1")
         );
+    }
+
+    /// A failure's escalation as the engine builds it: the node's name for
+    /// its claim, no record, and the menu beside it.
+    fn failure_payload(menu: FailureMenu, options: Vec<GateOption>) -> GateWaitingPayload {
+        let mut options = options.into_iter();
+        let first = options.next().expect("a menu offers at least one option");
+        let rest: Vec<GateOption> = options.collect();
+        Escalation::new(
+            "node `lint` failed",
+            Evidence::none(),
+            NonEmpty::from((first, rest)),
+        )
+        .expect("the summary states no fact the evidence holds")
+        .with_failure(menu)
+        .into_payload()
+    }
+
+    #[test]
+    fn a_retry_is_worded_by_the_input_it_waits_for() {
+        let menu = FailureMenu {
+            attempt: 2,
+            failure: Failure::Exited {
+                exited: CommandExit {
+                    origin: None,
+                    code: 1,
+                    tail: Vec::new(),
+                    output: None,
+                },
+            },
+            remedies: vec![Remedy {
+                option: ReservedOption::Retry,
+                precondition: Some(Precondition::OutsideTreeChanged),
+            }],
+            stuck: None,
+            reroute: None,
+        };
+        let payload = failure_payload(menu, vec![bare("retry"), bare("abort")]);
+        let (label, tradeoff) = words_of(&payload, "retry");
+        assert_eq!(
+            label,
+            "Run it again (attempt 2) once something outside the tree changes"
+        );
+        assert!(
+            tradeoff.as_deref().is_some_and(|tradeoff| tradeoff
+                .ends_with("Until something outside the tree changes, it fails the same way and asks again")),
+            "{}", tradeoff.as_deref().unwrap_or("none")
+        );
+        assert_eq!(
+            words_of(&payload, "abort"),
+            (
+                "Abort the run".to_string(),
+                Some("Pauses here; nothing further executes".to_string())
+            )
+        );
+        assert_eq!(evidence(&payload), vec!["exit 1"]);
+    }
+
+    #[test]
+    fn a_failure_with_no_remedy_says_its_way_out_beside_what_failed() {
+        let menu = FailureMenu {
+            attempt: 1,
+            failure: Failure::PathsDenied {
+                denied_paths: vec!["a.txt".into()],
+                reasons: Vec::new(),
+            },
+            remedies: Vec::new(),
+            stuck: Some(Stuck::ProjectDenies),
+            reroute: None,
+        };
+        let payload = failure_payload(menu, vec![bare("abort")]);
+        assert_eq!(
+            evidence(&payload),
+            vec![
+                "wrote what no session of the run may write — a.txt: undo those changes",
+                "way out: the project's permissions refuse it, so no attempt goes \
+                 differently: change what they refuse, or the permissions themselves",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_departure_says_what_accepting_waives_and_what_the_session_said() {
+        let deviation = DeviationDeclaredPayload {
+            task_id: "greet".into(),
+            from: DepartsFrom::Criterion("grep -q Hello greeting.txt".to_string()),
+            planned: "the greeting names the person".to_string(),
+            instead: "it prints a fixed greeting".to_string(),
+            why: "the person is not known yet".to_string(),
+        };
+        let mut payload = Escalation::new(
+            "task `greet`'s session departs from the plan",
+            Evidence::none(),
+            NonEmpty::from((bare("accept"), vec![bare("send-back")])),
+        )
+        .expect("the summary states no fact the evidence holds")
+        .into_payload();
+        payload.departure = Some(Box::new(DepartureMenu {
+            deviations: vec![deviation],
+            waived: vec!["grep -q Hello greeting.txt".to_string()],
+            rewritten_by: None,
+            accept_offered: true,
+        }));
+        let (label, tradeoff) = words_of(&payload, "accept");
+        assert_eq!(label, "Accept the departure");
+        assert!(
+            tradeoff
+                .as_deref()
+                .is_some_and(|tradeoff| tradeoff.starts_with(
+                    "The task stops being held to `grep -q Hello greeting.txt` and closes"
+                )),
+            "{}",
+            tradeoff.as_deref().unwrap_or("none")
+        );
+        let record = evidence(&payload);
+        assert_eq!(
+            record[0],
+            "departs from: the criterion `grep -q Hello greeting.txt`"
+        );
+        assert_eq!(record[3], "because: the person is not known yet");
     }
 }

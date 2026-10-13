@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use yunta_core::events::Failure;
-use yunta_core::events::{EngineFact, FindingSeverity, NodeOutcome, TokenUsage};
+use yunta_core::events::{EngineFact, FindingSeverity, NodeOutcome, RedCheck, TokenUsage};
 use yunta_core::{CheckBuiltin, ConfigKey, Node};
 
 use super::node_close::{close_node, fail, fail_with, Close};
@@ -26,9 +26,6 @@ pub(super) async fn execute_check(
     builtin: &CheckBuiltin,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    if let Some(end) = refuse_unchanged(ctx, node, builtin).await? {
-        return Ok(end);
-    }
     match builtin {
         CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, cancel).await,
         CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, cancel).await,
@@ -40,44 +37,10 @@ pub(super) async fn execute_check(
     }
 }
 
-/// Refuses an attempt a person asked for that would run a check on the
-/// very tree its failed attempt ran on: a check that judges the tree
-/// answers the same on the same tree, so the attempt fails at once,
-/// naming the one that ran and what it failed with. The menu that
-/// follows still offers another attempt — the person may change the
-/// tree while it is open.
-async fn refuse_unchanged(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    builtin: &CheckBuiltin,
-) -> Result<Option<NodeEnd>, RunError> {
-    if !builtin.judges_the_tree() {
-        return Ok(None);
-    }
-    let state = ctx.run_view().await?.state;
-    let retried = state
-        .choice_after_failure(&node.id)
-        .is_some_and(|(_, choice)| {
-            crate::reserved::ReservedOption::of(&choice.option)
-                == Some(crate::reserved::ReservedOption::Retry)
-        });
-    let Some(failed) = state
-        .nodes
-        .get(&node.id)
-        .and_then(|record| record.repeats())
-        .filter(|_| retried)
-    else {
-        return Ok(None);
-    };
-    let failure = Failure::unchanged(failed.attempt, failed.failure.clone());
-    fail_with(ctx, node, failure, false, TokenUsage::default())
-        .await
-        .map(Some)
-}
-
 pub(super) struct CommandOutput {
     pub(super) exit_code: i32,
     pub(super) stdout: String,
+    pub(super) stderr: String,
 }
 
 /// A verification command's run: done with its output, or cut short —
@@ -87,9 +50,9 @@ pub(super) enum CommandRun {
     Cancelled,
 }
 
-/// Runs `cmd` in `cwd` to completion and captures its stdout — unlike a
-/// bash *node*, a command the engine runs to verify something is not
-/// agent-visible work, so its stdout is data to parse, not a stream to
+/// Runs `cmd` in `cwd` to completion and captures its stdout and stderr —
+/// unlike a bash *node*, a command the engine runs to verify something is
+/// not agent-visible work, so its output is data to parse, not a stream to
 /// relay. The command runs in its own process group and dies with its
 /// whole tree when `supervision` is cancelled.
 pub(super) async fn run_command(
@@ -97,11 +60,17 @@ pub(super) async fn run_command(
     cwd: &Path,
     cmd: &str,
 ) -> Result<CommandRun, RunError> {
-    let command = GovernedCommand::shell(cwd, cmd).stderr(Capture::Discard);
+    let command = GovernedCommand::shell(cwd, cmd).stderr(Capture::Collect);
     match spawn_governed(command, supervision).await? {
-        Outcome::Exited { status, stdout, .. } => Ok(CommandRun::Done(CommandOutput {
+        Outcome::Exited {
+            status,
+            stdout,
+            stderr,
+            ..
+        } => Ok(CommandRun::Done(CommandOutput {
             exit_code: status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
         })),
         // A verification command has no timeout of its own: stopping
         // early means the run was cancelled.
@@ -153,7 +122,7 @@ async fn execute_baseline_compare(
     }
 
     if ran.exit_code != 0 {
-        fail(ctx, node, regression(&captured, &ran), false).await
+        fail_with(ctx, node, regressed(&captured, &ran), TokenUsage::default()).await
     } else {
         // The memo does not say who asked first, so the fact says only
         // whether this invocation already had the answer.
@@ -165,31 +134,29 @@ async fn execute_baseline_compare(
     }
 }
 
-/// What a comparison that found the suite failing fails with: the exit
-/// code it passed with and the one it fails with now, then what the
-/// suite printed last, which is what says why.
-fn regression(
+/// The red check a comparison that found the suite failing fails with: the
+/// command that passed when it was measured, the exit code it fails with
+/// now, and what it printed last, which is what says why.
+fn regressed(
     captured: &yunta_core::events::BaselineCapturedPayload,
     ran: &crate::task_cycle::Memoized,
-) -> String {
-    let said = ran
-        .output
-        .as_ref()
-        .map(|output| output.tail().join("\n"))
-        .unwrap_or_default();
-    yunta_core::text::detailed(
-        format!(
-            "regression: `{}` passed at baseline (exit 0) but now exits {}",
-            captured.command, ran.exit_code
-        ),
-        &said,
-    )
+) -> Failure {
+    let red = RedCheck::Regression {
+        cmd: captured.command.clone(),
+        exit_code: ran.exit_code,
+        tail: ran
+            .output
+            .as_ref()
+            .map(|output| output.tail())
+            .unwrap_or_default(),
+    };
+    Failure::Red { red }
 }
 
-/// `coverage_gate`: `coverage.cmd`'s stdout must contain a bare
-/// `NN[.NN]%` — the last one found is taken as the measured coverage, per
-/// `CoverageConfig`'s own documented convention, since no parsing
-/// contract is fixed elsewhere.
+/// `coverage_gate`: `coverage.cmd` must exit 0, and its stdout must contain
+/// a bare `NN[.NN]%` — the last one found is taken as the measured coverage.
+/// A command that exits otherwise has measured nothing, so its exit is judged
+/// before any figure is read.
 async fn execute_coverage_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -203,30 +170,33 @@ async fn execute_coverage_gate(
         CommandRun::Done(output) => output,
         CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node).await,
     };
+    if output.exit_code != 0 {
+        let conclusion =
+            crate::process::output::conclusion(output.stdout.as_bytes(), output.stderr.as_bytes());
+        let red = RedCheck::Command {
+            cmd: coverage.cmd.clone(),
+            exit_code: output.exit_code,
+            conclusion,
+            output: None,
+        };
+        return fail_with(ctx, node, Failure::Red { red }, TokenUsage::default()).await;
+    }
     let Some(measured) = parse_last_percentage(&output.stdout) else {
-        return fail(
-            ctx,
-            node,
-            format!(
-                "`{}` produced no `NN[.NN]%` coverage figure in its stdout",
-                coverage.cmd
-            ),
-            false,
-        )
-        .await;
+        let red = RedCheck::Coverage {
+            cmd: coverage.cmd.clone(),
+            measured: None,
+            threshold: coverage.threshold,
+        };
+        return fail_with(ctx, node, Failure::Red { red }, TokenUsage::default()).await;
     };
 
     if measured < coverage.threshold {
-        fail(
-            ctx,
-            node,
-            format!(
-                "coverage {measured}% is below the {}% threshold",
-                coverage.threshold
-            ),
-            false,
-        )
-        .await
+        let red = RedCheck::Coverage {
+            cmd: coverage.cmd.clone(),
+            measured: Some(measured),
+            threshold: coverage.threshold,
+        };
+        fail_with(ctx, node, Failure::Red { red }, TokenUsage::default()).await
     } else {
         let outcome = NodeOutcome::Fact(EngineFact::CoverageMet {
             measured,
@@ -303,7 +273,6 @@ async fn execute_findings_gate(
                 max_severity.as_str(),
                 offending.join(", ")
             ),
-            false,
         )
         .await
     }
@@ -316,5 +285,5 @@ pub(super) async fn unset(
     node: &Node,
     key: ConfigKey,
 ) -> Result<NodeEnd, RunError> {
-    fail_with(ctx, node, Failure::unset(key), false, TokenUsage::default()).await
+    fail_with(ctx, node, Failure::unset(key), TokenUsage::default()).await
 }

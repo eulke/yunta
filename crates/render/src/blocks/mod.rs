@@ -19,14 +19,17 @@ mod fields;
 mod headline;
 mod next;
 mod node_table;
+pub mod stop;
 mod table;
 
 pub use checklist::{Check, Checklist, Found};
 pub use concern::Concern;
+pub(crate) use decision::{departure_facts, departure_words};
 pub use decision::{Chosen, Decision, DecisionOption};
 pub use document::{Code, Marked, Prose, Section};
 pub use evidence::{Evidence, Whole};
-pub use failure::{FailureDetail, FailureSays};
+pub(crate) use failure::{remedy_words, reroute_words, stuck_words};
+pub use failure::{FailureDetail, FailureSays, PathNote};
 pub use fields::Fields;
 pub use headline::Headline;
 pub use next::Next;

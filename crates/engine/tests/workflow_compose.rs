@@ -581,7 +581,7 @@ nodes:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.state("feat") {
         Some(NodeState::Failed { failure, .. }) => {
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(
                 outcome.contains(".yunta/workflows/nope.yaml"),
                 "the diagnostic must name the resolved path: {outcome}"
@@ -840,7 +840,7 @@ nodes:
             // did not close, so it reaches every surface as one entry
             // with its own code — never a sentence to be taken apart.
             let entries: Vec<&ArtifactFailure> = failure.failures().collect();
-            assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
+            assert_eq!(entries.len(), 1, "one artifact did not close: {failure:?}");
             assert_eq!(
                 entries[0]
                     .code()
@@ -858,7 +858,7 @@ nodes:
                 "the entry names the run asked, the node and the artifact: {:?}",
                 entries[0]
             );
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(
                 outcome.contains("plan.yaml") && outcome.contains("plan"),
                 "the diagnostic must name the artifact and its source node: {outcome}"
@@ -1077,7 +1077,7 @@ nodes:
             // failure carries it as an entry, with the run it was
             // missing from.
             let entries: Vec<&ArtifactFailure> = failure.failures().collect();
-            assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
+            assert_eq!(entries.len(), 1, "one artifact did not close: {failure:?}");
             assert_eq!(
                 entries[0]
                     .code()
@@ -1095,7 +1095,7 @@ nodes:
                 "the entry names the child run and the artifact: {:?}",
                 entries[0]
             );
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(
                 outcome.contains("report.md") && outcome.contains(child_id.as_str()),
                 "the diagnostic must name the artifact and the child run: {outcome}"

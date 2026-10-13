@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::stop::TaskCause;
 use crate::events::node::payloads::{Criterion, CriterionResult};
 use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
@@ -78,6 +79,10 @@ pub struct TaskStatusChangedPayload {
     /// resumes on the same work. Absent on every other transition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumes: Option<SessionId>,
+    /// On a `blocked`: why the task stopped. Absent on every other
+    /// transition, and in a log written before the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<TaskCause>,
 }
 
 impl TaskStatusChangedPayload {
@@ -94,13 +99,22 @@ impl TaskStatusChangedPayload {
             commit: None,
             left_work: None,
             resumes: None,
+            stop: None,
         }
     }
 
-    /// A task blocked, and the work its last attempt left, if it left any.
-    pub fn blocked(task: TaskId, caused_by: Seq, left_work: Option<CommitSha>) -> Self {
+    /// A task blocked, why it stopped, and the work its last attempt left,
+    /// if it left any. A blocked task always names its stop, so a resumed
+    /// run reads the same reason the run that wrote it stopped for.
+    pub fn blocked(
+        task: TaskId,
+        caused_by: Seq,
+        left_work: Option<CommitSha>,
+        stop: TaskCause,
+    ) -> Self {
         TaskStatusChangedPayload {
             left_work,
+            stop: Some(stop),
             ..Self::to(task, TaskStatus::Blocked, caused_by)
         }
     }
@@ -136,6 +150,7 @@ impl TaskStatusChangedPayload {
             commit: Some(commit),
             left_work: None,
             resumes: None,
+            stop: None,
         }
     }
 }

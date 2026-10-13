@@ -17,7 +17,7 @@ fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(
         pause,
         PauseReason::NodeFailed { node: named, failure }
-            if named.as_str() == node && failure.headline() == headline
+            if named.as_str() == node && yunta_render::failure::headline(failure) == headline
     )
 }
 
@@ -652,7 +652,8 @@ async fn an_agent_without_a_definition_fails_its_node_before_any_session() {
     let Some(NodeState::Failed { failure, .. }) = state.nodes.state("audit") else {
         panic!("`audit` fails: {state:?}");
     };
-    assert!(failure.to_string().contains(".yunta/agents"), "{failure}");
+    let sentence = yunta_render::failure::sentence(failure);
+    assert!(sentence.contains(".yunta/agents"), "{sentence}");
     assert!(bench.mock().requests_seen().is_empty(), "no session opened");
 }
 
@@ -1012,13 +1013,15 @@ sessions:
     let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("work") else {
         panic!("`work` failed: {reason:?}");
     };
+    let sentence = yunta_render::failure::sentence(failure);
     assert!(
         matches!(
             reason,
             PauseReason::NodeFailed { node, failure: cause }
-                if node.as_str() == "work" && cause.headline().contains("report.md")
-        ) && failure.to_string().contains("never produced"),
-        "nothing the replaced session left becomes this session's artifact: {reason:?} / {failure}"
+                if node.as_str() == "work"
+                    && yunta_render::failure::headline(cause).contains("report.md")
+        ) && sentence.contains("never produced"),
+        "nothing the replaced session left becomes this session's artifact: {reason:?} / {sentence}"
     );
 }
 
@@ -1479,86 +1482,6 @@ nodes:
     );
 }
 
-/// Every check a task cycle runs reaches the log the moment it runs: the
-/// pre-check before the task's first session opens, and its post-check
-/// before a person decides — so the session a `retry` opens reads why the
-/// attempt before it did not close.
-#[tokio::test]
-async fn each_check_of_a_task_reaches_the_log_before_the_next_session_opens() {
-    let bench = Bench::new();
-    let workflow = r#"
-name: checked-as-it-goes
-nodes:
-  - id: plan
-    kind: prompt
-    runner: planner
-    prompt: "Write the tasks document."
-    artifacts:
-      produces: [tasks]
-  - id: implement
-    kind: loop
-    runner: executor
-    depends_on: [plan]
-    until: all_tasks_complete
-    prompt: "Implement your task."
-"#;
-    // The attempt leaves the criterion red, and the task blocks.
-    let fixture = plan_session(&format!(
-        "tasks:\n{}",
-        task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
-    )) + "  - match_prompt_contains: \"task-1\"\n    outcome: { type: completed, summary: missed }\n";
-    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "{terminal:?}"
-    );
-    assert_eq!(
-        sessions_and_checks(&bench.events(), "implement"),
-        ["pre", "session", "post"],
-        "the red attempt's check is on the log before anyone decides"
-    );
-
-    // A person retries; the session that opens meets the criterion.
-    answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, state: _ } = bench
-        .wake_on_fixture(
-            "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
-        )
-        .await;
-    assert_eq!(terminal, RunTerminal::Finished);
-    // The log only grows: the first attempt's check stays ahead of it.
-    let order = sessions_and_checks(&bench.events(), "implement");
-    assert_eq!(
-        order.iter().filter(|seen| **seen == "session").count(),
-        2,
-        "one session per attempt, the second one a person's: {order:?}"
-    );
-}
-
-/// `node`'s session openings and criteria checks, in the order the log
-/// holds them.
-fn sessions_and_checks(
-    events: &[yunta_core::events::StoredEvent],
-    node: &str,
-) -> Vec<&'static str> {
-    events
-        .iter()
-        .filter(|event| event.node_id.as_ref().map(|id| id.as_str()) == Some(node))
-        .filter_map(|event| match event.payload() {
-            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(_))) => {
-                Some("session")
-            }
-            Some(yunta_core::events::EventPayload::Node(NodeEvent::CriteriaChecked(p))) => {
-                Some(match p.phase {
-                    yunta_core::events::Phase::Pre => "pre",
-                    yunta_core::events::Phase::Post => "post",
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 /// Every session carries what it may write, always: a node that
 /// declared a scope carries it, and a `read_only` node carries a
 /// ceiling that admits nothing under the worktree.
@@ -1687,7 +1610,7 @@ async fn a_node_whose_session_died_fails_naming_the_adapter_and_the_exit() {
     // about how one ended — and the sentence says exactly that.
     assert_eq!(died.exit, None);
     assert_eq!(
-        failure.to_string(),
+        yunta_render::failure::sentence(&failure),
         "session `mock` ended without a terminal event"
     );
     assert!(bench.mock().interrogated(), "the one that died was asked");

@@ -15,18 +15,6 @@ pub struct Unchanged {
     pub failure: Box<Failure>,
 }
 
-impl Unchanged {
-    /// Why the attempt was not run, ending in what the attempt that last
-    /// ran failed with, as `failed` says it.
-    pub(super) fn sentence(&self, failed: &str) -> String {
-        format!(
-            "not run again: nothing in the run's tree changed since attempt {} failed on it — \
-             change what it failed on there first. Attempt {} failed: {failed}",
-            self.since, self.since
-        )
-    }
-}
-
 /// One task's request for scope, owed a person's decision: what it asked
 /// to be allowed to write, and why, in its session's own words.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

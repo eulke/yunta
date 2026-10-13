@@ -9,14 +9,15 @@
 //! The first cycle's pre-check already proved the criteria red; this
 //! cycle has no pre-check of its own, because its tree holds the work.
 
-use yunta_core::events::Phase;
+use yunta_core::events::{CriterionResult, Phase, TaskCause};
 use yunta_core::protected::Closing;
 use yunta_core::CommitSha;
 
 use super::attempt::AttemptParams;
+use super::criteria::could_not_run;
 use super::judge::{judge, scope_in_force, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work};
-use super::record::Recorder;
-use super::{BlockedCause, CriterionRun, TaskCycleError, TaskOutcome};
+use super::record::{Checked, Recorder};
+use super::{CriterionRun, TaskCycleError, TaskOutcome};
 use crate::git::{Cause, GitError};
 use crate::worktree::{carry_work, Carried};
 
@@ -57,9 +58,10 @@ pub(super) async fn continue_from(
                     Phase::Post,
                     std::slice::from_ref(&stopped_on(&stopped, &paths)),
                 )
-                .await?,
+                .await?
+                .seq,
             outcome: TaskOutcome::Blocked {
-                cause: BlockedCause::CarriedWorkNoLongerApplies { paths },
+                cause: TaskCause::CarriedWorkNoLongerApplies { paths },
             },
         });
     }
@@ -77,11 +79,14 @@ pub(super) async fn judge_in_place(
     recorder: Recorder<'_>,
 ) -> Result<Carry, TaskCycleError> {
     let judgement = judged(params).await?;
-    let last_check = recorder
+    let Checked {
+        seq: last_check,
+        results,
+    } = recorder
         .post_check(&judgement.criteria, &judgement.waiting)
         .await?;
     recorder.scope(&judgement.scope).await?;
-    Ok(match settled(&judgement) {
+    Ok(match settled(&judgement, &results) {
         Some(outcome) => Carry::Settled {
             outcome,
             last_check,
@@ -133,17 +138,17 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
 
 /// What the carried work settles without a session: a criterion that
 /// still cannot run blocks the task, work that closes it finishes it,
-/// and anything else is for the sessions to take on.
-fn settled(judgement: &Judgement) -> Option<TaskOutcome> {
-    let unrunnable: Vec<CriterionRun> = judgement
-        .criteria
+/// and anything else is for the sessions to take on. `results` are the
+/// answers the judgement's criteria recorded, one for each.
+fn settled(judgement: &Judgement, results: &[CriterionResult]) -> Option<TaskOutcome> {
+    let unrunnable: Vec<CriterionResult> = results
         .iter()
-        .filter(|run| run.could_not_run().is_some())
+        .filter(|result| could_not_run(result.exit_code).is_some())
         .cloned()
         .collect();
     if !unrunnable.is_empty() {
         return Some(TaskOutcome::Blocked {
-            cause: BlockedCause::Unrunnable { runs: unrunnable },
+            cause: TaskCause::Unrunnable { runs: unrunnable },
         });
     }
     judgement.closes().then_some(TaskOutcome::Done)

@@ -150,8 +150,8 @@ pub(crate) fn check_gate(
     for option in on.keys() {
         let route = if !options.iter().any(|declared| declared == option) {
             UntakenRoute::Undeclared(option.clone())
-        } else if crate::reserved::ReservedOption::of(option)
-            == Some(crate::reserved::ReservedOption::Abort)
+        } else if yunta_core::reserved::ReservedOption::of(option)
+            == Some(yunta_core::reserved::ReservedOption::Abort)
         {
             UntakenRoute::Abort
         } else {

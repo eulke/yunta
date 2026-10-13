@@ -13,9 +13,9 @@ use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::events::TokenUsage;
 use yunta_core::protected::{Closing, Protected, Trespass};
-use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind};
+use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind, TreeId};
 
-use super::node_close::fail_with_tokens_staged;
+use super::node_close::{fail_with_tokens_staged, tree_of};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::replay::{NodeState, RunState};
@@ -250,6 +250,23 @@ pub(super) async fn found(
     ))
 }
 
+/// The tree a record of `node` names: its start, its close, and the wake that
+/// finds it failed. A node that works in the run's own tree, in a run that
+/// commits there, names the tree its commit would hold, whether or not its
+/// close commits: the run's tree and its `HEAD` hold the same content, less
+/// what git ignores. Any other node names the tree `tree_of` reads.
+///
+/// Read without committing anything, so a record and a wake that come
+/// later name the same kind of tree for the same node.
+pub(super) async fn recorded_tree(ctx: &RunCtx<'_>, node: &Node) -> Result<TreeId, RunError> {
+    if !commits_here(ctx) || !shares_the_tree(ctx, node) {
+        return tree_of(ctx, node).await;
+    }
+    let index =
+        crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
+    Ok(crate::worktree::capture_for_commit(ctx.worktree, &index, ctx.root_supervision()).await?)
+}
+
 /// Lands what a node did in its own checkout onto the run's tree, and says
 /// nothing for a node that never had one.
 ///
@@ -292,7 +309,7 @@ pub(super) async fn land_unit(
                 node.id,
                 yunta_core::text::counted(paths.len(), "path"),
             );
-            return fail_with_tokens_staged(ctx, node, outcome, false, tokens, staged)
+            return fail_with_tokens_staged(ctx, node, outcome, tokens, staged)
                 .await
                 .map(Some);
         }
@@ -350,21 +367,28 @@ fn commits_here(ctx: &RunCtx<'_>) -> bool {
 }
 
 /// Whether `node` works in the run's own tree: it has no checkout of its
-/// own, nor one its group opened, and it is not a gate.
+/// own, nor one its group opened, and the workflow does not declare it one.
+/// A wake holds no checkout for any node, so the declaration decides there,
+/// as it decides for a running node that has none.
 fn shares_the_tree(ctx: &RunCtx<'_>, node: &Node) -> bool {
-    ctx.unit.is_none() && !is_gate(node)
+    ctx.unit.is_none() && declared_to_share(node)
 }
 
 fn is_gate(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Gate { .. })
 }
 
+/// Whether the workflow declares `node` to work in the run's own tree: it is
+/// not audited, which is what gives a node a checkout of its own, and it is
+/// not a gate.
+fn declared_to_share(node: &Node) -> bool {
+    !crate::scope::audits(node) && !is_gate(node)
+}
+
 /// The nodes that work in the run's own tree, as the workflow declares
 /// them: no checkout of their own, and not gates.
 fn tree_sharers(workflow: &yunta_core::Workflow) -> impl Iterator<Item = &Node> {
-    workflow
-        .iter_nodes()
-        .filter(|node| !crate::scope::audits(node) && !is_gate(node))
+    workflow.iter_nodes().filter(|node| declared_to_share(node))
 }
 
 /// Whether a node other than `node` is still working in the run's tree.

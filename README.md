@@ -116,7 +116,7 @@ yunta run .yunta/workflows/lint-fix.yaml
 
 `run` shows the run live while it works: a pinned region at the bottom of the
 terminal — a row for each node at work and what its last calls touched, and a footer
-that always says whether the run needs you — with each finished node scrolling above
+that always says whether the run needs you or is waiting for a limit's reset — with each finished node scrolling above
 it into your own scrollback, where you can still scroll back through it and select
 text. A node that fails brings the end of what it printed with it. Piped into a file
 or running in CI, every moment of the run arrives as one line instead, in the words

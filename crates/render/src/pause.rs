@@ -6,12 +6,24 @@
 //! can say a different thing. The fact is stored as data; the words are
 //! produced here, where a reader is told.
 
-use yunta_core::events::{loop_overrun_failure, node_failed_line, PauseReason, PAST_THE_CAP};
+use yunta_core::events::{loop_overrun_failure, PauseReason, PAST_THE_CAP};
 use yunta_core::text;
 use yunta_core::units::{Bytes, Tokens};
 use yunta_core::{NodeId, RunId};
 
 use crate::escalation;
+
+/// The chronicle's words for a pause: `waiting` for a limit's reset, which
+/// the run resumes on its own, and `needs you` for every other stop, then
+/// the sentence the pause is.
+pub fn said(pause: &PauseReason) -> String {
+    let word = if pause.reset_wait().is_some() {
+        "waiting"
+    } else {
+        "needs you"
+    };
+    format!("{word} — {}", sentence(pause))
+}
 
 /// The one line a reader sees for a parked run. Every surface prints
 /// this, so none of them can say something different.
@@ -31,7 +43,17 @@ pub fn sentence(pause: &PauseReason) -> String {
         PauseReason::UncertainOrphans { nodes } => uncertain(nodes),
         // The claim; what a command printed travels as the escalation's
         // evidence, not inside the one line a pause is.
-        PauseReason::NodeFailed { node, failure } => node_failed_line(node, failure),
+        PauseReason::NodeFailed { node, failure } => {
+            format!(
+                "node `{node}` failed: {}",
+                crate::failure::headline(failure)
+            )
+        }
+        PauseReason::AwaitingReset { node, at } => format!(
+            "node `{node}` waits for its limit to reset at {}, and the run resumes on its own \
+             then",
+            at.format(crate::failure::RESET_FORMAT)
+        ),
         PauseReason::Blocked { node, on } => blocked(node, on),
         PauseReason::GateAborted { node, free_text } => gate_aborted(node, free_text.as_deref()),
         PauseReason::ChildPaused { node, run, child } => child_paused(node, run, child),
@@ -109,10 +131,32 @@ fn child_paused(node: &NodeId, run: &RunId, child: &PauseReason) -> String {
 
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::PauseReason;
+    use yunta_core::events::{Failure, PauseReason};
     use yunta_core::{NodeId, RunId};
 
     use super::sentence;
+
+    #[test]
+    fn a_node_that_waits_for_a_reset_names_the_moment_it_resumes() {
+        let waiting = PauseReason::AwaitingReset {
+            node: NodeId::from("review"),
+            at: yunta_testkit_core::fixed_now(),
+        };
+        assert_eq!(
+            sentence(&waiting),
+            "node `review` waits for its limit to reset at 2026-01-01 00:00 UTC, and the run \
+             resumes on its own then"
+        );
+    }
+
+    #[test]
+    fn a_failed_node_pauses_on_the_headline_of_its_failure() {
+        let failed = PauseReason::NodeFailed {
+            node: NodeId::from("lint"),
+            failure: Failure::message("exit 1"),
+        };
+        assert_eq!(sentence(&failed), "node `lint` failed: exit 1");
+    }
 
     #[test]
     fn a_pause_a_person_chose_reads_as_the_choice() {

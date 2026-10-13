@@ -22,8 +22,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, Notify};
-use yunta_core::events::{RunToolFailureCause, ToolTarget};
-use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, FailureCause, RunToolsEndpoint};
+use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
+use yunta_core::port::{AgentError, AgentEvent, RunToolsEndpoint};
 use yunta_core::process::stream::StreamGuard;
 use yunta_core::process::subprocess::LineParser;
 use yunta_core::rail::{RailAnswer, RailEvent};
@@ -137,6 +137,9 @@ struct Stream {
     reader: Box<dyn LineParser>,
     guard: StreamGuard,
     events: mpsc::UnboundedSender<AgentEvent>,
+    /// The usage steps played so far. A CLI that reports usage at the end of
+    /// its turn carries their sum on the line that closes the session.
+    usage: Vec<MockStep>,
 }
 
 impl Stream {
@@ -167,8 +170,12 @@ impl Stream {
         })
     }
 
-    /// Prints one step the way its CLI prints it, and reads the lines back.
+    /// Prints one step the way its CLI prints it, and reads the lines back. A
+    /// usage step is kept as well, for the line that closes the session.
     fn say(&mut self, step: MockStep) -> bool {
+        if matches!(step, MockStep::Usage { .. }) {
+            self.usage.push(step.clone());
+        }
         let lines = self.dialect.render(&step, self.naming);
         self.read(lines)
     }
@@ -177,13 +184,14 @@ impl Stream {
     fn fail(&mut self, message: String) -> bool {
         self.send(AgentEvent::Failed {
             error: AgentError::message(message),
-            cause: FailureCause::Final,
+            cause: FailureCause::Refused(RefusalCause::Final),
         });
         false
     }
 
-    /// Plays one step. A run tool step calls the engine first; any other
-    /// step is printed as its CLI prints it.
+    /// Plays one step. A run tool step calls the engine first, and a rejected
+    /// one is reported without a call; any other step is printed as its CLI
+    /// prints it.
     async fn step(&mut self, step: MockStep) -> bool {
         match step {
             MockStep::RunTool {
@@ -192,6 +200,9 @@ impl Stream {
                 expect,
                 ..
             } => self.run_tool(tool, arguments, expect).await,
+            MockStep::RunToolRejected { tool, .. } => {
+                self.send(AgentEvent::RunToolRejected { tool })
+            }
             step => self.say(step),
         }
     }
@@ -219,23 +230,28 @@ impl Stream {
                     after_ms: 0,
                 })
             }
-            (Err(error), ToolExpectation::Refused) if error.reached_call() => {
-                let mut events = call_failure(&tool, &error);
+            // The engine answered the call, with a refusal or a protocol error:
+            // the CLI reports the rejection, and the session takes it and goes on.
+            (
+                Err(RunToolCallError::Refused { .. } | RunToolCallError::Call { .. }),
+                ToolExpectation::Refused,
+            ) => {
+                let mut events = call_rejection(&tool);
                 events.push(AgentEvent::ToolUse {
                     target: ToolTarget::opaque(tool.as_bytes()),
                     name: tool,
                 });
                 self.emit(events)
             }
-            (Err(error), _) => {
-                let mut events = call_failure(&tool, &error);
+            (Err(_), _) => {
+                let mut events = call_rejection(&tool);
                 let message = RunTool::parse(&tool).map_or_else(
                     || "run tool call failed".to_string(),
                     |known| format!("run tool `{}` failed", known.name()),
                 );
                 events.push(AgentEvent::Failed {
                     error: AgentError::message(message),
-                    cause: FailureCause::Final,
+                    cause: FailureCause::Refused(RefusalCause::Final),
                 });
                 self.emit(events);
                 false
@@ -247,15 +263,13 @@ impl Stream {
 }
 
 /// What a failed call leaves in the stream for the run tool it named: the
-/// tool's failure, when the call reached the engine at all.
-fn call_failure(tool: &str, error: &RunToolCallError) -> Vec<AgentEvent> {
-    match RunTool::parse(tool) {
-        Some(known) if error.reached_call() => vec![AgentEvent::RunToolFailed {
-            tool: known,
-            cause: RunToolFailureCause::CallFailed,
-        }],
-        _ => Vec::new(),
-    }
+/// rejection its CLI reports. Whether the call reached the engine is for the
+/// engine to read from its own listener.
+fn call_rejection(tool: &str) -> Vec<AgentEvent> {
+    RunTool::parse(tool)
+        .map(|known| AgentEvent::RunToolRejected { tool: known })
+        .into_iter()
+        .collect()
 }
 
 /// The session's opening: the lines its CLI prints before it opens, then the
@@ -310,6 +324,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         reader,
         guard: StreamGuard::default(),
         events,
+        usage: Vec::new(),
     };
     let (before_open, steps): (Vec<MockStep>, Vec<MockStep>) = steps
         .into_iter()
@@ -417,24 +432,17 @@ async fn stepped(steps: Vec<MockStep>, stream: &mut Stream, stops: &Stops) -> bo
     true
 }
 
-/// How a session that played its whole script ends.
+/// How a session that played its whole script ends. A completed or failed
+/// session closes with the line its CLI closes with, read back the way the
+/// engine reads that CLI, so the outcome and its cause come from the reader
+/// a real session's come from.
 async fn end(outcome: MockOutcome, stream: &mut Stream, stops: &Stops) {
-    match outcome {
-        MockOutcome::Completed { summary } => {
-            stream.send(AgentEvent::Completed {
-                result: AgentOutcome { summary },
-            });
+    match &outcome {
+        MockOutcome::Completed { .. } | MockOutcome::Failed { .. } => {
+            let lines = stream.dialect.render_close(&outcome, &stream.usage);
+            stream.read(lines);
         }
-        MockOutcome::Failed { message, .. } => {
-            // Read the way a real adapter reads its CLI's message, so a
-            // fixture that prints what a cut-off CLI prints is one.
-            let cause = crate::failure::classify(&message).cause();
-            stream.send(AgentEvent::Failed {
-                error: AgentError::message(message),
-                cause,
-            });
-        }
-        // Both end with no terminal event — a real crash: the engine
+        // Crash ends with no terminal event at all — a real crash: the engine
         // synthesizes the failure, not the adapter. Hang additionally waits
         // for a stop before ending, simulating a stuck session a timeout
         // would have to act on.

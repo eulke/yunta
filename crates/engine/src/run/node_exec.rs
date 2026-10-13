@@ -10,7 +10,7 @@ use yunta_core::commit_message::CommitMessage;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Failure, HookPhase, PauseReason};
 use yunta_core::port::PermissionProfile;
-use yunta_core::{HookFailurePolicy, Node, NodeId, NodeKind, RunId};
+use yunta_core::{HookFailurePolicy, Node, NodeKind};
 
 use yunta_core::template::render_template;
 
@@ -32,19 +32,13 @@ pub(crate) enum NodeEnd {
     /// (`running` in the log) so a later resume re-treats it per its
     /// `on_interrupt` policy, exactly like a crash.
     Interrupted,
-    /// A `kind: workflow` node's child run paused on its own log
-    /// (a gate, a failure without re-route, its budget). No terminal
-    /// event here either — the node stays open so a later resume
-    /// re-enters it and resumes the child recursively — but
-    /// unlike `Interrupted` the *parent run* must pause on the child's
-    /// own pause rather than fall through to its loop-top cancel check.
-    ChildPaused {
-        /// The parent's own `kind: workflow` node.
-        node: NodeId,
-        /// The child run that paused; its own log holds the pause.
-        run: RunId,
-        /// The pause the child run stopped on.
-        child: PauseReason,
+    /// The node stays open, so a later resume re-enters it, and the run
+    /// pauses with `reason`: a child run paused on its own log, or a
+    /// departure the person aborted. No terminal event is recorded here
+    /// either. Unlike `Interrupted`, the run pauses on this reason rather
+    /// than falling through to its loop-top cancel check.
+    Paused {
+        reason: PauseReason,
     },
     /// The node closed in full — hooks, scope, artifacts — and handed
     /// questions over: `questions_asked` is on the log and no terminal
@@ -65,7 +59,6 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
         ctx,
         node,
         "interrupted: a sibling in this join: any group finished first".to_string(),
-        false,
     )
     .await
 }
@@ -197,12 +190,11 @@ async fn execute_in_its_tree(
     let hooks = effective_hooks(ctx, node);
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
-            HookRun::Violation(rule) => return fail(ctx, node, rule, false).await,
+            HookRun::Violation(rule) => return fail(ctx, node, rule).await,
             HookRun::Unset(key) => return super::check_exec::unset(ctx, node, key).await,
             HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
                 let failure = yunta_core::events::Failure::exited(exit);
-                return super::node_close::fail_with(ctx, node, failure, false, Default::default())
-                    .await;
+                return super::node_close::fail_with(ctx, node, failure, Default::default()).await;
             }
             HookRun::Passed | HookRun::Failed(_) => {}
         }
@@ -411,7 +403,7 @@ pub(super) async fn render_or_fail(
 ) -> Result<Step<String>, RunError> {
     match render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Step::Value(rendered)),
-        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string(), false).await?)),
+        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string()).await?)),
     }
 }
 

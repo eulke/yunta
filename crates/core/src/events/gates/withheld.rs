@@ -4,7 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::payloads::{Escalation, GateWaitingPayload, Refusal};
+use super::escalation::{Escalation, Refusal};
+use super::payloads::GateWaitingPayload;
 use crate::events::Fact;
 use crate::ids::OptionId;
 
@@ -68,8 +69,8 @@ mod tests {
     fn option(id: &str) -> GateOption {
         GateOption {
             id: id.into(),
-            label: id.to_string(),
-            tradeoff: String::new(),
+            label: Some(id.to_string()),
+            tradeoff: None,
             asks: None,
         }
     }

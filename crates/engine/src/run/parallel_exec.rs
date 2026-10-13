@@ -3,7 +3,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EngineFact, NodeOutcome, PauseReason, TokenUsage};
-use yunta_core::{JoinPolicy, Node, NodeId, RunId};
+use yunta_core::{JoinPolicy, Node};
 
 use crate::replay::NodeState;
 
@@ -56,7 +56,6 @@ pub(super) async fn execute_parallel(
                  verify manually before resuming",
                 child.id
             ),
-            false,
         )
         .await?;
     }
@@ -91,7 +90,6 @@ pub(super) async fn execute_parallel(
                     ctx,
                     node,
                     format!("child `{}` failed under join: all", first.id),
-                    false,
                 )
                 .await;
             }
@@ -104,7 +102,7 @@ pub(super) async fn execute_parallel(
 
             let mut failed_child = None;
             let mut interrupted = false;
-            let mut child_paused: Option<(NodeId, RunId, PauseReason)> = None;
+            let mut child_paused: Option<PauseReason> = None;
             for ((child, _), result) in to_run.iter().zip(results) {
                 match result? {
                     NodeEnd::Failed => {
@@ -118,9 +116,9 @@ pub(super) async fn execute_parallel(
                     // failure here would change nothing it wrote.
                     NodeEnd::Interrupted => interrupted = true,
                     // Same shape — the group stays open and the
-                    // run pauses naming the paused child run.
-                    NodeEnd::ChildPaused { node, run, child } => {
-                        child_paused.get_or_insert((node, run, child));
+                    // run pauses on the first paused child's reason.
+                    NodeEnd::Paused { reason } => {
+                        child_paused.get_or_insert(reason);
                     }
                     NodeEnd::Finished => {}
                     // `check` refuses a child that produces
@@ -144,21 +142,11 @@ pub(super) async fn execute_parallel(
             if interrupted {
                 return Ok(NodeEnd::Interrupted);
             }
-            if let Some((paused, run, child)) = child_paused {
-                return Ok(NodeEnd::ChildPaused {
-                    node: paused,
-                    run,
-                    child,
-                });
+            if let Some(reason) = child_paused {
+                return Ok(NodeEnd::Paused { reason });
             }
             if let Some(id) = failed_child {
-                return fail(
-                    ctx,
-                    node,
-                    format!("child `{id}` failed under join: all"),
-                    false,
-                )
-                .await;
+                return fail(ctx, node, format!("child `{id}` failed under join: all")).await;
             }
             close_node(
                 ctx,
@@ -205,7 +193,7 @@ pub(super) async fn execute_parallel(
                 .collect();
 
             let mut winner = None;
-            let mut child_paused: Option<(NodeId, RunId, PauseReason)> = None;
+            let mut child_paused: Option<PauseReason> = None;
             while winner.is_none() {
                 let Some((child_id, result)) = running.next().await else {
                     break;
@@ -230,8 +218,8 @@ pub(super) async fn execute_parallel(
                     // A paused child run is neither a win nor a
                     // loss — the race stays live: a sibling can still
                     // win the group. Recorded for the no-winner ending.
-                    NodeEnd::ChildPaused { node, run, child } => {
-                        child_paused.get_or_insert((node, run, child));
+                    NodeEnd::Paused { reason } => {
+                        child_paused.get_or_insert(reason);
                     }
                     // `check` refuses a child that produces `questions`
                     // (see the `join: all` arm): a node inside a group
@@ -275,22 +263,17 @@ pub(super) async fn execute_parallel(
                     .await
                 }
                 None => {
-                    if let Some((paused, run, child)) = child_paused {
+                    if let Some(reason) = child_paused {
                         // No winner and a child run waiting on its own
                         // pause: the group can't close over an open
                         // child — the run pauses and resume
                         // re-enters the race.
-                        return Ok(NodeEnd::ChildPaused {
-                            node: paused,
-                            run,
-                            child,
-                        });
+                        return Ok(NodeEnd::Paused { reason });
                     }
                     fail(
                         ctx,
                         node,
                         format!("join: any — no child succeeded ({} failed)", failures.len()),
-                        false,
                     )
                     .await
                 }

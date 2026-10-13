@@ -6,7 +6,8 @@
 //! session. [`StreamGuard`] holds both rules for every adapter, so a parser
 //! only has to translate each line.
 
-use crate::port::{AgentError, AgentEvent, FailureCause};
+use crate::events::{FailureCause, RefusalCause};
+use crate::port::{AgentError, AgentEvent};
 
 /// Holds one stream to the protocol while its events are read: the first
 /// event that is not a session opening fails the stream, and a terminal
@@ -35,7 +36,7 @@ impl StreamGuard {
                     "the {cli} CLI reported {} before opening the session",
                     describe(&other)
                 )),
-                cause: FailureCause::Final,
+                cause: FailureCause::Refused(RefusalCause::Final),
             },
         };
         self.opened = true;
@@ -56,7 +57,7 @@ fn describe(event: &AgentEvent) -> &'static str {
         AgentEvent::Note { .. } => "a note",
         AgentEvent::Completed { .. } => "a completion",
         AgentEvent::Failed { .. } => "a failure",
-        AgentEvent::RunToolFailed { .. } => "a run tool failure",
+        AgentEvent::RunToolRejected { .. } => "a run tool failure",
     }
 }
 
@@ -89,7 +90,7 @@ mod tests {
             error.message,
             "the probe CLI reported a note before opening the session"
         );
-        assert_eq!(cause, FailureCause::Final);
+        assert_eq!(cause, FailureCause::Refused(RefusalCause::Final));
     }
 
     /// Once a terminal event has been admitted, whatever comes after it is

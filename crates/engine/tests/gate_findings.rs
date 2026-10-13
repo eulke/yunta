@@ -205,16 +205,17 @@ async fn going_on_settles_each_finding_shown_and_the_run_succeeds() {
         ["review@planner/f-1", "review@executor/f-1", "fix/left"]
     );
     assert_eq!(blocking(&bench, WORKFLOW), 0);
-    let tradeoff = &bench
+    let tradeoff = bench
         .events()
         .iter()
         .find_map(|event| match event.payload() {
             Some(EventPayload::Gates(GateEvent::Waiting(p))) => {
-                Some(p.options()[0].tradeoff.clone())
+                Some(yunta_render::escalation::option_words(p, &p.options()[0]).1)
             }
             _ => None,
         })
-        .unwrap();
+        .unwrap()
+        .expect("the going-on option says what it settles");
     assert!(
         tradeoff.contains("settles every finding it shows"),
         "{tradeoff}"

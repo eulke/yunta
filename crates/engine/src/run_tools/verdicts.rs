@@ -340,6 +340,7 @@ mod tests {
                 output: Some(Printed::Recorded {
                     object: None,
                     tail: vec![tail.to_string()],
+                    conclusion: None,
                 }),
                 tree: None,
                 head: None,

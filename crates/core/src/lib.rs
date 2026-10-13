@@ -50,6 +50,7 @@ pub mod protected;
 mod questions;
 pub mod rail;
 pub mod receipt;
+pub mod reserved;
 mod run_tool;
 pub mod schema;
 mod schema_range;

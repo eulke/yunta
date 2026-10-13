@@ -234,7 +234,8 @@ fn tool_definitions() -> Vec<Tool> {
             "resume_run",
             "Hands a paused run back to a detached process and returns immediately — use \
              after external state changed (an approval landed, a file was fixed by hand) \
-             with nothing else for resolve_gate to answer.",
+             with nothing else for resolve_gate to answer. A run paused on an account's \
+             limit waits for that limit's reset first, and the call still returns at once.",
             json!({
                 "type": "object",
                 "properties": {"run_id": {"type": "string"}},

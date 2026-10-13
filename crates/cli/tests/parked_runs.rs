@@ -332,23 +332,15 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
         serde_json::Value::String(format!("yunta resolve-gate {run_id} <option>")),
         "{state:#}"
     );
-    // What a page drops because the summary already said it, a document
-    // still carries: the machine surface is the escalation as the log
-    // recorded it, never what a reader was shown.
+    // A failure's menu carries the failure as data, and no evidence beside
+    // it: the exit code is read from the failure, never from a fact.
     let facts = decision["evidence"]
         .as_array()
         .unwrap_or_else(|| panic!("the record is data, not a sentence: {state:#}"));
+    assert!(facts.is_empty(), "{state:#}");
     assert_eq!(
-        facts
-            .iter()
-            .map(|fact| fact["value"].as_str().unwrap_or_default())
-            .collect::<Vec<_>>(),
-        ["exit 1"],
+        decision["failure"]["failure"]["exited"]["code"], 1,
         "{state:#}"
-    );
-    assert!(
-        facts[0].get("label").is_none(),
-        "a fact that names itself carries no label invented for it: {state:#}"
     );
 
     assert_eq!(state["schema_version"], 7, "{state:#}");
@@ -386,7 +378,7 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         "the page says which node the decision belongs to: {text}"
     );
     assert!(
-        text.contains("retry — Run `boom` again (attempt 2)"),
+        text.contains("retry — Run it again (attempt 2) once something outside the tree changes"),
         "{text}"
     );
     assert!(text.contains("abort — Abort the run"), "{text}");

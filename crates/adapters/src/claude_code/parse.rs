@@ -16,11 +16,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use yunta_core::{InvalidId, ModelName, RunTool, SessionId, ToolNaming};
 
 use crate::failure;
-use yunta_core::events::ToolTarget;
+use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
 use yunta_core::fence::Coverage;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
@@ -40,6 +41,8 @@ enum ClaudeLine {
     /// including a tool result. A hook's refusal reaches the stream
     /// here and nowhere else.
     User(Value),
+    /// A window's rate-limit report, read for the limit it may name.
+    RateLimitEvent(Value),
     Result(Value),
     /// A line kind this adapter does not read: a kind the CLI adds
     /// after this build, or a CLI speaking a different protocol.
@@ -57,11 +60,51 @@ struct SystemLine {
     rest: Value,
 }
 
+/// What the stream's own fields say about the account's limit. The text
+/// is not read for it: a Claude limit message says "usage limit" in every
+/// form, including the one that is not the account's.
+#[derive(Debug, Default)]
+pub(super) struct LimitReading {
+    /// The reset of the last window the CLI reported as rejected.
+    resets_at: Option<DateTime<Utc>>,
+    /// The last assistant message ended on a `rate_limit` error.
+    assistant_limited: bool,
+}
+
+impl LimitReading {
+    /// Allowed windows report a reset too; only a rejected window's is the limit's.
+    fn rate_limit_event(&mut self, value: &Value) {
+        let info = value.get("rate_limit_info");
+        if info
+            .and_then(|info| info.get("status"))
+            .and_then(Value::as_str)
+            == Some("rejected")
+        {
+            self.resets_at = info
+                .and_then(|info| info.get("resetsAt"))
+                .and_then(Value::as_i64)
+                .and_then(|secs| DateTime::from_timestamp(secs, 0));
+        }
+    }
+
+    fn assistant(&mut self, value: &Value) {
+        self.assistant_limited = value.get("error").and_then(Value::as_str) == Some("rate_limit");
+    }
+
+    /// Whether the result that ends a failed stream is the account's limit.
+    /// It takes the assistant's flag, so the flag never outlives its message.
+    fn ends_limited(&mut self, result: &Value) -> bool {
+        let assistant = std::mem::take(&mut self.assistant_limited);
+        assistant || result.get("api_error_status").and_then(Value::as_u64) == Some(429)
+    }
+}
+
 pub(super) fn parse_line(
     line: &str,
     fence: Option<&Coverage>,
     run_tool_calls: &mut HashMap<String, RunTool>,
     reported: &mut Reported,
+    limit: &mut LimitReading,
 ) -> Vec<AgentEvent> {
     // A line that is not JSON at all is not this protocol: the stream
     // carries whatever the CLI wrote to stdout, warnings included.
@@ -73,12 +116,17 @@ pub(super) fn parse_line(
             vec![session_opened(&system.rest, fence)]
         }
         ClaudeLine::Assistant(value) => {
+            limit.assistant(&value);
             let mut events = assistant_message(&value, run_tool_calls);
             events.extend(message_usage(&value, reported));
             events
         }
         ClaudeLine::User(value) => failed_run_tools(&value, run_tool_calls),
-        ClaudeLine::Result(value) => result_events(&value, reported),
+        ClaudeLine::RateLimitEvent(value) => {
+            limit.rate_limit_event(&value);
+            Vec::new()
+        }
+        ClaudeLine::Result(value) => result_events(&value, reported, limit),
         ClaudeLine::System(_) | ClaudeLine::Unknown => Vec::new(),
     }
 }
@@ -126,7 +174,7 @@ fn unreadable(what: &str, cause: InvalidId) -> AgentEvent {
 fn failed(error: AgentError) -> AgentEvent {
     AgentEvent::Failed {
         error,
-        cause: yunta_core::port::FailureCause::Final,
+        cause: FailureCause::Refused(RefusalCause::Final),
     }
 }
 
@@ -176,10 +224,7 @@ fn failed_run_tools(
             let id = part.get("tool_use_id")?.as_str()?;
             let tool = run_tool_calls.remove(id)?;
             if part.get("is_error").and_then(Value::as_bool) == Some(true) {
-                Some(AgentEvent::RunToolFailed {
-                    tool,
-                    cause: yunta_core::events::RunToolFailureCause::CallFailed,
-                })
+                Some(AgentEvent::RunToolRejected { tool })
             } else {
                 None
             }
@@ -323,7 +368,11 @@ fn message_usage(value: &Value, reported: &mut Reported) -> Option<AgentEvent> {
     Some(spent.as_usage())
 }
 
-fn result_events(value: &Value, reported: &mut Reported) -> Vec<AgentEvent> {
+fn result_events(
+    value: &Value,
+    reported: &mut Reported,
+    limit: &mut LimitReading,
+) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     if let Some(usage) = value.get("usage") {
         let total = Spent::of(usage);
@@ -344,7 +393,13 @@ fn result_events(value: &Value, reported: &mut Reported) -> Vec<AgentEvent> {
             .and_then(Value::as_str)
             .unwrap_or("session ended with an error and no result text")
             .to_string();
-        let cause = failure::classify(&message).cause();
+        let cause = if limit.ends_limited(value) {
+            FailureCause::Limit {
+                resets_at: limit.resets_at,
+            }
+        } else {
+            failure::classify(&message)
+        };
         AgentEvent::Failed {
             error: AgentError::message(message),
             cause,

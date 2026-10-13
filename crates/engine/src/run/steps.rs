@@ -2,15 +2,16 @@
 //! scheduler loop in [`super`] dispatches to, each named for the step it
 //! serves so the loop reads as the schedule it runs.
 
+use chrono::{DateTime, Utc};
 use yunta_core::events::{
-    EngineFact, EventPayload, Evidence, Failure, NodeOutcome, NodeReroutedPayload, PauseReason,
-    PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, TerminalState,
-    TokenUsage,
+    EngineFact, EventPayload, Evidence, Failure, NodeOutcome, NodeReroutedPayload, Outlook,
+    PauseReason, PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload,
+    TerminalState, TokenUsage,
 };
-use yunta_core::{ModeName, NodeId, RunId};
+use yunta_core::reserved::ReservedOption;
+use yunta_core::{ModeName, NodeId};
 
 use crate::replay::RunState;
-use crate::reserved::ReservedOption;
 
 use super::{
     budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
@@ -85,12 +86,27 @@ pub(super) async fn run_finished(
 /// distilled and no worktree is cleaned up — a failed close is not a
 /// real finish, it expects no resume, and its knowledge is not
 /// the attempt's knowledge to keep. The `node_failed` events already on
-/// the log name every failed node; `reason` names one for the report.
-pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport, RunError> {
+/// the log name every failed node; `node` and `failure` name the one that
+/// ended the run, for the report.
+pub(super) async fn run_failed(
+    ctx: &RunCtx<'_>,
+    node: NodeId,
+    failure: Failure,
+) -> Result<RunReport, RunError> {
     Ok(RunReport {
-        terminal: RunTerminal::Failed { reason },
+        terminal: RunTerminal::Failed { node, failure },
         state: finish(ctx, TerminalState::Failed).await?,
     })
+}
+
+/// A node failed on a limit that resets at `at`: the run pauses awaiting that
+/// reset. The detached resume that follows waits for it before the run wakes.
+pub(super) async fn pause_for_reset(
+    ctx: &RunCtx<'_>,
+    node: NodeId,
+    at: DateTime<Utc>,
+) -> Result<RunReport, RunError> {
+    pause(ctx, PauseReason::AwaitingReset { node, at }).await
 }
 
 /// Records a node's re-route to another node, then lets the loop schedule the
@@ -128,15 +144,16 @@ pub(super) async fn failure_escalation(
     state: &RunState,
     node: NodeId,
     failure: Failure,
-    (next_attempt, ways_back): (u32, (bool, bool)),
+    next_attempt: u32,
+    outlook: Outlook,
 ) -> Result<Option<RunReport>, RunError> {
-    let escalation = escalation::build_failure_escalation(&node, &failure, next_attempt, ways_back)
+    let escalation = escalation::build_failure_escalation(&node, &failure, next_attempt, &outlook)
         .map_err(|source| RunError::Escalation {
             context: format!("node `{node}`'s escalation"),
             source,
         })?;
-    let choice = escalation::decided(ctx, state, &node, &escalation).await?;
-    if choice.is_some_and(|choice| {
+    let answer = escalation::decided(ctx, state, &node, None, &escalation).await?;
+    if answer.is_some_and(|(choice, _)| {
         ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)
     }) {
         return Ok(None);
@@ -174,7 +191,7 @@ pub(super) async fn gate_exhausted(
         context: format!("node `{node}`'s escalation"),
         source,
     })?;
-    let Some(choice) = escalation::decided(ctx, state, &node, &escalation).await? else {
+    let Some((choice, _)) = escalation::decided(ctx, state, &node, None, &escalation).await? else {
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
         // let a later `yunta resume` (or an MCP client) carry the
         // decision instead.
@@ -207,12 +224,15 @@ pub(super) async fn gate_exhausted(
                 ),
             });
         };
-        let evidence: Evidence = super::escalation::failure_facts(&cause).into();
         ctx.emit(
             None,
             EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
-                PromotionCause { node, goto },
-                evidence,
+                PromotionCause {
+                    node,
+                    goto,
+                    failure: Some(cause),
+                },
+                Evidence::none(),
                 next_mode.clone(),
             ))),
         )
@@ -320,7 +340,10 @@ pub(super) async fn execute_batch(
     // A person who chose to run a node again after its failure says the
     // world it failed in may have changed: every red the run holds is
     // asked again, and what passed stays passed.
-    if batch.iter().any(|(node, _)| state.run_again_chosen(node)) {
+    if batch
+        .iter()
+        .any(|(node, _)| state.run_again_chosen(node).is_some())
+    {
         ctx.memo.forget_failures();
     }
     // Top-level DAG fan-out never interrupts a still-running sibling the
@@ -335,23 +358,18 @@ pub(super) async fn execute_batch(
             node_exec::execute_node(ctx, node, attempt, &cancel_for_batch).await
         }
     });
-    // A workflow node whose child run paused can't close its node (the parent
-    // waits on the child's *terminal* state) — after the whole batch lands,
-    // the parent pauses too, naming the child. A root cancellation takes
+    // A node whose run paused — a child run on its own log, or a departure the
+    // person aborted — can't close its node: after the whole batch lands, the
+    // run pauses too, with the first such reason. A root cancellation takes
     // precedence: the loop-top check handles it as "cancelled by user".
-    let mut child_paused: Option<(NodeId, RunId, PauseReason)> = None;
+    let mut paused: Option<PauseReason> = None;
     for result in futures::future::join_all(executions).await {
-        if let node_exec::NodeEnd::ChildPaused { node, run, child } = result? {
-            child_paused.get_or_insert((node, run, child));
+        if let node_exec::NodeEnd::Paused { reason } = result? {
+            paused.get_or_insert(reason);
         }
     }
-    if let Some((node, run, child)) = child_paused {
+    if let Some(reason) = paused {
         if !ctx.root_cancel.is_cancelled() {
-            let reason = PauseReason::ChildPaused {
-                node,
-                run,
-                child: Box::new(child),
-            };
             return Ok(Some(pause(ctx, reason).await?));
         }
     }

@@ -745,7 +745,7 @@ nodes:
     assert!(matches!(terminal, yunta_engine::RunTerminal::Paused { .. }));
     match state.nodes.state("write") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            let said = failure.to_string();
+            let said = yunta_render::failure::sentence(failure);
             assert!(
                 said.contains("reaches outside the run directory"),
                 "the failure names the rendered name and the rule, got {said}",

@@ -91,6 +91,7 @@ mod tests {
                             tail: Vec::new(),
                             tree: None,
                             head: None,
+                            conclusion: None,
                         },
                     },
                 )),

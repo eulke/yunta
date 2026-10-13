@@ -15,6 +15,7 @@ use yunta_storage::StorageError;
 
 use super::dispatch::{DispatchError, Dispatched, Opening};
 use super::DispatchOutcome;
+use crate::run_tools::Arrivals;
 
 /// Everything about *how* one node's sessions open, resolved
 /// once by the engine and threaded through the cycle: the mounted
@@ -371,6 +372,8 @@ pub(super) async fn stream_session(
     let mut cut_off = false;
     let mut terminal = None;
     let mut cancelled = false;
+    // A session with no run tools has no call that reached a server.
+    let no_run_tools = Arrivals::default();
 
     {
         let mut stream = session.events();
@@ -428,6 +431,7 @@ pub(super) async fn stream_session(
                     cut_off: &mut cut_off,
                     task: opening.task,
                     continues,
+                    arrivals: opening.arrivals.unwrap_or(&no_run_tools),
                 },
             )
             .await?

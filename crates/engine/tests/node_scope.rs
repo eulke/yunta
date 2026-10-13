@@ -49,7 +49,7 @@ async fn a_scope_violation_names_every_path_outside_and_the_decision_shows_them(
     assert_eq!(
         failure.outside_scope(),
         [std::path::PathBuf::from("Cargo.toml")],
-        "the failure is the list of paths, not a count: {failure}"
+        "the failure is the list of paths, not a count: {failure:?}"
     );
 
     let (_, escalation) = current_escalation(
@@ -60,10 +60,19 @@ async fn a_scope_violation_names_every_path_outside_and_the_decision_shows_them(
     .await
     .unwrap()
     .expect("a failed node is a pause with a menu");
-    let evidence = yunta_render::evidence::lines(escalation.evidence()).join("\n");
+    let menu = escalation
+        .failure
+        .as_ref()
+        .expect("the menu carries the failure it answers");
+    assert_eq!(
+        menu.failure.outside_scope(),
+        [std::path::PathBuf::from("Cargo.toml")],
+        "the decision is about the paths that fell outside"
+    );
+    let decision = yunta_render::escalation::evidence(&escalation).join("\n");
     assert!(
-        evidence.contains("Cargo.toml"),
-        "the person deciding reads which file fell outside: {evidence}"
+        decision.contains("Cargo.toml"),
+        "the person deciding reads which file fell outside: {decision}"
     );
 }
 
@@ -119,7 +128,7 @@ async fn a_scope_violation_is_offered_the_grant_that_widens_the_node_by_what_it_
     )
     .await;
 
-    assert_eq!(menu(&bench).await, ["grant", "retry", "abort"]);
+    assert_eq!(menu(&bench).await, ["grant", "abort"]);
     let (_, escalation) = current_escalation(
         &bench.manifest(),
         &bench.run_dir(),
@@ -128,9 +137,10 @@ async fn a_scope_violation_is_offered_the_grant_that_widens_the_node_by_what_it_
     .await
     .unwrap()
     .unwrap();
+    let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
     assert_eq!(
-        escalation.options()[0].label,
-        "Allow `fix` to also write Cargo.toml and run it again (attempt 2)"
+        label,
+        "Allow the node to also write Cargo.toml and run it again (attempt 2)"
     );
 }
 
@@ -217,7 +227,7 @@ async fn a_restart_after_the_grant_never_grants_it_twice() {
 }
 
 #[tokio::test]
-async fn a_ceiling_that_denies_every_expansion_leaves_retry_and_abort() {
+async fn a_ceiling_that_denies_every_expansion_leaves_only_abort() {
     let bench = Bench::new();
     let config = format!("{MOCK_CONFIG}permissions:\n  scope_expansion:\n    max_mode: deny\n");
     let RunReport { terminal, .. } = bench
@@ -232,7 +242,7 @@ async fn a_ceiling_that_denies_every_expansion_leaves_retry_and_abort() {
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    assert_eq!(menu(&bench).await, ["retry", "abort"]);
+    assert_eq!(menu(&bench).await, ["abort"]);
 }
 
 #[tokio::test]
@@ -312,24 +322,14 @@ async fn a_node_session_that_asks_for_scope_puts_its_request_to_a_person() {
     let bench = parked(ASKS_FIRST_WORKFLOW, ASKS_FIRST_FIXTURE).await;
 
     let failure = last_failure(&bench, "fix");
-    assert!(
-        matches!(failure, Failure::ScopeRequested { .. }),
-        "the node's work waits on the answer: {failure}"
+    let Failure::ScopeRequested { requested_scope } = &failure else {
+        panic!("the node's work waits on the answer: {failure:?}");
+    };
+    assert_eq!(
+        requested_scope.reason, "the lint's cause is the manifest",
+        "the person reads the session's own reason"
     );
-    assert_eq!(menu(&bench).await, ["grant", "retry", "abort"]);
-    let (_, escalation) = current_escalation(
-        &bench.manifest(),
-        &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    let evidence = yunta_render::evidence::lines(escalation.evidence()).join("\n");
-    assert!(
-        evidence.contains("the lint's cause is the manifest"),
-        "the person reads the session's own reason: {evidence}"
-    );
+    assert_eq!(menu(&bench).await, ["grant", "abort"]);
     let requested = events_matching(
         &bench,
         |p| matches!(p, EventPayload::Scope(ScopeEvent::Requested(r)) if r.task_id.is_none()),

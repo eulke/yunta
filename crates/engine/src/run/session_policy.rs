@@ -55,7 +55,6 @@ pub(super) async fn agent(
             ctx,
             node,
             error.to_string(),
-            false,
         )
         .await?)),
     }

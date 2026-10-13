@@ -18,10 +18,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use yunta_core::port::FailureCause;
+use yunta_core::events::{FailureCause, RefusalCause};
 use yunta_core::template::TemplateVar;
 use yunta_core::yaml::{self, Value};
-use yunta_core::ModelName;
+use yunta_core::{ModelName, RunTool};
 
 use super::check;
 use crate::dialect::DialectName;
@@ -82,13 +82,8 @@ pub enum FixtureError {
     /// fixture needs.
     #[error(transparent)]
     Shape(#[from] yunta_core::yaml::YamlError),
-    /// A usage step a codex session cannot print where the script puts it.
-    #[error(
-        "a codex session reports its usage on the line that completes its turn, so a usage \
-         step must be the last step of a session that completes"
-    )]
-    UsageNotLast,
-    /// A declared cause the outcome's message does not classify to.
+    /// A declared cause the outcome's message does not read as, under the
+    /// CLI the fixture stands for.
     #[error("the outcome declares the cause {declared}, but its message classifies as {actual}")]
     Cause {
         declared: &'static str,
@@ -143,17 +138,16 @@ impl MockFixture {
     }
 
     /// Refuses what a fixture states that its CLI would not do: a declared
-    /// cause its message does not classify to, and a run tool named by its
+    /// cause its message does not read as, and a run tool named by its
     /// protocol name where the CLI prefixes the names of its tools.
     fn check(&self) -> Result<(), FixtureError> {
         let naming = self.dialect.capabilities().tool_naming;
         for session in &self.sessions {
-            session.outcome.check()?;
+            session.outcome.check(self.dialect)?;
             check::names(&session.steps, naming)?;
             if let Some(stop) = &session.before_stop {
                 check::names(&stop.steps, naming)?;
             }
-            check::usage(self.dialect, session)?;
         }
         Ok(())
     }
@@ -333,6 +327,14 @@ pub enum MockStep {
         #[serde(default)]
         after_ms: u64,
     },
+    /// A run tool call the CLI reports as rejected, with the call never made:
+    /// nothing reaches the endpoint, so the engine reads the rejection as a
+    /// call its server never saw.
+    RunToolRejected {
+        tool: RunTool,
+        #[serde(default)]
+        after_ms: u64,
+    },
 }
 
 /// What a scripted tool call expects the engine to answer.
@@ -358,7 +360,8 @@ impl MockStep {
             | MockStep::Note { after_ms, .. }
             | MockStep::UnknownLine { after_ms }
             | MockStep::BeforeOpen { after_ms, .. }
-            | MockStep::RunTool { after_ms, .. } => *after_ms,
+            | MockStep::RunTool { after_ms, .. }
+            | MockStep::RunToolRejected { after_ms, .. } => *after_ms,
         }
     }
 }
@@ -392,11 +395,12 @@ pub enum Via {
     Command,
 }
 
-/// The causes a fixture may state: the port's three, as a person writes them.
+/// The refusals a fixture may state, as a person writes them. A fixture
+/// states what its message says, never a retry: whether a session is
+/// re-attempted is the engine's to decide from the refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeclaredCause {
-    Retryable,
     Final,
     Unreachable,
 }
@@ -404,9 +408,8 @@ pub enum DeclaredCause {
 impl From<DeclaredCause> for FailureCause {
     fn from(declared: DeclaredCause) -> Self {
         match declared {
-            DeclaredCause::Retryable => FailureCause::Retryable,
-            DeclaredCause::Final => FailureCause::Final,
-            DeclaredCause::Unreachable => FailureCause::Unreachable,
+            DeclaredCause::Final => FailureCause::Refused(RefusalCause::Final),
+            DeclaredCause::Unreachable => FailureCause::Refused(RefusalCause::Unreachable),
         }
     }
 }
@@ -423,9 +426,9 @@ pub enum MockOutcome {
     },
     Failed {
         message: String,
-        /// The cause the message must classify to, when the fixture states
-        /// one. A fixture whose message classifies otherwise is refused
-        /// when it is read.
+        /// The cause the message must read as under the fixture's dialect,
+        /// when the fixture states one. A fixture whose message reads
+        /// otherwise is refused when it is read.
         #[serde(default)]
         cause: Option<DeclaredCause>,
     },
@@ -441,8 +444,9 @@ pub enum MockOutcome {
 }
 
 impl MockOutcome {
-    /// Refuses a declared cause that the message does not classify to.
-    pub(crate) fn check(&self) -> Result<(), FixtureError> {
+    /// Refuses a declared cause that the message does not read as under
+    /// `dialect`, the CLI the fixture stands for.
+    pub(crate) fn check(&self, dialect: DialectName) -> Result<(), FixtureError> {
         let MockOutcome::Failed {
             message,
             cause: Some(declared),
@@ -451,7 +455,7 @@ impl MockOutcome {
             return Ok(());
         };
         let declared = FailureCause::from(*declared);
-        let actual = crate::failure::classify(message).cause();
+        let actual = dialect.failure_cause(message);
         if declared == actual {
             return Ok(());
         }
@@ -465,9 +469,11 @@ impl MockOutcome {
 /// The word a fixture writes a cause as.
 fn word(cause: FailureCause) -> &'static str {
     match cause {
-        FailureCause::Retryable => "retryable",
-        FailureCause::Final => "final",
-        FailureCause::Unreachable => "unreachable",
+        FailureCause::Limit { .. } => "limit",
+        FailureCause::Refused(RefusalCause::Final) => "final",
+        FailureCause::Refused(RefusalCause::Authentication) => "authentication",
+        FailureCause::Refused(RefusalCause::InvalidModel) => "invalid_model",
+        FailureCause::Refused(RefusalCause::Unreachable) => "unreachable",
     }
 }
 

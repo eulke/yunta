@@ -1,12 +1,18 @@
 ---
 number: D243
 title: "A person's decision to run a node again asks every failure again, and keeps what passed"
-status: accepted
+status: revised
 revises: [D230]
-revised_by: []
+revised_by: [D263]
 ---
 
 # D243 — A person's decision to run a node again asks every failure again, and keeps what passed
+
+*(Revised by D263: a person's retry is offered for an outside-world cause, and for a
+tree cause only once the log has seen the tree move since the failed attempt. The
+reading in point 1 and in the Rationale, that a retry is the one signal that
+something outside the tree changed, holds for the outside causes. A retry for a tree
+cause claims the tree's own move instead. Points 2 to 4 stand.)*
 
 ## Context
 

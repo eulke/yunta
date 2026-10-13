@@ -39,8 +39,8 @@
 use serde_json::Value;
 use yunta_core::{RunTool, SessionId};
 
-use crate::failure;
-use yunta_core::events::ToolTarget;
+use crate::failure::{classify, has_word};
+use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
 use yunta_core::fence::Coverage;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
@@ -101,7 +101,7 @@ fn thread_started(value: &Value, fence: &Coverage) -> Option<AgentEvent> {
             // The failure keeps what rejected the id, so a reader
             // following the chain reaches the rule the value broke.
             error: AgentError::caused_by("the CLI's `thread.started` line is malformed", error),
-            cause: yunta_core::port::FailureCause::Final,
+            cause: FailureCause::Refused(RefusalCause::Final),
         },
     })
 }
@@ -139,14 +139,16 @@ fn item_completed(value: &Value) -> Vec<AgentEvent> {
         _ => None,
     };
     let mut events: Vec<_> = event.into_iter().collect();
-    if let Some(failed) = run_tool_failure(item) {
-        events.push(failed);
+    if let Some(rejected) = run_tool_rejection(item) {
+        events.push(rejected);
     }
     events
 }
 
-fn run_tool_failure(item: &Value) -> Option<AgentEvent> {
-    use yunta_core::events::RunToolFailureCause;
+/// A run tool call of this run's server that the CLI reports as not done.
+/// Whether the call reached the engine is the engine's to read, so the
+/// status says only that the call was refused.
+fn run_tool_rejection(item: &Value) -> Option<AgentEvent> {
     if item.get("type").and_then(Value::as_str) != Some("mcp_tool_call")
         || item.get("server").and_then(Value::as_str)
             != Some(yunta_core::port::RunToolsEndpoint::SERVER_NAME)
@@ -155,12 +157,11 @@ fn run_tool_failure(item: &Value) -> Option<AgentEvent> {
     }
     let tool = RunTool::parse(item.get("tool")?.as_str()?)?;
     let status = item.get("status")?.as_str()?;
-    let cause = match status {
-        "failed" => RunToolFailureCause::CallFailed,
-        "approval_denied" | "approval_blocked" | "declined" => RunToolFailureCause::ApprovalBlocked,
-        _ => return None,
-    };
-    Some(AgentEvent::RunToolFailed { tool, cause })
+    matches!(
+        status,
+        "failed" | "approval_denied" | "approval_blocked" | "declined"
+    )
+    .then_some(AgentEvent::RunToolRejected { tool })
 }
 
 /// The field this kind of item acts on, identified and never shown: it
@@ -240,9 +241,28 @@ fn turn_completed(value: &Value, last_message: &str) -> Vec<AgentEvent> {
     events
 }
 
-/// `turn.failed` and the top-level `error` both carry a `message` and
-/// nothing about retrying; the message itself says whether another
-/// attempt can do better.
+/// Codex's limit phrases. Only this parser reads them: the shared reading
+/// has no limit class, so another CLI's text never reads as one.
+const LIMIT_MARKERS: &[&str] = &[
+    "you\u{2019}ve hit your usage limit",
+    "you've hit your usage limit",
+    "exceeded retry limit, last status: 429",
+];
+
+/// The cause of a Codex failure text. Codex retries a request on its own
+/// before it fails with a limit, so a limit it names is the account's, and
+/// the text names no reset time.
+pub(crate) fn failure_cause(message: &str) -> FailureCause {
+    let lower = message.to_lowercase();
+    if LIMIT_MARKERS.iter().any(|marker| has_word(&lower, marker)) {
+        FailureCause::Limit { resets_at: None }
+    } else {
+        classify(message)
+    }
+}
+
+/// `turn.failed` and the top-level `error` both carry a `message`, and the
+/// message is what refused the turn.
 fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
     let message = carrier
         .and_then(|carrier| carrier.get("message"))
@@ -251,9 +271,28 @@ fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
             || format!("{fallback} with no error message"),
             str::to_string,
         );
-    let cause = failure::classify(&message).cause();
+    let cause = failure_cause(&message);
     AgentEvent::Failed {
         error: AgentError::message(message),
         cause,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn both_apostrophes_are_codex_limit_phrases() {
+        for message in [
+            "You\u{2019}ve hit your usage limit. Try again later.",
+            "You've hit your usage limit. Try again later.",
+        ] {
+            assert_eq!(
+                failure_cause(message),
+                FailureCause::Limit { resets_at: None },
+                "{message}"
+            );
+        }
     }
 }

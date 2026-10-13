@@ -35,6 +35,9 @@ use yunta_engine::{
 
 const RUN: &str = "run-1";
 
+#[path = "view/stops.rs"]
+mod stops;
+
 fn base() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
 }
@@ -132,7 +135,6 @@ fn finished() -> EventPayload {
 fn failed(outcome: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
         Failure::message(outcome.to_string()),
-        true,
         tokens(7, 3),
     )))
 }
@@ -206,8 +208,8 @@ fn usage_message(input: u64, output: u64) -> EventPayload {
 fn approve_option() -> GateOption {
     GateOption {
         id: "approve".into(),
-        label: "Approve".to_string(),
-        tradeoff: "goes on".to_string(),
+        label: Some("Approve".to_string()),
+        tradeoff: Some("goes on".to_string()),
         asks: None,
     }
 }
@@ -1150,164 +1152,6 @@ nodes:
         }
     );
     assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 1, 0]);
-}
-
-#[test]
-fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
-    // A node id names *which* node stopped; only the sentence the engine
-    // wrote when it stopped the run names *what* that node asked for. A
-    // surface that had to read the log again for it could print a
-    // sentence the frame beside it does not agree with.
-    let workflow = chain();
-    let asked = "node `plan` asked 1 question: `what-changed`";
-    let events = log(vec![
-        (0, None, created("alpha")),
-        (1, Some("plan"), started(1)),
-        (2, Some("plan"), gate_waiting(None)),
-        (
-            3,
-            None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-                &PauseReason::Recorded {
-                    sentence: asked.to_string(),
-                },
-            ))),
-        ),
-    ]);
-
-    assert_eq!(
-        frame(&workflow, &events, 100).phase,
-        RunPhase::Waiting {
-            on: WaitingOn::Node {
-                node: "plan".into(),
-                on: NodeWait::Gate { external_ref: None },
-                reason: Some(PauseReason::Recorded {
-                    sentence: asked.to_string(),
-                }),
-            }
-        }
-    );
-}
-
-#[test]
-fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
-    // The run resumed after its last pause, so that sentence describes a
-    // stop the run has already left behind. The node is still parked and
-    // the frame says so, quoting nothing rather than the wrong thing.
-    let workflow = chain();
-    let events = log(vec![
-        (0, None, created("alpha")),
-        (1, Some("plan"), started(1)),
-        (2, Some("plan"), gate_waiting(None)),
-        (
-            3,
-            None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-                &PauseReason::Recorded {
-                    sentence: "token budget exceeded".to_string(),
-                },
-            ))),
-        ),
-        (
-            4,
-            None,
-            EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
-                checkout: None,
-                policies: Vec::new(),
-                environment: None,
-            })),
-        ),
-        (5, Some("build"), started(1)),
-    ]);
-
-    assert_eq!(
-        frame(&workflow, &events, 100).phase,
-        RunPhase::Waiting {
-            on: WaitingOn::Node {
-                node: "plan".into(),
-                on: NodeWait::Gate { external_ref: None },
-                reason: None,
-            }
-        }
-    );
-}
-
-#[test]
-fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
-    let workflow = chain();
-    let events = log(vec![
-        (0, None, created("alpha")),
-        (1, Some("build"), started(1)),
-        (2, Some("build"), failed("out of budget")),
-        (
-            3,
-            None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-                &PauseReason::Recorded {
-                    sentence: "token budget exceeded".to_string(),
-                },
-            ))),
-        ),
-    ]);
-
-    assert_eq!(
-        frame(&workflow, &events, 100).phase,
-        RunPhase::Waiting {
-            on: WaitingOn::Run {
-                reason: PauseReason::Recorded {
-                    sentence: "token budget exceeded".to_string(),
-                },
-            }
-        }
-    );
-}
-
-#[test]
-fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
-    let workflow = chain();
-    let events = log(vec![
-        (0, None, created("alpha")),
-        (1, Some("build"), started(1)),
-        (2, Some("build"), failed("criteria still red")),
-        (3, None, run_finished(TerminalState::Failed)),
-    ]);
-
-    assert_eq!(
-        frame(&workflow, &events, 100).phase,
-        RunPhase::Failed {
-            failure: Some(Failure::message("criteria still red".to_string())),
-        }
-    );
-}
-
-#[test]
-fn a_promoted_run_names_the_mode_its_signal_suggested() {
-    let workflow = chain();
-    let events = log(vec![
-        (0, None, created("alpha")),
-        (1, Some("build"), started(1)),
-        (2, Some("build"), finished()),
-        (
-            3,
-            None,
-            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
-                PromotionCause {
-                    node: "build".into(),
-                    goto: "fix".into(),
-                },
-                vec![Fact::bare("criteria still red")].into(),
-                "beta".into(),
-            ))),
-        ),
-        (4, None, run_finished(TerminalState::Promoted)),
-    ]);
-
-    assert_eq!(
-        frame(&workflow, &events, 100).phase,
-        RunPhase::Promoted {
-            to: Some("beta".into()),
-        }
-    );
 }
 
 #[test]

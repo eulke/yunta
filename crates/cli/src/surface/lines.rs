@@ -130,6 +130,10 @@ mod pause_reason_tests {
                 node: NodeId::from("lint"),
                 failure: Failure::message("exit 1"),
             },
+            PauseReason::AwaitingReset {
+                node: NodeId::from("build"),
+                at: chrono::DateTime::UNIX_EPOCH,
+            },
             PauseReason::Blocked {
                 node: NodeId::from("ship"),
                 on: vec![NodeId::from("lint")],
@@ -183,6 +187,7 @@ mod pause_reason_tests {
                 | PauseReason::ExternalGate { .. }
                 | PauseReason::UncertainOrphans { .. }
                 | PauseReason::NodeFailed { .. }
+                | PauseReason::AwaitingReset { .. }
                 | PauseReason::Blocked { .. }
                 | PauseReason::GateAborted { .. }
                 | PauseReason::ChildPaused { .. }
@@ -212,11 +217,17 @@ mod pause_reason_tests {
                 ),
                 crate::render::Glyphs::Unicode,
             );
+            // A limit's reset is nobody's to answer, so its line reads waiting.
+            let word = if matches!(reason, PauseReason::AwaitingReset { .. }) {
+                "waiting"
+            } else {
+                "needs you"
+            };
             assert_eq!(
                 said.text,
                 yunta_core::text::aside(
                     "run",
-                    &yunta_core::text::one_line(&format!("needs you — {sentence}"))
+                    &yunta_core::text::one_line(&format!("{word} — {sentence}"))
                 )
             );
 
@@ -234,7 +245,7 @@ mod pause_reason_tests {
 /// sentence: the mode alone, on the chronicle line every surface writes.
 #[cfg(test)]
 mod promotion_tests {
-    use yunta_core::events::{run, Evidence};
+    use yunta_core::events::{run, Evidence, Failure, PromotionCause};
 
     use super::super::chronicle;
 
@@ -251,5 +262,30 @@ mod promotion_tests {
             crate::render::Glyphs::Unicode,
         );
         assert_eq!(said.text, "run — promotion to `ship`");
+    }
+
+    /// The failure a promotion carries is read beside the node whose
+    /// re-routes ran out, after the node and the mode it moves to.
+    #[test]
+    fn a_promotion_says_the_failure_that_exhausted_its_re_routes() {
+        let cause = PromotionCause {
+            node: "lint".into(),
+            goto: "fix-lint".into(),
+            failure: Some(Failure::message("exit 1")),
+        };
+        let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
+            to: "ship".into(),
+            cause: Some(cause),
+            legacy_reason: None,
+            evidence: Evidence::none(),
+        });
+        let said = chronicle::say(
+            &yunta_testkit::moment(None, promoted),
+            crate::render::Glyphs::Unicode,
+        );
+        assert_eq!(
+            said.text,
+            "run — promotion to `ship`: node `lint` exhausted its re-routes to `fix-lint` — exit 1"
+        );
     }
 }

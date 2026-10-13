@@ -75,7 +75,7 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
 }
 
 #[test]
-fn a_retryable_failure_can_restart_and_then_finish() {
+fn a_failed_attempt_can_restart_and_then_finish() {
     let events = Log::for_run("run-1")
         .node(
             "lint",
@@ -85,7 +85,6 @@ fn a_retryable_failure_can_restart_and_then_finish() {
             "lint",
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria red".to_string()),
-                true,
                 tokens(5, 2),
             ))),
         )
@@ -359,7 +358,6 @@ fn replay_is_deterministic_across_several_fixtures() {
                 "a",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("bad".to_string()),
-                    false,
                     tokens(2, 2),
                 ))),
             )
@@ -445,7 +443,6 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
                 "ask",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("scope violated: 1 file outside the declared globs"),
-                    false,
                     tokens(0, 0),
                 ))),
             )

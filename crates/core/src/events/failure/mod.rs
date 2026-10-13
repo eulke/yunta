@@ -1,30 +1,38 @@
 //! Why a node failed, as data.
 //!
-//! The one payload field that is not a plain value: a node fails either
-//! with a sentence the engine states, or with declared artifacts that
-//! did not close, each saying what went wrong with it. Keeping both in
-//! one type is what lets the log record the facts and every surface
-//! produce its own prose from them, instead of the engine writing prose
-//! once and three surfaces taking it apart again.
+//! The one payload field that is not a plain value: a node fails with a
+//! sentence the engine states, with declared artifacts that did not close,
+//! or with a fact the log records (a command's exit, a session's refusal,
+//! an account's limit, a loop's stops, a red check, a child run's failure).
+//! Keeping every case in one type is what lets the log record the facts and
+//! every surface produce its own prose from them, instead of the engine
+//! writing prose once and three surfaces taking it apart again.
 
-use std::fmt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::diagnostic::{ArtifactFailure, Report};
-use crate::glob::{listed_globs, InvalidScopeGlob, ScopeGlob};
+use crate::events::TaskStop;
+use crate::glob::{InvalidScopeGlob, ScopeGlob};
 use crate::hash::ContentHash;
-use crate::ids::AdapterId;
+use crate::ids::{AdapterId, RunId};
 use crate::protected::Protection;
 
+mod cause;
 mod exit;
 mod records;
+mod remedy;
 mod sentences;
 
-pub use exit::{CommandExit, CommandOrigin, SessionDeath, SessionEnd, SessionExit, TAIL_LINES};
+pub use cause::{FailureCause, RefusalCause, SessionRefusal};
+pub use exit::{
+    AccountLimit, CommandExit, CommandOrigin, LimitSource, SessionDeath, SessionEnd, SessionExit,
+    Unanswered, STOPPED_EXIT_CODE, TAIL_LINES,
+};
 pub use records::{OwedScope, RequestedScope, Unchanged, UnpassableTask};
-pub use sentences::{loop_overrun_failure, node_failed_line, PAST_THE_CAP};
+pub use remedy::{Facts, Outlook, Precondition, Remedy, Stuck};
+pub use sentences::{loop_overrun_failure, PAST_THE_CAP};
 
 /// Why a node failed.
 ///
@@ -33,13 +41,17 @@ pub use sentences::{loop_overrun_failure, node_failed_line, PAST_THE_CAP};
 /// [`Failure::SessionDied`], one carrying `exited:` as
 /// [`Failure::Exited`], one carrying `outside_scope:` as
 /// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
-/// [`Failure::ScopeRequested`], one carrying `unset:` as
-/// [`Failure::Unset`], one carrying `unchanged:` as
-/// [`Failure::Unchanged`], one carrying `denied_paths:` as
-/// [`Failure::PathsDenied`], one carrying `unpassable:` as
-/// [`Failure::PlanUnpassable`], and a log written before failures were
-/// data carries `outcome:` alone and reads back as
-/// [`Failure::Message`]. That tolerance is the rule for what is
+/// [`Failure::ScopeRequested`], one carrying `owed:` as
+/// [`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],
+/// one carrying `unchanged:` as [`Failure::Unchanged`], one carrying
+/// `denied_paths:` as [`Failure::PathsDenied`], one carrying
+/// `unpassable:` as [`Failure::PlanUnpassable`], one carrying
+/// `session_refused:` as [`Failure::SessionRefused`], one carrying
+/// `limit:` as [`Failure::Limit`], one carrying `stopped:` as
+/// [`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],
+/// one carrying `child_run:` as [`Failure::ChildFailed`], and a log
+/// written before failures were data carries `outcome:` alone and reads
+/// back as [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
 /// version wrote the line it is looking at.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -88,8 +100,60 @@ pub enum Failure {
     /// planner rewrites the plan. Its key, `unpassable:`, is one no other
     /// variant has.
     PlanUnpassable { unpassable: Vec<UnpassableTask> },
+    /// The session refused the request: the adapter's message, and the
+    /// cause it read from it.
+    SessionRefused { session_refused: SessionRefusal },
+    /// The account's limit, or the forge's, stopped the run. `resets_at` is
+    /// absolute: a forge's retry-after is added to the failure's own time.
+    Limit { limit: AccountLimit },
+    /// Tasks of a loop stopped before the loop could finish: each names
+    /// the task and why it stopped.
+    TasksStopped { stopped: Vec<TaskStop> },
+    /// A judging check came out red on the tree it judged.
+    Red { red: RedCheck },
+    /// A composed workflow whose run ended in failure; `child_failure` is
+    /// the failure its own log records, when it records one.
+    ChildFailed {
+        child_run: RunId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        child_failure: Option<Box<Failure>>,
+    },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
+}
+
+/// Why a judging check came out red: a coverage figure under its
+/// threshold or none at all, a command that exited non-zero, or a baseline
+/// suite that passed when it was measured and fails now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RedCheck {
+    /// The coverage the run measured, when it measured one, and the
+    /// threshold it fell short of. `cmd` is the command that measured it.
+    Coverage {
+        cmd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        measured: Option<f64>,
+        threshold: f64,
+    },
+    /// The command that exited non-zero, with its exit code, the line it
+    /// concluded with and the run object holding everything it printed.
+    Command {
+        cmd: String,
+        exit_code: i32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conclusion: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<ContentHash>,
+    },
+    /// The baseline suite passed when the lineage measured it and fails now;
+    /// `tail` is what it printed last, which says why.
+    Regression {
+        cmd: String,
+        exit_code: i32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tail: Vec<String>,
+    },
 }
 
 impl Failure {
@@ -141,104 +205,27 @@ impl Failure {
         }
     }
 
-    /// Whether another attempt of the node, in this same run, can end
-    /// differently. Not when the cause is the config the run froze at
-    /// birth: every attempt reads the same one, and the way out is a new
-    /// run under a config that declares what is missing. Nor when a
-    /// refusal repeats a declared criterion no work of the plan can pass.
-    pub fn retry_can_change(&self) -> bool {
-        match self {
-            Failure::Unset { .. } => false,
-            // A rewrite of the plan leaves the criterion where it was, so
-            // the same declaration repeats.
-            Failure::Unchanged { unchanged } => {
-                !matches!(unchanged.failure.as_ref(), Failure::PlanUnpassable { .. })
-            }
-            _ => true,
-        }
-    }
-
     /// A command that exited non-zero, and what it left behind.
     pub fn exited(exited: CommandExit) -> Self {
         Failure::Exited { exited }
     }
 
-    /// The failure as one claim, without the lines a failing command
-    /// printed: what a surface states before it lists them.
-    pub fn headline(&self) -> String {
-        match self {
-            Failure::Exited { exited } => exited.headline(),
-            Failure::Unchanged { unchanged } => unchanged.sentence(&unchanged.failure.headline()),
-            // Each document that did not close, by the heading its own
-            // block opens with: the path and how many problems it has.
-            Failure::Artifacts { artifacts } => artifacts
-                .iter()
-                .filter_map(|artifact| artifact.to_string().lines().next().map(str::to_string))
-                .collect::<Vec<_>>()
-                .join("; "),
-            // How many files, when there are several to list.
-            Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => format!(
-                "scope violated: {} outside the declared globs",
-                crate::text::counted(outside_scope.len(), "file")
-            ),
-            Failure::SessionDied { .. }
-            | Failure::ScopeViolated { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::ScopeOwed { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::Message { .. } => self.to_string(),
-        }
-    }
-
-    /// What the failure says beyond its [`Failure::headline`], a line
-    /// each: the last lines a command printed, the problems of a document
-    /// that did not close — each document's own block when several did —
-    /// and every path that fell outside a scope when there are several.
-    pub fn detail(&self) -> Vec<String> {
-        match self {
-            Failure::Exited { exited } => exited.tail.clone(),
-            Failure::Unchanged { unchanged } => unchanged.failure.detail(),
-            Failure::Artifacts { artifacts } => {
-                let blocks = artifacts.iter().map(ToString::to_string);
-                let lines: Vec<String> = match artifacts.len() {
-                    1 => blocks.flat_map(|block| own_lines(&block, 1)).collect(),
-                    _ => blocks.flat_map(|block| own_lines(&block, 0)).collect(),
-                };
-                lines
-            }
-            Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => outside_scope
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect(),
-            Failure::ScopeOwed { owed } => owed
-                .iter()
-                .map(|owed| {
-                    format!(
-                        "`{}` — {}: {}",
-                        owed.task_id,
-                        listed_globs(&owed.paths),
-                        owed.reason
-                    )
-                })
-                .collect(),
-            Failure::SessionDied { .. }
-            | Failure::ScopeViolated { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::Message { .. } => Vec::new(),
-        }
-    }
-
-    /// The last lines the failing command printed. Empty for a failure
-    /// that is not about a command, or one that printed nothing.
+    /// The last lines the failing command printed, as the log holds them
+    /// here. Empty for a failure that is not about a command, for a command
+    /// whose output the log holds as a run object, and for one that printed
+    /// nothing. A child run's failure hands over its own command's lines,
+    /// which a person reads under this one.
     pub fn tail(&self) -> &[String] {
         match self {
             Failure::Exited { exited } => &exited.tail,
             Failure::Unchanged { unchanged } => unchanged.failure.tail(),
+            Failure::ChildFailed {
+                child_failure: Some(child),
+                ..
+            } => child.tail(),
+            Failure::Red {
+                red: RedCheck::Regression { tail, .. },
+            } => tail,
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
@@ -247,6 +234,11 @@ impl Failure {
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::PlanUnpassable { .. }
+            | Failure::SessionRefused { .. }
+            | Failure::Limit { .. }
+            | Failure::TasksStopped { .. }
+            | Failure::Red { .. }
+            | Failure::ChildFailed { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -255,7 +247,15 @@ impl Failure {
     pub fn output(&self) -> Option<&ContentHash> {
         match self {
             Failure::Exited { exited } => exited.output.as_ref(),
+            Failure::Red { red } => match red {
+                RedCheck::Command { output, .. } => output.as_ref(),
+                RedCheck::Coverage { .. } | RedCheck::Regression { .. } => None,
+            },
             Failure::Unchanged { unchanged } => unchanged.failure.output(),
+            Failure::ChildFailed {
+                child_failure: Some(child),
+                ..
+            } => child.output(),
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
@@ -264,6 +264,10 @@ impl Failure {
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::PlanUnpassable { .. }
+            | Failure::SessionRefused { .. }
+            | Failure::Limit { .. }
+            | Failure::TasksStopped { .. }
+            | Failure::ChildFailed { .. }
             | Failure::Message { .. } => None,
         }
     }
@@ -288,7 +292,8 @@ impl Failure {
     }
 
     /// The paths the node wrote outside its scope. Empty for a failure
-    /// that is not a violation of it.
+    /// that is not a violation of it. A child run's violations are its
+    /// own, and do not widen this node's scope.
     pub fn outside_scope(&self) -> &[PathBuf] {
         match self {
             Failure::ScopeViolated { outside_scope } => outside_scope,
@@ -301,6 +306,11 @@ impl Failure {
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
             | Failure::PlanUnpassable { .. }
+            | Failure::SessionRefused { .. }
+            | Failure::Limit { .. }
+            | Failure::TasksStopped { .. }
+            | Failure::Red { .. }
+            | Failure::ChildFailed { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -319,6 +329,11 @@ impl Failure {
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
             | Failure::PlanUnpassable { .. }
+            | Failure::SessionRefused { .. }
+            | Failure::Limit { .. }
+            | Failure::TasksStopped { .. }
+            | Failure::Red { .. }
+            | Failure::ChildFailed { .. }
             | Failure::Message { .. } => false,
         }
     }
@@ -341,21 +356,6 @@ impl Failure {
         }
     }
 
-    /// [`scope_wanted`](Self::scope_wanted) as a sentence lists it: the
-    /// paths as a person reads them, comma-separated.
-    pub fn scope_wanted_listed(&self) -> String {
-        match self {
-            Failure::ScopeRequested { requested_scope } => listed_globs(&requested_scope.paths),
-            Failure::ScopeOwed { owed } => listed_globs(&owed_paths(owed)),
-            _ => self
-                .outside_scope()
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-        }
-    }
-
     /// Every report behind this failure, each carrying the document it
     /// is about. What a diagnostic is rendered from; a failure whose
     /// artifacts name no document yields none.
@@ -369,8 +369,10 @@ impl Failure {
         match self {
             Failure::Artifacts { artifacts } => artifacts.iter(),
             Failure::Unchanged { unchanged } => unchanged.failure.failures(),
-            // A dead session names no artifact, and neither does a
-            // scope, a command or a sentence: the count of documents
+            // A dead session names no artifact, and neither does a scope, a
+            // command or a sentence. A refused session, a limit, a loop's
+            // stops, a check's figure and a child run's failure name no
+            // document this node declared either: the count of documents
             // that did not close is about documents this node declared.
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
@@ -380,111 +382,42 @@ impl Failure {
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
             | Failure::PlanUnpassable { .. }
+            | Failure::SessionRefused { .. }
+            | Failure::Limit { .. }
+            | Failure::TasksStopped { .. }
+            | Failure::Red { .. }
+            | Failure::ChildFailed { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
 }
 
-impl fmt::Display for Failure {
-    /// The prose a reader sees, produced here rather than stored: one
-    /// sentence for a plain failure, and one block per failing document
-    /// in declaration order for an artifact failure.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Failure::Message { outcome } => f.write_str(outcome),
-            Failure::Exited { exited } => write!(f, "{exited}"),
-            Failure::Unset { unset } => write!(f, "{unset}"),
-            Failure::Unchanged { unchanged } => {
-                f.write_str(&unchanged.sentence(&unchanged.failure.to_string()))
-            }
-            Failure::SessionDied { died } => write!(f, "{died}"),
-            Failure::ScopeViolated { outside_scope } => {
-                write!(
-                    f,
-                    "scope violated: {} outside the declared globs — ",
-                    crate::text::counted(outside_scope.len(), "file")
-                )?;
-                for (position, path) in outside_scope.iter().enumerate() {
-                    if position > 0 {
-                        f.write_str(", ")?;
-                    }
-                    write!(f, "{}", path.display())?;
-                }
-                Ok(())
-            }
-            Failure::PathsDenied { denied_paths, .. } => write!(
-                f,
-                "wrote what no session of the run may write — {}: undo those changes",
-                denied_paths
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Failure::ScopeRequested { requested_scope } => write!(
-                f,
-                "asked for scope beyond its own — {}: {}",
-                listed_globs(&requested_scope.paths),
-                requested_scope.reason
-            ),
-            Failure::ScopeOwed { owed } => f.write_str(&owed_sentence(owed)),
-            Failure::PlanUnpassable { unpassable } => write!(
-                f,
-                "the plan holds a criterion no work can pass — {}",
-                unpassable
-                    .iter()
-                    .map(|task| format!("task `{}`: `{}` ({})", task.task_id, task.cmd, task.why))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ),
-            Failure::Artifacts { artifacts } => {
-                for (position, artifact) in artifacts.iter().enumerate() {
-                    if position > 0 {
-                        f.write_str("\n")?;
-                    }
-                    write!(f, "{artifact}")?;
-                }
-                Ok(())
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_regression_hands_over_the_tail_it_printed() {
+        let failure = Failure::Red {
+            red: RedCheck::Regression {
+                cmd: "make test".into(),
+                exit_code: 1,
+                tail: vec!["2 tests failed".to_string()],
+            },
+        };
+        assert_eq!(failure.tail(), ["2 tests failed"]);
     }
-}
 
-/// The requests a loop owes a person, as one sentence.
-fn owed_sentence(owed: &[OwedScope]) -> String {
-    let each: Vec<String> = owed
-        .iter()
-        .map(|owed| {
-            format!(
-                "task `{}` asked for {}",
-                owed.task_id,
-                listed_globs(&owed.paths)
-            )
-        })
-        .collect();
-    format!(
-        "{} a person's decision about scope: {}",
-        crate::text::counted_as(owed.len(), "request owes", "requests owe"),
-        each.join("; ")
-    )
-}
-
-/// Every path the owed requests ask for, each once.
-fn owed_paths(owed: &[OwedScope]) -> Vec<ScopeGlob> {
-    let mut paths: Vec<ScopeGlob> = Vec::new();
-    for path in owed.iter().flat_map(|owed| owed.paths.iter()) {
-        if !paths.contains(path) {
-            paths.push(path.clone());
-        }
+    #[test]
+    fn a_command_whose_output_the_log_holds_by_hash_hands_over_no_lines() {
+        let failure = Failure::Red {
+            red: RedCheck::Command {
+                cmd: "make test".into(),
+                exit_code: 1,
+                conclusion: None,
+                output: None,
+            },
+        };
+        assert!(failure.tail().is_empty());
     }
-    paths
-}
-
-/// The lines of `block` after its first `skip`, without their indent.
-fn own_lines(block: &str, skip: usize) -> Vec<String> {
-    block
-        .lines()
-        .skip(skip)
-        .map(|line| line.trim().to_string())
-        .collect()
 }

@@ -67,6 +67,13 @@ pub struct CriterionResult {
     /// runs `git`, whose answer can turn on history as well as on files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<String>,
+    /// The line the command concluded with, when it printed one: its last
+    /// non-empty stdout line, else its last stderr line. Taken when the
+    /// result is recorded, so a replay reads what the live run read.
+    /// Absent when nothing was printed, and on a log written before the
+    /// field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conclusion: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -311,10 +318,10 @@ pub struct NodeFailedPayload {
     #[serde(flatten)]
     pub failure: Failure,
     pub tokens_used: TokenUsage,
-    /// Whether this node will be attempted again. Set by whoever owns
-    /// the budget, so a failure that nothing will retry is never
-    /// recorded as retryable.
-    pub retryable: bool,
+    /// Read from a log that carried it; never written. What a retry can
+    /// change is the failure's own cause now, not a flag beside it.
+    #[serde(default, rename = "retryable", skip_serializing)]
+    pub legacy_retryable: Option<bool>,
     /// The run's tree as the failed attempt left it — a failure can move
     /// the tree as much as a finish can. Absent in a log written before
     /// it was recorded, which then says nothing about the tree.
@@ -333,11 +340,12 @@ pub struct NodeFailedPayload {
 }
 
 impl NodeFailedPayload {
-    pub fn new(failure: Failure, retryable: bool, tokens_used: TokenUsage) -> Self {
+    /// A node that failed with `failure`, having spent `tokens_used`.
+    pub fn new(failure: Failure, tokens_used: TokenUsage) -> Self {
         NodeFailedPayload {
             failure,
             tokens_used,
-            retryable,
+            legacy_retryable: None,
             tree: None,
             commit: None,
             refused: Vec::new(),

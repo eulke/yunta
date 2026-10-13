@@ -95,7 +95,7 @@ pub(super) async fn execute_executor(
         &path.display().to_string(),
         ctx.manifest.config.permissions.as_ref(),
     ) {
-        return fail(ctx, node, rule, false).await;
+        return fail(ctx, node, rule).await;
     }
 
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
@@ -105,7 +105,6 @@ pub(super) async fn execute_executor(
                 ctx,
                 node,
                 format!("failed to serialize executor `{executor}`'s stdin: {source}"),
-                false,
             )
             .await;
         }
@@ -130,7 +129,6 @@ pub(super) async fn execute_executor(
                     "executor `{executor}` exceeded its {}s timeout",
                     timeout_seconds.unwrap_or_default()
                 ),
-                false,
             )
             .await;
         }
@@ -158,6 +156,6 @@ pub(super) async fn execute_executor(
             &format!("executor `{executor}`"),
         )
         .await?;
-        fail_with(ctx, node, failure, false, TokenUsage::default()).await
+        fail_with(ctx, node, failure, TokenUsage::default()).await
     }
 }

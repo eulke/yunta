@@ -3,7 +3,7 @@
 //! sits in the graph, and — for a node waiting or one whose session
 //! died — the shape a program acts on instead of parsing a sentence.
 
-use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd};
+use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd, TaskStop};
 use yunta_engine::{NodeFrame, NodeStanding, NodeState, NodeWait};
 
 use crate::render::state::StateWord;
@@ -66,6 +66,11 @@ pub(crate) struct NodeJson {
     /// and the run object holding all of it.
     #[serde(skip_serializing_if = "Option::is_none")]
     command_exit: Option<CommandExit>,
+    /// Why each task this node stopped on stopped, for a node that failed
+    /// because its tasks did: one entry per task, in task order, each
+    /// naming the task and its cause. `detail` says the same in a sentence.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    stop: Vec<TaskStop>,
     /// Most recent failed `yunta-run` call in this node's attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     last_tool_failure: Option<RunToolFailureJson>,
@@ -103,6 +108,13 @@ impl NodeJson {
                     ..
                 }) => Some(exited.clone()),
                 _ => None,
+            },
+            stop: match &node.state {
+                NodeStanding::Reached(NodeState::Failed {
+                    failure: Failure::TasksStopped { stopped },
+                    ..
+                }) => stopped.clone(),
+                _ => Vec::new(),
             },
             last_tool_failure: record
                 .and_then(|record| record.last_tool_failure.as_ref())

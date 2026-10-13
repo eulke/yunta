@@ -47,7 +47,7 @@ pub(super) async fn execute_bash(
     if let Some(rule) =
         crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
     {
-        return fail(ctx, node, rule, false).await;
+        return fail(ctx, node, rule).await;
     }
 
     let command = GovernedCommand::shell(ctx.worktree, &rendered);
@@ -73,7 +73,7 @@ pub(super) async fn execute_bash(
     } else {
         let code = status.code().unwrap_or(-1);
         let failure = super::command_exited(ctx, &outcome, code, None, "bash node").await?;
-        fail_with(ctx, node, failure, false, TokenUsage::default()).await
+        fail_with(ctx, node, failure, TokenUsage::default()).await
     }
 }
 

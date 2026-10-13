@@ -63,7 +63,6 @@ pub(super) async fn resolve_node_runner(
                             chosen.agent.as_ref().map_or("", AgentName::as_str),
                             chosen.adapter
                         ),
-                        false,
                     )
                     .await?;
                     return Ok(Step::Ended(end));
@@ -80,7 +79,7 @@ pub(super) async fn resolve_node_runner(
             .await?;
             Ok(Step::Value(chosen))
         }
-        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string(), false).await?)),
+        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string()).await?)),
     }
 }
 

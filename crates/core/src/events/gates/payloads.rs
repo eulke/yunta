@@ -3,22 +3,25 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::escalation::Refusal;
 use crate::events::session::payloads::TokenUsage;
-use crate::events::{Evidence, Fact};
+use crate::events::tasks::DeviationDeclaredPayload;
+use crate::events::{Evidence, Failure, Remedy, Stuck};
 use crate::hash::{CommitSha, ContentHash};
-use crate::ids::{OptionId, QuestionId, Responder};
-use crate::NonEmpty;
+use crate::ids::{ModeName, NodeId, OptionId, QuestionId, Responder};
 
 /// One choice in a gate's escalation: `id` is what
-/// `GateResolvedPayload.chosen_option` names back, `label` is the
-/// human-facing text, `tradeoff` is mandatory — any option that expands
-/// scope of work must declare what it trades off, and no variant of
-/// this type can omit it.
+/// `GateResolvedPayload.chosen_option` names back. `label` and `tradeoff`
+/// are the words a person reads beside it, when the option stores them.
+/// An option that stores neither has its words written when it is shown,
+/// from the data its escalation carries, so neither is required here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateOption {
     pub id: OptionId,
-    pub label: String,
-    pub tradeoff: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tradeoff: Option<String>,
     /// What choosing this option has to say along with it, when an
     /// answer without words would change nothing — a correction sent
     /// back to the session that made the work is the words.
@@ -63,7 +66,7 @@ pub struct GateWaitingPayload {
     /// The claim: what happened, in the words of whoever escalated.
     /// It ends where the record begins — a summary that quotes what
     /// `evidence` holds leaves every surface printing it twice.
-    summary: String,
+    pub(super) summary: String,
     /// The record `summary` is audited against, attached by the engine
     /// straight from the log.
     pub(super) evidence: Evidence,
@@ -74,11 +77,11 @@ pub struct GateWaitingPayload {
     /// log, so a later `poll` from another process knows what to poll
     /// without publishing again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    external_ref: Option<String>,
+    pub(super) external_ref: Option<String>,
     /// The artifacts the decision is about, as the person was shown
     /// them. Empty for an escalation about something that happened.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    shows: Vec<Shown>,
+    pub(super) shows: Vec<Shown>,
     /// The options the gate does not offer, each with why: what stands
     /// against them is part of the decision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -86,144 +89,14 @@ pub struct GateWaitingPayload {
     /// Why the loop waits on a scope request a person answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) scope: Option<super::ScopeWait>,
-}
-
-/// Why an answer does not count as a decision on an escalation.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Refusal {
-    /// The option is not on the menu.
-    #[error("`{chosen}` is not one of the options offered ({offered})")]
-    OffMenu { chosen: OptionId, offered: String },
-    /// The option asks for words, and the answer has none.
-    #[error("`{chosen}` asks \"{asks}\", and the answer says nothing")]
-    Unsaid { chosen: OptionId, asks: String },
-    /// The gate withholds the option, for the reason it gives.
-    #[error("`{chosen}` is withheld: {because}")]
-    Withheld { chosen: OptionId, because: String },
-}
-
-/// Why an escalation was refused before it reached anyone.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum EscalationError {
-    /// The claim repeats a fact the record already holds. Every surface
-    /// prints the two under separate headings, so a summary that quotes
-    /// its own evidence reads as the same sentence twice, the second
-    /// time under a heading that promised something new. The fact is
-    /// carried as data; a surface that shows it draws it.
-    #[error("the summary repeats what the evidence already states")]
-    SummaryRepeatsEvidence { fact: Fact },
-}
-
-/// An escalation on its way to a person: the claim, the record it is
-/// audited against, and the menu of answers.
-///
-/// The one way a `gate_waiting` payload comes to exist: which half of the
-/// story goes into the summary and which into the evidence is decided
-/// here, once, and the menu cannot be empty by type, since an escalation
-/// with no options refuses every answer it is given.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(from = "GateWaitingPayload", into = "GateWaitingPayload")]
-#[schemars(with = "GateWaitingPayload")]
-pub struct Escalation(pub(super) GateWaitingPayload);
-
-impl Escalation {
-    /// One escalation, refused if its claim repeats its own record.
-    pub fn new(
-        summary: impl Into<String>,
-        evidence: Evidence,
-        options: NonEmpty<GateOption>,
-    ) -> Result<Self, EscalationError> {
-        let summary = summary.into();
-        if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
-            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() });
-        }
-        Ok(Escalation(GateWaitingPayload {
-            summary,
-            evidence,
-            options: options.into_vec(),
-            external_ref: None,
-            shows: Vec::new(),
-            withheld: Vec::new(),
-            scope: None,
-        }))
-    }
-
-    /// An escalation whose answer comes from a forge: the pull request
-    /// is the menu, and `external_ref` is the handle a later poll needs
-    /// to find it again from a process that knows nothing but the log.
-    ///
-    /// No options, and that is the shape rather than an omission: no
-    /// answer given here would count, because the decision is made and
-    /// recorded on the forge. `offers` refusing every option is the
-    /// truth about this gate, not the bug it would be on a local one.
-    pub fn published_to(
-        summary: impl Into<String>,
-        evidence: Evidence,
-        external_ref: impl Into<String>,
-    ) -> Result<Self, EscalationError> {
-        let summary = summary.into();
-        if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
-            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() });
-        }
-        Ok(Escalation(GateWaitingPayload {
-            summary,
-            evidence,
-            options: Vec::new(),
-            external_ref: Some(external_ref.into()),
-            shows: Vec::new(),
-            withheld: Vec::new(),
-            scope: None,
-        }))
-    }
-
-    /// The same escalation, putting `shows` in front of the person.
-    pub fn showing(mut self, shows: Vec<Shown>) -> Self {
-        self.0.shows = shows;
-        self
-    }
-
-    /// The payload, for the event that carries it.
-    pub fn into_payload(self) -> GateWaitingPayload {
-        self.0
-    }
-}
-
-impl From<GateWaitingPayload> for Escalation {
-    /// A payload read off the log is taken as written, without re-checking its claim.
-    fn from(payload: GateWaitingPayload) -> Self {
-        Escalation(payload)
-    }
-}
-
-impl From<Escalation> for GateWaitingPayload {
-    fn from(escalation: Escalation) -> Self {
-        escalation.0
-    }
-}
-
-/// Whether `summary` already states what `fact` records.
-///
-/// A fact that names itself is repeated when its whole value appears in
-/// the claim. A labelled one is repeated when both its label and its
-/// value do — a bare number can turn up in a summary for its own
-/// reasons, and it is the pair that makes it the same fact.
-fn repeats(summary: &str, fact: &Fact) -> bool {
-    let value = fact.value.trim();
-    if value.is_empty() {
-        return false;
-    }
-    match &fact.label {
-        None => summary.contains(value),
-        Some(label) => summary.contains(label.trim()) && summary.contains(value),
-    }
-}
-
-impl std::ops::Deref for Escalation {
-    type Target = GateWaitingPayload;
-
-    fn deref(&self) -> &GateWaitingPayload {
-        &self.0
-    }
+    /// The failure a node's escalation is about, with the menu that
+    /// failure offers. Absent on every other escalation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<Box<FailureMenu>>,
+    /// The departure from the plan a task's session declared, as the
+    /// question about it is written. Absent on every other escalation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub departure: Option<Box<DepartureMenu>>,
 }
 
 impl GateWaitingPayload {
@@ -240,6 +113,26 @@ impl GateWaitingPayload {
     /// The answers on offer.
     pub fn options(&self) -> &[GateOption] {
         &self.options
+    }
+
+    /// The payload with each option's label and tradeoff set from `words`,
+    /// the words a person reads beside it. A surface that shows the menu
+    /// applies this to its own copy: an option that stores no words is then
+    /// shown with the ones its escalation gives it.
+    pub fn worded(
+        mut self,
+        words: impl Fn(&Self, &GateOption) -> (String, Option<String>),
+    ) -> Self {
+        let filled: Vec<(String, Option<String>)> = self
+            .options
+            .iter()
+            .map(|option| words(&self, option))
+            .collect();
+        for (option, (label, tradeoff)) in self.options.iter_mut().zip(filled) {
+            option.label = Some(label);
+            option.tradeoff = tradeoff;
+        }
+        self
     }
 
     /// The forge's own handle for this gate, when it has one.
@@ -487,4 +380,54 @@ pub struct QuestionsAnsweredPayload {
     pub channel: Channel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub responder: Option<Responder>,
+}
+
+/// The failure a node's escalation is about, and the menu it offers: the
+/// attempt the choices start, the failure as data, the remedies that can
+/// change its outcome and, when none can, why not. Every word of the menu
+/// is written from these fields when it is shown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FailureMenu {
+    /// The attempt the menu's choices start, numbered as the log numbers
+    /// attempts.
+    pub attempt: u32,
+    pub failure: Failure,
+    pub remedies: Vec<Remedy>,
+    /// Why no remedy is offered, when none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stuck: Option<Stuck>,
+    /// The re-route this failure exhausted, when it closes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reroute: Option<ExhaustedReroute>,
+}
+
+/// A re-route the failure exhausted: the node it would send the run to,
+/// the cap it reached, and the mode a promotion would take the run to,
+/// when the workflow names one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ExhaustedReroute {
+    pub goto: NodeId,
+    pub max_reroutes: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_mode: Option<ModeName>,
+}
+
+/// The departure from the plan a task's session declared, as its question
+/// is written: the declarations it asks about, the plan's criteria that
+/// accepting stops holding the task to, the node that writes the task's
+/// tests again, and whether accepting is offered at all. Every word of the
+/// question is written from these fields when it is shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DepartureMenu {
+    pub deviations: Vec<DeviationDeclaredPayload>,
+    /// The commands of the plan's criteria accepting stops holding the
+    /// task to. Absent when accepting waives none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waived: Vec<String>,
+    /// The node that writes the task's tests again, when accepting does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewritten_by: Option<NodeId>,
+    /// Whether accepting is offered. False when a test a departure departs
+    /// from came with the run and no node of the run writes it again.
+    pub accept_offered: bool,
 }

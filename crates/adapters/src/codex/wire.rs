@@ -11,10 +11,11 @@ use yunta_core::port::RunToolsEndpoint;
 use yunta_core::rail::RailEvent;
 use yunta_core::{ModelName, RunTool, SessionId, ToolNaming};
 
-use crate::mock::MockStep;
+use crate::mock::{MockOutcome, MockStep};
 
 /// The lines the CLI prints for one step of a fixture, in the order it
-/// prints them.
+/// prints them. Usage is not printed here: the CLI reports it on the line
+/// that closes the turn, from `close`.
 pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
     match step {
         MockStep::Note { text, .. } | MockStep::BeforeOpen { text, .. } => {
@@ -27,16 +28,32 @@ pub(crate) fn render(step: &MockStep, naming: ToolNaming) -> Vec<String> {
         ],
         MockStep::ToolUse { name, target, .. } => vec![tool_use(name, target, naming)],
         MockStep::RunTool { tool, .. } => vec![run_tool_call(tool)],
-        MockStep::Usage {
-            input_tokens,
-            output_tokens,
-            cached_input_tokens,
-            ..
-        } => vec![turn_completed(
-            *input_tokens,
-            *output_tokens,
-            *cached_input_tokens,
-        )],
+        MockStep::Usage { .. } | MockStep::RunToolRejected { .. } => Vec::new(),
+    }
+}
+
+/// The lines the CLI prints to close a turn. A completed turn prints its
+/// final message, then the turn's end with the usage its steps spent. A
+/// failed turn prints `turn.failed` with the message. A crash and a hang
+/// print no line, since no terminal line exists for either.
+pub(crate) fn close(outcome: &MockOutcome, usage: &[MockStep]) -> Vec<String> {
+    match outcome {
+        MockOutcome::Completed { summary } => {
+            let turn = match turn_usage(usage) {
+                Some(spent) => json!({ "type": "turn.completed", "usage": spent }),
+                None => json!({ "type": "turn.completed" }),
+            };
+            vec![
+                item(json!({ "type": "agent_message", "text": summary })),
+                turn.to_string(),
+            ]
+        }
+        MockOutcome::Failed { message, .. } => vec![json!({
+            "type": "turn.failed",
+            "error": { "message": message },
+        })
+        .to_string()],
+        MockOutcome::Crash | MockOutcome::Hang { .. } => Vec::new(),
     }
 }
 
@@ -93,14 +110,42 @@ fn item(payload: Value) -> String {
     json!({ "type": "item.completed", "item": payload }).to_string()
 }
 
-/// The turn's end, which carries the usage the CLI counted. A count the CLI
-/// did not report is left out, never written as zero.
-fn turn_completed(input: u64, output: u64, cached: Option<u64>) -> String {
-    let mut usage = json!({ "input_tokens": input, "output_tokens": output });
-    if let (Some(cached), Some(map)) = (cached, usage.as_object_mut()) {
-        map.insert("cached_input_tokens".to_string(), json!(cached));
+/// The usage a turn reports: the sums of the usage its steps spent, with the
+/// cached part present only when some step reported one. A turn that spent
+/// nothing reports no usage, and a count no step reported is never written
+/// as zero.
+fn turn_usage(steps: &[MockStep]) -> Option<Value> {
+    let spent: Vec<(u64, u64, Option<u64>)> = steps
+        .iter()
+        .filter_map(|step| match step {
+            MockStep::Usage {
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+                ..
+            } => Some((*input_tokens, *output_tokens, *cached_input_tokens)),
+            _ => None,
+        })
+        .collect();
+    if spent.is_empty() {
+        return None;
     }
-    json!({ "type": "turn.completed", "usage": usage }).to_string()
+    let input: u64 = spent.iter().map(|(input, _, _)| input).sum();
+    let output: u64 = spent.iter().map(|(_, output, _)| output).sum();
+    let cached = spent
+        .iter()
+        .filter_map(|(_, _, cached)| *cached)
+        .fold(None, |sum: Option<u64>, cached| {
+            Some(sum.unwrap_or(0) + cached)
+        });
+    Some(match cached {
+        Some(cached) => json!({
+            "input_tokens": input,
+            "output_tokens": output,
+            "cached_input_tokens": cached,
+        }),
+        None => json!({ "input_tokens": input, "output_tokens": output }),
+    })
 }
 
 /// A patch that updates the one file `path` names, in the form the codec
@@ -161,20 +206,29 @@ mod tests {
             reads_back(&render(&run, naming)).as_slice(),
             [AgentEvent::ToolUse { name, .. }] if name == RunTool::CheckArtifact.name()
         ));
+        // Usage is reported on the line that closes the turn: the summary's
+        // Note comes first, then the usage, then the completion.
         let usage = MockStep::Usage {
             input_tokens: 10,
             output_tokens: 4,
             cached_input_tokens: Some(2),
             after_ms: 0,
         };
+        let closed = close(
+            &MockOutcome::Completed {
+                summary: "done".to_string(),
+            },
+            std::slice::from_ref(&usage),
+        );
         assert!(matches!(
-            reads_back(&render(&usage, naming)).first(),
+            reads_back(&closed).get(1),
             Some(AgentEvent::Usage {
                 input_tokens: Some(10),
                 output_tokens: Some(4),
                 cached_input_tokens: Some(2),
             })
         ));
+        assert!(reads_back(&render(&usage, naming)).is_empty());
         let session: SessionId = "thread-abc".parse().unwrap();
         let opened = open(&session, None);
         assert!(matches!(

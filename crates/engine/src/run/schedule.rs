@@ -33,16 +33,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use yunta_core::events::{node_failed_line, Failure, NodeWait, PauseReason, ResumePolicy};
+use chrono::{DateTime, Utc};
+use yunta_core::events::{Failure, NodeWait, Outlook, PauseReason, ResumePolicy};
 use yunta_core::protected::Protected;
 use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 mod baseline;
+mod failure;
 mod follow;
 mod grant;
+mod retry;
 mod reverify;
 
 pub use baseline::owed_baseline;
+use failure::failure_step;
 pub use follow::follows_build;
 
 use crate::modes::dependencies_in_mode;
@@ -92,11 +96,12 @@ pub enum Decision {
     /// A node failed with no re-route of its own and the run's
     /// `defaults.on_failure` closes the run as failed rather than pausing:
     /// `abort` at the first such failure, `continue` once every node not
-    /// blocked behind a failure has run. `reason` names a causing node,
-    /// in the words a `NodeFailed` pause gives it. The imperative shell
-    /// writes `run_finished { terminal_state: Failed }` and stops.
+    /// blocked behind a failure has run. `failure` is the causing node's
+    /// failure, as the log holds it. The imperative shell writes
+    /// `run_finished { terminal_state: Failed }` and stops.
     Fail {
-        reason: String,
+        node: NodeId,
+        failure: Failure,
     },
     /// A node's re-routes are exhausted — the one pause that
     /// carries real options, since "retry the same
@@ -121,12 +126,17 @@ pub enum Decision {
         node: NodeId,
         failure: Failure,
         next_attempt: u32,
-        /// Whether a task the node's loop blocked left work to continue
-        /// from — what decides whether the menu offers to.
-        continuable: bool,
-        /// Whether a person may widen the node's scope by what its
-        /// failure needs — what decides whether the menu offers `grant`.
-        grantable: bool,
+        /// What can change the failure, as the log holds it: the remedies a
+        /// person may choose from, or why none can change it.
+        outlook: Outlook,
+    },
+    /// A node failed on a limit that resets at `at`, and the run's
+    /// `defaults.on_failure` is `pause`: the run pauses until the reset, and
+    /// a resume after it runs the node again. A resume detached to that hour
+    /// picks the run up.
+    WaitUntil {
+        node: NodeId,
+        at: DateTime<Utc>,
     },
     /// A `kind: gate` node is ready and has never been published —
     /// the imperative shell commits its declared artifacts,
@@ -416,12 +426,6 @@ impl<'a> Board<'a> {
         self.state.nodes.get(id).map_or(0, |r| r.attempts) + 1
     }
 
-    /// Whether a person chose to run this node again after its latest
-    /// failure — see [`RunState::run_again_chosen`].
-    fn retry_chosen(&self, id: &NodeId) -> bool {
-        self.state.run_again_chosen(id)
-    }
-
     /// How a ready or re-opened gate is driven: poll the handle it was
     /// published under, publish it for the first time, or ask here.
     fn drive_gate(&self, node: &Node) -> Decision {
@@ -579,102 +583,6 @@ fn orphan_step(board: &Board<'_>) -> Option<Decision> {
             .map(|policy| (policy.node.clone(), board.next_attempt(&policy.node)))
             .collect(),
     ))
-}
-
-/// Failures, one at a time: re-route, hand control to a pending
-/// corrective node, return control to a corrected node, or stop. A
-/// failure this call leaves unresolved is picked up again on the next
-/// (the reroute or restart it emits changes the log, so the next call
-/// sees a different answer for it).
-fn failure_step(board: &Board<'_>) -> Option<Decision> {
-    for node in board.nodes.iter().copied() {
-        let Some(NodeState::Failed { failure, .. }) = board.state.nodes.state(&node.id) else {
-            continue;
-        };
-        let record = board.state.nodes.get(&node.id).cloned().unwrap_or_default();
-        let rerouted_for_this_failure = record
-            .last_reroute
-            .as_ref()
-            .filter(|reroute| Some(reroute.seq) > record.last_failed)
-            .map(|reroute| (reroute.seq, reroute.to.clone()));
-
-        match rerouted_for_this_failure {
-            None => {
-                if let Some(decision) = unrerouted(board, node, failure, record.on_failure_reroutes)
-                {
-                    return Some(decision);
-                }
-            }
-            Some((reroute_seq, to)) => {
-                if let Some(decision) = after_reroute(board, node, &to, reroute_seq) {
-                    return Some(decision);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// A failure with no re-route after it: its own `on_failure` re-routes
-/// or escalates, and a node without one leaves the decision to the
-/// policy. `continue` is the one answer that is not a decision — the
-/// node stays failed, its dependents stay unscheduled, and the rest of
-/// the graph keeps running. Under `pause` a person decides, and a
-/// `retry` they chose after this failure runs the node again; a gate
-/// node keeps the plain pause, since its own flow is what re-asks it.
-///
-/// A failure no attempt of the run can change is left to the policy
-/// too: a correction reads the same frozen config the node failed on,
-/// so re-routing to it spends a node on an outcome already known.
-fn unrerouted(
-    board: &Board<'_>,
-    node: &Node,
-    failure: &yunta_core::events::Failure,
-    reroutes: u32,
-) -> Option<Decision> {
-    let correctable = node
-        .on_failure
-        .as_ref()
-        .filter(|_| failure.retry_can_change());
-    if let Some(on_failure) = correctable {
-        if reroutes < on_failure.max_reroutes {
-            return Some(Decision::Reroute {
-                from: node.id.clone(),
-                to: on_failure.goto.clone(),
-                attempt: reroutes + 1,
-                max_reroutes: on_failure.max_reroutes,
-                cause: failure.clone(),
-            });
-        }
-        return Some(Decision::GateExhaustedReroutes {
-            node: node.id.clone(),
-            goto: on_failure.goto.clone(),
-            max_reroutes: on_failure.max_reroutes,
-            cause: failure.clone(),
-        });
-    }
-    let reason = PauseReason::NodeFailed {
-        node: node.id.clone(),
-        failure: failure.clone(),
-    };
-    match board.policy.on_failure {
-        DefaultOnFailure::Pause if is_gate(node) => Some(Decision::Pause { reason }),
-        DefaultOnFailure::Pause if board.retry_chosen(&node.id) => Some(Decision::Execute(vec![(
-            node.id.clone(),
-            board.next_attempt(&node.id),
-        )])),
-        DefaultOnFailure::Pause => Some(Decision::EscalateFailure {
-            node: node.id.clone(),
-            failure: failure.clone(),
-            next_attempt: board.next_attempt(&node.id),
-            continuable: board.state.tasks.continuable_by(&node.id),
-            grantable: board.grantable(node, failure),
-        }),
-        DefaultOnFailure::Abort => Some(Decision::Fail {
-            reason: node_failed_line(&node.id, failure),
-        }),
-        DefaultOnFailure::Continue => None,
-    }
 }
 
 /// A failure already re-routed to `to`: what happens next depends on
@@ -847,18 +755,15 @@ fn nothing_runnable(board: &Board<'_>) -> Decision {
     // behind the failure has already run — so it closes failed, naming a
     // node that failed; under `pause` it freezes resumable.
     if board.policy.on_failure == DefaultOnFailure::Continue {
-        if let Some(reason) =
-            board
-                .nodes
-                .iter()
-                .find_map(|node| match board.state.nodes.state(&node.id) {
-                    Some(NodeState::Failed { failure, .. }) => {
-                        Some(node_failed_line(&node.id, failure))
-                    }
-                    _ => None,
-                })
-        {
-            return Decision::Fail { reason };
+        let failed = board
+            .nodes
+            .iter()
+            .find_map(|node| match board.state.nodes.state(&node.id) {
+                Some(NodeState::Failed { failure, .. }) => Some((node.id.clone(), failure.clone())),
+                _ => None,
+            });
+        if let Some((node, failure)) = failed {
+            return Decision::Fail { node, failure };
         }
     }
     Decision::Pause {

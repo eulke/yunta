@@ -5,13 +5,17 @@
 //! sees the live session rather than a summary written at the end. The
 //! terminal outcome the fold returns is what ends the read loop.
 
-use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
+use yunta_core::events::{
+    EventPayload, FailureCause, RefusalCause, RunToolFailedPayload, RunToolFailureCause,
+    SessionEvent, TokenUsage,
+};
 use yunta_core::port::{Adapter, AgentEvent, AgentOutcome};
 use yunta_storage::StorageError;
 
 use super::dispatch::DispatchError;
 use super::session::{note_summary, SessionObserver};
 use super::DispatchOutcome;
+use crate::run_tools::Arrivals;
 
 /// Records that a session's run tools never reached it: one that was
 /// offered its tools, opened, and never listed them or called one, which
@@ -69,6 +73,9 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) task: Option<&'a yunta_core::TaskId>,
     /// The session this one resumes, when it does.
     pub(super) continues: Option<&'a yunta_core::SessionId>,
+    /// The calls the session's run tools took in, which say whether a
+    /// rejection the adapter reports reached the server.
+    pub(super) arrivals: &'a Arrivals,
 }
 
 /// Appends one streamed event to the session's audit trail
@@ -95,6 +102,7 @@ pub(super) async fn apply_agent_event(
         cut_off,
         task,
         continues,
+        arrivals,
     } = ctx;
     match event {
         AgentEvent::SessionOpened {
@@ -124,17 +132,21 @@ pub(super) async fn apply_agent_event(
             .await
             .map_err(DispatchError::Audit)?;
         }
-        AgentEvent::RunToolFailed { tool, cause } => {
+        AgentEvent::RunToolRejected { tool } => {
+            // A rejection of a call the server received is a failed call. One
+            // the server never received was blocked before it got there.
+            let cause = match arrivals.take_arrival(tool) {
+                true => RunToolFailureCause::CallFailed,
+                false => RunToolFailureCause::ApprovalBlocked,
+            };
             if let Some(session_id) = opened.clone() {
                 emit_audit(
                     audit,
-                    EventPayload::Session(SessionEvent::RunToolFailed(
-                        yunta_core::events::RunToolFailedPayload {
-                            session_id,
-                            tool,
-                            cause,
-                        },
-                    )),
+                    EventPayload::Session(SessionEvent::RunToolFailed(RunToolFailedPayload {
+                        session_id,
+                        tool,
+                        cause,
+                    })),
                 )
                 .await
                 .map_err(DispatchError::Audit)?;
@@ -220,13 +232,10 @@ pub(super) async fn apply_agent_event(
             result: AgentOutcome { summary },
         } => return Ok(Some(DispatchOutcome::Completed { summary })),
         AgentEvent::Failed { error, cause } => {
-            *cut_off = cause == yunta_core::port::FailureCause::Unreachable;
-            return Ok(Some(DispatchOutcome::Failed {
-                // Whatever the adapter caught travels with the sentence
-                // it states: the cause is read here or it is lost.
-                message: yunta_core::describe(&error),
-                retryable: cause.retryable(),
-            }));
+            *cut_off = cause == FailureCause::Refused(RefusalCause::Unreachable);
+            // The error travels whole: what the adapter caught under its
+            // message is read where the failure is reported, or it is lost.
+            return Ok(Some(DispatchOutcome::Failed { error, cause }));
         }
     }
     Ok(None)

@@ -1,10 +1,7 @@
-//! The sentences a node's failure and a loop's cap end a run with. The
-//! engine writes them into a failure's claim, so they live here beside the
-//! failure's own words; render says the same sentences for a parked run.
+//! The sentence a loop's cap ends its node with, and the half every cap's
+//! sentence shares. Render reads both for a parked run.
 
 use crate::ids::NodeId;
-
-use super::Failure;
 
 /// The half every cap's sentence ends with: a reader who hit a declared
 /// limit has the same two ways past it whichever limit it was.
@@ -19,16 +16,9 @@ pub fn loop_overrun_failure(node: &NodeId, cap: u32) -> String {
     format!("loop `{node}` exceeded `limits.max_loop_iterations` ({cap}) — {PAST_THE_CAP}")
 }
 
-/// The line a run closes with when a failed node ends it: the node, and the
-/// headline of what failed it. What a command printed stays in the failure's
-/// detail, not inside this line.
-pub fn node_failed_line(node: &NodeId, failure: &Failure) -> String {
-    format!("node `{node}` failed: {}", failure.headline())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::events::Failure;
 
     #[test]
     fn a_denial_read_from_a_log_without_reasons_names_its_paths() {
@@ -41,25 +31,6 @@ mod tests {
                 denied_paths: vec!["a.txt".into(), ".claude/x".into()],
                 reasons: Vec::new(),
             }
-        );
-        assert_eq!(
-            failure.to_string(),
-            "wrote what no session of the run may write — a.txt, .claude/x: undo those changes"
-        );
-    }
-
-    #[test]
-    fn an_unpassable_plan_names_each_task_its_criterion_and_why() {
-        let failure = Failure::PlanUnpassable {
-            unpassable: vec![super::super::UnpassableTask {
-                task_id: "task-u".into(),
-                cmd: "false".to_string(),
-                why: "false exits 1".to_string(),
-            }],
-        };
-        assert_eq!(
-            failure.headline(),
-            "the plan holds a criterion no work can pass — task `task-u`: `false` (false exits 1)"
         );
     }
 }

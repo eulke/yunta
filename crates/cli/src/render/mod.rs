@@ -31,10 +31,10 @@ pub(crate) fn draw(doc: doc::Doc<'_>, look: &Look) -> String {
     yunta_render::surface::Terminal::on(*look).draw(&doc)
 }
 pub(crate) use yunta_render::{
-    bar, bar_cells, blocks, cell_width, doc, duration, evidence, glyphs, id_column, indent, ink,
-    label, middle_cut, paths, prose, shown, sparkline, state, truncate, wrap, Glyphs, Look, Mark,
-    NodeDisplay, Ratio, StateWord, Tokens, Width, CHILD_DEPTH, INDENT, INDENT_WIDTH, LABEL_WIDTH,
-    STATE_WIDTH,
+    bar, bar_cells, blocks, cell_width, doc, duration, evidence, failure, glyphs, id_column,
+    indent, ink, middle_cut, paths, prose, shown, sparkline, state, truncate, wrap, Glyphs, Look,
+    Mark, NodeDisplay, Ratio, StateWord, Tokens, Width, CHILD_DEPTH, INDENT, INDENT_WIDTH,
+    LABEL_WIDTH, STATE_WIDTH,
 };
 
 /// The look of a terminal a golden is rendered for.

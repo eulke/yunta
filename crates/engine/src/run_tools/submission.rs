@@ -365,7 +365,7 @@ impl SessionTools {
 }
 
 /// How each test of an accepted spec fails before the work: its exit and
-/// the last line it printed, redacted the way the log would be. A test
+/// the line it concluded with, redacted the way the log would be. A test
 /// that fails for anything but the missing behavior — a typo, a wrong
 /// path — fails after the work too, and this is where its writer sees it.
 fn failing_now(
@@ -380,12 +380,12 @@ fn failing_now(
          missing behavior fails after the work too:",
     );
     for (task, run) in failing {
-        let said = match run.said() {
-            Some(said) => format!(" — it said `{}`", redactor.text(&said)),
+        let line = match run.conclusion() {
+            Some(line) => format!(" — it said `{}`", redactor.text(&line)),
             None => ", printing nothing".to_string(),
         };
         text.push_str(&format!(
-            "\n  `{}` (task `{task}`): exit {}{said}",
+            "\n  `{}` (task `{task}`): exit {}{line}",
             run.cmd,
             run.exit_described()
         ));

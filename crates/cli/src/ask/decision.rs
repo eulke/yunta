@@ -18,7 +18,7 @@ use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
 use crate::commands::status::decision::{account, before_you_decide, Beside};
 use crate::render::blocks::{Drawn, Headline};
-use crate::render::{label, Mark};
+use crate::render::Mark;
 
 /// What settles an option that asks for nothing: the decision as it
 /// stands, or a note sent with it.
@@ -142,10 +142,16 @@ fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
     escalation
         .options()
         .iter()
-        .map(|option| Choice {
-            label: label(option).map(str::to_string),
-            detail: Some(option.tradeoff.clone()),
-            ..Choice::named(option.id.as_str(), option.id.clone())
+        .map(|option| {
+            let (words, detail) = yunta_render::escalation::option_words(escalation, option);
+            // A label that says nothing beyond the id is left off the row, which names it.
+            let label =
+                Some(words).filter(|words| !words.is_empty() && words != option.id.as_str());
+            Choice {
+                label,
+                detail,
+                ..Choice::named(option.id.as_str(), option.id.clone())
+            }
         })
         .collect()
 }
@@ -158,18 +164,19 @@ mod tests {
     use yunta_core::NonEmpty;
 
     fn escalation() -> GateWaitingPayload {
+        escalation_with(GateOption {
+            id: "approve".into(),
+            label: Some("Add an in-memory session store".to_string()),
+            tradeoff: Some("Unblocks now; one more task in the document".to_string()),
+            asks: None,
+        })
+    }
+
+    fn escalation_with(option: GateOption) -> GateWaitingPayload {
         Escalation::new(
             "T007 failed three times",
             vec![Fact::labelled("criteria_checked", "2/3 green")].into(),
-            NonEmpty::from((
-                GateOption {
-                    id: "approve".into(),
-                    label: "Add an in-memory session store".to_string(),
-                    tradeoff: "Unblocks now; one more task in the document".to_string(),
-                    asks: None,
-                },
-                Vec::new(),
-            )),
+            NonEmpty::from((option, Vec::new())),
         )
         .expect("the summary states no fact the evidence holds")
         .into_payload()
@@ -189,5 +196,17 @@ mod tests {
             Some("Unblocks now; one more task in the document"),
             "every option declares what it trades off, and the menu shows it"
         );
+    }
+
+    #[test]
+    fn a_label_that_only_repeats_the_id_is_left_off_the_row() {
+        let drawn = options(&escalation_with(GateOption {
+            id: "approve".into(),
+            label: Some("approve".to_string()),
+            tradeoff: None,
+            asks: None,
+        }));
+        let first = drawn.first().expect("the menu offers the option");
+        assert_eq!(first.label, None, "the row already names the option");
     }
 }

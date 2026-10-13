@@ -114,15 +114,15 @@ pub async fn status(
         Some((_, escalation)) => crate::json::shown_of(&run_dir, escalation, &state).await?,
         None => Vec::new(),
     };
+    let next = paint(
+        page.next(decision.as_ref().map(|(_, escalation)| &**escalation))
+            .lines(&look),
+    );
     let decided = decision_page((run_id, &tree), &state, &frame.phase, (decision, &shown));
     if let Some(decided) = &decided {
         out.push('\n');
         out.push_str(&decided.text);
     }
-    let next = paint(
-        page.next(decided.as_ref().is_some_and(|d| d.menu))
-            .lines(&look),
-    );
     if !next.is_empty() {
         out.push('\n');
         out.push_str(&next);
@@ -131,11 +131,9 @@ pub async fn status(
     Ok(Outcome::Success)
 }
 
-/// The decision a parked run waits on, as the page prints it, and
-/// whether the log rebuilds a menu for it.
+/// The decision a parked run waits on, as the page prints it.
 struct Decided {
     text: String,
-    menu: bool,
 }
 
 /// What a parked run is waiting on, printed after the facts because it
@@ -176,16 +174,15 @@ fn decision_page(
                 // above the decision and whole, so it can be copied
                 // into another terminal.
                 text: format!("{INDENT}{}\n{block}", decision::run_tree_line(tree)),
-                menu: true,
             }
         }
         None => Decided {
             text: decision::without_menu(
                 run_id,
                 &advice::parked_in_full(waiting),
+                advice::reset_pause(phase).is_some(),
                 crate::render::stdout_width().cells(),
             ),
-            menu: false,
         },
     })
 }

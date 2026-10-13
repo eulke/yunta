@@ -4,7 +4,7 @@
 //! findings and the birth of a run, all derived from the event log alone.
 
 use yunta_core::RunId;
-use yunta_engine::{NodeState, RunError, RunReport, RunTerminal};
+use yunta_engine::{current_escalation, NodeState, RunError, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 use yunta_testkit_core::FixedClock;
 
@@ -15,12 +15,15 @@ use yunta_core::events::{
     RecordedOrigin, RunEvent, RunFinishedPayload, RunMetrics, TerminalState, TokenUsage,
 };
 
+#[path = "run/failures.rs"]
+mod failures;
+
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(
         pause,
         PauseReason::NodeFailed { node: named, failure }
-            if named.as_str() == node && failure.headline() == headline
+            if named.as_str() == node && yunta_render::failure::headline(failure) == headline
     )
 }
 
@@ -295,46 +298,6 @@ nodes:
         state.nodes.state("build"),
         Some(NodeState::Failed { .. })
     ));
-}
-
-#[tokio::test]
-async fn a_session_that_never_hands_over_its_declared_document_fails_the_node() {
-    let bench = Bench::new();
-
-    let workflow = r#"
-name: broken-plan
-nodes:
-  - id: plan
-    kind: prompt
-    runner: planner
-    prompt: "Write the plan."
-    artifacts:
-      produces: [tasks]
-"#;
-
-    // The session claims success but submits nothing — the engine
-    // verifies, and the document nobody handed over fails the node. It
-    // names the node and what that node owes: no file was ever going to
-    // be there, so the failure points at nothing on disk.
-    let fixture = r#"
-dialect: claude-code
-sessions:
-  - outcome: { type: completed, summary: "trust me, it is written" }
-"#;
-
-    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
-
-    assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.state("plan") {
-        Some(NodeState::Failed { failure, .. }) => {
-            assert_eq!(
-                failure.to_string(),
-                "node `plan`: 1 error\n  handed over no tasks document — \
-                 produce it before the node ends, or stop declaring it here"
-            );
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -1165,8 +1128,8 @@ nodes:
     assert!(
         matches!(reason, PauseReason::Escalation(_))
             && sentence.contains("report.md")
-            && failure.to_string().contains("never produced"),
-        "the second attempt is judged on what it produced: {reason:?} / {failure}"
+            && yunta_render::failure::sentence(failure).contains("never produced"),
+        "the second attempt is judged on what it produced: {reason:?} / {failure:?}"
     );
     assert_eq!(
         bench.accepted(),
@@ -1358,72 +1321,6 @@ nodes:
     }
 }
 
-/// A `loop` node whose executor session dies reports the death, not the
-/// tail that says no task is ready: what a reader has to act on is the
-/// CLI that would not start, and the criteria were never run at all.
-#[tokio::test]
-async fn a_loop_node_whose_session_died_fails_naming_the_adapter_and_the_exit() {
-    let bench = Bench::new();
-
-    let workflow = r#"
-name: dying-loop
-nodes:
-  - id: plan
-    kind: prompt
-    runner: planner
-    prompt: "Write the tasks document."
-    artifacts:
-      produces: [tasks]
-  - id: implement
-    kind: loop
-    runner: executor
-    depends_on: [plan]
-    until: all_tasks_complete
-    prompt: "Read your task from the tasks document and implement it."
-"#;
-
-    let fixture = r#"
-dialect: claude-code
-sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_tasks
-        arguments:
-          document:
-            tasks:
-              - id: T001
-                title: "Create hello"
-                scope: ["hello.txt"]
-                criteria:
-                  - cmd: "test -f hello.txt"
-    outcome: { type: completed, summary: "planned" }
-  - outcome: { type: crash }
-"#;
-
-    let RunReport { terminal, state: _ } = bench.run(workflow, fixture).await;
-    assert!(
-        !matches!(terminal, RunTerminal::Finished),
-        "a loop whose session died does not finish: {terminal:?}"
-    );
-
-    let failure = bench
-        .events()
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(p))) => Some(p.clone()),
-            _ => None,
-        })
-        .expect("the loop node failed");
-    let yunta_core::events::Failure::SessionDied { died } = &failure.failure else {
-        panic!("the death is the fact, not a tail: {:?}", failure.failure);
-    };
-    assert_eq!(died.adapter, "mock");
-    assert!(
-        failure.retryable,
-        "a CLI that would not start is worth another run"
-    );
-}
-
 #[tokio::test]
 async fn a_run_records_what_its_commands_run_with_when_it_is_born() {
     let bench =
@@ -1467,7 +1364,6 @@ async fn a_log_that_breaks_before_its_close_is_broken_not_finished() {
         .await;
     let failed = NodeFailedPayload::new(
         Failure::message("no start".to_string()),
-        false,
         TokenUsage::default(),
     );
     let close = RunFinishedPayload {

@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
+use yunta_core::events::{Failure, FindingEvent, GateEvent, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::golden::assert_golden;
@@ -182,7 +182,7 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 }
 
 #[tokio::test]
-async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
+async fn changes_requested_posts_findings_and_fails_the_node() {
     let (bench, forge_state) = bench_on_a_forge();
 
     bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
@@ -197,16 +197,16 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
     );
 
     let RunReport { terminal, state } = bench.wake().await;
-    // No `on_failure` declared on this workflow's gate, so a retryable
-    // failure with nowhere to reroute to just pauses — the same rule
-    // any other failed node without `on_failure` already follows.
+    // No `on_failure` declared on this workflow's gate, so a failure with
+    // nowhere to reroute to just pauses — the same rule any other failed
+    // node without `on_failure` already follows.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
         state.nodes.state("approve"),
         Some(NodeState::Failed {
-            retryable: true,
+            failure: Failure::Message { outcome },
             ..
-        })
+        }) if outcome.starts_with("changes requested by person-b")
     ));
 
     let events = bench.events();
@@ -297,7 +297,7 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
 }
 
 #[tokio::test]
-async fn a_closed_pr_fails_the_node_non_retryably() {
+async fn a_closed_pr_fails_the_node_without_approval() {
     let (bench, forge_state) = bench_on_a_forge();
 
     bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
@@ -307,9 +307,9 @@ async fn a_closed_pr_fails_the_node_non_retryably() {
     assert!(matches!(
         state.nodes.state("approve"),
         Some(NodeState::Failed {
-            retryable: false,
+            failure: Failure::Message { outcome },
             ..
-        })
+        }) if outcome == "the pull request was closed without approval"
     ));
 }
 

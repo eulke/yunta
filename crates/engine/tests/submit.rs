@@ -12,11 +12,14 @@
 //! answer, and the session fixes it in the same breath.
 
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
-use yunta_core::events::{ArtifactId, EventPayload, SubmissionOutcome};
+use yunta_core::events::{ArtifactId, EventPayload, Failure, SubmissionOutcome};
 use yunta_core::port::{Policy, PolicyApplied};
 use yunta_core::{ArtifactKind, Capabilities};
-use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_engine::{current_escalation, NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
+
+#[path = "submit/undelivered.rs"]
+mod undelivered;
 
 const PLAN_NODE: &str = r#"
 name: plan
@@ -331,62 +334,6 @@ sessions:
         .collect();
     assert_eq!(hashes.len(), 2);
     assert_eq!(hashes[0], hashes[1], "one meaning, one file, one hash");
-}
-
-#[tokio::test]
-async fn a_document_never_submitted_fails_the_node_with_no_second_session() {
-    let bench = Bench::new();
-    let fixture = r#"
-dialect: claude-code
-sessions:
-  - outcome: { type: completed, summary: "said it was done" }
-"#;
-    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
-    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
-
-    // One attempt, and no session opened to correct anything: a document
-    // nobody handed over is a node that failed, not a node to re-instruct.
-    assert_eq!(kinds(&bench, "node_started"), 1);
-    assert_eq!(kinds(&bench, "agent_session_opened"), 1);
-
-    let retryable = bench
-        .events()
-        .iter()
-        .rev()
-        .find_map(|event| match event.payload() {
-            Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.retryable),
-            _ => None,
-        })
-        .expect("the node failed");
-    assert!(!retryable, "there is nothing to attempt again");
-}
-
-#[tokio::test]
-async fn a_typed_artifact_on_an_adapter_without_run_tools_fails_before_dispatch() {
-    // The capability is absent, so the document has no way in. The node
-    // fails before a session opens rather than after one produced
-    // nothing.
-    let bench = Bench::new().with_capabilities(Capabilities::default());
-    let fixture = r#"
-dialect: claude-code
-sessions:
-  - outcome: { type: completed, summary: "never reached" }
-"#;
-    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
-    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
-
-    match state.nodes.state("plan") {
-        Some(NodeState::Failed { failure, .. }) => {
-            let text = failure.to_string();
-            assert!(
-                text.contains("run_tools") && text.contains("tasks"),
-                "the refusal names the capability and the artifact: {text}"
-            );
-        }
-        other => panic!("expected plan failed, got {other:?}"),
-    }
-    assert_eq!(kinds(&bench, "agent_session_opened"), 0);
-    assert_eq!(kinds(&bench, "capability_degraded"), 0);
 }
 
 #[tokio::test]
@@ -939,7 +886,7 @@ sessions:
 
     match state.nodes.state("implement") {
         Some(NodeState::Failed { failure, .. }) => {
-            let text = failure.to_string();
+            let text = yunta_render::failure::sentence(failure);
             assert!(
                 text.contains("run_tools") && text.contains("findings"),
                 "the refusal names the capability and the artifact: {text}"

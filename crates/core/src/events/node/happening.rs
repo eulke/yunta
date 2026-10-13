@@ -167,7 +167,6 @@ fn said(event: &NodeEvent) -> NodeState {
         NodeEvent::Failed(p) => NodeState::Failed {
             failure: p.failure.clone(),
             tokens: p.tokens_used,
-            retryable: p.retryable,
         },
         NodeEvent::Started(p) => NodeState::Running { attempt: p.attempt },
         NodeEvent::RunnerResolved(_)

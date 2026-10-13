@@ -5,7 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::payloads::{Escalation, GateWaitingPayload};
+use super::escalation::Escalation;
+use super::payloads::GateWaitingPayload;
 use crate::expansion::{Precheck, Waiting};
 
 /// What a loop waits on in one scope request.

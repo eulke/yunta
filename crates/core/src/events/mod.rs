@@ -35,12 +35,13 @@ pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
-    loop_overrun_failure, node_failed_line, CommandExit, CommandOrigin, Failure, OwedScope,
-    RequestedScope, SessionDeath, SessionEnd, SessionExit, UnpassableTask, PAST_THE_CAP,
-    TAIL_LINES,
+    loop_overrun_failure, AccountLimit, CommandExit, CommandOrigin, Facts, Failure, FailureCause,
+    LimitSource, Outlook, OwedScope, Precondition, RedCheck, RefusalCause, Remedy, RequestedScope,
+    SessionDeath, SessionEnd, SessionExit, SessionRefusal, Stuck, Unanswered, UnpassableTask,
+    PAST_THE_CAP, STOPPED_EXIT_CODE, TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
-pub use gates::{ledger::*, payloads::*, scope_wait::*, GateEvent, Withheld};
+pub use gates::{escalation::*, ledger::*, payloads::*, scope_wait::*, GateEvent, Withheld};
 pub use meta::EventMeta;
 pub use node::{ledger::*, payloads::*, NodeEvent};
 pub use redact::Unredactable;
@@ -51,7 +52,7 @@ pub use run::{ledger::*, metrics::*, payloads::*, PauseReason, RunEvent, Suspens
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
 pub use session::{ledger::*, payloads::*, SessionEvent};
 pub use spend::Spend;
-pub use tasks::{ledger::*, payloads::*, TaskEvent};
+pub use tasks::{ledger::*, payloads::*, stop::*, TaskEvent};
 pub use unknown::UnknownKindCount;
 
 // Re-exported for convenience: `agent_session_opened`'s payload uses this

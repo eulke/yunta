@@ -44,6 +44,10 @@ pub(super) fn attention(
     glyphs: Glyphs,
 ) -> Option<Line> {
     let on = advice::parked(&frame.phase)?;
+    // A limit's reset is nobody's to answer: the run resumes on its own.
+    if advice::reset_pause(&frame.phase).is_some() {
+        return None;
+    }
     Some(
         Line::new()
             .push(
@@ -85,6 +89,9 @@ pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
         ));
     }
     let line = Line::new().push(Tone::Muted, format!("{}{sep}", said.join(&sep)));
+    if advice::reset_pause(&frame.phase).is_some() {
+        return line.push(Tone::Muted, "waiting for a reset");
+    }
     match advice::parked(&frame.phase) {
         Some(_) => line.push(Tone::NeedsYou, "needs you"),
         None => line.push(Tone::Muted, "nothing needs you"),
@@ -386,6 +393,23 @@ mod tests {
             "it carries the command that answers it, whole: {row}"
         );
         assert!(row.contains("node `plan`"), "and what it is about: {row}");
+    }
+
+    #[test]
+    fn a_run_waiting_on_a_reset_draws_no_attention_row_and_says_it_waits() {
+        let reset = RunPhase::Waiting {
+            on: yunta_engine::WaitingOn::Run {
+                reason: yunta_core::events::PauseReason::AwaitingReset {
+                    node: NodeId::from_static("build"),
+                    at: yunta_testkit_core::fixed_now(),
+                },
+            },
+        };
+        let frame = standing(reset, None);
+        assert!(attention(&frame, &RUN, true, Glyphs::Ascii).is_none());
+        let line = Ink::Plain.paint(&footer(&frame, Glyphs::Ascii));
+        assert!(line.ends_with(" waiting for a reset"), "{line}");
+        assert!(!line.contains("needs you"), "{line}");
     }
 
     #[test]

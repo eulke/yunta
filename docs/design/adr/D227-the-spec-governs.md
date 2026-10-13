@@ -55,8 +55,8 @@ whatever the code does.
    - An approval seeded while the run was parked no longer stands, so the gate
      asks again.
 5. **A gate on a forge does not publish.**
-   - The engine posts one finding per flaw on the plan and fails the gate,
-     retryable. Its `on_failure` sends the plan back, as a request for changes
+   - The engine posts one finding per flaw on the plan and fails the gate, and
+     its menu offers a retry. Its `on_failure` sends the plan back, as a request for changes
      would.
    - A gate that falls back to the console withholds approval.
    - A gate already published stays as it was.

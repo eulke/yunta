@@ -5,13 +5,15 @@
 //! Running it again pushes the same branch and finds the pull request it
 //! opened by the run's marker, so a rerun never opens a second one.
 
+use chrono::{DateTime, Utc};
 use yunta_core::events::{
-    EngineFact, EventPayload, NodeEvent, NodeOutcome, PullRequestOpenedPayload, TokenUsage,
+    AccountLimit, EngineFact, EventPayload, Failure, LimitSource, NodeEvent, NodeOutcome,
+    PullRequestOpenedPayload, TokenUsage,
 };
-use yunta_core::port::{Forge, PullRequestRef, PullRequestRequest};
+use yunta_core::port::{Forge, ForgeError, PullRequestRef, PullRequestRequest};
 use yunta_core::{ConfigKey, Node};
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::step::Step;
 use super::{RunCtx, RunError};
@@ -42,14 +44,11 @@ pub(super) async fn execute_pull_request(
             return Err(error.into());
         }
         let said = format!("pushing `{head}` to `{remote}`: {}", error.detail());
-        return fail(ctx, node, said, false).await;
+        return fail(ctx, node, said).await;
     }
     let opened = match forge.open_pull_request(&request).await {
         Ok(opened) => opened,
-        Err(error) => {
-            let said = format!("opening the pull request: {}", yunta_core::describe(&error));
-            return fail(ctx, node, said, false).await;
-        }
+        Err(error) => return open_refused(ctx, node, &error).await,
     };
     ctx.emit(
         Some(&node.id),
@@ -73,6 +72,39 @@ fn opened_fact(opened: PullRequestRef) -> NodeOutcome {
     })
 }
 
+/// Fails the node with the forge's refusal to open the pull request: a spent
+/// rate limit is the account's limit, and any other refusal is its sentence.
+async fn open_refused(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    error: &ForgeError,
+) -> Result<NodeEnd, RunError> {
+    if let Some(failure) = forge_limit(error, ctx.clock.now()) {
+        return fail_with(ctx, node, failure, TokenUsage::default()).await;
+    }
+    let said = format!("opening the pull request: {}", yunta_core::describe(error));
+    fail(ctx, node, said).await
+}
+
+/// The failure a forge refusal leaves when the forge's rate limit is spent:
+/// the account's limit, resetting `retry_after` past `failed_at` when the
+/// forge named a wait. Any other refusal is not a limit, so `None`.
+pub(super) fn forge_limit(error: &ForgeError, failed_at: DateTime<Utc>) -> Option<Failure> {
+    let ForgeError::RateLimited { retry_after, .. } = error else {
+        return None;
+    };
+    let resets_at = retry_after
+        .and_then(|wait| chrono::Duration::from_std(wait).ok())
+        .map(|wait| failed_at + wait);
+    Some(Failure::Limit {
+        limit: AccountLimit {
+            source: LimitSource::Forge,
+            resets_at,
+            message: yunta_core::describe(error),
+        },
+    })
+}
+
 /// The forge the pull request is opened through and what it asks for,
 /// or the node ended: a key the frozen config leaves unset, a forge this
 /// machine cannot reach, a template that does not render.
@@ -93,7 +125,7 @@ async fn prepared<'a>(
     let Some(forge) = ctx.forge else {
         let said = "the forge the config declares is not reachable from this machine: the \
                     variable its `token_env` names is not set";
-        return Ok(Step::Ended(fail(ctx, node, said.to_string(), false).await?));
+        return Ok(Step::Ended(fail(ctx, node, said.to_string()).await?));
     };
     let title = match render_or_fail(ctx, node, title).await? {
         Step::Value(title) => title,

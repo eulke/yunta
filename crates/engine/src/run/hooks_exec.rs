@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use yunta_core::events::{
     CommandExit, CommandOrigin, EventPayload, Failure, HookExecutedPayload, HookPhase, TokenUsage,
+    STOPPED_EXIT_CODE,
 };
 use yunta_core::{ConfigKey, HookFailurePolicy, HookStep, Hooks, Node, Resolved};
 
@@ -121,7 +122,7 @@ pub(super) async fn run_hook(
         // Never a real process exit code (those are 0..=255) — distinct
         // from -1's "couldn't even render/run", so a hook the engine
         // stopped is diagnosable from the event alone.
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => STOPPED_EXIT_CODE,
     };
     let printed = CommandOutput::of(&outcome);
     let output = crate::artifacts::store::ObjectStore::at(ctx.run_dir)
@@ -193,14 +194,14 @@ pub(super) async fn after_hooks(
     for step in &effective_hooks(ctx, node).after {
         let end = match run_hook(ctx, node, HookPhase::After, step).await? {
             HookRun::Violation(rule) => {
-                fail_with_tokens_staged(ctx, node, rule, false, tokens, staged).await?
+                fail_with_tokens_staged(ctx, node, rule, tokens, staged).await?
             }
             HookRun::Unset(key) => {
-                fail_with_staged(ctx, node, Failure::unset(key), false, tokens, staged).await?
+                fail_with_staged(ctx, node, Failure::unset(key), tokens, staged).await?
             }
             HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
                 let failure = Failure::exited(exit);
-                fail_with_staged(ctx, node, failure, false, tokens, staged).await?
+                fail_with_staged(ctx, node, failure, tokens, staged).await?
             }
             HookRun::Passed | HookRun::Failed(_) => continue,
         };

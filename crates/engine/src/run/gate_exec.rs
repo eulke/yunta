@@ -26,8 +26,9 @@ use yunta_core::port::{
 };
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, Responder};
 
-use super::node_close::{fail, finish_node};
+use super::node_close::{fail, fail_with, finish_node};
 use super::node_exec::template_vars;
+use super::pull_request_exec::forge_limit;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
 use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
@@ -90,13 +91,9 @@ pub(super) async fn publish_gate(
         shown,
     };
 
-    let published = forge
-        .publish(&request)
-        .await
-        .map_err(|source| RunError::Forge {
-            context: format!("publish node `{}`'s external gate", node.id),
-            source,
-        })?;
+    let Some(published) = publish_or_fail(ctx, node, forge, &request).await? else {
+        return Ok(GateStep::Resolved);
+    };
 
     ctx.emit(
         Some(&node.id),
@@ -117,6 +114,33 @@ pub(super) async fn publish_gate(
     Ok(GateStep::Waiting(PauseReason::ExternalGate {
         url: published.url,
     }))
+}
+
+/// Publishes the gate's pull request. A forge whose rate limit is spent
+/// fails the node with the account's limit, and `None` says the node ended
+/// that way; any other refusal is the run's error.
+async fn publish_or_fail(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    forge: &dyn Forge,
+    request: &PublishRequest,
+) -> Result<Option<PullRequestRef>, RunError> {
+    match forge.publish(request).await {
+        Ok(published) => Ok(Some(published)),
+        Err(error) => {
+            let Some(failure) = forge_limit(&error, ctx.clock.now()) else {
+                return Err(RunError::Forge {
+                    context: format!("publish node `{}`'s external gate", node.id),
+                    source: error,
+                });
+            };
+            // Publishing does not start the node, so a refusal starts it
+            // first, as every other failure of this step does.
+            emit_started(ctx, node).await?;
+            fail_with(ctx, node, failure, TokenUsage::default()).await?;
+            Ok(None)
+        }
+    }
 }
 
 /// What the reviewer decides on, as the run holds it: each artifact's
@@ -145,7 +169,6 @@ async fn held_for_review(
                     node.id,
                     wanted.label()
                 ),
-                false,
             )
             .await?;
             return Ok(None);
@@ -303,7 +326,6 @@ async fn resolve_from_poll(
                     "changes requested by {by} at {reviewed_sha} ({})",
                     yunta_core::text::counted(comments.len(), "comment")
                 ),
-                true,
             )
             .await?;
             Ok(GateStep::Resolved)
@@ -319,7 +341,6 @@ async fn resolve_from_poll(
                 ctx,
                 node,
                 "the pull request was closed without approval".to_string(),
-                false,
             )
             .await?;
             Ok(GateStep::Resolved)
@@ -437,7 +458,7 @@ async fn render_or_fail_here(
         Ok(rendered) => Ok(Step::Value(rendered)),
         Err(e) => {
             emit_started(ctx, node).await?;
-            fail(ctx, node, e.to_string(), false).await?;
+            fail(ctx, node, e.to_string()).await?;
             Ok(Step::Ended(GateStep::Resolved))
         }
     }

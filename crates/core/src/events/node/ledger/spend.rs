@@ -76,7 +76,6 @@ impl NodeRecord {
         self.state = Some(NodeState::Failed {
             failure: p.failure.clone(),
             tokens: attempt,
-            retryable: p.retryable,
         });
     }
 

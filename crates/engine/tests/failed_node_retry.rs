@@ -4,11 +4,18 @@
 //! the run asks, or later through `resolve_gate` — and a plain resume
 //! never spends on a retry nobody chose.
 
-use yunta_core::events::{GateEvent, NodeEvent, PauseReason};
+use yunta_core::events::{
+    EventPayload, Failure, GateEvent, NodeEvent, PauseReason, Stuck, TaskCause, TaskEvent,
+    TaskStatus, TaskStop,
+};
+use yunta_core::ConfigKey;
 use yunta_engine::{current_escalation, RunReport, RunTerminal};
-use yunta_testkit::{write, Bench};
+use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
 mod common;
+
+#[path = "failed_node_retry/loop_menu.rs"]
+mod loop_menu;
 use common::*;
 
 /// A node with no `on_failure` whose run pauses on failures: it fails
@@ -60,9 +67,10 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     assert_eq!(escalation.summary(), "node `broken` failed");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
+    let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
     assert_eq!(
-        escalation.options()[0].label,
-        "Run `broken` again (attempt 2)"
+        label,
+        "Run it again (attempt 2) once something outside the tree changes"
     );
 }
 
@@ -87,7 +95,22 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     assert_eq!(node.as_str(), "gate");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["abort"]);
-    let said = yunta_render::evidence::lines(escalation.evidence()).join("\n");
+    let menu = escalation
+        .failure
+        .as_ref()
+        .expect("the menu carries the failure it answers");
+    assert!(
+        matches!(
+            &menu.failure,
+            Failure::Unset {
+                unset: ConfigKey::Coverage
+            }
+        ),
+        "{:?}",
+        menu.failure
+    );
+    assert_eq!(menu.stuck, Some(Stuck::FrozenConfig));
+    let said = yunta_render::escalation::evidence(&escalation).join("\n");
     assert!(
         said.contains("`coverage.cmd`") && said.contains("start a new run"),
         "{said}"
@@ -180,9 +203,10 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
     .await
     .unwrap()
     .expect("the second failure is a decision too");
+    let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
     assert_eq!(
-        escalation.options()[0].label,
-        "Run `broken` again (attempt 3)"
+        label,
+        "Run it again (attempt 3) once something outside the tree changes"
     );
 }
 
@@ -275,217 +299,32 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     assert_eq!(attempts(&bench, "broken"), 1);
 }
 
-/// A loop whose one task needs `made.txt`: the plan writes the task, and
-/// only a session that creates the file meets its criterion.
-const ONE_TASK_LOOP_WORKFLOW: &str = r#"
-name: stuck-task
+/// A node whose printed output repeats its own name pauses on its failure
+/// menu, not on a summary the engine rejects for repeating the output.
+#[tokio::test]
+async fn a_failed_node_whose_output_names_it_pauses_on_its_menu() {
+    let workflow = r#"
+name: names-itself
 nodes:
-  - id: plan
+  - id: build
     kind: bash
-    run: "printf 'tasks:\n  - id: T001\n    title: Make it\n    scope: [made.txt]\n    criteria:\n      - cmd: test -f made.txt\n' > {{node.artifacts}}/tasks.yaml"
-    artifacts:
-      produces: [tasks]
-  - id: implement
-    kind: loop
-    runner: executor
-    depends_on: [plan]
-    until: all_tasks_complete
-    prompt: "Implement your task."
+    run: "echo build; exit 1"
 "#;
-
-/// An attempt that never writes the file: the task blocks after it.
-const MISSES: &str = "\
-dialect: claude-code
-sessions:
-  - outcome: { type: completed, summary: missed }
-";
-
-/// One attempt that writes it.
-const MAKES_IT: &str = "\
-dialect: claude-code
-sessions:
-  - effects:
-      - { path: made.txt, content: made }
-    outcome: { type: completed, summary: made }
-";
-
-fn status_of(bench: &Bench, task: &str) -> Option<yunta_core::events::TaskStatus> {
-    yunta_engine::derive(&bench.events()).tasks.status(task)
-}
-
-#[tokio::test]
-async fn a_blocked_task_says_what_its_attempt_left_red() {
-    let bench = parked(ONE_TASK_LOOP_WORKFLOW, MISSES).await;
-
-    assert_eq!(
-        status_of(&bench, "T001"),
-        Some(yunta_core::events::TaskStatus::Blocked)
-    );
-    let (_, escalation) = current_escalation(
-        &bench.manifest(),
-        &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
-    )
-    .await
-    .unwrap()
-    .expect("a loop that failed on a blocked task is a decision");
-    let facts = format!("{:?}", escalation.evidence());
-    assert!(
-        facts.contains("task `T001` blocked")
-            && facts.contains("not done after 1 attempt: `test -f made.txt` still exits 1"),
-        "the decision names the criterion still red: {facts}"
-    );
-}
-
-#[tokio::test]
-async fn retrying_a_loop_gives_the_task_it_left_blocked_a_fresh_cycle() {
-    let bench = parked(ONE_TASK_LOOP_WORKFLOW, MISSES).await;
-
-    answer_parked(&bench, "retry").await.unwrap();
-    let RunReport { terminal, state } = bench.wake_on_fixture(MAKES_IT).await;
-
-    assert_eq!(terminal, RunTerminal::Finished);
-    assert_eq!(
-        state.tasks.status("T001"),
-        Some(yunta_core::events::TaskStatus::Done)
-    );
-    // The reopening cites the decision that asked for it.
-    let events = bench.events();
-    let decision = events
-        .iter()
-        .rev()
-        .find(|e| {
-            matches!(
-                e.payload(),
-                Some(yunta_core::events::EventPayload::Gates(
-                    GateEvent::Resolved(_)
-                ))
-            )
-        })
-        .map(|e| e.seq)
-        .expect("the retry is on the log");
-    assert!(events.iter().any(|e| matches!(
-        e.payload(),
-        Some(yunta_core::events::EventPayload::Tasks(
-            yunta_core::events::TaskEvent::StatusChanged(p)
-        )) if p.task_id.as_str() == "T001"
-            && p.new_status == yunta_core::events::TaskStatus::Pending
-            && p.caused_by == decision
-    )));
-}
-
-#[tokio::test]
-async fn a_plain_resume_leaves_a_blocked_task_blocked() {
-    let bench = parked(ONE_TASK_LOOP_WORKFLOW, MISSES).await;
-
-    let RunReport { terminal, .. } = bench.wake_on_fixture(MAKES_IT).await;
-
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "{terminal:?}"
-    );
-    assert_eq!(
-        status_of(&bench, "T001"),
-        Some(yunta_core::events::TaskStatus::Blocked)
-    );
-    assert!(
-        bench.mock().requests_seen().is_empty(),
-        "nobody chose to spend again, so no session opened"
-    );
-}
-
-/// A loop whose one task writes `made.txt`, and whose criterion also
-/// needs `marker` — a file outside the repository that only a person
-/// provides. The sessions do the task's work; the criterion stays red
-/// until the person does their part.
-fn needs_a_person(marker: &std::path::Path) -> String {
-    format!(
-        r#"
-name: needs-a-person
-nodes:
-  - id: plan
-    kind: bash
-    run: "printf 'tasks:\n  - id: T001\n    title: Make it\n    scope: [made.txt]\n    criteria:\n      - cmd: test -f made.txt && test -f {marker}\n' > {{{{node.artifacts}}}}/tasks.yaml"
-    artifacts:
-      produces: [tasks]
-  - id: implement
-    kind: loop
-    runner: executor
-    depends_on: [plan]
-    until: all_tasks_complete
-    prompt: "Implement your task."
-"#,
-        marker = marker.display()
-    )
-}
-
-/// Three attempts: the first writes the task's own work, none can meet
-/// what the person has to provide.
-const DOES_ITS_PART: &str = "\
-dialect: claude-code
-sessions:
-  - effects:
-      - { path: made.txt, content: made }
-    outcome: { type: completed, summary: made }
-  - outcome: { type: completed, summary: nothing more to do }
-  - outcome: { type: completed, summary: nothing more to do }
-";
-
-async fn options(bench: &Bench) -> Vec<String> {
-    let (_, escalation) = current_escalation(
-        &bench.manifest(),
-        &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
-    )
-    .await
-    .unwrap()
-    .expect("a failed loop is a decision");
-    escalation
-        .options()
-        .iter()
-        .map(|option| option.id.to_string())
-        .collect()
-}
-
-#[tokio::test]
-async fn continuing_a_loop_from_the_work_it_left_closes_the_task_without_a_session() {
-    let outside = tempfile::tempdir().unwrap();
-    let marker = outside.path().join("provided");
-    let bench = parked(&needs_a_person(&marker), DOES_ITS_PART).await;
-    assert_eq!(
-        options(&bench).await,
-        ["continue-work", "retry", "abort"],
-        "the blocked task left work, so continuing from it is offered"
-    );
-
-    write(&marker, "done");
-    answer_parked(&bench, "continue-work").await.unwrap();
-    let RunReport { terminal, state } = bench
-        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []\n",
+            MOCK_CONFIG,
+        )
         .await;
-
-    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
-    assert_eq!(
-        state.tasks.status("T001"),
-        Some(yunta_core::events::TaskStatus::Done)
-    );
     assert!(
-        bench.mock().requests_seen().is_empty(),
-        "the work it left closed the task, so no session was spent on it"
-    );
-}
-
-#[tokio::test]
-async fn a_task_blocked_before_any_work_is_only_offered_to_run_again() {
-    let bench = parked(
-        &ONE_TASK_LOOP_WORKFLOW.replace("test -f made.txt", "yunta-no-such-tool"),
-        MISSES,
-    )
-    .await;
-
-    assert_eq!(
-        options(&bench).await,
-        ["retry", "abort"],
-        "the pre-check blocked it before any work, so there is nothing to continue from"
+        matches!(
+            terminal,
+            RunTerminal::Paused {
+                reason: PauseReason::NodeFailed { .. }
+            }
+        ),
+        "{terminal:?}"
     );
 }

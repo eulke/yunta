@@ -4,7 +4,7 @@ use super::state::Mark;
 
 /// What a run's derived phase is called, wherever a surface says it.
 ///
-/// Ten words for the ten answers a reader acts on. A listing, a status
+/// Eleven words for the eleven answers a reader acts on. A listing, a status
 /// page, a closing block and a JSON document each used to reach into
 /// the engine's `RunPhase` and choose a word, so one stop could be called four
 /// things — and whether the command succeeded was decided a third time,
@@ -15,6 +15,8 @@ use super::state::Mark;
 pub enum RunWord {
     Created,
     Running,
+    /// Parked until a limit resets; it resumes on its own.
+    Waiting,
     /// Its log says it is moving, and the engine that drove it is gone:
     /// nothing moves it until a person resumes it.
     Stalled,
@@ -34,9 +36,10 @@ pub enum RunWord {
 impl RunWord {
     /// Every word: what sizes a column of them, and what the tests that
     /// hold the set closed walk.
-    pub const ALL: [RunWord; 10] = [
+    pub const ALL: [RunWord; 11] = [
         RunWord::Created,
         RunWord::Running,
+        RunWord::Waiting,
         RunWord::Stalled,
         RunWord::NeedsYou,
         RunWord::Finished,
@@ -59,6 +62,7 @@ impl RunWord {
         match self {
             RunWord::Created => "created",
             RunWord::Running => "running",
+            RunWord::Waiting => "waiting",
             RunWord::Stalled => "stalled",
             RunWord::NeedsYou => "needs you",
             RunWord::Finished => "finished",
@@ -73,7 +77,7 @@ impl RunWord {
     /// The mark that repeats the word for the eye.
     pub fn mark(self) -> Mark {
         match self {
-            RunWord::Created | RunWord::Running => Mark::Running,
+            RunWord::Created | RunWord::Running | RunWord::Waiting => Mark::Running,
             RunWord::NeedsYou => Mark::NeedsYou,
             RunWord::Stalled | RunWord::Reported => Mark::Caution,
             RunWord::Finished => Mark::Done,
@@ -121,5 +125,11 @@ mod tests {
             assert!(cell_width(word.word()) <= RunWord::WIDEST, "{word:?}");
         }
         assert_eq!(RunWord::WIDEST, "needs you".len());
+    }
+
+    #[test]
+    fn a_run_waiting_on_a_reset_is_drawn_as_one_that_moves_on_its_own() {
+        assert_eq!(RunWord::Waiting.word(), "waiting");
+        assert_eq!(RunWord::Waiting.mark(), Mark::Running);
     }
 }

@@ -42,14 +42,11 @@ pub enum NodeState {
         tokens: TokenUsage,
     },
     Failed {
-        /// Why the node failed, as the log recorded it. The prose a
-        /// reader sees is produced from this (it is `Display`), so no
-        /// surface can disagree with the facts behind it.
+        /// Why the node failed, as the log recorded it. The words a
+        /// reader sees are written from this, so no surface can disagree
+        /// with the facts behind it.
         failure: Failure,
         tokens: TokenUsage,
-        /// Whether the caller that owned the budget expected another
-        /// attempt at this node.
-        retryable: bool,
     },
     /// Waiting on a human, and on what.
     Waiting {
@@ -205,10 +202,9 @@ pub struct NodeRecord {
     /// Whether the node's session lost its service and has not got it back.
     /// A terminal clears it.
     pub unreachable: bool,
-    /// The attempt before the open one, when it failed: its number, the
-    /// tree it started from and what it failed with — what the open
-    /// attempt is measured against to tell whether anything changed
-    /// since. `None` when the open attempt follows no failure.
+    /// The attempt before the open one, when it failed: its number and
+    /// what it failed with. `None` when the open attempt follows no
+    /// failure.
     pub failed_before: Option<FailedAttempt>,
     /// The session of a previous attempt that no terminal ever closed —
     /// what a resume finds when a crash cut the attempt between its
@@ -225,7 +221,6 @@ pub struct NodeRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FailedAttempt {
     pub attempt: u32,
-    pub from_tree: Option<TreeId>,
     pub failure: Failure,
 }
 
@@ -238,18 +233,8 @@ impl NodeRecord {
         };
         Some(FailedAttempt {
             attempt: self.attempts,
-            from_tree: self.from_tree.clone(),
             failure: failure.clone(),
         })
-    }
-
-    /// The failed attempt the open one repeats: the one before it failed,
-    /// and both started from the same recorded tree. `None` when either
-    /// named no tree, since then nothing says the tree stood still.
-    pub fn repeats(&self) -> Option<&FailedAttempt> {
-        self.failed_before
-            .as_ref()
-            .filter(|failed| failed.from_tree.is_some() && failed.from_tree == self.from_tree)
     }
 
     /// A `node_rerouted`: one more re-route, and the latest one kept.

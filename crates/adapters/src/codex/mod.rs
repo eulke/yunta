@@ -21,6 +21,8 @@ pub(crate) mod rail;
 pub(crate) mod settings;
 pub(crate) mod wire;
 
+pub(crate) use parse::failure_cause;
+
 use std::path::PathBuf;
 
 use async_trait::async_trait;

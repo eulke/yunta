@@ -75,13 +75,7 @@ async fn in_the_runs_tree(
     if let Some(captured) = super::shared_tree::found(ctx, node).await? {
         return Ok((captured.commit, captured.tree));
     }
-    let index =
-        crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
-    let pathspecs = ctx.protected().pathspecs();
-    let tree =
-        crate::worktree::capture_tree(ctx.worktree, &index, &pathspecs, ctx.root_supervision())
-            .await?;
-    Ok((None, tree))
+    Ok((None, super::shared_tree::recorded_tree(ctx, node).await?))
 }
 
 async fn started(

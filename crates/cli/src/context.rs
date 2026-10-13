@@ -249,3 +249,9 @@ pub fn own_binary() -> PathBuf {
 pub fn rail_command() -> RailCommand {
     RailCommand::new(own_binary())
 }
+
+/// How long until `at` by the system clock: zero once it has passed. The
+/// one reading of the clock a command takes before it has a run's clock.
+pub fn time_until(at: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
+    (at - chrono::Utc::now()).to_std().unwrap_or_default()
+}

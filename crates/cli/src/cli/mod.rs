@@ -106,7 +106,8 @@ enum Command {
     },
     /// Resume a run from its event log.
     ///
-    /// Resumes a run from its event log, restarting orphaned nodes.
+    /// Resumes a run from its event log, restarting orphaned nodes. A run
+    /// paused on a limit's reset waits for the reset first.
     Resume {
         #[command(flatten)]
         run: RunArg,

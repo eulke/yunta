@@ -16,6 +16,7 @@ use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{PriorEstimation, RunEnv, RunReport, RunTerminal};
 use yunta_storage::AsyncStorage;
 
+use crate::commands::{reset_at, spawn_detached_resume, DetachedResumeError};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::PreRunWarnings;
@@ -257,6 +258,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
 /// How the run ended, said the way this invocation was asked to say it.
 async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
     released(&settling).await?;
+    resumes_after_reset(&settling).await?;
     if settling.json {
         return Ok(report_run_json(
             settling.ctx,
@@ -317,6 +319,21 @@ async fn released(settling: &Settling<'_>) -> Result<(), CliError> {
         )
         .await?;
     }
+    Ok(())
+}
+
+/// A run paused on a limit's reset is taken on again by a detached resume
+/// that waits for the reset before it touches anything, so this invocation
+/// may leave now: nothing else would resume the run. An invocation a person
+/// interrupted starts nothing more.
+async fn resumes_after_reset(settling: &Settling<'_>) -> Result<(), CliError> {
+    if reset_at(&settling.report.state).is_none() || settling.cancelled {
+        return Ok(());
+    }
+    let run_dir = run_dir_of(settling.ctx, &settling.run_id);
+    spawn_detached_resume(&run_dir, settling.run_id.as_str(), &settling.ctx.cwd)
+        .await
+        .map_err(|source| DetachedResumeError::new(&settling.run_id, source))?;
     Ok(())
 }
 

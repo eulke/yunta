@@ -105,10 +105,19 @@ pub fn promotion_reason(
                 "node `{}` exhausted its re-routes to `{}`",
                 promoted.node, promoted.goto
             ),
-            &evidence::one_line(evidence),
+            &promotion_record(promoted, evidence),
         ),
         (None, Some(sentence)) => sentence.to_string(),
         (None, None) => evidence::one_line(evidence),
+    }
+}
+
+/// The record a promotion is read against: the failure that exhausted the
+/// re-routes, when the promotion carries it, and the evidence otherwise.
+fn promotion_record(promoted: &PromotionCause, evidence: &Evidence) -> String {
+    match &promoted.failure {
+        Some(failure) => evidence::one_line(&Evidence::from(crate::failure::facts(failure))),
+        None => evidence::one_line(evidence),
     }
 }
 
@@ -194,6 +203,7 @@ mod tests {
         let cause = PromotionCause {
             node: NodeId::from("lint"),
             goto: NodeId::from("fix-lint"),
+            failure: None,
         };
         let record = Evidence::from(vec![Fact::bare("exit 1")]);
         assert_eq!(
@@ -203,6 +213,19 @@ mod tests {
         assert_eq!(
             promotion_reason(None, Some("an older sentence"), &record),
             "an older sentence"
+        );
+    }
+
+    #[test]
+    fn a_promotion_that_carries_its_failure_reads_the_failure_as_its_record() {
+        let cause = PromotionCause {
+            node: NodeId::from("lint"),
+            goto: NodeId::from("fix-lint"),
+            failure: Some(yunta_core::events::Failure::message("exit 1")),
+        };
+        assert_eq!(
+            promotion_reason(Some(&cause), None, &Evidence::none()),
+            "node `lint` exhausted its re-routes to `fix-lint` — exit 1"
         );
     }
 }

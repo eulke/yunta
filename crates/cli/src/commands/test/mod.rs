@@ -30,7 +30,8 @@
 //! the `worktree` seed (absent: an empty repository), the `fixture`, the
 //! `decisions` it answers each gate with (absent: the run parks on the
 //! first one), and an `expect` block with `final_state` (`finished` |
-//! `needs you` | `reported` | `failed` | `promoted`), `nodes` and `tasks`.
+//! `needs you` | `waiting` | `reported` | `failed` | `promoted`), `nodes` and
+//! `tasks`.
 
 mod case;
 

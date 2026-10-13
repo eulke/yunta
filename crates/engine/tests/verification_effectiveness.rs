@@ -98,6 +98,7 @@ fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
         tail: Vec::new(),
         tree: None,
         head: None,
+        conclusion: None,
     }
 }
 
@@ -192,7 +193,6 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
                     "lint",
                     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                         Failure::message("lint failed".to_string()),
-                        true,
                         Default::default(),
                     ))),
                 )
@@ -220,7 +220,6 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                     "lint",
                     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                         Failure::message("lint failed".to_string()),
-                        true,
                         Default::default(),
                     ))),
                 )
@@ -234,7 +233,6 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                 "lint",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("lint failed".to_string()),
-                    true,
                     Default::default(),
                 ))),
             )

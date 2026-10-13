@@ -102,7 +102,7 @@ fn failed_node<'a>(failed: &'a FailedNode, handle: &str) -> Section<'a> {
         title: Line::new()
             .push(Tone::Strong, format!("node `{node}`"))
             .plain(" — ")
-            .plain(failed.failure.headline()),
+            .plain(crate::failure::headline(&failed.failure)),
         blocks: vec![Block::Failure(FailureDetail {
             failure: &failed.failure,
             whole: Some(Whole::Command(format!(

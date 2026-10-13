@@ -67,8 +67,7 @@ pub(super) async fn derive_findings(
         Ok(derived) => derived,
         Err(error) => {
             return Ok(Some(
-                fail_with_tokens_staged(ctx, node, error.to_string(), false, tokens, staged)
-                    .await?,
+                fail_with_tokens_staged(ctx, node, error.to_string(), tokens, staged).await?,
             ))
         }
     };

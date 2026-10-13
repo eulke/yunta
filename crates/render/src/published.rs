@@ -133,19 +133,19 @@ fn answers(decision: &GateDecision) -> Vec<DecisionOption> {
         DecisionOption {
             id: "approve".to_string(),
             label: Some("approve this pull request, or merge it".to_string()),
-            tradeoff: goes_on,
+            tradeoff: Some(goes_on),
             asks: None,
         },
         DecisionOption {
             id: "request changes".to_string(),
             label: Some("request changes, saying what to change in comments".to_string()),
-            tradeoff: corrected,
+            tradeoff: Some(corrected),
             asks: None,
         },
         DecisionOption {
             id: "close".to_string(),
             label: Some("close this pull request".to_string()),
-            tradeoff: STOPS.to_string(),
+            tradeoff: Some(STOPS.to_string()),
             asks: None,
         },
     ]

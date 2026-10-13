@@ -269,10 +269,15 @@ the rail started from; "after" carries it.
 | Claude before (4 earlier runs) | 4–5 each; 1 of 4 reached `ship` | red in all 3 that ran it | — | — | — | — | — |
 | Claude before | questions, `retry` blocked tasks, `retry` lint | red twice, 2 `fix-lint` sessions | — | 2 / — | 1h22m | — | 1h03m |
 | Claude after | `continue-work`, `grant` | green first time | 0 | 4 / 71 | 1h29m | 3 s | 38m |
-| Claude after | questions, `continue-work`, `retry` (account limit) | green first time | 1 | 3 / 110 | 1h16m | 10 s | 42m |
+| Claude after | questions, `continue-work`, `retry` (account limit, before `awaiting_reset`) | green first time | 1 | 3 / 110 | 1h16m | 10 s | 42m |
 | Codex before | `continue-work` | green first time | — | 0 / — | 7m | — | 43m |
 | Codex after | `grant` ×3 | green first time | 1 | 7 / 31 | 23m | 1 s | 26m |
 
+- Un límite de cuenta que nombra su hora de reset pausa como `awaiting_reset` y
+  retoma a esa hora, sin un `retry` de una persona; el `retry` de una persona se
+  aplica a un límite solo cuando no nombró hora de reset. La parada `retry
+  (account limit)` de la fila de arriba se hizo con el binario anterior a ese
+  cambio.
 - Parity between the CLIs is a test, not an observation: the contract suite
   (`cargo test -p yunta-adapters --test contract`) runs each case against
   claude-code, codex and the mock. The runs above saw the same causes give the

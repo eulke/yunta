@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use yunta_core::events::Failure;
+use yunta_core::events::{Failure, GateWaitingPayload};
 use yunta_core::RunId;
 use yunta_engine::{NodeState, RunFrame, RunPhase, RunState};
 use yunta_render::spend::Breakdown;
@@ -61,6 +61,11 @@ impl Page<'_> {
                 Some(prompt) => (Tone::NeedsYou, advice::asking(prompt, self.engine.at)),
                 None => (Tone::NeedsYou, "it needs you".to_string()),
             },
+            // A limit's reset moves the run on its own, so the wait is not a
+            // stop a person is asked to answer.
+            (RunWord::Waiting, RunPhase::Waiting { on }) => {
+                (Tone::Muted, advice::parked_in_full(on))
+            }
             (_, RunPhase::Waiting { on }) => (Tone::NeedsYou, advice::parked_in_full(on)),
             (_, RunPhase::Broken { diagnostic }) => {
                 (Tone::Failed, yunta_core::text::one_line(diagnostic))
@@ -72,7 +77,7 @@ impl Page<'_> {
                 },
             ) => (
                 Tone::Failed,
-                yunta_core::text::one_line(&failure.to_string()),
+                yunta_core::text::one_line(&crate::render::failure::sentence(failure)),
             ),
             (_, RunPhase::Created | RunPhase::Running) => {
                 (Tone::Muted, "nothing needs you: it is moving".to_string())
@@ -194,7 +199,7 @@ impl Page<'_> {
         ) {
             return Vec::new();
         }
-        let claim = failure.headline();
+        let claim = crate::render::failure::headline(failure);
         // What a row leaves its note: the indent, the mark, the word and
         // an id column as wide as the longest id.
         let ids = crate::render::id_column(self.frame.nodes.iter().map(|node| node.id.as_str()));
@@ -268,8 +273,9 @@ impl Page<'_> {
             )
     }
 
-    /// What a person types next, for where the run stands.
-    pub(super) fn next(&self, menu: bool) -> Next {
+    /// What a person types next, for where the run stands. `decision` is
+    /// the decision the run stopped on, when the log rebuilds one.
+    pub(super) fn next(&self, decision: Option<&GateWaitingPayload>) -> Next {
         // A run asking at its terminal is alive: what moves it is the
         // answer given there, and what stops it is what stops any run
         // that is moving.
@@ -278,7 +284,7 @@ impl Page<'_> {
             None => crate::render::observed_word(self.frame, &self.engine),
         };
         Next {
-            steps: advice::after(word, self.run_id.handle(), menu),
+            steps: advice::after(word, self.run_id.handle(), decision),
         }
     }
 }

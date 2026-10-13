@@ -132,7 +132,6 @@ fn fixture_events() -> Vec<StoredEvent> {
             "b",
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria still red".to_string()),
-                true,
                 tokens(80, 40, None),
             ))),
         )

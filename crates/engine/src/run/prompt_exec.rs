@@ -6,7 +6,9 @@ use yunta_core::events::EventPayload;
 use yunta_core::events::Failure;
 use yunta_core::events::NodeOutcome;
 use yunta_core::events::OrphanedSession;
-use yunta_core::{Node, PromptSource};
+use yunta_core::events::{AccountLimit, FailureCause, LimitSource, SessionRefusal};
+use yunta_core::port::AgentError;
+use yunta_core::{AdapterId, Node, PromptSource};
 
 use crate::run_dir::Opening;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
@@ -181,7 +183,7 @@ pub(super) async fn execute_prompt(
             // A node that cannot proceed without the run tools it declared:
             // refused before a token is spent, naming what has no way in.
             Err(super::session_plan::OpenSessionError::RunTools(error)) => {
-                return super::node_close::fail(ctx, node, error.to_string(), false).await
+                return super::node_close::fail(ctx, node, error.to_string()).await
             }
             Err(super::session_plan::OpenSessionError::Audit(source)) => {
                 return Err(RunError::Storage(source))
@@ -240,6 +242,9 @@ pub(super) async fn execute_prompt(
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         crate::task_cycle::Opening {
             task: None,
+            arrivals: run_tools
+                .as_ref()
+                .map(crate::run_tools::RunToolsSession::arrivals),
             // A continued session has the brief to fall back on; an
             // interrupted one was already checked to be resumable.
             resume: resume_session
@@ -275,8 +280,9 @@ pub(super) async fn execute_prompt(
             let node_outcome = NodeOutcome::Summary(summary);
             close_node(ctx, node, Close::new(node_outcome, tokens).staged(&staged)).await
         }
-        DispatchOutcome::Failed { message, retryable } => {
-            fail_with_tokens_staged(ctx, node, message, retryable, tokens, &staged).await
+        DispatchOutcome::Failed { error, cause } => {
+            let failure = session_failure(adapter.id(), error, cause);
+            fail_with_staged(ctx, node, failure, tokens, &staged).await
         }
         // No terminal event means the engine records the death — the
         // adapter never invents a terminal of its own — with how the
@@ -284,11 +290,35 @@ pub(super) async fn execute_prompt(
         // refused its configuration from one that merely stopped.
         DispatchOutcome::Crashed { exit } => {
             let death = Failure::session_died(adapter.id().clone(), exit);
-            fail_with_staged(ctx, node, death, true, tokens, &staged).await
+            fail_with_staged(ctx, node, death, tokens, &staged).await
         }
         DispatchOutcome::BudgetExceeded { reason } => {
-            fail_with_tokens_staged(ctx, node, reason, false, tokens, &staged).await
+            fail_with_tokens_staged(ctx, node, reason, tokens, &staged).await
         }
         DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
+    }
+}
+
+/// The failure a session that failed on its own leaves on its node: the
+/// account's limit the adapter named, or the refusal it gave, each with
+/// the adapter's own message.
+fn session_failure(adapter: &AdapterId, error: AgentError, cause: FailureCause) -> Failure {
+    match cause {
+        FailureCause::Limit { resets_at } => Failure::Limit {
+            limit: AccountLimit {
+                source: LimitSource::Session {
+                    adapter: adapter.clone(),
+                },
+                resets_at,
+                message: error.message,
+            },
+        },
+        FailureCause::Refused(cause) => Failure::SessionRefused {
+            session_refused: SessionRefusal {
+                adapter: adapter.clone(),
+                cause,
+                message: error.message,
+            },
+        },
     }
 }

@@ -34,7 +34,7 @@ use yunta_engine::ShownDocument;
 use crate::commands::advice;
 use crate::render::blocks::{Chosen, Decision, DecisionOption, Drawn};
 use crate::render::ink::{Line, Tone};
-use crate::render::{cell_width, evidence, indent, label, wrap, Look, Width, INDENT};
+use crate::render::{cell_width, evidence, indent, wrap, Look, Width, INDENT};
 
 /// Where a run works, as the page says it above a decision: the path
 /// whole — it is copied into another terminal, never wrapped — and what
@@ -159,11 +159,14 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
         options: escalation
             .options()
             .iter()
-            .map(|option| DecisionOption {
-                id: option.id.to_string(),
-                label: label(option).map(str::to_string),
-                tradeoff: option.tradeoff.clone(),
-                asks: option.asks.clone(),
+            .map(|option| {
+                let (label, tradeoff) = yunta_render::escalation::option_words(escalation, option);
+                DecisionOption {
+                    id: option.id.to_string(),
+                    label: Some(label),
+                    tradeoff,
+                    asks: option.asks.clone(),
+                }
             })
             .collect(),
     };
@@ -180,9 +183,24 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
 /// The block `yunta status` prints for a run parked on something with no
 /// menu: what it waits on, that nothing here is answerable by choosing
 /// an option, and what moves the run instead, wrapped to `width` cells.
-pub(crate) fn without_menu(run_id: &RunId, reason: &str, width: usize) -> String {
+/// A run waiting on a limit's reset moves on its own, so the block says
+/// that and names no command.
+pub(crate) fn without_menu(
+    run_id: &RunId,
+    reason: &str,
+    awaits_reset: bool,
+    width: usize,
+) -> String {
     let mut out = "waiting on:\n".to_string();
     out.push_str(&paragraph(reason, 1, width));
+    if awaits_reset {
+        out.push_str(&paragraph(
+            "nothing here needs a choice: the run resumes on its own once the limit resets.",
+            1,
+            width,
+        ));
+        return out;
+    }
     out.push_str(&paragraph(
         "no options to choose here: a menu is reconstructed for a failed node, \
          an exhausted re-route and an unresolved gate node, and this pause is \
@@ -230,6 +248,9 @@ pub(crate) struct DecisionJson {
 
 impl DecisionJson {
     pub(crate) fn new(run_id: &RunId, node: &NodeId, escalation: GateWaitingPayload) -> Self {
+        // The options carry the words the text menu draws, so a program reads
+        // what a person reads, including for an option that stores none.
+        let escalation = escalation.worded(yunta_render::escalation::option_words);
         let commands = escalation
             .options()
             .iter()
@@ -258,8 +279,8 @@ mod tests {
     fn option(id: &'static str, label: &str, tradeoff: &str) -> GateOption {
         GateOption {
             id: yunta_core::OptionId::from_static(id),
-            label: label.to_string(),
-            tradeoff: tradeoff.to_string(),
+            label: Some(label.to_string()),
+            tradeoff: Some(tradeoff.to_string()),
             asks: None,
         }
     }
@@ -391,6 +412,17 @@ mod tests {
         assert_eq!(
             json["commands"]["retry"],
             "yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 retry"
+        );
+    }
+
+    #[test]
+    fn a_reset_pause_with_no_menu_says_the_run_resumes_on_its_own() {
+        let run = RunId::from_static("run-1");
+        let text = without_menu(&run, "node `build` waits for its limit to reset", true, 80);
+        assert!(text.contains("resumes on its own"), "{text}");
+        assert!(
+            !text.contains("yunta resume"),
+            "no command is asked of the person: {text}"
         );
     }
 }

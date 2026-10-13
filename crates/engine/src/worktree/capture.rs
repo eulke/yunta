@@ -83,8 +83,9 @@ pub(super) fn request_file_pathspec() -> String {
 /// The tree `cwd` stands at as git sees it, for a commit to hold. It is
 /// captured through an index of its own beside `index`, into which no
 /// capture forces an ignored path, so a commit never holds what the project
-/// ignores.
-pub(super) async fn capture_for_commit(
+/// ignores. Nothing is committed, so a caller can name the tree a commit would
+/// hold without making one.
+pub(crate) async fn capture_for_commit(
     cwd: &Path,
     index: &Path,
     supervision: Supervision<'_>,

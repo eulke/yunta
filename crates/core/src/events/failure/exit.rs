@@ -1,9 +1,9 @@
-//! How a process a node depended on ended: a session's CLI that died
+//! How a process a node depended on ended, what an account's limit said,
+//! and what a command that never answered means: a session's CLI that died
 //! without a terminal event, or a command that exited non-zero, each with
 //! the last lines it printed.
 
-use std::fmt;
-
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::events::HookPhase;
@@ -74,34 +74,6 @@ pub enum CommandOrigin {
     Hook { phase: HookPhase, command: String },
 }
 
-impl CommandExit {
-    /// The line that names the command and how it ended, without what it
-    /// printed.
-    pub fn headline(&self) -> String {
-        match &self.origin {
-            None => format!("exit {}", self.code),
-            Some(CommandOrigin::Executor { executor }) => {
-                format!("executor `{executor}` exited {}", self.code)
-            }
-            Some(CommandOrigin::Hook { phase, command }) => {
-                format!("{} hook `{command}` failed", phase.as_str())
-            }
-        }
-    }
-}
-
-impl fmt::Display for CommandExit {
-    /// The headline and, under it, the lines the command printed last. A
-    /// command that failed saying nothing — `test -f x` is the ordinary
-    /// case — reads as its headline alone.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&crate::text::detailed(
-            self.headline(),
-            &self.tail.join("\n"),
-        ))
-    }
-}
-
 /// A session that ended without ever reporting a terminal event: whose
 /// it was, and how its process went, when it had one of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -111,35 +83,55 @@ pub struct SessionDeath {
     pub exit: Option<SessionExit>,
 }
 
-impl fmt::Display for SessionDeath {
-    /// Every shape the type admits, the absence included: a session with
-    /// no process of its own has nothing to report about one.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(exit) = &self.exit else {
-            return write!(
-                f,
-                "session `{}` ended without a terminal event",
-                self.adapter
-            );
-        };
-        write!(
-            f,
-            "session `{}` {} before any terminal event",
-            self.adapter, exit.end
-        )?;
-        match exit.stderr_tail.last() {
-            Some(last) => write!(f, " — {last}"),
-            None => Ok(()),
-        }
-    }
+/// The account's limit, as the session or the forge reported it: where it
+/// came from, when it resets if it said so, and the words it came with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AccountLimit {
+    pub source: LimitSource,
+    /// Absolute: the moment the limit lifts, when the source named one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<DateTime<Utc>>,
+    pub message: String,
 }
 
-impl fmt::Display for SessionEnd {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SessionEnd::Code { code } => write!(f, "exited with code {code}"),
-            SessionEnd::Signal { signal } => write!(f, "was killed by signal {signal}"),
-            SessionEnd::Unknown => f.write_str("ended in a way this build does not know"),
+/// Which limit stopped the run: the account of a session's CLI, or the
+/// forge's rate limit on the run's pull requests.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LimitSource {
+    /// The account of the session's CLI.
+    Session { adapter: AdapterId },
+    /// The forge's rate limit.
+    Forge,
+}
+
+/// Why a command gave no answer of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Unanswered {
+    /// The shell found no command of that name.
+    NotFound,
+    /// The shell found the command but could not run it.
+    NotExecutable,
+    /// The engine stopped the command before it answered.
+    Stopped,
+}
+
+/// The exit code the engine records for a command it stopped before it
+/// answered. Negative, so no code a shell reports equals it; a command that
+/// a signal ended already reads as -1, so the engine's own stop takes the next.
+pub const STOPPED_EXIT_CODE: i32 = -2;
+
+impl Unanswered {
+    /// What `exit_code` says when the command never answered; `None` when
+    /// it is the command's own.
+    pub fn of(exit_code: i32) -> Option<Self> {
+        match exit_code {
+            // The shell's own codes for a command it could not find, and for one it could not run.
+            127 => Some(Unanswered::NotFound),
+            126 => Some(Unanswered::NotExecutable),
+            STOPPED_EXIT_CODE => Some(Unanswered::Stopped),
+            _ => None,
         }
     }
 }

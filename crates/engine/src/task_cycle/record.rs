@@ -11,7 +11,7 @@ use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, NodeEvent, Phase,
     ScopeCheckedPayload,
 };
-use yunta_core::{NodeId, Seq, TaskId};
+use yunta_core::{ContentHash, NodeId, Seq, TaskId};
 
 use super::{CriterionRun, KeepsOutput, SessionObserver, TaskCycleError};
 use crate::process::Printed;
@@ -25,14 +25,21 @@ pub(super) struct Recorder<'a> {
     pub(super) task: &'a TaskId,
 }
 
+/// What one check left: the sequence number the log gave it, `None`
+/// without an observer, and the results it holds, one per criterion. A
+/// cause quotes the results, so they are built once, here.
+pub(super) struct Checked {
+    pub(super) seq: Option<Seq>,
+    pub(super) results: Vec<CriterionResult>,
+}
+
 impl Recorder<'_> {
-    /// Records what one run of the criteria answered, and returns the
-    /// sequence number the log gave it — `None` without an observer.
+    /// Records what one run of the criteria answered.
     pub(super) async fn criteria(
         &self,
         phase: Phase,
         runs: &[CriterionRun],
-    ) -> Result<Option<Seq>, TaskCycleError> {
+    ) -> Result<Checked, TaskCycleError> {
         self.checked(phase, runs, Vec::new()).await
     }
 
@@ -42,7 +49,7 @@ impl Recorder<'_> {
         &self,
         runs: &[CriterionRun],
         waiting: &[String],
-    ) -> Result<Option<Seq>, TaskCycleError> {
+    ) -> Result<Checked, TaskCycleError> {
         self.checked(Phase::Post, runs, waiting.to_vec()).await
     }
 
@@ -51,9 +58,12 @@ impl Recorder<'_> {
         phase: Phase,
         runs: &[CriterionRun],
         waiting: Vec<String>,
-    ) -> Result<Option<Seq>, TaskCycleError> {
+    ) -> Result<Checked, TaskCycleError> {
         let Some((observer, _)) = self.audit else {
-            return Ok(None);
+            return Ok(Checked {
+                seq: None,
+                results: runs.iter().map(|run| result_of(run, None)).collect(),
+            });
         };
         let results =
             recorded(runs, observer)
@@ -62,15 +72,17 @@ impl Recorder<'_> {
                     task: self.task.clone(),
                     source,
                 })?;
-        self.record(EventPayload::Node(NodeEvent::CriteriaChecked(
-            CriteriaCheckedPayload {
-                task_id: self.task.clone(),
-                phase,
-                results,
-                waiting,
-            },
-        )))
-        .await
+        let seq = self
+            .record(EventPayload::Node(NodeEvent::CriteriaChecked(
+                CriteriaCheckedPayload {
+                    task_id: self.task.clone(),
+                    phase,
+                    results: results.clone(),
+                    waiting,
+                },
+            )))
+            .await?;
+        Ok(Checked { seq, results })
     }
 
     /// Records what one scope audit found.
@@ -104,10 +116,9 @@ impl Recorder<'_> {
 
 /// Criterion runs as the log records them. What a command printed in
 /// this invocation goes where `objects` keeps it, and an answer taken
-/// from an earlier
-/// invocation names the object that one kept; a red one also quotes the
-/// end of it, for a reader who does not open the object. A command that
-/// printed nothing leaves nothing to keep.
+/// from an earlier invocation names the object that one kept; a red one
+/// also quotes the end of it, for a reader who does not open the object.
+/// A command that printed nothing leaves nothing to keep.
 pub(crate) async fn recorded(
     runs: &[CriterionRun],
     objects: &dyn KeepsOutput,
@@ -121,20 +132,28 @@ pub(crate) async fn recorded(
             Some(Printed::Recorded { object, .. }) => object.clone(),
             Some(Printed::Ran(_)) | None => None,
         };
-        results.push(CriterionResult {
-            cmd: run.cmd.clone(),
-            exit_code: run.exit_code,
-            r#type: run.is_guard.then_some(CriterionType::Guard),
-            reused: run.reused,
-            duration_ms: run.duration_ms,
-            output,
-            tail: match (&run.output, run.exit_code) {
-                (Some(output), exit_code) if exit_code != 0 => output.tail(),
-                _ => Vec::new(),
-            },
-            tree: run.tree.clone(),
-            head: run.head.clone(),
-        });
+        results.push(result_of(run, output));
     }
     Ok(results)
+}
+
+/// `run` as the log holds it, with `output` the object that holds what it
+/// printed. Its conclusion is read here, once, so the log and a replay of
+/// it agree.
+fn result_of(run: &CriterionRun, output: Option<ContentHash>) -> CriterionResult {
+    CriterionResult {
+        cmd: run.cmd.clone(),
+        exit_code: run.exit_code,
+        r#type: run.is_guard.then_some(CriterionType::Guard),
+        reused: run.reused,
+        duration_ms: run.duration_ms,
+        output,
+        tail: match (&run.output, run.exit_code) {
+            (Some(output), exit_code) if exit_code != 0 => output.tail(),
+            _ => Vec::new(),
+        },
+        tree: run.tree.clone(),
+        head: run.head.clone(),
+        conclusion: run.conclusion(),
+    }
 }

@@ -222,6 +222,38 @@ the whole of where it is: a diagnostic carries no line and column, and
 and the receipt — so none of them can disagree about the facts, and nothing has
 to take a sentence apart to recover them.
 
+The later failure shapes have keys of their own too. `session_refused:` is a session
+that refused the request, with its adapter, its message and a cause: final,
+authentication, invalid model, or transport, and only the transport one is
+re-attempted by the engine on its own. `limit:` is an account's limit, of a
+session or of the forge. When the CLI or the forge named the time it resets, the
+run waits for that time (`run_paused` with `awaiting_reset`) and resumes on its
+own; when it named none, a person decides. `stopped:` lists the tasks of a loop
+that did not close, each with the cause of its stop. `red:` is a check that judges
+the tree and came out red, in one of three forms. `coverage` is a coverage figure
+under its threshold, or a coverage command that printed no figure: it names the `cmd`
+and the `threshold`, and `measured` when there was a figure. `command` is a coverage
+command that exited non-zero, with its `cmd`, `exit_code`, `conclusion` and `output`
+when it has one. `regression` is a baseline suite that passed when the lineage measured
+it and fails now, with its `cmd`, `exit_code` and the `tail` it printed last.
+`child_run` names a child run that closed failed, with `child_failure` when the parent
+knows that child's failure.
+
+The fields this release adds to a kind are additive. A `blocked` task carries the
+`stop` that says why it stopped, whose `type` names the cause; a result in
+`criteria_checked` carries the `conclusion` its command printed; a
+`promotion_signaled` that a failure asked for carries that failure as
+`cause.failure`; and a `gate_waiting` for a node's failure or a task's departure
+carries the menu it offers as data, where each option's `label` and `tradeoff` are
+optional. A log written before a field existed reads without it: a `blocked` task
+with no `stop` is one whose cause the log does not hold.
+
+`retryable` on `node_failed` is read from a log that wrote it and is never written
+again: what a retry can change is the failure's own cause. A binary from before
+this release reads a `node_failed` without `retryable`, and a `run_paused` whose
+pause is `awaiting_reset`, as corrupt, like any payload that is not its kind's
+shape. This policy makes no promise about a log a newer binary wrote.
+
 A finding's `location` is where it is: a path with the lines of it when the
 finder named them (`src/lib.rs`, `src/lib.rs:142`, `src/lib.rs:142-150`). The path
 is relative and never climbs out of what it is under, because a findings document
@@ -244,9 +276,10 @@ under `of`, names the entry the problem is about; for a workflow that is `node`.
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
 read (`tasks[1].scope`); its stable code is `parse`. `rule` carries a `code` from a
-closed set and the `detail` a reader acts on. A node fails on an
-artifact with `retryable: false`: there is no second session to instruct, so
-nothing about the failure asks for one.
+closed set and the `detail` a reader acts on. A node that fails on an artifact
+is offered a retry only once the run's tree has moved since the failure, which a
+resume that finds the failure waiting records (`run_resumed.tree`): the failure, not
+a flag stored beside it, says what a retry can change.
 
 The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
@@ -369,12 +402,13 @@ parsing what it printed:
 | 2 | was never started: the command line did not parse |
 | 3 | needs you: it stopped on a person — a decision, a question, a budget, a scope |
 | 4 | reported: it finished holding findings that block it |
+| 5 | waiting: it is parked until a limit resets, and resumes on its own then — nothing is asked of a person |
 | 130 | was interrupted by a person in this invocation (Ctrl-C) |
 
 `yunta status` and `yunta close` exit 0 whatever the run says: they report a
-run, they do not drive it. `yunta test` writes a case's `final_state` in the same
-words: `finished`, `needs you`, `reported`, `failed`, `promoted`; a case written
-with `paused` is refused, naming `needs you`.
+run, they do not drive it. `yunta test` reads a case's `final_state` in the same
+words: `finished`, `needs you`, `waiting`, `reported`, `failed`, `promoted`; a case
+written with `paused` is refused, naming `needs you`.
 
 ## Color
 
@@ -405,18 +439,22 @@ place never passes the terminal's edge, whatever the floor says.
 
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 6`. The
-three share one stamp, so all of them carry the new number even though only the
-run document changed shape: from 6 on, a run stopped on a person is `needs you`
-rather than `paused`, and a run that finished holding blocking findings is
-`reported` rather than `finished`.
+`stats --json`, `status --json` and `run --json` carry `schema_version: 7`. The
+three share one stamp, so all of them carry the new number even when a change
+touched only one of them: from 6 on, a run stopped on a person is `needs you` rather
+than `paused`, and a run that finished holding blocking findings is `reported` rather
+than `finished`. From 7 on, `tokens` is the spend in one shape in each of the three:
+`input`, `output`, `cached` when the adapter reports it, `total`, and `in_flight` for
+the usage an open attempt has reported. A run paused on a limit's reset is `waiting`
+rather than `needs you`, and its document carries `awaiting_reset`. `waiting` joins
+version 7, which no released binary has written, so the stamp does not move for it.
 
 `run --json`, `resume --json`, `status --json` and the control plane's
 `workflow_status` all emit one document. It names the run by its whole `run_id`
 and by the `handle` every line a person reads calls it. It is derived from the run's own event
 log, so the command that drove a run to its stop and the command that reads that
 run afterwards publish the same answer, field for field. `outcome` is the word
-every text surface prints for the run — `created`, `running`, `stalled`,
+every text surface prints for the run — `created`, `running`, `waiting`, `stalled`,
 `needs you`, `finished`, `reported`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
 terminal for what `status` said finds the same word in the document. A failed or
 broken run carries `reason`; a parked one carries `waiting_on` and, when its
@@ -497,13 +535,18 @@ to whoever *creates* a run.
 `status --json` carries `waiting_on` for a parked run, tagged by `on`:
 `{"on": "gate", "node", "external_ref"?, "reason"?}` when a node is parked on a
 gate, `{"on": "questions", "node", "asked": [...], "reason"?}` when it is parked
-on questions nobody answered, and `{"on": "run", "reason"}` when the run itself
-stopped. A run that is moving while its live engine asks a person at its terminal
-carries `{"on": "prompt", "node"?, "since", "pid"}`: a question asked live is on
+on questions nobody answered, and `{"on": "run", "reason"}` when the run itself is
+paused, a limit's reset included. A run that is moving while its live engine asks a
+person at its terminal carries `{"on": "prompt", "node"?, "since", "pid"}`: a question asked live is on
 no log until it is answered, and the only place it takes an answer is the
 terminal of process `pid`. Its `outcome` is `"needs you"` then, as a parked run's
 is. `summary` says the same thing inside a sentence that also carries the run's
 counters; this is the pause on its own.
+
+`status --json` carries `awaiting_reset` for a run paused on a limit's reset:
+`{node, at}`, the node the limit stopped and the moment, as an RFC 3339 time in
+UTC, at which the run resumes by itself. A person has nothing to answer before
+then. The key is absent for every other run.
 
 `status --json` carries `nodes` as a **list**, in the order the run's frozen
 workflow declares them, each `parallel` group followed by its own children —
@@ -512,10 +555,15 @@ draws. Every declared node is in it, the ones this run's mode leaves out
 included and marked `skipped`; a node the log never mentioned is in it too,
 because a document that left it out could not say whether the run is still on
 its way there or never going. Each entry is `{id, state, detail?, group?,
-waiting_on?, session_death?, last_tool_failure?}`: `state` is the word every text
-surface prints for a node, `detail`
-is what qualifies it, `group` names the enclosing `parallel` group, and
-`waiting_on` carries the wait in the same shape the run-level one uses.
+waiting_on?, session_death?, command_exit?, stop?, last_tool_failure?}`:
+`state` is the word every text surface prints for a node, `detail` is what
+qualifies it, `group` names the enclosing `parallel` group, and `waiting_on`
+carries the wait in the same shape the run-level one uses.
+`command_exit` is how the command a node ran ended, for a node that failed
+because one exited non-zero: its `code`, the `tail`, the last lines it printed, and
+the `output` object holding all of it, with `origin` when the command was not the
+node's own `run:`. `stop` is, for a node that failed because its loop's tasks did,
+each stopped task as `{task_id, cause}`, in task order.
 `tasks` and `diagnostics` stay maps: a reader indexes those by id, and they
 carry no order of their own.
 
@@ -563,6 +611,21 @@ budget cap, a scope expansion, an unanswered questions artifact, an external
 gate with no reachable forge — carries no `decision` at all, and `summary` says
 what the run is waiting on instead. The `decision` field itself is additive; the
 stamp moved to `3` for the shape of `decision.evidence`, described above.
+
+A failed node's menu is `decision.failure`: `{attempt, failure, remedies, stuck?,
+reroute?}`, where `failure` is the failure the node's `node_failed` carries.
+Each remedy is `{option, precondition}`: the option's id, and the input a
+`retry` waits for (`null` for an option that waits for none), as a snake_case
+word such as `tree_changed`,
+`outside_tree_changed` or `limit_lifted`, or as `{command_runnable: {cmd}}` for a
+command that has to run. The menu's `options` name each option once, so `retry` is
+listed there once even when `remedies` holds a `retry` for each input a stop waits
+for. `stuck` says why no remedy is offered, as a word such as
+`frozen_config`, `tree_unchanged` or `criteria_wrong`, and `reroute` is the
+re-route the failure exhausted: its `goto`, `max_reroutes` and `next_mode`. A
+departure's menu is `decision.departure`: the `deviations` declared, the `waived`
+commands, the `rewritten_by` node when accepting rewrites a test, and
+`accept_offered`, which is `false` when no node of the run writes that test again.
 
 ## Message wording
 

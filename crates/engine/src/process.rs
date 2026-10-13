@@ -24,7 +24,7 @@ use crate::process_registry::{self, ProcessRegistry};
 mod environment;
 mod error;
 mod leader;
-mod output;
+pub(crate) mod output;
 mod pipes;
 mod state;
 
@@ -35,7 +35,8 @@ pub use error::{CapturedOutput, PipeKind, SpawnError};
 use leader::Leader;
 pub use output::{CommandOutput, Printed};
 use pipes::{read_to_capture, stdio, write_then_close, Captured, PipeFailure};
-use state::{wait_for_deadline, Waited};
+pub use state::wait_for_deadline;
+use state::Waited;
 
 /// The run context a governed subprocess runs under: who watches it — the
 /// run's registry, so `yunta cancel` finds it, and the token whose firing

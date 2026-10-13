@@ -19,14 +19,18 @@ use futures::StreamExt;
 use yunta_adapters::{
     ClaudeCodeAdapter, MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths,
 };
+use yunta_core::events::{FailureCause, RefusalCause};
 use yunta_core::port::{
-    Adapter, AgentEvent, FailureCause, Forge, ForgeError, GateDecision, ProbeReport,
-    PublishRequest, PullRequestRef, ReviewOutcome, RunToolsEndpoint, SessionRequest,
+    Adapter, AgentEvent, Forge, ForgeError, GateDecision, ProbeReport, PublishRequest,
+    PullRequestRef, ReviewOutcome, RunToolsEndpoint, SessionRequest,
 };
 use yunta_core::{
-    AdapterSettings, Capabilities, Capability, FenceLevel, Secret, SessionId, ToolNaming,
+    AdapterSettings, Capabilities, Capability, FenceLevel, RunTool, Secret, SessionId, ToolNaming,
 };
 use yunta_testkit_core::adapter::{drain, request};
+
+#[path = "mock/outcomes.rs"]
+mod outcomes;
 
 #[tokio::test]
 async fn a_successful_session_opens_then_completes() {
@@ -78,7 +82,7 @@ outcome: { type: failed, message: "401 Unauthorized" }
     let Some(AgentEvent::Failed { cause, .. }) = events.last() else {
         panic!("a failed session: {events:?}")
     };
-    assert_eq!(*cause, FailureCause::Final);
+    assert_eq!(*cause, FailureCause::Refused(RefusalCause::Authentication));
 }
 
 /// A scripted session emits exactly one terminal event, and nothing after
@@ -115,13 +119,6 @@ async fn a_scripted_session_ends_with_one_terminal_event_and_nothing_after_it() 
     }
 }
 
-/// A fixture has no retryable flag, so it cannot call an auth failure retryable.
-#[test]
-fn a_fixture_cannot_call_an_auth_failure_retryable() {
-    let yaml = "dialect: claude-code\nsessions:\n  - outcome: {type: failed, message: \"401 Unauthorized\", retryable: true}";
-    assert!(MockFixture::parse_without_a_run(yaml).is_err());
-}
-
 /// A declared cause the message does not classify to is refused, and the
 /// refusal names both causes.
 #[test]
@@ -130,13 +127,13 @@ fn a_declared_cause_the_message_does_not_classify_to_is_refused() {
         r#"
 dialect: claude-code
 sessions:
-  - outcome: { type: failed, message: "401 Unauthorized", cause: retryable }
+  - outcome: { type: failed, message: "401 Unauthorized", cause: unreachable }
 "#,
     )
-    .expect_err("a retryable cause on an auth failure is refused");
+    .expect_err("an unreachable cause on an auth failure is refused");
     let message = refused.to_string();
     assert!(
-        message.contains("retryable") && message.contains("final"),
+        message.contains("unreachable") && message.contains("authentication"),
         "the refusal names both causes: {message}"
     );
 }
@@ -450,7 +447,7 @@ sessions:
     .await;
     assert!(matches!(
         second.last().unwrap(),
-        AgentEvent::Failed { error, cause: yunta_core::port::FailureCause::Retryable } if error.message == "second session"
+        AgentEvent::Failed { error, cause: FailureCause::Refused(RefusalCause::Final) } if error.message == "second session"
     ));
 }
 

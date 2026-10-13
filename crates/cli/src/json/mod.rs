@@ -25,6 +25,7 @@ mod node;
 
 use node::{NodeJson, NodeWaitJson};
 
+use crate::commands::advice;
 use crate::commands::status::{decision, progress};
 use crate::error::{CliError, Outcome};
 use crate::render::state::RunWord;
@@ -149,9 +150,21 @@ pub(crate) struct RunDocument {
     /// this says it in a shape a program acts on without parsing one.
     #[serde(skip_serializing_if = "Option::is_none")]
     waiting_on: Option<WaitingOnJson>,
+    /// The reset a limit named, for a run paused on one: the node it is
+    /// for, and the moment the run resumes by itself. A person has nothing
+    /// to answer before then. Absent for every other run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    awaiting_reset: Option<AwaitingResetJson>,
     /// What the run spent: the work its attempts settled, plus the usage
     /// an open attempt has reported that no settled round has taken in.
     tokens: SpendJson,
+}
+
+/// A run paused on a limit's reset, as the document carries it.
+#[derive(serde::Serialize)]
+pub(crate) struct AwaitingResetJson {
+    node: String,
+    at: DateTime<Utc>,
 }
 
 impl RunDocument {
@@ -195,6 +208,10 @@ impl RunDocument {
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
             waiting_on: WaitingOnJson::of(&frame.phase, engine),
+            awaiting_reset: advice::reset_pause(&frame.phase).map(|(node, at)| AwaitingResetJson {
+                node: node.to_string(),
+                at,
+            }),
             tokens: SpendJson::of(&state.spend()),
         }
     }
@@ -221,7 +238,7 @@ fn reason(phase: &RunPhase) -> Option<String> {
     match phase {
         RunPhase::Failed { failure } => failure
             .as_ref()
-            .map(|failure| yunta_core::text::one_line(&failure.to_string())),
+            .map(|failure| yunta_core::text::one_line(&crate::render::failure::sentence(failure))),
         RunPhase::Broken { diagnostic } => Some(yunta_core::text::one_line(diagnostic)),
         RunPhase::Created
         | RunPhase::Running
@@ -445,13 +462,20 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                     );
                 }
                 // A failure stated in one sentence names no document,
-                // and neither does a session that died, anything about
-                // scope, an unset config key, a check refused on a tree
-                // nothing changed or a criterion no work can pass: the
-                // node's own entry carries each of them whole.
+                // and neither does a session that died or refused, a
+                // limit, stopped tasks, a red check, a child's failure,
+                // anything about scope, an unset config key, a check
+                // refused on a tree nothing changed or a criterion no
+                // work can pass: the node's own entry carries each of
+                // them whole.
                 Failure::Message { .. }
                 | Failure::Exited { .. }
                 | Failure::SessionDied { .. }
+                | Failure::SessionRefused { .. }
+                | Failure::Limit { .. }
+                | Failure::TasksStopped { .. }
+                | Failure::Red { .. }
+                | Failure::ChildFailed { .. }
                 | Failure::ScopeViolated { .. }
                 | Failure::PathsDenied { .. }
                 | Failure::ScopeRequested { .. }

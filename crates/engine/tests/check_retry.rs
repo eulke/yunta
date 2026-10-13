@@ -1,15 +1,18 @@
-//! A check that judges the run's tree answers the same on the same tree:
-//! a `retry` of one whose tree nothing changed since it failed fails at
-//! once, without running its command, and asks again.
+//! A check that judges the run's tree answers the same on the same tree.
+//! A regression offers abort alone on the tree it failed on, as a red
+//! coverage gate does. A retry comes back once a wake finds the tree
+//! changed, and a retry chosen while the tree moved runs only if the menu
+//! still offers it when the run wakes.
 
 use std::path::PathBuf;
 
-use yunta_core::events::{EventPayload, Failure, NodeEvent};
-use yunta_engine::{current_escalation, RunReport, RunTerminal};
+use yunta_core::events::{EventPayload, Failure, NodeEvent, RedCheck};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
 mod common;
 use common::answer_parked;
+use common::menu::rebuilt_menu;
 
 /// A node that breaks what the suite checks, then the comparison.
 const REGRESSES: &str = r#"
@@ -23,6 +26,9 @@ nodes:
     builtin: baseline_compare
     depends_on: [regress]
 "#;
+
+/// The fixture of a run that scripts no session, so a wake reaches only its gates.
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 /// Where a command counts its own runs: outside the tree, so counting
 /// never changes what it judges.
@@ -40,6 +46,11 @@ fn ran(bench: &Bench) -> usize {
         .unwrap_or(0)
 }
 
+/// Removes the marker file, which a person moves the tree back by hand.
+fn remove_marker(bench: &Bench) {
+    std::fs::remove_file(bench.worktree.join("marker.txt")).expect("the tree moves back");
+}
+
 /// A run parked on its comparison's regression: the suite ran twice, to
 /// measure and to compare.
 async fn parked_on_a_regression() -> Bench {
@@ -49,9 +60,7 @@ async fn parked_on_a_regression() -> Bench {
         "{MOCK_CONFIG}baseline:\n  suite: \"echo . >> {}; cat marker.txt\"\n",
         counter(&bench).display()
     );
-    let RunReport { terminal, .. } = bench
-        .run_with_config(REGRESSES, "dialect: claude-code\nsessions: []\n", &config)
-        .await;
+    let RunReport { terminal, .. } = bench.run_with_config(REGRESSES, NO_SESSIONS, &config).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
@@ -73,117 +82,167 @@ fn failures(bench: &Bench, node: &str) -> Vec<Failure> {
         .collect()
 }
 
-async fn retried(bench: &Bench) -> RunTerminal {
-    answer_parked(bench, "retry").await.unwrap();
-    bench
-        .wake_on_fixture("dialect: claude-code\nsessions: []\n")
+/// The ids of the options the menu a paused run offers now, rebuilt from
+/// its log the way a wake rebuilds it.
+async fn offered(bench: &Bench) -> Vec<String> {
+    let (_, escalation) = rebuilt_menu(&bench.manifest(), &bench.run_dir(), &bench.events())
         .await
-        .terminal
+        .expect("the run is paused on a menu");
+    escalation
+        .options()
+        .iter()
+        .map(|option| option.id.as_str().to_string())
+        .collect()
 }
 
+async fn offers_retry(bench: &Bench) -> bool {
+    offered(bench).await.iter().any(|id| id == "retry")
+}
+
+/// Answers the menu with `retry`, then wakes the run headlessly.
+async fn retried(bench: &Bench) -> RunTerminal {
+    answer_parked(bench, "retry").await.unwrap();
+    bench.wake_on_fixture(NO_SESSIONS).await.terminal
+}
+
+/// A regression offers abort alone on the tree it failed on, as a red
+/// coverage gate does: a retry the menu does not offer is refused, and a
+/// wake that follows runs no suite.
 #[tokio::test]
-async fn a_check_retried_on_the_tree_it_failed_on_fails_without_running_again() {
+async fn a_regression_offers_abort_alone_on_the_tree_it_failed_on() {
     let bench = parked_on_a_regression().await;
+    let failure = failures(&bench, "compare")
+        .pop()
+        .expect("the comparison failed");
+    let Failure::Red {
+        red: RedCheck::Regression {
+            exit_code, tail, ..
+        },
+    } = &failure
+    else {
+        panic!("the comparison fails on a regression: {failure:?}");
+    };
+    assert_eq!(*exit_code, 1);
+    assert!(
+        tail.iter().any(|line| line.contains("No such file")),
+        "the regression keeps what the suite printed: {tail:?}"
+    );
+    assert_eq!(offered(&bench).await, ["abort"]);
+    assert!(
+        matches!(
+            answer_parked(&bench, "retry").await,
+            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+        ),
+        "a retry the menu does not offer is refused"
+    );
 
-    let terminal = retried(&bench).await;
-
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    assert_eq!(ran(&bench), 2, "the suite did not run for the retry");
-    let refused = failures(&bench, "compare").pop().expect("the retry failed");
-    let Failure::Unchanged { unchanged } = &refused else {
-        panic!("the retry is refused as unchanged: {refused:?}");
-    };
-    assert_eq!(unchanged.since, 1);
-    assert!(
-        unchanged.failure.to_string().starts_with("regression:"),
-        "{refused}"
+    assert_eq!(
+        ran(&bench),
+        2,
+        "the suite does not run again on the tree it failed on"
     );
+    assert_eq!(offered(&bench).await, ["abort"]);
 }
 
+/// A person who writes the tree back and a wake that finds the change
+/// offer the retry again, and choosing it runs the suite once more.
 #[tokio::test]
-async fn a_check_retried_after_its_tree_changed_runs_and_can_pass() {
+async fn a_retry_is_offered_once_a_wake_finds_the_tree_changed_and_runs_the_suite() {
     let bench = parked_on_a_regression().await;
+    // The baseline passed on the tree with `ok` in the marker, and a tree
+    // it passed on is answered from that measurement: the marker takes
+    // content no measurement saw, so the retry runs the suite.
     write(&bench.worktree.join("marker.txt"), "fixed");
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert!(
+        offers_retry(&bench).await,
+        "the menu offers the retry once the tree changed"
+    );
+    assert_eq!(
+        ran(&bench),
+        2,
+        "a wake runs nothing the person did not choose"
+    );
 
     assert_eq!(retried(&bench).await, RunTerminal::Finished);
-    assert_eq!(ran(&bench), 3, "the retry ran the suite on the new tree");
+    assert_eq!(
+        ran(&bench),
+        3,
+        "the retry ran the suite on the changed tree"
+    );
 }
 
-/// A refusal is still a failure a person may change the tree for: the
-/// menu offers the next attempt, and what it shows is what the attempt
-/// that ran failed with.
+/// A retry chosen while the tree moved does not run once the tree moved
+/// back: the wake that finds it pauses again, and the menu offers abort
+/// alone.
 #[tokio::test]
-async fn a_refused_retry_still_offers_retry_and_names_the_attempt_that_ran() {
+async fn a_retry_chosen_on_a_moved_tree_is_not_run_once_the_tree_moved_back() {
     let bench = parked_on_a_regression().await;
-    retried(&bench).await;
-
-    let (node, escalation) = current_escalation(
-        &bench.manifest(),
-        &bench.run_dir(),
-        &yunta_engine::derive(&bench.events()),
-    )
-    .await
-    .unwrap()
-    .expect("the refusal is a pause with a menu");
-    assert_eq!(node.as_str(), "compare");
-    let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
-    assert_eq!(ids, vec!["retry", "abort"]);
-    assert_eq!(
-        escalation.options()[0].label,
-        "Run `compare` again (attempt 3)"
-    );
-    let said = yunta_render::evidence::lines(escalation.evidence()).join("\n");
+    write(&bench.worktree.join("marker.txt"), "fixed");
+    bench.wake_on_fixture(NO_SESSIONS).await;
     assert!(
-        said.contains("since attempt 1 failed") && said.contains("regression:"),
-        "{said}"
+        offers_retry(&bench).await,
+        "the menu offers the retry once the tree changed"
     );
-}
+    answer_parked(&bench, "retry")
+        .await
+        .expect("the retry is chosen while the menu offers it");
+    remove_marker(&bench);
 
-#[tokio::test]
-async fn a_second_refusal_names_the_attempt_that_last_ran() {
-    let bench = parked_on_a_regression().await;
-    retried(&bench).await;
-    retried(&bench).await;
-
-    assert_eq!(ran(&bench), 2);
-    let refusals: Vec<u32> = failures(&bench, "compare")
-        .iter()
-        .filter_map(|failure| match failure {
-            Failure::Unchanged { unchanged } => Some(unchanged.since),
-            _ => None,
-        })
-        .collect();
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
     assert_eq!(
-        refusals,
-        vec![1, 1],
-        "both name attempt 1, the one that ran"
+        ran(&bench),
+        2,
+        "the chosen retry does not run on the tree it failed on"
     );
+    assert_eq!(offered(&bench).await, ["abort"]);
 }
 
+/// A red coverage gate offers no retry on the tree it failed on, and a
+/// resume measures nothing again.
 #[tokio::test]
-async fn a_coverage_gate_retried_on_an_unchanged_tree_fails_without_running_again() {
+async fn a_coverage_gate_on_an_unchanged_tree_offers_no_retry_and_runs_no_more() {
     let bench = Bench::new();
     let config = format!(
         "{MOCK_CONFIG}coverage:\n  cmd: \"echo . >> {}; echo 10%\"\n  threshold: 50.0\n",
         counter(&bench).display()
     );
     let workflow = "name: covered\nnodes:\n  - { id: gate, kind: check, builtin: coverage_gate }\n";
-    let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", &config)
-        .await;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, NO_SESSIONS, &config).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
 
-    retried(&bench).await;
+    assert!(
+        matches!(
+            answer_parked(&bench, "retry").await,
+            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+        ),
+        "no retry is offered on the tree the gate failed on"
+    );
+    let RunReport { terminal, .. } = bench.wake_on_fixture(NO_SESSIONS).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
 
     assert_eq!(ran(&bench), 1, "only the first attempt measured coverage");
     assert!(matches!(
         failures(&bench, "gate").pop(),
-        Some(Failure::Unchanged { .. })
+        Some(Failure::Red { .. })
     ));
 }

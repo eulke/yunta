@@ -24,7 +24,7 @@ use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
 use crate::replay::RunView;
-use crate::task_cycle::{could_not_run, CriterionRun, Judgement, Settle};
+use crate::task_cycle::{could_not_run, unanswered_words, CriterionRun, Judgement, Settle};
 
 impl SessionTools {
     pub(super) async fn task_status(&self) -> Result<String, RunToolError> {
@@ -310,7 +310,7 @@ impl Answered {
             cmd: result.cmd.clone(),
             guard: result.r#type == Some(CriterionType::Guard),
             exit_code: result.exit_code,
-            cannot_run: could_not_run(result.exit_code),
+            cannot_run: could_not_run(result.exit_code).map(unanswered_words),
             tail: result.tail.clone(),
         }
     }
@@ -329,7 +329,7 @@ impl Answered {
             cmd: run.cmd.clone(),
             guard: run.is_guard,
             exit_code: run.exit_code,
-            cannot_run: run.could_not_run(),
+            cannot_run: run.could_not_run().map(unanswered_words),
             tail,
         }
     }

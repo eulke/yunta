@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use yunta_core::durable::{self, Durability};
+use yunta_core::events::FailureCause;
 use yunta_core::fence::Coverage;
 use yunta_core::port::session::SessionEnv;
 use yunta_core::port::{HookReply, RailCodec, SessionRequest};
@@ -18,7 +19,8 @@ use yunta_core::{
     SessionId, ToolNaming, Unbuildable,
 };
 
-use crate::mock::MockStep;
+use crate::failure::classify;
+use crate::mock::{MockOutcome, MockStep};
 use crate::mount::MountPlan;
 use crate::{claude_code, codex};
 
@@ -91,6 +93,15 @@ impl DialectName {
         }
     }
 
+    /// The lines this CLI prints to close a session that played its whole
+    /// script, from the outcome and the usage its steps spent.
+    pub(crate) fn render_close(self, outcome: &MockOutcome, usage: &[MockStep]) -> Vec<String> {
+        match self {
+            Self::ClaudeCode => claude_code::wire::close(outcome),
+            Self::Codex => codex::wire::close(outcome, usage),
+        }
+    }
+
     /// The stdin this CLI sends its hook for `event`. A write names `path`.
     pub(crate) fn hook_stdin(self, event: RailEvent, session: &SessionId, path: &Path) -> Vec<u8> {
         match self {
@@ -113,6 +124,16 @@ impl DialectName {
         match self {
             Self::ClaudeCode => Box::new(claude_code::ClaudeParser::new(plan.coverage.clone())),
             Self::Codex => Box::new(codex::CodexParser::new(plan.coverage.clone())),
+        }
+    }
+
+    /// The cause a failure message reads as under this CLI. A Claude limit
+    /// is read from the stream's fields and never from the text, so the text
+    /// reads only as a refusal; Codex reads its limit phrases from the text.
+    pub(crate) fn failure_cause(self, message: &str) -> FailureCause {
+        match self {
+            Self::ClaudeCode => classify(message),
+            Self::Codex => codex::failure_cause(message),
         }
     }
 

@@ -161,7 +161,9 @@ impl NodeDisplay {
                 }
                 // The claim, not the lines a command printed: those are
                 // evidence, one step away on every surface that has room.
-                Some(NodeState::Failed { failure, .. }) => detail(&failure.headline()),
+                Some(NodeState::Failed { failure, .. }) => {
+                    detail(&crate::failure::headline(failure))
+                }
                 Some(NodeState::Waiting { on }) => match on {
                     NodeWait::Gate { external_ref } => external_ref.as_deref().and_then(detail),
                     // The one sentence for a node that asked: the same
@@ -267,7 +269,6 @@ mod tests {
                 outcome: "exit 1".to_string(),
             },
             tokens: TokenUsage::default(),
-            retryable: false,
         };
         assert_eq!(NodeDisplay::of(Some(&state)).label(), "failed — exit 1");
     }

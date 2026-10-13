@@ -135,6 +135,8 @@ pub(super) async fn tool_resume_run(
     let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
     let run_dir = ctx.open_run(&run_id).await?.run_dir;
+    // A run paused on a limit's reset is handed to a resume that waits for
+    // the reset first, so it does not spend the limit before it lifts.
     super::super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
         .await
         .map_err(|source| super::super::DetachedResumeError::new(&run_id, source))?;

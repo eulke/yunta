@@ -235,8 +235,8 @@ mod tests {
 
     #[test]
     fn an_option_too_long_for_one_line_is_broken_rather_than_left_to_the_terminal() {
-        // A tradeoff the engine writes for an exhausted re-route, which
-        // is half again as wide as a line has room for.
+        // A tradeoff an exhausted re-route shows, which is half again as
+        // wide as a line has room for.
         let block = read(
             &[Choice {
                 label: Some("Re-route to `fix` once more".to_string()),

@@ -18,7 +18,7 @@ use yunta_core::events::{
 };
 use yunta_core::{ArtifactKind, Node, NodeId, NodeKind, SpecFile, TaskId};
 
-use super::super::node_close::fail_with_tokens;
+use super::super::node_close::fail_with;
 use super::super::node_exec::NodeEnd;
 use super::super::{RunCtx, RunError};
 use crate::replay::RunState;
@@ -44,8 +44,8 @@ pub(super) fn writer(ctx: &RunCtx<'_>, state: &RunState) -> Option<NodeId> {
 
 /// Sends the run back to the node that writes the spec when a person
 /// accepted that a task's tests are wrong and that node has not written
-/// them again: the loop fails, retryable, and re-routes there, as a
-/// person's choice does — it spends none of the loop's own re-routes.
+/// them again: the loop fails and re-routes there, as a person's choice
+/// does — it spends none of the loop's own re-routes.
 pub(super) async fn send_back(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -59,16 +59,16 @@ pub(super) async fn send_back(
     else {
         return Ok(None);
     };
-    let reason = format!(
+    let cause = Failure::message(format!(
         "a person accepted that task `{task}`'s tests are wrong — `{by}` writes them again \
          before the loop goes on"
-    );
-    let end = fail_with_tokens(ctx, node, reason.clone(), true, tokens).await?;
+    ));
+    let end = fail_with(ctx, node, cause.clone(), tokens).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
             by,
-            Failure::message(reason),
+            cause,
             RerouteOrigin::GateChoice,
             None,
             None,

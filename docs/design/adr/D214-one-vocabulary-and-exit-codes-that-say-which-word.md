@@ -1,12 +1,16 @@
 ---
 number: D214
 title: "One vocabulary, one mark per meaning, and exit codes that say which word"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D264]
 ---
 
 # D214 — One vocabulary, one mark per meaning, and exit codes that say which word
+
+*(Revised by D264: a run parked until a limit resets is `waiting`, a run word of its
+own, and its invocation exits 5. Exit 3 no longer covers a reset: it keeps its meaning
+of a person who has to act.)*
 
 ## Context
 

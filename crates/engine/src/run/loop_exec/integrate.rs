@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, Decider, EventPayload, Phase, ScopeCheckedPayload,
-    TaskStatus, TaskStatusChangedPayload,
+    TaskCause, TaskStatus, TaskStatusChangedPayload,
 };
 use yunta_core::expansion::Decision;
 use yunta_core::protected::{Closing, Protected};
@@ -15,8 +15,7 @@ use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task, TreeId};
 use crate::run::node_exec::NodeEnd;
 use crate::run::scope_record::{self, Recording, Subject, Withdrawal};
 use crate::task_cycle::{
-    judge, scope_in_force, BlockedCause, JudgeEnv, Judgement, Memo, Refusals, Settle, Sitting,
-    TaskOutcome, Work,
+    judge, scope_in_force, JudgeEnv, Judgement, Memo, Refusals, Settle, Sitting, TaskOutcome, Work,
 };
 use crate::worktree::{land, rebase_onto, Rebase, Unit};
 
@@ -135,6 +134,7 @@ pub(super) async fn integrate_batch(
                             task.id.clone(),
                             last_check_seq,
                             left_work,
+                            cause.clone(),
                         ),
                     )),
                 )
@@ -197,22 +197,13 @@ pub(super) async fn integrate_batch(
         // the answer to a scope request its done work also made.
         let was_blocked = blocked_cause
             .as_ref()
-            .is_some_and(|cause| !matches!(cause, BlockedCause::DeviationOwed { .. }));
-        match blocked_cause {
-            // Departures are put to a person once the batch is on the log.
-            Some(BlockedCause::DeviationOwed { deviations }) => {
-                departures.push(PendingDeparture {
-                    task_id: task.id.clone(),
-                    deviations,
-                });
-            }
-            // An escalation-blocked task is the escalation flow's to report
-            // (resolved by the caller, or the pause diagnostic) — its interim
-            // Blocked never feeds the generic tail.
-            Some(cause) if !needs_human_decision => {
-                state.blocked.push((task.id.clone(), cause));
-            }
-            _ => {}
+            .is_some_and(|cause| !matches!(cause, TaskCause::DeviationOwed { .. }));
+        // Departures are put to a person once the batch is on the log.
+        if let Some(TaskCause::DeviationOwed { deviations }) = blocked_cause {
+            departures.push(PendingDeparture {
+                task_id: task.id.clone(),
+                deviations,
+            });
         }
         if needs_human_decision {
             if let Some((attempt_no, outcome)) = escalated {
@@ -469,6 +460,7 @@ async fn record_conflict(
                 tail: Vec::new(),
                 tree: None,
                 head: None,
+                conclusion: None,
             }],
             waiting: Vec::new(),
         })),

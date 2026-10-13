@@ -1,12 +1,20 @@
 ---
 number: D242
 title: "A session cut off from its service resumes once the service answers"
-status: accepted
+status: revised
 revises: [D191]
-revised_by: []
+revised_by: [D261, D262]
 ---
 
 # D242 — A session cut off from its service resumes once the service answers
+
+*(Revised by D261 and D262. `retryable` is no longer one of point 1's causes: a session
+reports a refusal with its own cause (`final`, `authentication`, `invalid model` or
+`unreachable`), or an account limit, which carries its reset time when the CLI gave one
+(D262). A limit with a reset waits for that time as a scheduled resume. A refusal's menu
+says what a retry waits for, and once the bounded wait of point 4 ends without the
+service answering, `retry` waits for the service to be reachable (D261). Points 2 to 5
+stand.)*
 
 ## Context
 

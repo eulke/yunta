@@ -127,7 +127,11 @@ Yunta supplies that approval when it mounts the endpoint.
 
 The live chronicle shows each failed call, while `yunta status <run>` shows
 the **last failed call of the attempt** of a node that has not finished, with
-the tool name and either `approval_blocked` or `call_failed`. A node that
+the tool name and either `approval_blocked` or `call_failed`. `call_failed`
+means the run's tool server received the call and answered it with an error.
+`approval_blocked` means the CLI refused the call before it reached that
+server, for example at its approval step. The engine tells them apart by
+whether the server saw the call, not by the CLI's own words. A node that
 finished is past the calls it got wrong on its way. Its row says how its
 document was accepted instead, for example "accepted on its 2nd handover
 (1 refused)". The event log records every failed call as `run_tool_failed`.
@@ -143,7 +147,7 @@ tokens and CLI error text are not stored in this event or summary.
 The session edited something outside the node's `scope:` globs, and the
 failure names each of those paths. This is a hard post-check, not a warning.
 
-When the run pauses on it, the decision offers three ways on:
+When the run pauses on it, the decision offers `grant` and `abort`:
 
 - `grant` widens the node's scope by exactly those paths, for the rest of
   this run, and picks the same session back up in the checkout it worked
@@ -151,16 +155,15 @@ When the run pauses on it, the decision offers three ways on:
   When the adapter cannot resume it, or that checkout is gone, a fresh
   session runs the node again and the log records a `capability_degraded`.
   Choose it when the edit was the right one.
-- `retry` runs the node again under the same scope. It only helps after you
-  change what it failed on in the run's tree yourself; otherwise the node
-  writes the same paths and asks again. `yunta status` says where that
-  tree is, above the decision ("the run works in …").
 - `abort` pauses the run.
 
-`grant` is not offered to a `read-only` node, or when a config layer sets
-`permissions.scope_expansion.max_mode: deny`. If the edit is legitimate for
-every run, widen `scope:` in the workflow instead. See
-[scope and permissions](guide.md#scope-and-permissions).
+The menu never offers `retry` for a scope failure. The same scope writes the
+same paths again, so running the node again would only ask the same question.
+`grant` is not offered to a `read-only` node, when a config layer sets
+`permissions.scope_expansion.max_mode: deny`, or when those paths reach a path
+the project protects. Then the menu offers nothing but `abort`, and the work has
+to stay inside `scope:`. If the edit is legitimate for every run, widen `scope:`
+in the workflow instead. See [scope and permissions](guide.md#scope-and-permissions).
 
 ## A node failed on an artifact it declared
 
@@ -189,8 +192,10 @@ No path is named because none was ever going to be there: such a document is
 never a file on its way in, and a file left in the node's directory is not one
 either, because no acceptance explains it. The run's log carries every submission
 the session made, accepted or refused, under `artifact_submitted`. There is no
-second session: a node that produces nothing fails once, and the failure is not
-retryable.
+second session: a node that produces nothing fails once. Its menu offers `retry`
+only once the run has seen the tree change since that attempt, which a
+`yunta resume` after your change records, so a retry never repeats the same
+attempt on the same tree.
 
 For a `bash`, `check`, `gate` or `executor` node, the command writes the file
 itself. Check that it writes the name the node declared, under
@@ -314,16 +319,41 @@ waiting on and the command that chooses each option; `yunta resolve-gate
 on a terminal puts the menu to you. See [gates from the
 outside](guide.md#gates-from-the-outside).
 
+## A run says it `waiting`
+
+A run says `waiting` when a limit's reset holds it, under the default
+`defaults.on_failure: pause`. Its `run_paused` event carries
+`"type": "awaiting_reset"`, the node the limit stopped and the time it resets,
+and `yunta status <run>` says the run resumes on its own once the limit resets.
+Nothing is asked of you, so `yunta run` and `yunta resume` exit 5, the code for
+a wait. Exit 3 still means a person has to act.
+
+The wait runs on its own. The detached resume the run started waits for that time
+without holding the run's worktree, then continues. A `yunta resume` you run
+before that time waits for it the same way, and says on the terminal that it is
+waiting. A resume that wakes before the reset pauses again on the same reset. A
+limit that names no reset time is not a wait: the run says `needs you`.
+
 ## A node failed and `resume` pauses on the same failure
 
 A node with no `on_failure` re-route that fails leaves the decision to you:
-`yunta status <run>` lists `retry` and `abort`. Fix the cause in the run's
-own worktree (`~/.yunta/worktrees/<run_id>` by default), not in your checkout:
-the run starts from the commit it was created on and never sees files you add
-or change there afterwards. Then run
-`yunta resolve-gate <run> retry`. The node starts a fresh attempt; nothing
-before it runs again. A plain `yunta resume` asks the same question again
-rather than spending on a retry nobody chose.
+`yunta status <run>` lists `abort`, and lists `retry` only when what the failure
+waits on may have changed. A check that judges the tree (a coverage gate or a
+baseline comparison), a missing artifact and an unmet criterion wait on the
+run's tree: until the run has seen the tree move since the attempt, the menu
+offers no `retry`, because the same check on the same tree gives the same
+answer. Other failures, such as a credential, a model, a service or the
+environment, offer `retry` and name what it waits for.
+
+To make a fix count after a red check, make it in the run's own worktree
+(`~/.yunta/worktrees/<run_id>` by default), not in your checkout: the run starts
+from the commit it was created on and never sees files you add or change there
+afterwards. Then run `yunta resume <run>`. The resume records the tree it finds,
+and `yunta status <run>` then lists `retry`. Only then run
+`yunta resolve-gate <run> retry`: the node starts a fresh attempt, and nothing
+before it runs again. A `retry` chosen before that resume is refused, because the
+menu does not offer it yet. A plain `yunta resume` with no choice asks the same
+question again rather than spending on a retry nobody chose.
 
 When the failure is a config key the node cannot run without — `baseline.suite`,
 `coverage`, an executor's registration, a runner — the menu offers only
@@ -331,16 +361,49 @@ When the failure is a config key the node cannot run without — `baseline.suite
 can go differently. Declare the key in `.yunta/config.yaml` and start a new
 run; `yunta check` refuses the workflow until you do.
 
+When a limit names the time it resets, such as an account's usage limit or a
+forge's retry-after, the run waits for that time instead of asking you: see
+[A run says it `waiting`](#a-run-says-it-waiting). Without a reset time the run
+asks you, and `retry` waits for the service to accept requests again.
+
 A loop task that ends an attempt with its criteria red is `blocked` right
 away: another session on the same task and tree would have nothing the first
 did not. One exception: a scope request still pending under a red criterion
 gets one fresh session first, once per cycle, which may close the task without
 it. A request the task leaves unanswered when it
 closes is withdrawn, and nobody is asked about it. The decision is yours —
-`retry`, `continue-work` when its attempt left work behind, or `grant` when it
-asked for scope. After an answer to a task's scope request, granted or denied,
-the session the task's cycle ended in picks its work back up where it left it; if that work
-already closes the task, no session opens at all.
+`retry` once what it failed on has changed, `continue-work` when its attempt
+left work behind, or `grant` when it asked for scope. After an answer to a
+task's scope request, granted or denied, the session the task's cycle ended in
+picks its work back up where it left it; if that work
+already closes the task, no session opens at all. That answer is not the node's own
+decision about its failure, so it never runs the node again as a `retry` would.
+
+## A task stopped by a red guard
+
+A `guard` criterion was red before the task did any work. The pre-check ran it on
+the tree the task starts from and it failed, so the task is `blocked` before any
+session opened. The stop names each guard, and says what the guard is there to
+show when the criteria say so:
+
+```
+guard `cargo test -p billing` is already red before any work started — it is there to show that totals match the invoices
+```
+
+The menu offers a `retry` that waits for what the guard reads. Once the log has
+seen the run's tree move since the node failed (a `yunta resume` after your change
+records the move), the `retry` waits for the tree. Until then it waits for something
+outside the tree, such as a service coming back or a file you provide.
+`yunta status <run>` lists it, and `yunta resolve-gate <run> retry` chooses it.
+
+A `retry` asks the red guard again and keeps what passed: a criterion that passed
+on the same tree is not run again. When several stops wait for different inputs,
+the menu still offers one `retry`, and its label names each input they still wait
+for.
+
+A criterion that already passes before any work offers no `retry` for its task,
+whatever else the pre-check found. The stop says the criteria need fixing, not the
+task, and only the plan can change them.
 
 ## `yunta pack add`/`update` refuses
 

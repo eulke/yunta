@@ -179,7 +179,7 @@ sessions:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(outcome.contains("blackboard"), "got: {outcome}");
         }
         other => panic!("expected rev-a failed, got {other:?}"),
@@ -267,7 +267,7 @@ sessions:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(
                 outcome.contains("run_tools") && outcome.contains("blackboard"),
                 "the diagnostic must name the capability and the coordination: {outcome}"

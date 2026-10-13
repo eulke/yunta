@@ -6,7 +6,9 @@ pub mod happening;
 pub mod kinds;
 pub mod ledger;
 pub mod payloads;
+pub mod stop;
 
 pub use kinds::TaskEvent;
 pub use ledger::*;
 pub use payloads::*;
+pub use stop::*;

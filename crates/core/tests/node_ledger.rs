@@ -31,38 +31,30 @@ fn started(attempt: u32, tree: &str) -> NodeEvent {
 fn failed(outcome: &str) -> NodeEvent {
     NodeEvent::Failed(NodeFailedPayload::new(
         Failure::message(outcome),
-        false,
         TokenUsage::default(),
     ))
 }
 
 #[test]
-fn the_attempt_after_a_failure_remembers_the_tree_that_failure_started_from() {
+fn the_attempt_after_a_failure_remembers_that_failure() {
     let ledger = fold(vec![
         started(1, "a1a1a1a"),
         failed("regression"),
         started(2, "a1a1a1a"),
     ]);
     let record = ledger.get("compare").unwrap();
-    let repeated = record.repeats().expect("the same tree, after a failure");
-    assert_eq!(repeated.attempt, 1);
-    assert_eq!(repeated.failure, Failure::message("regression"));
+    let earlier = record
+        .failed_before
+        .as_ref()
+        .expect("the attempt before failed");
+    assert_eq!(earlier.attempt, 1);
+    assert_eq!(earlier.failure, Failure::message("regression"));
 }
 
 #[test]
-fn an_attempt_from_another_tree_repeats_nothing() {
-    let ledger = fold(vec![
-        started(1, "a1a1a1a"),
-        failed("regression"),
-        started(2, "b2b2b2b"),
-    ]);
-    assert_eq!(ledger.get("compare").unwrap().repeats(), None);
-}
-
-#[test]
-fn an_attempt_that_follows_no_failure_repeats_nothing() {
+fn an_attempt_that_follows_no_failure_remembers_none() {
     let ledger = fold(vec![started(1, "a1a1a1a"), started(2, "a1a1a1a")]);
-    assert_eq!(ledger.get("compare").unwrap().repeats(), None);
+    assert_eq!(ledger.get("compare").unwrap().failed_before, None);
 }
 
 /// Folds `events`, each under its node, in order.
@@ -115,7 +107,7 @@ fn a_close_that_moved_the_tree_marks_the_attempts_beside_it() {
         (
             "fix",
             NodeEvent::Failed(
-                NodeFailedPayload::new(Failure::message("exit 1"), false, TokenUsage::default())
+                NodeFailedPayload::new(Failure::message("exit 1"), TokenUsage::default())
                     .leaving("b2b2b2b".parse().unwrap()),
             ),
         ),

@@ -11,6 +11,30 @@
     }
   ],
   "$defs": {
+    "AccountLimit": {
+      "description": "The account's limit, as the session or the forge reported it: where it\ncame from, when it resets if it said so, and the words it came with.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "resets_at": {
+          "description": "Absolute: the moment the limit lifts, when the source named one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "source": {
+          "$ref": "#/$defs/LimitSource"
+        }
+      },
+      "required": [
+        "source",
+        "message"
+      ]
+    },
     "AdapterId": {
       "description": "An adapter id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -1193,6 +1217,13 @@
         "cmd": {
           "type": "string"
         },
+        "conclusion": {
+          "description": "The line the command concluded with, when it printed one: its last\nnon-empty stdout line, else its last stderr line. Taken when the\nresult is recorded, so a replay reads what the live run read.\nAbsent when nothing was printed, and on a log written before the\nfield.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "duration_ms": {
           "description": "Wall-clock milliseconds this execution took — the datum\nthe learned criterion ordering feeds on. `None` for a `reused: true`\nresult (nothing ran) and for events logged before this field\nexisted (additive, tolerant reader).",
           "type": [
@@ -1560,6 +1591,44 @@
             "criterion"
           ]
         }
+      ]
+    },
+    "DepartureMenu": {
+      "description": "The departure from the plan a task's session declared, as its question\nis written: the declarations it asks about, the plan's criteria that\naccepting stops holding the task to, the node that writes the task's\ntests again, and whether accepting is offered at all. Every word of the\nquestion is written from these fields when it is shown.",
+      "type": "object",
+      "properties": {
+        "accept_offered": {
+          "description": "Whether accepting is offered. False when a test a departure departs\nfrom came with the run and no node of the run writes it again.",
+          "type": "boolean"
+        },
+        "deviations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeviationDeclaredPayload"
+          }
+        },
+        "rewritten_by": {
+          "description": "The node that writes the task's tests again, when accepting does.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waived": {
+          "description": "The commands of the plan's criteria accepting stops holding the\ntask to. Absent when accepting waives none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "deviations",
+        "accept_offered"
       ]
     },
     "DeviationDeclaredPayload": {
@@ -2153,6 +2222,17 @@
       "description": "An escalation on its way to a person: the claim, the record it is\naudited against, and the menu of answers.\n\nThe one way a `gate_waiting` payload comes to exist: which half of the\nstory goes into the summary and which into the evidence is decided\nhere, once, and the menu cannot be empty by type, since an escalation\nwith no options refuses every answer it is given.",
       "type": "object",
       "properties": {
+        "departure": {
+          "description": "The departure from the plan a task's session declared, as the\nquestion about it is written. Absent on every other escalation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DepartureMenu"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "evidence": {
           "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
           "$ref": "#/$defs/Evidence"
@@ -2162,6 +2242,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "failure": {
+          "description": "The failure a node's escalation is about, with the menu that\nfailure offers. Absent on every other escalation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureMenu"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "options": {
@@ -3018,6 +3109,34 @@
       "type": "string",
       "minLength": 1
     },
+    "ExhaustedReroute": {
+      "description": "A re-route the failure exhausted: the node it would send the run to,\nthe cap it reached, and the mode a promotion would take the run to,\nwhen the workflow names one.",
+      "type": "object",
+      "properties": {
+        "goto": {
+          "$ref": "#/$defs/NodeId"
+        },
+        "max_reroutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "next_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModeName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "goto",
+        "max_reroutes"
+      ]
+    },
     "Fact": {
       "description": "One fact the engine read off the log: the label a reader scans for,\nand the value under it.\n\nThe label is optional because not every fact needs one. A cause like\n`exit 1` or a sentence like `no forge reachable from this machine`\nalready names itself, and putting a word in front of it would add\nreading without adding meaning; a bare number like `400` says\nnothing until `limits.max_tokens_per_run` is in front of it. A fact\nthat carries a label states it here rather than writing it into the\nvalue, so every surface sets the two apart the same way.",
       "type": "object",
@@ -3037,7 +3156,7 @@
       ]
     },
     "Failure": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], one carrying `unpassable:` as\n[`Failure::PlanUnpassable`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "anyOf": [
         {
           "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
@@ -3182,6 +3301,79 @@
           ]
         },
         {
+          "description": "The session refused the request: the adapter's message, and the\ncause it read from it.",
+          "type": "object",
+          "properties": {
+            "session_refused": {
+              "$ref": "#/$defs/SessionRefusal"
+            }
+          },
+          "required": [
+            "session_refused"
+          ]
+        },
+        {
+          "description": "The account's limit, or the forge's, stopped the run. `resets_at` is\nabsolute: a forge's retry-after is added to the failure's own time.",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "$ref": "#/$defs/AccountLimit"
+            }
+          },
+          "required": [
+            "limit"
+          ]
+        },
+        {
+          "description": "Tasks of a loop stopped before the loop could finish: each names\nthe task and why it stopped.",
+          "type": "object",
+          "properties": {
+            "stopped": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskStop"
+              }
+            }
+          },
+          "required": [
+            "stopped"
+          ]
+        },
+        {
+          "description": "A judging check came out red on the tree it judged.",
+          "type": "object",
+          "properties": {
+            "red": {
+              "$ref": "#/$defs/RedCheck"
+            }
+          },
+          "required": [
+            "red"
+          ]
+        },
+        {
+          "description": "A composed workflow whose run ended in failure; `child_failure` is\nthe failure its own log records, when it records one.",
+          "type": "object",
+          "properties": {
+            "child_failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "child_run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "child_run"
+          ]
+        },
+        {
           "description": "A failure the engine states in one sentence.",
           "type": "object",
           "properties": {
@@ -3193,6 +3385,54 @@
             "outcome"
           ]
         }
+      ]
+    },
+    "FailureMenu": {
+      "description": "The failure a node's escalation is about, and the menu it offers: the\nattempt the choices start, the failure as data, the remedies that can\nchange its outcome and, when none can, why not. Every word of the menu\nis written from these fields when it is shown.",
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "description": "The attempt the menu's choices start, numbered as the log numbers\nattempts.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "failure": {
+          "$ref": "#/$defs/Failure"
+        },
+        "remedies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Remedy"
+          }
+        },
+        "reroute": {
+          "description": "The re-route this failure exhausted, when it closes one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExhaustedReroute"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stuck": {
+          "description": "Why no remedy is offered, when none is.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Stuck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "attempt",
+        "failure",
+        "remedies"
       ]
     },
     "FenceLevel": {
@@ -3489,7 +3729,7 @@
       ]
     },
     "GateOption": {
-      "description": "One choice in a gate's escalation: `id` is what\n`GateResolvedPayload.chosen_option` names back, `label` is the\nhuman-facing text, `tradeoff` is mandatory — any option that expands\nscope of work must declare what it trades off, and no variant of\nthis type can omit it.",
+      "description": "One choice in a gate's escalation: `id` is what\n`GateResolvedPayload.chosen_option` names back. `label` and `tradeoff`\nare the words a person reads beside it, when the option stores them.\nAn option that stores neither has its words written when it is shown,\nfrom the data its escalation carries, so neither is required here.",
       "type": "object",
       "properties": {
         "asks": {
@@ -3503,16 +3743,20 @@
           "$ref": "#/$defs/OptionId"
         },
         "label": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "tradeoff": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "id",
-        "label",
-        "tradeoff"
+        "id"
       ]
     },
     "GateResolvedPayload": {
@@ -3564,6 +3808,17 @@
     "GateWaitingPayload": {
       "type": "object",
       "properties": {
+        "departure": {
+          "description": "The departure from the plan a task's session declared, as the\nquestion about it is written. Absent on every other escalation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DepartureMenu"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "evidence": {
           "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
           "$ref": "#/$defs/Evidence"
@@ -3573,6 +3828,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "failure": {
+          "description": "The failure a node's escalation is about, with the menu that\nfailure offers. Absent on every other escalation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureMenu"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "options": {
@@ -3720,6 +3986,41 @@
       ],
       "required": [
         "node"
+      ]
+    },
+    "LimitSource": {
+      "description": "Which limit stopped the run: the account of a session's CLI, or the\nforge's rate limit on the run's pull requests.",
+      "oneOf": [
+        {
+          "description": "The account of the session's CLI.",
+          "type": "object",
+          "properties": {
+            "adapter": {
+              "$ref": "#/$defs/AdapterId"
+            },
+            "type": {
+              "type": "string",
+              "const": "session"
+            }
+          },
+          "required": [
+            "type",
+            "adapter"
+          ]
+        },
+        {
+          "description": "The forge's rate limit.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "forge"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
       ]
     },
     "Location": {
@@ -3877,7 +4178,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], one carrying `unpassable:` as\n[`Failure::PlanUnpassable`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "commit": {
@@ -3899,8 +4200,12 @@
           }
         },
         "retryable": {
-          "description": "Whether this node will be attempted again. Set by whoever owns\nthe budget, so a failure that nothing will retry is never\nrecorded as retryable.",
-          "type": "boolean"
+          "description": "Read from a log that carried it; never written. What a retry can\nchange is the failure's own cause now, not a flag beside it.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "writeOnly": true
         },
         "tokens_used": {
           "$ref": "#/$defs/TokenUsage"
@@ -4061,6 +4366,79 @@
           ]
         },
         {
+          "description": "The session refused the request: the adapter's message, and the\ncause it read from it.",
+          "type": "object",
+          "properties": {
+            "session_refused": {
+              "$ref": "#/$defs/SessionRefusal"
+            }
+          },
+          "required": [
+            "session_refused"
+          ]
+        },
+        {
+          "description": "The account's limit, or the forge's, stopped the run. `resets_at` is\nabsolute: a forge's retry-after is added to the failure's own time.",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "$ref": "#/$defs/AccountLimit"
+            }
+          },
+          "required": [
+            "limit"
+          ]
+        },
+        {
+          "description": "Tasks of a loop stopped before the loop could finish: each names\nthe task and why it stopped.",
+          "type": "object",
+          "properties": {
+            "stopped": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskStop"
+              }
+            }
+          },
+          "required": [
+            "stopped"
+          ]
+        },
+        {
+          "description": "A judging check came out red on the tree it judged.",
+          "type": "object",
+          "properties": {
+            "red": {
+              "$ref": "#/$defs/RedCheck"
+            }
+          },
+          "required": [
+            "red"
+          ]
+        },
+        {
+          "description": "A composed workflow whose run ended in failure; `child_failure` is\nthe failure its own log records, when it records one.",
+          "type": "object",
+          "properties": {
+            "child_failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Failure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "child_run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "child_run"
+          ]
+        },
+        {
           "description": "A failure the engine states in one sentence.",
           "type": "object",
           "properties": {
@@ -4074,8 +4452,7 @@
         }
       ],
       "required": [
-        "tokens_used",
-        "retryable"
+        "tokens_used"
       ]
     },
     "NodeFinishedPayload": {
@@ -4218,6 +4595,20 @@
       ]
     },
     "NonEmpty": {
+      "description": "A `Vec<T>` with at least one element.\n\nBuilt through [`NonEmpty::new`], which answers `None` for an empty\none, or from a first element and the rest. Reads as a slice. On the\nwire it is the plain array, and an empty array does not read.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Surprise"
+      }
+    },
+    "NonEmpty2": {
+      "description": "A `Vec<T>` with at least one element.\n\nBuilt through [`NonEmpty::new`], which answers `None` for an empty\none, or from a first element and the rest. Reads as a slice. On the\nwire it is the plain array, and an empty array does not read.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DeviationDeclaredPayload"
+      }
+    },
+    "NonEmpty3": {
       "description": "A `Vec<T>` with at least one element.\n\nBuilt through [`NonEmpty::new`], which answers `None` for an empty\none, or from a first element and the rest. Reads as a slice. On the\nwire it is the plain array, and an empty array does not read.",
       "type": "array",
       "items": {
@@ -4450,6 +4841,28 @@
           ]
         },
         {
+          "description": "The account's limit resets at `at`; the run resumes detached then.",
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "awaiting_reset"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "at"
+          ]
+        },
+        {
           "description": "Nothing is runnable: `node` waits on `on`, which this pass left\nunresolved.",
           "type": "object",
           "properties": {
@@ -4529,7 +4942,7 @@
               "$ref": "#/$defs/NodeId"
             },
             "pending": {
-              "$ref": "#/$defs/NonEmpty"
+              "$ref": "#/$defs/NonEmpty3"
             },
             "type": {
               "type": "string",
@@ -4684,10 +5097,77 @@
         }
       ]
     },
+    "Precondition": {
+      "description": "What must change before a retry can end differently: the tree, something outside it, or the named input.",
+      "oneOf": [
+        {
+          "description": "The run's tree has to change first.",
+          "type": "string",
+          "const": "tree_changed"
+        },
+        {
+          "description": "Something outside the run's tree has to change first.",
+          "type": "string",
+          "const": "outside_tree_changed"
+        },
+        {
+          "description": "The credential the session was refused for has to be fixed.",
+          "type": "string",
+          "const": "credential_fixed"
+        },
+        {
+          "description": "The model the session asked for has to be one the account can use.",
+          "type": "string",
+          "const": "model_available"
+        },
+        {
+          "description": "The service accepts requests again, by account or by throttle.",
+          "type": "string",
+          "const": "limit_lifted"
+        },
+        {
+          "description": "The service the session talks to has to answer.",
+          "type": "string",
+          "const": "service_reachable"
+        },
+        {
+          "description": "The command has to run: it is installed and executable.",
+          "type": "object",
+          "properties": {
+            "command_runnable": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command_runnable"
+          ]
+        }
+      ]
+    },
     "PromotionCause": {
       "description": "Where a run's promotion leads: the node that exhausted its re-routes,\nand the node it was routed to.",
       "type": "object",
       "properties": {
+        "failure": {
+          "description": "The failure that exhausted the node's re-routes, when a failure\nasked for the promotion. Absent on a promotion the log wrote\nwithout one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Failure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "goto": {
           "$ref": "#/$defs/NodeId"
         },
@@ -4899,6 +5379,154 @@
         "reason"
       ]
     },
+    "RedCheck": {
+      "description": "Why a judging check came out red: a coverage figure under its\nthreshold or none at all, a command that exited non-zero, or a baseline\nsuite that passed when it was measured and fails now.",
+      "oneOf": [
+        {
+          "description": "The coverage the run measured, when it measured one, and the\nthreshold it fell short of. `cmd` is the command that measured it.",
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string"
+            },
+            "measured": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "threshold": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "coverage"
+            }
+          },
+          "required": [
+            "type",
+            "cmd",
+            "threshold"
+          ]
+        },
+        {
+          "description": "The command that exited non-zero, with its exit code, the line it\nconcluded with and the run object holding everything it printed.",
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string"
+            },
+            "conclusion": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "exit_code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "output": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContentHash"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "command"
+            }
+          },
+          "required": [
+            "type",
+            "cmd",
+            "exit_code"
+          ]
+        },
+        {
+          "description": "The baseline suite passed when the lineage measured it and fails now;\n`tail` is what it printed last, which says why.",
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string"
+            },
+            "exit_code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "tail": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "regression"
+            }
+          },
+          "required": [
+            "type",
+            "cmd",
+            "exit_code"
+          ]
+        }
+      ]
+    },
+    "RefusalCause": {
+      "description": "Why a session refused the request.",
+      "oneOf": [
+        {
+          "description": "Unclassified: final for this attempt, never re-attempted on its own.",
+          "type": "string",
+          "const": "final"
+        },
+        {
+          "description": "The credential the session used was refused.",
+          "type": "string",
+          "const": "authentication"
+        },
+        {
+          "description": "The model the session asked for is not one the account can use.",
+          "type": "string",
+          "const": "invalid_model"
+        },
+        {
+          "description": "Transport markers only; the one cause the engine re-attempts by itself.",
+          "type": "string",
+          "const": "unreachable"
+        }
+      ]
+    },
+    "Remedy": {
+      "description": "One option a failure's menu offers, with the input it waits for.",
+      "type": "object",
+      "properties": {
+        "option": {
+          "$ref": "#/$defs/ReservedOption"
+        },
+        "precondition": {
+          "description": "The input a `retry` waits for; always set on one. Other options may leave it `None`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Precondition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "option"
+      ]
+    },
     "Report": {
       "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a writer who hears\none rule at a time rewrites the document once per rule.",
       "type": "object",
@@ -4943,6 +5571,22 @@
       "enum": [
         "on_failure",
         "gate_choice"
+      ]
+    },
+    "ReservedOption": {
+      "type": "string",
+      "enum": [
+        "abort",
+        "retry",
+        "continue-work",
+        "promote",
+        "approve",
+        "grant",
+        "deny",
+        "continue",
+        "reject",
+        "accept",
+        "send-back"
       ]
     },
     "Responder": {
@@ -5418,6 +6062,17 @@
           "items": {
             "$ref": "#/$defs/ResumePolicy"
           }
+        },
+        "tree": {
+          "description": "The run's tree as this wake found it, recorded when a node's failure\nwaited on a person: a change a person made to the tree while the run\nwas parked reaches the log here. Absent on every other wake.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -6063,6 +6718,26 @@
       "type": "string",
       "minLength": 1
     },
+    "SessionRefusal": {
+      "description": "A refusal kept whole: the adapter's message and its cause.",
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterId"
+        },
+        "cause": {
+          "$ref": "#/$defs/RefusalCause"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adapter",
+        "cause",
+        "message"
+      ]
+    },
     "Shown": {
       "description": "An artifact an escalation puts in front of the person deciding: the\nversion they saw, by its hash, so a decision on it is a decision on\nexactly those bytes.",
       "type": "object",
@@ -6150,6 +6825,46 @@
         "why"
       ]
     },
+    "Stuck": {
+      "description": "Why a failure offers no remedy.",
+      "oneOf": [
+        {
+          "description": "The config the run froze at birth lacks what this needs; a new run under a config that declares it is the way out.",
+          "type": "string",
+          "const": "frozen_config"
+        },
+        {
+          "description": "The project's permissions deny the work.",
+          "type": "string",
+          "const": "project_denies"
+        },
+        {
+          "description": "The scope needs a grant this run will not give.",
+          "type": "string",
+          "const": "no_grant"
+        },
+        {
+          "description": "The same check on the same tree answers the same: the tree has to change first.",
+          "type": "string",
+          "const": "tree_unchanged"
+        },
+        {
+          "description": "A person's decision is owed before the node can go on.",
+          "type": "string",
+          "const": "owed"
+        },
+        {
+          "description": "The refusal says the same to every attempt.",
+          "type": "string",
+          "const": "final"
+        },
+        {
+          "description": "A declared criterion no work of the plan can pass: the plan has to change.",
+          "type": "string",
+          "const": "criteria_wrong"
+        }
+      ]
+    },
     "SubmissionOutcome": {
       "description": "Accepted, and the file the engine wrote from it; or refused, and\nevery problem the document has.",
       "oneOf": [
@@ -6191,6 +6906,274 @@
           "additionalProperties": false,
           "required": [
             "refused"
+          ]
+        }
+      ]
+    },
+    "Surprise": {
+      "description": "What a criterion's first run told the engine before any work began.\nEach case says the criteria are wrong, not the task.",
+      "oneOf": [
+        {
+          "description": "A non-guard criterion that already passes before any work: the\ncriteria need fixing, not the task.",
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "trivial_criterion"
+            }
+          },
+          "required": [
+            "type",
+            "cmd"
+          ]
+        },
+        {
+          "description": "A guard already red on the tree the task starts from: what broke it\ncame before the task. `proves` is what the guard is there to show,\nwhen the task or the run says so.",
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string"
+            },
+            "proves": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "broken_guard"
+            }
+          },
+          "required": [
+            "type",
+            "cmd"
+          ]
+        },
+        {
+          "description": "A criterion that never answered; `Unanswered::of(exit_code)` says why.",
+          "type": "object",
+          "properties": {
+            "cmd": {
+              "type": "string"
+            },
+            "exit_code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "unrunnable"
+            }
+          },
+          "required": [
+            "type",
+            "cmd",
+            "exit_code"
+          ]
+        }
+      ]
+    },
+    "TaskCause": {
+      "description": "Why a task stopped short of done. A `blocked` status carries one, and\nthe words a person reads for it are written by the render crate.",
+      "oneOf": [
+        {
+          "description": "The criteria were wrong before any work started: what the\npre-check found, one entry per criterion.",
+          "type": "object",
+          "properties": {
+            "found": {
+              "$ref": "#/$defs/NonEmpty"
+            },
+            "type": {
+              "type": "string",
+              "const": "pre_check"
+            }
+          },
+          "required": [
+            "type",
+            "found"
+          ]
+        },
+        {
+          "description": "Every attempt ran and the criteria are still red, or the work left\nthe scope the task declared. `red` and `outside` are what the last\nattempt left: the criteria still failing, and the paths it changed\noutside the scope.",
+          "type": "object",
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "outside": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "red": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CriterionResult"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "unmet"
+            }
+          },
+          "required": [
+            "type",
+            "attempts",
+            "red",
+            "outside"
+          ]
+        },
+        {
+          "description": "After an attempt, a criterion never answered: its command could not\nbe found or executed, or it was stopped before it answered. Another\nattempt would change the tree, never that.",
+          "type": "object",
+          "properties": {
+            "runs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CriterionResult"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "unrunnable"
+            }
+          },
+          "required": [
+            "type",
+            "runs"
+          ]
+        },
+        {
+          "description": "The session refused the request, with the adapter's message and the\ncause it gave. The cycle ends here: no other session runs the task.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session_refused"
+            }
+          },
+          "$ref": "#/$defs/SessionRefusal",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The account's limit ended the session; the node waits for its reset.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session_limited"
+            }
+          },
+          "$ref": "#/$defs/AccountLimit",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The session an attempt worked in ended without a terminal event, and\nhow its process went.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session_died"
+            }
+          },
+          "$ref": "#/$defs/SessionDeath",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A person chose to continue from the work the task's last attempt\nleft, and that work no longer applies on the run's tree: these are\nthe paths it conflicts on.",
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "carried_work_no_longer_applies"
+            }
+          },
+          "required": [
+            "type",
+            "paths"
+          ]
+        },
+        {
+          "description": "A criterion's own command is one the run's permissions refuse, so\nthe task cannot be verified at all. `rule` is the refusal the\npermission check wrote, naming the pattern and the field.",
+          "type": "object",
+          "properties": {
+            "rule": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "command_denied"
+            }
+          },
+          "required": [
+            "type",
+            "rule"
+          ]
+        },
+        {
+          "description": "A scope-expansion request is owed a human decision, and no further\nsession spends budget while one is owed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "scope_decision_owed"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The session declared that its work departs from the plan, and a\nperson answers each departure before the task closes.",
+          "type": "object",
+          "properties": {
+            "deviations": {
+              "$ref": "#/$defs/NonEmpty2"
+            },
+            "type": {
+              "type": "string",
+              "const": "deviation_owed"
+            }
+          },
+          "required": [
+            "type",
+            "deviations"
+          ]
+        },
+        {
+          "description": "The session declared a criterion impossible on the plan's work. No\nfurther session retries it, and the planner rewrites the tasks.",
+          "type": "object",
+          "properties": {
+            "declared": {
+              "$ref": "#/$defs/CriterionUnpassablePayload"
+            },
+            "type": {
+              "type": "string",
+              "const": "criterion_unpassable"
+            }
+          },
+          "required": [
+            "type",
+            "declared"
           ]
         }
       ]
@@ -6368,6 +7351,17 @@
             }
           ]
         },
+        "stop": {
+          "description": "On a `blocked`: why the task stopped. Absent on every other\ntransition, and in a log written before the field.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "task_id": {
           "$ref": "#/$defs/TaskId"
         }
@@ -6376,6 +7370,22 @@
         "task_id",
         "new_status",
         "caused_by"
+      ]
+    },
+    "TaskStop": {
+      "description": "A task that stopped, and why: one entry of the list a loop's failure\ncarries for the tasks that kept it from closing.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/TaskCause"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "cause"
       ]
     },
     "TerminalState": {

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use yunta_core::rail::RailEvent;
 use yunta_core::{ModelName, SessionId, ToolNaming};
 
-use crate::mock::MockStep;
+use crate::mock::{MockOutcome, MockStep};
 
 /// Counts the ids given out, so every message and tool use of the process
 /// carries one of its own. A session counts a message's usage once per id,
@@ -54,7 +54,28 @@ pub(crate) fn render(step: &MockStep, _naming: ToolNaming) -> Vec<String> {
                 *cached_input_tokens,
             )),
         )],
-        MockStep::RunTool { .. } => Vec::new(),
+        MockStep::RunTool { .. } | MockStep::RunToolRejected { .. } => Vec::new(),
+    }
+}
+
+/// The line the CLI closes a session with: a `result` that carries the
+/// summary, or on a failure `is_error` and the message. A crash and a hang
+/// print no line, since no terminal line exists for either.
+pub(crate) fn close(outcome: &MockOutcome) -> Vec<String> {
+    match outcome {
+        MockOutcome::Completed { summary } => vec![json!({
+            "type": "result",
+            "is_error": false,
+            "result": summary,
+        })
+        .to_string()],
+        MockOutcome::Failed { message, .. } => vec![json!({
+            "type": "result",
+            "is_error": true,
+            "result": message,
+        })
+        .to_string()],
+        MockOutcome::Crash | MockOutcome::Hang { .. } => Vec::new(),
     }
 }
 

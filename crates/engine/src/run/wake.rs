@@ -1,15 +1,16 @@
-//! What a run does when an invocation wakes one that already has
-//! history: it verifies that the run is still what its own log says it
-//! is, then records that it woke.
+//! What a run does when an invocation wakes one that already has history:
+//! it verifies that the run is still what its own log says it is, then
+//! records that it woke, with the tree a failure waiting on a person found
+//! the run at.
 
 use yunta_core::events::{EventPayload, FindingSeverity, RunEvent, RunResumedPayload};
-use yunta_core::{Location, RelativePath};
+use yunta_core::{Location, RelativePath, TreeId};
 
 use crate::artifacts::ArtifactIntegrity;
-use crate::replay::RunView;
+use crate::replay::{NodeState, RunView};
 use crate::worktree::{RunWorktree, WorktreeIntegrity};
 
-use super::{schedule, steps, RunCtx, RunError};
+use super::{schedule, shared_tree, steps, RunCtx, RunError};
 
 /// Wakes a run that already has history: verifies that the run is still
 /// what its own log says it is, records the resume with the policy each
@@ -80,8 +81,9 @@ async fn verify_before_waking(
 }
 
 /// Writes the `run_resumed` that says the run woke, carrying the policy
-/// each orphan node resolves to. Whether they share one is the
-/// payload's own arithmetic.
+/// each orphan node resolves to, and the tree a failure waiting on a person
+/// found the run at. Whether the policies share one is the payload's own
+/// arithmetic.
 async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
     // A node the mode excludes never ran, so the orphans are the same
     // whichever nodes are in the mode.
@@ -96,9 +98,41 @@ async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError>
         Some(checkout) => woken.in_checkout(checkout),
         None => woken,
     };
+    let woken = match waiting_failure_tree(ctx, view).await? {
+        Some(tree) => woken.finding(tree),
+        None => woken,
+    };
     ctx.emit(None, EventPayload::Run(RunEvent::Resumed(woken)))
         .await?;
     Ok(())
+}
+
+/// The run's tree as this wake finds it, when a node's failure waits on a
+/// person: a change a person made to the tree while the run was parked
+/// reaches the log through it. It is the tree a record of that node names
+/// (see `shared_tree::recorded_tree`), so the failure's tree and this one
+/// compare like with like. A wake with no failure waiting finds no tree, and
+/// runs no git. The scan covers the top-level nodes, the ones whose failures
+/// the scheduler decides on.
+async fn waiting_failure_tree(
+    ctx: &RunCtx<'_>,
+    view: &RunView,
+) -> Result<Option<TreeId>, RunError> {
+    let failed = ctx.manifest.workflow.nodes.iter().find(|node| {
+        matches!(
+            view.state.nodes.state(&node.id),
+            Some(NodeState::Failed { .. })
+        )
+    });
+    match failed {
+        Some(node) => {
+            // A capture takes in the ignored paths the project protects, and this
+            // invocation's context holds none until the set is read from the log.
+            ctx.renew_protected(super::protected::of(ctx, &view.events).await?);
+            Ok(Some(shared_tree::recorded_tree(ctx, node).await?))
+        }
+        None => Ok(None),
+    }
 }
 
 /// The checkout the run wakes in, when it is not the one its log last

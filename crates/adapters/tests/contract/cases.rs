@@ -7,8 +7,9 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use yunta_core::agent::AgentDefinition;
+use yunta_core::events::{FailureCause, RefusalCause};
 use yunta_core::fence::Coverage;
-use yunta_core::port::{AgentEvent, FailureCause, PermissionProfile, ProbeReport};
+use yunta_core::port::{AgentEvent, PermissionProfile, ProbeReport};
 use yunta_core::port::{RunToolsEndpoint, SessionRequest};
 use yunta_core::rail::RailEvent;
 use yunta_core::{sha256_hex, AdapterError, AdapterSettings, CliConfig, Effort, FenceLevel};
@@ -72,10 +73,22 @@ fn usages(events: &[AgentEvent]) -> Vec<(Option<u64>, Option<u64>, Option<u64>)>
 /// Each message a CLI fails with ends its session at the cause its classifier table gives it.
 pub async fn failure_causes_follow_the_classifier_table(subject: &dyn Subject) {
     let table = [
-        ("401 Unauthorized", FailureCause::Final),
-        ("Invalid API key. Run /login", FailureCause::Final),
-        ("getaddrinfo ENOTFOUND host", FailureCause::Unreachable),
-        ("stream ended unexpectedly", FailureCause::Retryable),
+        (
+            "401 Unauthorized",
+            FailureCause::Refused(RefusalCause::Authentication),
+        ),
+        (
+            "Invalid API key. Run /login",
+            FailureCause::Refused(RefusalCause::Authentication),
+        ),
+        (
+            "getaddrinfo ENOTFOUND host",
+            FailureCause::Refused(RefusalCause::Unreachable),
+        ),
+        (
+            "stream ended unexpectedly",
+            FailureCause::Refused(RefusalCause::Unreachable),
+        ),
     ];
     for (message, expected) in table {
         let (dir, req) = fresh();
@@ -84,7 +97,7 @@ pub async fn failure_causes_follow_the_classifier_table(subject: &dyn Subject) {
         let Some(AgentEvent::Failed { cause, .. }) = played.events.last() else {
             panic!("`{message}` ends in Failed: {:?}", played.events);
         };
-        assert_eq!(*cause, expected, "`{message}`");
+        assert_eq!(cause, &expected, "`{message}`");
     }
 }
 

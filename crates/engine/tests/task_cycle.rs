@@ -10,18 +10,22 @@
 
 use yunta_adapters::MockAdapter;
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, EventPayload, NodeEvent, Phase, TaskLedger,
+    CriteriaCheckedPayload, CriterionResult, EventPayload, NodeEvent, Phase, RefusalCause,
+    TaskLedger, Unanswered,
 };
 use yunta_core::port::{Budget, PermissionProfile};
 use yunta_core::Task;
 use yunta_core::{Capabilities, Criterion};
 use yunta_engine::scope_expansion::GrantWindow;
 use yunta_engine::{
-    run_task, surprises, AttemptEnv, BlockedCause, CriterionRun, DispatchOutcome, Memo,
-    ScopeGovernance, Surprise, TaskOutcome, Unit, UnitId,
+    run_task, surprises, AttemptEnv, CriterionRun, DispatchOutcome, Memo, ScopeGovernance,
+    Surprise, TaskCause, TaskCycleReport, TaskOutcome, Unit, UnitId,
 };
 use yunta_testkit::{init_repo, Owner};
 use yunta_testkit_core::Log;
+
+#[path = "task_cycle/failed_attempts.rs"]
+mod failed_attempts;
 
 /// The setup a task session of node `build` runs under: the mock
 /// runner every fixture here answers as, and nothing else.
@@ -105,6 +109,42 @@ fn unpriced() -> TaskLedger {
     TaskLedger::default()
 }
 
+/// Runs `t` once, as its first attempt runs, on `adapter` in `unit`'s tree,
+/// and returns what the cycle reports.
+async fn run_once(
+    owner: &Owner,
+    unit: &Unit,
+    run: &std::path::Path,
+    t: &Task,
+    adapter: &MockAdapter,
+) -> TaskCycleReport {
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let grants = GrantWindow::seeded(0);
+    let env = AttemptEnv {
+        node: &build_node(),
+        adapter,
+        unit,
+        budget: Budget::default(),
+        memo: &memo,
+        history: &unpriced(),
+        supervision: owner.supervision(),
+        carry: None,
+        resume: None,
+    };
+    let report = run_task(
+        t,
+        "Implement your task.",
+        env,
+        ungoverned(&grants),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run),
+    )
+    .await
+    .unwrap();
+    report
+}
+
 /// The tasks fold a run derives from a log whose one pre-check timed
 /// each command at the durations `entries` names.
 fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
@@ -121,6 +161,7 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
                 tail: Vec::new(),
                 tree: None,
                 head: None,
+                conclusion: None,
             })
         })
         .collect();
@@ -308,9 +349,13 @@ outcome: { type: completed, summary: "ok" }"#,
         "no attempt should have been dispatched"
     );
     match report.outcome {
-        TaskOutcome::Blocked { cause } => assert_eq!(
-            cause.to_string(),
-            "criterion `true` already passes before any work — the criteria need fixing, not the task"
+        TaskOutcome::Blocked {
+            cause: TaskCause::PreCheck { found },
+        } => assert_eq!(
+            found.as_slice(),
+            &[Surprise::TrivialCriterion {
+                cmd: "true".to_string()
+            }]
         ),
         other => panic!("expected Blocked, got {other:?}"),
     }
@@ -320,8 +365,6 @@ outcome: { type: completed, summary: "ok" }"#,
 async fn a_broken_guard_blocks_before_any_attempt_runs() {
     let owner = Owner::new();
     let (_dir, run, unit) = a_unit(&owner).await;
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
     // `false` always exits 1 — a guard that's already red.
     let t = task(
         "broken-guard",
@@ -332,37 +375,18 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         r#"dialect: claude-code
 outcome: { type: completed, summary: "ok" }"#,
     );
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            node: &build_node(),
-            adapter: &adapter,
-            unit: &unit,
-            budget: Budget::default(),
-            memo: &memo,
-            history: &unpriced(),
-            supervision: owner.supervision(),
-            carry: None,
-            resume: None,
-        },
-        ungoverned(&GrantWindow::seeded(0)),
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(run.path()),
-    )
-    .await
-    .unwrap();
-
+    let report = run_once(&owner, &unit, run.path(), &t, &adapter).await;
     assert!(report.attempts.is_empty());
     match report.outcome {
-        TaskOutcome::Blocked { cause } => {
-            assert_eq!(
-                cause.to_string(),
-                "guard `false` is already red before any work started"
-            )
-        }
+        TaskOutcome::Blocked {
+            cause: TaskCause::PreCheck { found },
+        } => assert_eq!(
+            found.as_slice(),
+            &[Surprise::BrokenGuard {
+                cmd: "false".to_string(),
+                proves: None,
+            }]
+        ),
         other => panic!("expected Blocked, got {other:?}"),
     }
 }
@@ -419,257 +443,6 @@ outcome: { type: completed, summary: "done" }
         .iter()
         .all(|c| c.exit_code == 0));
     assert!(!report.attempts[0].scope.violations.is_empty());
-}
-
-#[tokio::test]
-async fn a_red_attempt_blocks_the_task_without_opening_another_session() {
-    let owner = Owner::new();
-    let (_dir, run, unit) = a_unit(&owner).await;
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    let t = task(
-        "always-red",
-        &["output.txt"],
-        vec![cmd("test -f output.txt")],
-    );
-    // Three scripted, so a cycle that opened more would find them.
-    let adapter = scripted(
-        r#"
-dialect: claude-code
-sessions:
-  - outcome: { type: completed, summary: "attempt 1" }
-  - outcome: { type: completed, summary: "attempt 2" }
-  - outcome: { type: completed, summary: "attempt 3" }
-"#,
-    );
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            node: &build_node(),
-            adapter: &adapter,
-            unit: &unit,
-            budget: Budget::default(),
-            memo: &memo,
-            history: &unpriced(),
-            supervision: owner.supervision(),
-            carry: None,
-            resume: None,
-        },
-        ungoverned(&GrantWindow::seeded(0)),
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(run.path()),
-    )
-    .await
-    .unwrap();
-
-    assert!(matches!(
-        report.outcome,
-        TaskOutcome::Blocked {
-            cause: BlockedCause::Unmet { attempts: 1, .. }
-        }
-    ));
-}
-
-#[tokio::test]
-async fn a_blocked_task_says_what_its_red_criterion_printed_last() {
-    let owner = Owner::new();
-    let (_dir, run, unit) = a_unit(&owner).await;
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    let t = task(
-        "still-red",
-        &["output.txt"],
-        vec![cmd(
-            "echo checking; echo 'output.txt is missing' >&2; test -f output.txt",
-        )],
-    );
-    let adapter = scripted(
-        r#"
-dialect: claude-code
-sessions:
-  - outcome: { type: completed, summary: "attempt 1" }
-"#,
-    );
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            node: &build_node(),
-            adapter: &adapter,
-            unit: &unit,
-            budget: Budget::default(),
-            memo: &memo,
-            history: &unpriced(),
-            supervision: owner.supervision(),
-            carry: None,
-            resume: None,
-        },
-        ungoverned(&GrantWindow::seeded(0)),
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(run.path()),
-    )
-    .await
-    .unwrap();
-
-    let TaskOutcome::Blocked { cause } = report.outcome else {
-        panic!("the attempt left the criterion red: {:?}", report.outcome);
-    };
-    assert_eq!(
-        cause.to_string(),
-        "not done after 1 attempt: `echo checking; echo 'output.txt is missing' >&2; \
-         test -f output.txt` still exits 1 — output.txt is missing",
-        "whoever decides reads why it fails, not only that it does"
-    );
-}
-
-#[tokio::test]
-async fn a_non_retryable_failure_ends_the_cycle() {
-    let owner = Owner::new();
-    let (_dir, run, unit) = a_unit(&owner).await;
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    // Criteria stay red (nothing writes the file) and the session reports a
-    // refused credential, which no retry cures: the task blocks on what the
-    // session said, after the one attempt.
-    let t = task("gives-up", &["output.txt"], vec![cmd("test -f output.txt")]);
-    // Scripts more sessions than it needs, so a cycle that opened another
-    // would find one.
-    let adapter = scripted(
-        r#"
-dialect: claude-code
-sessions:
-  - outcome: { type: failed, message: "Invalid API key" }
-  - outcome: { type: failed, message: "Invalid API key" }
-  - outcome: { type: failed, message: "Invalid API key" }
-"#,
-    );
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            node: &build_node(),
-            adapter: &adapter,
-            unit: &unit,
-            budget: Budget::default(),
-            memo: &memo,
-            history: &unpriced(),
-            supervision: owner.supervision(),
-            carry: None,
-            resume: None,
-        },
-        ungoverned(&GrantWindow::seeded(0)),
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(run.path()),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(
-        report.attempts.len(),
-        1,
-        "no retry after a non-retryable failure"
-    );
-    assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
-    assert!(matches!(
-        report.attempts[0].dispatch,
-        DispatchOutcome::Failed {
-            retryable: false,
-            ..
-        }
-    ));
-}
-
-#[tokio::test]
-async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
-    let owner = Owner::new();
-    let (_dir, run, unit) = a_unit(&owner).await;
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = scripted("dialect: claude-code\noutcome: { type: crash }");
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            node: &build_node(),
-            adapter: &adapter,
-            unit: &unit,
-            budget: Budget::default(),
-            memo: &memo,
-            history: &unpriced(),
-            supervision: owner.supervision(),
-            carry: None,
-            resume: None,
-        },
-        ungoverned(&GrantWindow::seeded(0)),
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(run.path()),
-    )
-    .await
-    .unwrap();
-
-    // The mock has no process of its own, so there is nothing to ask
-    // about how one ended.
-    assert_eq!(
-        report.attempts[0].dispatch,
-        DispatchOutcome::Crashed { exit: None }
-    );
-    assert!(!report.attempts[0].succeeded);
-}
-
-/// A session that says nothing leaves no work behind and no criteria
-/// worth re-running: the task blocks naming the death, so a reader is
-/// not left to infer a dead CLI from criteria that never ran.
-#[tokio::test]
-async fn a_task_whose_session_died_blocks_naming_the_exit() {
-    let owner = Owner::new();
-    let (_dir, run, unit) = a_unit(&owner).await;
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = scripted("dialect: claude-code\noutcome: { type: crash }");
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            node: &build_node(),
-            adapter: &adapter,
-            unit: &unit,
-            budget: Budget::default(),
-            memo: &memo,
-            history: &unpriced(),
-            supervision: owner.supervision(),
-            carry: None,
-            resume: None,
-        },
-        ungoverned(&GrantWindow::seeded(0)),
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(run.path()),
-    )
-    .await
-    .unwrap();
-
-    let TaskOutcome::Blocked {
-        cause: BlockedCause::SessionDied(died),
-    } = &report.outcome
-    else {
-        panic!("a dead session blocks the task: {:?}", report.outcome);
-    };
-    assert_eq!(died.adapter, "mock");
-    assert_eq!(
-        report.attempts.len(),
-        1,
-        "and stops there: the next attempt would open the same session"
-    );
 }
 
 #[tokio::test]
@@ -1579,13 +1352,18 @@ outcome: { type: completed, summary: "ok" }"#,
 
     assert!(report.attempts.is_empty(), "no session was spent on it");
     assert!(adapter.requests_seen().is_empty());
-    let TaskOutcome::Blocked { cause } = report.outcome else {
+    let TaskOutcome::Blocked {
+        cause: TaskCause::PreCheck { found },
+    } = report.outcome
+    else {
         panic!("expected Blocked, got {:?}", report.outcome);
     };
     assert_eq!(
-        cause.to_string(),
-        "criterion `yunta-no-such-tool --version` could not run: exit 127 (command not \
-         found) — the criteria need fixing, or the environment the engine runs them in does"
+        found.as_slice(),
+        &[Surprise::Unrunnable {
+            cmd: "yunta-no-such-tool --version".to_string(),
+            exit_code: 127,
+        }]
     );
 }
 
@@ -1643,10 +1421,13 @@ sessions:
     let TaskOutcome::Blocked { cause } = report.outcome else {
         panic!("expected Blocked, got {:?}", report.outcome);
     };
-    assert!(matches!(cause, BlockedCause::Unrunnable { .. }), "{cause}");
-    assert!(
-        cause.to_string().contains("exits 127 (command not found)"),
-        "{cause}"
+    let TaskCause::Unrunnable { runs } = &cause else {
+        panic!("expected an unrunnable criterion, got {cause:?}");
+    };
+    assert_eq!(
+        Unanswered::of(runs[0].exit_code),
+        Some(Unanswered::NotFound),
+        "{cause:?}"
     );
 }
 
@@ -1723,7 +1504,7 @@ async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_
     };
     assert_eq!(
         cause,
-        BlockedCause::CarriedWorkNoLongerApplies {
+        TaskCause::CarriedWorkNoLongerApplies {
             paths: vec!["a.txt".into()]
         }
     );

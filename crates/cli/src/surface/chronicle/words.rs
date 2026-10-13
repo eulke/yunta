@@ -44,7 +44,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
         H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
-        H::Paused { pause } => format!("needs you — {}", yunta_render::pause::sentence(pause)),
+        H::Paused { pause } => yunta_render::pause::said(pause),
         H::Resumed { policies } => match policies.len() {
             0 => "resumed".to_string(),
             n => format!(
@@ -110,7 +110,7 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
             Some(Mark::Reroute),
             detailed(
                 format!("rerouted to `{}`", it.to),
-                &one_line(&it.cause.to_string()),
+                &one_line(&yunta_render::failure::sentence(&it.cause)),
             ),
         ),
         H::HookRan { phase, exit_code } => {

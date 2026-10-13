@@ -239,9 +239,11 @@ pub enum AgentEvent {
     /// cuánto de la sesión cercó realmente lo que el adapter construyó,
     /// calculado —nunca declarado—; ausente cuando no construyó ninguno.
     SessionOpened { session_id: SessionId, model: Option<ModelName>, fence: Option<Coverage> },
-    /// Falló una herramienta conocida del servidor `yunta-run` de la sesión.
-    /// Ningún argumento ni texto de error del CLI cruza esta frontera.
-    RunToolFailed { tool: RunTool, cause: RunToolFailureCause },
+    /// El CLI rechazó una llamada a una herramienta conocida del servidor
+    /// `yunta-run` de la sesión. Si la llamada llegó al servidor lo decide el
+    /// engine, que lo lee de su propio listener. Ningún argumento ni texto de
+    /// error del CLI cruza esta frontera.
+    RunToolRejected { tool: RunTool },
     /// Actividad resumida: qué herramienta usó, sobre qué. `display`
     /// solo cuando el argumento nombra el repositorio; el digest,
     /// siempre. Nunca contenido completo ni secretos (§4, O3).
@@ -261,9 +263,12 @@ pub enum AgentEvent {
     /// Cierre exitoso de la sesión (el agente terminó su turno).
     Completed { result: AgentOutcome },
     /// Cierre con error. `error` es el mensaje, con lo que el adapter atrapó
-    /// debajo. `cause` dice si otra sesión con el mismo pedido puede hacerlo
-    /// mejor: `Final` dice que no, `Retryable` y `Unreachable` dicen que sí,
-    /// y de ahí el engine registra el `retryable` del nodo.
+    /// debajo. `cause` es lo que el CLI dijo que rechazó la sesión: `Limit`
+    /// cuando la cuenta llegó a su límite (con `resets_at` cuando el CLI dio
+    /// la hora), y `Refused` con la causa de la negativa: `Final` cuando nada
+    /// la nombra, `Authentication`, `InvalidModel` o `Unreachable`. Solo
+    /// `Unreachable` vuelve a intentarse sola; de las demás decide el engine,
+    /// a partir de la falla que registra.
     Failed { error: AgentError, cause: FailureCause },
 }
 ```
@@ -385,6 +390,14 @@ incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
 `allowLocalBinding`), así que `network_isolation` se declara (D252). Las banderas viven
 en el adapter; `probe()` comprueba la versión que reporta el binario instalado y los
 settings que lee, no las banderas, y el engine no conoce ninguna.
+Un límite de cuenta se lee de los campos del stream, no del texto: un
+`rate_limit_event` con `status: rejected` trae el `resetsAt` (segundos Unix) de la
+ventana rechazada, y el `result` con `is_error` es límite si el último `assistant`
+trae `error: rate_limit` o el `result` trae `api_error_status: 429`. Una ventana
+`allowed` también trae reset, de otra ventana, y no cuenta. Un límite sin hora es
+`Limit` sin `resets_at`. Un `result` con `is_error` que no es límite se clasifica
+por marcas de palabra entera; un `result` sin `is_error` es una negativa `Final`. Un
+`tool_result` con `is_error` de una herramienta de `yunta-run` es `RunToolRejected`.
 
 ### `codex`
 
@@ -423,6 +436,12 @@ no el de un perfil de Codex (D253). La
 red de los comandos la abre el pedido (`sandbox_workspace_write.network_access`); bajo
 `read-only` no hay red y bajo `danger-full-access` no se cierra, y `check` rechaza
 `network: false` en un nodo `full` (D252).
+Un fallo se clasifica por el `message` de `turn.failed` o de `error`, que traen el mismo
+texto. Las frases de límite de Codex —`You've hit your usage limit`, con apóstrofo
+recto o curvo, y `exceeded retry limit, last status: 429`— son `Limit` sin hora: Codex
+ya reintentó antes de fallar. Lo demás se clasifica por marcas de palabra entera. Una
+llamada de `yunta-run` que termina `failed`, `approval_denied`, `approval_blocked` o
+`declined` es `RunToolRejected`.
 
 ### `mock`
 
@@ -432,10 +451,10 @@ inyectables, y puede simular solicitudes de ampliación de scope y posteos al
 blackboard. No lleva tabla fija: su fixture declara `dialect: claude-code` o
 `dialect: codex`, y el mock juega ese CLI. Responde con sus capacidades, arma su argv,
 su sandbox, su cobertura, sus hooks y su codec del riel como lo arma el adapter real,
-imprime cada paso en el formato del stream de ese CLI y lee esas líneas con el lector
-del adapter; cada escritura la pide al riel, como su CLI. Un test angosta una capacidad
-solo cuando la necesita ausente, que es lo que permite ejercitar una capacidad ausente
-sin un CLI que la niegue. Cada efecto pasa por el mismo `Fence::judge` que los
+imprime cada paso y el cierre de la sesión en el formato del stream de ese CLI, y lee
+esas líneas con el lector del adapter; cada escritura la pide al riel, como su CLI. Un
+test angosta una capacidad solo cuando la necesita ausente, que es lo que permite
+ejercitar una capacidad ausente sin un CLI que la niegue. Cada efecto pasa por el mismo `Fence::judge` que los
 adapters reales: un fixture ejercita la regla, nunca una segunda implementación de
 ella. Es lo que permite testear el engine completo (ciclo de tareas, degradación,
 cancelación, resume, paralelismo) en CI sin ningún LLM, y validar workflows nuevos

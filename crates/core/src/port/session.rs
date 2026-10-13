@@ -271,11 +271,11 @@ pub enum AgentEvent {
         /// derived from what it built. `None` when it built nothing.
         fence: Option<Coverage>,
     },
-    /// A known tool of this session's `yunta-run` server failed. No
-    /// arguments or CLI error text cross this boundary.
-    RunToolFailed {
+    /// The CLI rejected a call to a known tool of this session's
+    /// `yunta-run` server. No arguments or CLI error text cross this
+    /// boundary.
+    RunToolRejected {
         tool: crate::RunTool,
-        cause: crate::events::RunToolFailureCause,
     },
     ToolUse {
         name: String,
@@ -301,30 +301,8 @@ pub enum AgentEvent {
     },
     Failed {
         error: AgentError,
-        cause: FailureCause,
+        cause: crate::events::FailureCause,
     },
-}
-
-/// What a session's failure says about what comes after it, as far as the
-/// adapter can tell from what its CLI reported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailureCause {
-    /// Another session with the same request may do better.
-    Retryable,
-    /// Another session with the same request fails the same way: the
-    /// credential was refused, or the model is not one the account can
-    /// use.
-    Final,
-    /// The session could not reach the service behind it. Nothing about
-    /// the work: the same session can go on once the service answers.
-    Unreachable,
-}
-
-impl FailureCause {
-    /// Whether another session with the same request may do better.
-    pub fn retryable(self) -> bool {
-        !matches!(self, FailureCause::Final)
-    }
 }
 
 /// Converts a session request into a stream of typed events — nothing

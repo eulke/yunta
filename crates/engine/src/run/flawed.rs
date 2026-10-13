@@ -41,8 +41,8 @@ pub(super) fn withheld_because<'a>(flaws: impl IntoIterator<Item = &'a Flaw>) ->
 
 /// Sends a plan back from an external gate instead of publishing it: one
 /// finding per flaw, on the plan, for the session that rewrites it, and
-/// the gate fails retryable, so its `on_failure` takes the run where a
-/// request for changes would.
+/// the gate fails, so its `on_failure` takes the run where a request for
+/// changes would.
 pub(super) async fn send_back(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -75,7 +75,6 @@ pub(super) async fn send_back(
         ctx,
         node,
         format!("not published, and sent back: {because}"),
-        true,
     )
     .await?;
     Ok(GateStep::Resolved)

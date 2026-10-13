@@ -45,6 +45,7 @@ mod activity;
 mod clock;
 mod decisions;
 mod refuse;
+mod tree;
 
 pub use clock::TimeSpent;
 pub use refuse::ReplayError;

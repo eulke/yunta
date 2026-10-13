@@ -128,7 +128,6 @@ fn a_node_that_settles_twice_is_two_moments() {
                     yunta_core::events::Failure::Message {
                         outcome: "exit 1".to_string(),
                     },
-                    true,
                     TokenUsage::default(),
                 ),
             )),

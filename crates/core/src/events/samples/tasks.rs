@@ -40,6 +40,7 @@ pub(crate) fn task_check_answered() -> TaskCheckAnsweredPayload {
             tail: vec!["test graph ... FAILED".to_string()],
             tree: None,
             head: None,
+            conclusion: None,
         }],
         outside_scope: vec!["notes.md".into()],
         denied: Vec::new(),

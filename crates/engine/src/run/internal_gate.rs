@@ -9,13 +9,14 @@ use yunta_core::events::{
     GateResolvedPayload, HumanChoice, NodeEvent, NodeOutcome, PauseReason, Shown, TokenUsage,
     Withheld,
 };
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
 
 use super::gate_exec::{emit_started, GateStep};
 use super::node_close::{fail, finish_node};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
-use crate::reserved::{offers, ReservedOption};
+use crate::reserved::offers;
 
 /// A gate a person answers here, read once out of its node.
 pub(crate) struct InternalGate<'a> {
@@ -104,8 +105,7 @@ impl<'a> InternalGate<'a> {
                 });
                 let mut option = offers::declared(id, target, &next);
                 if target.is_none() && self.shows_the_run_findings() {
-                    option.tradeoff =
-                        format!("{}, and settles every finding it shows", option.tradeoff);
+                    option.tradeoff = settling(option.tradeoff);
                 }
                 option
             })
@@ -238,10 +238,19 @@ fn aborts(option: &OptionId) -> bool {
     ReservedOption::of(option) == Some(ReservedOption::Abort)
 }
 
+/// The tradeoff of an option that goes on past a gate which shows the run's
+/// findings: it settles every finding it showed.
+fn settling(tradeoff: Option<String>) -> Option<String> {
+    Some(match tradeoff {
+        Some(tradeoff) => format!("{tradeoff}, and settles every finding it shows"),
+        None => "settles every finding it shows".to_string(),
+    })
+}
+
 /// Resolves an internal gate: puts its escalation to the person, or
 /// takes the decision `resolve_gate` seeded onto the log while the run
 /// was parked. An option mapped in `on` re-routes exactly like
-/// `on_failure.goto` — the gate fails retryable, control transfers, and
+/// `on_failure.goto` — the gate fails, control transfers, and
 /// once the target's subgraph completes the gate asks again; an
 /// unmapped option finishes the gate with that choice as its outcome;
 /// `abort` pauses the run. No surface → `Waiting`, with nothing
@@ -272,7 +281,7 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     let pre_seeded = super::escalation::pre_seeded_resolution(&state, &node.id, &escalation);
     let already_recorded = pre_seeded.is_some();
     let choice = match pre_seeded {
-        Some(choice) => choice,
+        Some((choice, _)) => choice,
         None => match ctx.ask_human(Some(&node.id), None, &escalation).await? {
             Some(choice) => choice,
             None => {
@@ -368,7 +377,7 @@ async fn land(
     route_back_to(ctx, node, &chosen, target, choice.free_text.as_deref()).await
 }
 
-/// A correction lap: the gate fails retryably, and control re-routes to
+/// A correction lap: the gate fails, and control re-routes to
 /// `target` with the person's words as the cause. Same shape as any other
 /// reroute; the scheduler brings the gate back to ask again once `target`'s
 /// subgraph completes.
@@ -383,7 +392,6 @@ async fn route_back_to(
         ctx,
         node,
         format!("gate chose `{chosen}` — re-routing to `{target}`"),
-        true,
     )
     .await?;
     let cause = yunta_core::text::detailed(

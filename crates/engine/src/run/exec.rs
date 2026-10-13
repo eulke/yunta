@@ -309,7 +309,7 @@ fn step<'s>(
         Decision::MeasureBaseline { owed } => Box::pin(goes_on(baseline::measure(ctx, owed))),
         Decision::Finish => Box::pin(ends(steps::run_finished(ctx, mode))),
         Decision::Pause { reason } => Box::pin(ends(pause(ctx, reason))),
-        Decision::Fail { reason } => Box::pin(ends(steps::run_failed(ctx, reason))),
+        Decision::Fail { node, failure } => Box::pin(ends(steps::run_failed(ctx, node, failure))),
         Decision::Reroute {
             from,
             to,
@@ -334,12 +334,16 @@ fn step<'s>(
             node,
             failure,
             next_attempt,
-            continuable,
-            grantable,
-        } => {
-            let next = (next_attempt, (continuable, grantable));
-            Box::pin(steps::failure_escalation(ctx, state, node, failure, next))
-        }
+            outlook,
+        } => Box::pin(steps::failure_escalation(
+            ctx,
+            state,
+            node,
+            failure,
+            next_attempt,
+            outlook,
+        )),
+        Decision::WaitUntil { node, at } => Box::pin(ends(steps::pause_for_reset(ctx, node, at))),
         Decision::Execute(batch) => Box::pin(steps::execute_batch(ctx, state, batch)),
         Decision::PublishGate { node } => Box::pin(steps::publish_gate(ctx, node)),
         Decision::PollGate { node, external_ref } => {

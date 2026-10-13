@@ -70,7 +70,6 @@ mod chronicle_tests {
                 EventPayload::Node(NodeEvent::Failed(
                     yunta_core::events::NodeFailedPayload::new(
                         Failure::message("exit 1"),
-                        true,
                         TokenUsage::default(),
                     ),
                 )),

@@ -554,6 +554,13 @@ it for every node that asks — `quick: { include: [...], ask: required }` — a
 node's own `ask:` beats its mode's. `yunta check` refuses `ask:` on a node that
 asks nothing.
 
+Under the default `defaults.on_failure: pause`, a run also stops for a person when a node
+fails in a way only a person can settle. A usage limit that names the time it resets is
+not a question: the run pauses with `awaiting_reset` and resumes by itself at that time.
+A limit that names no time, and a session the CLI refuses for an invalid credential or
+model, stop the run the same way: the failure's menu offers a retry, and says what must
+change before the retry can end differently.
+
 ### Optional nodes
 
 `optional: true` on a top-level node says the run can do without it when the project

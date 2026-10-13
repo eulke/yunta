@@ -14,13 +14,16 @@ use futures::StreamExt;
 use yunta_core::fence::{Advice, Fence};
 
 use yunta_adapters::CodexAdapter;
-use yunta_core::events::SessionEnd;
+use yunta_core::events::{FailureCause, RefusalCause, SessionEnd};
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile};
 use yunta_core::Pid;
 use yunta_core::{AdapterSettings, SessionId};
 use yunta_testkit_core::adapter::{
     child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, wait_until_gone, write_lines,
 };
+
+#[path = "codex/refusals.rs"]
+mod refusals;
 
 fn stub_path() -> PathBuf {
     yunta_testkit_core::stubs::codex()
@@ -48,35 +51,6 @@ async fn a_run_tool_is_named_the_way_this_cli_hands_it_to_the_model() {
         yunta_core::RunTool::CheckArtifact.called(naming),
         "mcp__yunta_run__yunta_check_artifact"
     );
-}
-
-#[tokio::test]
-async fn a_failed_turn_ends_the_stream_with_failed_and_retryable() {
-    let dir = tempfile::tempdir().unwrap();
-    let lines = write_lines(
-        dir.path(),
-        "lines.jsonl",
-        &[
-            THREAD_STARTED_LINE,
-            r#"{"type":"turn.failed","error":{"message":"model response stream ended unexpectedly"}}"#,
-        ],
-    );
-
-    let mut req = request(dir.path().to_path_buf());
-    req.env.plain.insert(
-        "CODEX_STUB_LINES_FILE".to_string(),
-        lines.display().to_string(),
-    );
-    let session = adapter().spawn(req).await.unwrap();
-    let events = drain(session).await;
-
-    match events.last().unwrap() {
-        AgentEvent::Failed { error, cause } => {
-            assert_eq!(error.message, "model response stream ended unexpectedly");
-            assert!(cause.retryable());
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -166,7 +140,7 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
 }
 
 #[tokio::test]
-async fn failed_run_tool_calls_report_only_a_known_tool_and_closed_cause() {
+async fn rejected_run_tool_calls_report_only_a_known_tool() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -186,31 +160,18 @@ async fn failed_run_tool_calls_report_only_a_known_tool_and_closed_cause() {
         lines.display().to_string(),
     );
     let events = drain(adapter().spawn(req).await.unwrap()).await;
-    let failed: Vec<_> = events
+    let rejected: Vec<_> = events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::RunToolFailed { tool, cause } => Some((*tool, *cause)),
+            AgentEvent::RunToolRejected { tool } => Some(*tool),
             _ => None,
         })
         .collect();
     assert_eq!(
-        failed,
-        vec![
-            (
-                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
-                yunta_core::events::RunToolFailureCause::CallFailed
-            ),
-            (
-                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
-                yunta_core::events::RunToolFailureCause::CallFailed
-            ),
-            (
-                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
-                yunta_core::events::RunToolFailureCause::ApprovalBlocked
-            ),
-        ]
+        rejected,
+        vec![yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions); 3]
     );
-    assert!(!format!("{failed:?}").contains("top-secret"));
+    assert!(!format!("{rejected:?}").contains("top-secret"));
 }
 
 #[tokio::test]
@@ -847,23 +808,6 @@ async fn events_with(
 }
 
 #[tokio::test]
-async fn a_fatal_error_event_ends_the_session_as_failed() {
-    let events = events_of(&[
-        THREAD_STARTED_LINE,
-        r#"{"type":"error","message":"stream disconnected before completion"}"#,
-    ])
-    .await;
-
-    match events.last().unwrap() {
-        AgentEvent::Failed { error, cause } => {
-            assert!(cause.retryable(), "a transport failure is one to retry");
-            assert_eq!(error.message, "stream disconnected before completion");
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
-}
-
-#[tokio::test]
 async fn a_codex_session_keeps_the_fence_roots_writable_beside_the_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join("run/artifacts");
@@ -1089,32 +1033,6 @@ async fn no_dead_config_override_reaches_the_cli() {
             .iter()
             .any(|a| a.starts_with("mcp_servers.yunta-run.bearer_token_env_var=")),
         "the credential is named, not inlined: {args:?}"
-    );
-}
-
-/// A thread id the CLI states and nothing can be fails the session, and
-/// the failure keeps what rejected the value so a reader following the
-/// chain reaches the rule it broke.
-#[tokio::test]
-async fn a_thread_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
-    let events = events_of(&[r#"{"type":"thread.started","thread_id":""}"#]).await;
-
-    let AgentEvent::Failed { error, cause } = &events[0] else {
-        panic!("expected Failed, got {:?}", events[0]);
-    };
-    assert!(!cause.retryable(), "not a failure to retry: {error}");
-    let described = yunta_core::describe(error);
-    assert!(
-        described.starts_with("the CLI's `thread.started` line is malformed"),
-        "the failure names the line: {described}"
-    );
-    assert!(
-        error.source().is_some(),
-        "the failure keeps what rejected the value: {described}"
-    );
-    assert!(
-        described.len() > error.message.len(),
-        "the cause is read, not dropped: {described}"
     );
 }
 

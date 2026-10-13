@@ -109,7 +109,7 @@ historial previo — es la primera implementación.
 
 ## 4. Mapeo `AgentEvent` (Spec Adapter) → `kind` del event log
 
-El trait `Adapter` emite 7 variantes de `AgentEvent` (`SessionOpened`, `RunToolFailed`,
+El trait `Adapter` emite 7 variantes de `AgentEvent` (`SessionOpened`, `RunToolRejected`,
 `ToolUse`, `Usage`, `Note`, `Completed`, `Failed`). El adapter informa lo que vio en el
 stream de su CLI; el engine decide qué `kind` escribe con cada una, en la sesión que las
 abrió (`task_cycle/stream.rs`). El puerto no tiene variante para una escritura
@@ -119,7 +119,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 |---|---|---|
 | `SessionOpened` | `agent_session_opened` | mapeo directo — obligatorio y siempre primero |
 | ninguna: el riel de la sesión | `write_refused` | la registra el engine cuando el cerco rechaza una escritura por la que preguntó el hook de la sesión, antes de responderle; ningún adapter la informa |
-| `RunToolFailed` | `run_tool_failed` | una run tool que falló, con su causa cerrada |
+| `RunToolRejected` | `run_tool_failed` | una run tool que la CLI rechazó; el engine decide su causa cerrada según la llamada haya llegado al servidor (`call_failed`) o no (`approval_blocked`) |
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
@@ -281,7 +281,7 @@ registra.
 |---|---|---|---|
 | `task_id` | string | sí | — |
 | `phase` | enum `pre \| post` | sí | pre-check en rojo vs. post-check |
-| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?, output?, tail?, tree?, head?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara; `output` es el hash del objeto con lo que imprimió el comando, stdout y después stderr, redactado — en `reused=true`, lo que imprimió la ejecución que dio esa respuesta roja sobre el mismo árbol, y ausente si la respuesta reutilizada pasó o si el comando no imprimió nada; `tail` son sus últimas 20 líneas cuando `exit_code` no es 0, y se omite cuando pasó. Un log anterior a estos dos campos los lee ausentes. `tree` es el árbol git de lo que el checkout tenía cuando el comando respondió —para lo que se guarda la respuesta—, y `head` el commit en que estaba, solo para un comando que corre `git`; ambos ausentes en un check que el engine enuncia sin correr, y en un log anterior a ellos |
+| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?, output?, tail?, tree?, head?, conclusion?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara; `output` es el hash del objeto con lo que imprimió el comando, stdout y después stderr, redactado — en `reused=true`, lo que imprimió la ejecución que dio esa respuesta roja sobre el mismo árbol, y ausente si la respuesta reutilizada pasó o si el comando no imprimió nada; `tail` son sus últimas 20 líneas cuando `exit_code` no es 0, y se omite cuando pasó. Un log anterior a estos dos campos los lee ausentes. `tree` es el árbol git de lo que el checkout tenía cuando el comando respondió —para lo que se guarda la respuesta—, y `head` el commit en que estaba, solo para un comando que corre `git`; ambos ausentes en un check que el engine enuncia sin correr, y en un log anterior a ellos. `conclusion` es la línea con que concluyó el comando —su última línea no vacía de stdout o, si no la hay, la de stderr—, fijada al registrar el resultado para que un replay lea lo mismo que la ejecución en vivo; ausente cuando no imprimió nada y en un log anterior al campo |
 | `waiting` | lista de strings (comandos) | vacía —y omitida— cuando ninguna guarda esperó | los `guard` que el check no corrió porque un criterio que corrió antes —propio de la tarea u otra guarda— estaba en rojo; solo en `post`. Un log anterior al campo lo lee vacío |
 
 ### 5.11 `task_status_changed` — engine
@@ -295,6 +295,7 @@ registra.
 | `commit` | `Option<CommitSha>` | no | dónde aterrizó el trabajo de la tarea, en un `done` y en ningún otro estado: el commit que el árbol del run llevaba tras integrarlo. Es lo que vuelve a un `done` respondible desde otro run — un árbol desciende de ese commit o no tiene el trabajo |
 | `left_work` | `Option<CommitSha>` | no | el commit con el trabajo que dejó el último intento de la tarea, commiteado sin rama y guardado por la ref de su unidad (`refs/yunta/unit/…`): en un `blocked`, trabajo desde el que una persona puede elegir continuar (`continue-work`); en el `pending` de esa reapertura, el trabajo desde el que continúa. Ausente cuando el intento no cambió nada, y en cualquier otra transición |
 | `resumes` | `Option<SessionId>` | no | en el `pending` que reabre una tarea después de la respuesta al scope que pidió su sesión: esa sesión, que el ciclo siguiente reanuda en la unidad que tiene su trabajo. Ausente en cualquier otra transición |
+| `stop` | `Option<TaskCause>` | no | en un `blocked`, por qué la tarea se detuvo, con `type` que nombra la causa: `pre_check` (`found`: las sorpresas del pre-check, cada una con su `type`, `trivial_criterion`, `broken_guard` o `unrunnable`), `unmet` (`attempts`, `red`, `outside`), `unrunnable` (`runs`), `session_refused` (`adapter`, `cause`, `message`), `session_limited` (`source`, `resets_at?`, `message`), `session_died` (`adapter`, `exit?`), `carried_work_no_longer_applies` (`paths`), `command_denied` (`rule`), `scope_decision_owed`, `deviation_owed` (`deviations`) o `criterion_unpassable` (`declared`). Ausente en cualquier otro estado y en un log anterior al campo, cuyo `blocked` se lee sin causa |
 
 ### 5.11a `task_check_started` / `task_check_answered` — engine
 **Source:** a task session's `yunta_check_task` call and the judgement it answered
@@ -417,19 +418,20 @@ Lo que una tarea deja al cerrar y nadie decidió. No es una concesión ni una de
 | `reason` | enum `task_closed` | sí | por qué se retira: la tarea cerró mientras el pedido seguía sin decidir |
 
 ### 5.15 `node_finished` / `node_failed` — engine
-**Fuente:** resultado, tokens, ¿reintentable?
+**Fuente:** resultado, tokens, la falla
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | `NodeOutcome`: un hecho del engine (objeto con `type`: `exit_status`, `pull_request_opened`, `children_finished`, `succeeded_first`, `tasks_done`, `child_run_finished`, `nothing_to_compare`, `no_regression`, `coverage_met`, `no_finding`), o un texto: el resumen del agente, o una frase que un log escrito antes guardó tal cual | solo en `node_finished` | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter: el hecho es el veredicto; el resumen del agente es telemetría |
-| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` / `unpassable` / `reasons` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y ninguna sesión del run puede escribir \| `[{task_id, cmd, why}]` las tareas cuyo criterio declarado ningún trabajo del plan puede pasar, con el comando y el motivo de cada una \| la protección de cada path de `denied_paths`, en su mismo orden: `project_deny`, `agent_config`, `agent_instructions`, `approved_test` o `git_register`; en un log viejo, vacía | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` / `unpassable` / `reasons` / `session_refused` / `limit` / `stopped` / `red` / `child_run` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y ninguna sesión del run puede escribir \| `[{task_id, cmd, why}]` las tareas cuyo criterio declarado ningún trabajo del plan puede pasar, con el comando y el motivo de cada una \| la protección de cada path de `denied_paths`, en su mismo orden: `project_deny`, `agent_config`, `agent_instructions`, `approved_test` o `git_register`; en un log viejo, vacía \| `{adapter, cause, message}` la negativa de la sesión y su causa \| `{source, resets_at?, message}` el límite de la cuenta \| `[{task_id, cause}]` las tareas de un loop que se detuvieron y por qué \| el check que juzga el árbol y salió en rojo: `coverage` (su `cmd`, su `threshold` y la `measured` cuando imprimió una cifra), `command` (el comando de cobertura que salió distinto de cero, con su código, su conclusión y su `output`) o `regression` (la suite de línea base que pasó al medirse y falla ahora, con su `cmd`, su `exit_code` y su `tail`) \| el `run_id` del hijo que cerró fallido | solo en `node_failed` | por qué falló, como dato: uno de los dieciséis, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage`. Un cierre diferido por una ronda de preguntas lleva cero: no abre sesión, y la ronda ya asentó lo que gastó la sesión que preguntó. El gasto del intento es lo que asentaron sus rondas más este valor |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
 | `refused` | lista de paths | sí; solo en `node_failed`, vacía —y omitida del log— si no hubo ninguno | lo que el intento dejó en el árbol del run y ninguna sesión del run puede escribir —lo que niega el proyecto (`permissions.paths.deny`), la configuración de la CLI de un agente, un archivo de instrucciones, un test que aprobó una persona o el registro de git—: no se commiteó y, en un run con worktree propio, volvió a como la rama lo tenía. La falla propia del nodo sigue siendo su causa (D206) |
-| `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
+| `retryable` | `Option<bool>` | no; solo en `node_failed` | solo lectura: un log que la trae la lee y la descarta, y este binario nunca la escribe. Lo que puede cambiar un reintento lo dice la falla misma, según se describe abajo |
+| `child_failure` | `Option<Failure>` | no; solo en `node_failed` | la falla con que cerró el run hijo, cuando el padre la conoce; ausente en las demás fallas |
 
-**La falla es dato, no prosa.** La falla toma una de once formas, planas sobre el
+**La falla es dato, no prosa.** La falla toma una de dieciséis formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
 `artifacts: [...]`, un elemento por artifact declarado que no cerró, `died:
 {adapter, exit?}`, una sesión que terminó sin evento terminal, `exited: {code,
@@ -451,8 +453,9 @@ menú no ofrece `retry`, o `unchanged: {since, failure}`, un `check` que juzga e
 sobre el mismo árbol en que falló su intento `since`: no se corre, porque el mismo
 comando sobre el mismo árbol responde lo mismo, y `failure` es la falla de ese
 intento —una negativa sobre otra negativa sigue nombrando el intento que corrió—. Su
-menú sigue ofreciendo `retry`: la persona puede cambiar el árbol mientras decide
-(D197), o `denied_paths: [...]`, cada path que el trabajo escribió y que ninguna sesión
+menú ofrece `retry` solo cuando el log ha visto moverse el árbol desde ese intento —un
+`yunta resume` tras el cambio de la persona lo registra en `run_resumed.tree`—; hasta
+entonces ofrece solo abortar (D197, D261), o `denied_paths: [...]`, cada path que el trabajo escribió y que ninguna sesión
 del run puede escribir, con su razón por índice en `reasons`: lo que el proyecto niega a
 todo run (`permissions.paths.deny`), la configuración que carga la CLI de un agente, un
 archivo de instrucciones, un test que aprobó una persona o el registro de git. Su menú
@@ -470,6 +473,23 @@ composición no escriben archivo, así que sus elementos no nombran ninguno. El 
 produce al leer el evento, nunca al escribirlo (D133). Un payload que lleva
 `outcome:` solo se lee como la falla de una frase, sin migración: es la tolerancia
 de lectura de §3.1 del Contrato aplicada a este campo.
+
+**Una negativa, un límite, una parada o un check en rojo dicen su causa.** `session_refused`
+nombra la sesión que rechazó la petición, con su `adapter`, su `message` y una `cause`
+de cuatro: final, de autenticación, de modelo inválido o de transporte. Solo la de
+transporte la reintenta el engine por sí mismo. `limit` es el límite de una cuenta: el
+de una sesión, con su `adapter`, o el del forge, y su `resets_at` cuando la CLI o el
+forge dijeron la hora. Con hora, el run queda en `run_paused` con `awaiting_reset`
+hasta ese momento; sin ella, la decisión va a una persona. `stopped` lista, en orden de
+tarea, las que dejaron detenido un loop que no cerró, cada una con la causa de su `stop`
+(§5.11). `red` es un check que juzga el árbol y salió en rojo, en una de tres formas:
+`coverage`, la cobertura bajo su `threshold` o un comando que no imprimió ninguna cifra,
+con el `cmd` que la midió y la `measured` cuando hubo una; `command`, el comando de
+cobertura que salió distinto de cero, con su código, su conclusión y el objeto que
+guarda su salida; o `regression`, la suite de línea base que pasó cuando se midió y
+falla ahora, con su `cmd`, su código y las últimas líneas que imprimió (`tail`).
+`child_run` es el `run_id` del hijo que cerró fallido, y `child_failure`, cuando el padre
+la conoce, la falla con que cerró.
 
 **Una sesión que muere dice cómo salió.** `died` nombra el `adapter` que la abrió
 y, cuando esa sesión tenía proceso propio, su `exit`: `end`, una unión cerrada
@@ -523,11 +543,13 @@ mismo número (D207).
 |---|---|---|---|
 | `summary` | string | solo en `gate_waiting` | objeto de escalación |
 | `evidence` | lista de `{label?, value}` | solo en `gate_waiting` | la adjunta el engine desde el log; nunca prosa generada por agente. Un hecho que se nombra solo (`exit 1`) no lleva `label`. Un log anterior a la estructura trae un string y se lee como el único hecho sin etiqueta que siempre fue |
-| `options` | lista de `{id, label, tradeoff, asks?}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción; `asks` es la pregunta que una opción hace antes de contar como respuesta —la de un gate que devuelve el run a un nodo con sesión, `what should change?`— y una respuesta sin `free_text` a esa opción se rechaza |
+| `options` | lista de `{id, label?, tradeoff?, asks?}` | solo en `gate_waiting` | `label` y `tradeoff` son opcionales: una opción que no los guarda los recibe con sus palabras al mostrarse, de los datos de su escalación; `asks` es la pregunta que una opción hace antes de contar como respuesta —la de un gate que devuelve el run a un nodo con sesión, `what should change?`— y una respuesta sin `free_text` a esa opción se rechaza |
 | `external_ref` | `Option<string>` | solo en `gate_waiting` | la referencia propia del forge para este gate: la URL del pull request (Contrato §5.6); ausente en la escalación interna, que no sale del run |
 | `shows` | lista de `{producer?, artifact, content_hash}` | solo en `gate_waiting` (puede ser vacía) | los artifacts que el gate puso delante de quien decide, con el hash exacto que vio: la decisión queda atada a esos bytes. Los hallazgos del run (`findings` sin `producer`) son una vista que el log deriva —cada hallazgo en pie con su nodo y sus respuestas—, guardada en `objects/` por ese hash. Omitida si no muestra nada, y en logs anteriores al campo |
 | `withheld` | lista de `{option, because}` | solo en `gate_waiting` (puede ser vacía) | las opciones que el gate no ofrece y por qué: con un plan que no se puede probar como está escrito, las que siguen el run más allá del gate (D227). Cada razón es también un hecho de `evidence` con la etiqueta `withheld`. Una respuesta que elige una opción retenida se rechaza en toda superficie. Omitida si no retiene nada, y en logs anteriores al campo |
 | `scope` | `Option<{because, proposed?}>` | solo en `gate_waiting` (puede faltar) | por qué el loop espera a una persona en un pedido de scope: `because` es la razón tipada (`type`: `mode_ask`, `shared_with_batch`, `cap_exhausted`, `instructions` o `person`) y `proposed` el criterio que propuso la sesión (`cmd`) con el `precheck` que el engine halló al correrlo (`type`: `passes`, `red`, `could_not_run` o `not_run`). Omitido en las escalaciones que no vienen de un pedido de scope, y en logs anteriores al campo |
+| `failure` | `Option<{attempt, failure, remedies, stuck?, reroute?}>` | no; solo en `gate_waiting` | la falla de un nodo que pide a una persona, con el menú que esa falla ofrece: `attempt` es el intento que empezarían las opciones; `failure`, la falla como dato (§5.15); `remedies`, lo que puede cambiarla, cada uno con su `option` (un id reservado) y la `precondition` que tiene que cambiar; `stuck`, por qué no se ofrece ninguno; y `reroute`, la re-ruta que la falla agotó, con su `goto`, su `max_reroutes` y su `next_mode`. Ausente en cualquier otra escalación |
+| `departure` | `Option<{deviations, waived?, rewritten_by?, accept_offered}>` | no; solo en `gate_waiting` | el desvío del plan que declaró la sesión de una tarea, como dato: `deviations`, lo que declaró; `waived`, los criterios del plan que aceptarlo deja de exigir; `rewritten_by`, el nodo que escribe otra vez los tests de la tarea, cuando aceptarlo lo hace; y `accept_offered`, si `accept` se ofrece, que no ocurre cuando un test del que se desvía vino con el run y ningún nodo del run lo escribe otra vez. Ausente en cualquier otra escalación |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `approved_sha` | `Option<CommitSha>` | solo en `gate_resolved` | el commit que cubre la aprobación del forge: contra él se compara la cabeza del pull request para decidir si la aprobación sigue en pie |
@@ -754,7 +776,7 @@ tuvo el artifact y el log no dice cómo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `cause` | `Option<PromotionCause>` | no | el nodo que señaló la promoción (`node`) y el nodo al que apunta (`goto`). Un log escrito antes no la tiene: guarda la afirmación en una frase, `reason`, que se muestra tal cual y no se escribe |
+| `cause` | `Option<PromotionCause>` | no | el nodo que señaló la promoción (`node`), el nodo al que apunta (`goto`) y, cuando una falla la pidió, la que agotó las re-rutas (`failure`, con la forma de `node_failed`). Un log escrito antes no la tiene: guarda la afirmación en una frase, `reason`, que se muestra tal cual y no se escribe |
 | `evidence` | lista de `{label?, value}` | sí | la misma estructura que `gate_waiting`, con la misma tolerancia de lectura |
 | `suggested_mode` | string | sí | debe respetar la escalera de promoción |
 
@@ -792,10 +814,14 @@ CLI, así que sus rechazos también los escribe el engine.
 
 ### 5.25a `run_tool_failed` — adapter (recorded by the engine)
 
-A failed call to a known tool on the ephemeral `yunta-run` server. This is a
-nonterminal session event; it does not claim the node failed because of the
-call. The node ledger retains only the last failure of each attempt for status,
-while the append-only log retains every occurrence.
+Una llamada fallida a una herramienta conocida del servidor efímero `yunta-run`.
+Es un evento de sesión no terminal; no afirma que el nodo falló por la llamada.
+El adapter informa el rechazo de una llamada por su CLI como `RunToolRejected`
+(§4), y el engine responde si el servidor recibió la llamada: `call_failed`
+cuando la recibió y respondió con un error, y `approval_blocked` cuando la
+llamada nunca llegó a él. El ledger del nodo retiene solo la última falla de
+cada intento para el estado, mientras que el log, de solo anexado, retiene cada
+ocurrencia.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
@@ -892,10 +918,11 @@ the run reports leaves the span out (D199).
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `pause` | `PauseReason` | sí, en `run_paused` | el hecho por el que el run se detuvo, con `type`: `budget_exhausted` (con `spent` y `cap`), `uncertain_orphans` (con `nodes`), `escalation`, `child_paused`, entre otros. Un log escrito antes guarda la frase en `reason`: se lee como `{"type": "recorded", "sentence": "<frase>"}` y no se escribe |
+| `pause` | `PauseReason` | sí, en `run_paused` | el hecho por el que el run se detuvo, con `type`: `budget_exhausted` (con `spent` y `cap`), `uncertain_orphans` (con `nodes`), `awaiting_reset` (con `node` y `at`: el límite de una cuenta se reinicia en `at`, y el run se retoma solo entonces), `escalation`, `child_paused`, entre otros. Un log escrito antes guarda la frase en `reason`: se lee como `{"type": "recorded", "sentence": "<frase>"}` y no se escribe |
 | `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config. De aquí sale la política común de los huérfanos (`agreed_policy`), que el log no guarda: la que todos resolvieron, ausente sin huérfanos o con políticas distintas. La lectura ignora el `resume_policy_applied` de un log viejo |
 | `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
 | `checkout` | ruta | no, solo en `run_resumed` | el checkout en que trabaja el run desde este wake, cuando no es el último que nombró su log (D235) |
+| `tree` | `TreeId` | no, solo en `run_resumed` | el árbol del run tal como lo halló este wake, cuando la falla de un nodo esperaba a una persona: el que registraría un inicio de ese nodo si trabaja en el árbol del run (en un run que commitea en su propio árbol, el que tendría ese commit, que deja fuera lo que git ignora); un cambio que la persona hizo al árbol mientras el run estaba detenido llega al log por aquí. Ausente en los demás wakes |
 | `terminal_state` | estado | solo en `run_finished` | — |
 | `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas. Son el gasto del run al cerrarse: `tokens` es lo asentado más lo en vuelo, y `cptv` es `tokens.total()` sobre las tareas `done`, ausente cuando ninguna está hecha. Un run cerrado gasta lo que este evento registró |
 | `closed_by` | responder | no, solo en `run_finished` | quién cerró un run detenido que nadie iba a continuar (`yunta close`), con `terminal_state: cancelled`; ausente cuando el engine cerró el run llevándolo a su fin |

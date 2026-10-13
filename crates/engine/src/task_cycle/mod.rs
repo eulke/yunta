@@ -39,9 +39,9 @@ use yunta_core::protected::Protected;
 use yunta_core::Task;
 
 pub use outcome::{
-    surprises, AttemptRecord, BlockedCause, CriterionRun, DispatchOutcome, Surprise,
-    TaskCycleReport, TaskOutcome,
+    surprises, AttemptRecord, CriterionRun, DispatchOutcome, TaskCycleReport, TaskOutcome,
 };
+pub use yunta_core::events::{Surprise, TaskCause};
 
 use crate::process::Supervision;
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
@@ -49,7 +49,7 @@ pub(crate) use record::recorded;
 use record::Recorder;
 
 pub(crate) use criteria::{
-    could_not_run, exit_code_of, pre_check_unless_cut, probe, probe_command,
+    could_not_run, exit_code_of, pre_check_unless_cut, probe, probe_command, unanswered_words,
 };
 pub use criteria::{post_check, pre_check, PostCheck};
 pub use dispatch::DispatchError;
@@ -222,10 +222,10 @@ async fn cycle(
                 pre_check: Vec::new(),
                 attempts: Vec::new(),
                 outcome: TaskOutcome::Blocked {
-                    cause: BlockedCause::CommandDenied { rule },
+                    cause: TaskCause::CommandDenied { rule },
                 },
                 needs_human_decision: false,
-                last_check: recorder.criteria(Phase::Pre, &[]).await?,
+                last_check: recorder.criteria(Phase::Pre, &[]).await?.seq,
             });
         }
     }
@@ -237,7 +237,7 @@ async fn cycle(
     // the batch starting and this task's first check is exactly that
     // case: the task was cut, not judged.
     if supervision.cancel.is_cancelled() {
-        let last_check = recorder.criteria(Phase::Pre, &[]).await?;
+        let last_check = recorder.criteria(Phase::Pre, &[]).await?.seq;
         return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
     }
 
@@ -249,7 +249,7 @@ async fn cycle(
         carried: carry.is_some(),
     };
     let Some(laid) = spec::laid(start, memo, history, supervision).await? else {
-        let last_check = recorder.criteria(Phase::Pre, &[]).await?;
+        let last_check = recorder.criteria(Phase::Pre, &[]).await?.seq;
         return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
     };
     let spec::Laid {
@@ -330,13 +330,13 @@ async fn cycle(
             let Some(mut pre_runs) =
                 pre_check_unless_cut(&rest, &unit.worktree, memo, history, supervision).await?
             else {
-                let last_check = recorder.criteria(Phase::Pre, &[]).await?;
+                let last_check = recorder.criteria(Phase::Pre, &[]).await?.seq;
                 return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
             };
             if let Some(guards) = guarded {
                 pre_runs.splice(0..0, guards);
             }
-            let last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
+            let last_check = recorder.criteria(Phase::Pre, &pre_runs).await?.seq;
             // A token that fired during the pre-check stopped its commands
             // before they answered: the task was cut, not found wanting.
             // A non-guard that already passes, or a guard already red,
@@ -346,7 +346,7 @@ async fn cycle(
             } else {
                 yunta_core::NonEmpty::new(surprises(task, &pre_runs)).map(|found| {
                     TaskOutcome::Blocked {
-                        cause: BlockedCause::PreCheck(found),
+                        cause: TaskCause::PreCheck { found },
                     }
                 })
             };
@@ -438,7 +438,7 @@ async fn cycle(
                     task: task.id.clone(),
                     source,
                 })?;
-            BlockedCause::ScopeDecisionOwed
+            TaskCause::ScopeDecisionOwed
         }
         false => unmet_cause(&attempts),
     };
@@ -455,16 +455,16 @@ async fn cycle(
 
 /// What the last attempt left: the criteria still red, and the paths it
 /// changed outside the scope.
-fn unmet_cause(attempts: &[AttemptRecord]) -> BlockedCause {
+fn unmet_cause(attempts: &[AttemptRecord]) -> TaskCause {
     let last = attempts.last();
-    BlockedCause::Unmet {
+    TaskCause::Unmet {
         attempts: attempts.len() as u32,
         red: last
             .map(|attempt| {
                 attempt
-                    .post_check
+                    .post_results
                     .iter()
-                    .filter(|run| run.exit_code != 0)
+                    .filter(|result| result.exit_code != 0)
                     .cloned()
                     .collect()
             })

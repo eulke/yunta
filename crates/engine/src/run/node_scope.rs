@@ -10,6 +10,7 @@ use std::sync::Arc;
 use yunta_core::events::{Decider, EventPayload, Failure, NodeEvent, TokenUsage};
 use yunta_core::expansion::{node_offer, Decision, Waiting};
 use yunta_core::protected::{Closing, Protected};
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{Node, NodePermissions, ScopeGlob, TreeId};
 
 use super::node_close::{fail_with_staged, fail_with_tokens_staged};
@@ -18,7 +19,6 @@ use super::scope_record::{record, Recording, Subject};
 use super::shared_tree::closing_of;
 use super::{RunCtx, RunError};
 use crate::replay::{NodeState, RunState};
-use crate::reserved::ReservedOption;
 use crate::run_tools::NodeScopeAccess;
 use crate::scope_expansion::{consume_request, read_request, ScopeExpansionRequest};
 use crate::task_cycle::{judge, JudgeEnv, Refusals, Settle, Sitting, Work};
@@ -236,7 +236,7 @@ pub(super) async fn scope_request(
         Ok(None) => return Ok(None),
         Err(error) => {
             let outcome = yunta_core::describe(&error);
-            return fail_with_tokens_staged(ctx, node, outcome, false, tokens, staged)
+            return fail_with_tokens_staged(ctx, node, outcome, tokens, staged)
                 .await
                 .map(Some);
         }
@@ -253,7 +253,7 @@ pub(super) async fn scope_request(
     match decision {
         Decision::Escalate { paths, .. } => {
             let failure = Failure::scope_requested(paths, request.reason);
-            fail_with_staged(ctx, node, failure, false, tokens, staged)
+            fail_with_staged(ctx, node, failure, tokens, staged)
                 .await
                 .map(Some)
         }
@@ -282,7 +282,7 @@ pub(super) async fn scope_violation(
     if !result.denied.is_empty() {
         let failure = Failure::paths_denied(result.denied, result.denied_by);
         return Ok(Some(
-            fail_with_staged(ctx, node, failure, false, tokens, staged).await?,
+            fail_with_staged(ctx, node, failure, tokens, staged).await?,
         ));
     }
     if result.violations.is_empty() {
@@ -300,7 +300,7 @@ pub(super) async fn scope_violation(
     }
     let failure = Failure::scope_violated(result.violations);
     Ok(Some(
-        fail_with_staged(ctx, node, failure, false, tokens, staged).await?,
+        fail_with_staged(ctx, node, failure, tokens, staged).await?,
     ))
 }
 

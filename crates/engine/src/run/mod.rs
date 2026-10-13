@@ -73,7 +73,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::PauseReason;
+use yunta_core::events::{Failure, PauseReason};
 use yunta_core::port::{Adapter, Forge, ForgeError};
 use yunta_core::{
     AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
@@ -359,13 +359,12 @@ pub enum RunTerminal {
     Paused {
         reason: PauseReason,
     },
-    /// A node failed and the run's `defaults.on_failure` closed the run
-    /// as failed rather than pausing it (`abort` at the first failure,
-    /// `continue` once the rest of the graph has run). `run_finished`
-    /// (`terminal_state: Failed`) is on the log; `reason` names the
-    /// causing node, in the words a `NodeFailed` pause gives it.
+    /// A node failed and the run's `defaults.on_failure` closed the run as
+    /// failed rather than pausing it. `run_finished` (`terminal_state:
+    /// Failed`) is on the log; `node` and `failure` name the causing node.
     Failed {
-        reason: String,
+        node: NodeId,
+        failure: Failure,
     },
     /// This run's own gate accepted promotion — `run_finished`
     /// (`terminal_state: Promoted`) is already on *this* log, closing it

@@ -488,7 +488,7 @@ async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: Some(NodeId::from(node)),
             body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
-                NodeFailedPayload::new(failure, false, TokenUsage::default()),
+                NodeFailedPayload::new(failure, TokenUsage::default()),
             ))),
         },
         StoredEvent {

@@ -19,6 +19,7 @@ use crate::events::{
     RunResumedPayload, TerminalState,
 };
 use crate::ids::{ModeName, Seq};
+use crate::TreeId;
 
 /// Where the run stands, as its own events say — without reference to
 /// what its nodes are doing. A surface that reports a run parked on a
@@ -108,6 +109,11 @@ pub struct RunLedger {
     /// Where the run last took the checkout it works in: its birth, a
     /// wake that moved it, or a move between two of its steps.
     bound_at: Option<Seq>,
+    /// The tree the latest wake found the run at, with the seq of that
+    /// wake. `None` when the latest wake found none.
+    woke_on: Option<(Seq, TreeId)>,
+    /// When the latest wake was logged, whether or not it found a tree.
+    resumed_at: Option<DateTime<Utc>>,
 }
 
 impl RunLedger {
@@ -122,6 +128,17 @@ impl RunLedger {
     /// run working in a person's checkout.
     pub fn bound_at(&self) -> Option<Seq> {
         self.bound_at
+    }
+
+    /// The tree the latest wake found the run at, with the seq of that
+    /// wake. `None` when the latest wake found no tree.
+    pub fn woke_on(&self) -> Option<(Seq, &TreeId)> {
+        self.woke_on.as_ref().map(|(seq, tree)| (*seq, tree))
+    }
+
+    /// When the latest wake was logged, whether or not it found a tree.
+    pub fn resumed_at(&self) -> Option<DateTime<Utc>> {
+        self.resumed_at
     }
 
     /// Whether the latest wake moved the run to another checkout than the
@@ -220,6 +237,13 @@ impl RunLedger {
             .map(|(pause, at)| (pause, *at))
     }
 
+    /// The latest `run_paused` with its reason, whether or not a resume came
+    /// after it: the pause the run last took, which `paused` drops once a
+    /// resume follows it.
+    pub fn last_pause(&self) -> Option<(&PauseReason, Seq)> {
+        self.paused.as_ref().map(|(pause, at)| (pause, *at))
+    }
+
     /// Where the latest `run_paused` sits, whether or not a resume came
     /// after it — the end of the window a decision could have been
     /// seeded into, which a later resume does not reopen.
@@ -304,6 +328,8 @@ impl RunLedger {
         self.woken = true;
         self.phase = RunPhaseRaw::Open;
         self.resumed_after = Some(meta.seq);
+        self.resumed_at = Some(meta.at);
+        self.woke_on = p.tree.clone().map(|tree| (meta.seq, tree));
         self.invocations.push((meta.seq, p.environment.clone()));
         if let Some(checkout) = &p.checkout {
             self.checkout = Some(checkout.clone());
@@ -314,168 +340,4 @@ impl RunLedger {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::events::{RunCreatedPayload, RunPausedPayload, RunResumedPayload};
-
-    fn environment(path: &str) -> ExecutionEnvironment {
-        ExecutionEnvironment {
-            shell: "/bin/sh".to_string(),
-            path: vec![path.to_string()],
-        }
-    }
-
-    fn at(ledger: &mut RunLedger, seq: u64, event: RunEvent) {
-        let meta = EventMeta {
-            seq: Seq::from(seq),
-            at: chrono::DateTime::UNIX_EPOCH,
-            node: None,
-        };
-        ledger.apply(&event, &meta);
-    }
-
-    /// Each seq is answered with what the invocation that wrote it ran
-    /// with: the birth's before the first wake, then each wake's own —
-    /// and nothing for a wake that recorded none.
-    #[test]
-    fn the_environment_at_a_seq_is_the_one_its_invocation_ran_with() {
-        let mut ledger = RunLedger::default();
-        let created = RunCreatedPayload {
-            checkout: None,
-            manifest_hash: crate::sha256_hex(b"manifest"),
-            inputs: Default::default(),
-            mode: Default::default(),
-            promoted_from: None,
-            yunta_schema: None,
-            base_branch: "main".to_string(),
-            base_commit: crate::sha256_hex(b"base").as_str().into(),
-            environment: Some(Box::new(environment("/born"))),
-            left_out: Vec::new(),
-            opens_on_base: false,
-        };
-        at(&mut ledger, 1, RunEvent::Created(created));
-        let woken = RunResumedPayload::new(Vec::new(), Some(environment("/woken")));
-        at(&mut ledger, 5, RunEvent::Resumed(woken));
-        at(
-            &mut ledger,
-            9,
-            RunEvent::Resumed(RunResumedPayload::new(Vec::new(), None)),
-        );
-
-        let path_at = |seq: u64| {
-            ledger
-                .environment_at(Seq::from(seq))
-                .map(|in_force| in_force.path.join(":"))
-        };
-        assert_eq!(path_at(4).as_deref(), Some("/born"));
-        assert_eq!(path_at(5).as_deref(), Some("/woken"));
-        assert_eq!(path_at(8).as_deref(), Some("/woken"));
-        assert_eq!(path_at(9), None);
-        assert_eq!(ledger.environment_now(), None);
-    }
-
-    fn born_in(checkout: Option<&str>) -> RunCreatedPayload {
-        RunCreatedPayload {
-            checkout: checkout.map(std::path::PathBuf::from),
-            manifest_hash: crate::sha256_hex(b"manifest"),
-            inputs: Default::default(),
-            mode: Default::default(),
-            promoted_from: None,
-            yunta_schema: None,
-            base_branch: "main".to_string(),
-            base_commit: crate::sha256_hex(b"base").as_str().into(),
-            environment: None,
-            left_out: Vec::new(),
-            opens_on_base: false,
-        }
-    }
-
-    /// The run's checkout is the one its log last named: where it was born,
-    /// unchanged by a wake that names none, and moved by one that does.
-    #[test]
-    fn the_checkout_is_the_one_the_log_last_named() {
-        let mut ledger = RunLedger::default();
-        at(
-            &mut ledger,
-            1,
-            RunEvent::Created(born_in(Some("/pool/slot-1"))),
-        );
-        let still = RunResumedPayload::new(Vec::new(), None);
-        at(&mut ledger, 2, RunEvent::Resumed(still));
-        assert_eq!(
-            ledger.checkout(),
-            Some(std::path::Path::new("/pool/slot-1"))
-        );
-
-        let moved = RunResumedPayload::new(Vec::new(), None).in_checkout("/pool/slot-3".into());
-        at(&mut ledger, 3, RunEvent::Resumed(moved));
-
-        assert_eq!(
-            ledger.checkout(),
-            Some(std::path::Path::new("/pool/slot-3"))
-        );
-    }
-
-    /// Only the wake that moved the run says so: the next one, in the same
-    /// checkout, does not.
-    #[test]
-    fn a_wake_that_moved_the_run_says_so_and_the_next_does_not() {
-        let mut ledger = RunLedger::default();
-        at(
-            &mut ledger,
-            1,
-            RunEvent::Created(born_in(Some("/pool/slot-1"))),
-        );
-        let moved = RunResumedPayload::new(Vec::new(), None).in_checkout("/pool/slot-2".into());
-        at(&mut ledger, 2, RunEvent::Resumed(moved));
-        assert!(ledger.moved_on_waking());
-
-        at(
-            &mut ledger,
-            3,
-            RunEvent::Resumed(RunResumedPayload::new(Vec::new(), None)),
-        );
-
-        assert!(!ledger.moved_on_waking());
-    }
-
-    /// A log written before the field names no checkout, and reads back.
-    #[test]
-    fn an_old_log_names_no_checkout() {
-        let written = serde_json::to_value(born_in(None)).unwrap();
-        assert!(written.get("checkout").is_none(), "{written}");
-        let read: RunCreatedPayload = serde_json::from_value(written).unwrap();
-        let mut ledger = RunLedger::default();
-        at(&mut ledger, 1, RunEvent::Created(read));
-
-        assert_eq!(ledger.checkout(), None);
-    }
-
-    /// A checkout the log names round-trips as written.
-    #[test]
-    fn run_created_round_trips_its_checkout() {
-        let born = born_in(Some("/pool/slot-1"));
-        let written = serde_json::to_string(&born).unwrap();
-        let read: RunCreatedPayload = serde_json::from_str(&written).unwrap();
-        assert_eq!(read, born);
-    }
-
-    /// A pause reads back as the fact its event recorded, until a resume
-    /// after it ends the pause.
-    #[test]
-    fn a_pause_is_the_fact_it_recorded_until_a_resume_follows() {
-        let mut ledger = RunLedger::default();
-        at(&mut ledger, 1, RunEvent::Created(born_in(None)));
-        let pause = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
-        at(
-            &mut ledger,
-            2,
-            RunEvent::Paused(RunPausedPayload::new(&pause)),
-        );
-        assert_eq!(ledger.paused(), Some((&pause, Seq::from(2_u64))));
-
-        let resumed = RunResumedPayload::new(Vec::new(), None);
-        at(&mut ledger, 3, RunEvent::Resumed(resumed));
-        assert_eq!(ledger.paused(), None);
-    }
-}
+mod tests;

@@ -5,16 +5,20 @@ use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Phase, SessionDeath};
+use yunta_core::events::{
+    AccountLimit, CriterionResult, FailureCause, LimitSource, Phase, SessionDeath, SessionRefusal,
+    TaskCause,
+};
 use yunta_core::expansion::Decision;
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::protected::{Closing, Protected};
-use yunta_core::Task;
+use yunta_core::{AdapterId, Task};
 
+use super::criteria::could_not_run;
 use super::judge::{judge, scope_in_force, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work};
 use super::memo::Memo;
 use super::open::open_and_dispatch;
-use super::record::Recorder;
+use super::record::{Checked, Recorder};
 use super::session::{SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
@@ -187,17 +191,11 @@ pub(super) async fn run_one_attempt(
     } = judgement;
     // On the log before anything else happens to this task, so the next
     // attempt's session can read why this one did not close.
-    let recorded = recorder.post_check(&post_runs, &waiting).await?;
+    let Checked {
+        seq: recorded,
+        results: post_results,
+    } = recorder.post_check(&post_runs, &waiting).await?;
     recorder.scope(&scope).await?;
-    // The session declared its failure won't yield to another try — captured
-    // before the outcome moves into the record below.
-    let non_retryable_failure = matches!(
-        dispatch_outcome,
-        DispatchOutcome::Failed {
-            retryable: false,
-            ..
-        }
-    );
     // The same, for a session that never reported anything at all: it
     // left no work behind and said how its process went, and the next
     // attempt would open the same session against the same
@@ -217,6 +215,7 @@ pub(super) async fn run_one_attempt(
         tokens,
         fence_breach: crate::scope::fence_breach(covered.as_ref(), &scope),
         post_check: post_runs,
+        post_results,
         scope,
         succeeded,
         scope_expansion: expansion_outcome,
@@ -238,34 +237,33 @@ pub(super) async fn run_one_attempt(
     // A criterion the session declared impossible ends the cycle before any
     // retry: no session on this tree could pass it, and no person decides it.
     if let Some(declared) = unpassable {
-        let cause = super::BlockedCause::CriterionUnpassable { declared };
+        let cause = TaskCause::CriterionUnpassable { declared };
         return Ok(stop(last_staged, record, TaskOutcome::Blocked { cause }));
     }
     // A criterion that never answered is the environment's, not the
     // work's: the next session would change the tree, never whether the
     // engine can run the command. The cycle stops here and says which.
-    let unrunnable: Vec<super::CriterionRun> = record
-        .post_check
+    let unrunnable: Vec<CriterionResult> = record
+        .post_results
         .iter()
-        .filter(|run| run.could_not_run().is_some())
+        .filter(|result| could_not_run(result.exit_code).is_some())
         .cloned()
         .collect();
     if !unrunnable.is_empty() {
-        let cause = super::BlockedCause::Unrunnable { runs: unrunnable };
+        let cause = TaskCause::Unrunnable { runs: unrunnable };
         return stop_unclosed(unit, task, last_staged, record, cause).await;
     }
     // A session that died says so instead of leaving the tail to report
     // criteria that were never run.
     if let Some(died) = session_death {
-        let cause = super::BlockedCause::SessionDied(died);
+        let cause = TaskCause::SessionDied(died);
         return stop_unclosed(unit, task, last_staged, record, cause).await;
     }
-    // A failure the session marked non-retryable ends the cycle now: the
-    // criteria were still verified above (the engine never trusts the
-    // session's own verdict), and having found them unmet, another attempt
-    // would only spend budget on the same dead end.
-    if non_retryable_failure {
-        let cause = super::BlockedCause::NonRetryable;
+    // A session that refused the request, or whose account reached its
+    // limit, ends the cycle here, with the criteria judged above: the
+    // engine never trusts the session's own verdict, and no other session
+    // is opened on the same request.
+    if let Some(cause) = failure_stop(params.adapter.id(), &record.dispatch) {
         return stop_unclosed(unit, task, last_staged, record, cause).await;
     }
     // A grant the engine made itself is the one thing that changes what
@@ -281,6 +279,30 @@ pub(super) async fn run_one_attempt(
             false => AttemptStep::Unmet(record),
         },
     ))
+}
+
+/// The cause a session that ended in a failure stops the cycle with: its
+/// refusal, or its account's limit, with the message the adapter gave. `None`
+/// for every other end.
+fn failure_stop(adapter: &AdapterId, dispatch: &DispatchOutcome) -> Option<TaskCause> {
+    let DispatchOutcome::Failed { error, cause } = dispatch else {
+        return None;
+    };
+    let message = yunta_core::describe(error);
+    Some(match cause {
+        FailureCause::Refused(cause) => TaskCause::SessionRefused(SessionRefusal {
+            adapter: adapter.clone(),
+            cause: cause.clone(),
+            message,
+        }),
+        FailureCause::Limit { resets_at } => TaskCause::SessionLimited(AccountLimit {
+            source: LimitSource::Session {
+                adapter: adapter.clone(),
+            },
+            resets_at: *resets_at,
+            message,
+        }),
+    })
 }
 
 /// The paths an escalation leaves unanswered when its task closes: nobody
@@ -320,7 +342,7 @@ async fn stop_unclosed(
     task: &Task,
     last_staged: Vec<PathBuf>,
     record: AttemptRecord,
-    cause: super::BlockedCause,
+    cause: TaskCause,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
     if !record.escalated() {
         return Ok(stop(last_staged, record, TaskOutcome::Blocked { cause }));
@@ -334,17 +356,17 @@ async fn stop_unclosed(
     let step = AttemptStep::Stop {
         record,
         outcome: TaskOutcome::Blocked {
-            cause: super::BlockedCause::ScopeDecisionOwed,
+            cause: TaskCause::ScopeDecisionOwed,
         },
         needs_human_decision: true,
     };
     Ok((last_staged, step))
 }
 
-/// An attempt a cancellation cut: nothing was checked, and the log says so
-/// in the attempt's own place — an empty post-check and an empty scope
-/// audit. What the cancellation means for the task is the caller's
-/// decision, because only it knows which token fired.
+/// An attempt a cancellation cut: nothing was checked, and the log says so in
+/// the attempt's own place — an empty post-check and an empty scope audit.
+/// What the cancellation means for the task is the caller's decision, because
+/// only it knows which token fired.
 async fn interrupted(
     recorder: &Recorder<'_>,
     attempt: u32,
@@ -353,7 +375,10 @@ async fn interrupted(
     last_staged: Vec<PathBuf>,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
     let scope = crate::scope::ScopeCheckResult::default();
-    let recorded = recorder.criteria(Phase::Post, &[]).await?;
+    let Checked {
+        seq: recorded,
+        results: post_results,
+    } = recorder.criteria(Phase::Post, &[]).await?;
     recorder.scope(&scope).await?;
     let record = AttemptRecord {
         attempt,
@@ -362,6 +387,7 @@ async fn interrupted(
         tokens,
         fence_breach: None,
         post_check: Vec::new(),
+        post_results,
         scope,
         succeeded: false,
         scope_expansion: None,

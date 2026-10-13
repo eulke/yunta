@@ -139,7 +139,6 @@ async fn mount_skills(
                 ctx,
                 node,
                 error.to_string(),
-                false,
             )
             .await?))
         }
@@ -180,7 +179,6 @@ async fn tools_access(
             ctx,
             node,
             error.to_string(),
-            false,
         )
         .await?));
     }

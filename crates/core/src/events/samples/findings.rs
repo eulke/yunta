@@ -88,6 +88,7 @@ pub(crate) fn finding_proved() -> FindingProvedPayload {
             tail: Vec::new(),
             tree: None,
             head: None,
+            conclusion: None,
         },
     }
 }

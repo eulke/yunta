@@ -23,6 +23,7 @@ use yunta_storage::StorageError;
 use super::session::{stream_session, SessionObserver};
 use super::stream::emit_audit;
 use super::DispatchOutcome;
+use crate::run_tools::Arrivals;
 
 /// How [`dispatch_session`] failed: the adapter refused, or a session
 /// audit event could not be appended. The two have different owners —
@@ -48,12 +49,14 @@ pub(crate) struct Dispatched {
     pub sessions: Vec<yunta_core::SessionId>,
 }
 
-/// How a session opens: the task it works, if any, and the conversation
-/// it continues, if any.
+/// How a session opens: the task it works, if any, the conversation it
+/// continues, if any, and the run tools whose calls say which of the
+/// session's rejections reached a server.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Opening<'a> {
     pub(crate) task: Option<&'a yunta_core::TaskId>,
     pub(crate) resume: Option<Resume<'a>>,
+    pub(crate) arrivals: Option<&'a Arrivals>,
 }
 
 /// A conversation to pick back up, and what a fresh session is told
@@ -92,12 +95,12 @@ pub(crate) async fn dispatch_session(
         ) else {
             break;
         };
-        let DispatchOutcome::Failed { message, .. } = &dispatched.outcome else {
+        let DispatchOutcome::Failed { error, .. } = &dispatched.outcome else {
             break;
         };
         let lost = ServiceUnreachablePayload {
             session_id: session.clone(),
-            message: message.clone(),
+            message: yunta_core::describe(error),
         };
         match away
             .reconnect(lost, adapter, &request, cancel, audit)
@@ -116,6 +119,7 @@ pub(crate) async fn dispatch_session(
                 session: &session,
                 fresh_prompt: Some(&request.prompt),
             }),
+            arrivals: opening.arrivals,
         };
         working = Instant::now() - worked;
         let (next, again_cut) = stream_session(adapter, again, cancel, audit, opening).await?;

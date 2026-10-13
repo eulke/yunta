@@ -2,8 +2,9 @@
 //! the step every block is indented by, the bars and sparklines that
 //! carry a magnitude, the words a run's and a node's state and a
 //! decision's options are called by, the sentences a log's typed facts
-//! are read as (why a run paused, how a node ended, which fallback the
-//! engine took), and the characters it is all drawn with.
+//! are read as (why a run paused, how a node ended, what a failure says,
+//! which fallback the engine took), and the characters it is all drawn
+//! with.
 //!
 //! One crate, because two readers told the same fact in two words — a
 //! person at a terminal, a file the engine writes, a pull request — read
@@ -26,6 +27,7 @@ pub mod diagram;
 pub mod doc;
 pub mod escalation;
 pub mod evidence;
+pub mod failure;
 mod findings;
 mod fold;
 pub mod glyphs;
@@ -66,4 +68,6 @@ pub use yunta_core::units::{duration, Ratio, Tokens};
 mod tests {
     mod deciding;
     mod documents;
+    mod failure;
+    mod retry;
 }

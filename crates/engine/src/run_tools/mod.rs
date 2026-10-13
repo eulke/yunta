@@ -45,6 +45,7 @@ mod answer;
 mod blackboard;
 pub mod catalog;
 mod deviation;
+mod error;
 mod findable;
 mod findings;
 mod handover;
@@ -71,5 +72,6 @@ pub(crate) use notice::{
     submission_notice, task_notice, Asker,
 };
 pub(crate) use rail::{refused_writes, unrecorded_cause};
+pub(crate) use session::Arrivals;
 pub(crate) use submission::verify_declared;
 pub use yunta_core::RunTool;

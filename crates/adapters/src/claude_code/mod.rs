@@ -242,6 +242,8 @@ pub(crate) struct ClaudeParser {
     fence: Coverage,
     run_tool_calls: std::collections::HashMap<String, yunta_core::RunTool>,
     reported: parse::Reported,
+    /// What the stream's limit fields have said so far.
+    limit: parse::LimitReading,
 }
 
 impl ClaudeParser {
@@ -251,6 +253,7 @@ impl ClaudeParser {
             fence,
             run_tool_calls: std::collections::HashMap::new(),
             reported: parse::Reported::default(),
+            limit: parse::LimitReading::default(),
         }
     }
 }
@@ -262,6 +265,7 @@ impl LineParser for ClaudeParser {
             Some(&self.fence),
             &mut self.run_tool_calls,
             &mut self.reported,
+            &mut self.limit,
         )
     }
 }

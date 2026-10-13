@@ -6,12 +6,12 @@ use std::path::Path;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EngineFact, EventPayload,
-    NodeOutcome, TerminalState,
+    ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EngineFact, EventPayload, Failure,
+    NodeOutcome, PauseReason, TerminalState,
 };
 use yunta_core::{Isolation, Manifest, Node, RunId};
 
-use super::super::node_close::{close_node, fail, ChildRun, Close};
+use super::super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::super::node_exec::{cancelled_end, NodeEnd};
 use super::super::{RunCtx, RunError, RunTerminal};
 use super::{runs_root, worktrees_root};
@@ -37,7 +37,6 @@ pub(super) async fn resume_child(
                     "child run `{child_id}` cannot resume: {}",
                     yunta_core::describe(&error)
                 ),
-                false,
             )
             .await;
         }
@@ -69,7 +68,7 @@ pub(super) async fn resume_child(
                 Ok(tree) => tree,
                 Err(e) => {
                     let said = format!("child run `{child_id}` cannot resume: {e}");
-                    return fail(ctx, node, said, false).await;
+                    return fail(ctx, node, said).await;
                 }
             }
         }
@@ -245,7 +244,6 @@ pub(super) async fn drive_child(
                                 "child run `{current_id}` promoted toward `{suggested_mode}` \
                                  but its successor could not be created: {e}"
                             ),
-                            false,
                         )
                         .await;
                     }
@@ -263,10 +261,10 @@ pub(super) async fn drive_child(
                 current_run_dir = successor.run_dir;
                 current_tree = successor.worktree;
             }
-            RunTerminal::Failed { reason } => {
+            RunTerminal::Failed { failure, .. } => {
                 // A child that closed itself as failed (`defaults.on_failure`)
                 // fails the workflow node — the link records the failure with
-                // its spend, and the diagnostic names the child.
+                // its spend, and the failure names the child it came from.
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
@@ -277,20 +275,20 @@ pub(super) async fn drive_child(
                     ))),
                 )
                 .await?;
-                // The child's reason keeps its own lines under this
-                // one. Its diagnostics are not copied up: the child is a
-                // run of its own, and its log is where they are
-                // recorded. Flattening one run's evidence into another's
-                // outcome is what turns three levels of composition into
-                // a single unreadable line.
-                return fail(
+                // The child's failure travels whole, as data, under this
+                // node's. Its diagnostics are not copied up: the child is a
+                // run of its own, and its log is where they are recorded.
+                // Flattening one run's evidence into another's outcome is
+                // what turns three levels of composition into a single
+                // unreadable line.
+                return fail_with(
                     ctx,
                     node,
-                    format!(
-                        "child run `{current_id}` failed:\n  {}",
-                        yunta_core::text::hanging(&reason, "  ")
-                    ),
-                    false,
+                    Failure::ChildFailed {
+                        child_run: current_id.clone(),
+                        child_failure: Some(Box::new(failure)),
+                    },
+                    yunta_core::events::TokenUsage::default(),
                 )
                 .await;
             }
@@ -301,10 +299,12 @@ pub(super) async fn drive_child(
                     // decides orphan vs. join:any loss.
                     return cancelled_end(ctx, node).await;
                 }
-                return Ok(NodeEnd::ChildPaused {
-                    node: node.id.clone(),
-                    run: current_id.clone(),
-                    child: reason,
+                return Ok(NodeEnd::Paused {
+                    reason: PauseReason::ChildPaused {
+                        node: node.id.clone(),
+                        run: current_id.clone(),
+                        child: Box::new(reason),
+                    },
                 });
             }
         }

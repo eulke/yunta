@@ -1,12 +1,18 @@
 ---
 number: D188
 title: "A command handed to the engine is proven where it runs; one that cannot run is neither red nor green; a failed loop continues from the work it left only when there is some"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D261]
 ---
 
 # D188 — A command handed to the engine is proven where it runs; one that cannot run is neither red nor green; a failed loop continues from the work it left only when there is some
+
+*(Revised by D261: the menu a failed loop offers comes from `Failure::remedies`. Point 4's
+`continue-work` is offered when the work the attempt left can still be continued. `retry`,
+which starts from scratch, waits for the input the stop names, as D263 says: for a
+criterion that stays red, the run's tree has to move since the failed attempt. Point 4's
+rule that continuing needs work the attempt left still holds.)*
 
 ## Context
 

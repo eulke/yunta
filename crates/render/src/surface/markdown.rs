@@ -208,7 +208,10 @@ fn failure(failure: &FailureDetail<'_>) -> String {
         FailureSays::Evidence(evidence) => self::evidence(&evidence),
         FailureSays::Text(lines) => lines.join("  \n"),
         FailureSays::Listed { heading, paths } => std::iter::once(heading)
-            .chain(paths.iter().map(|path| format!("- `{}`", path.display())))
+            .chain(paths.iter().map(|note| match &note.reason {
+                Some(reason) => format!("- `{}` — {reason}", note.path.display()),
+                None => format!("- `{}`", note.path.display()),
+            }))
             .collect::<Vec<_>>()
             .join("\n"),
         FailureSays::Nothing => String::new(),
@@ -221,10 +224,12 @@ fn decision(decision: &Decision) -> String {
         .iter()
         .map(|option| {
             let mut out = format!("- **{}**", option.id);
-            if let Some(label) = &option.label {
+            if let Some(label) = option.said_label() {
                 out.push_str(&format!(" — {label}"));
             }
-            out.push_str(&format!("  \n  {}", option.tradeoff));
+            if let Some(tradeoff) = &option.tradeoff {
+                out.push_str(&format!("  \n  {tradeoff}"));
+            }
             if let Some(asks) = &option.asks {
                 out.push_str(&format!("  \n  asks: {asks}"));
             }

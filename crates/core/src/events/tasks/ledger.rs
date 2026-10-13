@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
+use crate::events::tasks::{TaskCause, TaskStop};
 use crate::events::TaskStatus;
 use crate::events::{DeviationDeclaredPayload, DeviationResolvedPayload, TaskStatusChangedPayload};
 use crate::hash::CommitSha;
@@ -45,6 +46,10 @@ pub struct TaskRecord {
     /// resumes. Cleared, like `left_work`, by every status change that
     /// names none.
     pub resumes: Option<SessionId>,
+    /// Why the task's latest status change stopped it, when that change
+    /// blocked it and named a stop. Cleared, like `left_work`, by every
+    /// status change that names none.
+    pub stop: Option<TaskCause>,
     /// The last session that worked this task.
     pub last_session: Option<SessionId>,
     /// A person's answer to the departure from the plan its last session
@@ -157,6 +162,22 @@ impl TaskLedger {
             record.status == TaskStatus::Blocked
                 && record.left_work.as_ref().is_some_and(|(by, _)| by == node)
         })
+    }
+
+    /// Every task whose latest status is `blocked` and names a stop, in
+    /// task order. A loop's failure lists them, and a resume reads them
+    /// from the log rather than from state of its own.
+    pub fn stops(&self) -> Vec<TaskStop> {
+        self.per_task
+            .iter()
+            .filter(|(_, record)| record.status == TaskStatus::Blocked)
+            .filter_map(|(task, record)| {
+                record.stop.clone().map(|cause| TaskStop {
+                    task_id: task.clone(),
+                    cause,
+                })
+            })
+            .collect()
     }
 
     /// How many tasks reached `done` — the denominator of cost per
@@ -290,6 +311,7 @@ impl TaskLedger {
             .clone()
             .and_then(|work| meta.node.cloned().map(|node| (node, work)));
         record.resumes = p.resumes.clone();
+        record.stop = p.stop.clone();
         record.in_session = false;
         self.caused.insert(p.caused_by);
         Ok(())
@@ -348,6 +370,7 @@ impl Default for TaskRecord {
             commit: None,
             left_work: None,
             resumes: None,
+            stop: None,
             last_session: None,
             deviation_answer: None,
             departures_owed: Vec::new(),

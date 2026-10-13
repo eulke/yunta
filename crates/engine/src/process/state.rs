@@ -6,7 +6,7 @@ pub(super) enum Waited {
     Failed,
 }
 
-pub(super) async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
+pub async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,

@@ -10,14 +10,17 @@ use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    AgentMessagePayload, AgentMessageType, Escalation, EventBody, EventPayload, Fact, Failure,
+    AgentMessagePayload, AgentMessageType, Escalation, EventBody, EventPayload, Evidence, Failure,
     GateEvent, GateOption, GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice,
-    NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload,
-    RunCreatedPayload, RunEvent, SessionEvent, StoredEvent, TokenUsage,
+    NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Outlook,
+    Precondition, RedCheck, Remedy, RunCreatedPayload, RunEvent, RunResumedPayload, SessionEvent,
+    StoredEvent, Stuck, TokenUsage,
 };
 use yunta_core::protected::Protected;
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{
-    CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, ScopeGlob, Workflow,
+    CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, ScopeGlob, TreeId,
+    Workflow,
 };
 use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
 
@@ -198,15 +201,15 @@ nodes:
 
 /// The pair a person's answer to `plan`'s failure leaves on the log: the
 /// question they were shown, and `option`.
-fn chose(failure: &Failure, option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
+fn chose(option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
     let escalation = Escalation::new(
         "node `plan` failed",
-        vec![Fact::bare(failure.to_string())].into(),
+        Evidence::none(),
         NonEmpty::from((
             GateOption {
                 id: "retry".into(),
-                label: "Run `plan` again (attempt 2)".to_string(),
-                tradeoff: "a fresh attempt".to_string(),
+                label: Some("Run `plan` again (attempt 2)".to_string()),
+                tradeoff: Some("a fresh attempt".to_string()),
                 asks: None,
             },
             Vec::new(),
@@ -247,7 +250,6 @@ fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
             Some("plan"),
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 failure.clone(),
-                false,
                 TokenUsage::default(),
             ))),
         ),
@@ -258,13 +260,15 @@ fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
             node: NodeId::from("plan"),
             failure: failure.clone(),
             next_attempt: 2,
-            continuable: false,
-            grantable: false,
+            outlook: Outlook::Choose(vec![Remedy {
+                option: ReservedOption::Retry,
+                precondition: Some(Precondition::OutsideTreeChanged),
+            }]),
         }
     );
 
     let mut aborted = failed.clone();
-    aborted.extend(chose(&failure, "abort"));
+    aborted.extend(chose("abort"));
     assert!(
         matches!(
             decide(&workflow(), &derive(&log(aborted)), &policy()),
@@ -274,7 +278,7 @@ fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
     );
 
     let mut retried = failed;
-    retried.extend(chose(&failure, "retry"));
+    retried.extend(chose("retry"));
     assert_eq!(
         decide(&workflow(), &derive(&log(retried)), &policy()),
         Decision::Execute(vec![(NodeId::from("plan"), 2)])
@@ -296,12 +300,11 @@ fn a_grant_after_a_scope_failure_runs_the_node_again() {
             Some("plan"),
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 failure.clone(),
-                false,
                 TokenUsage::default(),
             ))),
         ),
     ];
-    events.extend(chose(&failure, "grant"));
+    events.extend(chose("grant"));
     assert_eq!(
         decide(&workflow(), &derive(&log(events)), &policy()),
         Decision::Execute(vec![(NodeId::from("plan"), 2)])
@@ -330,7 +333,6 @@ nodes:
             Some(node),
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 failure,
-                false,
                 TokenUsage::default(),
             ))),
         ),
@@ -345,7 +347,11 @@ nodes:
 fn a_scope_failure_offers_a_grant_only_where_a_person_may_widen_it() {
     let outside = || Failure::scope_violated(vec!["Cargo.toml".into()]);
     let offers = |decision: Decision| match decision {
-        Decision::EscalateFailure { grantable, .. } => grantable,
+        Decision::EscalateFailure {
+            outlook: Outlook::Choose(remedies),
+            ..
+        } => remedies.iter().any(|r| r.option == ReservedOption::Grant),
+        Decision::EscalateFailure { .. } => false,
         other => panic!("a failed node is a decision, got {other:?}"),
     };
 
@@ -370,7 +376,11 @@ fn a_scope_failure_offers_a_grant_only_where_a_person_may_widen_it() {
 #[test]
 fn grant_is_not_offered_for_a_denied_path() {
     let offers = |decision: Decision| match decision {
-        Decision::EscalateFailure { grantable, .. } => grantable,
+        Decision::EscalateFailure {
+            outlook: Outlook::Choose(remedies),
+            ..
+        } => remedies.iter().any(|r| r.option == ReservedOption::Grant),
+        Decision::EscalateFailure { .. } => false,
         other => panic!("a failed node is a decision, got {other:?}"),
     };
     let protected =
@@ -436,5 +446,50 @@ nodes:
             node: NodeId::from("ask")
         },
         "a wait on questions is a wait on questions, whatever the node is"
+    );
+}
+
+/// On a red check's tree a retry is offered only once a wake finds the tree
+/// moved: until then the menu offers nothing, and a person's choice to retry
+/// is asked again rather than run.
+#[test]
+fn a_retry_on_a_red_check_runs_the_node_once_a_wake_finds_the_tree_moved() {
+    let left: TreeId = "a1a1a1a".parse().expect("a tree id");
+    let red = Failure::Red {
+        red: RedCheck::Command {
+            cmd: "cargo test".to_string(),
+            exit_code: 101,
+            conclusion: None,
+            output: None,
+        },
+    };
+    let started = NodeStartedPayload::attempt_from(1, left.clone());
+    let failed = NodeFailedPayload::new(red.clone(), TokenUsage::default()).leaving(left);
+    let mut events = vec![
+        (None, created()),
+        (
+            Some("plan"),
+            EventPayload::Node(NodeEvent::Started(started)),
+        ),
+        (Some("plan"), EventPayload::Node(NodeEvent::Failed(failed))),
+    ];
+    events.extend(chose("retry"));
+    let asked_again = Decision::EscalateFailure {
+        node: NodeId::from("plan"),
+        failure: red,
+        next_attempt: 2,
+        outlook: Outlook::Stuck(Stuck::TreeUnchanged),
+    };
+    assert_eq!(
+        decide(&workflow(), &derive(&log(events.clone())), &policy()),
+        asked_again
+    );
+
+    let later: TreeId = "b2b2b2b".parse().expect("a tree id");
+    let wake = RunResumedPayload::new(Vec::new(), None).finding(later);
+    events.push((None, EventPayload::Run(RunEvent::Resumed(wake))));
+    assert_eq!(
+        decide(&workflow(), &derive(&log(events)), &policy()),
+        Decision::Execute(vec![(NodeId::from("plan"), 2)]),
     );
 }

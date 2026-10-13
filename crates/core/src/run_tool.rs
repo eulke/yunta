@@ -3,7 +3,9 @@
 use crate::ArtifactKind;
 
 /// A known run tool. Adapters only record failures for these names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[serde(into = "String", try_from = "String")]
 pub enum RunTool {
     CheckArtifact,

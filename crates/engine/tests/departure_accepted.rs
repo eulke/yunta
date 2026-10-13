@@ -140,11 +140,12 @@ async fn accepting_says_the_task_stops_being_held_to_that_criterion() {
         .iter()
         .find_map(|event| match event.payload() {
             Some(EventPayload::Gates(GateEvent::Waiting(p))) => {
-                Some(p.options()[0].tradeoff.clone())
+                Some(yunta_render::escalation::option_words(p, &p.options()[0]).1)
             }
             _ => None,
         })
-        .expect("the departure was put to a person");
+        .expect("the departure was put to a person")
+        .expect("the accept option says what accepting costs");
     assert!(
         tradeoff.starts_with("The task stops being held to `grep -q Hello greeting.txt`"),
         "{tradeoff}"

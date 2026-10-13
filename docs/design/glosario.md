@@ -153,9 +153,17 @@ presupuesto, un scope—, en todas las superficies y en el JSON; su marca, `◆`
 la única que dice "una persona", y no marca nada más. Sale con código 3.
 _Evitar_: paused, parked (como palabra de superficie).
 
+**Waiting**:
+La palabra de un run pausado hasta que se reinicia el límite de una cuenta, con esa
+hora en su pausa (`awaiting_reset`). Nadie tiene nada que contestar: el run se reanuda
+solo a esa hora, así que no es una parada de persona y nunca sale con código 3. Sale
+con código 5, en todas las superficies y en el JSON.
+_Evitar_: needs you (para un límite que se reinicia), parked.
+
 **Pausa** (`PauseReason`):
 Por qué un run se detuvo y espera: un presupuesto agotado, una escalación, nodos
-huérfanos cuyo resultado es incierto. Es un hecho tipado que guarda `run_paused`; la
+huérfanos cuyo resultado es incierto, o un límite de cuenta que espera la hora de su
+reset, sin una persona. Es un hecho tipado que guarda `run_paused`; la
 frase que lee una persona la produce cada superficie al leerlo, igual que el texto de
 una falla de nodo. Un log escrito antes guarda la frase, y se lee tal cual.
 _Evitar_: frase de pausa, motivo de pausa.
@@ -246,8 +254,10 @@ _Evitar_: pregunta del gate, pedido de ayuda, pausa.
 
 **Tradeoff** (`GateOption.tradeoff`):
 Qué cuesta tomar una opción del menú, escrito por quien escribió la opción y
-obligatorio en el tipo: toda opción que amplía el trabajo declara contra qué lo
-cambia, y elegirla autoriza esa ampliación (D50). Viaja con la opción y se
+obligatorio en las opciones que el engine escribe con sus palabras: toda opción que
+amplía el trabajo declara contra qué lo cambia, y elegirla autoriza esa ampliación
+(D50). Las opciones de un menú de falla o de desvío no traen palabras: la superficie
+que dibuja el menú las escribe desde sus datos. Viaja con la opción y se
 muestra como la línea debajo de su etiqueta, así que quien decide lee el costo
 donde elige.
 _Evitar_: nota de la opción, advertencia, consecuencia.
@@ -372,9 +382,13 @@ _Evitar_: cancelación, descarte.
 ## Fallas
 
 **Falla de nodo**:
-Por qué un nodo no cerró, como dato y no como frase: o una falla que el engine
-enuncia en una oración, o los artifacts declarados que no cerraron. Es lo que
-persiste `node_failed`; el texto lo produce cada superficie al leerlo (D133).
+Por qué un nodo no cerró, como dato tipado y no como frase: la causa de un
+comando, de una sesión rechazada, de un límite, de las tareas que paró un loop o
+de los artifacts declarados que no cerraron. Es lo que persiste `node_failed`. Las
+palabras las escribe cada superficie al leerla, y los remedios que ofrece se
+deducen de la falla y del log. El engine solo enuncia una oración en
+`Failure::Message`, para una falla sin datos propios; esa oración se guarda y se
+lee tal cual (D133).
 _Evitar_: outcome, mensaje de error, motivo.
 
 **Falla de artifact**:

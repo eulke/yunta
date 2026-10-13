@@ -224,7 +224,7 @@ async fn a_correction_resumes_the_planner_with_the_persons_words() {
     let rerouted = bench.events().iter().any(|event| {
         matches!(
             event.payload(),
-            Some(EventPayload::Node(NodeEvent::Rerouted(p))) if p.cause.to_string().contains(SAID)
+            Some(EventPayload::Node(NodeEvent::Rerouted(p))) if yunta_render::failure::sentence(&p.cause).contains(SAID)
         )
     });
     assert!(rerouted, "the re-route says why the plan went back");

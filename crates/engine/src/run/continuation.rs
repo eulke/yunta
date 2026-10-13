@@ -13,8 +13,8 @@ use yunta_core::{Node, NodeId, NodeKind, Seq, Workflow};
 
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
-use crate::reserved::ReservedOption;
 use crate::task_cycle::{Answer, Continuing, RespecifiedTask, Respecify, Review};
+use yunta_core::reserved::ReservedOption;
 
 /// The session a node's attempt picks back up, and the answer it is
 /// told: a person's review of what the node handed over, or a grant of

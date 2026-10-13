@@ -10,7 +10,7 @@
 //! the parent-side half of the chain.
 
 use yunta_core::events::EventPayload;
-use yunta_core::events::{BaselineOrigin, FindingEvent, PromotionCause, RunEvent, TaskEvent};
+use yunta_core::events::{BaselineOrigin, Failure, FindingEvent, RunEvent, TaskEvent};
 use yunta_core::ModeName;
 use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
 use yunta_testkit::{baselines, Bench, ScriptedInteraction};
@@ -182,13 +182,11 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     });
     let signaled = signaled.expect("promotion_signaled must be on the parent's own log");
     assert_eq!(signaled.suggested_mode, "full");
-    assert_eq!(
-        signaled.cause,
-        Some(PromotionCause {
-            node: "lint".into(),
-            goto: "fix-lint".into(),
-        })
-    );
+    let cause = signaled.cause.as_ref().expect("a promotion with a cause");
+    assert_eq!(cause.node.as_str(), "lint");
+    assert_eq!(cause.goto.as_str(), "fix-lint");
+    let command_exit = matches!(cause.failure, Some(Failure::Exited { .. }));
+    assert!(command_exit, "{:?}", cause.failure);
 
     let finished = events.iter().find_map(|e| match e.payload() {
         Some(EventPayload::Run(RunEvent::Finished(p))) => Some(p),

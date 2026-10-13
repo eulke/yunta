@@ -34,6 +34,11 @@ pub struct GateRecord {
     pub waiting: Option<(GateWaitingPayload, Seq)>,
     /// Every resolution, oldest first.
     pub resolved: Vec<(GateResolvedPayload, Seq)>,
+    /// Where the log holds each resolution that answered a question about
+    /// one of this node's tasks, a scope request or a departure. Such an
+    /// answer is written on the node's own gate, but it is not the node's
+    /// decision.
+    pub task_answers: BTreeSet<Seq>,
     /// The forge's handle of the gate this node published and a wake
     /// polls: the latest, until a review asked for changes on it — the
     /// corrected lap publishes again.
@@ -97,16 +102,6 @@ impl GateLedger {
             .and_then(|record| record.approved_sha.as_ref())
     }
 
-    /// A resolution recorded while the run was parked, with no
-    /// escalation standing after it: what a `resolve_gate` call seeded
-    /// onto the log for this wake to consume.
-    pub fn pre_seeded(&self, node: &NodeId) -> Option<&GateResolvedPayload> {
-        let record = self.per_node.get(node)?;
-        let (resolution, at) = record.resolved.last()?;
-        let waiting_after = record.waiting.as_ref().is_some_and(|(_, seq)| seq > at);
-        (!waiting_after).then_some(resolution)
-    }
-
     /// Whether `node`'s latest round was answered. Its close already ran
     /// when it asked, so what it owes is a terminal, and the scheduler
     /// pays that from the log rather than running a session again.
@@ -166,6 +161,14 @@ impl GateLedger {
 }
 
 impl GateRecord {
+    /// The resolutions that are the node's own decisions, oldest first:
+    /// every resolution except the answers to questions about its tasks.
+    pub fn own_resolutions(&self) -> impl DoubleEndedIterator<Item = &(GateResolvedPayload, Seq)> {
+        self.resolved
+            .iter()
+            .filter(move |(_, at)| !self.task_answers.contains(at))
+    }
+
     /// Folds one gate event of this record's node, written at `seq`.
     fn apply(&mut self, event: &GateEvent, seq: Seq) {
         match event {
@@ -190,6 +193,14 @@ impl GateRecord {
                     | GateResolvedPayload::Unrecognized(_) => {}
                 }
                 self.resolved.push((p.clone(), seq));
+                // The escalation still standing is the question this answers.
+                let answers_a_task = self
+                    .waiting
+                    .as_ref()
+                    .is_some_and(|(asked, _)| asked.scope().is_some() || asked.departure.is_some());
+                if answers_a_task {
+                    self.task_answers.insert(seq);
+                }
                 self.waiting = None;
             }
             GateEvent::QuestionsAsked(p) => self.rounds.push(QuestionRound {
@@ -206,5 +217,114 @@ impl GateRecord {
             }
             GateEvent::AskingOpened(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{
+        DepartureMenu, Escalation, Evidence, Failure, FailureMenu, GateOption, HumanChoice,
+        ScopeWait,
+    };
+    use crate::expansion::Waiting;
+    use crate::reserved::ReservedOption;
+    use crate::NonEmpty;
+
+    fn option(choice: ReservedOption) -> GateOption {
+        GateOption {
+            id: choice.id(),
+            label: None,
+            tradeoff: None,
+            asks: None,
+        }
+    }
+
+    /// A question with two answers and nothing in its record.
+    fn question(first: ReservedOption, second: ReservedOption) -> Escalation {
+        Escalation::new(
+            "a question with two answers",
+            Evidence::none(),
+            NonEmpty::from((option(first), vec![option(second)])),
+        )
+        .expect("a claim with no evidence repeats none")
+    }
+
+    fn apply_at(ledger: &mut GateLedger, node: &NodeId, seq: u64, event: GateEvent) {
+        let meta = EventMeta {
+            seq: Seq::from(seq),
+            at: chrono::DateTime::UNIX_EPOCH,
+            node: Some(node),
+        };
+        ledger.apply(&event, &meta);
+    }
+
+    fn chosen(choice: ReservedOption) -> GateEvent {
+        GateEvent::Resolved(GateResolvedPayload::Chosen(HumanChoice {
+            option: choice.id(),
+            by: "lead".into(),
+            free_text: None,
+        }))
+    }
+
+    /// The event that writes `escalation` as the gate a node waits on.
+    fn waiting(escalation: Escalation) -> GateEvent {
+        GateEvent::Waiting(escalation.into_payload())
+    }
+
+    #[test]
+    fn a_resolution_answering_a_scope_request_is_a_task_answer() {
+        let node = NodeId::from("loop");
+        let mut ledger = GateLedger::default();
+        let scope = ScopeWait {
+            because: Waiting::ModeAsk,
+            proposed: None,
+        };
+        let escalation = question(ReservedOption::Grant, ReservedOption::Deny).with_scope(scope);
+        apply_at(&mut ledger, &node, 1, waiting(escalation));
+        apply_at(&mut ledger, &node, 2, chosen(ReservedOption::Deny));
+
+        let record = ledger.get(&node).expect("the node has a gate record");
+        assert_eq!(record.task_answers, BTreeSet::from([Seq::from(2)]));
+        assert!(record.waiting.is_none());
+    }
+
+    #[test]
+    fn a_resolution_answering_a_departure_is_a_task_answer() {
+        let node = NodeId::from("loop");
+        let mut ledger = GateLedger::default();
+        let departure = DepartureMenu {
+            deviations: Vec::new(),
+            waived: Vec::new(),
+            rewritten_by: None,
+            accept_offered: true,
+        };
+        let escalation =
+            question(ReservedOption::Accept, ReservedOption::Abort).with_departure(departure);
+        apply_at(&mut ledger, &node, 1, waiting(escalation));
+        apply_at(&mut ledger, &node, 2, chosen(ReservedOption::Accept));
+
+        let record = ledger.get(&node).expect("the node has a gate record");
+        assert_eq!(record.task_answers, BTreeSet::from([Seq::from(2)]));
+    }
+
+    #[test]
+    fn a_resolution_of_a_failure_menu_is_the_nodes_own_decision() {
+        let node = NodeId::from("loop");
+        let mut ledger = GateLedger::default();
+        let menu = FailureMenu {
+            attempt: 1,
+            failure: Failure::message("criteria still red"),
+            remedies: Vec::new(),
+            stuck: None,
+            reroute: None,
+        };
+        let escalation = question(ReservedOption::Retry, ReservedOption::Abort).with_failure(menu);
+        apply_at(&mut ledger, &node, 1, waiting(escalation));
+        apply_at(&mut ledger, &node, 2, chosen(ReservedOption::Retry));
+
+        let record = ledger.get(&node).expect("the node has a gate record");
+        assert!(record.task_answers.is_empty());
+        assert_eq!(record.resolved.len(), 1);
     }
 }

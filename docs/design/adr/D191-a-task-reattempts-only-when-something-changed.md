@@ -3,10 +3,17 @@ number: D191
 title: "A task gets one session per attempt; another opens on its own only when an engine grant changed what it may write"
 status: revised
 revises: [D146]
-revised_by: [D192, D240, D242]
+revised_by: [D192, D240, D242, D261]
 ---
 
 # D191 — A task gets one session per attempt; another opens on its own only when an engine grant changed what it may write
+
+*(Revised by D261: the options a blocked task's escalation offers come from the
+failure's own remedies, `Failure::remedies`, not from a fixed list. A retry is offered
+only for an input that may have changed, so a red check, an artifact or an unmet
+criterion on a tree the log has not seen move since the failure offers no `retry`.
+Point 1 still holds: a red attempt blocks the task and a person decides, from the
+options its failure offers.)*
 
 ## Context
 

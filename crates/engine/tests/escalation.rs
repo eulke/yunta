@@ -74,7 +74,8 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
     assert!(escalation.summary().contains("fix-lint"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
-    assert!(escalation.options().iter().all(|o| !o.tradeoff.is_empty()));
+    let words = |o| yunta_render::escalation::option_words(&escalation, o).1;
+    assert!(escalation.options().iter().all(|o| words(o).is_some()));
 }
 
 const INTERNAL_GATE_WORKFLOW: &str = r#"
@@ -111,7 +112,8 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     assert_eq!(escalation.summary(), "Approve the plan?");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["proceed", "revise", "abort"]);
-    assert!(escalation.options().iter().all(|o| !o.tradeoff.is_empty()));
+    let words = |o| yunta_render::escalation::option_words(&escalation, o).1;
+    assert!(escalation.options().iter().all(|o| words(o).is_some()));
 }
 
 // --- resolve_gate writes ONLY the decision; the engine

@@ -175,6 +175,11 @@ impl Closing {
     fn holds(&self) -> Option<(Tone, String)> {
         let blocking = self.frame.blocking_findings;
         Some(match &self.frame.phase {
+            // A limit's reset moves the run on its own, so the wait is not a
+            // stop a person is asked to answer.
+            RunPhase::Waiting { on } if advice::reset_pause(&self.frame.phase).is_some() => {
+                (Tone::Muted, advice::parked_in_full(on))
+            }
             RunPhase::Waiting { on } => (Tone::NeedsYou, advice::parked_in_full(on)),
             RunPhase::Failed {
                 failure: Some(failure),
@@ -202,9 +207,10 @@ impl Closing {
     /// The failure that closed the run, said as the node it happened to.
     fn failed_claim(&self, failure: &yunta_core::events::Failure) -> String {
         let failed = self.failed().find(|(_, failed)| *failed == failure);
+        let headline = yunta_render::failure::headline(failure);
         match failed {
-            Some((node, _)) => format!("node `{}` failed: {}", node.id, failure.headline()),
-            None => failure.headline(),
+            Some((node, _)) => format!("node `{}` failed: {headline}", node.id),
+            None => headline,
         }
     }
 
@@ -245,7 +251,7 @@ impl Closing {
                     .plain(INDENT)
                     .push(Tone::Strong, node.id.as_str())
                     .plain(": ")
-                    .push(Tone::Failed, failure.headline()),
+                    .push(Tone::Failed, yunta_render::failure::headline(failure)),
             );
             lines.extend(detail.into_iter().map(|line| line.under(INDENT)));
         }
@@ -340,7 +346,7 @@ impl Closing {
         let mut steps = advice::after(
             crate::render::run_word(&self.frame),
             handle,
-            self.decision.is_some(),
+            self.decision.as_ref().map(|(_, payload)| payload),
         );
         steps.push((advice::status(handle), "shows the whole run"));
         Next { steps }

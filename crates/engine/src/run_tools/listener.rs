@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::host::{NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
-use super::session::SessionTools;
+use super::session::{Arrivals, SessionTools};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio_util::sync::CancellationToken;
@@ -34,6 +34,9 @@ pub struct RunToolsSession {
     rails: Arc<super::rail::SessionRails>,
     /// Whether the session's CLI ever listed these tools or called one.
     listed: Arc<std::sync::atomic::AtomicBool>,
+    /// The calls this server was reached by, which say whether a rejection
+    /// the CLI reports reached it.
+    arrivals: Arc<Arrivals>,
     /// How the session's CLI names these tools to its model.
     naming: yunta_core::ToolNaming,
     /// The tools this session is served, in the order it reads them.
@@ -58,6 +61,12 @@ impl RunToolsSession {
     /// both CLIs list a server's tools before their first turn.
     pub fn listed(&self) -> bool {
         self.listed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The calls this session's server was reached by, which a stream
+    /// reads to tell a rejection that reached it from one that did not.
+    pub(crate) fn arrivals(&self) -> &Arrivals {
+        &self.arrivals
     }
 
     /// How this session's CLI names these tools to its model.
@@ -118,6 +127,7 @@ pub async fn open_session_listener(
     let naming = access.naming;
     let rails = Arc::new(super::rail::SessionRails::default());
     let listed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let arrivals = Arc::new(Arrivals::default());
     let tools = SessionTools::new(
         access,
         (task, node_scope),
@@ -125,6 +135,7 @@ pub async fn open_session_listener(
         shutdown.clone(),
         Arc::clone(&rails),
         Arc::clone(&listed),
+        Arc::clone(&arrivals),
     );
     let offered = super::catalog::offered(&tools);
     let server = serve(listener, tools, &shutdown, token.expose());
@@ -140,6 +151,7 @@ pub async fn open_session_listener(
         },
         rails,
         listed,
+        arrivals,
         naming,
         offered,
         shutdown,

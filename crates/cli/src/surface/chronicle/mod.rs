@@ -249,6 +249,7 @@ mod tests {
             tail: tail.iter().map(|line| line.to_string()).collect(),
             tree: None,
             head: None,
+            conclusion: None,
         };
         let payload = EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
             task_id: "T001".into(),
@@ -284,6 +285,7 @@ mod tests {
                         tail: Vec::new(),
                         tree: None,
                         head: None,
+                        conclusion: None,
                     }],
                     outside_scope: outside.iter().map(|path| path.into()).collect(),
                     denied: Vec::new(),
@@ -316,6 +318,7 @@ mod tests {
         let cause = PromotionCause {
             node: "lint".into(),
             goto: "fix-lint".into(),
+            failure: None,
         };
         let promoted = PromotionSignaledPayload::new(cause, Evidence::none(), "ship".into());
         assert_eq!(
@@ -466,7 +469,6 @@ mod tests {
         let failed = EventPayload::Node(NodeEvent::Failed(
             yunta_core::events::NodeFailedPayload::new(
                 Failure::message("exit 1"),
-                false,
                 TokenUsage::default(),
             ),
         ));

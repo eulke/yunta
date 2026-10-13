@@ -153,9 +153,9 @@ pub use stats::{
     NodeStat, RunStats, Submissions,
 };
 pub use task_cycle::{
-    post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, BlockedCause,
-    CriterionRun, DispatchOutcome, KeepsOutput, Memo, PostCheck, ScopeGovernance, SessionObserver,
-    SessionSetup, Surprise, TaskCycleError, TaskCycleReport, TaskOutcome,
+    post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, CriterionRun,
+    DispatchOutcome, KeepsOutput, Memo, PostCheck, ScopeGovernance, SessionObserver, SessionSetup,
+    Surprise, TaskCause, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use tasks::{held_of, judged_task, measured};
 pub use verification_effectiveness::{

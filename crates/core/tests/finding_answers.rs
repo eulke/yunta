@@ -161,6 +161,7 @@ fn proved(id: &str, exit_code: i32) -> FindingEvent {
             tail: Vec::new(),
             tree: None,
             head: None,
+            conclusion: None,
         },
     })
 }

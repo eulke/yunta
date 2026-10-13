@@ -7,7 +7,8 @@ mod common;
 
 use common::*;
 use yunta_core::events::{
-    DepartsFrom, EventPayload, Failure, GateEvent, PauseReason, SessionEvent, TaskEvent, TaskStatus,
+    DepartsFrom, EventPayload, Failure, GateEvent, PauseReason, SessionEvent, TaskCause, TaskEvent,
+    TaskStatus, TaskStop,
 };
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction, MOCK_CONFIG};
@@ -112,6 +113,13 @@ fn task_sessions(bench: &Bench) -> usize {
         .count()
 }
 
+/// Whether `stopped` holds `greet` stopped on a departure a person still owes.
+fn owes_departure(stopped: &[TaskStop]) -> bool {
+    stopped.iter().any(|stop| {
+        stop.task_id.as_str() == "greet" && matches!(stop.cause, TaskCause::DeviationOwed { .. })
+    })
+}
+
 #[tokio::test]
 async fn a_departure_accepted_closes_the_task_on_its_work_without_another_session() {
     let bench = Bench::new();
@@ -183,21 +191,36 @@ async fn a_departure_no_one_answers_parks_the_run_owing_it() {
     let bench = Bench::new();
     let RunReport { terminal, state } = bench.run(WORKFLOW, &fixture("")).await;
 
-    match terminal {
-        RunTerminal::Paused {
-            reason:
-                PauseReason::NodeFailed {
-                    failure: Failure::Message { outcome },
-                    ..
-                },
-        } => assert!(
-            outcome.contains("a departure from the plan needs a person's answer")
-                && outcome.contains("`greet`"),
-            "{outcome}"
-        ),
-        other => panic!("expected the run to pause, got {other:?}"),
-    }
+    let RunTerminal::Paused {
+        reason:
+            PauseReason::NodeFailed {
+                failure: Failure::TasksStopped { stopped },
+                ..
+            },
+    } = terminal
+    else {
+        panic!("expected the run to pause owing the departure, got {terminal:?}");
+    };
+    assert!(owes_departure(&stopped), "{stopped:?}");
     assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
+}
+
+#[tokio::test]
+async fn an_abort_on_a_departure_pauses_without_a_missing_answer_and_is_asked_again() {
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(WORKFLOW, &fixture(""), &answering("abort", None))
+        .await;
+    let RunTerminal::Paused { reason } = terminal else {
+        panic!("expected a pause, got {terminal:?}");
+    };
+    assert!(
+        matches!(reason, PauseReason::GateAborted { .. }),
+        "{reason:?}"
+    );
+    assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
+    let RunReport { terminal, .. } = bench.wake_answering(&answering("accept", None)).await;
+    assert_eq!(terminal, RunTerminal::Finished);
 }
 
 #[tokio::test]
@@ -313,19 +336,17 @@ async fn a_departure_declared_beside_a_scope_request_is_still_owed_once_the_scop
         .run_with_interaction(&workflow, &fixture, &GrantsScopeOnly)
         .await;
 
-    match terminal {
-        RunTerminal::Paused {
-            reason:
-                PauseReason::NodeFailed {
-                    failure: Failure::Message { outcome },
-                    ..
-                },
-        } => assert!(
-            outcome.contains("a departure from the plan needs a person's answer"),
-            "{outcome}"
-        ),
-        other => panic!("expected the run to pause owing the departure, got {other:?}"),
-    }
+    let RunTerminal::Paused {
+        reason:
+            PauseReason::NodeFailed {
+                failure: Failure::TasksStopped { stopped },
+                ..
+            },
+    } = terminal
+    else {
+        panic!("expected the run to pause owing the departure, got {terminal:?}");
+    };
+    assert!(owes_departure(&stopped), "{stopped:?}");
     assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
 }
 
@@ -448,11 +469,12 @@ async fn a_criterion_no_work_on_the_plan_can_pass_is_declared_and_the_planner_is
         })
         .count();
     assert_eq!(opened, 1);
-    assert!(
-        loop_failure(&bench).is_some_and(|f| serde_json::to_value(&f).unwrap()["unpassable"][0]
-            ["task_id"]
-            == "task-u")
-    );
+    // The planner declared the same criterion again, so the loop fails as
+    // unchanged, with the declaration it repeats inside.
+    assert!(loop_failure(&bench).is_some_and(|f| {
+        serde_json::to_value(&f).unwrap()["unchanged"]["failure"]["unpassable"][0]["task_id"]
+            == "task-u"
+    }));
 }
 
 /// [`WORKFLOW`] with one reroute back to the planner, so a loop that fails

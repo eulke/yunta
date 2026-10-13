@@ -110,7 +110,6 @@ pub(super) async fn execute_workflow(
                  raise the limit",
                 yunta_core::text::counted(ctx.depth as usize + 1, "level")
             ),
-            false,
         )
         .await;
     }
@@ -143,7 +142,6 @@ pub(super) async fn execute_workflow(
                 ctx,
                 node,
                 format!("child workflow `use: {use_name}` cannot be resolved: {e}"),
-                false,
             )
             .await;
         }
@@ -158,7 +156,6 @@ pub(super) async fn execute_workflow(
                     "child workflow `{}` cannot be read: {e}",
                     resolved.path.display()
                 ),
-                false,
             )
             .await;
         }
@@ -166,7 +163,7 @@ pub(super) async fn execute_workflow(
     let child_workflow = match yunta_core::workflow::read::read(&text, &resolved.path) {
         Ok(workflow) => workflow,
         Err(report) => {
-            return fail(ctx, node, report.to_string(), false).await;
+            return fail(ctx, node, report.to_string()).await;
         }
     };
     // The same static gate `yunta run` applies before spending anything
@@ -193,7 +190,6 @@ pub(super) async fn execute_workflow(
             ctx,
             node,
             format!("child workflow `{use_name}` fails check: {listed}"),
-            false,
         )
         .await;
     }
@@ -212,7 +208,6 @@ pub(super) async fn execute_workflow(
                     ctx,
                     node,
                     format!("child input `{name}` does not render: {e}"),
-                    false,
                 )
                 .await;
             }
@@ -229,7 +224,6 @@ pub(super) async fn execute_workflow(
                 ctx,
                 node,
                 problem.into(),
-                false,
                 yunta_core::events::TokenUsage::default(),
             )
             .await
@@ -282,7 +276,6 @@ pub(super) async fn execute_workflow(
                 ctx,
                 node,
                 format!("child workflow `{use_name}` cannot freeze its manifest: {e}"),
-                false,
             )
             .await;
         }
@@ -301,7 +294,6 @@ pub(super) async fn execute_workflow(
                 ctx,
                 node,
                 format!("child run of `{use_name}` cannot freeze its state roots: {e}"),
-                false,
             )
             .await;
         }
@@ -343,7 +335,6 @@ pub(super) async fn execute_workflow(
                         ctx,
                         node,
                         format!("child run `{child_id}` cannot prepare its worktree: {e}"),
-                        false,
                     )
                     .await;
                 }

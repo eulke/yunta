@@ -856,7 +856,7 @@ nodes:
     match state.nodes.state("slow-loop") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                failure.to_string(),
+                yunta_render::failure::sentence(failure),
                 "interrupted: a sibling in this join: any group finished first"
             );
         }
@@ -900,7 +900,7 @@ nodes:
     match state.nodes.state("slow-check") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                failure.to_string(),
+                yunta_render::failure::sentence(failure),
                 "interrupted: a sibling in this join: any group finished first"
             );
         }
@@ -996,7 +996,7 @@ nodes:
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.state("implement") {
         Some(NodeState::Failed { failure, .. }) => {
-            let said = failure.to_string();
+            let said = yunta_render::failure::sentence(failure);
             assert!(
                 said.contains("declares a `findings` artifact")
                     && said.contains("declares no `run_tools` capability"),
@@ -1059,8 +1059,8 @@ nodes:
     match state.nodes.state("audit") {
         Some(NodeState::Failed { failure, .. }) => {
             assert!(
-                failure.to_string().contains("fail_if_uncertain"),
-                "the failure says which policy refused, got {failure}",
+                yunta_render::failure::sentence(failure).contains("fail_if_uncertain"),
+                "the failure says which policy refused, got {failure:?}",
             );
         }
         other => panic!("the uncertain child is recorded failed, got {other:?}"),

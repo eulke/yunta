@@ -3,12 +3,14 @@ number: D189
 title: "A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first"
 status: revised
 revises: []
-revised_by: [D192, D238, D259]
+revised_by: [D192, D238, D259, D261]
 ---
 
 # D189 — A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first
 
 *(Revised by D259: a node's failure offers `grant` only where the close would apply it, and a denied node request leaves a finding.)*
+
+*(Revised by D261: the menu of a scope failure comes from `Failure::remedies` and offers `grant` beside `abort`, and only where the run may widen the scope. It never offers `retry`, because the same scope writes the same paths again. Point 2's `retry` is no longer one of its options.)*
 
 ## Context
 

@@ -3,8 +3,11 @@
 //! what passed stays passed — whether the choice is made at the run's own
 //! console or from outside while it is parked.
 
-use yunta_core::events::{CriterionResult, EventPayload, NodeEvent, TaskStatus};
-use yunta_engine::{RunReport, RunTerminal};
+use yunta_core::events::{
+    CriterionResult, Escalation, EventPayload, NodeEvent, Precondition, Remedy, TaskStatus,
+};
+use yunta_core::reserved::ReservedOption;
+use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 mod common;
@@ -57,6 +60,19 @@ fn last_pre_check(bench: &Bench, cmd: &str) -> Option<CriterionResult> {
         })
 }
 
+/// The menu a parked run rebuilds from its log, as a wake rebuilds it.
+async fn parked_menu(bench: &Bench) -> Escalation {
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a red guard is a pause with a menu");
+    escalation
+}
+
 #[tokio::test]
 async fn a_retry_at_the_console_reruns_the_guard_that_stopped_the_task() {
     let outside = tempfile::tempdir().unwrap();
@@ -104,5 +120,35 @@ async fn a_retry_keeps_what_passed() {
     assert_eq!(
         green_before.map(|r| (r.exit_code, r.reused)),
         Some((0, true))
+    );
+}
+
+/// A red guard waits for an input outside the tree, so its retry waits for
+/// that input too: the menu a parked run rebuilds offers retry, and the
+/// failure menu's retry remedy names the outside change it waits for.
+#[tokio::test]
+async fn a_red_guard_offers_a_retry_that_waits_for_something_outside_the_tree() {
+    let outside = tempfile::tempdir().unwrap();
+    let ready = outside.path().join("ready");
+    let bench = parked_on_a_red_guard(&ready).await;
+
+    let escalation = parked_menu(&bench).await;
+
+    let offered: Vec<String> = escalation
+        .options()
+        .iter()
+        .map(|option| option.id.to_string())
+        .collect();
+    assert_eq!(offered, ["retry", "abort"]);
+    let failure = escalation
+        .failure
+        .as_ref()
+        .expect("a failed node's menu names its failure");
+    assert_eq!(
+        failure.remedies,
+        [Remedy {
+            option: ReservedOption::Retry,
+            precondition: Some(Precondition::OutsideTreeChanged),
+        }]
     );
 }

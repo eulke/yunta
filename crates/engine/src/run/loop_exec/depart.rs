@@ -9,22 +9,19 @@
 //! the person said.
 
 use yunta_core::events::{
-    DepartsFrom, DeviationDeclaredPayload, DeviationResolvedPayload, Escalation, EventPayload,
-    Fact, GateEvent, GateOption, GateResolvedPayload, TaskEvent, TaskLedger, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage,
+    DepartsFrom, DepartureMenu, DeviationDeclaredPayload, DeviationResolvedPayload, Escalation,
+    EscalationError, EventPayload, Evidence, Failure, HumanChoice, PauseReason, TaskCause,
+    TaskEvent, TaskLedger, TaskStatus, TaskStatusChangedPayload, TaskStop, TokenUsage,
 };
-use yunta_core::{Node, NonEmpty, OptionId, TaskId};
+use yunta_core::reserved::ReservedOption;
+use yunta_core::{Node, NonEmpty, Seq, TaskId};
 
 use crate::reserved::offers;
-use crate::run::node_close::fail_with_tokens;
+use crate::run::escalation::decided;
+use crate::run::node_close::fail_with;
 use crate::run::node_exec::NodeEnd;
 use crate::run::{RunCtx, RunError};
-use crate::task_cycle::{BlockedCause, TaskCycleReport, TaskOutcome};
-
-/// The option that accepts a departure.
-const ACCEPT: &str = "accept";
-/// The option that sends a departure back to the session that made it.
-const SEND_BACK: &str = "send-back";
+use crate::task_cycle::{TaskCycleReport, TaskOutcome};
 
 /// What holds a task to its criteria besides its plan, which decides
 /// what accepting a departure from one of them does — and the node that
@@ -73,17 +70,17 @@ pub(super) struct PendingDeparture {
 /// not, the task closes on nothing until the answer exists. Never a cycle
 /// that did not judge that work, nor a task a scope answer it is owed
 /// reopens — that task's next close asks.
-pub(super) fn owed_first(tasks: &TaskLedger, report: &TaskCycleReport) -> Option<BlockedCause> {
+pub(super) fn owed_first(tasks: &TaskLedger, report: &TaskCycleReport) -> Option<TaskCause> {
     let asks = match &report.outcome {
         TaskOutcome::Done => true,
         TaskOutcome::Blocked { cause } => {
             !report.needs_human_decision
                 && matches!(
                     cause,
-                    BlockedCause::Unmet { .. }
-                        | BlockedCause::NonRetryable
-                        | BlockedCause::Unrunnable { .. }
-                        | BlockedCause::SessionDied(_)
+                    TaskCause::Unmet { .. }
+                        | TaskCause::SessionRefused(_)
+                        | TaskCause::Unrunnable { .. }
+                        | TaskCause::SessionDied(_)
                 )
         }
         TaskOutcome::Interrupted => false,
@@ -91,12 +88,56 @@ pub(super) fn owed_first(tasks: &TaskLedger, report: &TaskCycleReport) -> Option
     let owed = tasks.get(&report.task_id)?.departures_owed.clone();
     NonEmpty::new(owed)
         .filter(|_| asks)
-        .map(|deviations| BlockedCause::DeviationOwed { deviations })
+        .map(|deviations| TaskCause::DeviationOwed { deviations })
+}
+
+/// The answer a departure's question takes. Each answer is parsed once.
+enum DepartureAnswer {
+    Accept,
+    SendBack,
+    Abort,
+}
+
+/// The answer a person gave a departure's question, or `None` for an option
+/// no departure offers.
+fn answer_of(choice: &HumanChoice) -> Option<DepartureAnswer> {
+    match ReservedOption::of(&choice.option)? {
+        ReservedOption::Accept => Some(DepartureAnswer::Accept),
+        ReservedOption::SendBack => Some(DepartureAnswer::SendBack),
+        ReservedOption::Abort => Some(DepartureAnswer::Abort),
+        _ => None,
+    }
+}
+
+/// Where a person's answer to a departure leaves the node: the departure is
+/// accepted or sent back, the run pauses on the answer, or no departure
+/// takes the answer.
+enum Settled {
+    Accepted(bool),
+    Paused(NodeEnd),
+    Unanswered,
+}
+
+/// Settles a departure on the answer a person gave. The run pauses on an
+/// abort, and the question comes back on resume.
+fn settle(node: &Node, choice: &HumanChoice) -> Settled {
+    match answer_of(choice) {
+        Some(DepartureAnswer::Accept) => Settled::Accepted(true),
+        Some(DepartureAnswer::SendBack) => Settled::Accepted(false),
+        Some(DepartureAnswer::Abort) => Settled::Paused(NodeEnd::Paused {
+            reason: PauseReason::GateAborted {
+                node: node.id.clone(),
+                free_text: choice.free_text.clone(),
+            },
+        }),
+        None => Settled::Unanswered,
+    }
 }
 
 /// Puts each task's departures to a person and reopens the task on the
 /// answer. Returns the node's end when any is left unanswered — no one
-/// to ask, or a person who chose to stop — and the run pauses owing it.
+/// to ask, or an answer no departure takes — and the node fails owing it,
+/// or when a person chose to stop, and the run pauses on that answer.
 pub(super) async fn resolve_departures(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -104,26 +145,25 @@ pub(super) async fn resolve_departures(
     holders: &Holders<'_>,
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
-    let mut unanswered: Vec<TaskId> = Vec::new();
+    let mut unanswered: Vec<TaskStop> = Vec::new();
     for departure in pending {
         let escalation =
             escalation(&departure, holders).map_err(|source| RunError::Escalation {
                 context: format!("task `{}`'s departure", departure.task_id),
                 source,
             })?;
-        let Some(choice) = ctx
-            .ask_human(Some(&node.id), Some(&departure.task_id), &escalation)
-            .await?
+        let state = ctx.run_view().await?.state;
+        let Some((choice, resolved)) =
+            decided(ctx, &state, &node.id, Some(&departure.task_id), &escalation).await?
         else {
-            unanswered.push(departure.task_id);
+            unanswered.push(owed_stop(&departure));
             continue;
         };
-        let resolved = asked_and_answered(ctx, node, escalation, &choice).await?;
-        let accepted = match choice.option.as_str() {
-            ACCEPT => true,
-            SEND_BACK => false,
-            _ => {
-                unanswered.push(departure.task_id);
+        let accepted = match settle(node, &choice) {
+            Settled::Accepted(accepted) => accepted,
+            Settled::Paused(end) => return Ok(Some(end)),
+            Settled::Unanswered => {
+                unanswered.push(owed_stop(&departure));
                 continue;
             }
         };
@@ -148,51 +188,57 @@ pub(super) async fn resolve_departures(
         )
         .await?;
     }
-    owing(ctx, node, &unanswered, tokens).await
+    owing(ctx, node, unanswered, tokens).await
 }
 
-/// The node's end while `unanswered` departures still owe a person's
-/// answer, which the run pauses on; `None` when none does.
+/// The departures the ledger holds owed a person's answer: each blocked task
+/// whose stop is a departure owed. A loop that finds nothing to run asks them
+/// again, so a resume after an abort puts the same question.
+pub(super) fn owed_by(stopped: &[TaskStop]) -> Vec<PendingDeparture> {
+    stopped
+        .iter()
+        .filter_map(|stop| match &stop.cause {
+            TaskCause::DeviationOwed { deviations } => Some(PendingDeparture {
+                task_id: stop.task_id.clone(),
+                deviations: deviations.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The stop a departure that still owes a person's answer leaves its task with.
+fn owed_stop(departure: &PendingDeparture) -> TaskStop {
+    TaskStop {
+        task_id: departure.task_id.clone(),
+        cause: TaskCause::DeviationOwed {
+            deviations: departure.deviations.clone(),
+        },
+    }
+}
+
+/// The node's end while `unanswered` departures still owe a person's answer:
+/// the node fails with each owed departure as its stop. `None` when none does.
 async fn owing(
     ctx: &RunCtx<'_>,
     node: &Node,
-    unanswered: &[TaskId],
+    unanswered: Vec<TaskStop>,
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
     if unanswered.is_empty() {
         return Ok(None);
     }
-    let owed: Vec<&str> = unanswered.iter().map(TaskId::as_str).collect();
-    let diagnostic = format!(
-        "a departure from the plan needs a person's answer before this run can continue: {}",
-        yunta_core::text::listed(owed)
-    );
     Ok(Some(
-        fail_with_tokens(ctx, node, diagnostic, false, tokens).await?,
+        fail_with(
+            ctx,
+            node,
+            Failure::TasksStopped {
+                stopped: unanswered,
+            },
+            tokens,
+        )
+        .await?,
     ))
-}
-
-/// The question and the person's answer, together on the log once the
-/// answer exists — where the answer sits is what the task's reopening
-/// cites.
-async fn asked_and_answered(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    escalation: Escalation,
-    choice: &yunta_core::events::HumanChoice,
-) -> Result<yunta_core::Seq, RunError> {
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
-    )
-    .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-            choice.clone(),
-        ))),
-    )
-    .await
 }
 
 /// How the task goes on after the answer: accepted, from the work its
@@ -202,7 +248,7 @@ async fn reopened(
     ctx: &RunCtx<'_>,
     task: &TaskId,
     accepted: bool,
-    resolved: yunta_core::Seq,
+    resolved: Seq,
 ) -> Result<TaskStatusChangedPayload, RunError> {
     let state = ctx.run_view().await?.state;
     let record = state.tasks.get(task);
@@ -217,92 +263,41 @@ async fn reopened(
     })
 }
 
-/// The question: what the session departed from, in its own words, and
-/// the answers that can change something. A departure from a test the
-/// run's spec gave the task is accepted only where a node of the run
-/// writes the spec again: accepted with nobody to rewrite the test, the
+/// The question a departure puts to a person: the departure itself, as the
+/// menu's data, and the answers that can change something. A departure from
+/// a test the run's spec gave the task is accepted only where a node of the
+/// run writes the spec again: accepted with nobody to rewrite the test, the
 /// task would stay held to what everyone agreed is wrong.
 fn escalation(
     departure: &PendingDeparture,
     holders: &Holders<'_>,
-) -> Result<Escalation, yunta_core::events::EscalationError> {
-    let mut facts = Vec::new();
-    for deviation in &departure.deviations {
-        facts.push(Fact::labelled("departs from", deviation.from.to_string()));
-        facts.push(Fact::labelled("the plan says", deviation.planned.clone()));
-        facts.push(Fact::labelled(
-            "its work instead",
-            deviation.instead.clone(),
-        ));
-        facts.push(Fact::labelled("because", deviation.why.clone()));
-    }
-    let send_back = GateOption {
-        id: OptionId::from_static(SEND_BACK),
-        label: "Send it back".to_string(),
-        tradeoff: "Its session picks the work back up with what you say".to_string(),
-        asks: Some("what should it do instead?".to_string()),
+) -> Result<Escalation, EscalationError> {
+    let accept_offered = !(holders.respecifies(departure) && holders.writer.is_none());
+    let options = match accept_offered {
+        true => NonEmpty::from((offers::accept(), vec![offers::send_back(), offers::abort()])),
+        false => NonEmpty::from((offers::send_back(), vec![offers::abort()])),
     };
-    let options = match (holders.respecifies(departure), holders.writer) {
-        (true, None) => {
-            facts.push(Fact::labelled(
-                "not offered: accepting",
-                "the tests came with the run, and no node of it writes them again",
-            ));
-            NonEmpty::from((send_back, vec![offers::abort()]))
-        }
-        _ => NonEmpty::from((
-            GateOption {
-                id: OptionId::from_static(ACCEPT),
-                label: "Accept the departure".to_string(),
-                tradeoff: accepting(departure, holders),
-                asks: None,
-            },
-            vec![send_back, offers::abort()],
-        )),
+    let menu = DepartureMenu {
+        deviations: departure.deviations.as_slice().to_vec(),
+        waived: holders
+            .of(departure)
+            .into_iter()
+            .filter(|(_, held)| *held == crate::tasks::HeldBy::Plan)
+            .map(|(cmd, _)| cmd.to_string())
+            .collect(),
+        rewritten_by: holders
+            .writer
+            .filter(|_| holders.respecifies(departure))
+            .cloned(),
+        accept_offered,
     };
     Escalation::new(
         format!(
             "task `{}`'s session departs from the plan",
             departure.task_id
         ),
-        facts.into(),
+        Evidence::none(),
         options,
     )
-}
-
-/// What accepting `departure` does, in the words its option offers: the
-/// task closes on the work it left; a criterion of its plan it departs
-/// from stops holding it, since nothing else can rewrite one; and a test
-/// the run's spec gave it is written again by the node that wrote it.
-fn accepting(departure: &PendingDeparture, holders: &Holders<'_>) -> String {
-    let waived: Vec<&str> = holders
-        .of(departure)
-        .into_iter()
-        .filter(|(_, held)| *held == crate::tasks::HeldBy::Plan)
-        .map(|(cmd, _)| cmd)
-        .collect();
-    let rewritten = holders
-        .writer
-        .filter(|_| holders.respecifies(departure))
-        .map(|writer| {
-            format!(
-                "its tests are written again by `{writer}` from this departure and what you \
-                 say, and it goes on held to the new ones"
-            )
-        });
-    let changes: Vec<String> = (!waived.is_empty())
-        .then(|| format!("stops being held to {}", yunta_core::text::listed(waived)))
-        .into_iter()
-        .chain(rewritten)
-        .collect();
-    match changes.is_empty() {
-        true => "The task closes on the work as it stands, if its criteria pass; the rest of \
-                 the plan builds on what it did instead"
-            .to_string(),
-        false => format!(
-            "The task {} and closes on the work as it stands, if its other criteria pass; the \
-             rest of the plan builds on what it did instead",
-            changes.join(", and ")
-        ),
-    }
+    .map(|escalation| escalation.with_departure(menu))
 }

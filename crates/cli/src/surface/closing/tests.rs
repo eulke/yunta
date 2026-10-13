@@ -61,7 +61,6 @@ fn failed_lint() -> NodeFrame {
         NodeState::Failed {
             failure: lint_failure(),
             tokens: TokenUsage::default(),
-            retryable: false,
         },
     )
 }
@@ -93,8 +92,8 @@ fn frame(phase: RunPhase, nodes: Vec<NodeFrame>) -> RunFrame {
 fn exhausted_escalation() -> Escalation {
     let option = |id: &'static str, label: &str, tradeoff: &str| GateOption {
         id: yunta_core::OptionId::from_static(id),
-        label: label.to_string(),
-        tradeoff: tradeoff.to_string(),
+        label: Some(label.to_string()),
+        tradeoff: Some(tradeoff.to_string()),
         asks: None,
     };
     Escalation::new(

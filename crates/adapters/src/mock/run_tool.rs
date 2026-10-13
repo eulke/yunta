@@ -40,14 +40,6 @@ pub(super) enum RunToolCallError {
     TimedOut { tool: String, within: Duration },
 }
 
-impl RunToolCallError {
-    /// A `tools/call` request was sent to the per-run server and answered.
-    /// A call that timed out was never answered, so it does not count.
-    pub(super) fn reached_call(&self) -> bool {
-        matches!(self, Self::Call { .. } | Self::Refused { .. })
-    }
-}
-
 /// What a CLI does with a per-run server before its first turn: connect and
 /// list the tools, within the CLI's own call timeout. A listing that fails
 /// is a server the session does not hold, which the engine reads from its

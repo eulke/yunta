@@ -50,6 +50,7 @@ pub(crate) fn criteria_checked() -> CriteriaCheckedPayload {
             tail: Vec::new(),
             tree: None,
             head: None,
+            conclusion: None,
         }],
         waiting: Vec::new(),
     }
@@ -76,11 +77,7 @@ pub(crate) fn node_finished() -> NodeFinishedPayload {
 }
 
 pub(crate) fn node_failed() -> NodeFailedPayload {
-    NodeFailedPayload::new(
-        Failure::message("criteria red"),
-        true,
-        TokenUsage::default(),
-    )
+    NodeFailedPayload::new(Failure::message("criteria red"), TokenUsage::default())
 }
 
 pub(crate) fn hook_executed() -> HookExecutedPayload {

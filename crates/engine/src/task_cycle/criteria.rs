@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use yunta_core::events::{CriterionType, TaskLedger};
+use yunta_core::events::{CriterionType, TaskLedger, Unanswered, STOPPED_EXIT_CODE};
 use yunta_core::Criterion;
 use yunta_core::{Task, TaskId};
 
@@ -18,28 +18,33 @@ use crate::process::{
 /// The exit code the log records for how a criterion's command ended.
 /// A command the engine stopped before it answered — a timeout, or a
 /// cancellation — has no exit code of its own, so it is recorded as
-/// `-2`, which no process exits with; one killed by a signal as `-1`.
+/// [`STOPPED_EXIT_CODE`], which no process exits with; one killed by a
+/// signal as `-1`.
 pub(crate) fn exit_code_of(outcome: Outcome) -> i32 {
     match outcome {
         Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => STOPPED_EXIT_CODE,
     }
 }
 
 /// Why a criterion never answered, when its exit code says it did not:
-/// the shell could not find its command (127), found it but could not
-/// execute it (126), or the engine stopped it first (`-2`, see
-/// [`exit_code_of`]). `None` for every other exit code, which is the
-/// command's own answer.
+/// the shell could not find its command, found it but could not execute
+/// it, or the engine stopped it first (see [`exit_code_of`]). `None` for
+/// every other exit code, which is the command's own answer.
 ///
 /// A criterion that could not run is neither red nor green: no work on
 /// the tree changes it, so it is never taken for a verdict about one.
-pub fn could_not_run(exit_code: i32) -> Option<&'static str> {
-    match exit_code {
-        127 => Some("command not found"),
-        126 => Some("command not executable"),
-        -2 => Some("stopped before it answered"),
-        _ => None,
+pub fn could_not_run(exit_code: i32) -> Option<Unanswered> {
+    Unanswered::of(exit_code)
+}
+
+/// The words an agent reads for a criterion that never answered: what
+/// happened to its command, in the terms a person fixing it would use.
+pub(crate) fn unanswered_words(why: Unanswered) -> &'static str {
+    match why {
+        Unanswered::NotFound => "command not found",
+        Unanswered::NotExecutable => "command not executable",
+        Unanswered::Stopped => "stopped before it answered",
     }
 }
 

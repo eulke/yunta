@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::events::Evidence;
+use crate::events::{Evidence, Failure};
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{ModeName, NodeId, RunId};
 use crate::workflow::OnInterrupt;
@@ -237,6 +237,11 @@ pub struct EnvironmentDrift {
 pub struct PromotionCause {
     pub node: NodeId,
     pub goto: NodeId,
+    /// The failure that exhausted the node's re-routes, when a failure
+    /// asked for the promotion. Absent on a promotion the log wrote
+    /// without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<Failure>,
 }
 
 /// A run asked to be run wider than the mode it started in.
@@ -364,6 +369,11 @@ pub struct RunResumedPayload {
     /// it was parked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<std::path::PathBuf>,
+    /// The run's tree as this wake found it, recorded when a node's failure
+    /// waited on a person: a change a person made to the tree while the run
+    /// was parked reaches the log here. Absent on every other wake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<crate::TreeId>,
 }
 
 impl RunResumedPayload {
@@ -374,6 +384,7 @@ impl RunResumedPayload {
             policies,
             environment,
             checkout: None,
+            tree: None,
         }
     }
 
@@ -391,6 +402,14 @@ impl RunResumedPayload {
     pub fn in_checkout(self, checkout: std::path::PathBuf) -> Self {
         RunResumedPayload {
             checkout: Some(checkout),
+            ..self
+        }
+    }
+
+    /// The same wake, having found the run's tree at `tree`.
+    pub fn finding(self, tree: crate::TreeId) -> Self {
+        RunResumedPayload {
+            tree: Some(tree),
             ..self
         }
     }
@@ -432,52 +451,4 @@ impl RunFinishedPayload {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use schemars::schema_for;
-
-    fn orphan(node: &'static str, on_interrupt: OnInterrupt) -> ResumePolicy {
-        ResumePolicy {
-            node: NodeId::from_static(node),
-            on_interrupt,
-        }
-    }
-
-    /// Orphans that resolved alike agree on their policy; orphans that
-    /// resolved differently, or none at all, agree on none.
-    #[test]
-    fn orphans_agree_on_a_policy_only_when_they_resolved_alike() {
-        let (restart, fail) = (OnInterrupt::RestartNode, OnInterrupt::FailIfUncertain);
-        let alike = RunResumedPayload::new(vec![orphan("a", restart), orphan("b", restart)], None);
-        let unlike = RunResumedPayload::new(vec![orphan("a", restart), orphan("b", fail)], None);
-        let empty = RunResumedPayload::new(Vec::new(), None);
-        assert_eq!(alike.agreed_policy().as_deref(), Some("restart_node"));
-        assert_eq!(unlike.agreed_policy(), None);
-        assert_eq!(empty.agreed_policy(), None);
-    }
-
-    /// A `run_resumed` an older writer stamped with the policy it agreed on
-    /// reads back, with that field ignored.
-    #[test]
-    fn a_legacy_resume_policy_field_is_ignored() {
-        let legacy = serde_json::json!({
-            "resume_policy_applied": "restart_node",
-            "policies": [{ "node": "build", "on_interrupt": "restart_node" }],
-        });
-        let read: RunResumedPayload = serde_json::from_value(legacy).unwrap();
-        assert_eq!(read.agreed_policy().as_deref(), Some("restart_node"));
-    }
-
-    /// The published shapes carry the pause and the cause, and never the
-    /// legacy sentences a log may still hold.
-    #[test]
-    fn the_published_shapes_leave_the_legacy_sentences_out() {
-        let run = serde_json::to_value(schema_for!(RunPausedPayload)).unwrap();
-        let promotion = serde_json::to_value(schema_for!(PromotionSignaledPayload)).unwrap();
-        let (run, promotion) = (&run["properties"], &promotion["properties"]);
-        assert!(run.get("pause").is_some(), "{run}");
-        assert!(run.get("reason").is_none(), "{run}");
-        assert!(promotion.get("cause").is_some(), "{promotion}");
-        assert!(promotion.get("reason").is_none(), "{promotion}");
-    }
-}
+mod tests;

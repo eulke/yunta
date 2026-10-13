@@ -198,7 +198,7 @@ fn a_failure_keeps_the_document_every_problem_came_from() {
 }
 
 #[test]
-fn a_failure_renders_one_block_per_failing_document() {
+fn a_failure_keeps_one_entry_per_failing_document() {
     let failure = Failure::artifacts(vec![
         ArtifactFailure::file(
             "artifacts/notes.md",
@@ -212,18 +212,24 @@ fn a_failure_renders_one_block_per_failing_document() {
         )),
     ]);
     assert_eq!(
-        failure.to_string(),
-        "artifacts/notes.md: 1 error\n  \
-         the document was declared by node `plan` and never produced\n\
-         artifacts/plan.yaml: 1 error\n  \
-         task `t1`: no criteria declared"
+        failure.failures().count(),
+        2,
+        "each declared document that did not close is one entry"
+    );
+    assert_eq!(
+        failure.reports().count(),
+        1,
+        "only the document that was read carries a report"
     );
 }
 
 #[test]
-fn a_failure_stated_in_one_sentence_renders_as_that_sentence() {
+fn a_failure_stated_in_one_sentence_has_no_document_behind_it() {
     let failure = Failure::message("the runner exited with status 2");
-    assert_eq!(failure.to_string(), "the runner exited with status 2");
+    assert!(
+        matches!(&failure, Failure::Message { outcome } if outcome == "the runner exited with status 2"),
+        "{failure:?}"
+    );
     assert_eq!(failure.reports().count(), 0);
 }
 
@@ -279,17 +285,11 @@ fn an_undelivered_document_reads_back_with_its_tag_the_node_and_the_identity() {
 }
 
 #[test]
-fn a_document_a_node_never_handed_over_renders_as_the_node_that_owes_it() {
+fn a_document_a_node_never_handed_over_is_one_failed_artifact_of_that_node() {
     let failure = Failure::artifacts(vec![ArtifactFailure::Undelivered {
         node: NodeId::from("plan"),
         artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
     }]);
-    assert_eq!(
-        failure.to_string(),
-        "node `plan`: 1 error\n  \
-         handed over no tasks document — produce it before the node ends, \
-         or stop declaring it here"
-    );
     assert_eq!(
         failure.failures().count(),
         1,
@@ -340,17 +340,12 @@ fn an_unheld_artifact_reads_back_with_its_tag_and_the_run_it_was_missing_from() 
 }
 
 #[test]
-fn an_artifact_another_run_owes_renders_as_the_run_that_does_not_hold_it() {
+fn an_artifact_another_run_owes_is_one_failed_artifact_of_that_run() {
     let failure = Failure::artifacts(vec![ArtifactFailure::Unheld {
         run: RunId::from("run-child-1"),
         producer: None,
         artifact: ArtifactId::of("report.md", None),
     }]);
-    assert_eq!(
-        failure.to_string(),
-        "run `run-child-1`: 1 error\n  \
-         holds no artifact `report.md` — produce it there, or stop declaring it here"
-    );
     assert_eq!(
         failure.failures().count(),
         1,
