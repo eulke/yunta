@@ -116,7 +116,7 @@ autenticada.
 
 ## D. Superficies live-only agregadas en fases posteriores
 
-Todo lo demás se construyó y testeó con mock/repos locales; estas tres
+Todo lo demás se construyó y testeó con mock/repos locales; estas cuatro
 partes son las únicas que ninguna corrida sin credenciales puede
 ejercitar.
 
@@ -142,6 +142,15 @@ ejercitar.
    shorthand `host/path` expande a `https://`, el clone-por-ref y el
    vendoring funcionan igual que con los repos locales de los tests;
    `yunta pack list` reporta `ok` contra el lock recién escrito.
+
+4. **Pedido bajo `deny` contestado en la llamada, en los dos CLIs**: una tarea de un
+   `loop` con `scope_expansion` en `mode: deny` pide `src/other.rs` con
+   `yunta_request_scope_expansion` y escribe ese path desde la shell en la misma
+   sesión. La respuesta de la llamada llega en el momento, empieza con
+   `request denied` y dice la razón; el log muestra `scope_expansion_requested` y
+   `scope_expansion_denied` en esa llamada, antes de que la sesión pare. Después la
+   sesión para con `stop_refused` (`outside_scope`), borra el archivo y termina. La
+   secuencia es la misma en `claude-code` y en `codex`.
 
 ## E. Session hooks on the real CLIs (2026-10-06)
 
@@ -279,7 +288,8 @@ the rail started from; "after" carries it.
 - What still stops for a person after: a scope a plan left too narrow (each
   grant opens one more attempt), a scope request the loop's rules deny — the
   session may stop while its request waits, and the denial blocks the task
-  instead of reaching the session — and an account limit.
+  instead of reaching the session — and an account limit. The denial reaches
+  the session in its tool reply now, at once: item 4 of section D checks it live.
 - A `read_only` Codex session cannot run `/usr/bin/git`: the Xcode shim writes
   a cache to the temporary directory, which Codex's `read-only` sandbox
   refuses, and a reviewer took the errors for a failed diff. Claude Code's

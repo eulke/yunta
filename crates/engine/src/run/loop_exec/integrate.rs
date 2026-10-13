@@ -2,8 +2,7 @@
 //! task at a time, its criteria re-run after the rebase, and the result
 //! committed or recorded as a conflict.
 
-use std::path::PathBuf;
-use yunta_core::commit_message::CommitMessage;
+use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, Decider, EventPayload, Phase, ScopeCheckedPayload,
@@ -11,23 +10,38 @@ use yunta_core::events::{
 };
 use yunta_core::expansion::Decision;
 use yunta_core::protected::{Closing, Protected};
-use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
+use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task, TreeId};
 
-use crate::replay::RunState;
-use crate::run::scope_record::{self, Recording, Subject};
-use crate::task_cycle::{post_check, BlockedCause, Memo, TaskOutcome};
-use crate::worktree::{commit_work, land, rebase_onto, Rebase, Unit};
+use crate::run::node_exec::NodeEnd;
+use crate::run::scope_record::{self, Recording, Subject, Withdrawal};
+use crate::task_cycle::{
+    judge, scope_in_force, BlockedCause, JudgeEnv, Judgement, Memo, Refusals, Settle, Sitting,
+    TaskOutcome, Work,
+};
+use crate::worktree::{land, rebase_onto, Rebase, Unit};
 
 use super::depart::PendingDeparture;
+use super::dispatch::{commit_task_work, left_work};
 use super::escalate::PendingEscalation;
-use super::{BatchIntegration, LoopState};
+use super::LoopState;
 use crate::run::{RunCtx, RunError};
 use yunta_core::events::{NodeEvent, TaskEvent};
 
+/// What integrating one batch produced: a cancellation that ends the node,
+/// or what is owed a person once the batch is on the log — the scope
+/// requests escalated, and the departures from the plan declared.
+pub(super) enum BatchIntegration {
+    Cancelled(NodeEnd),
+    Done {
+        escalations: Vec<PendingEscalation>,
+        departures: Vec<PendingDeparture>,
+    },
+}
+
 /// Integrates one dispatched batch, serially and in declaration order
 /// (never the order dispatch finished in): records what each task's cycle
-/// could not record itself — its attempts' fence breaches and scope
-/// expansion requests; every check is already on the log, written the
+/// could not record itself — its attempts' fence breaches, scope expansion
+/// requests and withdrawals; every check is already on the log, written the
 /// moment it ran — rebases and fast-forwards a `Done` task onto the run's current
 /// tree, and marks each task's new status. A cancelled dispatch ends the
 /// whole node. Any `Escalate`d scope-expansion request is collected for the
@@ -69,6 +83,9 @@ pub(super) async fn integrate_batch(
             diagnostic: format!("task `{}`'s cycle recorded no check", task.id),
         })?;
 
+        // The request the attempt before this one decided, if it made one: a
+        // fresh session re-reads a request still pending, and the log holds it once.
+        let mut previous_asked: Option<crate::scope_expansion::ScopeExpansionRequest> = None;
         for attempt in report.attempts.drain(..) {
             state.tokens += attempt.tokens;
             // `run_task` has no ctx to record on, so it hands the
@@ -78,10 +95,24 @@ pub(super) async fn integrate_batch(
             }
 
             if let Some(outcome) = &attempt.scope_expansion {
-                record_attempt(ctx, node, task, attempt.attempt, outcome).await?;
+                let new_request = outcome.asked.is_some() && outcome.asked != previous_asked;
+                record_attempt(ctx, node, task, attempt.attempt, outcome, new_request).await?;
                 if matches!(outcome.decision, Decision::Escalate { .. }) {
                     escalated = Some((attempt.attempt, outcome.clone()));
                 }
+            }
+            previous_asked = attempt
+                .scope_expansion
+                .as_ref()
+                .and_then(|outcome| outcome.asked.clone());
+            // A request the task closed with, unanswered, is withdrawn: nobody
+            // decided it, so the log says it left with the task.
+            if let Some(paths) = &attempt.withdrawn {
+                let request = Withdrawal {
+                    task: &task.id,
+                    paths,
+                };
+                scope_record::withdraw(&ctx.log(), &node.id, request).await?;
             }
         }
 
@@ -208,10 +239,11 @@ async fn record_attempt(
     task: &Task,
     attempt_no: u32,
     outcome: &crate::scope_expansion::ScopeExpansionOutcome,
+    new_request: bool,
 ) -> Result<(), RunError> {
     scope_record::record(
         &ctx.log(),
-        node,
+        &node.id,
         Recording {
             subject: Subject::Task(&task.id),
             mode: Some(super::mode_in_force(node)),
@@ -222,36 +254,10 @@ async fn record_attempt(
             located: outcome.asked.is_none(),
             precheck: outcome.precheck,
             attempt: attempt_no,
+            new_request,
         },
     )
     .await
-}
-
-/// What a blocked task's last attempt left in its unit, committed on the
-/// unit's own branch so a person can have the next cycle continue from
-/// it. `None` when the attempt changed nothing.
-async fn left_work(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    task: &Task,
-    unit: &Unit,
-    cancel: &tokio_util::sync::CancellationToken,
-) -> Result<Option<CommitSha>, RunError> {
-    let supervision = ctx.supervision(cancel);
-    commit_work(
-        unit,
-        &CommitMessage::new(
-            format!("task {}: the work its last attempt left", task.id),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
-        supervision,
-    )
-    .await?;
-    let head = crate::worktree::head_commit(&unit.worktree, supervision).await?;
-    Ok((head != unit.base).then_some(head))
 }
 
 enum IntegrationOutcome {
@@ -276,31 +282,6 @@ struct VerifiedTask<'a> {
     /// The hold on the unit's checkout, which landing lets go of.
     lease: &'a crate::worktree::Lease,
     staged: &'a [PathBuf],
-}
-
-/// Commits the work a task left in its unit as the task's own commit, before
-/// anything judges it. What git ignores stays out of it: the close of the
-/// task's attempt judged the ignored paths the run protects.
-async fn commit_task_work(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    task: &Task,
-    unit: &Unit,
-    supervision: crate::process::Supervision<'_>,
-) -> Result<(), RunError> {
-    commit_work(
-        unit,
-        &CommitMessage::new(
-            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
-        supervision,
-    )
-    .await?;
-    Ok(())
 }
 
 /// Integrates one task verified `Done` in isolation: rebase
@@ -334,96 +315,18 @@ async fn integrate_task(
     let onto = match rebase_onto(unit, ctx.worktree, supervision).await? {
         Rebase::Onto(tree) => tree,
         Rebase::Conflicts(paths) => {
-            // No `post_check` ran — nothing to attach the reason to but
-            // the replay itself, so it is recorded the way any other
-            // command outcome is: a synthetic `CriterionRun` naming the
-            // git command and the paths it stopped on, through the
-            // existing `CriteriaChecked` vocabulary rather than a new
-            // event kind.
-            *last_check_seq = ctx
-                .emit(
-                    Some(&node.id),
-                    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-                        task_id: task.id.clone(),
-                        phase: Phase::Post,
-                        results: vec![CriterionResult {
-                            cmd: format!("git rebase: {}", conflict_list(&paths)),
-                            exit_code: 1,
-                            r#type: None,
-                            reused: false,
-                            duration_ms: None,
-                            output: None,
-                            tail: Vec::new(),
-                            tree: None,
-                            head: None,
-                        }],
-                        waiting: Vec::new(),
-                    })),
-                )
-                .await?;
+            *last_check_seq = record_conflict(ctx, node, task, &paths).await?;
             return Ok(IntegrationOutcome::Rejected);
         }
     };
     let task_worktree = unit.worktree.as_path();
 
-    let checked = post_check(task, task_worktree, memo, ctx.supervision(cancel)).await?;
-    let results = ctx.recorded(&checked.runs).await.map_err(|source| {
-        crate::task_cycle::TaskCycleError::KeepOutput {
-            task: task.id.clone(),
-            source,
-        }
-    })?;
-    *last_check_seq = ctx
-        .emit(
-            Some(&node.id),
-            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-                task_id: task.id.clone(),
-                phase: Phase::Post,
-                results,
-                waiting: checked.waiting.clone(),
-            })),
-        )
-        .await?;
     // Re-verified on the rebased tree, so what the task answers for is
     // what it added on top of the base it landed against — which is not
     // the tree it opened on: the ground moved under it while it worked.
-    //
-    // Against the same scope the attempt was judged by: what the log
-    // authorized for this task is as much its scope as what the tasks
-    // document declared, and an audit that ignored the grants would
-    // reject work a human already allowed.
-    // Every test a person approved, the task's own among them: its own
-    // are what it staged, which the audit leaves out of its diff.
-    let (allowed, lifted) = judged_against(ctx, task).await?;
-    let scope = crate::scope::audit_tree(
-        task_worktree,
-        &onto,
-        &checked.tree,
-        crate::scope::Ceiling {
-            scope: &allowed,
-            protected: &lifted,
-            closing: Closing::Every,
-        },
-        staged,
-        supervision,
-    )
-    .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
-            task_id: Some(task.id.clone()),
-            diff: scope.diff.clone(),
-            violations: scope.violations.clone(),
-            denied: scope.denied.clone(),
-        })),
-    )
-    .await?;
-    let coverage = ctx.last_coverage(&node.id).await?;
-    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &scope) {
-        record_breach(ctx, node, &breach).await?;
-    }
-
-    if !checked.passes() || !scope.violations.is_empty() {
+    let judgement = judge_rebased(ctx, task, task_worktree, &onto, staged, memo, cancel).await?;
+    *last_check_seq = record_judgement(ctx, node, task, &judgement).await?;
+    if !judgement.closes() {
         return Ok(IntegrationOutcome::Rejected);
     }
 
@@ -438,21 +341,9 @@ async fn integrate_task(
     Ok(IntegrationOutcome::Integrated { commit })
 }
 
-/// What this task may touch: what it declared, plus the files that name a
-/// shape it owns and every path a `scope_expansion_granted` on the log
-/// authorized for it. Derived from the log rather than carried from the
-/// attempt, so a re-verification after a crash grants exactly what the
-/// attempt was granted.
-fn effective_scope(task: &Task, state: &RunState) -> Vec<ScopeGlob> {
-    task.scope
-        .iter()
-        .cloned()
-        .chain(state.grants.reach_for(&task.id))
-        .collect()
-}
-
-/// What a task's landing is audited against: the scope it may touch, and the
-/// protected set lifted by what a person granted that task alone.
+/// What a task's landing is judged against: the scope in force, which the
+/// grants on the log widen, and the protected set lifted by what a person
+/// granted that task alone.
 async fn judged_against(
     ctx: &RunCtx<'_>,
     task: &Task,
@@ -461,7 +352,128 @@ async fn judged_against(
     let lifted = ctx
         .protected()
         .lifting(view.state.grants.person_granted_to_task(&task.id));
-    Ok((effective_scope(task, &view.state), lifted))
+    let scope = scope_in_force(task, &view.state.grants.reach_for(&task.id));
+    Ok((scope, lifted))
+}
+
+/// Judges a rebased task's work the way its attempt's close judges the same
+/// tree: against the scope in force, with the protected set lifted by what a
+/// person granted that task alone.
+async fn judge_rebased(
+    ctx: &RunCtx<'_>,
+    task: &Task,
+    checkout: &Path,
+    onto: &TreeId,
+    staged: &[PathBuf],
+    memo: &Memo,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Judgement, RunError> {
+    // Against the same scope the attempt was judged by: what the log
+    // authorized for this task is as much its scope as what the tasks
+    // document declared, and an audit that ignored the grants would
+    // reject work a human already allowed.
+    // Every test a person approved, the task's own among them: its own
+    // are what it staged, which the audit leaves out of its diff.
+    let (scope, lifted) = judged_against(ctx, task).await?;
+    let sitting = Sitting {
+        work: Work {
+            checkout,
+            from: onto,
+            staged,
+        },
+        task: Some(task),
+        scope: &scope,
+        request: None,
+        refused: Refusals::None,
+        window: None,
+        bounds: None,
+        declared: None,
+        documents: None,
+        env: JudgeEnv {
+            memo,
+            protected: &lifted,
+            closing: Closing::Every,
+            supervision: ctx.supervision(cancel),
+        },
+    };
+    Ok(judge(sitting, Settle::Commit).await?)
+}
+
+/// Records what a rebased task's judgement found, as its close records it:
+/// the criteria, then the scope audit and any fence breach it shows. Returns
+/// where the criteria landed on the log, which the task's status change cites.
+async fn record_judgement(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    judgement: &Judgement,
+) -> Result<Seq, RunError> {
+    let results = ctx.recorded(&judgement.criteria).await.map_err(|source| {
+        crate::task_cycle::TaskCycleError::KeepOutput {
+            task: task.id.clone(),
+            source,
+        }
+    })?;
+    let criteria_at = ctx
+        .emit(
+            Some(&node.id),
+            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+                task_id: task.id.clone(),
+                phase: Phase::Post,
+                results,
+                waiting: judgement.waiting.clone(),
+            })),
+        )
+        .await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
+            task_id: Some(task.id.clone()),
+            diff: judgement.scope.diff.clone(),
+            violations: judgement.scope.violations.clone(),
+            denied: judgement.scope.denied.clone(),
+        })),
+    )
+    .await?;
+    let coverage = ctx.last_coverage(&node.id).await?;
+    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &judgement.scope) {
+        record_breach(ctx, node, &breach).await?;
+    }
+    Ok(criteria_at)
+}
+
+/// Records a rebase that could not replay a task's work as the criteria check
+/// that failed it. No `post_check` ran — nothing to attach the reason to but
+/// the replay itself, so it is recorded the way any other command outcome is:
+/// a synthetic `CriterionRun` naming the git command and the paths it stopped
+/// on, through the existing `CriteriaChecked` vocabulary rather than a new
+/// event kind.
+async fn record_conflict(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    paths: &[PathBuf],
+) -> Result<Seq, RunError> {
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+            task_id: task.id.clone(),
+            phase: Phase::Post,
+            results: vec![CriterionResult {
+                cmd: format!("git rebase: {}", conflict_list(paths)),
+                exit_code: 1,
+                r#type: None,
+                reused: false,
+                duration_ms: None,
+                output: None,
+                tail: Vec::new(),
+                tree: None,
+                head: None,
+            }],
+            waiting: Vec::new(),
+        })),
+    )
+    .await
 }
 
 /// The paths a replay stopped on, as the criterion line names them.

@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use yunta_core::events::{Decider, EventPayload, Failure, NodeEvent, TokenUsage};
 use yunta_core::expansion::{node_offer, Decision, Waiting};
-use yunta_core::protected::Protected;
-use yunta_core::{Node, NodePermissions, ScopeGlob};
+use yunta_core::protected::{Closing, Protected};
+use yunta_core::{Node, NodePermissions, ScopeGlob, TreeId};
 
 use super::node_close::{fail_with_staged, fail_with_tokens_staged};
 use super::node_exec::NodeEnd;
@@ -20,8 +20,8 @@ use super::{RunCtx, RunError};
 use crate::replay::{NodeState, RunState};
 use crate::reserved::ReservedOption;
 use crate::run_tools::NodeScopeAccess;
-use crate::scope::audit;
-use crate::scope_expansion::ScopeExpansionRequest;
+use crate::scope_expansion::{consume_request, read_request, ScopeExpansionRequest};
+use crate::task_cycle::{judge, JudgeEnv, Refusals, Settle, Sitting, Work};
 use crate::worktree::UnitId;
 
 /// What a node's session works to, when the node declares a scope and is
@@ -37,7 +37,7 @@ pub(super) async fn session_access(
     }
     let state = ctx.run_view().await?.state;
     let protected = judged_by(&ctx.protected(), &state, node);
-    Ok(crate::effective_scope(node, &state).map(|scope| {
+    Ok(crate::node_scope_in_force(node, &state).map(|scope| {
         Arc::new(NodeScopeAccess {
             scope,
             index: crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()))
@@ -111,7 +111,7 @@ pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<
 ///
 /// Which scope is audited — a declared one with whatever a person
 /// granted it, or nothing whatsoever for a `read-only` node — is
-/// [`effective_scope`](crate::effective_scope)'s call, not this one's.
+/// [`node_scope_in_force`](crate::node_scope_in_force)'s call, not this one's.
 async fn audited_diff(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -123,31 +123,18 @@ async fn audited_diff(
     // crash between the start and this close must not change what the
     // node answers for.
     let view = ctx.run_view().await?;
-    let Some(scope) = crate::effective_scope(node, &view.state) else {
+    let Some(scope) = crate::node_scope_in_force(node, &view.state) else {
         return Ok(None);
     };
     let judged = judged_by(&ctx.protected(), &view.state, node);
-    let index = crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()));
     let closing = closing_of(node);
     let Some(from) = view.state.nodes.from_tree(&node.id).cloned() else {
+        let index = crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()));
         return untreed_protection(ctx, &index, &judged, closing, staged)
             .await
             .map(Some);
     };
-    let ceiling = crate::scope::Ceiling {
-        scope: &scope,
-        protected: &judged,
-        closing,
-    };
-    let result = audit(
-        ctx.worktree,
-        &from,
-        &index,
-        ceiling,
-        staged,
-        ctx.root_supervision(),
-    )
-    .await?;
+    let result = node_audit(ctx, &from, &scope, &judged, closing, staged).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::ScopeChecked(
@@ -161,6 +148,40 @@ async fn audited_diff(
     )
     .await?;
     Ok(Some(result))
+}
+
+/// The node's diff since `from`, judged against `scope` as its close judges it.
+/// A node has no criteria and no request here, so the judgement is the audit.
+async fn node_audit(
+    ctx: &RunCtx<'_>,
+    from: &TreeId,
+    scope: &[ScopeGlob],
+    judged: &Protected,
+    closing: Closing,
+    staged: &[PathBuf],
+) -> Result<crate::ScopeCheckResult, RunError> {
+    let sitting = Sitting {
+        work: Work {
+            checkout: ctx.worktree,
+            from,
+            staged,
+        },
+        task: None,
+        scope,
+        request: None,
+        refused: Refusals::None,
+        window: None,
+        bounds: None,
+        declared: None,
+        documents: None,
+        env: JudgeEnv {
+            memo: &ctx.memo,
+            protected: judged,
+            closing,
+            supervision: ctx.root_supervision(),
+        },
+    };
+    Ok(judge(sitting, Settle::Commit).await?.scope)
 }
 
 /// The judgement of an attempt whose start recorded no tree, as a log written
@@ -206,7 +227,11 @@ pub(super) async fn scope_request(
     if !crate::audits(node) {
         return Ok(None);
     }
-    let request = match crate::scope_expansion::load_request(ctx.worktree).await {
+    let taken = match read_request(ctx.worktree).await {
+        Ok(Some(request)) => consume_request(ctx.worktree).await.map(|()| Some(request)),
+        other => other,
+    };
+    let request = match taken {
         Ok(Some(request)) => request,
         Ok(None) => return Ok(None),
         Err(error) => {
@@ -323,7 +348,7 @@ async fn record_node_decision(
         .unwrap_or_default();
     record(
         &ctx.log(),
-        node,
+        &node.id,
         Recording {
             subject: Subject::Node,
             mode: None,
@@ -334,6 +359,7 @@ async fn record_node_decision(
             located: false,
             precheck: None,
             attempt,
+            new_request: true,
         },
     )
     .await

@@ -21,7 +21,8 @@ pub enum Happening {
     },
 }
 
-/// Where a request stands: asked for, granted, or turned down.
+/// Where a request stands: asked for, granted, turned down, or withdrawn
+/// unanswered when its task closed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
     Requested {
@@ -36,6 +37,10 @@ pub enum Step {
         /// a decision a reader cannot act on, and the log carries that
         /// absence rather than inventing a sentence for it.
         reason: Option<String>,
+    },
+    /// Its task closed while the request waited: nobody decided it.
+    Withdrawn {
+        paths: Vec<ScopeGlob>,
     },
 }
 
@@ -65,6 +70,12 @@ impl From<&ScopeEvent> for Happening {
                 task: p.task_id.clone(),
                 paths: p.paths.clone(),
                 common: p.common.clone(),
+            },
+            ScopeEvent::Withdrawn(p) => Happening::Expansion {
+                task: Some(p.task_id.clone()),
+                step: Step::Withdrawn {
+                    paths: p.paths.clone(),
+                },
             },
         }
     }

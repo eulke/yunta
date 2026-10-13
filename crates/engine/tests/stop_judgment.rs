@@ -1,10 +1,13 @@
 //! A session that asks to stop with work its close would not take is sent
 //! back to it, once for one state of that work, with what stands in the
 //! way — so the same session fixes it instead of closing, failing and
-//! handing the work to another.
+//! handing the work to another. Judging the stop reads what a request could
+//! be granted and spends none of it: the close that follows is the one that
+//! grants.
 
 use yunta_core::events::{
-    EventPayload, NodeEvent, Phase, SessionEvent, StopRefusal, StopRefusedPayload, TaskStatus,
+    Decider, EventPayload, NodeEvent, Phase, ScopeEvent, SessionEvent, StopRefusal,
+    StopRefusedPayload, TaskStatus,
 };
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
@@ -200,4 +203,74 @@ async fn a_session_whose_refused_write_its_red_output_locates_is_never_sent_back
         stops_refused(&bench).is_empty(),
         "the attempt's end grants the write by its evidence and resumes the session"
     );
+}
+
+#[tokio::test]
+async fn a_denied_request_does_not_exempt_the_stop_from_the_path_it_wrote() {
+    let bench = Bench::new();
+    // The tool answers the request in its call, under deny, and writes no
+    // file. The request file is left on disk by a shell command all the
+    // same, so the stop judges what that file asks, and b.txt, written by a
+    // shell command too, is outside the scope the stop holds it to.
+    let sessions = format!(
+        "  - match_prompt_contains: \"task-a\"\n    effects:\n      - {{ path: {file:?}, content: \"paths: [b.txt]\\nreason: x\\n\", via: command }}\n      - {{ path: b.txt, content: \"b\", via: command }}\n      - {{ path: a.txt, content: \"a\" }}\n{}    before_stop: {{}}\n    outcome: {{ type: completed, summary: did-a }}\n",
+        request_step(serde_json::json!({ "paths": ["b.txt"], "reason": "x" })),
+        file = yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+    );
+
+    bench
+        .run(&scope_expansion_workflow("deny", None), &fixture(&sessions))
+        .await;
+
+    let refused = stops_refused(&bench);
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert_eq!(refused[0].why, vec![StopRefusal::OutsideScope]);
+}
+
+#[tokio::test]
+async fn a_stop_judgment_spends_no_grant() {
+    let bench = Bench::new();
+    let sessions = format!(
+        "  - match_prompt_contains: \"task-a\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    before_stop: {{}}\n    outcome: {{ type: completed, summary: asked }}\n  - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.txt, content: \"b\" }}\n    before_stop: {{}}\n    outcome: {{ type: completed, summary: did-b }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "x",
+            "proposed_criterion": { "cmd": "test -f b.txt" },
+        })),
+    );
+    let fixture = fixture(&sessions);
+
+    let RunReport { terminal, state } = bench
+        .run(&scope_expansion_workflow("rules", Some(1)), &fixture)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("task-a"), Some(TaskStatus::Done));
+    assert!(stops_refused(&bench).is_empty(), "both stops were let go");
+    let events = bench.events();
+    let granted: Vec<(usize, Decider)> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(at, event)| match event.payload() {
+            Some(EventPayload::Scope(ScopeEvent::Granted(p))) => Some((at, p.decided_by.clone())),
+            _ => None,
+        })
+        .collect();
+    let [(at, decided_by)] = granted.as_slice() else {
+        panic!("one grant, from the close: {granted:?}");
+    };
+    let closed = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) if p.phase == Phase::Post
+            )
+        })
+        .expect("the close checked the task");
+    assert!(
+        *at > closed,
+        "the grant comes after the close, not during a stop"
+    );
+    assert_eq!(decided_by, &Decider::Rule);
 }

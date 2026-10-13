@@ -16,18 +16,15 @@ pub(super) fn scope_words(happening: &scope::happening::Happening) -> String {
         } => return derived_words(task, paths, common),
     };
     let said = match step {
-        Step::Requested { paths } => format!(
-            "asks for {}",
-            paths
-                .iter()
-                .map(|glob| glob.as_str().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        Step::Requested { paths } => format!("asks for {}", yunta_core::listed_globs(paths)),
         Step::Granted { by } => format!("scope granted by {}", decider(by)),
         Step::Denied { by, reason } => detailed(
             format!("scope denied by {}", decider(by)),
             &one_line(reason.as_deref().unwrap_or_default()),
+        ),
+        Step::Withdrawn { paths } => format!(
+            "withdrew its request for {}, unanswered because the task closed",
+            yunta_core::listed_globs(paths)
         ),
     };
     // A node's own request needs no name in front of it: the moment
@@ -66,5 +63,38 @@ fn decider(by: &yunta_core::events::Decider) -> String {
         yunta_core::events::Decider::Evidence { criterion } => {
             format!("evidence from `{criterion}`")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::scope::happening::{Happening, Step};
+    use yunta_core::{ScopeGlob, TaskId};
+
+    use super::scope_words;
+
+    #[test]
+    fn a_withdrawn_request_says_it_was_left_unanswered() {
+        let happening = Happening::Expansion {
+            task: Some(TaskId::from("task-h")),
+            step: Step::Withdrawn {
+                paths: vec![ScopeGlob::from("a.txt")],
+            },
+        };
+        assert_eq!(
+            scope_words(&happening),
+            "task-h withdrew its request for a.txt, unanswered because the task closed"
+        );
+    }
+
+    #[test]
+    fn a_request_names_its_paths_comma_separated() {
+        let happening = Happening::Expansion {
+            task: Some(TaskId::from("task-h")),
+            step: Step::Requested {
+                paths: vec![ScopeGlob::from("a.txt"), ScopeGlob::from("src/*.rs")],
+            },
+        };
+        assert_eq!(scope_words(&happening), "task-h asks for a.txt, src/*.rs");
     }
 }

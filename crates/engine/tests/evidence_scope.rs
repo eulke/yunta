@@ -5,6 +5,7 @@
 
 use yunta_core::events::{Decider, EventPayload, GateEvent, ProposedCheck, ScopeEvent, TaskStatus};
 use yunta_core::expansion::{Precheck, Waiting};
+use yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, ApproveEverything, Bench, MOCK_CONFIG};
 
@@ -24,7 +25,9 @@ fn bench() -> Bench {
 }
 
 /// `task-h` may write `a.rs`; its first session does `first`, and the
-/// session picked back up once `b.rs` is granted writes it.
+/// session picked back up once `b.rs` is granted writes it. A request still
+/// pending under the red check opens one fresh session more, which writes
+/// nothing new and leaves the check red.
 fn fixture(first: &str) -> String {
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
@@ -32,6 +35,7 @@ fn fixture(first: &str) -> String {
     ));
     fixture.push_str(&format!(
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.rs, content: \"a\" }}\n{first}    outcome: {{ type: completed, summary: did-h }}\n\
+         \x20 - match_prompt_contains: \"task-h\"\n    outcome: {{ type: completed, summary: retried-h }}\n\
          \x20 - match_prompt_contains: \"was granted\"\n    effects:\n      - {{ path: b.rs, content: \"b\" }}\n    outcome: {{ type: completed, summary: did-b }}\n"
     ));
     fixture
@@ -108,6 +112,48 @@ async fn a_request_citing_nothing_is_granted_on_the_red_criterion_that_locates_i
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("task-h"), Some(TaskStatus::Done));
+    assert_eq!(
+        granted_by(&bench),
+        Some(Decider::Evidence {
+            criterion: "sh check.sh".into()
+        })
+    );
+}
+
+/// A request under `rules` that names no criterion is granted by a red
+/// criterion that locates every path it asks for, here as a file a shell
+/// command left for the judgement to read.
+#[tokio::test]
+async fn a_rules_request_naming_no_criterion_is_granted_on_the_red_criterion_that_locates_it() {
+    let request = "paths: [b.rs]\nreason: the caller breaks\n";
+    let first = format!(
+        "      - {{ path: {SCOPE_EXPANSION_REQUEST_FILE:?}, content: {request:?}, via: command }}\n"
+    );
+    granted_by_evidence_under_rules(&first).await;
+}
+
+/// The same request asked through the tool meets the same answer: the call
+/// refuses only what no work could change, so it leaves this one to the
+/// judgement that reads the red output.
+#[tokio::test]
+async fn a_rules_request_asked_through_the_tool_with_no_criterion_meets_the_same_answer() {
+    let request = request_step(serde_json::json!({
+        "paths": ["b.rs"],
+        "reason": "the caller breaks",
+    }));
+    granted_by_evidence_under_rules(&request).await;
+}
+
+/// Runs `task-h` under `rules`, its first session doing `first`, and checks the
+/// task closed on a grant its red criterion's evidence made.
+async fn granted_by_evidence_under_rules(first: &str) {
+    let bench = bench();
+    let RunReport { terminal, state } = bench
+        .run(&scope_expansion_workflow("rules", None), &fixture(first))
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished, "{:?}", bench.events());
     assert_eq!(state.tasks.status("task-h"), Some(TaskStatus::Done));
     assert_eq!(
         granted_by(&bench),

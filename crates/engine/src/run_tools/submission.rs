@@ -14,13 +14,15 @@
 //! close would never look for has no way in and there is nothing for the
 //! session to choose.
 
+use std::path::Path;
+
 use serde_json::Value;
 use yunta_core::diagnostic::{ArtifactFailure, DocumentRef, Report};
 use yunta_core::events::{
     ArtifactId, ArtifactSubmittedPayload, EventPayload, RecordedOrigin, SubmissionOutcome,
     TaskProbe,
 };
-use yunta_core::{ArtifactKind, ArtifactSpec};
+use yunta_core::{ArtifactKind, ArtifactSpec, NodeId, NodeKind};
 
 use crate::artifacts::{accept, VerifiedArtifact};
 
@@ -83,21 +85,16 @@ impl SessionTools {
         &self,
         spec: &ArtifactSpec,
         held: &crate::artifacts::RunArtifacts<'_>,
-    ) -> Result<VerifiedArtifact, yunta_core::diagnostic::ArtifactFailure> {
-        match crate::artifacts::answerer(&self.node_kind, spec.kind()) {
-            crate::artifacts::Answerer::Log => {
-                crate::artifacts::held_document(&self.node, spec, held).await
-            }
-            crate::artifacts::Answerer::Staging => {
-                crate::artifacts::verify_one(
-                    &self.node,
-                    spec,
-                    &self.host.run_dir,
-                    self.host.max_artifact_bytes,
-                )
-                .await
-            }
-        }
+    ) -> Result<VerifiedArtifact, ArtifactFailure> {
+        verify_declared(
+            &self.node,
+            &self.node_kind,
+            spec,
+            held,
+            &self.host.run_dir,
+            self.host.max_artifact_bytes,
+        )
+        .await
     }
 
     /// Why a check has nothing to look at: a name this node does not
@@ -288,6 +285,26 @@ impl SessionTools {
             .map(|spec| format!("`{spec}`"))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// What a node's close makes of one declared artifact: the document the run
+/// holds for it, where the log answers for it, or the file the node wrote in
+/// its staging. The close and every check a session makes come here, so the
+/// verdict a session reads is the verdict that decides the node.
+pub(crate) async fn verify_declared(
+    node: &NodeId,
+    node_kind: &NodeKind,
+    spec: &ArtifactSpec,
+    held: &crate::artifacts::RunArtifacts<'_>,
+    run_dir: &Path,
+    max_artifact_bytes: Option<u64>,
+) -> Result<VerifiedArtifact, ArtifactFailure> {
+    match crate::artifacts::answerer(node_kind, spec.kind()) {
+        crate::artifacts::Answerer::Log => crate::artifacts::held_document(node, spec, held).await,
+        crate::artifacts::Answerer::Staging => {
+            crate::artifacts::verify_one(node, spec, run_dir, max_artifact_bytes).await
+        }
     }
 }
 

@@ -35,6 +35,12 @@ pub enum Happening {
         task: TaskId,
         accepted: bool,
     },
+    /// Its session declared a criterion no work of the plan can pass.
+    Unpassable {
+        task: TaskId,
+        criterion: String,
+        why: String,
+    },
 }
 
 impl From<&TaskEvent> for Happening {
@@ -63,6 +69,11 @@ impl From<&TaskEvent> for Happening {
             TaskEvent::DeviationResolved(p) => Happening::Answered {
                 task: p.task_id.clone(),
                 accepted: p.accepted,
+            },
+            TaskEvent::CriterionDeclaredUnpassable(p) => Happening::Unpassable {
+                task: p.task_id.clone(),
+                criterion: p.criterion.clone(),
+                why: p.why.clone(),
             },
         }
     }

@@ -1,32 +1,33 @@
-//! The facts a red output of one attempt locates: a path the output names
-//! as `path:line`, and the criterion that printed it. A refused write, or a
-//! request citing one of the task's own criteria, is located this way. The
-//! decision on those facts is `yunta_core::expansion`'s, reached through
-//! `scope_expansion::expand`.
-//!
-//! Two doors lead here. The fence refused a write and a red criterion of the
-//! same attempt locates that file — `src/caller.rs:12`, as a compiler or a
-//! test runner points at a place. Or the session asks for the paths citing
-//! one of its task's criteria as `evidence`, and that criterion, run on its
-//! work, locates every one. Either way the facts are what the engine
-//! verified, and nobody is asked to confirm them.
+//! The facts a red output locates: a path the output names as `path:line`,
+//! and the criterion that printed it. A refused write, or a request citing one
+//! of the task's own criteria as its evidence, is located this way, and the
+//! judgement decides on those facts through `scope_expansion::expand`. The
+//! facts are what the engine verified, so nobody is asked to confirm them.
 
 use std::path::Path;
 
 use yunta_core::events::ToolTarget;
 use yunta_core::expansion::Precheck;
-use yunta_core::{ScopeGlob, Task};
+use yunta_core::ScopeGlob;
 
-use super::attempt::AttemptParams;
-use super::{CriterionRun, TaskCycleError};
+use super::criteria::could_not_run;
+use super::judge::{Deciding, Refusals, Sitting};
+use super::{CriterionRun, SessionObserver, TaskCycleError};
+use crate::artifacts::store::ObjectStore;
 use crate::process::Printed;
-use crate::scope_expansion::{
-    locates, relative, relative_text, ScopeExpansionOutcome, ScopeExpansionRequest,
-};
+use crate::scope_expansion::{locates, relative_text, ScopeExpansionRequest};
+
+/// Where the output a criterion kept is read from, when its answer was reused
+/// rather than run: the observer that holds it, or the run's directory.
+pub(super) enum Kept<'a> {
+    Observer(&'a dyn SessionObserver),
+    Run(&'a Path),
+    Nowhere,
+}
 
 /// What a red output locates, owned so that a decision can borrow it: the
-/// paths, the criterion that located them, the request the session made
-/// (none for a refused write) and the pre-check of that request's criterion.
+/// paths, the criterion that located them, the request made (none for a
+/// refused write) and the pre-check of that request's criterion.
 pub(super) struct Located {
     pub(super) paths: Vec<ScopeGlob>,
     pub(super) criterion: String,
@@ -34,9 +35,8 @@ pub(super) struct Located {
     pub(super) precheck: Option<Precheck>,
 }
 
-/// What a located decision is made on: at least one path. Nothing located
-/// is nothing to decide.
-fn located(
+/// Located facts, when there is at least one path. Nothing located decides nothing.
+pub(super) fn located(
     paths: Vec<ScopeGlob>,
     criterion: String,
     asked: Option<ScopeExpansionRequest>,
@@ -50,139 +50,82 @@ fn located(
     })
 }
 
-/// The first red output of this attempt that names one of the paths its
-/// fence refused, with that path. `None` when no red output names one.
-pub(super) async fn of_refusals(
-    params: &AttemptParams<'_>,
-    refused: &[ToolTarget],
-    post: &[CriterionRun],
-) -> Option<Located> {
-    let worktree = params.unit.worktree.as_path();
-    let refused: Vec<String> = refused
-        .iter()
-        .filter_map(|target| relative(worktree, target.display()?))
-        .collect();
-    let mut evidence = None;
-    for run in post {
-        let red = run.exit_code != 0 && run.could_not_run().is_none();
-        let Some(printed) = run.output.as_ref().filter(|_| red) else {
-            continue;
-        };
-        let text = text_of(printed, worktree, params).await;
-        let here: Vec<String> = refused
-            .iter()
-            .filter(|path| locates(&text, path))
-            .cloned()
-            .collect();
-        if !here.is_empty() {
-            evidence = Some((run.cmd.clone(), here));
-            break;
-        }
-    }
-    let (criterion, paths) = evidence?;
-    let globs = paths
-        .iter()
-        .filter_map(|path| ScopeGlob::exact(Path::new(path)).ok())
-        .collect();
-    located(globs, criterion, None, None)
+/// A proposed criterion's exit on the checkout, read through the memo as the
+/// request's own pre-check.
+pub(super) async fn precheck_of(
+    deciding: &Deciding<'_>,
+    cmd: &str,
+) -> Result<Precheck, TaskCycleError> {
+    let exit = deciding
+        .env
+        .memo
+        .exit_code(cmd, deciding.checkout, deciding.env.supervision)
+        .await?
+        .exit_code;
+    Ok(match exit {
+        0 => Precheck::Passes,
+        exit if could_not_run(exit).is_some() => Precheck::CouldNotRun,
+        exit => Precheck::Red { exit },
+    })
 }
 
-/// The facts of the request, when it cites one of the task's criteria as
-/// its evidence and that criterion locates every path it asks for. `None`
-/// when any of that does not hold, and the request is decided on its own.
-pub(super) async fn of_request(
-    params: &AttemptParams<'_>,
-    request: &ScopeExpansionRequest,
-) -> Result<Option<Located>, TaskCycleError> {
-    match request.evidence.as_deref() {
-        Some(cmd) if own(params.task, cmd) => located_by(params, request, cmd).await,
-        _ => Ok(None),
+/// The refused writes a red criterion may locate. Only a task reads them, and
+/// only while a criterion is red: a refused write explains only a failure.
+pub(super) async fn refused_writes(
+    sitting: &Sitting<'_>,
+    runs: &[CriterionRun],
+) -> Result<Vec<ToolTarget>, TaskCycleError> {
+    let Some(task) = sitting.task.filter(|_| runs.iter().any(is_red)) else {
+        return Ok(Vec::new());
+    };
+    match &sitting.refused {
+        Refusals::None => Ok(Vec::new()),
+        Refusals::Observer {
+            observer,
+            node,
+            sessions,
+        } => super::stream::read_refusals(Some((*observer, *node)), sessions, runs)
+            .await
+            .map_err(|source| TaskCycleError::Audit {
+                task: task.id.clone(),
+                source,
+            }),
+        Refusals::Log {
+            events, sessions, ..
+        } => Ok(crate::run_tools::refused_writes(events, sessions)),
     }
 }
 
-/// The facts of a request the decision on its own left open: a red criterion
-/// of this attempt that locates every path it asks for, which keeps the
-/// request's own pre-check. `None` when no red output locates them all.
-pub(super) async fn of_red(
-    params: &AttemptParams<'_>,
-    outcome: &ScopeExpansionOutcome,
-    post: &[CriterionRun],
+/// The first red criterion of `runs` whose output `locate` finds facts in. The
+/// output is read as it stands relative to the checkout, and is only read until
+/// a criterion locates something.
+pub(super) async fn first_located(
+    deciding: &Deciding<'_>,
+    runs: &[CriterionRun],
+    locate: impl Fn(&str, &str) -> Option<Located>,
 ) -> Option<Located> {
-    let request = outcome.asked.as_ref()?;
-    let worktree = params.unit.worktree.as_path();
-    for run in post {
-        let red = run.exit_code != 0 && run.could_not_run().is_none();
-        let Some(printed) = run.output.as_ref().filter(|_| red) else {
+    for run in runs {
+        let Some(printed) = red_output(run) else {
             continue;
         };
-        let text = text_of(printed, worktree, params).await;
-        if request
-            .paths
-            .iter()
-            .all(|path| locates(&text, path.as_str()))
-        {
-            return located(
-                request.paths.clone(),
-                run.cmd.clone(),
-                Some(request.clone()),
-                outcome.precheck,
-            );
+        let text = text_of(&deciding.kept, deciding.checkout, printed).await;
+        if let Some(found) = locate(text.as_str(), run.cmd.as_str()) {
+            return Some(found);
         }
     }
     None
 }
 
-/// Whether `cmd` is one of the criteria `task` declares — never a command
-/// the session made up to point somewhere.
-fn own(task: &Task, cmd: &str) -> bool {
-    task.criteria.iter().any(|criterion| criterion.cmd == cmd)
-}
-
-/// The facts of `request` when `cmd`, run on the session's work, is red and
-/// its output locates every path the request asks for.
-async fn located_by(
-    params: &AttemptParams<'_>,
-    request: &ScopeExpansionRequest,
-    cmd: &str,
-) -> Result<Option<Located>, TaskCycleError> {
-    let worktree = params.unit.worktree.as_path();
-    let answer = params
-        .memo
-        .exit_code(cmd, worktree, params.supervision)
-        .await?;
-    let red = answer.exit_code != 0 && super::criteria::could_not_run(answer.exit_code).is_none();
-    let Some(printed) = answer.output.as_ref() else {
-        return Ok(None);
-    };
-    let text = text_of(printed, worktree, params).await;
-    if !red
-        || !request
-            .paths
-            .iter()
-            .all(|path| locates(&text, path.as_str()))
-    {
-        return Ok(None);
-    }
-    Ok(located(
-        request.paths.clone(),
-        cmd.to_string(),
-        Some(request.clone()),
-        None,
-    ))
-}
-
-/// Everything `printed` says, with the checkout's own path taken out, so
-/// a location reads relative to it whichever way the command printed it.
-/// An answer an earlier invocation gave is read from the object the run
-/// kept of it; only one whose object cannot be read — or that a log
-/// written before a run kept its objects names none for — is read from
-/// the last lines the log quotes.
-async fn text_of(printed: &Printed, worktree: &Path, params: &AttemptParams<'_>) -> String {
+/// Everything `printed` says, with the checkout's own path taken out, so a
+/// location reads relative to it whichever way the command printed it. An answer
+/// whose kept object cannot be read is read from the last lines the log quotes.
+pub(super) async fn text_of(kept: &Kept<'_>, checkout: &Path, printed: &Printed) -> String {
     let text = match printed {
         Printed::Ran(output) => String::from_utf8_lossy(output.bytes()).into_owned(),
         Printed::Recorded { object, tail } => {
-            let kept = match (object, params.audit) {
-                (Some(hash), Some((observer, _))) => observer.kept_output(hash).await,
+            let kept = match (object, kept) {
+                (Some(hash), Kept::Observer(observer)) => observer.kept_output(hash).await,
+                (Some(hash), Kept::Run(run_dir)) => ObjectStore::at(run_dir).get(hash).await.ok(),
                 _ => None,
             };
             match kept {
@@ -191,5 +134,48 @@ async fn text_of(printed: &Printed, worktree: &Path, params: &AttemptParams<'_>)
             }
         }
     };
-    relative_text(text, worktree)
+    relative_text(text, checkout)
+}
+
+/// Whether `text` locates every path of `paths`.
+pub(super) fn locates_every(text: &str, paths: &[ScopeGlob]) -> bool {
+    paths.iter().all(|path| locates(text, path.as_str()))
+}
+
+/// Whether a criterion ran red: it exited non-zero, and it did answer.
+pub(super) fn is_red(run: &CriterionRun) -> bool {
+    run.exit_code != 0 && run.could_not_run().is_none()
+}
+
+/// What a red criterion printed, when it kept what it printed.
+fn red_output(run: &CriterionRun) -> Option<&Printed> {
+    run.output.as_ref().filter(|_| is_red(run))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A kept answer whose location sits above its tail is located from the
+    /// output the object holds, and from the tail alone it is not.
+    #[tokio::test]
+    async fn a_kept_answer_locates_from_the_output_it_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let output =
+            b"error[E0061]: this takes one argument\n  --> b.txt:3:9\nmany lines\nlast line\n";
+        let object = ObjectStore::at(dir.path()).put(output).await.unwrap();
+        let printed = Printed::Recorded {
+            object: Some(object),
+            tail: vec!["last line".to_string()],
+        };
+        let kept = Kept::Run(dir.path());
+        assert!(locates(
+            &text_of(&kept, dir.path(), &printed).await,
+            "b.txt"
+        ));
+        assert!(!locates(
+            &text_of(&Kept::Nowhere, dir.path(), &printed).await,
+            "b.txt"
+        ));
+    }
 }

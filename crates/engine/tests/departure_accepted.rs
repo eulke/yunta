@@ -50,6 +50,7 @@ fn departing(from: &str, expect: &str) -> String {
       - type: run_tool
         tool: yunta_declare_deviation
 {expect}        arguments:
+          kind: departure
           from: {from}
           planned: \"the greeting says Hello\"
           instead: \"it says Hi\"

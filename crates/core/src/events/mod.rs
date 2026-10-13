@@ -36,7 +36,8 @@ pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
     loop_overrun_failure, node_failed_line, CommandExit, CommandOrigin, Failure, OwedScope,
-    RequestedScope, SessionDeath, SessionEnd, SessionExit, PAST_THE_CAP, TAIL_LINES,
+    RequestedScope, SessionDeath, SessionEnd, SessionExit, UnpassableTask, PAST_THE_CAP,
+    TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
 pub use gates::{ledger::*, payloads::*, scope_wait::*, GateEvent, Withheld};

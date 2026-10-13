@@ -7,6 +7,7 @@ use yunta_core::events::{
 };
 use yunta_core::expansion::Denial;
 use yunta_core::protected::Protection;
+use yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench, MOCK_CONFIG};
 
@@ -203,6 +204,58 @@ async fn a_task_request_for_a_denied_path_is_refused_by_rule_without_asking() {
         event.payload(),
         Some(EventPayload::Scope(ScopeEvent::Granted(_)))
     )));
+}
+
+/// A request the project denies runs no proposed criterion. The request
+/// reaches the judgement as a file a shell command left, so the attempt's end
+/// decides it, and the criterion's command, which would leave a marker, never
+/// runs.
+#[tokio::test]
+async fn a_request_the_project_denies_runs_no_proposed_criterion() {
+    let bench = Bench::new();
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("marker");
+    let request = format!(
+        "paths: [.github/ci.yml]\nreason: the workflow file is wrong\nproposed_criterion:\n  cmd: \"touch {}\"\n",
+        marker.display()
+    );
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-w", "w", "a.txt", "test -f a.txt")
+    );
+    let fixture = format!(
+        "{}  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {SCOPE_EXPANSION_REQUEST_FILE:?}, content: {request:?}, via: command }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        plan_session(&tasks),
+    );
+
+    bench
+        .run_with_config(
+            &scope_expansion_workflow("rules", None),
+            &fixture,
+            &denying_ci(),
+        )
+        .await;
+
+    assert!(
+        !marker.exists(),
+        "the criterion of a request the project denies never ran"
+    );
+    let reasons: Vec<Denial> = bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Scope(ScopeEvent::Denied(p))) => p.why(),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reasons.iter().any(|reason| matches!(
+            reason,
+            Denial::ReachesProtected { reached }
+                if reached.iter().any(|hit| hit.reason == Protection::ProjectDeny)
+        )),
+        "{reasons:?}"
+    );
 }
 
 /// A node's session that asks for a denied path is never put to a

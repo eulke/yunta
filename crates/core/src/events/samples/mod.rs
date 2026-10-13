@@ -38,12 +38,13 @@ pub(crate) use run::{
 };
 pub(crate) use scope::{
     scope_derived, scope_expansion_denied, scope_expansion_granted, scope_expansion_requested,
+    scope_expansion_withdrawn,
 };
 pub(crate) use session::{
     agent_message, agent_session_opened, capability_degraded, run_tool_failed, run_tool_refused,
     service_reachable, service_unreachable, stop_refused, write_formatted, write_refused,
 };
 pub(crate) use tasks::{
-    deviation_declared, deviation_resolved, task_check_answered, task_check_started,
-    task_registered, task_status_changed,
+    criterion_declared_unpassable, deviation_declared, deviation_resolved, task_check_answered,
+    task_check_started, task_registered, task_status_changed,
 };

@@ -110,12 +110,14 @@ impl RunState {
         Ok(())
     }
 
-    /// A status change or a deviation names a task the log registered.
+    /// A status change, a deviation or a declared criterion names a task the
+    /// log registered.
     fn refuse_task(&self, event: &TaskEvent, stored: &StoredEvent) -> Result<(), ReplayError> {
         let task = match event {
             TaskEvent::StatusChanged(p) => &p.task_id,
             TaskEvent::DeviationDeclared(p) => &p.task_id,
             TaskEvent::DeviationResolved(p) => &p.task_id,
+            TaskEvent::CriterionDeclaredUnpassable(p) => &p.task_id,
             TaskEvent::Registered(_) | TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => {
                 return Ok(());
             }
@@ -207,13 +209,13 @@ impl RunState {
     }
 }
 
-/// A grant or a denial widens or answers a task, or the node it is written
-/// under: one that names neither has no subject to act on.
+/// A grant, a denial or a withdrawal acts on a task, or on the node it is
+/// written under: one that names neither has no subject to act on.
 fn refuse_scope(event: &ScopeEvent, stored: &StoredEvent) -> Result<(), ReplayError> {
     let names_task = match event {
         ScopeEvent::Granted(p) => p.task_id.is_some(),
         ScopeEvent::Denied(p) => p.task_id.is_some(),
-        ScopeEvent::Requested(_) | ScopeEvent::Derived(_) => true,
+        ScopeEvent::Requested(_) | ScopeEvent::Derived(_) | ScopeEvent::Withdrawn(_) => true,
     };
     if names_task || stored.node_id.is_some() {
         Ok(())

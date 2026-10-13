@@ -13,7 +13,7 @@ git_command_outside_git_rs 0
 let_underscore_in_prod 10
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
-prod_fns_over_50_lines 69
+prod_fns_over_50_lines 68
 reason_built_by_format 2
 run_tool_named_outside_vocabulary 1
 separator_literal_outside_glyphs 2

@@ -51,7 +51,14 @@ pub async fn capture_tree(
     let private = supervision.with_env(&env);
     // `add -A` stages what is there, untracked included, so the tree is
     // the whole visible state and not only what git already followed.
-    git::change(cwd, Effect::Objects, &["add", "-A"], private).await?;
+    let exclude = request_file_pathspec();
+    git::change(
+        cwd,
+        Effect::Objects,
+        &["add", "-A", "--", ".", exclude.as_str()],
+        private,
+    )
+    .await?;
     force_covered(cwd, covered, &beside(&index, ".ignored"), private).await?;
     let printed = git::change(cwd, Effect::Objects, &["write-tree"], private).await?;
     printed
@@ -62,6 +69,15 @@ pub async fn capture_tree(
             cwd: cwd.to_path_buf(),
             source,
         })
+}
+
+/// The pathspec that leaves the request file out of a staging call. The
+/// engine reads that file and removes it, so no tree or commit holds it.
+pub(super) fn request_file_pathspec() -> String {
+    format!(
+        ":(exclude){}",
+        crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
+    )
 }
 
 /// The tree `cwd` stands at as git sees it, for a commit to hold. It is

@@ -202,3 +202,26 @@ async fn a_capture_never_enters_an_ignored_directory_for_a_glob_that_names_none(
         "{held:?}"
     );
 }
+
+#[tokio::test]
+async fn the_request_file_is_not_part_of_the_captured_tree() {
+    let owner = Owner::new();
+    let (root, repo) = a_repo().await;
+    let probe = root.path().join("probe");
+    let spec = Protected::default().pathspecs();
+    let without = capture_tree(&repo, &probe, &spec, owner.supervision())
+        .await
+        .unwrap();
+    tokio::fs::write(
+        repo.join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE),
+        "paths: [b.txt]\nreason: r\n",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        capture_tree(&repo, &probe, &spec, owner.supervision())
+            .await
+            .unwrap(),
+        without
+    );
+}

@@ -123,3 +123,20 @@ pub struct ScopeDerivedPayload {
     /// The commit the files were read at.
     pub at: CommitSha,
 }
+
+/// Why a request left without an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WithdrawalCause {
+    /// The task closed while its request still waited for an answer.
+    TaskClosed,
+}
+
+/// A request its task closed with, unanswered. Nobody decided it, so
+/// nothing was granted or denied: the request leaves with the task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScopeExpansionWithdrawnPayload {
+    pub task_id: TaskId,
+    pub paths: Vec<ScopeGlob>,
+    pub reason: WithdrawalCause,
+}

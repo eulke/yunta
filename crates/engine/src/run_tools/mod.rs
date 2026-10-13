@@ -60,7 +60,9 @@ mod tasks;
 mod verdicts;
 
 pub use blackboard::consolidate_blackboard;
-pub use host::{Formatter, HostOf, NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
+pub use host::{
+    Formatter, HostOf, NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess, TaskExpansion,
+};
 mod format;
 pub(crate) use listener::run_tools_unreachable;
 pub use listener::{open_session_listener, RunToolsSession};
@@ -69,4 +71,5 @@ pub(crate) use notice::{
     submission_notice, task_notice, Asker,
 };
 pub(crate) use rail::{refused_writes, unrecorded_cause};
+pub(crate) use submission::verify_declared;
 pub use yunta_core::RunTool;

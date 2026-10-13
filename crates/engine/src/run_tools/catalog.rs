@@ -264,25 +264,37 @@ fn check_scope_tool(session: &SessionTools) -> Tool {
 }
 
 fn deviation_tool() -> Tool {
+    Tool::new(
+        RunTool::DeclareDeviation.name(),
+        "Declare, by `kind`, what your task cannot do as the plan says. `departure` declares \
+         that your work departs from the plan: what of it (`from`: one of the plan's shapes or \
+         decisions by name, one of your task's `changes` by where it is, one of its criteria by \
+         its command, or `\"outcome\"`), what the plan says (`planned`), what your work does or \
+         needs instead (`instead`), and `why`. Call it whenever you cannot build what the plan \
+         declares within your scope: never build something else and say nothing. Your task does \
+         not close on a departure; when your session ends a person accepts it or sends it back \
+         with what to do instead. Accepted, a criterion of the plan you depart from stops holding \
+         your task, and a test the run's spec gave it is written again by whoever wrote the spec. \
+         `unpassable` declares that one of your task's criteria (`criterion`, its command) is red \
+         on your work and that no work the plan allows can make it pass, with `why`. The engine \
+         runs it on your work: one that passes, or that the environment cannot run, is refused; \
+         a red one is recorded with its exit, and your attempt ends with it. The suite the run \
+         measured holds every task and is no plan's to depart from, under either kind.",
+        object(json!({"type": "object", "oneOf": deviation_shapes()})),
+    )
+}
+
+/// The two declarations the tool takes, told apart by `kind`: a departure
+/// from the plan, and an unpassable criterion of the task.
+fn deviation_shapes() -> Value {
     let named = |key: &str| {
         json!({"type": "object", "properties": {key: {"type": "string"}}, "required": [key],
                "additionalProperties": false})
     };
-    Tool::new(
-        RunTool::DeclareDeviation.name(),
-        "Declare that your work departs from the plan: what of it (`from`: one of the plan's \
-         shapes or decisions by name, one of your task's `changes` by where it is, one of its \
-         criteria by its command, or `\"outcome\"`), what the plan says (`planned`), what \
-         your work does or needs instead (`instead`), and `why`. Call it whenever you cannot \
-         build what the plan declares within your scope — never build something else and say \
-         nothing. Your task does not close on a departure: when your session ends a person \
-         accepts it, or sends it back with what to do instead. Accepted, a criterion of the \
-         plan you depart from stops holding your task, and a test the run's spec gave it is \
-         written again by whoever wrote the spec. The suite the run measured holds every \
-         task and is no plan's to depart from.",
-        object(json!({
-            "type": "object",
+    json!([
+        {
             "properties": {
+                "kind": {"const": "departure"},
                 "from": {"oneOf": [
                     named("shape"), named("decision"), named("change"), named("criterion"),
                     {"const": "outcome"},
@@ -291,25 +303,34 @@ fn deviation_tool() -> Tool {
                 "instead": {"type": "string"},
                 "why": {"type": "string"},
             },
-            "required": ["from", "planned", "instead", "why"],
-        })),
-    )
+            "required": ["kind", "from", "planned", "instead", "why"],
+            "additionalProperties": false,
+        },
+        {
+            "properties": {
+                "kind": {"const": "unpassable"},
+                "criterion": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["kind", "criterion", "why"],
+            "additionalProperties": false,
+        },
+    ])
 }
 
 fn scope_expansion_tool() -> Tool {
     Tool::new(
         RunTool::RequestScopeExpansion.name(),
-        "Ask for the scope you work to be widened — you never widen it yourself. \
-         Provide the paths and the reason; for a task, also a verifiable criterion \
-         that is red today — or, when one of your task's own criteria fails and its \
-         output points at each path as `path:line`, that criterion's command as \
-         `evidence`: the engine runs it and, if it still points there, grants the \
-         paths itself. A task's request its loop's rules would not grant is tried \
-         against every criterion and guard its attempt's check found red, the same \
-         way, before anyone is asked. The request is decided when this attempt ends: \
-         a task's by \
-         its evidence, its loop's rules or a person, and a denial becomes a finding \
-         rather than silence; a node's by a person, who is shown your reason.",
+        "Ask for the scope you work to be widened — you never widen it yourself. Provide the \
+         paths and the reason; for a task, also a verifiable criterion that is red today — or, \
+         when one of your task's own criteria fails and its output points at each path as \
+         `path:line`, that criterion's command as `evidence`: the engine runs it and, if it \
+         still points there, grants the paths itself. A task's request its loop's rules would \
+         not grant is tried against every criterion and guard its attempt's check found red, \
+         the same way, before anyone is asked. A refusal the project settles comes back in \
+         this reply, with its reason. The rest is decided when the attempt ends: a task's by \
+         its evidence, its loop's rules or a person, and a denial becomes a finding rather \
+         than silence; a node's by a person, who is shown your reason.",
         object(json!({
             "type": "object",
             "properties": {

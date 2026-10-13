@@ -11,10 +11,10 @@
 
 use yunta_core::events::Phase;
 use yunta_core::protected::Closing;
-use yunta_core::{CommitSha, ScopeGlob};
+use yunta_core::CommitSha;
 
 use super::attempt::AttemptParams;
-use super::judge::{judge, Judgement, Work};
+use super::judge::{judge, scope_in_force, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work};
 use super::record::Recorder;
 use super::{BlockedCause, CriterionRun, TaskCycleError, TaskOutcome};
 use crate::git::{Cause, GitError};
@@ -103,22 +103,30 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
         supervision,
         ..
     } = params;
-    let scope: Vec<ScopeGlob> = task
-        .scope
-        .iter()
-        .chain(already_granted_paths)
-        .cloned()
-        .collect();
+    let scope = scope_in_force(task, already_granted_paths);
     judge(
-        task,
-        crate::scope::Ceiling {
+        Sitting {
+            work: Work {
+                checkout: unit.worktree.as_path(),
+                from: &unit.from,
+                staged: &[],
+            },
+            task: Some(task),
             scope: &scope,
-            protected,
-            closing: Closing::Every,
+            request: None,
+            refused: Refusals::None,
+            window: None,
+            bounds: None,
+            declared: None,
+            documents: None,
+            env: JudgeEnv {
+                memo,
+                protected,
+                closing: Closing::Every,
+                supervision,
+            },
         },
-        Work { unit, staged: &[] },
-        memo,
-        supervision,
+        Settle::Commit,
     )
     .await
 }

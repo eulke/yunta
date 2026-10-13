@@ -336,6 +336,16 @@ fn refuses_whole(reached: &[Reach]) -> bool {
     reached.iter().any(|reach| !reach.reason.person_may_grant())
 }
 
+impl Denial {
+    /// Whether no work can change this refusal: a path no session of the run
+    /// may write, or a mode that grants nothing. A session is told such a
+    /// refusal in the call that asks; any other waits for the judgement of
+    /// its work, where a red output may still locate what it asks for.
+    pub fn stands(&self) -> bool {
+        matches!(self, Denial::ReachesProtected { .. } | Denial::ModeDeny)
+    }
+}
+
 impl fmt::Display for Denial {
     /// The sentence a finding and a refused session read: a reached path is
     /// named with the reason it is protected. A `Legacy` denial reads back as

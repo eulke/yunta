@@ -281,8 +281,9 @@ mod denied_by_a_human {
     use yunta_engine::{RunReport, RunTerminal};
     use yunta_testkit::ScriptedInteraction;
 
-    /// `task-n` writes what its scope allows and asks for `b.txt`, which a
-    /// fence would have refused; the human denies the request.
+    /// `task-n` asks for `b.txt`, which a fence would have refused; the human
+    /// denies the request. The first attempt writes nothing, so its criterion
+    /// stays red and the request is owed a person's decision.
     async fn run_denied() -> (Bench, RunReport) {
         let bench = Bench::new();
         let workflow = scope_expansion_workflow("ask", None);
@@ -291,17 +292,22 @@ mod denied_by_a_human {
             task_yaml("task-n", "n", "a.txt", "test -f a.txt")
         );
         let mut fixture = plan_session(&tasks);
-        // Attempt 1 writes what its scope allows and asks for b.txt, which a
-        // fence would have refused; the human denies. The work it left already
-        // closes the task within its scope, so no second session opens.
         fixture.push_str(&format!(
-            "  - match_prompt_contains: \"task-n\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
+            "  - match_prompt_contains: \"task-n\"\n{}    outcome: {{ type: completed, summary: asked }}\n",
             request_step(serde_json::json!({
                 "paths": ["b.txt"],
                 "reason": "adjacent fix in b.txt",
                 "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
             })),
         ));
+        // The fresh session the pending request opens writes nothing either.
+        fixture.push_str(
+            "  - match_prompt_contains: \"task-n\"\n    outcome: { type: completed, summary: fresh }\n",
+        );
+        // Denied, the task writes what its scope allows, and closes.
+        fixture.push_str(
+            "  - match_prompt_contains: \"task-n\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-n }\n",
+        );
         let interaction = ScriptedInteraction::new(HumanChoice {
             option: "deny".into(),
             by: "eulke".into(),

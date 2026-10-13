@@ -2,23 +2,31 @@
 //! node's work lies outside it, and how the session asks for it to be
 //! widened.
 //!
-//! A session never widens its own scope: the request is written as the
-//! very file the file-based path produces, and the engine decides it when
-//! the attempt ends — for a task by its loop's rules or a person, for a
-//! node by a person, from the menu of the failure the request becomes.
-//! One mechanism with two intake surfaces, rather than a second policy
-//! living behind the listener.
+//! A session never widens its own scope. A request refused whatever the
+//! work, for what the project protects or for the mode, is answered in the
+//! call, with its reason, and logged at once. Any other request is written
+//! as the request file the attempt's end reads, and decided there: for a
+//! task by its evidence, its loop's rules or a person, for a node by a
+//! person, from the menu of the failure the request becomes. One mechanism
+//! with two intake surfaces, rather than a second policy living behind the
+//! listener.
 
 use serde::Serialize;
 use serde_json::Value;
-use yunta_core::durable::{self, Durability};
-use yunta_core::protected::Closing;
+use yunta_core::events::Decider;
+use yunta_core::expansion::{Decision, Denial};
 use yunta_core::ScopeGlob;
 
 use super::catalog::RunTool;
+use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{json, Reply};
+use super::verdicts::{self, json};
 use crate::replay::RunView;
+use crate::run::scope_record::{self, Recording, Subject};
+use crate::scope_expansion::{
+    standing_refusal, write_request, Recorded, RequestError, ScopeExpansionRequest,
+};
+use crate::task_cycle::Settle;
 
 impl SessionTools {
     /// What this node's close would find outside its scope if the
@@ -29,7 +37,7 @@ impl SessionTools {
             .node_scope
             .as_deref()
             .ok_or(RunToolError::NoNodeScope)?;
-        let result = self.scope_audit(access).await?;
+        let result = self.scope_audit().await?;
         json(&ScopeVerdict {
             within: result.violations.is_empty(),
             scope: &access.scope,
@@ -37,36 +45,15 @@ impl SessionTools {
         })
     }
 
-    /// The audit this node's close would make of its work now.
-    pub(super) async fn scope_audit(
-        &self,
-        access: &super::host::NodeScopeAccess,
-    ) -> Result<crate::scope::ScopeCheckResult, RunToolError> {
-        let state = RunView::of(self.events().await?).state;
-        let from = state
-            .nodes
-            .from_tree(&self.node)
-            .cloned()
-            .ok_or(RunToolError::NoStartingTree)?;
-        crate::scope::audit(
-            &self.cwd,
-            &from,
-            &access.index,
-            crate::scope::Ceiling {
-                scope: &access.scope,
-                protected: &access.protected,
-                closing: Closing::Every,
-            },
-            access.staged.get().map_or(&[], Vec::as_slice),
-            self.host.supervision(&self.stop),
-        )
-        .await
-        .map_err(|source| match source.cancelled() {
-            true => RunToolError::Cancelled,
-            false => RunToolError::Audit { source },
-        })
+    /// The audit this node's close would make of its work now: the dry
+    /// judgement of the node, which moves no grant.
+    pub(super) async fn scope_audit(&self) -> Result<crate::scope::ScopeCheckResult, RunToolError> {
+        Ok(self.judge_session(Settle::Dry, &[]).await?.scope)
     }
 
+    /// Asks for the scope to be widened. A task's request no work could get
+    /// granted is answered here, with its reason; any other request is
+    /// written for the attempt's end to decide.
     pub(super) async fn request_scope_expansion(
         &self,
         args: serde_json::Map<String, Value>,
@@ -76,47 +63,76 @@ impl SessionTools {
             (None, Some(access)) if access.may_ask => true,
             _ => return Err(RunToolError::NoScopeToWiden),
         };
-        // The identical request object the file-based path uses,
-        // validated by the same type it parses — then written as that
-        // exact file, so what consumes it at the attempt's end reads it
-        // unchanged: one mechanism, two intake surfaces.
-        let request: crate::scope_expansion::ScopeExpansionRequest =
-            serde_json::from_value(Value::Object(args))
-                .map_err(|source| RunToolError::InvalidRequest { source })?;
-        let path = self
-            .cwd
-            .join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
-        let yaml = yunta_core::yaml::to_string(&request)
-            .map_err(|source| RunToolError::Yaml { source })?;
-        // blocking: `durable` is synchronous, and one small request file is
-        // the whole write, so it lands whole or not at all.
-        let written =
-            durable::create_new(&path, yaml.as_bytes(), Durability::Atomic).map_err(|source| {
-                RunToolError::Write {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-        if !written {
-            return Err(RunToolError::RequestPending);
+        // The identical request object the file-based path uses, validated
+        // by the same type it parses.
+        let request: ScopeExpansionRequest = serde_json::from_value(Value::Object(args))
+            .map_err(|source| RunToolError::InvalidRequest { source })?;
+        if let Some(access) = self.task.as_deref() {
+            if let Some(denial) = standing_refusal(&request, &access.scope_bounds()) {
+                self.record_denial(access, &request, &denial).await?;
+                return Ok(verdicts::denied(&denial, &self.called(RunTool::CheckTask)));
+            }
         }
-        let reply = match answered_by_a_person {
-            true => Reply::new(
-                "request recorded — when this attempt ends a person decides whether to widen \
-                 this node's scope",
-            )
-            .next(format!(
-                "finish what you can within the scope you have, without writing the paths \
-                 you asked for; `{}` tells you whether what you changed is within it",
+        let next = match answered_by_a_person {
+            true => format!(
+                "a person decides it when this attempt ends; until then, finish what you can \
+                 within the scope you have, without writing the paths you asked for; `{}` tells \
+                 you whether what you changed is within it",
                 self.called(RunTool::CheckScope)
-            )),
-            false => Reply::new(
-                "request recorded — it is decided when this attempt ends, by the engine or a \
-                 person, and a denial becomes a finding",
-            )
-            .next("end this attempt; the work is attempted again once the request is decided"),
+            ),
+            false => "end this attempt; the work is attempted again once the request is decided"
+                .to_string(),
         };
-        Ok(reply.text())
+        Ok(
+            match write_request(&self.cwd, request, &self.host.scope_guard).await? {
+                Recorded::Written => verdicts::recorded(&next),
+                Recorded::Amended { added } => verdicts::amended(added, &next),
+            },
+        )
+    }
+
+    /// Records a request the project settled at intake: what the session
+    /// asked, and the denial that refused it, with the finding that says
+    /// why.
+    async fn record_denial(
+        &self,
+        access: &TaskAccess,
+        request: &ScopeExpansionRequest,
+        denial: &Denial,
+    ) -> Result<(), RunToolError> {
+        let count = RunView::of(self.events().await?).state.grants.granted();
+        let decision = Decision::Deny(denial.clone());
+        scope_record::record(
+            &self.log(),
+            &self.node,
+            Recording {
+                subject: Subject::Task(&access.task.id),
+                mode: Some(access.expansion.mode),
+                by: Decider::Rule,
+                asked: Some(request),
+                decision: &decision,
+                count,
+                located: false,
+                precheck: None,
+                attempt: access.expansion.attempt,
+                new_request: true,
+            },
+        )
+        .await
+        .map_err(|source| RunToolError::Record { source })
+    }
+}
+
+impl From<RequestError> for RunToolError {
+    /// A request under another criterion is the call's own refusal; a request
+    /// file the engine cannot read, parse or write is the engine's failure.
+    fn from(source: RequestError) -> Self {
+        match source {
+            RequestError::CriterionConflict { pending } => {
+                RunToolError::CriterionConflict { pending }
+            }
+            source => RunToolError::Request { source },
+        }
     }
 }
 

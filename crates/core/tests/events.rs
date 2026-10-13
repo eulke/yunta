@@ -10,7 +10,10 @@ use std::collections::BTreeSet;
 
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
-use yunta_core::{Capability, NonEmpty, QuestionId, Redactor, RunId, ScopeExpansionMode, Secret};
+use yunta_core::{
+    AdapterId, Capability, ConfigKey, NonEmpty, QuestionId, Redactor, RunId, ScopeExpansionMode,
+    ScopeGlob, Secret,
+};
 use yunta_testkit_core::all_kinds;
 
 #[test]
@@ -111,12 +114,12 @@ fn a_done_task_carries_its_commit_and_nothing_else_does() {
 }
 
 #[test]
-fn there_are_exactly_57_kinds_with_distinct_names() {
+fn there_are_exactly_59_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 57);
+    assert_eq!(kinds.len(), 59);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 57, "expected 57 distinct kind names");
+    assert_eq!(names.len(), 59, "expected 59 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -177,11 +180,13 @@ const KIND_NAMES: &[&str] = &[
     "task_check_answered",
     "deviation_declared",
     "deviation_resolved",
+    "criterion_declared_unpassable",
     "scope_checked",
     "scope_expansion_requested",
     "scope_expansion_granted",
     "scope_expansion_denied",
     "scope_derived",
+    "scope_expansion_withdrawn",
     "node_finished",
     "node_failed",
     "hook_executed",
@@ -747,6 +752,40 @@ fn a_check_refused_on_an_unchanged_tree_round_trips_naming_the_attempt_that_ran(
     );
     let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(payload, parsed, "{json}");
+}
+
+/// Every failure variant, sampled, is written as JSON and reads back as itself.
+#[test]
+fn every_failure_variant_reads_back_as_itself() {
+    let samples = [
+        Failure::message("exit 1"),
+        Failure::artifacts(Vec::new()),
+        Failure::session_died(AdapterId::from_static("mock"), None),
+        Failure::scope_violated(vec!["clippy.toml".into()]),
+        Failure::scope_requested(vec![ScopeGlob::from("src/a.rs")], "needs it"),
+        Failure::ScopeOwed { owed: Vec::new() },
+        Failure::unset(ConfigKey::Runner),
+        Failure::unchanged(1, Failure::message("regression: exit 101")),
+        Failure::paths_denied(vec!["secret.env".into()], Vec::new()),
+        Failure::exited(CommandExit {
+            origin: None,
+            code: 1,
+            tail: vec!["exit 1".into()],
+            output: None,
+        }),
+        Failure::PlanUnpassable {
+            unpassable: vec![UnpassableTask {
+                task_id: "task-u".into(),
+                cmd: "false".to_string(),
+                why: "false exits 1".to_string(),
+            }],
+        },
+    ];
+    for failure in samples {
+        let json = serde_json::to_value(&failure).unwrap();
+        let parsed: Failure = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(parsed, failure, "{json}");
+    }
 }
 
 #[test]

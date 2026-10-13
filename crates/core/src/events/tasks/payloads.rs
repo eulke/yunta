@@ -226,3 +226,14 @@ pub struct DeviationResolvedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub respecified_by: Option<NodeId>,
 }
+
+/// A criterion of a task that its session declared no work of the plan
+/// can pass. The engine ran it on the tree the session left and saw it
+/// red; the exit code it saw and the session's reason are recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CriterionUnpassablePayload {
+    pub task_id: TaskId,
+    pub criterion: String,
+    pub exit_code: i32,
+    pub why: String,
+}

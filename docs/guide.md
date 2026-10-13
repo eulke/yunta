@@ -163,9 +163,10 @@ permissions:
 Every layer's denies stand together. A session's write fence refuses those paths
 where its adapter enforces one; a node with a checkout of its own that wrote one
 fails without landing, and a task that wrote one is not integrated. A failure over a
-denied path never offers `grant`, a scope-expansion request for one is refused
-without asking anyone, and a node's request for one is never put to a person. The
-list is empty unless the project writes one, so no workflow fails for lacking it.
+denied path never offers `grant`, a task's scope-expansion request for one is
+refused in the tool's reply, at once, without asking anyone, and a node's request
+for one is never put to a person. The list is empty unless the project writes
+one, so no workflow fails for lacking it.
 Once a run holds a [spec](#artifacts-the-engine-reads), every file of it is denied the same way to
 every session of the run — the tests a person approved stay as approved through
 the pull request. A lint command that rewrites files fails over one of them like
@@ -181,6 +182,16 @@ trees, or an instruction file, count as written: a `.gitignore` entry does not
 hide one from the check. The check does not enter a directory your project ignores
 whole, such as a build output or a dependency tree, to look for an instruction
 file: what lies there is the build's or the dependency's own.
+
+A session that needs more scope asks with `yunta_request_scope_expansion`; it never
+widens its own. When the project refuses a task's request whatever the work — `deny` as
+the `scope_expansion` mode, or a path no person may grant — the tool's reply refuses it at
+once, with the reason, and the log records the request and its refusal then. Any other
+request is judged when its attempt, or its node, closes: a `rules` request that names no
+criterion is still granted there when a red criterion's output locates every path it asks
+for. A request still waiting when its
+task closes is withdrawn, and nobody is asked for it; a task that does not close has its
+request put to a person.
 
 `cli_config: inherit | isolated`, on a node or in `node_defaults`, says whose
 configuration of the agent's CLI its sessions load. `inherit`, the default, loads
@@ -364,7 +375,8 @@ are, its fence refuses the write, `yunta_task` lists them as denied, and a chang
 the audit finds keeps the task open. Neither may any other session of the run — another task, a node after
 the loop, one scoped to what the run changed: every file of the spec is denied to
 all of them, as the project's own denies are. A test the implementer believes is
-wrong is a departure from the plan — `yunta_declare_deviation` on that criterion —
+wrong is a departure from the plan — `yunta_declare_deviation` with `kind: departure`
+on that criterion —
 for a person to settle. Accepted, the test is written again by the node that wrote
 the spec, never by whoever builds the task: the loop sends the run back to that
 node, which is told the departure and what the person said and may change only
@@ -376,6 +388,14 @@ acceptance for such a departure — only sending it back. The files reach the ru
 tree with the task's own commit.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no
 shape to demand.
+
+A criterion no work of the plan can pass is not a departure. The task's session declares
+it with `yunta_declare_deviation` and `kind: unpassable`, naming the criterion and why, and
+the task stays blocked without another session. Once the loop has nothing else to run, its
+implementation node fails with `PlanUnpassable`, which lists each task with its criterion
+and reason; that node's `on_failure.goto` sends the run back to the planner, which writes
+the plan again. If the same task declares the same criterion again after that, the repeat
+is not routed a second time and the run pauses for a person.
 
 The tool answers in the same call, with the verdict the node's close reaches: the
 engine reads the object into the same type and runs the same rules. An acceptance
@@ -726,7 +746,9 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   `yunta_task_status` for every such session; `yunta_task`, `yunta_check_task`,
   `yunta_request_scope_expansion` and `yunta_declare_deviation` for a loop's task
   sessions, which read their task and the plan it belongs to, judge their work, and
-  say where it departs from the plan through them — a departure keeps the task open
+  say where it departs from the plan through them (`kind: departure`), or declare
+  with `kind: unpassable` a criterion no work of the plan can pass, which sends the
+  plan back to its planner — a departure keeps the task open
   until a person accepts it or sends it back; accepting a departure from a criterion
   its plan declares, and nothing else supplies, stops that criterion holding the
   task, and no task departs from the suite the run measured, which holds every one

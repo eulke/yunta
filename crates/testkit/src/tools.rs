@@ -16,11 +16,12 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
 use yunta_core::protected::Protected;
 use yunta_core::{
-    sha256_hex, Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
+    sha256_hex, Clock, CommitSha, NodeId, NodeKind, RunId, ScopeExpansionMode, Seq, SystemClock,
+    Task, TaskId, TreeId, Workflow,
 };
 use yunta_engine::{
-    open_session_listener, Memo, NodeScopeAccess, RunToolsHost, RunToolsSession, TaskAccess, Unit,
-    UnitId,
+    open_session_listener, Memo, NodeScopeAccess, RunToolsHost, RunToolsSession, TaskAccess,
+    TaskExpansion, Unit, UnitId,
 };
 use yunta_storage::Storage;
 
@@ -36,6 +37,9 @@ pub struct ToolsHost {
     pub run_id: RunId,
     host: Arc<RunToolsHost>,
     clock: Arc<dyn Clock>,
+    /// The workflow the host was built over, which says what each loop's
+    /// tasks may ask for.
+    workflow: Workflow,
 }
 
 impl ToolsHost {
@@ -88,6 +92,7 @@ impl ToolsHost {
             run_id,
             host,
             clock,
+            workflow,
         };
         // Every log opens with `run_created` — the listener's own
         // appends land on an already-born run in production too.
@@ -145,7 +150,7 @@ impl ToolsHost {
         declared: Vec<yunta_core::ArtifactSpec>,
     ) -> RunToolsSession {
         let task = task.map(|id| {
-            self.task_access(
+            let mut access = self.task_access(
                 Task {
                     id: TaskId::from(id),
                     title: String::new(),
@@ -170,7 +175,13 @@ impl ToolsHost {
                         1,
                     ),
                 },
-            )
+            );
+            // The loop's own scope expansion decides this session's requests,
+            // as the run applies it to the tasks of that loop.
+            let (mode, max_per_run) = self.scope_expansion_of(node);
+            access.expansion.mode = mode;
+            access.expansion.max_per_run = max_per_run;
+            access
         });
         let cwd = task
             .as_ref()
@@ -205,7 +216,8 @@ impl ToolsHost {
     }
 
     /// What a task session's tools reach for `task` worked in `unit`: the
-    /// scope the task declared, nothing granted, and nothing staged.
+    /// scope the task declared, nothing granted, nothing staged, nothing
+    /// declared, and the run's default expansion.
     pub fn task_access(&self, task: Task, unit: Unit) -> TaskAccess {
         TaskAccess {
             scope: task.scope.clone(),
@@ -218,7 +230,35 @@ impl ToolsHost {
             checks: Default::default(),
             plan: None,
             held: Vec::new(),
+            declared: Default::default(),
+            expansion: TaskExpansion {
+                mode: ScopeExpansionMode::default(),
+                // The bound a test's grant may touch, when the test does not state one.
+                max_files: 5,
+                max_per_run: None,
+                beside: Vec::new(),
+                attempt: 1,
+            },
         }
+    }
+
+    /// The mode and the cap a loop declares for the requests of its tasks,
+    /// read from the workflow the host was built over. A node that is not
+    /// a loop, or a loop that declares none, gets the run's default.
+    fn scope_expansion_of(&self, node: &str) -> (ScopeExpansionMode, Option<u32>) {
+        let policy = self
+            .workflow
+            .nodes
+            .iter()
+            .find(|candidate| candidate.id.as_str() == node)
+            .and_then(|candidate| match &candidate.kind {
+                NodeKind::Loop {
+                    scope_expansion, ..
+                } => scope_expansion.clone(),
+                _ => None,
+            })
+            .unwrap_or_default();
+        (policy.mode, policy.max_per_run)
     }
 
     async fn open(

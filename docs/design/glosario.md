@@ -321,7 +321,9 @@ escribir y antes de terminar. El hook es este binario, su subcomando `rail`, el
 adapter cuyo codec lee la llamada y el momento (`before-write`,
 `after-write`, `before-stop`); la respuesta la da el engine por el listener de
 esa sesión, con el mismo token que sus herramientas, y deja en el log lo que
-juzgó o hizo (D249, D254, D255).
+juzgó o hizo (D249, D254, D255). `before-stop` juzga el trabajo con el mismo
+juicio que el cierre del intento, en seco: si el cierre no lo tomaría, la
+sesión vuelve a él.
 _Evitar_: fence hook, FenceHook, yunta fence.
 
 **Codec** (`RailCodec`):
@@ -337,8 +339,21 @@ _Evitar_: bloqueo, edición bloqueada.
 
 **Parada devuelta** (`stop_refused`):
 La sesión quiso terminar con trabajo que su cierre no tomaría, y el engine la
-devolvió a él diciendo qué falta. Una vez por estado del trabajo (D254).
+devolvió a él diciendo qué falta. Lo juzga el mismo juicio que el cierre, una
+vez por estado del trabajo (D254). No la devuelve un pedido de ampliación que
+el cierre puede conceder o escalar: lo decide el cierre.
 _Evitar_: stop bloqueado, reintento.
+
+**Negativa inmediata**:
+La negativa de un pedido de ampliación de una tarea que el engine contesta en la
+llamada, con su razón, porque el proyecto lo decide con el pedido solo y ningún
+trabajo lo cambia: el modo `deny` o una ruta que ninguna persona puede conceder.
+Su respuesta empieza con `request denied`, y el log registra el pedido y la
+negativa en ese momento (`scope_expansion_requested` y `scope_expansion_denied`).
+Las negativas que dependen del trabajo —un criterio que ya pasa, el tope de
+archivos, un pedido `rules` sin criterio, que una salida en rojo todavía puede
+conceder— se deciden al cerrar.
+_Evitar_: rechazo diferido, denegación al cierre.
 
 **Sujeto de una concesión**:
 Lo que una decisión de alcance amplía o deniega: una tarea, o el nodo al que pertenece
@@ -346,6 +361,13 @@ la sesión. Una concesión sin tarea ni nodo no se escribe. Una denegación de n
 nombra tarea, porque su sujeto es el nodo del evento; y un hecho de sesión sin nodo
 corta el replay, porque no tiene a quién atribuirse.
 _Evitar_: destino de la concesión, alcance del run.
+
+**Retiro** (`scope_expansion_withdrawn`):
+Lo que una tarea deja al cerrar: el pedido de ampliación que nadie contestó
+cuando el cierre llegó. No es una concesión ni una denegación: no escribe
+finding, no cuenta para `max_per_run` y nadie lo decide. Una tarea que no cierra
+no retira su pedido: lo escala una persona.
+_Evitar_: cancelación, descarte.
 
 ## Fallas
 

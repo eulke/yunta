@@ -15,10 +15,10 @@ mod criteria;
 mod dispatch;
 mod error;
 mod evidence;
-mod expansion;
 mod held;
 mod judge;
 mod memo;
+mod open;
 mod outcome;
 mod record;
 mod recorded;
@@ -33,12 +33,14 @@ use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Phase, TaskLedger};
+use yunta_core::expansion::Decision;
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::protected::Protected;
 use yunta_core::Task;
 
 pub use outcome::{
-    surprises, AttemptRecord, BlockedCause, DispatchOutcome, Surprise, TaskCycleReport, TaskOutcome,
+    surprises, AttemptRecord, BlockedCause, CriterionRun, DispatchOutcome, Surprise,
+    TaskCycleReport, TaskOutcome,
 };
 
 use crate::process::Supervision;
@@ -53,7 +55,9 @@ pub use criteria::{post_check, pre_check, PostCheck};
 pub use dispatch::DispatchError;
 pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
 pub use held::HeldGate;
-pub(crate) use judge::{judge, Judgement, Work};
+pub(crate) use judge::{
+    judge, scope_in_force, Documents, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work,
+};
 pub use memo::{Memo, Memoized};
 pub use session::{KeepsOutput, RunToolsNeed, SessionObserver, SessionSetup};
 pub(crate) use stream::record_unlisted_tools;
@@ -62,57 +66,6 @@ pub(crate) use tree::content_of;
 pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};
 pub use error::TaskCycleError;
 pub(crate) use spec::files as spec_files;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CriterionRun {
-    pub cmd: String,
-    pub exit_code: i32,
-    pub is_guard: bool,
-    /// Whether this result came from the memoization cache instead of
-    /// an actual execution — `criteria_checked` records it so receipt/replay
-    /// show what ran versus what was reused, nothing verified in silence.
-    pub reused: bool,
-    /// Wall-clock milliseconds the execution took — what the
-    /// learned ordering feeds on. `None` when `reused` (nothing ran).
-    pub duration_ms: Option<u64>,
-    /// What the command printed on this tree: in this run of it, or, for
-    /// a red answer the cache reused, in the run that gave it. `None` for
-    /// a green answer reused, and for a check the engine states rather
-    /// than runs.
-    pub output: Option<crate::process::Printed>,
-    /// The tree the answer is for — what the checkout held — and, for a
-    /// command that runs `git`, the commit it stood on. `None` for a
-    /// check the engine states rather than runs.
-    pub tree: Option<yunta_core::TreeId>,
-    pub head: Option<String>,
-}
-
-impl CriterionRun {
-    /// Why this criterion never answered, if it did not.
-    pub fn could_not_run(&self) -> Option<&'static str> {
-        criteria::could_not_run(self.exit_code)
-    }
-
-    /// The last line it printed, if it ran and printed anything.
-    pub fn said(&self) -> Option<String> {
-        self.output.as_ref().and_then(|output| output.last_words())
-    }
-
-    /// The line it concluded with, if it printed anything: the last one
-    /// on stdout, where a test runner says what it ran.
-    pub fn concluded(&self) -> Option<String> {
-        self.output.as_ref().and_then(|output| output.concluded())
-    }
-
-    /// How its exit code reads to a person: the code, and what it means
-    /// when the command never answered.
-    pub fn exit_described(&self) -> String {
-        match self.could_not_run() {
-            Some(why) => format!("{} ({why})", self.exit_code),
-            None => self.exit_code.to_string(),
-        }
-    }
-}
 
 /// The permission/scope policy a task cycle enforces:
 /// `permissions` is the merged model every criterion command is checked
@@ -186,11 +139,13 @@ pub struct AttemptEnv<'a> {
 }
 
 /// Runs a task through the full cycle: pre-check once, then dispatch →
-/// post-check → scope-check. A task its attempt leaves red is `Blocked`:
-/// another session on the same task, tree and evidence has nothing the
-/// first did not, so the next move is a person's. The one attempt that
-/// follows on its own is the one a scope the engine granted during the
-/// last makes different.
+/// post-check → scope-check. An attempt that leaves the task unsettled
+/// starts another session only when the engine granted the scope the session
+/// asked for, or when the session left a request pending under a red criterion
+/// on the first attempt or on a tree its previous attempt did not leave. Any
+/// other unsettled end is `Blocked`: a session on the same tree would have
+/// nothing new to act on. A criterion the session declared impossible ends
+/// the cycle at once, before any retry.
 ///
 /// Never trusts the session's own outcome: `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
@@ -445,7 +400,10 @@ async fn cycle(
             }
             AttemptStep::Again(record) => {
                 last_check = record.recorded.or(last_check);
-                let widened = expansion::paths_granted(record.scope_expansion.as_ref()).to_vec();
+                let widened = match record.scope_expansion.as_ref().map(|o| &o.decision) {
+                    Some(Decision::Grant { paths, .. }) => paths.clone(),
+                    _ => Vec::new(),
+                };
                 granted.extend(widened.iter().cloned());
                 continuing = record.session.clone().map(|session| Continuing {
                     session,
@@ -455,16 +413,51 @@ async fn cycle(
             }
             AttemptStep::Unmet(record) => {
                 last_check = record.recorded.or(last_check);
+                let fresh = record.fresh_session_owed(&attempts);
                 attempts.push(record);
-                break;
+                if !fresh {
+                    break;
+                }
+                // The pending request stays on the checkout for the session
+                // that follows, which starts fresh and carries no grant.
+                continuing = None;
             }
         }
     }
 
     // What the last attempt left is what a person deciding about the task
-    // needs to read: which criteria still fail, and what strayed.
+    // needs to read: which criteria still fail, and what strayed. A request
+    // still owed a person's decision is that decision, and it leaves the
+    // checkout with the cycle.
+    let owed = attempts.last().is_some_and(AttemptRecord::escalated);
+    let cause = match owed {
+        true => {
+            crate::scope_expansion::consume_request(unit.worktree.as_path())
+                .await
+                .map_err(|source| TaskCycleError::ScopeExpansion {
+                    task: task.id.clone(),
+                    source,
+                })?;
+            BlockedCause::ScopeDecisionOwed
+        }
+        false => unmet_cause(&attempts),
+    };
+    Ok(TaskCycleReport {
+        task_id: task.id.clone(),
+        staged: last_staged.clone(),
+        pre_check: pre_runs,
+        attempts,
+        needs_human_decision: owed,
+        outcome: TaskOutcome::Blocked { cause },
+        last_check,
+    })
+}
+
+/// What the last attempt left: the criteria still red, and the paths it
+/// changed outside the scope.
+fn unmet_cause(attempts: &[AttemptRecord]) -> BlockedCause {
     let last = attempts.last();
-    let cause = BlockedCause::Unmet {
+    BlockedCause::Unmet {
         attempts: attempts.len() as u32,
         red: last
             .map(|attempt| {
@@ -479,14 +472,5 @@ async fn cycle(
         outside: last
             .map(|attempt| attempt.scope.violations.clone())
             .unwrap_or_default(),
-    };
-    Ok(TaskCycleReport {
-        task_id: task.id.clone(),
-        staged: last_staged.clone(),
-        pre_check: pre_runs,
-        attempts,
-        needs_human_decision: false,
-        outcome: TaskOutcome::Blocked { cause },
-        last_check,
-    })
+    }
 }

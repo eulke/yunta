@@ -1,5 +1,6 @@
 //! The samples of the task kinds: a task's registration, its status, its
-//! check, and the deviations it declared or resolved.
+//! check, the deviations it declared or resolved, and a criterion it
+//! declared no work of the plan can pass.
 
 use crate::events::*;
 
@@ -63,5 +64,14 @@ pub(crate) fn deviation_resolved() -> DeviationResolvedPayload {
         accepted: false,
         said: Some("add `Dot` too".to_string()),
         respecified_by: None,
+    }
+}
+
+pub(crate) fn criterion_declared_unpassable() -> CriterionUnpassablePayload {
+    CriterionUnpassablePayload {
+        task_id: "graph-cmd".into(),
+        criterion: "cargo test -p yunta".to_string(),
+        exit_code: 101,
+        why: "the crate it runs is written by another task".to_string(),
     }
 }

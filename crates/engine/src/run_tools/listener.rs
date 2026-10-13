@@ -97,8 +97,8 @@ impl Drop for RunToolsSession {
 /// the task tools exist for; `node_scope` is `Some` for a node's own
 /// session when the node declares a scope, which is what `yunta_check_scope`
 /// judges. Either can ask with `yunta_request_scope_expansion`; `cwd` is
-/// where a request file lands (the same worktree
-/// `scope_expansion::load_request` consumes it from).
+/// where a request file lands, and the worktree the attempt's end reads
+/// it back from.
 pub async fn open_session_listener(
     access: RunToolsAccess,
     (task, node_scope): (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>),

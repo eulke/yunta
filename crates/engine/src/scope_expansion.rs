@@ -4,8 +4,9 @@
 //!
 //! - **Transport**: the session calls `yunta_request_scope_expansion`,
 //!   which writes the request to [`SCOPE_EXPANSION_REQUEST_FILE`] in the
-//!   task's own worktree. The engine reads it once the session ends
-//!   ([`load_request`]). A request is one object per task attempt.
+//!   task's own worktree (`write_request`). The engine reads it when a
+//!   decision needs it ([`read_request`]) and removes it once decided
+//!   ([`consume_request`]). One file per attempt holds one criterion's requests.
 //! - **Decision**: `yunta_core::expansion` decides every request, and
 //!   every refused write that a red criterion locates. This module
 //!   gathers the facts that decision reads and applies it through
@@ -21,13 +22,19 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
-use yunta_core::events::ToolTarget;
-use yunta_core::expansion::{touched_under, Ask, Bounds, Candidate, Decision, Precheck, Screen};
+use yunta_core::expansion::{
+    touched_under, Ask, Bounds, Candidate, Decision, Denial, Precheck, Proposal, Screen,
+};
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeGlob;
 
 use crate::git::GitError;
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
+
+mod request;
+
+pub use request::{consume_request, read_request};
+pub(crate) use request::{write_request, Recorded, RequestError};
 
 /// The well-known path, relative to a task's own isolated worktree, an
 /// agent writes to request an expansion — mirrors `findings.yaml`'s role
@@ -81,45 +88,6 @@ pub struct ScopeExpansionRequest {
     /// proposed criterion: what lets the engine grant the request itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
-}
-
-/// Reads and parses the task's own request file, if the agent wrote one
-/// this attempt. `None` — no file — is the ordinary case, not an error.
-///
-/// Deletes the file once read: it is a signal to the engine, not part of
-/// the task's own deliverable diff, and the scope audit that follows reads
-/// the same worktree it lives in — left in place, an untracked control file
-/// would be flagged a scope violation on every single request. Consumption
-/// also gives "one request per attempt" its only real enforcement: a second
-/// `load_request` against the same worktree sees nothing left to read.
-pub async fn load_request(
-    task_worktree: &Path,
-) -> Result<Option<ScopeExpansionRequest>, ScopeExpansionError> {
-    let path = task_worktree.join(SCOPE_EXPANSION_REQUEST_FILE);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = tokio::fs::read(&path)
-        .await
-        .map_err(|source| ScopeExpansionError::Read {
-            path: path.display().to_string(),
-            detail: source.to_string(),
-        })?;
-    let request =
-        yunta_core::yaml::parse_bytes(&bytes).map_err(|e| ScopeExpansionError::Malformed {
-            path: path.display().to_string(),
-            detail: e.to_string(),
-        })?;
-    tokio::fs::remove_file(&path)
-        .await
-        .map_err(|source| ScopeExpansionError::Io {
-            action: format!(
-                "remove consumed scope expansion request `{}`",
-                path.display()
-            ),
-            source,
-        })?;
-    Ok(Some(request))
 }
 
 /// One attempt's expansion story: what the session asked, the pre-check of
@@ -202,6 +170,33 @@ pub(crate) async fn expand(
     }
 }
 
+/// The refusal `request` meets before its criterion runs and before any work
+/// is read: one no work changes, which the protection or the mode settles.
+/// The call that asks answers it, and the judgement gives the same, so a
+/// request meets one answer however it reached the engine. `None` leaves the
+/// request to the judgement of the work.
+pub(crate) fn standing_refusal(
+    request: &ScopeExpansionRequest,
+    bounds: &Bounds<'_>,
+) -> Option<Denial> {
+    let proposal = request
+        .proposed_criterion
+        .as_ref()
+        .map(|criterion| Proposal {
+            cmd: &criterion.cmd,
+            precheck: Precheck::NotRun,
+        });
+    let ask = Ask::Requested {
+        paths: &request.paths,
+        reason: &request.reason,
+        proposal,
+    };
+    match yunta_core::expansion::screen(&ask, bounds) {
+        Screen::Settled(Decision::Deny(denial)) if denial.stands() => Some(denial),
+        _ => None,
+    }
+}
+
 async fn diff_paths(
     cwd: &Path,
     supervision: Supervision<'_>,
@@ -252,16 +247,6 @@ pub(crate) async fn run_criterion(
         },
         Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => Precheck::CouldNotRun,
     })
-}
-
-/// Whether `printed` locates a write of one of `refused`, read the way the
-/// attempt's close reads it: relative to `worktree`.
-pub(crate) fn locates_a_refusal(printed: &str, worktree: &Path, refused: &[ToolTarget]) -> bool {
-    let text = relative_text(printed.to_string(), worktree);
-    refused
-        .iter()
-        .filter_map(|target| relative(worktree, target.display()?))
-        .any(|path| locates(&text, &path))
 }
 
 /// `target` relative to the checkout, when it lies in it.

@@ -99,6 +99,9 @@ event_kinds! {
         => Tasks(TaskEvent::DeviationDeclared) sample samples::deviation_declared;
     DeviationResolved(DeviationResolvedPayload) = "deviation_resolved"
         => Tasks(TaskEvent::DeviationResolved) sample samples::deviation_resolved;
+    CriterionDeclaredUnpassable(CriterionUnpassablePayload) = "criterion_declared_unpassable"
+        => Tasks(TaskEvent::CriterionDeclaredUnpassable)
+        sample samples::criterion_declared_unpassable;
     ScopeChecked(ScopeCheckedPayload) = "scope_checked"
         => Node(NodeEvent::ScopeChecked) sample samples::scope_checked;
     ScopeExpansionRequested(ScopeExpansionRequestedPayload) = "scope_expansion_requested"
@@ -109,6 +112,8 @@ event_kinds! {
         => Scope(ScopeEvent::Denied) sample samples::scope_expansion_denied;
     ScopeDerived(ScopeDerivedPayload) = "scope_derived"
         => Scope(ScopeEvent::Derived) sample samples::scope_derived;
+    ScopeExpansionWithdrawn(ScopeExpansionWithdrawnPayload) = "scope_expansion_withdrawn"
+        => Scope(ScopeEvent::Withdrawn) sample samples::scope_expansion_withdrawn;
     NodeFinished(NodeFinishedPayload) = "node_finished"
         => Node(NodeEvent::Finished) sample samples::node_finished;
     NodeFailed(NodeFailedPayload) = "node_failed"

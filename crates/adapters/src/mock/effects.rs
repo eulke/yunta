@@ -9,7 +9,7 @@ use yunta_core::port::SessionRequest;
 use yunta_core::rail::{RailAnswer, RailEndpoint, RailEvent};
 use yunta_core::{AdapterError, FenceLevel, Result, SessionId};
 
-use super::fixture::{MockEffect, SessionScript};
+use super::fixture::{MockEffect, SessionScript, Via};
 use super::{MockAdapter, ID};
 use crate::dialect::DialectName;
 
@@ -30,9 +30,15 @@ pub(super) struct Asked {
 }
 
 impl Asked {
-    /// Asks the engine about each effect and writes the ones it allows.
+    /// Asks the engine about each effect and writes the ones it allows. A
+    /// write made through a shell command reaches no write hook, so it is
+    /// written as it is made, with nothing asked and nothing reported.
     pub(super) async fn written(&self, session: &SessionId) -> std::result::Result<(), String> {
         for effect in &self.effects {
+            if effect.via == Via::Command {
+                write_effect(&self.cwd, effect).map_err(|e| e.to_string())?;
+                continue;
+            }
             let answer = ask_hook(
                 self.dialect,
                 &self.rail,

@@ -1,85 +1,73 @@
-//! Whether a session may end its turn: its work judged the way the
+//! Whether a session may end its turn: its work judged the way its
 //! attempt's close will judge it, while the session can still act on the
 //! answer.
 //!
-//! A CLI asks before its session stops. A task session's work is checked
-//! as `yunta_check_task` checks it — criteria, guards, scope — and a
-//! node's own session's as its close checks it: the documents it hands
-//! over and its scope. When the close would not take that work, the
-//! session is sent back to it with what stands in the way, and the log
-//! says so before the session hears it.
+//! A CLI asks before its session stops, and the engine answers with the
+//! judgement the close would make of that session's work: a task
+//! session's criteria, scope and request, or a node's documents and scope.
+//! The session is held only when the close would not take the work and
+//! would not settle it on its own. A grant or an escalation of the
+//! session's request is the close's to decide, a criterion that cannot run
+//! is nothing the session changes, and a criterion the session declared
+//! impossible goes back to the planner. A held session is sent back to its
+//! work with what stands in the way, and the log says so before the session
+//! hears it.
 //!
 //! Never twice for one state of the work: a session that stops again
 //! without changing anything has nothing better to give, and holding it
-//! would only spend the run. Never while the attempt's end owes the
-//! session an answer about its scope — a request it made, or a refused
-//! write a red criterion locates — because that end decides it and
-//! resumes the session with the answer. And never once the session is
-//! being cut: a stop then is the end it was asked for.
+//! would only spend the run. And never once the session is being cut: a
+//! stop then is the end it was asked for.
 
-use yunta_core::diagnostic::{ArtifactFailure, FileProblem};
-use yunta_core::events::{EventPayload, SessionEvent, StopRefusal, StopRefusedPayload};
+use yunta_core::events::{
+    CriterionResult, CriterionUnpassablePayload, EventPayload, SessionEvent, StopRefusal,
+    StopRefusedPayload, StoredEvent, TaskCheckAnsweredPayload, TaskCheckStartedPayload, TaskEvent,
+};
+use yunta_core::protected::Closing;
 use yunta_core::rail::RailAnswer;
-use yunta_core::{ArtifactSpec, ContentHash, RunTool, SessionId};
+use yunta_core::{ContentHash, RunTool, SessionId, TaskId};
 
 use super::host::TaskAccess;
-use super::rail::refused_writes;
 use super::session::{RunToolError, SessionTools};
-use crate::artifacts::{answerer, Answerer, RunArtifacts};
-use crate::process::Printed;
+use super::verdicts;
 use crate::replay::RunView;
-use crate::task_cycle::CriterionRun;
-
-/// Work a session would leave that its close would not take.
-struct Unfinished {
-    /// What the work stands at, which a stop is refused once for.
-    state: ContentHash,
-    why: Vec<StopRefusal>,
-    /// What the session reads: what stands in the way, and how to go on.
-    told: String,
-    /// What each red criterion printed, read for a refused write it
-    /// locates.
-    red: Vec<String>,
-}
+use crate::scope::ScopeCheckResult;
+use crate::scope_expansion::{read_request, GrantWindow, ScopeExpansionRequest};
+use crate::task_cycle::{
+    judge, Documents, JudgeEnv, Judgement, Refusals, Settle, Sitting, TaskCycleError, Work,
+};
+use std::path::Path;
 
 impl SessionTools {
     /// Whether the session may stop now.
     pub(super) async fn before_stop(&self, session: &SessionId) -> RailAnswer {
-        let judged = match self.task.as_deref() {
-            Some(access) => self.task_unfinished(access).await,
-            None => self.node_unfinished().await,
-        };
-        let unfinished = match judged {
-            Ok(Some(unfinished)) => unfinished,
-            Ok(None) => return RailAnswer::Proceed,
+        let judgement = match self
+            .judge_session(Settle::Dry, std::slice::from_ref(session))
+            .await
+        {
+            Ok(judgement) => judgement,
             Err(error) => {
                 tracing::debug!(%error, "a stop went unjudged");
                 return RailAnswer::Proceed;
             }
         };
-        if self.stop.is_cancelled() {
+        let state = judgement.state();
+        if self.stop.is_cancelled() || !judgement.holds_a_stop() {
             return RailAnswer::Proceed;
         }
-        match self.scope_owed(session, &unfinished).await {
-            Ok(false) => {}
-            Ok(true) => return RailAnswer::Proceed,
-            Err(error) => {
-                tracing::debug!(%error, "a stop's scope owed went unread");
-                return RailAnswer::Proceed;
-            }
-        }
-        match self.refused_before(session, &unfinished.state).await {
-            Ok(false) => {}
-            Ok(true) => return RailAnswer::Proceed,
+        let seen = match self.refused_before(session, &state).await {
+            Ok(seen) => seen,
             Err(error) => {
                 tracing::debug!(%error, "a stop's earlier refusals went unread");
                 return RailAnswer::Proceed;
             }
+        };
+        if seen {
+            return RailAnswer::Proceed;
         }
         let payload = EventPayload::Session(SessionEvent::StopRefused(StopRefusedPayload {
             session_id: session.clone(),
-            state: unfinished.state,
-            why: unfinished.why,
+            state,
+            why: stop_reasons(&judgement),
             task_id: self.task.as_ref().map(|access| access.task.id.clone()),
         }));
         // A refusal the log does not hold could be repeated forever: the
@@ -88,160 +76,162 @@ impl SessionTools {
             tracing::debug!(%error, "a refused stop went unrecorded");
             return RailAnswer::Proceed;
         }
+        // The text leaves the engine, so the secrets the run holds are taken
+        // out of it, as they are out of the log.
+        let text = verdicts::stop_text(&judgement, &self.called(RunTool::RequestScopeExpansion));
         RailAnswer::Refuse {
-            reason: unfinished.told,
+            reason: self.host.redactor.text(&text),
         }
     }
 
-    /// A task session's work, checked as `yunta_check_task` checks it —
-    /// `None` when it closes its task, and when a criterion could not run
-    /// at all, which nothing the session does changes.
-    async fn task_unfinished(
+    /// A task session's work judged on its checkout as its attempt's close
+    /// judges it, and kept on the log as one check of the task.
+    pub(super) async fn judge_task(
         &self,
         access: &TaskAccess,
-    ) -> Result<Option<Unfinished>, RunToolError> {
-        let (judgement, tree) = self.judged_now(access).await?;
-        let unrunnable = judgement
-            .criteria
-            .iter()
-            .any(|run| run.could_not_run().is_some());
-        if judgement.closes() || unrunnable {
-            return Ok(None);
+        settle: Settle,
+        sessions: &[SessionId],
+    ) -> Result<Judgement, RunToolError> {
+        let reads = self.task_reads(access, sessions).await?;
+        let tree = self.tree_now(&access.unit.worktree).await?;
+        let (_turn, stop) = access.checks.take(tree, &self.stop, &access.index).await;
+        self.append(EventPayload::Tasks(TaskEvent::CheckStarted(
+            TaskCheckStartedPayload {
+                task_id: access.task.id.clone(),
+            },
+        )))
+        .await?;
+        let started = std::time::Instant::now();
+        let env = JudgeEnv {
+            memo: &self.host.memo,
+            protected: &access.protected,
+            closing: Closing::Every,
+            supervision: self.host.supervision(&stop),
+        };
+        let sitting = task_sitting(access, &reads, sessions, &self.host.run_dir, env);
+        let judgement = judge(sitting, settle).await;
+        access.checks.judged();
+        if stop.is_cancelled() && !self.stop.is_cancelled() {
+            return Err(RunToolError::Superseded);
         }
-        let mut why = Vec::new();
-        if !judgement.waiting.is_empty() || judgement.criteria.iter().any(|run| run.exit_code != 0)
-        {
-            why.push(StopRefusal::CriteriaRed);
-        }
-        if !judgement.scope.violations.is_empty() {
-            why.push(StopRefusal::OutsideScope);
-        }
-        let red = self.red_output(&judgement.criteria).await;
-        let verdict = self.check_verdict(judgement)?;
-        let told = format!(
-            "yunta: not done yet — this is your work judged as the engine will judge it when \
-             your session ends, and it would not close your task:\n{verdict}\n\nFix what fails, \
-             then finish. If the fix needs a file outside your scope, ask for it with `{}` and \
-             finish; the engine answers it once your session ends. Finishing again without \
-             changing anything ends the session as it stands.",
-            self.called(RunTool::RequestScopeExpansion)
-        );
-        Ok(Some(Unfinished {
-            state: ContentHash::sha256(tree.as_str().as_bytes()),
-            why,
-            told,
-            red,
-        }))
+        let judgement = judgement.map_err(|source| RunToolError::Check { source })?;
+        let results = self.recorded(&access.task.id, &judgement.criteria).await?;
+        self.append(answered(
+            &access.task.id,
+            &judgement,
+            results,
+            started.elapsed(),
+        ))
+        .await?;
+        Ok(judgement)
     }
 
-    /// A node's own session's work, checked as its close checks it: every
-    /// document the session hands over, and its scope. `None` when the
-    /// close would take it.
-    async fn node_unfinished(&self) -> Result<Option<Unfinished>, RunToolError> {
-        let (mut why, mut told) = self.documents_owed().await?;
-        if let Some(access) = self.node_scope.as_deref() {
-            let audit = self.scope_audit(access).await?;
-            if !audit.violations.is_empty() {
-                why.push(StopRefusal::OutsideScope);
-                let paths: Vec<String> = audit
-                    .violations
-                    .iter()
-                    .map(|path| format!("- {}", path.display()))
-                    .collect();
-                told.push(format!(
-                    "outside this node's scope — undo these changes:\n{}",
-                    paths.join("\n")
-                ));
-            }
-        }
-        if why.is_empty() {
-            return Ok(None);
-        }
-        let tree = crate::task_cycle::content_of(
-            &self.cwd,
-            &self.host.memo.pathspecs(),
-            self.host.supervision(&self.stop),
-        )
-        .await
-        .map_err(|source| RunToolError::Check { source })?;
-        let found = told.join("\n\n");
-        let state = ContentHash::sha256(format!("{tree}\n{found}").as_bytes());
-        let told = format!(
-            "yunta: not done yet — this is your work judged as this node's close will judge \
-             it, and it would not take it:\n\n{found}\n\nFix what it names, then finish. \
-             Finishing again without changing anything ends the session as it stands."
-        );
-        Ok(Some(Unfinished {
-            state,
-            why,
-            told,
-            red: Vec::new(),
-        }))
-    }
-
-    /// What keeps the documents this session hands over from closing its
-    /// node, and each one's verdict. A document the engine derives or
-    /// writes itself — findings from what was posted, answers a person
-    /// gave — is the close's to take, not the session's to hand over.
-    async fn documents_owed(&self) -> Result<(Vec<StopRefusal>, Vec<String>), RunToolError> {
-        let handed: Vec<&ArtifactSpec> = self
-            .declared
-            .iter()
-            .filter(|spec| match answerer(&self.node_kind, spec.kind()) {
-                Answerer::Staging => true,
-                Answerer::Log => spec.kind().is_some_and(|kind| kind.submit_tool().is_some()),
-            })
-            .collect();
-        let mut why = Vec::new();
-        let mut told = Vec::new();
-        if handed.is_empty() {
-            return Ok((why, told));
-        }
-        let events = self.events().await?;
-        let held = RunArtifacts::of(&self.host.run_dir, &events);
-        for spec in handed {
-            let verified = self.verified(spec, &held).await;
-            let Err(failure) = &verified else {
-                continue;
-            };
-            let reason = match missing(failure) {
-                true => StopRefusal::ArtifactMissing,
-                false => StopRefusal::ArtifactRefused,
-            };
-            if !why.contains(&reason) {
-                why.push(reason);
-            }
-            told.push(super::submission::render_verdict(
-                &spec.to_string(),
-                verified,
-            ));
-        }
-        Ok((why, told))
-    }
-
-    /// Whether the attempt's end owes this session an answer about its
-    /// scope: a request it made, or a write it was refused that a red
-    /// criterion locates. The log is read only when a red criterion has
-    /// output to locate a write in.
-    async fn scope_owed(
+    /// What a task's judgement reads before its turn. The log is read only
+    /// when there is a request to decide, or a session whose refused writes
+    /// are read.
+    async fn task_reads(
         &self,
-        session: &SessionId,
-        unfinished: &Unfinished,
-    ) -> Result<bool, RunToolError> {
-        let request = self
-            .cwd
-            .join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
-        if tokio::fs::try_exists(&request).await.unwrap_or(false) {
-            return Ok(true);
+        access: &TaskAccess,
+        sessions: &[SessionId],
+    ) -> Result<TaskReads, RunToolError> {
+        let request = read_request(&access.unit.worktree)
+            .await
+            .map_err(|source| RunToolError::Check {
+                source: TaskCycleError::ScopeExpansion {
+                    task: access.task.id.clone(),
+                    source,
+                },
+            })?;
+        let deciding = request.is_some() || !sessions.is_empty();
+        let view = RunView::of(match deciding {
+            true => self.events().await?,
+            false => Vec::new(),
+        });
+        let window = deciding.then(|| GrantWindow::seeded(view.state.grants.granted()));
+        let declared = access.declared.lock().await.clone();
+        Ok(TaskReads {
+            request,
+            view,
+            window,
+            declared,
+        })
+    }
+
+    /// A node's own session judged as its close judges it: the documents it
+    /// hands over, and the diff against the scope it declares.
+    pub(super) async fn judge_node(&self, settle: Settle) -> Result<Judgement, RunToolError> {
+        let Some(access) = self.node_scope.as_deref() else {
+            return self.judge_unscoped().await;
+        };
+        let view = RunView::of(self.events().await?);
+        let from = view
+            .state
+            .nodes
+            .from_tree(&self.node)
+            .cloned()
+            .ok_or(RunToolError::NoStartingTree)?;
+        let env = JudgeEnv {
+            memo: &self.host.memo,
+            protected: &access.protected,
+            closing: Closing::Every,
+            supervision: self.host.supervision(&self.stop),
+        };
+        let sitting = Sitting {
+            work: Work {
+                checkout: &self.cwd,
+                from: &from,
+                staged: access.staged.get().map_or(&[], Vec::as_slice),
+            },
+            task: None,
+            scope: &access.scope,
+            request: None,
+            refused: Refusals::None,
+            window: None,
+            bounds: None,
+            declared: None,
+            documents: Some(self.documents(&view.events)),
+            env,
+        };
+        judge(sitting, settle)
+            .await
+            .map_err(|source| RunToolError::Check { source })
+    }
+
+    /// A node that declares no scope owes its close no audit, so the
+    /// documents it hands over are all its judgement holds it to. The log is
+    /// read only when it hands one over, and its tree only when the close
+    /// would refuse one: a stop that owes nothing goes on nothing more.
+    async fn judge_unscoped(&self) -> Result<Judgement, RunToolError> {
+        let events = match Documents::any_handed(&self.declared, &self.node_kind) {
+            true => self.events().await?,
+            false => Vec::new(),
+        };
+        let documents = self.documents(&events).faults().await;
+        let tree = match documents.is_empty() {
+            true => None,
+            false => Some(self.tree_now(&self.cwd).await?),
+        };
+        Ok(Judgement {
+            criteria: Vec::new(),
+            waiting: Vec::new(),
+            scope: ScopeCheckResult::default(),
+            request: None,
+            documents,
+            unpassable: None,
+            tree,
+        })
+    }
+
+    /// The documents this node's session hands over, verified against `events`.
+    fn documents<'a>(&'a self, events: &'a [StoredEvent]) -> Documents<'a> {
+        Documents {
+            declared: &self.declared,
+            node: &self.node,
+            node_kind: &self.node_kind,
+            run_dir: &self.host.run_dir,
+            max_artifact_bytes: self.host.max_artifact_bytes,
+            events,
         }
-        if unfinished.red.is_empty() {
-            return Ok(false);
-        }
-        let refused = refused_writes(&self.events().await?, std::slice::from_ref(session));
-        Ok(!refused.is_empty()
-            && unfinished.red.iter().any(|printed| {
-                crate::scope_expansion::locates_a_refusal(printed, &self.cwd, &refused)
-            }))
     }
 
     /// Whether `session` was sent back already with its work at `state`.
@@ -253,42 +243,84 @@ impl SessionTools {
         let view = RunView::of(self.events().await?);
         Ok(view.state.nodes.stop_refused_on(&self.node, session, state))
     }
+}
 
-    /// Everything each red criterion of `runs` printed: what this check
-    /// ran, or what the run kept of an answer it reused.
-    async fn red_output(&self, runs: &[CriterionRun]) -> Vec<String> {
-        let objects = crate::artifacts::store::ObjectStore::at(&self.host.run_dir);
-        let mut texts = Vec::new();
-        for run in runs.iter().filter(|run| run.exit_code != 0) {
-            let text = match &run.output {
-                Some(Printed::Ran(output)) => String::from_utf8_lossy(output.bytes()).into_owned(),
-                Some(Printed::Recorded { object, tail }) => {
-                    let kept = match object {
-                        Some(hash) => objects.get(hash).await.ok(),
-                        None => None,
-                    };
-                    match kept {
-                        Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-                        None => tail.join("\n"),
-                    }
-                }
-                None => continue,
-            };
-            texts.push(text);
-        }
-        texts
+/// What a task's judgement reads before its turn.
+struct TaskReads {
+    /// The request the session left in its checkout, if it left one.
+    request: Option<ScopeExpansionRequest>,
+    /// The run's log, read when a request is decided or refused writes are.
+    view: RunView,
+    /// The grant window a request counts against, seeded from the log.
+    window: Option<GrantWindow>,
+    /// The criterion the session declared impossible, as the log stands.
+    declared: Option<CriterionUnpassablePayload>,
+}
+
+/// The sitting a task session's work is judged on: its task and checkout,
+/// the scope it answers to, and what `reads` holds.
+fn task_sitting<'a>(
+    access: &'a TaskAccess,
+    reads: &'a TaskReads,
+    sessions: &'a [SessionId],
+    run_dir: &'a Path,
+    env: JudgeEnv<'a>,
+) -> Sitting<'a> {
+    Sitting {
+        work: Work {
+            checkout: access.unit.worktree.as_path(),
+            from: &access.unit.from,
+            staged: access.staged.get().map_or(&[], Vec::as_slice),
+        },
+        task: Some(&access.task),
+        scope: &access.scope,
+        request: reads.request.as_ref(),
+        refused: Refusals::Log {
+            events: &reads.view.events,
+            sessions,
+            run_dir,
+        },
+        window: reads.window.as_ref(),
+        bounds: reads.window.is_some().then(|| access.scope_bounds()),
+        declared: reads.declared.as_ref(),
+        documents: None,
+        env,
     }
 }
 
-/// Whether `failure` is a document never handed over, rather than one
-/// handed over that the close refuses.
-fn missing(failure: &ArtifactFailure) -> bool {
-    matches!(
-        failure,
-        ArtifactFailure::Undelivered { .. }
-            | ArtifactFailure::File {
-                problem: FileProblem::Missing { .. },
-                ..
-            }
-    )
+/// What keeps the judged work from closing, each reason once: the criteria
+/// that are red or waiting, then the documents the close would refuse, then
+/// the changes outside the scope.
+fn stop_reasons(judgement: &Judgement) -> Vec<StopRefusal> {
+    let mut why = Vec::new();
+    if !judgement.waiting.is_empty() || judgement.criteria.iter().any(|run| run.exit_code != 0) {
+        why.push(StopRefusal::CriteriaRed);
+    }
+    for fault in &judgement.documents {
+        if !why.contains(&fault.refusal) {
+            why.push(fault.refusal);
+        }
+    }
+    if !judgement.scope.violations.is_empty() {
+        why.push(StopRefusal::OutsideScope);
+    }
+    why
+}
+
+/// The answer a check of `task` gave, as the log keeps it.
+fn answered(
+    task: &TaskId,
+    judgement: &Judgement,
+    results: Vec<CriterionResult>,
+    took: std::time::Duration,
+) -> EventPayload {
+    EventPayload::Tasks(TaskEvent::CheckAnswered(TaskCheckAnsweredPayload {
+        task_id: task.clone(),
+        closes: judgement.closes(),
+        results,
+        waiting: judgement.waiting.clone(),
+        outside_scope: judgement.scope.violations.clone(),
+        denied: judgement.scope.denied.clone(),
+        duration_ms: took.as_millis().min(u64::MAX as u128) as u64,
+    }))
 }

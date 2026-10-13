@@ -2,17 +2,21 @@
 //! asked, what the engine or a person granted, and what a refusal left —
 //! the event that refused it and the finding that says why.
 //!
-//! Every site that decides a request records through here, so a grant, a
-//! refusal and its finding read the same whichever path reached the
-//! decision.
+//! Every site that decides a request records through [`record`], so a grant,
+//! a refusal and its finding read the same whichever path reached the
+//! decision. A request a task closed with, unanswered, is withdrawn through
+//! [`withdraw`]: nobody decided it, so it is the module's only other write.
 
 use yunta_core::events::{
     Decider, EventPayload, Finding, FindingEvent, FindingPostedPayload, FindingSeverity,
     ProposedCriterionPrecheck, ScopeEvent, ScopeExpansionDeniedPayload,
-    ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload,
+    ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload, ScopeExpansionWithdrawnPayload,
+    WithdrawalCause,
 };
 use yunta_core::expansion::{Decision, Denial, Precheck};
-use yunta_core::{FindingId, Location, Node, RelativePath, ScopeExpansionMode, ScopeGlob, TaskId};
+use yunta_core::{
+    FindingId, Location, NodeId, RelativePath, ScopeExpansionMode, ScopeGlob, TaskId,
+};
 
 use super::RunError;
 use crate::run_log::RunLog;
@@ -54,18 +58,22 @@ pub(crate) struct Recording<'a> {
     pub precheck: Option<Precheck>,
     /// Numbers the refusal's finding, as the attempt that asked does.
     pub attempt: u32,
+    /// Whether the request is new to the log. A fresh session that re-reads a
+    /// request an earlier attempt logged passes `false`, so it is not logged twice.
+    pub new_request: bool,
 }
 
 /// Writes what `what` decided onto the run's log.
 ///
-/// A request the session made is recorded first, whatever came of it. A
-/// grant records the grant. A refusal records the refusal and the finding
-/// that says why. An escalation records nothing more: the gate that asks a
-/// person records that. A refusal the criterion located records nothing
-/// more either: the refused write is recorded where it was found.
+/// A request the session made is recorded first, whatever came of it, unless
+/// an earlier attempt already logged it. A grant records the grant. A refusal
+/// records the refusal and the finding that says why. An escalation records
+/// nothing more: the gate that asks a person records that. A refusal the
+/// criterion located records nothing more either: the refused write is
+/// recorded where it was found.
 pub(crate) async fn record(
     log: &RunLog<'_>,
-    node: &Node,
+    node: &NodeId,
     what: Recording<'_>,
 ) -> Result<(), RunError> {
     // A person answers a request the engine logged when it arrived, so only
@@ -73,11 +81,11 @@ pub(crate) async fn record(
     // reads the session's reason from `what.asked` below either way.
     if let Some(asked) = what
         .asked
-        .filter(|_| !matches!(what.by, Decider::Person { .. }))
+        .filter(|_| what.new_request && !matches!(what.by, Decider::Person { .. }))
     {
         let requested = requested(asked, what.subject.task_id(), what.precheck);
         log.record(
-            Some(&node.id),
+            Some(node),
             EventPayload::Scope(ScopeEvent::Requested(requested)),
         )
         .await?;
@@ -92,7 +100,7 @@ pub(crate) async fn record(
                 paths: paths.clone(),
             };
             log.record(
-                Some(&node.id),
+                Some(node),
                 EventPayload::Scope(ScopeEvent::Granted(granted)),
             )
             .await?;
@@ -101,6 +109,32 @@ pub(crate) async fn record(
         Decision::Deny(_) if what.located => {}
         Decision::Deny(denial) => refuse(log, node, &what, denial).await?,
     }
+    Ok(())
+}
+
+/// What a task closed with, unanswered: the paths of the request it leaves.
+pub(crate) struct Withdrawal<'a> {
+    pub task: &'a TaskId,
+    pub paths: &'a [ScopeGlob],
+}
+
+/// The one writer of a withdrawn request. Nobody decided it, so nothing is
+/// granted or denied: the task closed and the request leaves with it.
+pub(crate) async fn withdraw(
+    log: &RunLog<'_>,
+    node: &NodeId,
+    request: Withdrawal<'_>,
+) -> Result<(), RunError> {
+    let withdrawn = ScopeExpansionWithdrawnPayload {
+        task_id: request.task.clone(),
+        paths: request.paths.to_vec(),
+        reason: WithdrawalCause::TaskClosed,
+    };
+    log.record(
+        Some(node),
+        EventPayload::Scope(ScopeEvent::Withdrawn(withdrawn)),
+    )
+    .await?;
     Ok(())
 }
 
@@ -125,7 +159,7 @@ fn requested(
 /// Records a refusal, then the finding it leaves.
 async fn refuse(
     log: &RunLog<'_>,
-    node: &Node,
+    node: &NodeId,
     what: &Recording<'_>,
     denial: &Denial,
 ) -> Result<(), RunError> {
@@ -137,14 +171,11 @@ async fn refuse(
         why: Some(denial.clone()),
         legacy_text: None,
     };
-    log.record(
-        Some(&node.id),
-        EventPayload::Scope(ScopeEvent::Denied(refused)),
-    )
-    .await?;
+    log.record(Some(node), EventPayload::Scope(ScopeEvent::Denied(refused)))
+        .await?;
     let finding = denial_finding(node, &what.subject, what.attempt, denial, what.asked)?;
     log.record(
-        Some(&node.id),
+        Some(node),
         EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload { finding })),
     )
     .await?;
@@ -156,7 +187,7 @@ async fn refuse(
 /// paths when it asked. A refusal is routine control flow, not evidence the
 /// run is broken, so it never carries a higher severity.
 fn denial_finding(
-    node: &Node,
+    node: &NodeId,
     subject: &Subject<'_>,
     attempt: u32,
     denial: &Denial,
@@ -164,7 +195,7 @@ fn denial_finding(
 ) -> Result<Finding, RunError> {
     let (kind, name) = match subject {
         Subject::Task(task) => ("task", task.to_string()),
-        Subject::Node => ("node", node.id.to_string()),
+        Subject::Node => ("node", node.to_string()),
     };
     let detail = match asked {
         Some(request) => format!(

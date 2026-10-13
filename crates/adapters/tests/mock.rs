@@ -81,6 +81,40 @@ outcome: { type: failed, message: "401 Unauthorized" }
     assert_eq!(*cause, FailureCause::Final);
 }
 
+/// A scripted session emits exactly one terminal event, and nothing after
+/// it, whichever terminal outcome it scripts and whatever steps precede it.
+#[tokio::test]
+async fn a_scripted_session_ends_with_one_terminal_event_and_nothing_after_it() {
+    for outcome in [
+        "outcome: { type: completed, summary: all good }",
+        "outcome: { type: failed, message: criteria still red }",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = MockAdapter::from_yaml(&format!(
+            "dialect: claude-code\n{outcome}\nsteps:\n  - {{ type: note, text: one }}\n  - {{ type: usage, input_tokens: 1, output_tokens: 1 }}\n"
+        ))
+        .unwrap();
+        let session = fixture
+            .spawn(request(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let events = drain(session).await;
+
+        let terminal = |event: &AgentEvent| {
+            matches!(
+                event,
+                AgentEvent::Completed { .. } | AgentEvent::Failed { .. }
+            )
+        };
+        assert_eq!(
+            events.iter().filter(|event| terminal(event)).count(),
+            1,
+            "{events:?}"
+        );
+        assert!(terminal(events.last().unwrap()), "{events:?}");
+    }
+}
+
 /// A fixture has no retryable flag, so it cannot call an auth failure retryable.
 #[test]
 fn a_fixture_cannot_call_an_auth_failure_retryable() {

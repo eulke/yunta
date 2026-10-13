@@ -8,12 +8,63 @@
 
 use std::path::PathBuf;
 
-use yunta_core::events::{SessionDeath, SessionExit, TokenUsage};
-use yunta_core::{Seq, TaskId};
+use yunta_core::events::{CriterionUnpassablePayload, SessionDeath, SessionExit, TokenUsage};
+use yunta_core::expansion::Decision;
+use yunta_core::{ScopeGlob, Seq, TaskId};
 
 use crate::scope::ScopeCheckResult;
 
-use super::CriterionRun;
+/// What one criterion's command printed and answered, on the tree it ran on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CriterionRun {
+    pub cmd: String,
+    pub exit_code: i32,
+    pub is_guard: bool,
+    /// Whether this result came from the memoization cache instead of
+    /// an actual execution — `criteria_checked` records it so receipt/replay
+    /// show what ran versus what was reused, nothing verified in silence.
+    pub reused: bool,
+    /// Wall-clock milliseconds the execution took — what the
+    /// learned ordering feeds on. `None` when `reused` (nothing ran).
+    pub duration_ms: Option<u64>,
+    /// What the command printed on this tree: in this run of it, or, for
+    /// a red answer the cache reused, in the run that gave it. `None` for
+    /// a green answer reused, and for a check the engine states rather
+    /// than runs.
+    pub output: Option<crate::process::Printed>,
+    /// The tree the answer is for — what the checkout held — and, for a
+    /// command that runs `git`, the commit it stood on. `None` for a
+    /// check the engine states rather than runs.
+    pub tree: Option<yunta_core::TreeId>,
+    pub head: Option<String>,
+}
+
+impl CriterionRun {
+    /// Why this criterion never answered, if it did not.
+    pub fn could_not_run(&self) -> Option<&'static str> {
+        super::criteria::could_not_run(self.exit_code)
+    }
+
+    /// The last line it printed, if it ran and printed anything.
+    pub fn said(&self) -> Option<String> {
+        self.output.as_ref().and_then(|output| output.last_words())
+    }
+
+    /// The line it concluded with, if it printed anything: the last one
+    /// on stdout, where a test runner says what it ran.
+    pub fn concluded(&self) -> Option<String> {
+        self.output.as_ref().and_then(|output| output.concluded())
+    }
+
+    /// How its exit code reads to a person: the code, and what it means
+    /// when the command never answered.
+    pub fn exit_described(&self) -> String {
+        match self.could_not_run() {
+            Some(why) => format!("{} ({why})", self.exit_code),
+            None => self.exit_code.to_string(),
+        }
+    }
+}
 
 /// A criterion the pre-check found wrong before any work: "this pre-check
 /// validates the validator" — a non-guard that already passes, or a guard
@@ -127,6 +178,11 @@ pub enum BlockedCause {
     /// not be found or executed where the engine runs criteria. Another
     /// attempt would change the tree, never that.
     Unrunnable { runs: Vec<CriterionRun> },
+    /// The session declared a criterion impossible on the plan's work. No
+    /// further session retries it, and the planner rewrites the tasks.
+    CriterionUnpassable {
+        declared: CriterionUnpassablePayload,
+    },
     /// A person chose to continue from the work the task's last attempt
     /// left, and that work no longer applies on the run's tree: these are
     /// the paths it stopped on.
@@ -189,6 +245,11 @@ impl std::fmt::Display for BlockedCause {
                 f,
                 "a criterion could not run, and another attempt would not change that: {}",
                 exits(runs, "exits")
+            ),
+            BlockedCause::CriterionUnpassable { declared } => write!(
+                f,
+                "criterion `{}` cannot pass on the work of this plan: {}",
+                declared.criterion, declared.why
             ),
             BlockedCause::CarriedWorkNoLongerApplies { paths } => {
                 let listed: Vec<String> = paths
@@ -299,13 +360,13 @@ pub struct AttemptRecord {
     pub post_check: Vec<CriterionRun>,
     pub scope: ScopeCheckResult,
     pub succeeded: bool,
-    /// The agent's own expansion request this attempt, if
-    /// it wrote one, and what the engine decided — `None` when no request
-    /// file was found, the ordinary case. The caller (`loop_exec.rs`) owns
-    /// emitting `scope_expansion_requested`/`granted`/`denied` and the
-    /// finding conversion from this; `run_task` only decides and
-    /// widens `scope` for this attempt's own check when granted.
+    /// The request the session left, as the judgement decided it on this
+    /// attempt's tree — `None` when it left none, the ordinary case. The
+    /// caller emits the request's events from it.
     pub scope_expansion: Option<crate::scope_expansion::ScopeExpansionOutcome>,
+    /// The paths of an escalation this attempt closed with, which nobody
+    /// decides once the task is done. `None` for every other attempt.
+    pub withdrawn: Option<Vec<ScopeGlob>>,
     /// A write the session's fence said it would have stopped and the
     /// diff carries anyway. `run_task` has no `RunCtx` to record it on,
     /// so it hands the breach to the caller that already records this
@@ -314,6 +375,36 @@ pub struct AttemptRecord {
     /// The sequence number the log gave this attempt's post-check, which
     /// the cycle records the moment it runs. `None` without an observer.
     pub recorded: Option<Seq>,
+}
+
+impl AttemptRecord {
+    /// Whether the request this attempt left waits for a person's decision.
+    pub(super) fn escalated(&self) -> bool {
+        matches!(
+            self.scope_expansion.as_ref().map(|o| &o.decision),
+            Some(Decision::Escalate { .. })
+        )
+    }
+
+    /// Whether the request this attempt left is settled, so its file goes: a
+    /// grant or a refusal answers it, and a withdrawn one has nobody left to.
+    pub(super) fn request_settled(&self) -> bool {
+        self.withdrawn.is_some()
+            || self
+                .scope_expansion
+                .as_ref()
+                .is_some_and(|o| !matches!(o.decision, Decision::Escalate { .. }))
+    }
+
+    /// Whether a fresh session takes the task on after this attempt, which
+    /// left its request pending under a red criterion: one may close the task
+    /// without what it asked for, and the request is then withdrawn. One does,
+    /// once per cycle. When `earlier` already left a request pending, a person
+    /// decides it, and no further session spends the run while they do.
+    pub(super) fn fresh_session_owed(&self, earlier: &[AttemptRecord]) -> bool {
+        let red = self.post_check.iter().any(|run| run.exit_code != 0);
+        self.escalated() && red && !earlier.iter().any(AttemptRecord::escalated)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

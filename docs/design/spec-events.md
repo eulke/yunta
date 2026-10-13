@@ -12,9 +12,11 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 47 rows and **57 `kind` names**.
-It had 46 rows and 56 kinds before `baseline_held` was added. The table
-defines the normative set; this document specifies each payload.
+The current Run Contract event table has 49 rows and **59 `kind` names**.
+It had 47 rows and 57 kinds before `scope_expansion_withdrawn` and
+`criterion_declared_unpassable` were added. It had 46 rows and 56 kinds before
+`baseline_held` was added. The table defines the normative set; this document
+specifies each payload.
 
 ## 1. Envelope común
 
@@ -26,7 +28,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 57 names in this document. A changed shape takes a new name, never a higher version. |
+| `kind` | string | One of the 59 names in this document. A changed shape takes a new name, never a higher version. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | `KIND_VERSION`: 1 para todo kind — ver la política de versionado más abajo |
 
@@ -121,7 +123,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
-## 5. Los 57 tipos de evento, campo por campo
+## 5. Los 59 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -313,7 +315,7 @@ moves the task. The question is written before the judgement runs, so a
 first, or whose answer never reached it.
 
 ### 5.11b `deviation_declared` / `deviation_resolved` — engine
-**Source:** a task session's `yunta_declare_deviation` call, and a person's answer to it
+**Source:** a task session's `yunta_declare_deviation` call with `kind: departure`, and a person's answer to it
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -336,6 +338,18 @@ part of what the plan is shown with from then on — and a criterion of the plan
 one departs from, which nothing else supplies, stops holding the task; sent back,
 they are gone, and the task's next cycle reads the answer.
 
+### 5.11c `criterion_declared_unpassable` — engine
+**Fuente:** la sesión de una tarea que llamó a `yunta_declare_deviation` con `kind: unpassable`, cuando el motor vio el criterio en rojo sobre el árbol que la sesión dejó. Solo la primera declaración de una sesión se escribe.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `task_id` | `TaskId` | sí | la tarea cuya sesión declara el criterio |
+| `criterion` | string | sí | el comando del criterio de la tarea, tal como lo escribe el plan |
+| `exit_code` | `i32` | sí | el código con que el criterio salió sobre el árbol: distinto de cero y no 126 ni 127, que son del entorno |
+| `why` | string | sí | el motivo de la sesión, no vacío |
+
+Una tarea con este evento no cierra. Cuando el loop ya no tiene nada que correr, su nodo de implementación falla con `PlanUnpassable` y el planner recibe la declaración por la re-ruta (§11.2). El handover no la ve: una spec imposible sigue rechazada allí, porque la declaración es un hecho de la ejecución.
+
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
 
@@ -355,7 +369,9 @@ they are gone, and the task's next cycle reads the answer.
 | `paths` | lista de globs | sí | ampliación pedida |
 | `reason` | string | sí | — |
 | `proposed_criterion` | `Option<{cmd}>` | no | si el agente propone además un criterio nuevo |
-| `proposed_criterion_precheck` [inferido] | `Option<{exit_code}>` | solo si hay `proposed_criterion` | un criterio que ya pasa se rechaza automático sin consultar |
+| `proposed_criterion_precheck` [inferido] | `Option<{exit_code}>` | solo si hay `proposed_criterion` | el código de la prueba previa, cuando el juicio que decidió el pedido la corrió (`-2` si el criterio no llegó a correr); ausente cuando la negativa se dio en la llamada, que no corre el criterio. Un criterio que ya pasa se rechaza sin consultar a nadie |
+
+Lo escribe el engine cuando decide el pedido: en la llamada de una tarea, si lo niega el proyecto por una razón que ningún trabajo cambia (modo `deny` o una ruta que nadie puede conceder), y al cerrar el intento o el nodo que lo recibió en los demás casos.
 
 `scope_expansion_requested` guarda lo que la sesión pidió, tal como lo pidió: nunca un pedido que el engine haya reescrito, ni uno que la sesión no hizo.
 
@@ -389,20 +405,31 @@ la tarea.
 | `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes que nombran más de 20 archivos: no alcanzan ninguno |
 | `at` | sha de commit git | sí | el commit en que se leyeron los archivos |
 
+### 5.14b `scope_expansion_withdrawn` — engine
+**Fuente:** la tarea que cerró con un pedido de ampliación que nadie contestó
+
+Lo que una tarea deja al cerrar y nadie decidió. No es una concesión ni una denegación: no lleva decisor, no escribe finding y no cuenta para el cap `max_per_run`. Una tarea que no cierra no retira su pedido: lo escala una persona (§6.2).
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `task_id` | `TaskId` | sí | la tarea que cerró con el pedido sin contestar |
+| `paths` | lista de globs | sí | los paths que el pedido nombraba |
+| `reason` | enum `task_closed` | sí | por qué se retira: la tarea cerró mientras el pedido seguía sin decidir |
+
 ### 5.15 `node_finished` / `node_failed` — engine
 **Fuente:** resultado, tokens, ¿reintentable?
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | `NodeOutcome`: un hecho del engine (objeto con `type`: `exit_status`, `pull_request_opened`, `children_finished`, `succeeded_first`, `tasks_done`, `child_run_finished`, `nothing_to_compare`, `no_regression`, `coverage_met`, `no_finding`), o un texto: el resumen del agente, o una frase que un log escrito antes guardó tal cual | solo en `node_finished` | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter: el hecho es el veredicto; el resumen del agente es telemetría |
-| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` / `reasons` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y ninguna sesión del run puede escribir \| la protección de cada path de `denied_paths`, en su mismo orden: `project_deny`, `agent_config`, `agent_instructions`, `approved_test` o `git_register`; en un log viejo, vacía | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` / `unpassable` / `reasons` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y ninguna sesión del run puede escribir \| `[{task_id, cmd, why}]` las tareas cuyo criterio declarado ningún trabajo del plan puede pasar, con el comando y el motivo de cada una \| la protección de cada path de `denied_paths`, en su mismo orden: `project_deny`, `agent_config`, `agent_instructions`, `approved_test` o `git_register`; en un log viejo, vacía | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage`. Un cierre diferido por una ronda de preguntas lleva cero: no abre sesión, y la ronda ya asentó lo que gastó la sesión que preguntó. El gasto del intento es lo que asentaron sus rondas más este valor |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
 | `refused` | lista de paths | sí; solo en `node_failed`, vacía —y omitida del log— si no hubo ninguno | lo que el intento dejó en el árbol del run y ninguna sesión del run puede escribir —lo que niega el proyecto (`permissions.paths.deny`), la configuración de la CLI de un agente, un archivo de instrucciones, un test que aprobó una persona o el registro de git—: no se commiteó y, en un run con worktree propio, volvió a como la rama lo tenía. La falla propia del nodo sigue siendo su causa (D206) |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** La falla toma una de nueve formas, planas sobre el
+**La falla es dato, no prosa.** La falla toma una de once formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
 `artifacts: [...]`, un elemento por artifact declarado que no cerró, `died:
 {adapter, exit?}`, una sesión que terminó sin evento terminal, `exited: {code,
@@ -413,7 +440,7 @@ redactadas como todo el log— y el objeto que guarda la salida entera, `outside
 [...]`, cada path que el diff del nodo alcanzó fuera de su `scope:`, o
 `requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo,
 `owed: [{task_id, paths, reason}]`, las ampliaciones que pidieron tareas de un loop
-y que nadie estuvo para decidir —el loop siguió con lo que no dependía de ellas y
+que no cerraron y que nadie estuvo para decidir —el loop siguió con lo que no dependía de ellas y
 termina debiéndolas; su menú ofrece `grant`, que las concede, y cualquier otra
 respuesta las deniega con su finding (D238)—, o
 `unset: {key, ...}` —`baseline_suite`, `coverage`, `executor` (con `executor`),
@@ -429,7 +456,7 @@ menú sigue ofreciendo `retry`: la persona puede cambiar el árbol mientras deci
 del run puede escribir, con su razón por índice en `reasons`: lo que el proyecto niega a
 todo run (`permissions.paths.deny`), la configuración que carga la CLI de un agente, un
 archivo de instrucciones, un test que aprobó una persona o el registro de git. Su menú
-nunca ofrece `grant`, porque la falla no pide alcance. Cada elemento de `artifacts`
+nunca ofrece `grant`, porque la falla no pide alcance. `unpassable: [{task_id, cmd, why}]` nombra las tareas cuyo criterio declarado ningún trabajo del plan puede pasar, con el comando y el motivo de cada una: el planner reescribe el plan por `on_failure.goto` (§11.2). Una declaración repetida de la misma tarea y criterio llega como `unchanged`, que no se re-enruta y deja la decisión a una persona. Cada elemento de `artifacts`
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
 `artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
 nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`
@@ -816,7 +843,12 @@ tiempo despierto— a que el servicio responda y el host se asiente, registra
 La escribe el engine cuando el hook de la sesión le pregunta antes de parar y
 el juicio —el de `yunta_check_task` para una tarea; documentos y scope para la
 sesión de un nodo— no cerraría, antes de responderle (D254). Nunca dos veces
-para la misma sesión y el mismo `state`.
+para la misma sesión y el mismo `state`. No se escribe mientras el pedido de
+scope de la sesión puede concederse o escalarse: lo decide el cierre, y la
+sesión sigue aunque sus criterios estén en rojo. Un pedido que solo se niega no
+la exime, y tampoco la devuelve un criterio que no llega a correr ni uno
+declarado imposible: el cierre bloquea la tarea en el primero, y el planner
+recibe el segundo (§11.2).
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|

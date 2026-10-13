@@ -1,14 +1,18 @@
 //! Dispatching one task of a batch in its own worktree, with the
-//! attempt number and the expansions already granted to it.
+//! attempt number and the expansions already granted to it. What a task
+//! leaves in that worktree is committed here, on the unit's own branch.
 
+use yunta_core::commit_message::CommitMessage;
 use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
 use yunta_core::{CommitSha, Node, Task};
 
 use crate::scope_expansion::GrantWindow;
-use crate::task_cycle::{run_task, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport};
-use crate::worktree::{Lease, Unit, UnitHome, UnitId};
+use crate::task_cycle::{
+    run_task, scope_in_force, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport,
+};
+use crate::worktree::{commit_work, head_commit, Lease, Unit, UnitHome, UnitId};
 
 use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
@@ -75,14 +79,6 @@ async fn continuation(
         return Ok(None);
     };
     Ok(Some((unit, lease, Continuing { session, answer })))
-}
-
-/// Everything the log lets `task_id` reach beyond its declared scope:
-/// the files that name a shape it owns, and every path a prior
-/// `scope_expansion_granted` authorized — the retry after a human grant
-/// derives its widened scope from here, never from in-memory state.
-fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<ScopeGlob> {
-    state.grants.reach_for(task_id)
 }
 
 /// The protected set one task is judged by: the run's own, lifted by what a
@@ -158,7 +154,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     let beside: Vec<ScopeGlob> = batch
         .iter()
         .filter(|other| other.id != task.id)
-        .flat_map(|other| super::batch::reach(other, state))
+        .flat_map(|other| scope_in_force(other, &state.grants.reach_for(&other.id)))
         .collect();
     let continuation = continuation(ctx, node, task, state, adapter).await?;
     let (unit, lease, resume) = match continuation {
@@ -236,7 +232,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
             protected: protection_of(ctx, state, &task.id),
-            already_granted_paths: &granted_paths_for(state, &task.id),
+            already_granted_paths: &state.grants.reach_for(&task.id),
             beside: &beside,
         },
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
@@ -251,4 +247,56 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         lease,
         report,
     })
+}
+
+/// What a blocked task's last attempt left in its unit, committed on the
+/// unit's own branch so a person can have the next cycle continue from
+/// it. `None` when the attempt changed nothing.
+pub(super) async fn left_work(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    unit: &Unit,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Option<CommitSha>, RunError> {
+    let supervision = ctx.supervision(cancel);
+    commit_work(
+        unit,
+        &CommitMessage::new(
+            format!("task {}: the work its last attempt left", task.id),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
+        supervision,
+    )
+    .await?;
+    let head = head_commit(&unit.worktree, supervision).await?;
+    Ok((head != unit.base).then_some(head))
+}
+
+/// Commits the work a task left in its unit as the task's own commit, before
+/// anything judges it. What git ignores stays out of it: the close of the
+/// task's attempt judged the ignored paths the run protects.
+pub(super) async fn commit_task_work(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    unit: &Unit,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(), RunError> {
+    commit_work(
+        unit,
+        &CommitMessage::new(
+            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
+        supervision,
+    )
+    .await?;
+    Ok(())
 }

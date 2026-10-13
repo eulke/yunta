@@ -118,7 +118,7 @@ async fn record_choice(
     };
     scope_record::record(
         &ctx.log(),
-        node,
+        &node.id,
         Recording {
             subject: Subject::Task(&pending.task_id),
             mode: Some(super::mode_in_force(node)),
@@ -129,6 +129,7 @@ async fn record_choice(
             located: false,
             precheck: None,
             attempt: pending.attempt_no,
+            new_request: true,
         },
     )
     .await

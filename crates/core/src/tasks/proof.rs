@@ -9,17 +9,21 @@
 
 use crate::Task;
 
-/// Whether `cmd` names the file at `path`: its whole path, its name, or
-/// its name without the extension as a word of its own — how a test
-/// runner is told which file to run (`--test pack_cmd`).
+/// Whether `cmd` names the file at `path`: its whole path or its name as a
+/// word of its own, or its name without the extension right after
+/// `--test`, which is how a test runner is told to run that one file. The
+/// stem alone names nothing else: `cargo test --lib` runs the crate's
+/// library, not `src/lib.rs`.
 pub fn names_file(cmd: &str, path: &str) -> bool {
     let path = path.trim_start_matches("./");
     let name = path.rsplit('/').next().unwrap_or(path);
     let stem = name.split('.').next().unwrap_or(name);
-    [path, name, stem]
+    let named = [path, name]
         .into_iter()
         .filter(|said| !said.is_empty())
-        .any(|said| as_a_word(cmd, said))
+        .any(|said| as_a_word(cmd, said));
+    let words: Vec<&str> = cmd.split_whitespace().collect();
+    named || words.windows(2).any(|pair| pair == ["--test", stem])
 }
 
 /// Each criterion of `task` that passes once a name is written in a file
@@ -127,6 +131,15 @@ mod tests {
         assert!(!names_file(
             "cargo test -p yunta --test pack_cmd",
             "crates/cli/tests/global_pack_scope_spec.rs"
+        ));
+    }
+
+    #[test]
+    fn a_library_test_run_names_no_file_by_its_stem() {
+        assert!(!names_file("cargo test --lib", "src/lib.rs"));
+        assert!(names_file(
+            "cargo test -p yunta --test pack_cmd",
+            "crates/cli/tests/pack_cmd.rs"
         ));
     }
 

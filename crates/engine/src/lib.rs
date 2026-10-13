@@ -141,11 +141,11 @@ pub use run::{
 };
 pub use run_tools::{
     consolidate_blackboard, open_session_listener, HostOf, NodeScopeAccess, RunTool,
-    RunToolsAccess, RunToolsHost, RunToolsSession, TaskAccess,
+    RunToolsAccess, RunToolsHost, RunToolsSession, TaskAccess, TaskExpansion,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{
-    audit, audits, changed_between, changed_since, effective_scope, fence_breach, violations,
+    audit, audits, changed_between, changed_since, fence_breach, node_scope_in_force, violations,
     Breach, Ceiling, ScopeCheckError, ScopeCheckResult,
 };
 pub use stats::{

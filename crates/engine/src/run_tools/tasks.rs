@@ -15,17 +15,16 @@ use serde::Serialize;
 use serde_json::Value;
 use yunta_core::events::{
     CriterionResult, CriterionType, EventPayload, ExecutionEnvironment, NodeEvent, Phase,
-    StoredEvent, TaskCheckAnsweredPayload, TaskCheckStartedPayload, TaskEvent, TaskStatus,
+    StoredEvent, TaskEvent, TaskStatus,
 };
-use yunta_core::protected::Closing;
-use yunta_core::{ScopeGlob, TaskId, TreeId};
+use yunta_core::{ScopeGlob, SessionId, TaskId, TreeId};
 
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
 use crate::replay::RunView;
-use crate::task_cycle::{could_not_run, judge, CriterionRun, Judgement, Work};
+use crate::task_cycle::{could_not_run, CriterionRun, Judgement, Settle};
 
 impl SessionTools {
     pub(super) async fn task_status(&self) -> Result<String, RunToolError> {
@@ -68,14 +67,15 @@ impl SessionTools {
     /// still running, and one whose answer never came, can be told apart
     /// from one that was never asked.
     pub(super) async fn check_task(&self) -> Result<String, RunToolError> {
-        let access = self.task_access(RunTool::CheckTask)?;
-        let (judgement, _) = self.judged_now(access).await?;
+        // Only a task session has a task to check: a node's session is refused here.
+        self.task_access(RunTool::CheckTask)?;
+        let judgement = self.judge_session(Settle::Dry, &[]).await?;
         self.check_verdict(judgement)
     }
 
     /// The tree `worktree` holds now, captured under the run's protected
     /// pathspecs: an ignored file no session may write is part of it.
-    async fn tree_now(&self, worktree: &Path) -> Result<TreeId, RunToolError> {
+    pub(super) async fn tree_now(&self, worktree: &Path) -> Result<TreeId, RunToolError> {
         crate::task_cycle::content_of(
             worktree,
             &self.host.memo.pathspecs(),
@@ -85,53 +85,20 @@ impl SessionTools {
         .map_err(|source| RunToolError::Check { source })
     }
 
-    /// The judgement `access`'s task gets on its checkout as it stands,
-    /// on the log as one check of the task, and the tree it judged.
-    pub(super) async fn judged_now(
+    /// The judgement a session's work gets on the tree it stands at now: a
+    /// task session's work on its checkout, a node's own work on the run's
+    /// tree. `sessions` are the sessions whose refused writes it reads. A
+    /// tool call passes none, because the listener does not know the session
+    /// it answers.
+    pub(super) async fn judge_session(
         &self,
-        access: &TaskAccess,
-    ) -> Result<(Judgement, yunta_core::TreeId), RunToolError> {
-        let tree = self.tree_now(&access.unit.worktree).await?;
-        let (_turn, stop) = access
-            .checks
-            .take(tree.clone(), &self.stop, &access.index)
-            .await;
-        self.append(EventPayload::Tasks(TaskEvent::CheckStarted(
-            TaskCheckStartedPayload {
-                task_id: access.task.id.clone(),
-            },
-        )))
-        .await?;
-        let started = std::time::Instant::now();
-        let judgement = judge(
-            &access.task,
-            crate::scope::Ceiling {
-                scope: &access.scope,
-                protected: &access.protected,
-                closing: Closing::Every,
-            },
-            Work {
-                unit: &access.unit,
-                staged: access.staged.get().map_or(&[], Vec::as_slice),
-            },
-            &self.host.memo,
-            self.host.supervision(&stop),
-        )
-        .await;
-        access.checks.judged();
-        if stop.is_cancelled() && !self.stop.is_cancelled() {
-            return Err(RunToolError::Superseded);
+        settle: Settle,
+        sessions: &[SessionId],
+    ) -> Result<Judgement, RunToolError> {
+        match self.task.as_deref() {
+            Some(access) => self.judge_task(access, settle, sessions).await,
+            None => self.judge_node(settle).await,
         }
-        let judgement = judgement.map_err(|source| RunToolError::Check { source })?;
-        let results = self.recorded(&access.task.id, &judgement.criteria).await?;
-        self.append(answered(
-            &access.task.id,
-            &judgement,
-            results,
-            started.elapsed(),
-        ))
-        .await?;
-        Ok((judgement, tree))
     }
 
     /// What `yunta_check_task` answers for `judgement`.
@@ -161,24 +128,6 @@ impl SessionTools {
                 tool: self.called(tool),
             })
     }
-}
-
-/// The answer a check of `task` gave, as the log keeps it.
-fn answered(
-    task: &TaskId,
-    judgement: &Judgement,
-    results: Vec<yunta_core::events::CriterionResult>,
-    took: std::time::Duration,
-) -> EventPayload {
-    EventPayload::Tasks(TaskEvent::CheckAnswered(TaskCheckAnsweredPayload {
-        task_id: task.clone(),
-        closes: judgement.closes(),
-        results,
-        waiting: judgement.waiting.clone(),
-        outside_scope: judgement.scope.violations.clone(),
-        denied: judgement.scope.denied.clone(),
-        duration_ms: took.as_millis().min(u64::MAX as u128) as u64,
-    }))
 }
 
 /// One task, as `yunta_task` answers it.

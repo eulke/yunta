@@ -82,7 +82,8 @@ impl FailureDetail<'_> {
             | Failure::PathsDenied { .. }
             | Failure::Message { .. }
             | Failure::ScopeRequested { .. }
-            | Failure::Unset { .. } => FailureSays::Nothing,
+            | Failure::Unset { .. }
+            | Failure::PlanUnpassable { .. } => FailureSays::Nothing,
         }
     }
 }

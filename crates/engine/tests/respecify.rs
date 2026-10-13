@@ -46,6 +46,7 @@ fn departing_from_the_test() -> String {
       - type: run_tool
         tool: yunta_declare_deviation
         arguments:
+          kind: departure
           from: { criterion: \"sh tests/greet.sh\" }
           planned: \"the greeting says Hello\"
           instead: \"it says Hi\"

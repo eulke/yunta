@@ -373,6 +373,23 @@ impl MockStep {
 pub struct MockEffect {
     pub path: PathBuf,
     pub content: String,
+    /// How the write is made. A write through the CLI's own tool call is
+    /// asked of the engine's rail before it lands; a write through a shell
+    /// command reaches no write hook, so the rail is never asked about it.
+    #[serde(default)]
+    pub via: Via,
+}
+
+/// How a scripted write is made: through the CLI's tool call, which its
+/// write hook judges, or through a shell command, which no hook sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Via {
+    /// Through the CLI's tool call, which the write hook judges first.
+    #[default]
+    Tool,
+    /// Through a shell command, which lands without the write hook seeing it.
+    Command,
 }
 
 /// The causes a fixture may state: the port's three, as a person writes them.

@@ -235,7 +235,7 @@ pub fn audits(node: &yunta_core::Node) -> bool {
     node.permissions == Some(yunta_core::NodePermissions::ReadOnly) || node.scope.is_declared()
 }
 
-/// What a node's work is held to on this run: the globs it declares —
+/// The scope in force for a node's work on this run: the globs it declares —
 /// or, scoped to the run, what the run had changed when its attempt
 /// started, as `node_started` recorded it — plus every path a person
 /// granted the node on the run's log after it failed on its scope.
@@ -243,7 +243,7 @@ pub fn audits(node: &yunta_core::Node) -> bool {
 ///
 /// A read-only node is held to its word alone: nothing ever offers it a
 /// grant, and one on the log would still widen nothing.
-pub fn effective_scope(node: &yunta_core::Node, state: &RunState) -> Option<Vec<ScopeGlob>> {
+pub fn node_scope_in_force(node: &yunta_core::Node, state: &RunState) -> Option<Vec<ScopeGlob>> {
     if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
         return Some(Vec::new());
     }

@@ -1,5 +1,7 @@
 //! A task session that cannot build what the plan declares says so, and
-//! its task does not close on it until a person answers.
+//! its task does not close on it until a person answers. A criterion that
+//! no work on the plan can pass is declared unpassable instead, and the
+//! planner is routed to rewrite the plan.
 
 mod common;
 
@@ -8,7 +10,7 @@ use yunta_core::events::{
     DepartsFrom, EventPayload, Failure, GateEvent, PauseReason, SessionEvent, TaskEvent, TaskStatus,
 };
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{Bench, ScriptedInteraction};
+use yunta_testkit::{Bench, ScriptedInteraction, MOCK_CONFIG};
 
 /// A plan whose one task owns the `Greeting` shape and must write
 /// `greeting.txt`.
@@ -52,6 +54,7 @@ fn departs(from: &str) -> String {
       - type: run_tool
         tool: yunta_declare_deviation
         arguments:
+          kind: departure
           from: {from}
           planned: \"Hello, and good night\"
           instead: \"Hello\"
@@ -363,3 +366,111 @@ async fn a_plan_shown_after_its_work_carries_the_departures_a_person_accepted() 
     assert_eq!(departure.declared.instead, "Hello");
     assert_eq!(departure.said.as_deref(), Some("the clock can wait"));
 }
+
+#[tokio::test]
+async fn a_criterion_that_passes_or_belongs_to_the_suite_is_never_declared_unpassable() {
+    let config = format!("{MOCK_CONFIG}baseline:\n  suite: \"true\"\n");
+    let plan = "\
+tasks:
+  - id: greet
+    title: \"Write the greeting\"
+    scope: [\"greeting.txt\"]
+    criteria:
+      - cmd: \"test -f greeting.txt\"
+      - cmd: \"true\"
+        type: guard
+";
+    let fixture = plan_session(plan)
+        + "  - match_prompt_contains: \"`greet`\"
+    effects:
+      - { path: greeting.txt, content: \"Hello\" }
+    steps:
+      - type: run_tool
+        tool: yunta_declare_deviation
+        expect: refused
+        arguments: { kind: unpassable, criterion: \"test -f greeting.txt\", why: \"it passes\" }
+      - type: run_tool
+        tool: yunta_declare_deviation
+        expect: refused
+        arguments: { kind: unpassable, criterion: \"true\", why: \"the suite holds it\" }
+    outcome: { type: completed, summary: declared }
+";
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench.run_with_config(WORKFLOW, &fixture, &config).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Done));
+    assert!(
+        !bench.events().iter().any(|event| {
+            event.payload().map(|payload| payload.kind_name())
+                == Some("criterion_declared_unpassable")
+        }),
+        "a passing criterion, or one the suite holds, is never declared unpassable"
+    );
+}
+
+#[tokio::test]
+async fn a_criterion_no_work_on_the_plan_can_pass_is_declared_and_the_planner_is_routed() {
+    let bench = Bench::new();
+    let plan = plan_session(&format!(
+        "tasks:\n{}",
+        task_yaml("task-u", "u", "u.txt", "false")
+    ));
+    let fixture = plan
+        + "  - match_prompt_contains: \"`task-u`\"
+    steps:
+      - type: run_tool
+        tool: yunta_declare_deviation
+        arguments: { kind: unpassable, criterion: \"false\", why: \"false exits 1\" }
+    outcome: { type: completed, summary: declared }
+" + &tasks_session("tasks: []\n", "replanned");
+
+    bench.run(UNPASSABLE_WORKFLOW, &fixture).await;
+
+    assert_eq!(
+        bench
+            .events()
+            .iter()
+            .filter(|event| event.payload().map(|payload| payload.kind_name())
+                == Some("criterion_declared_unpassable"))
+            .count(),
+        1
+    );
+    let opened = bench
+        .events()
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Session(SessionEvent::Opened(p)))
+                    if p.task_id.as_ref().is_some_and(|id| id.as_str() == "task-u")
+            )
+        })
+        .count();
+    assert_eq!(opened, 1);
+    assert!(
+        loop_failure(&bench).is_some_and(|f| serde_json::to_value(&f).unwrap()["unpassable"][0]
+            ["task_id"]
+            == "task-u")
+    );
+}
+
+/// [`WORKFLOW`] with one reroute back to the planner, so a loop that fails
+/// on a declared criterion gets its plan rewritten.
+const UNPASSABLE_WORKFLOW: &str = r#"
+name: departs
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+    on_failure: { goto: plan, max_reroutes: 1 }
+"#;

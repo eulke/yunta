@@ -333,11 +333,14 @@ run; `yunta check` refuses the workflow until you do.
 
 A loop task that ends an attempt with its criteria red is `blocked` right
 away: another session on the same task and tree would have nothing the first
-did not. The decision is yours — `retry`, `continue-work` when its attempt
-left work behind, or `grant` when it asked for scope. After an answer to a
-task's scope request, granted or denied, the session that asked picks its work
-back up where it left it; if that work already closes the task, no session
-opens at all.
+did not. One exception: a scope request still pending under a red criterion
+gets one fresh session first, once per cycle, which may close the task without
+it. A request the task leaves unanswered when it
+closes is withdrawn, and nobody is asked about it. The decision is yours —
+`retry`, `continue-work` when its attempt left work behind, or `grant` when it
+asked for scope. After an answer to a task's scope request, granted or denied,
+the session the task's cycle ended in picks its work back up where it left it; if that work
+already closes the task, no session opens at all.
 
 ## `yunta pack add`/`update` refuses
 

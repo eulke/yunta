@@ -260,6 +260,9 @@ impl TaskLedger {
                 record.answered(p, meta.seq);
                 Ok(())
             }
+            // A declaration moves nothing the ledger keeps: the status change
+            // that blocks the task is its own event.
+            TaskEvent::CriterionDeclaredUnpassable(_) => Ok(()),
         }
     }
 

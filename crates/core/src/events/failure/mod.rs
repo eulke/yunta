@@ -19,9 +19,11 @@ use crate::ids::AdapterId;
 use crate::protected::Protection;
 
 mod exit;
+mod records;
 mod sentences;
 
 pub use exit::{CommandExit, CommandOrigin, SessionDeath, SessionEnd, SessionExit, TAIL_LINES};
+pub use records::{OwedScope, RequestedScope, Unchanged, UnpassableTask};
 pub use sentences::{loop_overrun_failure, node_failed_line, PAST_THE_CAP};
 
 /// Why a node failed.
@@ -34,7 +36,8 @@ pub use sentences::{loop_overrun_failure, node_failed_line, PAST_THE_CAP};
 /// [`Failure::ScopeRequested`], one carrying `unset:` as
 /// [`Failure::Unset`], one carrying `unchanged:` as
 /// [`Failure::Unchanged`], one carrying `denied_paths:` as
-/// [`Failure::PathsDenied`], and a log written before failures were
+/// [`Failure::PathsDenied`], one carrying `unpassable:` as
+/// [`Failure::PlanUnpassable`], and a log written before failures were
 /// data carries `outcome:` alone and reads back as
 /// [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -81,45 +84,12 @@ pub enum Failure {
     /// A command the node ran exited non-zero, and what it printed last
     /// is the reason a person reads.
     Exited { exited: CommandExit },
+    /// Tasks whose declared criterion no work of the plan can pass: the
+    /// planner rewrites the plan. Its key, `unpassable:`, is one no other
+    /// variant has.
+    PlanUnpassable { unpassable: Vec<UnpassableTask> },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
-}
-
-/// The attempt that last actually ran on the tree a refused attempt
-/// would have run on, and what it failed with.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct Unchanged {
-    pub since: u32,
-    pub failure: Box<Failure>,
-}
-
-impl Unchanged {
-    /// Why the attempt was not run, ending in what the attempt that last
-    /// ran failed with, as `failed` says it.
-    fn sentence(&self, failed: &str) -> String {
-        format!(
-            "not run again: nothing in the run's tree changed since attempt {} failed on it — \
-             change what it failed on there first. Attempt {} failed: {failed}",
-            self.since, self.since
-        )
-    }
-}
-
-/// One task's request for scope, owed a person's decision: what it asked
-/// to be allowed to write, and why, in its session's own words.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct OwedScope {
-    pub task_id: crate::TaskId,
-    pub paths: Vec<ScopeGlob>,
-    pub reason: String,
-}
-
-/// What a node's session asked to be allowed to write, and why, in its
-/// own words.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct RequestedScope {
-    pub paths: Vec<ScopeGlob>,
-    pub reason: String,
 }
 
 impl Failure {
@@ -174,9 +144,18 @@ impl Failure {
     /// Whether another attempt of the node, in this same run, can end
     /// differently. Not when the cause is the config the run froze at
     /// birth: every attempt reads the same one, and the way out is a new
-    /// run under a config that declares what is missing.
+    /// run under a config that declares what is missing. Nor when a
+    /// refusal repeats a declared criterion no work of the plan can pass.
     pub fn retry_can_change(&self) -> bool {
-        !matches!(self, Failure::Unset { .. })
+        match self {
+            Failure::Unset { .. } => false,
+            // A rewrite of the plan leaves the criterion where it was, so
+            // the same declaration repeats.
+            Failure::Unchanged { unchanged } => {
+                !matches!(unchanged.failure.as_ref(), Failure::PlanUnpassable { .. })
+            }
+            _ => true,
+        }
     }
 
     /// A command that exited non-zero, and what it left behind.
@@ -208,6 +187,7 @@ impl Failure {
             | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => self.to_string(),
         }
     }
@@ -248,6 +228,7 @@ impl Failure {
             | Failure::ScopeRequested { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => Vec::new(),
         }
     }
@@ -265,6 +246,7 @@ impl Failure {
             | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -281,6 +263,7 @@ impl Failure {
             | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => None,
         }
     }
@@ -317,6 +300,7 @@ impl Failure {
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -334,6 +318,7 @@ impl Failure {
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => false,
         }
     }
@@ -394,6 +379,7 @@ impl Failure {
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
+            | Failure::PlanUnpassable { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
@@ -442,6 +428,15 @@ impl fmt::Display for Failure {
                 requested_scope.reason
             ),
             Failure::ScopeOwed { owed } => f.write_str(&owed_sentence(owed)),
+            Failure::PlanUnpassable { unpassable } => write!(
+                f,
+                "the plan holds a criterion no work can pass — {}",
+                unpassable
+                    .iter()
+                    .map(|task| format!("task `{}`: `{}` ({})", task.task_id, task.cmd, task.why))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
             Failure::Artifacts { artifacts } => {
                 for (position, artifact) in artifacts.iter().enumerate() {
                     if position > 0 {

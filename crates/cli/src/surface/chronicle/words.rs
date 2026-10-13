@@ -343,6 +343,11 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
             true => format!("{task}'s departure from the plan was accepted"),
             false => format!("{task}'s departure from the plan was sent back"),
         },
+        H::Unpassable {
+            task,
+            criterion,
+            why,
+        } => detailed(format!("{task} declared `{criterion}` cannot pass"), why),
     }
 }
 

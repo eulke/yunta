@@ -4,6 +4,7 @@ use yunta_core::events::TaskStatus;
 use yunta_core::{ScopeGlob, Task, TasksFile};
 
 use crate::replay::RunState;
+use crate::task_cycle::scope_in_force;
 
 /// Up to `concurrency` tasks this iteration may work on, in
 /// declaration order: a task whose dependencies are all `Done` and is
@@ -28,7 +29,7 @@ pub(super) fn select_batch<'a>(
         if batch.len() >= concurrency as usize {
             break;
         }
-        let reach = reach(task, state);
+        let reach = scope_in_force(task, &state.grants.reach_for(&task.id));
         if batch.iter().any(|(_, chosen)| meet(chosen, &reach)) {
             continue;
         }
@@ -47,16 +48,6 @@ fn ready(task: &Task, state: &RunState) -> bool {
         Some(TaskStatus::Running) => true,
         _ => false,
     }
-}
-
-/// Everything `task` may write: what it declared, and what the log lets
-/// it reach beyond that.
-pub(super) fn reach(task: &Task, state: &RunState) -> Vec<ScopeGlob> {
-    task.scope
-        .iter()
-        .cloned()
-        .chain(state.grants.reach_for(&task.id))
-        .collect()
 }
 
 /// Whether two reaches might select the same file.

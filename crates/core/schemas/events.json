@@ -1268,6 +1268,31 @@
         "guard"
       ]
     },
+    "CriterionUnpassablePayload": {
+      "description": "A criterion of a task that its session declared no work of the plan\ncan pass. The engine ran it on the tree the session left and saw it\nred; the exit code it saw and the session's reason are recorded.",
+      "type": "object",
+      "properties": {
+        "criterion": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "criterion",
+        "exit_code",
+        "why"
+      ]
+    },
     "Decider": {
       "description": "`decided_by`: `rule | person | evidence`, with who the person was, or\nwhich criterion's output was the evidence.",
       "oneOf": [
@@ -2397,6 +2422,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "criterion_declared_unpassable"
+            }
+          },
+          "$ref": "#/$defs/CriterionUnpassablePayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "scope_checked"
             }
           },
@@ -2453,6 +2491,19 @@
             }
           },
           "$ref": "#/$defs/ScopeDerivedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "scope_expansion_withdrawn"
+            }
+          },
+          "$ref": "#/$defs/ScopeExpansionWithdrawnPayload",
           "required": [
             "kind"
           ]
@@ -2986,7 +3037,7 @@
       ]
     },
     "Failure": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], one carrying `unpassable:` as\n[`Failure::PlanUnpassable`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "anyOf": [
         {
           "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
@@ -3113,6 +3164,21 @@
           },
           "required": [
             "exited"
+          ]
+        },
+        {
+          "description": "Tasks whose declared criterion no work of the plan can pass: the\nplanner rewrites the plan. Its key, `unpassable:`, is one no other\nvariant has.",
+          "type": "object",
+          "properties": {
+            "unpassable": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UnpassableTask"
+              }
+            }
+          },
+          "required": [
+            "unpassable"
           ]
         },
         {
@@ -3811,7 +3877,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], one carrying `unpassable:` as\n[`Failure::PlanUnpassable`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "commit": {
@@ -3977,6 +4043,21 @@
           },
           "required": [
             "exited"
+          ]
+        },
+        {
+          "description": "Tasks whose declared criterion no work of the plan can pass: the\nplanner rewrites the plan. Its key, `unpassable:`, is one no other\nvariant has.",
+          "type": "object",
+          "properties": {
+            "unpassable": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UnpassableTask"
+              }
+            }
+          },
+          "required": [
+            "unpassable"
           ]
         },
         {
@@ -5797,6 +5878,29 @@
         "reason"
       ]
     },
+    "ScopeExpansionWithdrawnPayload": {
+      "description": "A request its task closed with, unanswered. Nobody decided it, so\nnothing was granted or denied: the request leaves with the task.",
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "reason": {
+          "$ref": "#/$defs/WithdrawalCause"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "paths",
+        "reason"
+      ]
+    },
     "ScopeGlob": {
       "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
       "type": "string",
@@ -6382,6 +6486,26 @@
         "failure"
       ]
     },
+    "UnpassableTask": {
+      "description": "A task whose declared criterion no work of the plan can pass: the\ncriterion's command, and the reason its session declared it with.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "cmd",
+        "why"
+      ]
+    },
     "Waiting": {
       "description": "Why a request waits for a person instead of being decided.",
       "oneOf": [
@@ -6460,6 +6584,16 @@
           "required": [
             "type"
           ]
+        }
+      ]
+    },
+    "WithdrawalCause": {
+      "description": "Why a request left without an answer.",
+      "oneOf": [
+        {
+          "description": "The task closed while its request still waited for an answer.",
+          "type": "string",
+          "const": "task_closed"
         }
       ]
     },

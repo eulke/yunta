@@ -1,5 +1,6 @@
 //! The samples of the scope kinds: a request to write outside a scope, the
-//! answer to it, and the scope a task derives from its shapes.
+//! answer to it or its withdrawal, and the scope a task derives from its
+//! shapes.
 
 use crate::events::*;
 use crate::expansion::Denial;
@@ -46,5 +47,13 @@ pub(crate) fn scope_derived() -> ScopeDerivedPayload {
         shapes: vec!["build_manifest".to_string()],
         common: vec!["run".to_string()],
         at: "deadbeef".into(),
+    }
+}
+
+pub(crate) fn scope_expansion_withdrawn() -> ScopeExpansionWithdrawnPayload {
+    ScopeExpansionWithdrawnPayload {
+        task_id: "graph-cmd".into(),
+        paths: vec!["crates/cli/src/**".into()],
+        reason: WithdrawalCause::TaskClosed,
     }
 }

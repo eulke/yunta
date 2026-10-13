@@ -47,4 +47,19 @@ mod tests {
             "wrote what no session of the run may write — a.txt, .claude/x: undo those changes"
         );
     }
+
+    #[test]
+    fn an_unpassable_plan_names_each_task_its_criterion_and_why() {
+        let failure = Failure::PlanUnpassable {
+            unpassable: vec![super::super::UnpassableTask {
+                task_id: "task-u".into(),
+                cmd: "false".to_string(),
+                why: "false exits 1".to_string(),
+            }],
+        };
+        assert_eq!(
+            failure.headline(),
+            "the plan holds a criterion no work can pass — task `task-u`: `false` (false exits 1)"
+        );
+    }
 }

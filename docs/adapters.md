@@ -124,9 +124,13 @@ too. The engine judges
 the work the way the attempt's close will — a task's criteria, guards and
 scope, or a node's documents and scope — and when the close would not take it,
 the session is sent back to it with what stands in the way, recorded as
-`stop_refused`. It does so once for one state of the work, never while the
-attempt's end owes the session an answer about its scope, and a hook that
-cannot reach the engine lets the session stop: the close still judges it.
+`stop_refused`. It does so once for one state of the work, and never while the
+close can grant or escalate a scope request the session made: the close decides
+that request, and a task's request the project refuses is answered in the run tool's
+reply, at once. A criterion that cannot run, or one declared impossible, does not
+send the session back either: the close blocks its task on the first, and the
+planner takes the second. A hook that cannot reach the engine lets the session
+stop: the close still judges it.
 Both CLIs wait for that answer as long as a run-tool call may take.
 
 Whatever the adapter, the session's prompt reaches the CLI on its standard

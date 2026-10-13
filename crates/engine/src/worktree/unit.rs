@@ -229,16 +229,18 @@ pub async fn carry_work(
 ///
 /// A unit that changed nothing produces no commit and is not an error:
 /// work whose criteria are met by side effects that leave no diff is
-/// still work done. What git ignores is never committed.
+/// still work done. What git ignores is never committed, and neither is the
+/// request file.
 pub async fn commit_work(
     unit: &Unit,
     message: &str,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
+    let exclude = super::capture::request_file_pathspec();
     git::change(
         &unit.worktree,
         Effect::Checkout,
-        &["add", "-A"],
+        &["add", "-A", "--", ".", exclude.as_str()],
         supervision,
     )
     .await?;

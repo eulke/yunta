@@ -140,9 +140,10 @@ pub(crate) enum RunToolError {
         source: serde_json::Error,
     },
     #[error(
-        "invalid departure — requires `from` (one of `{{\"shape\": name}}`, \
-         `{{\"decision\": id}}`, `{{\"change\": at}}`, `{{\"criterion\": cmd}}` or \
-         `\"outcome\"`), `planned`, `instead` and `why`"
+        "invalid declaration — requires `kind`: `departure`, with `from` (one of \
+         `{{\"shape\": name}}`, `{{\"decision\": id}}`, `{{\"change\": at}}`, \
+         `{{\"criterion\": cmd}}` or `\"outcome\"`), `planned`, `instead` and `why`; or \
+         `unpassable`, with `criterion` and `why`"
     )]
     InvalidDeparture {
         #[source]
@@ -184,7 +185,7 @@ pub(crate) enum RunToolError {
         id: yunta_core::FindingId,
         reason: String,
     },
-    #[error("a departure says what it is — `{field}` is empty")]
+    #[error("a declaration says what it is — `{field}` is empty")]
     EmptyDeparture { field: &'static str },
     #[error("the plan holds no {from} — it holds {known}")]
     NotInThePlan { from: String, known: String },
@@ -207,15 +208,26 @@ pub(crate) enum RunToolError {
     NoNodeScope,
     #[error("this attempt's start is not on the log, so there is no tree to judge its work from")]
     NoStartingTree,
-    #[error("the node's work could not be audited")]
-    Audit {
-        #[source]
-        source: crate::ScopeCheckError,
-    },
     #[error(
-        "a scope expansion request is already pending for this attempt — one request per attempt"
+        "a scope expansion request under `{pending}` is already waiting for this attempt's end, \
+         and only requests under the same criterion join it"
     )]
-    RequestPending,
+    CriterionConflict { pending: String },
+    #[error(
+        "`{criterion}` does not fail on the work (exit {exit}), so it cannot be declared \
+         unpassable — only a criterion that is red on the work can be"
+    )]
+    NotRedOnTheWork { criterion: String, exit: i32 },
+    #[error("the criterion could not be run to see whether it is red on the work")]
+    Criterion {
+        #[source]
+        source: crate::scope_expansion::ScopeExpansionError,
+    },
+    #[error("the scope decision could not be recorded on the run's log")]
+    Record {
+        #[source]
+        source: crate::run::RunError,
+    },
     #[error(
         "`{tool}` answers about a task, and this session works none — only a loop's task \
          sessions are served it"
@@ -253,16 +265,10 @@ pub(crate) enum RunToolError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("the request cannot be written as YAML")]
-    Yaml {
-        #[source]
-        source: yunta_core::yaml::YamlError,
-    },
-    #[error("cannot write `{path}`")]
-    Write {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
+    /// A request file that could not be read, parsed or written: its own sentence names the path.
+    #[error(transparent)]
+    Request {
+        source: crate::scope_expansion::RequestError,
     },
     #[error("node `{node}` declares no artifacts, so there is nothing to check")]
     NoArtifacts { node: NodeId },
@@ -310,7 +316,7 @@ impl RunToolError {
         use yunta_core::events::RunToolRefusal as R;
         let refusal = match self {
             RunToolError::Cancelled => return None,
-            RunToolError::RequestPending => R::RequestPending,
+            RunToolError::CriterionConflict { .. } => R::RequestPending,
             RunToolError::InvalidSubmission { .. }
             | RunToolError::InvalidRequest { .. }
             | RunToolError::InvalidDeparture { .. }
@@ -330,17 +336,18 @@ impl RunToolError {
             | RunToolError::NoSuchFinding { .. }
             | RunToolError::WithdrawnFinding { .. } => R::FindingNotAnswerable,
             RunToolError::Refused { .. }
+            | RunToolError::NotRedOnTheWork { .. }
             | RunToolError::Superseded
             | RunToolError::Unredactable { .. } => R::Refused,
             RunToolError::NoStartingTree
-            | RunToolError::Audit { .. }
+            | RunToolError::Criterion { .. }
+            | RunToolError::Record { .. }
             | RunToolError::Handover { .. }
             | RunToolError::Plan { .. }
             | RunToolError::Check { .. }
             | RunToolError::Storage { .. }
             | RunToolError::Render { .. }
-            | RunToolError::Yaml { .. }
-            | RunToolError::Write { .. }
+            | RunToolError::Request { .. }
             | RunToolError::Accept { .. } => R::EngineFailed,
         };
         Some(refusal)
@@ -382,8 +389,6 @@ impl SessionTools {
         .observed_by(self.host.observer.as_deref())
     }
 
-    /// Records `payload` against this session's run and node, stamped
-    /// with the run's own clock.
     /// Records that this binary refused a call to `tool`, and why: the log
     /// says what the session was answered, in a word a reader can count.
     async fn refused(&self, tool: RunTool, error: &RunToolError) {
@@ -398,6 +403,8 @@ impl SessionTools {
         }
     }
 
+    /// Records `payload` against this session's run and node, stamped with
+    /// the run's own clock, and leaves a failure to the caller to answer.
     pub(super) async fn append(&self, payload: EventPayload) -> Result<(), RunToolError> {
         self.log()
             .record(Some(&self.node), payload)

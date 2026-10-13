@@ -326,7 +326,8 @@ existe el **MCP por-run**, que el engine monta él mismo en cada sesión bajo el
 nombre `yunta-run` (endpoint que pasa en `SessionRequest.run_tools_endpoint`), con
 tools de scope de run: `yunta_post_finding`,
 `yunta_get_blackboard`, `yunta_task_status`, `yunta_request_scope_expansion`,
-—solo en una sesión de tarea— `yunta_task` y `yunta_check_task`, y —solo en la
+—solo en una sesión de tarea— `yunta_task`, `yunta_check_task` y
+`yunta_declare_deviation` (con `kind`: `departure` o `unpassable`), y —solo en la
 sesión propia de un nodo con `scope:`— `yunta_check_scope`.
 
 Para que el agente cliente sepa **cuándo** usar todo esto, `yunta init` instala una

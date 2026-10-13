@@ -1,17 +1,17 @@
-//! `effective_scope` — which scope a node's own worktree diff is held
+//! `node_scope_in_force` — which scope a node's own worktree diff is held
 //! to. The pure half of the node-level scope check; the imperative call
 //! site lives in `run::node_close`.
 
-use yunta_engine::{audits, effective_scope, RunState};
+use yunta_engine::{audits, node_scope_in_force, RunState};
 
 /// What `node` is held to on a run whose log granted it nothing and
 /// recorded no start.
 fn audited_scope(node: &yunta_core::Node) -> Option<Vec<yunta_core::ScopeGlob>> {
     assert_eq!(
         audits(node),
-        effective_scope(node, &RunState::default()).is_some()
+        node_scope_in_force(node, &RunState::default()).is_some()
     );
-    effective_scope(node, &RunState::default())
+    node_scope_in_force(node, &RunState::default())
 }
 
 fn node(yaml: &str) -> yunta_core::Node {

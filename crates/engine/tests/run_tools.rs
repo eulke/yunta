@@ -12,11 +12,16 @@ use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, FindingEvent, NodeEvent,
-    Phase, ScopeCheckedPayload, TaskEvent, TaskStatus, TaskStatusChangedPayload,
+    Phase, RunToolRefusal, ScopeCheckedPayload, SessionEvent, TaskEvent, TaskStatus,
+    TaskStatusChangedPayload,
 };
 use yunta_core::TaskId;
+use yunta_engine::scope_expansion::ScopeExpansionRequest;
 use yunta_engine::RunToolsSession;
 use yunta_testkit::ToolsHost;
+
+mod common;
+use common::scope_expansion_workflow;
 
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: coordinated
@@ -113,6 +118,16 @@ async fn call(
     }
     let result = client.call_tool(params).await.unwrap();
     (result.is_error.unwrap_or(false), text_of(&result))
+}
+
+/// The request file a session left in `dir`, read back as the request type
+/// the engine decides it by.
+async fn request_file_in(dir: &std::path::Path) -> ScopeExpansionRequest {
+    let path = dir.join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
+    let bytes = tokio::fs::read(&path)
+        .await
+        .expect("the request file must exist");
+    yunta_core::yaml::parse_bytes(&bytes).expect("the request file must parse")
 }
 
 // --- Auth (per-session bearer token) -------------------------------
@@ -321,7 +336,7 @@ async fn task_status_reflects_the_task_state_derived_from_the_log() {
 
 #[tokio::test]
 async fn scope_expansion_request_round_trips_through_the_real_consumer() {
-    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let host = ToolsHost::over(&scope_expansion_workflow("ask", None));
     let session = host.session("implement", Some("T001")).await;
     let client = client_for(&session, None).await.unwrap();
 
@@ -337,28 +352,21 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
     .await;
     assert!(!is_error, "got: {text}");
 
-    // One request per attempt — a second one is refused while
-    // the first sits unconsumed.
+    // A second request under no criterion of its own joins the pending one:
+    // the file then holds the paths of both.
     let (is_error, text) = call(
         &client,
         "yunta_request_scope_expansion",
         json!({"paths": ["src/other.rs"], "reason": "another"}),
     )
     .await;
-    assert!(is_error);
-    assert_eq!(
-        text,
-        "a scope expansion request is already pending for this attempt — one request per attempt"
-    );
+    assert!(!is_error, "got: {text}");
 
     // The file the tool wrote is the exact artifact the engine's
     // existing post-attempt evaluation consumes — proven by parsing it
-    // with the real consumer, not a mirror type.
-    let request = yunta_engine::scope_expansion::load_request(&host.attempt_dir())
-        .await
-        .unwrap()
-        .expect("the request file must exist and parse");
-    assert_eq!(request.paths, vec!["src/session/store.rs"]);
+    // with the request type the engine reads it as, not a mirror type.
+    let request = request_file_in(&host.attempt_dir()).await;
+    assert_eq!(request.paths, vec!["src/session/store.rs", "src/other.rs"]);
     assert_eq!(
         request.proposed_criterion.map(|c| c.cmd),
         Some("cargo test -p auth".to_string())
@@ -394,6 +402,71 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     client.cancel().await.unwrap();
 }
 
+#[tokio::test]
+async fn a_request_the_project_denies_is_answered_in_the_tool_reply() {
+    let host = ToolsHost::over(&scope_expansion_workflow("deny", None));
+    let session = host.session("implement", Some("T001")).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, reply) = call(
+        &client,
+        "yunta_request_scope_expansion",
+        json!({"paths": ["src/other.rs"], "reason": "x"}),
+    )
+    .await;
+    let kinds: Vec<&str> = host
+        .events()
+        .iter()
+        .filter_map(|e| e.payload().map(|p| p.kind_name()))
+        .collect();
+    assert!(!is_error && reply.contains("denied"), "{reply}");
+    assert!(kinds
+        .windows(2)
+        .any(|w| w == ["scope_expansion_requested", "scope_expansion_denied"]));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn requests_under_one_criterion_add_their_paths_even_at_once() {
+    let host = ToolsHost::over(&scope_expansion_workflow("rules", None));
+    let session = host.session("implement", Some("T001")).await;
+    let client = client_for(&session, None).await.unwrap();
+    let ask = |path: String, cmd: &str| json!({"paths": [path], "reason": "r", "proposed_criterion": {"cmd": cmd}});
+    let calls = (0..16).map(|n| {
+        call(
+            &client,
+            "yunta_request_scope_expansion",
+            ask(format!("src/f{n}.rs"), "test -f src/f.rs"),
+        )
+    });
+    assert!(futures::future::join_all(calls)
+        .await
+        .iter()
+        .all(|(is_error, _)| !is_error));
+    let written = tokio::fs::read_to_string(
+        host.attempt_dir()
+            .join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE),
+    )
+    .await
+    .unwrap();
+    assert!(
+        (0..16).all(|n| written.contains(&format!("src/f{n}.rs"))),
+        "{written}"
+    );
+    let (refused, _) = call(
+        &client,
+        "yunta_request_scope_expansion",
+        ask("src/c.rs".into(), "test -f src/c.rs"),
+    )
+    .await;
+    assert!(
+        refused
+            && host.events().iter().any(|e| matches!(e.payload(),
+                Some(EventPayload::Session(SessionEvent::RunToolRefused(r)))
+                    if r.reason == RunToolRefusal::RequestPending))
+    );
+    client.cancel().await.unwrap();
+}
+
 // --- yunta_check_scope / a node's request (node sessions with a scope) --
 
 /// A checkout at its first commit, and the log saying `fix`'s attempt
@@ -412,6 +485,53 @@ async fn scoped_node_checkout(host: &ToolsHost) -> tempfile::TempDir {
         )),
     );
     repo
+}
+
+/// A request that names no criterion joins the one waiting, and the request
+/// that names one gives it to the file, so the file holds both paths under it
+/// and a request under another criterion is then refused.
+#[tokio::test]
+async fn a_request_naming_no_criterion_takes_the_one_that_names_it() {
+    let host = ToolsHost::over(&scope_expansion_workflow("ask", None));
+    let session = host.session("implement", Some("T001")).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, reply) = call(
+        &client,
+        "yunta_request_scope_expansion",
+        json!({"paths": ["src/a.rs"], "reason": "r"}),
+    )
+    .await;
+    assert!(!is_error, "{reply}");
+    let (is_error, reply) = call(
+        &client,
+        "yunta_request_scope_expansion",
+        json!({"paths": ["src/b.rs"], "reason": "r", "proposed_criterion": {"cmd": "test -f src/b.rs"}}),
+    )
+    .await;
+    assert!(!is_error, "{reply}");
+    assert!(
+        reply.starts_with("request amended — 1 new path "),
+        "{reply}"
+    );
+    let written = tokio::fs::read_to_string(
+        host.attempt_dir()
+            .join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE),
+    )
+    .await
+    .unwrap();
+    assert!(
+        written.contains("src/a.rs") && written.contains("src/b.rs"),
+        "{written}"
+    );
+    assert!(written.contains("test -f src/b.rs"), "{written}");
+    let (refused, _) = call(
+        &client,
+        "yunta_request_scope_expansion",
+        json!({"paths": ["src/c.rs"], "reason": "r", "proposed_criterion": {"cmd": "test -f src/c.rs"}}),
+    )
+    .await;
+    assert!(refused);
+    client.cancel().await.unwrap();
 }
 
 #[tokio::test]
@@ -458,10 +578,7 @@ async fn a_node_session_checks_its_work_against_its_scope_the_way_its_close_will
     .await;
     assert!(!is_error, "got: {text}");
     assert!(text.contains("a person decides"), "got: {text}");
-    let request = yunta_engine::scope_expansion::load_request(repo.path())
-        .await
-        .unwrap()
-        .expect("the request file must exist and parse");
+    let request = request_file_in(repo.path()).await;
     assert_eq!(request.paths, vec!["Cargo.toml"]);
     client.cancel().await.unwrap();
 }
@@ -2012,34 +2129,5 @@ async fn a_tool_the_server_never_offered_is_refused_by_the_protocol() {
     };
     assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
     assert!(error.message.contains("yunta_no_such_tool"), "{error:?}");
-    client.cancel().await.unwrap();
-}
-
-/// A call the engine refuses is on the log with why: a second scope request
-/// while the first waits is refused as one already pending.
-#[tokio::test]
-async fn request_pending_records_its_refusal() {
-    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
-    let session = host.session("implement", Some("T001")).await;
-    let client = client_for(&session, None).await.unwrap();
-    let request = json!({"paths": ["src/other.rs"], "reason": "another"});
-    call(&client, "yunta_request_scope_expansion", request.clone()).await;
-
-    let (is_error, _) = call(&client, "yunta_request_scope_expansion", request).await;
-
-    assert!(is_error);
-    let refused = host
-        .events()
-        .into_iter()
-        .find_map(|event| match event.payload() {
-            Some(yunta_core::events::EventPayload::Session(
-                yunta_core::events::SessionEvent::RunToolRefused(refused),
-            )) => Some(refused.reason),
-            _ => None,
-        });
-    assert_eq!(
-        refused,
-        Some(yunta_core::events::RunToolRefusal::RequestPending)
-    );
     client.cancel().await.unwrap();
 }

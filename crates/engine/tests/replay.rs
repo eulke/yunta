@@ -519,6 +519,8 @@ const AUDIT_KINDS: &[&str] = &[
     "run_tool_refused",
     "service_reachable",
     "task_check_answered",
+    "criterion_declared_unpassable",
+    "scope_expansion_withdrawn",
 ];
 
 /// Every kind either moves state or says it does not. The pair is what

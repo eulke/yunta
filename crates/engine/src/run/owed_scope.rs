@@ -53,7 +53,7 @@ pub(super) async fn answer(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError
         };
         scope_record::record(
             &log,
-            node,
+            &node.id,
             Recording {
                 subject: Subject::Task(&request.task_id),
                 mode: Some(super::loop_exec::mode_in_force(node)),
@@ -64,6 +64,7 @@ pub(super) async fn answer(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError
                 located: false,
                 precheck: None,
                 attempt,
+                new_request: true,
             },
         )
         .await?;

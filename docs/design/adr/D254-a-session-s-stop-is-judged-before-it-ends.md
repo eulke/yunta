@@ -1,12 +1,14 @@
 ---
 number: D254
 title: "A session's stop is judged before it ends, once for one state of its work"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D260]
 ---
 
 # D254 — A session's stop is judged before it ends, once for one state of its work
+
+*(Revised by D260: decisions 2 and 4 are revised. A stop is judged by the judgement its attempt's close makes, and a request the project refuses on its own terms is answered in the call that made it.)*
 
 ## Context
 

@@ -17,7 +17,7 @@ mod respecify;
 
 use yunta_core::events::{
     loop_overrun_failure, EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome,
-    SessionDeath, TaskStatus, TokenUsage,
+    SessionDeath, TaskStatus, TokenUsage, UnpassableTask,
 };
 use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TaskId, TasksFile};
 
@@ -35,8 +35,8 @@ use super::{RunCtx, RunError};
 use batch::select_batch;
 use depart::resolve_departures;
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
-use escalate::{resolve_escalations, PendingEscalation};
-use integrate::integrate_batch;
+use escalate::resolve_escalations;
+use integrate::{integrate_batch, BatchIntegration};
 
 use crate::worktree::head_commit;
 use yunta_core::events::ChildEvent;
@@ -84,6 +84,23 @@ pub(super) async fn execute_loop(
                 })),
             )
             .await?;
+            // A criterion no task can pass is for the planner to rewrite; a
+            // repeat of the declaration that failed the node before is not.
+            if let Some(unpassable) = unpassable_of(&state.blocked) {
+                let earlier = view
+                    .state
+                    .nodes
+                    .get(&node.id)
+                    .and_then(|record| record.failed_before.as_ref());
+                let failure = match earlier {
+                    Some(earlier) if declares_again(&earlier.failure, &unpassable) => {
+                        Failure::unchanged(earlier.attempt, earlier.failure.clone())
+                    }
+                    _ => unpassable,
+                };
+                return crate::run::node_close::fail_with(ctx, node, failure, false, state.tokens)
+                    .await;
+            }
             // A decision owed a person is what nothing else can stand in
             // for: the loop ends on it, done or not, and the person grants
             // or denies each request from there.
@@ -293,15 +310,39 @@ impl LoopState {
     }
 }
 
-/// What integrating one batch produced: a cancellation that ends the node,
-/// or what is owed a person once the batch is on the log — the scope
-/// requests escalated, and the departures from the plan declared.
-enum BatchIntegration {
-    Cancelled(NodeEnd),
-    Done {
-        escalations: Vec<PendingEscalation>,
-        departures: Vec<depart::PendingDeparture>,
-    },
+/// The plan-unpassable failure of the tasks this invocation blocked on a
+/// declared criterion, or `None` when none did.
+fn unpassable_of(blocked: &[(TaskId, BlockedCause)]) -> Option<Failure> {
+    let unpassable: Vec<UnpassableTask> = blocked
+        .iter()
+        .filter_map(|(_, cause)| match cause {
+            BlockedCause::CriterionUnpassable { declared } => Some(UnpassableTask {
+                task_id: declared.task_id.clone(),
+                cmd: declared.criterion.clone(),
+                why: declared.why.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    (!unpassable.is_empty()).then_some(Failure::PlanUnpassable { unpassable })
+}
+
+/// Whether `failure` names only tasks and criteria `earlier` named too. The
+/// pair is the cause; the wording and the exit code of a new declaration
+/// are not, so the two failures are never compared whole.
+fn declares_again(earlier: &Failure, failure: &Failure) -> bool {
+    let (
+        Failure::PlanUnpassable { unpassable: before },
+        Failure::PlanUnpassable { unpassable: now },
+    ) = (earlier, failure)
+    else {
+        return false;
+    };
+    now.iter().all(|task| {
+        before
+            .iter()
+            .any(|known| known.task_id == task.task_id && known.cmd == task.cmd)
+    })
 }
 
 /// Resolves everything a loop needs once, before any task runs: the rendered

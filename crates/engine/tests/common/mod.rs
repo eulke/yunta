@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
-use yunta_core::events::{FindingEvent, NodeEvent, SessionEvent};
+use yunta_core::events::{Failure, FindingEvent, NodeEvent, SessionEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -961,4 +961,18 @@ pub fn events_matching(
         .iter()
         .filter(|e| e.payload().is_some_and(&pred))
         .count()
+}
+
+/// What the loop node last failed on.
+pub fn loop_failure(bench: &Bench) -> Option<Failure> {
+    bench
+        .events()
+        .iter()
+        .rev()
+        .find_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(failed))) => {
+                Some(failed.failure.clone())
+            }
+            _ => None,
+        })
 }

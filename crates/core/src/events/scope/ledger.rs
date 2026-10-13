@@ -164,6 +164,8 @@ impl GrantLedger {
             ScopeEvent::Derived(p) => {
                 self.derived.insert(p.task_id.clone(), p.clone());
             }
+            // A withdrawn request was never decided: it grants and answers nothing.
+            ScopeEvent::Withdrawn(_) => {}
         }
         Ok(())
     }

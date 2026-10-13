@@ -272,7 +272,9 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
     // asks with the same paths, reason and proposed_criterion, and only the
     // mode in the config changes between runs. The `ScopeExpansionRequested`
     // event must record exactly the same content in all three cases, even
-    // when the verdict that follows differs.
+    // when the verdict that follows differs. The one part that differs is the
+    // pre-check: a request the project denies in its call is refused before its
+    // criterion runs, so the deny mode records none.
     let tasks = format!(
         "tasks:\n{}",
         task_yaml("task-g", "g", "a.txt", "test -f a.txt")
@@ -320,10 +322,16 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         );
         assert_eq!(payload.reason, first.reason);
         assert_eq!(payload.proposed_criterion, first.proposed_criterion);
-        assert_eq!(
-            payload.proposed_criterion_precheck,
-            first.proposed_criterion_precheck
-        );
+        match *mode {
+            "deny" => assert_eq!(
+                payload.proposed_criterion_precheck, None,
+                "a request denied in its call runs no criterion"
+            ),
+            _ => assert_eq!(
+                payload.proposed_criterion_precheck,
+                first.proposed_criterion_precheck
+            ),
+        }
     }
 }
 
@@ -410,14 +418,21 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     let bench = Bench::new();
 
     let workflow = scope_expansion_workflow("ask", None);
+    // The criterion needs b.txt, so the first attempt ends unclosed with the
+    // request pending: the fresh session it opens writes the same, and the
+    // request is owed a person's decision.
     let tasks = format!(
         "tasks:\n{}",
-        task_yaml("task-h", "h", "a.txt", "test -f a.txt")
+        task_yaml("task-h", "h", "a.txt", "test -f a.txt && test -f b.txt")
     );
     let mut fixture = plan_session(&tasks);
-    // Attempt 1: asks. Attempt 2 (after the human grants): same diff,
-    // no new request — b.txt must now be covered by the grant on the log.
+    // Attempt 1: asks. Fresh session: asks again, writes the same. After the
+    // human grants: the same diff, no new request — b.txt must now be covered
+    // by the grant on the log.
     fixture.push_str(&requesting_session("task-h"));
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",
+    );
     fixture.push_str(
         "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",
     );
@@ -485,12 +500,18 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     let bench = Bench::new();
 
     let workflow = scope_expansion_workflow("ask", None);
+    // The criterion needs b.txt, which the request asks for, so the attempt
+    // ends unclosed with the request pending: the fresh session it opens
+    // writes nothing, and the request is owed a person.
     let tasks = format!(
         "tasks:\n{}",
-        task_yaml("task-p", "p", "a.txt", "test -f a.txt")
+        task_yaml("task-p", "p", "a.txt", "test -f a.txt && test -f b.txt")
     );
     let mut fixture = plan_session(&tasks);
     fixture.push_str(&requesting_session("task-p"));
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-p\"\n    outcome: { type: completed, summary: retried }\n",
+    );
 
     let RunReport {
         terminal,
@@ -985,7 +1006,11 @@ fn asks_then(answered: &str) -> (String, String) {
             "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
         })),
     );
-    let fixture = plan_session(&tasks) + &asks + answered;
+    // The fresh session the pending request opens writes nothing, so the
+    // request stays owed a person's decision.
+    let fresh =
+        "  - match_prompt_contains: \"task-h\"\n    outcome: { type: completed, summary: fresh }\n";
+    let fixture = plan_session(&tasks) + &asks + fresh + answered;
     (scope_expansion_workflow("ask", None), fixture)
 }
 
@@ -997,11 +1022,11 @@ fn grants() -> ScriptedInteraction {
     })
 }
 
-/// The answer is the one thing that changed for the session that asked:
-/// it is picked back up in the checkout it saw, holding its work, told
-/// what was granted and where to read its scope — not started over.
+/// The answer is the one thing that changed for the session the cycle
+/// ended in: it is picked back up in the checkout it saw, holding its work,
+/// told what was granted and where to read its scope — not started over.
 #[tokio::test]
-async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
+async fn a_granted_request_resumes_the_session_the_cycle_ended_in() {
     let (workflow, fixture) = asks_then(
         "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
     );
@@ -1015,12 +1040,23 @@ async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
         Some(yunta_core::events::TaskStatus::Done)
     );
 
+    // The request is logged once though three sessions read it: the fresh
+    // session after the one that asked carries the same request, no grant.
+    let requested = bench
+        .events()
+        .iter()
+        .filter(|e| e.payload().map(|p| p.kind_name()) == Some("scope_expansion_requested"))
+        .count();
+    assert_eq!(requested, 1, "the request is logged once, not per session");
+    // The answer picks back up the session the cycle ended in, in the
+    // checkout all three sessions share.
     let opened = task_sessions(&bench, "task-h");
-    assert_eq!(opened.len(), 2, "{opened:?}");
-    assert_eq!(opened[1].continues.as_ref(), Some(&opened[0].session_id));
+    assert_eq!(opened.len(), 3, "{opened:?}");
+    assert_eq!(opened[1].continues, None);
+    assert_eq!(opened[2].continues.as_ref(), Some(&opened[1].session_id));
     assert_eq!(
         bench.mock().resumes_seen(),
-        vec![opened[0].session_id.clone()]
+        vec![opened[1].session_id.clone()]
     );
     let requests = bench.mock().requests_seen();
     let in_units: Vec<_> = requests
@@ -1028,9 +1064,9 @@ async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
         .filter(|request| request.cwd.to_string_lossy().contains("/pool/"))
         .map(|request| request.cwd.clone())
         .collect();
-    assert_eq!(in_units.len(), 2, "{in_units:?}");
-    assert_eq!(
-        in_units[1], in_units[0],
+    assert_eq!(in_units.len(), 3, "{in_units:?}");
+    assert!(
+        in_units.iter().all(|cwd| *cwd == in_units[0]),
         "the session picks back up in the checkout it saw"
     );
     let resumed = requests.last().unwrap();
@@ -1055,9 +1091,12 @@ async fn an_adapter_that_cannot_resume_opens_fresh_on_the_same_work() {
         "a.txt from the first session is still there"
     );
 
+    // The asking session, then the fresh one the cycle opens, then the
+    // fresh one the answer reopens: an adapter that cannot resume never
+    // continues any of them.
     let opened = task_sessions(&bench, "task-h");
-    assert_eq!(opened.len(), 2, "{opened:?}");
-    assert_eq!(opened[1].continues, None);
+    assert_eq!(opened.len(), 3, "{opened:?}");
+    assert_eq!(opened[2].continues, None);
     assert!(bench.mock().resumes_seen().is_empty());
     assert!(bench.events().iter().any(|e| matches!(
         e.payload(),

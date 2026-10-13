@@ -15,9 +15,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::ExecutionEnvironment;
+use yunta_core::events::{CriterionUnpassablePayload, ExecutionEnvironment};
 use yunta_core::protected::Protected;
-use yunta_core::{ArtifactSpec, Coordination, NodeId, NodeKind, RunId, ScopeGlob, Task, Workflow};
+use yunta_core::{
+    ArtifactSpec, Coordination, NodeId, NodeKind, RunId, ScopeExpansionMode, ScopeGlob, Task,
+    Workflow,
+};
 use yunta_storage::AsyncStorage;
 
 use crate::observer::RunObserver;
@@ -152,6 +155,9 @@ pub struct RunToolsHost {
     pub(super) workflow: Workflow,
     /// What formats a file a session writes.
     pub(super) formatters: Vec<Formatter>,
+    /// Held while a request file is read and written, so the requests of
+    /// concurrent sessions of the run never race on the one file.
+    pub(super) scope_guard: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Each blackboard group's members, by group.
@@ -220,6 +226,7 @@ impl RunToolsHost {
             suite,
             workflow: workflow.clone(),
             formatters,
+            scope_guard: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -307,8 +314,9 @@ pub struct TaskAccess {
     /// The task as the cycle judges it: the criteria the loop registered,
     /// plus the suite the run holds every task to.
     pub task: Task,
-    /// What a scope audit holds the diff to: the scope the task declared
-    /// plus every path the log granted it when this cycle began.
+    /// The scope in force for this task's work: what the task declared
+    /// plus every path granted to it when this cycle began, as
+    /// `scope_in_force` combines them. What the diff is held to.
     pub scope: Vec<ScopeGlob>,
     /// What no session of the run may write, as this task's grants leave
     /// it: the run's protected paths, with the instruction files a person
@@ -334,6 +342,48 @@ pub struct TaskAccess {
     /// The commands the run holds every task to, which no task departs
     /// from.
     pub held: Vec<String>,
+    /// The criterion this session declared unpassable, if it declared one.
+    /// Held across the check and the append, so a second declaration is
+    /// never recorded.
+    pub declared: Arc<tokio::sync::Mutex<Option<CriterionUnpassablePayload>>>,
+    /// The limits this task's requests are decided under.
+    pub expansion: TaskExpansion,
+}
+
+/// The limits a task's scope requests are decided under: the mode and the
+/// caps its loop declares, the bound on the files a grant may touch, the
+/// paths another task of its batch may write, and the attempt the session
+/// belongs to.
+#[derive(Debug, Clone)]
+pub struct TaskExpansion {
+    /// What a request may get: a grant, a wait for a person, or nothing.
+    pub mode: ScopeExpansionMode,
+    /// The most files a bounded grant may touch.
+    pub max_files: usize,
+    /// How many grants the run may make before a request waits for a
+    /// person. Absent is no cap.
+    pub max_per_run: Option<u32>,
+    /// Paths another task of the batch may write: a grant there is a
+    /// person's to make.
+    pub beside: Vec<ScopeGlob>,
+    /// The attempt this session belongs to, which numbers the finding a
+    /// refused request leaves.
+    pub attempt: u32,
+}
+
+impl TaskAccess {
+    /// The limits this task's requests are decided under, built from the
+    /// expansion the access carries and the protection the task works
+    /// under.
+    pub(crate) fn scope_bounds(&self) -> yunta_core::expansion::Bounds<'_> {
+        yunta_core::expansion::Bounds {
+            mode: self.expansion.mode,
+            max_files: self.expansion.max_files,
+            max_per_run: self.expansion.max_per_run,
+            protected: &self.protected,
+            beside: &self.expansion.beside,
+        }
+    }
 }
 
 /// The one check of a task that judges at a time, and the tree it is
