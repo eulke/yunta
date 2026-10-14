@@ -99,7 +99,7 @@ pub(crate) async fn spawn_detached_resume(
     let log_path = run_dir
         .join(yunta_engine::run_dir::SCRATCH_DIR)
         .join("detached.log");
-    let log = std::fs::File::create(&log_path)?;
+    let log = tokio::fs::File::create(&log_path).await?.into_std().await;
     let log_err = log.try_clone()?;
     let mut child_cmd = tokio::process::Command::new(crate::context::own_binary());
     child_cmd
@@ -120,8 +120,7 @@ pub(crate) async fn spawn_detached_resume(
         .and_then(|id| Pid::try_from(id).ok())
         .ok_or_else(|| std::io::Error::other("the detached child reported no usable process id"))?;
     tokio::spawn(async move {
-        // best-effort: the reaper only collects the child's exit; the child's
-        // own log says how the run went.
+        // best-effort: the reaper only collects the child; its own log says how the run went.
         let _ = child.wait().await;
     });
     Ok(pid)

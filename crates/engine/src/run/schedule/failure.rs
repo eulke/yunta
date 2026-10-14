@@ -4,9 +4,9 @@
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{Facts, Failure, Outlook, PauseReason, Stuck};
-use yunta_core::{DefaultOnFailure, Node};
+use yunta_core::{DefaultOnFailure, Node, NodeId};
 
-use super::{after_reroute, is_gate, Board, Decision};
+use super::{is_gate, Board, Decision};
 use crate::replay::NodeState;
 
 impl Board<'_> {
@@ -159,4 +159,104 @@ fn correction_can_change(failure: &Failure, outlook: &Outlook) -> bool {
         Outlook::Stuck(Stuck::FrozenConfig | Stuck::FrozenInput)
     );
     !repeats_a_plan && !waits && !frozen
+}
+
+/// A failure already re-routed to `to`: what happens next depends on
+/// where that correction got to.
+fn after_reroute(
+    board: &Board<'_>,
+    node: &Node,
+    to: &NodeId,
+    reroute_seq: yunta_core::Seq,
+) -> Option<Decision> {
+    let corrective = board.state.nodes.get(to).cloned().unwrap_or_default();
+    if let Some(corrected) = corrective.last_finished.filter(|seq| *seq > reroute_seq) {
+        // What lies between the correction and the failed node read what
+        // the correction replaced: it runs again, in the graph's order,
+        // before the failed node does — a gate never asks about a plan
+        // alongside what was made from the one it sent back.
+        match stale_between(board, to, &node.id, corrected) {
+            // A gate among them asks again, the way any gate is driven.
+            Some(Stale::Rerun(id)) => {
+                return Some(match board.nodes.iter().find(|n| n.id == id) {
+                    Some(gate) if is_gate(gate) => board.drive_gate(gate),
+                    _ => Decision::Execute(vec![(id.clone(), board.next_attempt(&id))]),
+                })
+            }
+            // Its own failure is its own to resolve, on its turn.
+            Some(Stale::Failed) => return None,
+            None => {}
+        }
+        // The destination completed — the failed node returns to ready
+        // and re-runs. A gate never goes through `Execute`: it re-asks
+        // (internal) or re-polls/republishes (external).
+        return Some(if is_gate(node) {
+            board.drive_gate(node)
+        } else {
+            Decision::Execute(vec![(node.id.clone(), board.next_attempt(&node.id))])
+        });
+    }
+    if corrective.last_failed.is_some_and(|seq| seq > reroute_seq) {
+        // The corrective node failed on its own; it is a Failed node
+        // itself and this same scan resolves it on its own turn.
+        return None;
+    }
+    // Re-route emitted, corrective node not run yet.
+    Some(Decision::Execute(vec![(
+        to.clone(),
+        board.next_attempt(to),
+    )]))
+}
+
+/// A node between a correction and the node that failed, still holding
+/// what it made before the correction.
+enum Stale {
+    /// The first, in the graph's order: it runs again.
+    Rerun(NodeId),
+    /// The first failed when it ran again after the correction.
+    Failed,
+}
+
+/// The first node downstream of `to` and upstream of `failed` that last
+/// finished before `to` did at `corrected` — declaration order, and only
+/// one whose own inputs between the two are fresh, so they run again in
+/// the order the graph gives them.
+fn stale_between(
+    board: &Board<'_>,
+    to: &NodeId,
+    failed: &NodeId,
+    corrected: yunta_core::Seq,
+) -> Option<Stale> {
+    let between: Vec<&NodeId> = board
+        .nodes
+        .iter()
+        .map(|node| &node.id)
+        .filter(|id| *id != to && *id != failed)
+        .filter(|id| board.depends_on(id, to) && board.depends_on(failed, id))
+        .collect();
+    let stale = |id: &NodeId| {
+        board
+            .state
+            .nodes
+            .get(id)
+            .and_then(|record| record.last_finished)
+            .is_none_or(|seq| seq < corrected)
+    };
+    let next = between.iter().copied().find(|id| {
+        stale(id)
+            && board
+                .deps_of(id)
+                .iter()
+                .all(|dep| !between.contains(&dep) || !stale(dep))
+    })?;
+    let failed_again = board
+        .state
+        .nodes
+        .get(next)
+        .and_then(|record| record.last_failed)
+        .is_some_and(|seq| seq > corrected);
+    Some(match failed_again {
+        true => Stale::Failed,
+        false => Stale::Rerun(next.clone()),
+    })
 }

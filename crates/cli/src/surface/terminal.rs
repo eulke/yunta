@@ -5,6 +5,8 @@
 use std::io::IsTerminal;
 use std::sync::OnceLock;
 
+use yunta_core::Env;
+
 /// The two values the delivery policy reads, lifted out of the process
 /// so the policy is a function of its arguments and nothing else.
 pub(crate) struct TerminalEnv {
@@ -16,13 +18,13 @@ pub(crate) struct TerminalEnv {
 
 static SETTLED: OnceLock<TerminalEnv> = OnceLock::new();
 
-/// Fixes what this process's terminal allows, from what it was started
-/// with. `main` calls it once, before anything is printed; a later call
-/// changes nothing.
-pub(crate) fn settle() {
+/// Fixes what this process's terminal allows, from the environment it was
+/// started with. `main` calls it once, ahead of any output; any
+/// further call changes nothing.
+pub(crate) fn settle(env: &Env) {
     SETTLED.get_or_init(|| TerminalEnv {
         stderr_is_terminal: std::io::stderr().is_terminal(),
-        term: std::env::var("TERM").ok(),
+        term: env.terminal_var("TERM").map(str::to_string),
     });
 }
 

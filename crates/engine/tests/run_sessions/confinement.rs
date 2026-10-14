@@ -93,8 +93,8 @@ fn opened_confinement(bench: &Bench, node: &str) -> ConfinementRecord {
 }
 
 /// What a session records it may write and reach: a read-only node's session
-/// has no checkout to write and no network, and a `full` node's session runs
-/// unconfined over the whole checkout with its network open.
+/// has no checkout to write and no network, and a node with `permissions: full`
+/// runs unconfined over the whole checkout with its network open.
 #[tokio::test]
 async fn the_opened_session_records_what_it_may_write_and_reach() {
     let workflow = r#"

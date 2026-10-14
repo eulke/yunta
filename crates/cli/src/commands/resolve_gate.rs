@@ -65,7 +65,7 @@ async fn record(
         &ctx.clock,
         HumanChoice {
             option: option.clone(),
-            by: crate::identity::responder(resolved_by),
+            by: crate::identity::responder(resolved_by, ctx.env.user.as_deref()),
             free_text: free_text.map(str::to_string),
         },
         &redactor,
@@ -118,7 +118,7 @@ pub async fn resolve_gate(
     let choice = match option {
         Some(option) => HumanChoice {
             option: option.clone(),
-            by: crate::identity::responder(resolved_by),
+            by: crate::identity::responder(resolved_by, ctx.env.user.as_deref()),
             free_text: free_text.map(str::to_string),
         },
         None => match chosen(&ctx, run_id).await? {
@@ -239,7 +239,7 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
         )));
     };
     let shown = yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state).await?;
-    match crate::ask::decide(&console, &escalation, Some((run_id, &shown))) {
+    match crate::ask::decide(&console, &ctx.env, &escalation, Some((run_id, &shown))) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(GateState::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(GateState::Interrupted)),

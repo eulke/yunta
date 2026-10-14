@@ -23,7 +23,7 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 /// `run` mirrors the `{{run.dir}}`/`{{run.worktree}}` template variables
 /// every other node already exposes (`node_exec::template_vars`), rather
 /// than inventing different names for the same two paths. `env` is
-/// always present but empty for now — no per-node `env:`
+/// always present and empty — no per-node `env:`
 /// declaration exists on `kind: executor` yet (same "not designed yet"
 /// treatment `isolation: container` gets elsewhere), so there is nothing
 /// to declare, but the key stays so an executor never has to branch on
@@ -104,8 +104,8 @@ pub(super) async fn execute_executor(
         )
         .await;
     };
-    // The only variant today (`ExecutorKind::Binary`) — matched
-    // explicitly rather than ignored so a future `wasm` variant
+    // The only variant (`ExecutorKind::Binary`) — matched explicitly
+    // rather than ignored, so a second variant such as `wasm`
     // breaks this call site at compile time instead of silently running
     // it as a binary.
     let ExecutorKind::Binary = registration.kind;

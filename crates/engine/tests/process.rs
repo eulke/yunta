@@ -408,12 +408,8 @@ async fn a_cancelled_run_kills_the_git_it_spawned() {
     }
 
     let cancel = tokio_util::sync::CancellationToken::new();
-    let path = format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    let env = [("PATH".to_string(), path.clone())];
+    let path = yunta_testkit::stubs::path_with(&bin);
+    let env = [("PATH".to_string(), path.to_string_lossy().into_owned())];
     let supervision = Supervision::outside_any_run(&cancel, &FixedClock).with_env(&env);
 
     let waiting = started.clone();

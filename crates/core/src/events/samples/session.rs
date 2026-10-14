@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::best_effort::BestEffortStep;
 use crate::confinement::{Commands, Worktree};
 use crate::events::*;
 use crate::port::PermissionProfile;
@@ -124,4 +125,12 @@ pub(crate) fn service_unreachable() -> ServiceUnreachablePayload {
 
 pub(crate) fn service_reachable() -> ServiceReachablePayload {
     ServiceReachablePayload { waited_ms: 42_000 }
+}
+
+/// The sample every test builds the best-effort row from.
+pub(crate) fn best_effort_failed() -> BestEffortFailedPayload {
+    BestEffortFailedPayload {
+        step: BestEffortStep::McpClientClose,
+        cause: "the MCP client did not close after its query".to_string(),
+    }
 }

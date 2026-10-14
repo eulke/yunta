@@ -6,13 +6,13 @@ use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    AccountLimit, CriterionResult, FailureCause, LimitSource, Phase, SessionDeath, SessionRefusal,
-    TaskCause,
+    AccountLimit, CriterionResult, CriterionUnpassablePayload, FailureCause, LimitSource, Phase,
+    SessionDeath, SessionRefusal, TaskCause,
 };
 use yunta_core::expansion::Decision;
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::protected::{Closing, Protected};
-use yunta_core::{AdapterId, Task};
+use yunta_core::{AdapterId, SessionId, Task};
 
 use super::criteria::could_not_run;
 use super::judge::{judge, scope_in_force, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work};
@@ -22,6 +22,7 @@ use super::record::{Checked, Recorder};
 use super::session::{SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
+use crate::run_tools::TaskAccess;
 use crate::scope_expansion::{consume_request, read_request, ScopeExpansionOutcome};
 
 /// Everything one attempt of [`run_task`] reads: the per-cycle context that
@@ -83,31 +84,9 @@ pub(super) async fn run_one_attempt(
     recorder: Recorder<'_>,
     attempt: u32,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
-    let (
-        last_staged,
-        super::Dispatched {
-            outcome: dispatch_outcome,
-            tokens,
-            fence: covered,
-            confinement,
-            sessions,
-            ..
-        },
-        access,
-    ) = open_and_dispatch(params, attempt).await?;
+    let (last_staged, dispatched, access) = open_and_dispatch(params, attempt).await?;
     // The session the attempt ends in is the one a next attempt picks back up.
-    let session = sessions.last().cloned();
-    let &AttemptParams {
-        task,
-        unit,
-        memo,
-        already_granted_paths,
-        protected,
-        supervision,
-        grants,
-        audit,
-        ..
-    } = params;
+    let session = dispatched.sessions.last().cloned();
     // A cancelled dispatch ends the cycle right here — no post-check, no
     // verdict, no retry. The attempt is on record; what the cancellation
     // means for the task is the caller's decision, because only it knows
@@ -119,67 +98,38 @@ pub(super) async fn run_one_attempt(
     // token — so running it would only produce a "killed before it could
     // answer" to interpret as a failure. This attempt lost; it did not
     // fail.
-    let cancelled =
-        matches!(dispatch_outcome, DispatchOutcome::Cancelled) || supervision.cancel.is_cancelled();
+    let cancelled = matches!(dispatched.outcome, DispatchOutcome::Cancelled)
+        || params.supervision.cancel.is_cancelled();
     if cancelled {
-        return interrupted(&recorder, attempt, session, tokens, last_staged).await;
+        return interrupted(&recorder, attempt, session, dispatched.tokens, last_staged).await;
     }
 
-    // The request the session left is read here and decided by the judgement
-    // on the tree the session left. Nothing is consumed until it is settled.
-    let request = read_request(unit.worktree.as_path())
-        .await
-        .map_err(|source| TaskCycleError::ScopeExpansion {
-            task: task.id.clone(),
-            source,
-        })?;
-    let declared = access.declared.lock().await.clone();
-    let in_force = scope_in_force(task, already_granted_paths);
-    let refused = match audit {
-        Some((observer, node)) => Refusals::Observer {
-            observer,
-            node,
-            sessions: sessions.as_slice(),
-        },
-        None => Refusals::None,
+    let Some(judgement) =
+        judge_attempt(params, &access, &dispatched.sessions, &last_staged).await?
+    else {
+        return interrupted(&recorder, attempt, session, dispatched.tokens, last_staged).await;
     };
-    // The final diff is evaluated against the declared scope plus any
-    // authorized expansions — never against a denied or escalated request's
-    // paths.
-    let judgement = judge(
-        Sitting {
-            work: Work {
-                checkout: unit.worktree.as_path(),
-                from: &unit.from,
-                staged: &last_staged,
-            },
-            task: Some(task),
-            scope: &in_force,
-            request: request.as_ref(),
-            refused,
-            window: Some(grants),
-            bounds: Some(access.scope_bounds()),
-            declared: declared.as_ref(),
-            documents: None,
-            env: JudgeEnv {
-                memo,
-                protected,
-                closing: Closing::Every,
-                supervision,
-            },
-        },
-        Settle::Commit,
+    verdict(
+        params,
+        recorder,
+        attempt,
+        dispatched,
+        last_staged,
+        judgement,
     )
-    .await;
-    // A cancellation that lands while the work is judged — a check waiting
-    // for the measurement, a criterion running — cuts the attempt the same
-    // way: nothing it answered is a verdict on the task.
-    let judgement = match judgement {
-        _ if supervision.cancel.is_cancelled() => {
-            return interrupted(&recorder, attempt, session, tokens, last_staged).await;
-        }
-        judged => judged?,
-    };
+    .await
+}
+
+/// Records what the judgement found on the log, then the attempt as a record,
+/// and returns the step the cycle takes next from it.
+async fn verdict(
+    params: &AttemptParams<'_>,
+    recorder: Recorder<'_>,
+    attempt: u32,
+    dispatched: super::Dispatched,
+    last_staged: Vec<PathBuf>,
+    judgement: Judgement,
+) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
     let succeeded = judgement.closes();
     let withdrawn = withdrawn_of(succeeded, judgement.request.as_ref());
     let Judgement {
@@ -201,20 +151,17 @@ pub(super) async fn run_one_attempt(
     // left no work behind and said how its process went, and the next
     // attempt would open the same session against the same
     // configuration. Captured here for the same reason.
-    let session_death = match &dispatch_outcome {
-        DispatchOutcome::Crashed { exit } => Some(SessionDeath {
-            adapter: params.adapter.id().clone(),
-            exit: exit.clone(),
-        }),
-        _ => None,
-    };
-
+    let session_death = session_death_of(&dispatched.outcome, params.adapter.id());
     let record = AttemptRecord {
         attempt,
-        session,
-        dispatch: dispatch_outcome,
-        tokens,
-        fence_breach: crate::scope::fence_breach(covered.as_ref(), confinement.as_ref(), &scope),
+        session: dispatched.sessions.last().cloned(),
+        dispatch: dispatched.outcome,
+        tokens: dispatched.tokens,
+        fence_breach: crate::scope::fence_breach(
+            dispatched.fence.as_ref(),
+            dispatched.confinement.as_ref(),
+            &scope,
+        ),
         post_check: post_runs,
         post_results,
         scope,
@@ -224,15 +171,100 @@ pub(super) async fn run_one_attempt(
         recorded,
     };
     if record.request_settled() {
-        consume_request(unit.worktree.as_path())
+        consume_request(params.unit.worktree.as_path())
             .await
             .map_err(|source| TaskCycleError::ScopeExpansion {
-                task: task.id.clone(),
+                task: params.task.id.clone(),
                 source,
             })?;
     }
+    step_of(params, last_staged, record, unpassable, session_death).await
+}
 
-    if succeeded {
+/// Judges the work an attempt's session left against the scope in force and
+/// the request the session made. `None` when a cancellation landed while the
+/// work was judged: nothing a cut judgement answered is a verdict on the task.
+async fn judge_attempt(
+    params: &AttemptParams<'_>,
+    access: &TaskAccess,
+    sessions: &[SessionId],
+    staged: &[PathBuf],
+) -> Result<Option<Judgement>, TaskCycleError> {
+    // The request the session left is read here and decided by the judgement
+    // on the tree the session left. Nothing is consumed until it is settled.
+    let request = read_request(params.unit.worktree.as_path())
+        .await
+        .map_err(|source| TaskCycleError::ScopeExpansion {
+            task: params.task.id.clone(),
+            source,
+        })?;
+    let declared = access.declared.lock().await.clone();
+    let in_force = scope_in_force(params.task, params.already_granted_paths);
+    let refused = refused_of(params.audit, sessions);
+    // The final diff is evaluated against the declared scope plus any
+    // authorized expansions — never against a denied or escalated request's
+    // paths.
+    let judged = judge(
+        Sitting {
+            work: Work {
+                checkout: params.unit.worktree.as_path(),
+                from: &params.unit.from,
+                staged,
+            },
+            task: Some(params.task),
+            scope: &in_force,
+            request: request.as_ref(),
+            refused,
+            window: Some(params.grants),
+            bounds: Some(access.scope_bounds()),
+            declared: declared.as_ref(),
+            documents: None,
+            env: JudgeEnv {
+                memo: params.memo,
+                protected: params.protected,
+                closing: Closing::Every,
+                supervision: params.supervision,
+            },
+        },
+        Settle::Commit,
+    )
+    .await;
+    // A cancellation that lands while the work is judged — a check waiting
+    // for the measurement, a criterion running — cuts the attempt the same
+    // way: nothing it answered is a verdict on the task.
+    if params.supervision.cancel.is_cancelled() {
+        return Ok(None);
+    }
+    judged.map(Some)
+}
+
+/// Where the judgement reads the refused writes a red criterion may locate: the
+/// observer of an audited node, with the sessions the attempt opened.
+fn refused_of<'a>(
+    audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
+    sessions: &'a [SessionId],
+) -> Refusals<'a> {
+    match audit {
+        Some((observer, node)) => Refusals::Observer {
+            observer,
+            node,
+            sessions,
+        },
+        None => Refusals::None,
+    }
+}
+
+/// The step an attempt tells the cycle to take next, from what its judgement
+/// and its dispatch left: the cycle closes, stops on a cause no retry can pass,
+/// or goes on to another attempt.
+async fn step_of(
+    params: &AttemptParams<'_>,
+    last_staged: Vec<PathBuf>,
+    record: AttemptRecord,
+    unpassable: Option<CriterionUnpassablePayload>,
+    session_death: Option<SessionDeath>,
+) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
+    if record.succeeded {
         return Ok(stop(last_staged, record, TaskOutcome::Done));
     }
     // A criterion the session declared impossible ends the cycle before any
@@ -252,20 +284,20 @@ pub(super) async fn run_one_attempt(
         .collect();
     if !unrunnable.is_empty() {
         let cause = TaskCause::Unrunnable { runs: unrunnable };
-        return stop_unclosed(unit, task, last_staged, record, cause).await;
+        return stop_unclosed(params.unit, params.task, last_staged, record, cause).await;
     }
     // A session that died says so instead of leaving the tail to report
     // criteria that were never run.
     if let Some(died) = session_death {
         let cause = TaskCause::SessionDied(died);
-        return stop_unclosed(unit, task, last_staged, record, cause).await;
+        return stop_unclosed(params.unit, params.task, last_staged, record, cause).await;
     }
     // A session that refused the request, or whose account reached its
     // limit, ends the cycle here, with the criteria judged above: the
     // engine never trusts the session's own verdict, and no other session
     // is opened on the same request.
     if let Some(cause) = failure_stop(params.adapter.id(), &record.dispatch) {
-        return stop_unclosed(unit, task, last_staged, record, cause).await;
+        return stop_unclosed(params.unit, params.task, last_staged, record, cause).await;
     }
     // A grant the engine made itself is the one thing that changes what
     // the next session can do: the fence refused the write in this one.
@@ -280,6 +312,19 @@ pub(super) async fn run_one_attempt(
             false => AttemptStep::Unmet(record),
         },
     ))
+}
+
+/// The death of a session that ended without reporting anything: it left no
+/// work behind and said how its process went, and the next attempt would open
+/// the same session against the same configuration. `None` for every other end.
+fn session_death_of(dispatch: &DispatchOutcome, adapter: &AdapterId) -> Option<SessionDeath> {
+    match dispatch {
+        DispatchOutcome::Crashed { exit } => Some(SessionDeath {
+            adapter: adapter.clone(),
+            exit: exit.clone(),
+        }),
+        _ => None,
+    }
 }
 
 /// The cause a session that ended in a failure stops the cycle with: its

@@ -45,76 +45,17 @@ impl Storage {
             )
             .map_err(read_err)?;
         let rows = stmt
-            .query_map(params![run_id.as_str()], |row| {
-                Ok(StoredRow {
-                    seq: row.get(0)?,
-                    ts: row.get(1)?,
-                    node_id: row.get(2)?,
-                    kind: row.get(3)?,
-                    payload_json: row.get(4)?,
-                    schema_version: row.get(5)?,
-                    event_hash: row.get(6)?,
-                })
-            })
+            .query_map(params![run_id.as_str()], stored_row)
             .map_err(read_err)?;
 
         let mut prev_hash: Option<String> = None;
         let mut verified = 0usize;
         for row in rows {
             let row = row.map_err(read_err)?;
-            let expected_seq = verified as i64 + 1;
-            let seq = Seq::try_from(row.seq).map_err(|source| StorageError::CorruptSeq {
-                run_id: run_id.clone(),
-                source,
-            })?;
-            if row.seq != expected_seq {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: format!(
-                        "expected seq {expected_seq} but found {} — an event was deleted, \
-                         inserted or reordered",
-                        row.seq
-                    ),
-                });
+            if let Some(verdict) = judge_row(run_id, &row, verified, prev_hash.as_deref())? {
+                return Ok(verdict);
             }
-            let Some(stored_hash) = &row.event_hash else {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: "event has no stored hash (written before the chain existed)"
-                        .to_string(),
-                });
-            };
-            let anchor = match &prev_hash {
-                Some(prev) => prev.clone(),
-                None => match genesis_from_first_row(run_id, &row) {
-                    Ok(anchor) => anchor,
-                    Err(error) => {
-                        return Ok(ChainVerification::Broken {
-                            seq,
-                            detail: error.to_string(),
-                        })
-                    }
-                },
-            };
-            let recomputed = chain_hash(ChainHashFields {
-                prev_hash: &anchor,
-                run_id: run_id.as_str(),
-                seq: row.seq,
-                ts: &row.ts,
-                node_id: row.node_id.as_deref(),
-                kind: &row.kind,
-                payload_json: &row.payload_json,
-                schema_version: row.schema_version,
-            });
-            if recomputed.as_str() != stored_hash.as_str() {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: "stored hash does not match the recomputed chain — the event or \
-                             its predecessor's hash was altered"
-                        .to_string(),
-                });
-            }
-            prev_hash = Some(stored_hash.clone());
+            prev_hash = row.event_hash;
             verified += 1;
         }
 
@@ -135,10 +76,73 @@ impl Storage {
     }
 }
 
+/// Judges one row of the walk: `None` when it holds, else the broken verdict.
+fn judge_row(
+    run_id: &RunId,
+    row: &StoredRow,
+    verified: usize,
+    prev_hash: Option<&str>,
+) -> Result<Option<ChainVerification>> {
+    let expected_seq = verified as i64 + 1;
+    let seq = Seq::try_from(row.seq).map_err(|source| StorageError::CorruptSeq {
+        run_id: run_id.clone(),
+        source,
+    })?;
+    if row.seq != expected_seq {
+        return Ok(broken(
+            seq,
+            format!(
+                "expected seq {expected_seq} but found {} — an event was deleted, \
+                 inserted or reordered",
+                row.seq
+            ),
+        ));
+    }
+    let Some(stored_hash) = &row.event_hash else {
+        return Ok(broken(
+            seq,
+            "event has no stored hash (written before the chain existed)",
+        ));
+    };
+    let anchor = match prev_hash {
+        Some(prev) => prev.to_string(),
+        None => match genesis_from_first_row(run_id, row) {
+            Ok(anchor) => anchor,
+            Err(error) => return Ok(broken(seq, error.to_string())),
+        },
+    };
+    let recomputed = chain_hash(ChainHashFields {
+        prev_hash: &anchor,
+        run_id: run_id.as_str(),
+        seq: row.seq,
+        ts: &row.ts,
+        node_id: row.node_id.as_deref(),
+        kind: &row.kind,
+        payload_json: &row.payload_json,
+        schema_version: row.schema_version,
+    });
+    if recomputed.as_str() != stored_hash.as_str() {
+        return Ok(broken(
+            seq,
+            "stored hash does not match the recomputed chain — the event or \
+             its predecessor's hash was altered",
+        ));
+    }
+    Ok(None)
+}
+
+/// The verdict that the chain stops holding at `seq`, because of `detail`.
+fn broken(seq: Seq, detail: impl Into<String>) -> Option<ChainVerification> {
+    Some(ChainVerification::Broken {
+        seq,
+        detail: detail.into(),
+    })
+}
+
 /// What the run's stored head says about a walk that verified `verified` rows
 /// and ended on the row whose stored hash is `last_hash`. The head must name
-/// that row: a log that ends before its head lost its tail, and a run with no
-/// head was written before heads were anchored.
+/// that row: a log that stops short of its head has lost its tail, and a run
+/// with no head has nothing to anchor its walk to.
 fn judge_head(
     run_id: &RunId,
     head: Option<(i64, String)>,
@@ -185,6 +189,19 @@ struct StoredRow {
     payload_json: String,
     schema_version: u32,
     event_hash: Option<String>,
+}
+
+/// Reads one row of the walk's query, columns in the order it selects them.
+fn stored_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredRow> {
+    Ok(StoredRow {
+        seq: row.get(0)?,
+        ts: row.get(1)?,
+        node_id: row.get(2)?,
+        kind: row.get(3)?,
+        payload_json: row.get(4)?,
+        schema_version: row.get(5)?,
+        event_hash: row.get(6)?,
+    })
 }
 
 /// The chain's anchor for a run's first row: `run_created`'s own

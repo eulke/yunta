@@ -280,9 +280,9 @@ fn behind_bearer(router: axum::Router, token: &str, tools: SessionTools) -> axum
                         .failed(None, None, RailFailureCause::Unauthorized)
                         .await;
                 }
-                // best-effort: a body that cannot be read leaves only the refusal to answer
                 axum::body::to_bytes(req.into_body(), REFUSED_BODY_BYTES)
                     .await
+                    // best-effort: a body that cannot be read leaves only the refusal to answer
                     .ok();
                 StatusCode::UNAUTHORIZED.into_response()
             }
@@ -365,7 +365,9 @@ mod quiet_session_tests {
             StreamableHttpServerConfig::default(),
         );
         tokio::spawn(async move {
-            let _ = axum::serve(listener, axum::Router::new().nest_service("/mcp", service)).await;
+            axum::serve(listener, axum::Router::new().nest_service("/mcp", service))
+                .await
+                .expect("the test server serves until the test ends");
         });
         let transport = StreamableHttpClientTransport::with_client(
             reqwest::Client::default(),

@@ -9,7 +9,7 @@
 //! in how they are answered.
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_core::{OptionId, RunId};
+use yunta_core::{Env, OptionId, RunId};
 use yunta_engine::ShownDocument;
 
 use super::field::ask_line;
@@ -27,9 +27,11 @@ const SETTLE: &str = "enter records it, n adds a note";
 
 /// Puts `escalation` to the person, with the documents it shows, and
 /// returns what they decided. `shown` pairs the run the documents belong
-/// to with the documents; a caller that holds no run shows none.
+/// to with the documents; a caller that holds no run shows none. `env`
+/// is the ambient identity the decision is attributed to.
 pub(crate) fn decide(
     console: &Console,
+    env: &Env,
     escalation: &GateWaitingPayload,
     shown: Option<(&RunId, &[ShownDocument])>,
 ) -> Answered<HumanChoice> {
@@ -45,7 +47,7 @@ pub(crate) fn decide(
         Some(asks) => Some(required(console, asks)?),
         None => noted(console)?,
     };
-    let by = attributed(console)?;
+    let by = attributed(console, env)?;
     Ok(HumanChoice {
         option,
         by,

@@ -20,7 +20,7 @@
 //! run and derived for a new one, with the run's age deciding which. So
 //! it is counted as what it is: an artifact this binary cannot check,
 //! reported with its count wherever the verification is reported. Same
-//! reading as an event kind from the future — derive what can be
+//! reading as an event kind from a newer binary — derive what can be
 //! derived, say what could not be, never `broken` for it.
 
 use std::path::Path;

@@ -55,7 +55,13 @@ pub async fn doctor(session: bool, output: Mode, look: &Look) -> Result<Outcome,
     if let Some((found, said)) = first_run::first_run().await {
         checks.push(found, "first run", said);
     }
-    check_installed_pack_requires(&ctx.cwd, &ctx.project.config, &mut checks, &mut steps);
+    check_installed_pack_requires(
+        &ctx.env,
+        &ctx.cwd,
+        &ctx.project.config,
+        &mut checks,
+        &mut steps,
+    );
     check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await?;
     if session {
         probe_sessions(&ctx, &healthy, &mut checks).await;
@@ -266,6 +272,7 @@ fn names_a_runner(error: &yunta_engine::CheckError) -> bool {
 /// runner each unresolvable role needs as a step. A project with no
 /// packs installed has nothing to check.
 fn check_installed_pack_requires(
+    env: &yunta_core::Env,
     cwd: &std::path::Path,
     config: &yunta_core::ConfigLayer,
     checks: &mut Checklist,
@@ -280,14 +287,19 @@ fn check_installed_pack_requires(
         }
         for (_, manifest) in packs.installed {
             let gap = yunta_engine::check_pack_requires(&manifest, config);
-            check_gap(&gap, checks, steps);
+            check_gap(env, &gap, checks, steps);
         }
     }
 }
 
 /// The rows an installed pack's unmet `requires:` make, and the steps that
 /// declare each runner it lacks.
-fn check_gap(gap: &yunta_engine::PackRequiresGap, checks: &mut Checklist, steps: &mut Vec<String>) {
+fn check_gap(
+    env: &yunta_core::Env,
+    gap: &yunta_engine::PackRequiresGap,
+    checks: &mut Checklist,
+    steps: &mut Vec<String>,
+) {
     let pack = format!("pack {}", gap.pack);
     for runner in &gap.missing_runners {
         checks.push(
@@ -325,7 +337,7 @@ fn check_gap(gap: &yunta_engine::PackRequiresGap, checks: &mut Checklist, steps:
     for program in gap
         .required_programs
         .iter()
-        .filter(|program| !super::refusals::command_on_path(program))
+        .filter(|program| !super::refusals::command_on_path(env, program))
     {
         checks.push(
             Found::Problem,

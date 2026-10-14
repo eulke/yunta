@@ -89,6 +89,7 @@ pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Wat
                 .as_ref()
                 .map_or_else(Diagnostics::none, Surface::diagnostics),
             cancel.clone(),
+            env.ctx.env.clone(),
         ),
         announcing: Some(announce(
             surface

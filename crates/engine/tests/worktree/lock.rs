@@ -8,12 +8,13 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tokio_util::sync::CancellationToken;
 use yunta_core::process::signal::Liveness;
-use yunta_core::{Isolation, Pid, SystemClock};
+use yunta_core::{Isolation, Pid};
 use yunta_engine::lock::{
     acquire, release, Acquired, Contention, LockError, LockOwner, OwnerProbe,
 };
 use yunta_engine::{prepare_worktree, WorktreeError};
 use yunta_testkit::{init_repo, Owner};
+use yunta_testkit_core::{fixed_now, FixedClock};
 
 use super::head;
 
@@ -79,7 +80,7 @@ async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
     let dead = std::process::Command::new("true").spawn().unwrap();
     let dead_pid = dead.id();
     let _ = std::process::Child::wait(&mut { dead });
-    std::fs::write(lock_file(&repo), owner_record(dead_pid, Utc::now())).unwrap();
+    std::fs::write(lock_file(&repo), owner_record(dead_pid, fixed_now())).unwrap();
 
     let prepared = prepare_worktree(
         &repo,
@@ -117,7 +118,7 @@ async fn a_live_owner_s_lock_still_refuses() {
     // This test process itself is the live owner.
     std::fs::write(
         lock_file(&repo),
-        owner_record(std::process::id(), Utc::now()),
+        owner_record(std::process::id(), fixed_now()),
     )
     .unwrap();
 
@@ -218,7 +219,7 @@ async fn concurrent_worktree_adds_on_one_repo_never_corrupt_git_metadata() {
 async fn unknown_liveness_never_steals_a_lock() {
     let dir = tempfile::tempdir().unwrap();
     let lock_path = dir.path().join("yunta.lock");
-    let taken = Utc::now();
+    let taken = fixed_now();
     let record = owner_record(4242, taken);
     tokio::fs::write(&lock_path, record).await.unwrap();
     let probe = Scripted {
@@ -231,7 +232,7 @@ async fn unknown_liveness_never_steals_a_lock() {
         &lock_path,
         Contention::Refuse,
         &probe,
-        &SystemClock,
+        &FixedClock,
         &CancellationToken::new(),
         &take_over,
     )
@@ -254,7 +255,7 @@ async fn unknown_liveness_never_steals_a_lock() {
             poll: Duration::from_millis(10),
         },
         &probe,
-        &SystemClock,
+        &FixedClock,
         &CancellationToken::new(),
         &take_over,
     )
@@ -272,7 +273,7 @@ async fn unknown_liveness_never_steals_a_lock() {
 async fn a_reused_pid_is_not_the_owner() {
     let dir = tempfile::tempdir().unwrap();
     let lock_path = dir.path().join("yunta.lock");
-    let taken = Utc::now();
+    let taken = fixed_now();
     std::fs::write(&lock_path, owner_record(4242, taken)).unwrap();
 
     // Alive, but started after the lock was taken: a newcomer that got
@@ -285,7 +286,7 @@ async fn a_reused_pid_is_not_the_owner() {
         &lock_path,
         Contention::Refuse,
         &newcomer,
-        &SystemClock,
+        &FixedClock,
         &CancellationToken::new(),
         &take_over,
     )
@@ -306,7 +307,7 @@ async fn a_reused_pid_is_not_the_owner() {
 async fn a_live_holder_with_an_unknown_start_time_keeps_its_lock() {
     let dir = tempfile::tempdir().unwrap();
     let lock_path = dir.path().join("yunta.lock");
-    std::fs::write(&lock_path, owner_record(4242, Utc::now())).unwrap();
+    std::fs::write(&lock_path, owner_record(4242, fixed_now())).unwrap();
 
     // A host that cannot tell when a process started: liveness alone
     // decides, and alive means held.
@@ -318,7 +319,7 @@ async fn a_live_holder_with_an_unknown_start_time_keeps_its_lock() {
         &lock_path,
         Contention::Refuse,
         &probe,
-        &SystemClock,
+        &FixedClock,
         &CancellationToken::new(),
         &take_over,
     )

@@ -277,6 +277,8 @@ pub(crate) enum OpenSessionError {
     /// or a shared directory inside the checkout.
     #[error(transparent)]
     Confinement(Unbuildable),
+    #[error("the staged paths of this session were already recorded")]
+    AlreadyStaged,
 }
 
 /// A session opened and waiting on its dispatch: the request to hand the
@@ -343,18 +345,23 @@ pub(crate) async fn open_session(
         artifact_dir: setup.artifact_dir.clone(),
         scratch_dir,
     };
-    record_staged(&held_to, adapter, &request);
+    record_staged(&held_to, adapter, &request)?;
     Ok(OpenedSession { request, run_tools })
 }
 
 /// Records the paths the adapter stages for its own mechanics. They are known
 /// only now, and no call can reach the session's tools before it is dispatched:
 /// a check the session asks for leaves out exactly what its close will.
-fn record_staged(held_to: &HeldTo, adapter: &dyn Adapter, request: &SessionRequest) {
+fn record_staged(
+    held_to: &HeldTo,
+    adapter: &dyn Adapter,
+    request: &SessionRequest,
+) -> Result<(), OpenSessionError> {
     if let Some(staged) = held_to.staged() {
-        // best-effort: the staged paths are set once, and a second set would keep the first.
-        let _ = staged.set(adapter.staged_paths(request));
+        let recorded = staged.set(adapter.staged_paths(request));
+        recorded.map_err(|_| OpenSessionError::AlreadyStaged)?;
     }
+    Ok(())
 }
 
 /// The session's prompt with every sentence its mount produces: which

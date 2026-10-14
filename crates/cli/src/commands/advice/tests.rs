@@ -164,6 +164,19 @@ fn spell_writes_a_decision_with_its_option_and_the_answer_it_asks_for() {
 }
 
 #[test]
+fn an_agent_is_handed_the_whole_run_id_and_the_text_flag_for_an_option_that_asks() {
+    let step = NextStep::ResolveGate {
+        run: yunta_core::RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA"),
+        option: Some(OptionId::from_static("retry")),
+        text: true,
+    };
+    assert_eq!(
+        spell_for(&step, Reader::Agent),
+        "yunta resolve-gate 01AAAAAAAAAAAAAAAAAAAAAAAA retry --text \"<answer>\""
+    );
+}
+
+#[test]
 fn the_test_spelling_matches_the_cli_for_every_step() {
     let run = yunta_core::RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
     let retry = || Some(OptionId::from_static("retry"));

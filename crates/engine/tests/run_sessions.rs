@@ -2,6 +2,7 @@
 
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
+use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
@@ -258,9 +259,9 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
 
 #[tokio::test]
 async fn a_distill_path_never_produced_becomes_a_finding_and_the_rest_lands() {
-    // Run in `quick` mode: `notes` never runs, its artifact never
+    // Run in `alpha` mode: `notes` never runs, its artifact never
     // exists, but distill declares it.
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let workflow = r#"
 name: distiller
 nodes:
@@ -291,7 +292,7 @@ on_finish:
     // honest runtime-missing case: `notes` is mode-excluded.
     let workflow = workflow.replace(
         "on_finish:",
-        "modes:\n  quick: { include: [plan] }\n  full: { include: all }\non_finish:",
+        "modes:\n  alpha: { include: [plan] }\n  beta: { include: all }\non_finish:",
     );
     let fixture = format!(
         r#"
@@ -778,7 +779,7 @@ nodes:
                         )),
                     )
                     .expect("a draft names its subject"),
-                    &yunta_core::SystemClock,
+                    &FixedClock,
                 )
                 .unwrap();
         })

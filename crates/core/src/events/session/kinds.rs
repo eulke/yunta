@@ -27,4 +27,7 @@ pub enum SessionEvent {
     ServiceUnreachable(ServiceUnreachablePayload),
     /// The service answers again, and the same session goes on.
     ServiceReachable(ServiceReachablePayload),
+    /// A best-effort step failed and the run went on past it, with the
+    /// cause its source gave.
+    BestEffortFailed(BestEffortFailedPayload),
 }

@@ -8,6 +8,8 @@
 //! baseline, so a stable miscount costs nothing and a wrong answer about
 //! one line never changes a verdict about the tree.
 
+use super::scan::blanked_lines;
+
 /// A source file with its inline `#[cfg(test)]` modules blanked, so a
 /// production counter never sees the unit tests that live beside the code:
 /// the audit measured these patterns *outside* tests.
@@ -28,7 +30,7 @@ pub fn production_only(text: &str) -> String {
 
 /// One flag per line: whether it sits inside a `#[cfg(test)]` module (the
 /// attribute line, the `mod … {` header, and the body through its matching
-/// `}`). Braces inside strings and comments are ignored via [`strip_noise`],
+/// `}`). Braces inside strings and comments are ignored via [`blanked_lines`],
 /// so a `{` in a string never opens a phantom module.
 pub fn test_mod_mask(text: &str) -> Vec<bool> {
     let lines: Vec<&str> = text.lines().collect();
@@ -158,12 +160,15 @@ pub fn functions_over(source: &str, max: usize) -> usize {
         .count()
 }
 
-/// Lines calling `std::fs::` inside the body of an `async fn`.
+/// Counts `std::fs::` calls inside an `async fn` body, except those covered
+/// by a `// blocking:` line directly above or by the argument list of
+/// `spawn_blocking(`.
 ///
 /// A synchronous file call blocks the thread the runtime gave the task:
 /// every other task sharing that thread waits for the disk, and nothing
-/// in the code says so. Disk work inside an async body goes
-/// through the async API or through `spawn_blocking`.
+/// in the code says so. Disk work inside an async body goes through the
+/// async API or through `spawn_blocking`, or carries the reason a
+/// `// blocking:` comment gives.
 pub fn sync_fs_in_async(source: &str) -> usize {
     let lines: Vec<&str> = source.lines().collect();
     let blanked = blanked_lines(source);
@@ -171,12 +176,25 @@ pub fn sync_fs_in_async(source: &str) -> usize {
         .iter()
         .filter(|body| blanked[body.header].contains("async fn"))
         .map(|body| {
-            lines
-                .iter()
-                .skip(body.open + 1)
-                .take(body.lines())
-                .filter(|line| line.contains("std::fs::"))
-                .count()
+            let mut open = 0i64; // parentheses open around a `spawn_blocking(` call
+            let mut count = 0;
+            for at in body.open + 1..body.close.min(blanked.len()) {
+                let code = &blanked[at];
+                let offload = code.find("spawn_blocking(");
+                let disk = code.find("std::fs::");
+                let offloaded = open > 0 || matches!((offload, disk), (Some(o), Some(d)) if d > o);
+                let justified = at > 0 && lines[at - 1].trim_start().starts_with("// blocking:");
+                if disk.is_some() && !offloaded && !justified {
+                    count += 1;
+                }
+                if open > 0 || offload.is_some() {
+                    let code = &code[offload.unwrap_or(0)..];
+                    open = (open + code.matches('(').count() as i64
+                        - code.matches(')').count() as i64)
+                        .max(0);
+                }
+            }
+            count
         })
         .sum()
 }
@@ -249,20 +267,6 @@ fn bodies(blanked: &[String]) -> Vec<Body> {
     out
 }
 
-/// Every line of `source` with its string literals and comments blanked,
-/// so only structural braces survive.
-fn blanked_lines(source: &str) -> Vec<String> {
-    let mut in_block = false;
-    source
-        .lines()
-        .map(|line| {
-            let (out, next) = strip_noise(line, in_block);
-            in_block = next;
-            out
-        })
-        .collect()
-}
-
 /// The column where a `fn` keyword introduces a function, or `None`. Only a
 /// `fn` at a word boundary counts, so `transfn` or a `fn` inside an
 /// already-blanked string never matches.
@@ -282,88 +286,6 @@ fn find_fn(code: &str) -> Option<usize> {
 
 fn is_ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// Blanks string/char literals and comments in `line` (replacing them with
-/// spaces) so only structural braces survive; returns the blanked line and
-/// whether a block comment is still open at its end.
-pub fn strip_noise(line: &str, mut in_block: bool) -> (String, bool) {
-    let mut out = String::with_capacity(line.len());
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if in_block {
-            if c == '*' && chars.get(i + 1) == Some(&'/') {
-                in_block = false;
-                out.push_str("  ");
-                i += 2;
-                continue;
-            }
-            out.push(' ');
-            i += 1;
-            continue;
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'/') {
-            break; // line comment — the rest is noise.
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'*') {
-            in_block = true;
-            out.push_str("  ");
-            i += 2;
-            continue;
-        }
-        if c == '"' {
-            out.push(' ');
-            i += 1;
-            while i < chars.len() {
-                if chars[i] == '\\' {
-                    out.push_str("  ");
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == '"' {
-                    out.push(' ');
-                    i += 1;
-                    break;
-                }
-                out.push(' ');
-                i += 1;
-            }
-            continue;
-        }
-        if c == '\'' {
-            // A char literal is `'x'` or `'\n'`/`'\u{..}'`; anything else
-            // opening with `'` is a lifetime (`'static`, `'a`), emitted
-            // verbatim so the code and braces after it are still seen.
-            let is_char = chars.get(i + 1) == Some(&'\\') || chars.get(i + 2) == Some(&'\'');
-            if !is_char {
-                out.push(c);
-                i += 1;
-                continue;
-            }
-            out.push(' ');
-            i += 1;
-            while i < chars.len() {
-                if chars[i] == '\\' {
-                    out.push_str("  ");
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == '\'' {
-                    out.push(' ');
-                    i += 1;
-                    break;
-                }
-                out.push(' ');
-                i += 1;
-            }
-            continue;
-        }
-        out.push(c);
-        i += 1;
-    }
-    (out, in_block)
 }
 
 /// Whether `line` formats a value with its `Debug` form in text that
@@ -486,6 +408,18 @@ fn also_reads() {
 }
 ";
         assert_eq!(sync_fs_in_async(source), 1);
+    }
+
+    #[test]
+    fn a_justified_or_offloaded_disk_call_in_an_async_body_is_not_counted() {
+        let justified = "async fn g() {\n    // blocking: atomic create, so the lock is whole\n    let _ = std::fs::File::create(\"b\");\n}\n";
+        assert_eq!(sync_fs_in_async(justified), 0);
+        let offloaded = "async fn h() {\n    tokio::task::spawn_blocking(move || std::fs::read_to_string(\"c\")).await.ok();\n}\n";
+        assert_eq!(sync_fs_in_async(offloaded), 0);
+        assert_eq!(
+            sync_fs_in_async("async fn f() {\n    let _ = std::fs::read(\"a\");\n}\n"),
+            1
+        );
     }
 
     #[test]

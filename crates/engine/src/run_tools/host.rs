@@ -56,6 +56,9 @@ pub struct HostOf {
     pub process_registry: Option<Arc<ProcessRegistry>>,
     /// The variables the run sets on every subprocess it starts.
     pub subprocess_vars: Vec<(String, String)>,
+    /// The directories a command the run starts is looked up in when its
+    /// variables set no `PATH`: the ones its ambient environment reads.
+    pub search_path: Vec<PathBuf>,
     /// What those subprocesses run with, so an answer about a command
     /// that could not run can say where it was looked for.
     pub environment: Option<ExecutionEnvironment>,
@@ -144,6 +147,9 @@ pub struct RunToolsHost {
     process_registry: Option<Arc<ProcessRegistry>>,
     /// What the run sets on every subprocess it starts.
     subprocess_vars: Vec<(String, String)>,
+    /// The directories a command the run starts searches when its variables
+    /// set no `PATH`.
+    search_path: Vec<PathBuf>,
     /// What every subprocess the run starts runs with.
     pub(super) environment: Option<ExecutionEnvironment>,
     /// The run's own tree.
@@ -201,6 +207,7 @@ impl RunToolsHost {
             pool,
             process_registry,
             subprocess_vars,
+            search_path,
             environment,
             worktree,
             suite,
@@ -226,6 +233,7 @@ impl RunToolsHost {
             suite,
             workflow: workflow.clone(),
             formatters,
+            search_path,
             scope_guard: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -257,6 +265,7 @@ impl RunToolsHost {
             registry: self.process_registry.as_deref(),
             cancel,
             env: &self.subprocess_vars,
+            path: &self.search_path,
             clock: self.clock.as_ref(),
         }
     }

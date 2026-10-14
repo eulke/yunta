@@ -13,19 +13,21 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use crate::{AdapterError, AdapterId, Pid, Redactor, Result};
+use crate::{AdapterError, AdapterId, Pid, Result};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::process::Child;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::lines::LineReader;
-use super::stream::StreamGuard;
-use crate::events::{SessionEnd, SessionExit, TAIL_LINES};
+use crate::events::{SessionEnd, SessionExit};
 use crate::port::session::SessionEnv;
 use crate::port::{AgentEvent, AgentSession, ProbeReport};
 use crate::process::signal::{signal_group, Signal};
+
+mod launch;
+
+pub use launch::open;
 
 /// Hands `prompt` to a just-spawned CLI on its stdin and closes the
 /// pipe, so the CLI sees end-of-input and the prompt never appears in
@@ -96,120 +98,6 @@ pub struct Launch<'a> {
     /// ends, or when the launch fails before it. `None` when the launch set
     /// nothing up.
     pub held: Option<Box<dyn Held>>,
-}
-
-/// Starts the CLI and hands back the session that owns it. The readers
-/// run before the prompt is written, so a CLI that talks before it
-/// listens cannot deadlock the exchange.
-pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
-    let adapter = launch.adapter;
-    let mut std_cmd = std::process::Command::new(launch.binary);
-    std_cmd
-        .args(&launch.args)
-        .current_dir(launch.cwd)
-        .envs(&launch.env.plain)
-        .envs(
-            launch
-                .env
-                .secret
-                .iter()
-                .map(|(name, value)| (name, value.expose())),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // The whole session's tree dies together: a group-targeted signal
-    // reaches every descendant the CLI spawns, its own tool
-    // subprocesses included, not just the CLI process itself.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        std_cmd.process_group(0);
-    }
-    let mut child = tokio::process::Command::from(std_cmd)
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|source| AdapterError::AdapterIo {
-            adapter: adapter.clone(),
-            action: format!("spawn `{}`", launch.binary.display()),
-            source,
-        })?;
-    let pgid = child
-        .id()
-        .and_then(|id| Pid::try_from(id).ok())
-        .ok_or_else(|| AdapterError::Adapter {
-            adapter: adapter.clone(),
-            message: format!(
-                "`{}` exited before it could be tracked",
-                launch.binary.display()
-            ),
-        })?;
-    let missing_pipe = |name: &str| AdapterError::Adapter {
-        adapter: adapter.clone(),
-        message: format!("`{}` has no {name} pipe", launch.binary.display()),
-    };
-    let stdin = child.stdin.take().ok_or_else(|| missing_pipe("stdin"))?;
-    let stdout = child.stdout.take().ok_or_else(|| missing_pipe("stdout"))?;
-    let stderr = child.stderr.take().ok_or_else(|| missing_pipe("stderr"))?;
-
-    let (tx, rx) = mpsc::unbounded_channel();
-    let mut parser = launch.parser;
-    let reader = tokio::spawn(async move {
-        let mut lines = LineReader::new(stdout);
-        let mut guard = StreamGuard::default();
-        while let Some(line) = lines.next_line().await {
-            for event in parser.parse(&line) {
-                let Some(event) = guard.admit(event, adapter.as_str()) else {
-                    return;
-                };
-                let terminal = matches!(
-                    event,
-                    AgentEvent::Completed { .. } | AgentEvent::Failed { .. }
-                );
-                if tx.send(event).is_err() || terminal {
-                    // Exactly one terminal event: nothing after it is
-                    // part of the session.
-                    return;
-                }
-            }
-        }
-    });
-    // The tail is shared with the session: the drain writes it as the
-    // child speaks, and `exit` reads it once the child is gone, which is
-    // the only moment anybody asks.
-    let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(TAIL_LINES)));
-    // The child's environment is where this system puts its secrets, and a
-    // CLI that fails at startup is the one liable to echo what it was given
-    // back at stderr: the tail keeps no value of `secret`.
-    let redactor = Redactor::of_values(launch.env.secret.values().cloned());
-    let tail = Arc::clone(&stderr_tail);
-    let stderr_drain = tokio::spawn(async move {
-        let mut lines = LineReader::new(stderr);
-        while let Some(line) = lines.next_line().await {
-            let line = redactor.text(&line);
-            tracing::debug!(adapter = %adapter, "stderr: {line}");
-            let mut tail = tail.lock().unwrap_or_else(PoisonError::into_inner);
-            if tail.len() == TAIL_LINES {
-                tail.pop_front();
-            }
-            tail.push_back(line);
-        }
-    });
-    // Owned before the prompt goes out: a failed write drops the
-    // session, and the drop takes the tree with it.
-    let session = SubprocessSession {
-        adapter,
-        child,
-        pgid,
-        reaped: false,
-        reader,
-        stderr_drain,
-        stderr_tail,
-        receiver: Some(rx),
-        held: launch.held,
-    };
-    write_prompt(stdin, launch.prompt, adapter).await?;
-    Ok(Box::new(session))
 }
 
 /// `binary --version` under [`PROBE_TIMEOUT`]: its first answer as the

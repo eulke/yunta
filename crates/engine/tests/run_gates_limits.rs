@@ -3,6 +3,7 @@
 use yunta_engine::{NoInteraction, NodeState, RunError, RunReport, RunTerminal};
 use yunta_render::escalation::option_words;
 use yunta_testkit::{Bench, ScriptedInteraction};
+use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
@@ -228,7 +229,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
                     payload,
                 )
                 .expect("a draft names its subject"),
-                &yunta_core::SystemClock,
+                &FixedClock,
             )
             .unwrap();
     };

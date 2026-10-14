@@ -211,7 +211,7 @@ fn input_spec(yaml: &str) -> yunta_core::InputSpec {
     yunta_core::yaml::parse(yaml).unwrap()
 }
 
-fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
+fn config_with_runner(runner: &str, candidates: usize) -> ConfigLayer {
     let list = (0..candidates)
         .map(|_| RunnerCandidate {
             adapter: "mock".into(),
@@ -221,7 +221,7 @@ fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
         })
         .collect();
     ConfigLayer {
-        runners: Some(BTreeMap::from([(role.into(), list)])),
+        runners: Some(BTreeMap::from([(runner.into(), list)])),
         ..Default::default()
     }
 }
@@ -1544,7 +1544,7 @@ fn check_refuses_ask_on_a_node_that_asks_nothing() {
     let yaml = r#"
 name: x
 modes:
-  quick: { include: all, ask: required }
+  alpha: { include: all, ask: required }
 nodes:
   - id: grill
     kind: prompt
@@ -2446,8 +2446,8 @@ fn a_mode_that_keeps_the_loop_and_drops_its_producer_is_refused() {
     let yaml = format!(
         r#"name: w
 modes:
-  quick: {{ include: [build] }}
-  full: {{ include: all }}
+  alpha: {{ include: [build] }}
+  beta: {{ include: all }}
 nodes:
   - {{ id: plan, kind: prompt, runner: r, prompt: p, artifacts: {{ produces: [tasks] }} }}
 {LOOP}, depends_on: [plan] }}
@@ -2458,7 +2458,7 @@ nodes:
         matches!(
             errors.as_slice(),
             [CheckError::Unanswerable(Unanswerable::LoopWithoutTasks { node, mode: Some(mode) })]
-                if node.as_str() == "build" && mode.as_str() == "quick"
+                if node.as_str() == "build" && mode.as_str() == "alpha"
         ),
         "got: {errors:?}"
     );
@@ -2844,7 +2844,7 @@ fn a_read_only_a_promotion_answers_warns_and_refuses_a_fresh_start_in_that_mode(
     let yaml = format!(
         r#"name: w
 modes:
-  full: {{ include: all }}
+  beta: {{ include: all }}
   followup: {{ include: [build, fix] }}
 nodes:
   - {{ id: plan, kind: prompt, runner: r, prompt: p, artifacts: {{ produces: [tasks] }} }}
@@ -2865,8 +2865,20 @@ nodes:
 
     let wf: Workflow = yunta_core::workflow::read::read(&yaml, std::path::Path::new("w.yaml"))
         .expect("a mode may read what an earlier mode keeps");
+    assert_read_only_is_warned(&wf);
+    assert_fresh_start_refused(&wf);
+    assert_eq!(
+        yunta_engine::check_mode_start(&wf, &"beta".parse().unwrap()),
+        Vec::new()
+    );
+}
+
+/// The two warnings a run promoted into `followup` carries: the loop `build`
+/// reads the tasks an earlier mode made, and `fix` reads the artifact `lint`
+/// made there.
+fn assert_read_only_is_warned(wf: &Workflow) {
     let config: ConfigLayer = yunta_core::yaml::parse(SOURCES_CONFIG).unwrap();
-    let warned: Vec<Caution> = check_warnings(&wf, &config)
+    let warned: Vec<Caution> = check_warnings(wf, &config)
         .into_iter()
         .filter(|w| matches!(w, Caution::ReadOnlyThroughPromotion { .. }))
         .collect();
@@ -2892,8 +2904,12 @@ nodes:
         ),
         "{warned:?}"
     );
+}
 
-    let refused = yunta_engine::check_mode_start(&wf, &"followup".parse().unwrap());
+/// A run started in `followup` holds nothing an earlier mode made, so its loop
+/// has no tasks and the source it reads is left out.
+fn assert_fresh_start_refused(wf: &Workflow) {
+    let refused = yunta_engine::check_mode_start(wf, &"followup".parse().unwrap());
     assert!(
         matches!(
             refused.as_slice(),
@@ -2903,10 +2919,6 @@ nodes:
             ]
         ),
         "{refused:?}"
-    );
-    assert_eq!(
-        yunta_engine::check_mode_start(&wf, &"full".parse().unwrap()),
-        Vec::new()
     );
 }
 

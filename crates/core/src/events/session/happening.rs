@@ -2,8 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use crate::best_effort::BestEffortStep;
 use crate::events::{
-    AgentMessageType, RailFailedPayload, RailSummaryPayload, SessionEvent, ToolTarget,
+    AgentMessageType, RailFailedPayload, RailSummaryPayload, RunToolFailedPayload,
+    RunToolRefusedPayload, SessionEvent, ToolTarget,
 };
 use crate::fence::Coverage;
 use crate::port::PolicyApplied;
@@ -69,6 +71,9 @@ pub enum Happening {
         model: Option<ModelName>,
         moments: BTreeMap<RailEvent, Histogram>,
     },
+    /// A best-effort step the run went on past, with the cause its source
+    /// gave for the failure.
+    BestEffortFailed { step: BestEffortStep, cause: String },
     /// One failed call is a moment in the chronicle.
     RunToolFailed {
         tool: crate::RunTool,
@@ -120,19 +125,17 @@ impl From<&SessionEvent> for Happening {
             },
             SessionEvent::RailFailed(p) => p.into(),
             SessionEvent::RailSummary(p) => p.into(),
-            SessionEvent::RunToolFailed(p) => Happening::RunToolFailed {
-                tool: p.tool,
-                cause: p.cause,
-            },
-            SessionEvent::RunToolRefused(p) => Happening::RunToolRefused {
-                tool: p.tool,
-                reason: p.reason,
-            },
+            SessionEvent::RunToolFailed(p) => p.into(),
+            SessionEvent::RunToolRefused(p) => p.into(),
             SessionEvent::ServiceUnreachable(p) => Happening::CutOff {
                 message: p.message.clone(),
             },
             SessionEvent::ServiceReachable(p) => Happening::Reconnected {
                 waited: std::time::Duration::from_millis(p.waited_ms),
+            },
+            SessionEvent::BestEffortFailed(p) => Happening::BestEffortFailed {
+                step: p.step,
+                cause: p.cause.clone(),
             },
         }
     }
@@ -152,6 +155,26 @@ impl From<&RailSummaryPayload> for Happening {
         Happening::RailSummary {
             model: payload.model.clone(),
             moments: payload.moments.clone(),
+        }
+    }
+}
+
+/// A failed call to a run tool, with the tool and its cause.
+impl From<&RunToolFailedPayload> for Happening {
+    fn from(payload: &RunToolFailedPayload) -> Self {
+        Happening::RunToolFailed {
+            tool: payload.tool,
+            cause: payload.cause,
+        }
+    }
+}
+
+/// A call to a run tool the engine refused, with the tool and why.
+impl From<&RunToolRefusedPayload> for Happening {
+    fn from(payload: &RunToolRefusedPayload) -> Self {
+        Happening::RunToolRefused {
+            tool: payload.tool,
+            reason: payload.reason,
         }
     }
 }

@@ -6,7 +6,7 @@ use yunta_core::commit_message::CommitMessage;
 use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{CommitSha, Node, Task};
+use yunta_core::{CommitSha, Node, Seq, Task};
 
 use crate::scope_expansion::GrantWindow;
 use crate::task_cycle::{
@@ -95,14 +95,6 @@ fn protection_of(
     )
 }
 
-/// Isolates one batch member in its own worktree — each task in the
-/// batch gets its own worktree derived from the current base commit —
-/// and runs it through the ordinary task cycle there — pre-check,
-/// dispatch, post-check, scope-check, exactly as the sequential path
-/// always has. Never commits or marks
-/// the task `done`/`blocked` in the log itself; that's the caller's job
-/// once every batch member's dispatch has settled, so integration can
-/// stay strictly serial and in declaration order.
 /// Everything every member of one batch dispatches with — identical
 /// across the whole `batch.iter().zip(&briefs).map(...)` fan-out that
 /// calls [`dispatch_task_in_isolation`]; only `task`/`instruction` vary
@@ -134,6 +126,14 @@ pub(super) struct Dispatched<'a> {
     pub(super) report: TaskCycleReport,
 }
 
+/// Isolates one batch member in its own worktree — each task in the
+/// batch gets its own worktree derived from the current base commit —
+/// and runs it through the ordinary task cycle there — pre-check,
+/// dispatch, post-check, scope-check, exactly as the sequential path
+/// always has. Never commits or marks
+/// the task `done`/`blocked` in the log itself; that's the caller's job
+/// once every batch member's dispatch has settled, so integration can
+/// stay strictly serial and in declaration order.
 pub(super) async fn dispatch_task_in_isolation<'a>(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -141,45 +141,80 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     task: &'a Task,
     instruction: &str,
 ) -> Result<Dispatched<'a>, RunError> {
-    let BatchDispatchEnv {
-        events,
-        state,
-        batch,
-        base_commit,
-        adapter,
-        scope_expansion,
-        grants,
-        cancel,
-        setup,
-    } = *env;
-    let beside: Vec<ScopeGlob> = batch
-        .iter()
-        .filter(|other| other.id != task.id)
-        .flat_map(|other| scope_in_force(other, &state.grants.reach_for(&other.id)))
-        .collect();
-    let continuation = continuation(ctx, node, task, state, adapter).await?;
-    let (unit, lease, resume) = match continuation {
-        Some((unit, lease, continuing)) => (unit, lease, Some(continuing)),
-        None => {
-            let (unit, lease) = ctx
-                .pool
-                .open(
-                    UnitHome {
-                        repo: ctx.worktree,
-                        run_dir: ctx.run_dir,
-                        run_id: ctx.run_id,
-                        base: base_commit,
-                    },
-                    UnitId::Task(task.id.clone()),
-                    attempt_number(state, &task.id),
-                    ctx.root_supervision(),
-                )
-                .await?;
-            (unit, lease, None)
+    let (unit, lease, resume) = open_unit(ctx, node, env, task).await?;
+    let registered_seq = registration_seq(env.events, task)?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            task.id.clone(),
+            TaskStatus::Running,
+            registered_seq,
+        ))),
+    )
+    .await?;
+
+    let report = match run_cycle(ctx, node, env, task, instruction, &unit, resume).await {
+        Ok(report) => report,
+        Err(error) => {
+            // A session the engine could not stop may still write in this
+            // checkout, so the hold stands while one of its groups runs.
+            if matches!(
+                error,
+                RunError::TaskCycle(TaskCycleError::NotStopped { .. })
+            ) && lease.groups_running().await
+            {
+                lease.keep();
+            }
+            return Err(error);
         }
     };
+    Ok(Dispatched {
+        task,
+        unit,
+        lease,
+        report,
+    })
+}
 
-    let registered_seq = events
+/// The unit a task's cycle works in and the hold on its checkout: the unit a
+/// session left for the task to continue, with the session to pick back up,
+/// or a fresh unit cut from the batch's base commit.
+async fn open_unit(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    env: &BatchDispatchEnv<'_>,
+    task: &Task,
+) -> Result<(Unit, Lease, Option<Continuing>), RunError> {
+    let BatchDispatchEnv {
+        state,
+        base_commit,
+        adapter,
+        ..
+    } = *env;
+    if let Some((unit, lease, continuing)) = continuation(ctx, node, task, state, adapter).await? {
+        return Ok((unit, lease, Some(continuing)));
+    }
+    let (unit, lease) = ctx
+        .pool
+        .open(
+            UnitHome {
+                repo: ctx.worktree,
+                run_dir: ctx.run_dir,
+                run_id: ctx.run_id,
+                base: base_commit,
+            },
+            UnitId::Task(task.id.clone()),
+            attempt_number(state, &task.id),
+            ctx.root_supervision(),
+        )
+        .await?;
+    Ok((unit, lease, None))
+}
+
+/// The sequence number of the registration the log holds for `task`, which the
+/// status change that starts its dispatch cites.
+fn registration_seq(events: &[StoredEvent], task: &Task) -> Result<Seq, RunError> {
+    events
         .iter()
         .find(|event| {
             matches!(
@@ -193,25 +228,50 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
                 "task `{}` is dispatched but the log has no task_registered for it",
                 task.id
             ),
-        })?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
-            task.id.clone(),
-            TaskStatus::Running,
-            registered_seq,
-        ))),
-    )
-    .await?;
+        })
+}
 
-    let outcome = run_task(
+/// What the other tasks of the batch may write: a path the evidence locates
+/// there is a person's to grant, never the engine's.
+fn beside_of(batch: &[&Task], state: &RunState, task: &Task) -> Vec<ScopeGlob> {
+    batch
+        .iter()
+        .filter(|other| other.id != task.id)
+        .flat_map(|other| scope_in_force(other, &state.grants.reach_for(&other.id)))
+        .collect()
+}
+
+/// Runs the task's cycle in its unit, with the scope the rest of the batch
+/// leaves it, the session it picks back up, and the budget the node has left.
+async fn run_cycle(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    env: &BatchDispatchEnv<'_>,
+    task: &Task,
+    instruction: &str,
+    unit: &Unit,
+    resume: Option<Continuing>,
+) -> Result<TaskCycleReport, RunError> {
+    let BatchDispatchEnv {
+        state,
+        batch,
+        adapter,
+        scope_expansion,
+        grants,
+        cancel,
+        setup,
+        ..
+    } = *env;
+    let beside = beside_of(batch, state, task);
+    let budget = ctx.session_budget().await?;
+    Ok(run_task(
         task,
         instruction,
         AttemptEnv {
             adapter,
             node,
-            unit: &unit,
-            budget: ctx.session_budget().await?,
+            unit,
+            budget,
             memo: &ctx.memo,
             history: &state.tasks,
             supervision: ctx.supervision(cancel),
@@ -240,25 +300,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         cancel,
         setup,
     )
-    .await;
-    let report = match outcome {
-        Ok(report) => report,
-        Err(error) => {
-            // A session the engine could not stop may still write in this
-            // checkout, so the hold stands while one of its groups runs.
-            if matches!(error, TaskCycleError::NotStopped { .. }) && lease.groups_running().await {
-                lease.keep();
-            }
-            return Err(error.into());
-        }
-    };
-
-    Ok(Dispatched {
-        task,
-        unit,
-        lease,
-        report,
-    })
+    .await?)
 }
 
 /// What a blocked task's last attempt left in its unit, committed on the

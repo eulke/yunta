@@ -113,7 +113,7 @@ pub enum ProjectError {
     },
     /// A layer declaring a `version:` this binary doesn't read is
     /// refused up front — parsing on regardless could silently misread
-    /// a future format.
+    /// a newer format.
     #[error(
         "config layer `{path}` declares `version: {declared}` but this binary reads \
          version {supported}"

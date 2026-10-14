@@ -12,7 +12,7 @@ use yunta_engine::{Counter, RunFrame};
 use super::Glyphs;
 
 /// The counters, at both levels the run has: the DAG's nodes and the
-/// ledger's tasks, each as finished over what this run will do, with
+/// run's tasks, each as finished over what this run will do, with
 /// every other bucket that holds anything beside it, and the re-routes
 /// when there were any.
 ///

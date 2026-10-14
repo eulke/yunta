@@ -83,7 +83,7 @@ coverage:
   threshold: 90
 
 storage:
-  path: ~/.yunta/yunta.db           # SQLite en modo WAL — único backend (D53)
+  path: ~/.yunta/yunta.db           # SQLite en modo WAL — único motor de almacenamiento (D53)
   retention_days: 90
   pool:                             # lo que los checkouts del proyecto guardan del disco (D247)
     budget: 60G                     # bytes (80G, 500M, 1.5T) o parte del disco (20%)

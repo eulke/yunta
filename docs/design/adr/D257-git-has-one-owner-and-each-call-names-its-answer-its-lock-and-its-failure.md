@@ -1,12 +1,16 @@
 ---
 number: D257
 title: "Git has one owner, and each call names its answer, its lock and its failure"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D267]
 ---
 
 # D257 — Git has one owner, and each call names its answer, its lock and its failure
+
+*(Revised by D267: the purity test named in item 1 no longer exists. A spawn of git
+outside `engine/src/git/` is refused by the `git_command_outside_git_rs` count of the
+smells ratchet, which holds it at zero. The decision itself is unchanged.)*
 
 ## Context
 

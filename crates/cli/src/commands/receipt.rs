@@ -26,8 +26,11 @@ pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcom
 
     let markdown = {
         use yunta_render::surface::Surface;
-        yunta_render::surface::Markdown
-            .draw(&yunta_render::receipt::document(&receipt, &advice::spell))
+        yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(
+            &receipt,
+            &advice::spell,
+            look.glyphs,
+        ))
     };
     let json_text = render_receipt_json(&receipt)
         .map_err(|e| CliError::msg(format!("could not render receipt JSON: {e}")))?;
@@ -50,8 +53,8 @@ struct ReceiptAnswer {
 }
 
 impl Answer for ReceiptAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
-        yunta_render::receipt::document(&self.receipt, &advice::spell)
+    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+        yunta_render::receipt::document(&self.receipt, &advice::spell, look.glyphs)
     }
 
     fn outcome(&self) -> Outcome {

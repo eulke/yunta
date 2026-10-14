@@ -10,9 +10,11 @@
 //! [`walk`] freezes, [`store`] keeps and materializes, and [`read`] is
 //! the door a node reads through. [`prompt`] reads a workflow's prompt
 //! files from where its pack allows, [`layers`] lists the files of each
-//! knowledge layer, and [`provenance`] says which pack a workflow came from.
+//! knowledge layer, [`listing`] lists a directory's files for every copy and
+//! layer, and [`provenance`] says which pack a workflow came from.
 
 pub(crate) mod layers;
+pub(crate) mod listing;
 pub(crate) mod prompt;
 pub(crate) mod provenance;
 pub(crate) mod read;

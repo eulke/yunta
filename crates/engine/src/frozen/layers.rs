@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::KnowledgeLayer;
 
+use super::listing::{self, SymlinkPolicy};
 use super::FrozenError;
 use crate::catalog::{self, DeclaredPath};
 
@@ -93,23 +94,6 @@ async fn list_layer(dir: &Path) -> Result<Vec<PathBuf>, FrozenError> {
     if !tokio::fs::try_exists(dir).await.unwrap_or(false) {
         return Ok(Vec::new());
     }
-    let mut entries = Vec::new();
-    let mut pending = vec![dir.to_path_buf()];
-    while let Some(current) = pending.pop() {
-        let io = |source: std::io::Error| FrozenError::Io {
-            context: format!("list `{}`", current.display()),
-            source,
-        };
-        let mut listing = tokio::fs::read_dir(&current).await.map_err(io)?;
-        while let Some(entry) = listing.next_entry().await.map_err(io)? {
-            let path = entry.path();
-            match entry.file_type().await {
-                Ok(kind) if kind.is_dir() => pending.push(path),
-                Ok(kind) if kind.is_file() => entries.push(path),
-                _ => {}
-            }
-        }
-    }
-    entries.sort();
-    Ok(entries)
+    let relative = listing::files(dir, SymlinkPolicy::Skip).await?;
+    Ok(relative.into_iter().map(|path| dir.join(path)).collect())
 }

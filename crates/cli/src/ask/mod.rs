@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use dialoguer::console::{Key, Term};
 use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios};
 use yunta_core::process::signal::{signal_process, Signal};
-use yunta_core::{Pid, Responder};
+use yunta_core::{Env, Pid, Responder};
 
 use crate::error::warn;
 use crate::surface::Diagnostics;
@@ -177,6 +177,12 @@ pub(crate) struct Console {
 }
 
 impl Console {
+    /// Whether a prompt here reaches a person: stdin and stderr both on
+    /// a terminal, which is what [`Console::open`] asks before it opens.
+    pub(crate) fn attended() -> bool {
+        std::io::stdin().is_terminal() && Term::stderr().is_term()
+    }
+
     /// The console this process can prompt on, or `None` when it has
     /// none.
     ///
@@ -198,12 +204,6 @@ impl Console {
     /// draw — `yunta init`, `yunta new` — passes
     /// [`Diagnostics::none`](crate::surface::Diagnostics::none), which
     /// is the same door onto nothing.
-    /// Whether a prompt here reaches a person: stdin and stderr both on
-    /// a terminal, which is what [`Console::open`] asks before it opens.
-    pub(crate) fn attended() -> bool {
-        std::io::stdin().is_terminal() && Term::stderr().is_term()
-    }
-
     pub(crate) async fn open(diagnostics: &Diagnostics, escape: Escape) -> Option<Self> {
         if !std::io::stdin().is_terminal() {
             return None;
@@ -394,8 +394,8 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
 /// log gets is the shell's own ambient identity, marked unverified.
 /// Saying so at the moment it is recorded is what keeps an unsigned
 /// decision from reading like a signed one.
-fn attributed(console: &Console) -> std::io::Result<Responder> {
-    let responder = crate::identity::responder(None);
+fn attributed(console: &Console, env: &Env) -> std::io::Result<Responder> {
+    let responder = crate::identity::responder(None, env.user.as_deref());
     console.say(&format!(
         "attributed to `{responder}` — unsigned, nothing here authenticates who typed"
     ))?;

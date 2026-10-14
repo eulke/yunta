@@ -205,8 +205,8 @@ pub enum ProbeReport {
 }
 
 /// What the agent itself reported it did — telemetry, never a verdict;
-/// the engine's own criteria run regardless. One field for now, widened
-/// when a real adapter has more worth reporting.
+/// the engine's own criteria run regardless. It holds one field, the
+/// summary; a real adapter that reports more worth keeping widens it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentOutcome {
     pub summary: String,

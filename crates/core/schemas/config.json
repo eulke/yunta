@@ -930,7 +930,7 @@
       "additionalProperties": false
     },
     "StorageConfig": {
-      "description": "`storage:` — SQLite is the only backend.",
+      "description": "`storage:` — SQLite is the only storage engine.",
       "type": "object",
       "properties": {
         "path": {

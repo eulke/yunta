@@ -16,7 +16,7 @@ mod runs;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use yunta_core::InputSpec;
+use yunta_core::{InputSpec, Workflow};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -99,12 +99,7 @@ async fn listed(
     glyphs: crate::render::Glyphs,
 ) -> Section<'static> {
     let name = &entry.display_name;
-    let read = std::fs::read_to_string(&entry.path)
-        .map_err(|e| format!("unreadable: {e}"))
-        .and_then(|contents| {
-            yunta_core::workflow::read::read(&contents, &entry.path).map_err(|r| r.to_string())
-        });
-    let workflow = match read {
+    let workflow = match read_entry(entry).await {
         Ok(workflow) => workflow,
         Err(why) => {
             return Section {
@@ -122,6 +117,30 @@ async fn listed(
     if let Some(description) = workflow.description.as_deref() {
         title = title.plain(format!(" — {description}"));
     }
+    let mut fields = input_fields(&workflow);
+    if let Some(ctx) = history_source {
+        fields = estimation_field(fields, ctx, &workflow, glyphs).await;
+    }
+    fields = fields.push_command("run", format!("yunta run {name}"));
+    Section {
+        mark: None,
+        title,
+        blocks: vec![fields.into()],
+    }
+}
+
+/// The workflow `entry` names, or the reason its file does not read.
+async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, String> {
+    tokio::fs::read_to_string(&entry.path)
+        .await
+        .map_err(|e| format!("unreadable: {e}"))
+        .and_then(|contents| {
+            yunta_core::workflow::read::read(&contents, &entry.path).map_err(|r| r.to_string())
+        })
+}
+
+/// One row per input the workflow takes, the first one carrying the label.
+fn input_fields(workflow: &Workflow) -> Fields {
     let mut fields = Fields::new();
     for (n, (input_name, spec)) in workflow.inputs.iter().enumerate() {
         let optionality = if spec.is_required() {
@@ -141,21 +160,24 @@ async fn listed(
             ),
         );
     }
-    if let Some(ctx) = history_source {
-        let history = super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
-        if let Some(estimation) = yunta_engine::prior_estimation(&history) {
-            fields = fields.push_if(
-                "usually",
-                super::stats::format_estimation_line(&estimation, glyphs),
-            );
-        }
+    fields
+}
+
+/// The `usually` row of the workflow's prior estimation, when its history has one.
+async fn estimation_field(
+    mut fields: Fields,
+    ctx: &Context,
+    workflow: &Workflow,
+    glyphs: crate::render::Glyphs,
+) -> Fields {
+    let history = super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
+    if let Some(estimation) = yunta_engine::prior_estimation(&history) {
+        fields = fields.push_if(
+            "usually",
+            super::stats::format_estimation_line(&estimation, glyphs),
+        );
     }
-    fields = fields.push_command("run", format!("yunta run {name}"));
-    Section {
-        mark: None,
-        title,
-        blocks: vec![fields.into()],
-    }
+    fields
 }
 
 /// Every workflow the catalog offers that reads back — the repo's own,

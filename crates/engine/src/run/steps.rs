@@ -214,72 +214,7 @@ pub(super) async fn gate_exhausted(
         .await?;
         Ok(None)
     } else if chosen == Some(ReservedOption::Promote) {
-        // `"promote"` only ever appears as an option when a successor
-        // mode was carried with it; a run whose log offers `promote`
-        // without one is corrupt, reported rather than unwrapped.
-        let Some(next_mode) = suggested_mode else {
-            return Err(RunError::Broken {
-                diagnostic: format!(
-                    "node `{node}` chose `promote` but its gate carried no successor mode"
-                ),
-            });
-        };
-        ctx.emit(
-            None,
-            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
-                PromotionCause {
-                    node,
-                    goto,
-                    failure: Some(cause),
-                },
-                Evidence::none(),
-                next_mode.clone(),
-            ))),
-        )
-        .await?;
-        // A promotion is a real close — the short attempt's knowledge is
-        // knowledge, and the successor inherits it through the repo layer.
-        super::distill::run_distill(ctx, mode_name).await?;
-        // Findings without an artifact (scope-expansion denials, for
-        // instance) live only on this log — derive them into an inheritable
-        // artifact so the successor's copied context carries them. No
-        // findings, no file.
-        let events_for_close = ctx.load_events().await?;
-        let inherited = crate::findings::inherited_findings(&events_for_close);
-        if !inherited.is_empty() {
-            // The one door a findings document is rendered through, so
-            // the run's own is held to `limits.max_artifact_bytes` like
-            // every other artifact it accepts. The run's artifact, not
-            // any node's: it is what this log adds up to, and the
-            // successor inherits it as it does every other one.
-            let derived = crate::artifacts::derive_findings(
-                None,
-                inherited,
-                ctx.manifest
-                    .config
-                    .limits
-                    .as_ref()
-                    .and_then(|limits| limits.max_artifact_bytes),
-            )
-            .map_err(|error| RunError::Broken {
-                diagnostic: error.to_string(),
-            })?;
-            crate::artifacts::accept(
-                &ctx.log(),
-                ctx.run_dir,
-                None,
-                derived.artifact.clone(),
-                &derived.bytes,
-                yunta_core::events::RecordedOrigin::Derived,
-            )
-            .await?;
-        }
-        Ok(Some(RunReport {
-            terminal: RunTerminal::Promoted {
-                suggested_mode: next_mode,
-            },
-            state: finish(ctx, TerminalState::Promoted).await?,
-        }))
+        promote_exhausted(ctx, mode_name, node, goto, cause, suggested_mode).await
     } else {
         // The menu offers nothing beyond retry, promote and abort.
         Ok(Some(
@@ -293,6 +228,88 @@ pub(super) async fn gate_exhausted(
             .await?,
         ))
     }
+}
+
+/// The `promote` choice of an exhausted gate: the run closes into the
+/// successor mode its gate carried, after distilling what it learned.
+async fn promote_exhausted(
+    ctx: &RunCtx<'_>,
+    mode_name: &ModeName,
+    node: NodeId,
+    goto: NodeId,
+    cause: Failure,
+    suggested_mode: Option<ModeName>,
+) -> Result<Option<RunReport>, RunError> {
+    // `"promote"` only ever appears as an option when a successor
+    // mode was carried with it; a run whose log offers `promote`
+    // without one is corrupt, reported rather than unwrapped.
+    let Some(next_mode) = suggested_mode else {
+        return Err(RunError::Broken {
+            diagnostic: format!(
+                "node `{node}` chose `promote` but its gate carried no successor mode"
+            ),
+        });
+    };
+    ctx.emit(
+        None,
+        EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload::new(
+            PromotionCause {
+                node,
+                goto,
+                failure: Some(cause),
+            },
+            Evidence::none(),
+            next_mode.clone(),
+        ))),
+    )
+    .await?;
+    // A promotion is a real close — the short attempt's knowledge is
+    // knowledge, and the successor inherits it through the repo layer.
+    super::distill::run_distill(ctx, mode_name).await?;
+    carry_findings(ctx).await?;
+    Ok(Some(RunReport {
+        terminal: RunTerminal::Promoted {
+            suggested_mode: next_mode,
+        },
+        state: finish(ctx, TerminalState::Promoted).await?,
+    }))
+}
+
+/// Findings without an artifact (scope-expansion denials, for instance)
+/// live only on this log — derive them into an inheritable artifact so the
+/// successor's copied context carries them. No findings, no file.
+async fn carry_findings(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+    let events_for_close = ctx.load_events().await?;
+    let inherited = crate::findings::inherited_findings(&events_for_close);
+    if !inherited.is_empty() {
+        // The one door a findings document is rendered through, so
+        // the run's own is held to `limits.max_artifact_bytes` like
+        // every other artifact it accepts. The run's artifact, not
+        // any node's: it is what this log adds up to, and the
+        // successor inherits it as it does every other one.
+        let derived = crate::artifacts::derive_findings(
+            None,
+            inherited,
+            ctx.manifest
+                .config
+                .limits
+                .as_ref()
+                .and_then(|limits| limits.max_artifact_bytes),
+        )
+        .map_err(|error| RunError::Broken {
+            diagnostic: error.to_string(),
+        })?;
+        crate::artifacts::accept(
+            &ctx.log(),
+            ctx.run_dir,
+            None,
+            derived.artifact.clone(),
+            &derived.bytes,
+            yunta_core::events::RecordedOrigin::Derived,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// A batch of independently-ready nodes to run together. The run-budget check

@@ -32,7 +32,7 @@ pub async fn close(
     let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
     let run_dir = open.run_dir.clone();
     let engine = settled_liveness(&ctx, &storage, run_id, &run_dir, &redactor).await?;
-    let by = crate::identity::responder(by);
+    let by = crate::identity::responder(by, ctx.env.user.as_deref());
     yunta_engine::close_run(
         &storage,
         run_id,

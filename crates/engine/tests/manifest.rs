@@ -470,8 +470,8 @@ async fn a_runners_fanout_node_expands_into_one_node_per_role() {
     let yaml = r#"
 name: fanout
 modes:
-  quick: { include: [work, review] }
-  full: { include: all }
+  alpha: { include: [work, review] }
+  beta: { include: all }
 nodes:
   - id: work
     kind: bash
@@ -534,9 +534,9 @@ nodes:
     let deps: Vec<&str> = ship.depends_on.iter().map(|d| d.as_str()).collect();
     assert_eq!(deps, vec!["review@reviewer", "review@reviewer-alt"]);
 
-    // Mode include lists rewrite too — `quick` still covers the review.
-    let quick = &manifest.workflow.modes.as_ref().unwrap()["quick"];
-    match &quick.include {
+    // Mode include lists rewrite too — `alpha` covers the review.
+    let alpha = &manifest.workflow.modes.as_ref().unwrap()["alpha"];
+    match &alpha.include {
         yunta_core::ModeInclude::Nodes(nodes) => {
             let names: Vec<&str> = nodes.iter().map(|n| n.as_str()).collect();
             assert_eq!(

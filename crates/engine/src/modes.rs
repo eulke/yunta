@@ -115,8 +115,8 @@ mod tests {
             r#"
 name: chain
 modes:
-  quick: { include: [start, ship, audit] }
-  full:  { include: all }
+  alpha: { include: [start, ship, audit] }
+  beta:  { include: all }
 nodes:
   - { id: start, kind: bash, run: "true" }
   - { id: review, kind: bash, run: "true", depends_on: [start] }
@@ -135,7 +135,7 @@ nodes:
     #[test]
     fn an_excluded_dependency_is_replaced_by_its_own_included_dependencies_transitively() {
         let workflow = workflow();
-        let included = mode_included_nodes(&workflow, &"quick".into());
+        let included = mode_included_nodes(&workflow, &"alpha".into());
         let deps = dependencies_in_mode(&workflow, included.as_ref());
         // `ship` -> `extra` (excluded) -> `review` (excluded) -> `start`, plus
         // `extra`'s own direct `start`, which collapses into one entry.

@@ -1,4 +1,4 @@
-//! The run execution driver: the scheduler loop that replays the log,
+//! Run execution: the scheduler loop that replays the log,
 //! asks [`schedule::decide`] what is next, and runs it until the answer
 //! is terminal — plus the pause paths every stop funnels through and the
 //! node lookup the step handlers share.

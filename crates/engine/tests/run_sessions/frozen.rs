@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     AgentMessageType, EventPayload, NodeFailedPayload, StoredEvent, TokenUsage,
 };
+use yunta_core::process::group::group_runs;
 
 /// An agent's definition is read once, at birth: an edit a node makes to
 /// the definition's file during the run does not reach the session after it.
@@ -270,16 +271,7 @@ async fn a_cancelled_batch_with_a_session_that_cannot_be_stopped_fails_the_loop_
 #[tokio::test]
 async fn a_loop_task_whose_session_cannot_be_stopped_keeps_its_checkout_taken() {
     let bench = Bench::new();
-    let workflow = concurrency_workflow(1);
-    let fixture = format!(
-        "{}  - match_prompt_contains: \"task-1\"\n    kill: refuse\n    steps:\n      - {{ type: usage, input_tokens: 200, output_tokens: 0 }}\n    outcome: {{ type: hang, on_interrupt: ignore }}\n",
-        plan_session(&independent_tasks(1)),
-    );
-    let config = format!(
-        "{}limits:\n  max_tokens_per_run: 100\n",
-        yunta_testkit::MOCK_CONFIG
-    );
-    let _run = bench.run_with_config(&workflow, &fixture, &config).await;
+    run_unstoppable_loop_task(&bench).await;
 
     let held = slot_locks(&bench.pool());
     let groups = registered_groups(&bench.run_dir());
@@ -297,6 +289,23 @@ async fn a_loop_task_whose_session_cannot_be_stopped_keeps_its_checkout_taken() 
         !held.is_empty(),
         "the task's checkout stays taken while its session's group runs"
     );
+}
+
+/// Runs one loop task whose session the engine cannot stop: its kill is
+/// refused and its spend passes the run's token cap, so the engine tries to
+/// stop the session itself, and its process group keeps running once the run
+/// has ended.
+async fn run_unstoppable_loop_task(bench: &Bench) {
+    let workflow = concurrency_workflow(1);
+    let fixture = format!(
+        "{}  - match_prompt_contains: \"task-1\"\n    kill: refuse\n    steps:\n      - {{ type: usage, input_tokens: 200, output_tokens: 0 }}\n    outcome: {{ type: hang, on_interrupt: ignore }}\n",
+        plan_session(&independent_tasks(1)),
+    );
+    let config = format!(
+        "{}limits:\n  max_tokens_per_run: 100\n",
+        yunta_testkit::MOCK_CONFIG
+    );
+    bench.run_with_config(&workflow, &fixture, &config).await;
 }
 
 /// The checkout locks of the pool at `pool`.
@@ -321,6 +330,39 @@ fn registered_groups(run_dir: &std::path::Path) -> Vec<yunta_core::Pid> {
         yunta_engine::Registry::Read(registry) => registry.doc.process_groups.clone(),
         _ => Vec::new(),
     }
+}
+
+/// Whether no group in `groups` runs. A group that cannot be inspected counts
+/// as running, as the engine's registry reads it.
+fn no_group_runs(groups: &[yunta_core::Pid]) -> bool {
+    groups
+        .iter()
+        .all(|group| !group_runs(*group).unwrap_or(true))
+}
+
+/// A bench that ends kills the process groups its run's registry names while
+/// any of them runs, so a session the engine could not stop leaves no process
+/// behind the test that opened it.
+#[tokio::test]
+async fn a_bench_that_ends_kills_the_process_groups_its_run_registry_names() {
+    let bench = Bench::new();
+    run_unstoppable_loop_task(&bench).await;
+    let groups = registered_groups(&bench.run_dir());
+    assert!(
+        groups
+            .iter()
+            .any(|group| matches!(group_runs(*group), Ok(true))),
+        "the session's group runs when the bench ends: {groups:?}"
+    );
+
+    // Ending the bench is what closes the group: nothing else in the test does.
+    drop(bench);
+
+    yunta_testkit::wait_until_async(
+        || std::future::ready(no_group_runs(&groups)),
+        || format!("a process group the run names runs after its bench ended: {groups:?}"),
+    )
+    .await;
 }
 
 // --- a node's confinement across two wakes ---------------------------------

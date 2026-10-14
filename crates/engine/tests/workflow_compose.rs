@@ -603,8 +603,8 @@ async fn a_promoted_child_chains_into_its_successor_automatically() {
         r#"
 name: promotable
 modes:
-  quick: { include: [lint, fix-lint] }
-  full:  { include: [ship] }
+  alpha: { include: [lint, fix-lint] }
+  beta:  { include: [ship] }
 nodes:
   - id: lint
     kind: bash
@@ -625,9 +625,9 @@ nodes:
     kind: workflow
     use: promotable
 "#;
-    // The child starts in `quick` (the floor), exhausts its re-route,
+    // The child starts in `alpha` (the floor), exhausts its re-route,
     // and the scripted human promotes — the parent must then create and
-    // drive the successor child (`full`) instead of failing the node.
+    // drive the successor child (`beta`) instead of failing the node.
     let RunReport { terminal, state } = bench
         .run_with_interaction(
             parent,
@@ -674,9 +674,9 @@ nodes:
         })
         .unwrap();
     assert_eq!(successor_created.promoted_from, Some(ids[0].clone()));
-    assert_eq!(successor_created.mode, "full");
+    assert_eq!(successor_created.mode, "beta");
 
-    // And the successor really did the `full` work, in its own tree.
+    // And the successor really did the `beta` work, in its own tree.
     assert!(on_its_branch(&bench, &successor, "shipped.txt")
         .await
         .is_some());
@@ -1492,8 +1492,8 @@ async fn a_promoted_child_s_successor_does_not_redo_what_its_predecessor_finishe
         r#"
 name: promotable-tasks
 modes:
-  quick: { include: [implement, lint, fix-lint] }
-  full:  { include: [implement, ship] }
+  alpha: { include: [implement, lint, fix-lint] }
+  beta:  { include: [implement, ship] }
 nodes:
   - id: implement
     kind: loop

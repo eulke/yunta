@@ -4,15 +4,19 @@
 //! a test case and a promotion successor each take the registry their
 //! manifest names, so a run behaves the same whichever of them drives it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_adapters::{FixtureError, MockAdapter, MockFixture, RunPaths};
 use yunta_core::{
-    AdapterId, Manifest, MountSpec, Node, NodeId, NodeKind, RunAdapter, RunnerName, Workflow,
+    AdapterId, Clock, Manifest, ModeName, MountSpec, Node, NodeId, NodeKind, Redactor, RunAdapter,
+    RunId, RunnerName, Workflow,
 };
+use yunta_engine::{CreateRunParams, FrozenRun, RunEnv, RunError, RunReport};
+use yunta_storage::AsyncStorage;
 
 use super::Adapters;
+use crate::context::Context;
 use crate::error::CliError;
 
 /// What `servable` refuses. Each variant names the node, runner or adapter
@@ -303,6 +307,89 @@ fn parse_script(text: &str, paths: &ScriptedPaths<'_>) -> Result<MockFixture, Fi
             staging: &staging,
         },
     )
+}
+
+/// One run, handed to the engine.
+///
+/// The run an invocation was given and every successor a promotion makes
+/// share this shape: the retry ceiling, the ambient environment, the
+/// secrets source, and how a `RunEnv` is filled in. One literal writes all
+/// of them, so a field added to a run is added to its successors too.
+pub(crate) struct Executing<'a> {
+    pub(crate) run_id: &'a RunId,
+    pub(crate) manifest: &'a Manifest,
+    pub(crate) run_dir: &'a Path,
+    pub(crate) worktree: &'a Path,
+    pub(crate) adapters: &'a Adapters,
+    pub(crate) storage: &'a AsyncStorage,
+    pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) ids: &'a dyn yunta_core::IdSource,
+    pub(crate) human_interaction: &'a dyn yunta_engine::HumanInteraction,
+    pub(crate) forge: Option<&'a dyn yunta_core::port::Forge>,
+    pub(crate) cancel: &'a tokio_util::sync::CancellationToken,
+    pub(crate) observer: Option<Arc<dyn yunta_engine::RunObserver>>,
+    pub(crate) rail_command: yunta_core::rail::RailCommand,
+    pub(crate) ambient: &'a yunta_core::Env,
+}
+
+/// Runs one run to its stop — the one `execute_run` call this binary
+/// makes.
+pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, RunError> {
+    yunta_engine::execute_run(RunEnv {
+        run_id: on.run_id,
+        manifest: on.manifest,
+        run_dir: on.run_dir,
+        worktree: on.worktree,
+        adapters: on.adapters,
+        storage: on.storage,
+        clock: on.clock,
+        ids: on.ids,
+        human_interaction: on.human_interaction,
+        forge: on.forge,
+        cancel: on.cancel,
+        ambient: Some(on.ambient),
+        secrets: Arc::new(yunta_core::ProcessSecrets),
+        observer: on.observer,
+        rail_command: Some(on.rail_command),
+    })
+    .await
+}
+
+/// Creates a run on disk from its frozen manifest and documents, in the
+/// checkout it works in. The one call from a command path into the
+/// engine's run creation, so a run a person starts and a run a case plays
+/// are born by the same step.
+pub(crate) async fn create_frozen_run(
+    ctx: &Context,
+    storage: &AsyncStorage,
+    frozen: &FrozenRun,
+    run_id: &RunId,
+    mode: &ModeName,
+    worktree: &Path,
+    redactor: &Redactor,
+) -> Result<PathBuf, RunError> {
+    yunta_engine::create_run(
+        CreateRunParams {
+            run_id,
+            manifest: &frozen.manifest,
+            runs_root: &ctx.project.runs_root,
+            mode,
+            worktree,
+            promoted_from: None,
+            // The run is born holding every document its `inputs:`
+            // named, accepted right after `run_created`.
+            artifacts: &frozen.documents,
+            blobs: &frozen.blobs,
+            // A run a caller starts is the root of its lineage: it
+            // measures on its first wake, if its config names a suite.
+            baseline: None,
+            environment: yunta_engine::process::execution_environment(Some(&ctx.env)),
+            redactor,
+        },
+        storage,
+        ctx.supervision(),
+    )
+    .await
 }
 
 #[cfg(test)]

@@ -67,13 +67,16 @@ string_id!(
     TreeId, what = "tree id", rule = GIT_OBJECT_RULE, check = is_git_object
 );
 
-fn lower_hex(bytes: &[u8]) -> String {
-    use std::fmt::Write;
+/// One lowercase hex digit for a value below 16.
+fn nibble(n: u8) -> char {
+    char::from(if n < 10 { b'0' + n } else { b'a' + (n - 10) })
+}
 
+fn lower_hex(bytes: &[u8]) -> String {
     let mut hex = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        // Writing into a `String` cannot fail.
-        let _ = write!(hex, "{byte:02x}");
+    for &byte in bytes {
+        hex.push(nibble(byte >> 4));
+        hex.push(nibble(byte & 0x0f));
     }
     hex
 }

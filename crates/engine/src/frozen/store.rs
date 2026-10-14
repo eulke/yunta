@@ -16,6 +16,7 @@ use yunta_core::durable::Durability;
 use yunta_core::events::ObjectProblem;
 use yunta_core::{ContentHash, ExecutorName, Frozen, SkillName};
 
+use super::listing::{self, SymlinkPolicy};
 use super::{executor_input, named_inputs, skill_input, FrozenError};
 use crate::artifacts::store::{ObjectStore, StoreError};
 
@@ -99,31 +100,7 @@ pub(crate) fn executor_copy(run_dir: &Path, name: &ExecutorName) -> PathBuf {
 /// neither a regular file nor a directory, a symlink included, is a
 /// `Mismatch` of `input`: the run never writes one.
 pub(crate) async fn copied_files(dir: &Path, input: &str) -> Result<Vec<PathBuf>, FrozenError> {
-    let mut files = Vec::new();
-    let mut pending = vec![PathBuf::new()];
-    while let Some(relative) = pending.pop() {
-        let here = dir.join(&relative);
-        let io = |source: std::io::Error| FrozenError::Io {
-            context: format!("list `{}`", here.display()),
-            source,
-        };
-        let mut listing = tokio::fs::read_dir(&here).await.map_err(io)?;
-        while let Some(entry) = listing.next_entry().await.map_err(io)? {
-            let path = relative.join(entry.file_name());
-            let kind = entry.file_type().await.map_err(io)?;
-            if kind.is_dir() {
-                pending.push(path);
-            } else if kind.is_file() {
-                files.push(path);
-            } else {
-                return Err(FrozenError::Mismatch {
-                    input: input.to_string(),
-                });
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
+    listing::files(dir, SymlinkPolicy::Refuse { input }).await
 }
 
 /// The bytes of the object `hash` names in the run at `run_dir`, verified

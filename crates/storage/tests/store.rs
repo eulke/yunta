@@ -17,6 +17,7 @@ use yunta_core::events::{
 };
 use yunta_core::{NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, ChainVerification, Purge, Storage, StorageError};
+use yunta_testkit_core::FixedClock;
 
 #[path = "store/chain.rs"]
 mod chain;
@@ -35,13 +36,10 @@ fn append_then_read_round_trips() {
     let run_id = RunId::from("run-1");
 
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     let seq = storage
-        .append(
-            &paused_draft("run-1", "budget exceeded"),
-            &yunta_core::SystemClock,
-        )
+        .append(&paused_draft("run-1", "budget exceeded"), &FixedClock)
         .unwrap();
     assert_eq!(seq.get(), 2);
 
@@ -65,14 +63,11 @@ fn seq_is_assigned_monotonically_per_run_and_replay_is_ordered() {
     let run_id = RunId::from("run-1");
 
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     for i in 0..5 {
         let seq = storage
-            .append(
-                &paused_draft("run-1", &format!("reason-{i}")),
-                &yunta_core::SystemClock,
-            )
+            .append(&paused_draft("run-1", &format!("reason-{i}")), &FixedClock)
             .unwrap();
         assert_eq!(seq.get(), i + 2);
     }
@@ -87,19 +82,19 @@ fn different_runs_get_independent_sequences() {
     let (_dir, storage) = open_temp();
 
     storage
-        .append(&created_draft("run-a"), &yunta_core::SystemClock)
+        .append(&created_draft("run-a"), &FixedClock)
         .unwrap();
     storage
-        .append(&created_draft("run-b"), &yunta_core::SystemClock)
+        .append(&created_draft("run-b"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-a", "a1"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-a", "a1"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-b", "b1"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-b", "b1"), &FixedClock)
         .unwrap();
     let seq_a2 = storage
-        .append(&paused_draft("run-a", "a2"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-a", "a2"), &FixedClock)
         .unwrap();
 
     assert_eq!(seq_a2.get(), 3);
@@ -115,7 +110,7 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
     let storage = Arc::new(Storage::open(&dir.path().join("yunta.db")).unwrap());
     let run_id = RunId::from("run-concurrent");
     storage
-        .append(&created_draft("run-concurrent"), &yunta_core::SystemClock)
+        .append(&created_draft("run-concurrent"), &FixedClock)
         .unwrap();
 
     let handles: Vec<_> = (0..8)
@@ -125,7 +120,7 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
                 storage
                     .append(
                         &paused_draft("run-concurrent", &format!("writer-{i}")),
-                        &yunta_core::SystemClock,
+                        &FixedClock,
                     )
                     .unwrap()
             })
@@ -162,7 +157,7 @@ fn concurrent_appends_across_two_connections_never_fail_busy() {
     let second = Arc::new(Storage::open(storage.path()).unwrap());
     let run_id = RunId::from("run-two-conns");
     storage
-        .append(&created_draft("run-two-conns"), &yunta_core::SystemClock)
+        .append(&created_draft("run-two-conns"), &FixedClock)
         .unwrap();
 
     const PER_WRITER: usize = 50;
@@ -175,7 +170,7 @@ fn concurrent_appends_across_two_connections_never_fail_busy() {
                     handle
                         .append(
                             &paused_draft("run-two-conns", &format!("writer-{writer}-{i}")),
-                            &yunta_core::SystemClock,
+                            &FixedClock,
                         )
                         .unwrap();
                 }
@@ -245,13 +240,13 @@ fn opened_at_once(log: &std::path::Path) -> Vec<String> {
 fn list_runs_returns_every_distinct_run() {
     let (_dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-a"), &yunta_core::SystemClock)
+        .append(&created_draft("run-a"), &FixedClock)
         .unwrap();
     storage
-        .append(&created_draft("run-b"), &yunta_core::SystemClock)
+        .append(&created_draft("run-b"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-a", "a2"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-a", "a2"), &FixedClock)
         .unwrap();
 
     let run_ids: Vec<RunId> = storage
@@ -271,13 +266,10 @@ fn a_reopened_database_keeps_its_events() {
     {
         let storage = Storage::open(&db_path).unwrap();
         storage
-            .append(&created_draft("run-1"), &yunta_core::SystemClock)
+            .append(&created_draft("run-1"), &FixedClock)
             .unwrap();
         storage
-            .append(
-                &paused_draft("run-1", "first session"),
-                &yunta_core::SystemClock,
-            )
+            .append(&paused_draft("run-1", "first session"), &FixedClock)
             .unwrap();
     }
 
@@ -292,10 +284,10 @@ fn a_corrupted_payload_surfaces_as_a_typed_error_not_a_panic() {
     let db_path = dir.path().join("yunta.db");
     let storage = Storage::open(&db_path).unwrap();
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-1", "fine"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-1", "fine"), &FixedClock)
         .unwrap();
 
     // Reach past the crate's own interface to corrupt the row directly —
@@ -319,13 +311,13 @@ fn a_corrupted_payload_surfaces_as_a_typed_error_not_a_panic() {
 fn purge_run_removes_every_row_for_exactly_that_run() {
     let (_dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-old"), &yunta_core::SystemClock)
+        .append(&created_draft("run-old"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-old", "done"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-old", "done"), &FixedClock)
         .unwrap();
     storage
-        .append(&created_draft("run-live"), &yunta_core::SystemClock)
+        .append(&created_draft("run-live"), &FixedClock)
         .unwrap();
 
     let purged = storage.purge_run(&RunId::from("run-old")).unwrap();
@@ -360,10 +352,10 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
 
     let run_id = RunId::from("run-reopen");
     let seq1 = storage
-        .append(&created_draft("run-reopen"), &yunta_core::SystemClock)
+        .append(&created_draft("run-reopen"), &FixedClock)
         .unwrap();
     let event = paused_draft("run-reopen", "from the second handle");
-    let seq2 = second.append(&event, &yunta_core::SystemClock).unwrap();
+    let seq2 = second.append(&event, &FixedClock).unwrap();
 
     assert_eq!((seq1.get(), seq2.get()), (1, 2));
     let events = storage.events_for_run(&run_id).unwrap();

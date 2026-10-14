@@ -19,12 +19,16 @@ use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, sandboxed_checkout};
 use crate::commands::advice;
-use crate::commands::registry::{adapters_and_script, ScriptedPaths};
+use crate::commands::registry::{adapters_and_script, execute, Executing, ScriptedPaths};
 use crate::commands::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
 use crate::render::state::RunWord;
+
+mod problems;
+
+use problems::{standing_problems, unclaimed_problems};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +78,7 @@ struct Expect {
 /// laid out under it. `Debug` would wrap the reason in quotes and escape
 /// every one it contains — noise added to a message already written for
 /// a reader.
-fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
+pub(super) fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
     match terminal {
         RunTerminal::Paused { reason } => format!(
             "{word}\n    {}",
@@ -191,11 +195,28 @@ pub(crate) async fn run_case(
     let ctx = ctx.sandboxed(sandbox.worktree().to_path_buf(), sandbox.root());
     let storage = ctx.async_storage().await?;
     let fixture_path = beside(&case.fixture);
+    let played = play(&ctx, &storage, &case, &fixture_path).await?;
+    Ok(verdict(&case, &fixture_path, &played))
+}
 
-    // The same three steps `yunta run` takes, in the same order and
-    // through the same functions: resolve and check the workflow,
-    // freeze its manifest, create the run, drive it. What differs is
-    // only what a case *is* — every session scripted, nobody to ask.
+/// What a played case leaves for its verdict: the run's manifest and
+/// preparation, its report, and the scripts its sessions may not all claim.
+struct Played {
+    manifest: yunta_core::Manifest,
+    prepared: crate::commands::drive::Prepared,
+    report: yunta_engine::RunReport,
+    script: Option<Arc<yunta_adapters::MockAdapter>>,
+}
+
+/// Freezes the case's workflow and creates its run, through the steps
+/// `yunta run` takes in the same order. What differs is only what a case
+/// *is* — every session scripted, nobody to ask.
+async fn create_case_run(
+    ctx: &Context,
+    storage: &yunta_storage::AsyncStorage,
+    case: &TestCase,
+    fixture_path: &Path,
+) -> Result<(yunta_core::Manifest, crate::commands::drive::Prepared), CliError> {
     let raw_inputs: Vec<String> = case
         .inputs
         .iter()
@@ -204,20 +225,37 @@ pub(crate) async fn run_case(
     // A case is hermetic at birth too: its manifest freezes no user
     // knowledge, as its sessions read none.
     let frozen = crate::commands::run::runnable(
-        &ctx,
+        ctx,
         Path::new(case.workflow.as_str()),
         &raw_inputs,
         None,
-        Some(&fixture_path),
+        Some(fixture_path),
         &yunta_core::Env::default(),
     )
     .await?;
-    let manifest = frozen.manifest.clone();
     let prepared =
-        crate::commands::run::create_run_from(&ctx, &storage, &frozen, case.mode.as_ref()).await?;
+        crate::commands::run::create_run_from(ctx, storage, &frozen, case.mode.as_ref()).await?;
+    Ok((frozen.manifest, prepared))
+}
 
+/// Drives the case's run under its scripted sessions, answering each gate
+/// the case names. Also answers with the scripted mock the run's sessions
+/// claimed from, so the verdict can name the scripts nothing claimed.
+async fn drive_case_run(
+    ctx: &Context,
+    storage: &yunta_storage::AsyncStorage,
+    case: &TestCase,
+    manifest: &yunta_core::Manifest,
+    prepared: &crate::commands::drive::Prepared,
+) -> Result<
+    (
+        yunta_engine::RunReport,
+        Option<Arc<yunta_adapters::MockAdapter>>,
+    ),
+    CliError,
+> {
     let (adapters, script) = adapters_and_script(
-        &manifest,
+        manifest,
         &ScriptedPaths {
             run_dir: &prepared.run_dir,
             worktree: &prepared.worktree,
@@ -227,13 +265,13 @@ pub(crate) async fn run_case(
     let forge = forge
         .as_ref()
         .map(|forge| forge as &dyn yunta_core::port::Forge);
-    let report = crate::commands::drive::execute(crate::commands::drive::Executing {
+    let report = execute(Executing {
         run_id: &prepared.run_id,
-        manifest: &manifest,
+        manifest,
         run_dir: &prepared.run_dir,
         worktree: &prepared.worktree,
         adapters: &adapters,
-        storage: &storage,
+        storage,
         clock: Arc::new(ctx.clock),
         ids: &ctx.ids,
         // A test case's every session comes from a scripted fixture — a
@@ -252,84 +290,44 @@ pub(crate) async fn run_case(
     })
     .await?;
     let report = answered(
-        &ctx,
-        &storage,
-        &prepared,
-        &manifest,
+        ctx,
+        storage,
+        prepared,
+        manifest,
         &adapters,
         forge,
-        case.decisions,
+        case.decisions.clone(),
         report,
     )
     .await?;
+    Ok((report, script))
+}
 
-    // Compare against expect — every mismatch reported, not just the first.
-    let mut problems = Vec::new();
+/// Plays the case: creates its run, then drives it.
+async fn play(
+    ctx: &Context,
+    storage: &yunta_storage::AsyncStorage,
+    case: &TestCase,
+    fixture_path: &Path,
+) -> Result<Played, CliError> {
+    let (manifest, prepared) = create_case_run(ctx, storage, case, fixture_path).await?;
+    let (report, script) = drive_case_run(ctx, storage, case, &manifest, &prepared).await?;
+    Ok(Played {
+        manifest,
+        prepared,
+        report,
+        script,
+    })
+}
 
-    // A fixture that describes sessions which never happened describes
-    // a run nobody made: the case fails, always, and names which
-    // scripts went unclaimed. There is no expectation to opt into —
-    // the fixture is the case's own account of what the run does.
-    let unclaimed = script.map(|mock| mock.unconsumed()).unwrap_or_default();
-    if !unclaimed.is_empty() {
-        problems.push(format!(
-            "fixture `{}`: {} nothing opened — {}",
-            fixture_path.display(),
-            yunta_core::text::counted(unclaimed.len(), "scripted session"),
-            unclaimed
-                .iter()
-                .map(|index| format!("#{}", index + 1))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    // Where the run and each node stand is read off the run's frame, the
-    // one place that tells a node the run's mode leaves out from one it
-    // has not reached and a run that finished from one findings still
-    // block — so a case says what `status` says. The report's state is
-    // the log as the run left it, read at its last event.
-    let state = &report.state;
-    let read_at = state.clock().last_at().unwrap_or_default();
-    let frame =
-        yunta_engine::run_frame_of(&prepared.run_id, &manifest.workflow, state, None, read_at);
-    let expected_word = case.expect.final_state.word();
-    let reached = crate::render::run_word(&frame);
-    if reached != expected_word {
-        problems.push(format!(
-            "final_state: expected {expected_word}, got {}",
-            terminal_label(reached, &report.terminal)
-        ));
-    }
-    for (node_id, expected) in &case.expect.nodes {
-        // A node that fans out to several runners runs as one node per
-        // runner (`review@reviewer`, ...): the id the workflow declares
-        // names all of them, and each has to stand where the case says.
-        let named: Vec<_> = frame
-            .nodes
-            .iter()
-            .filter(|node| {
-                node.id == node_id.as_str()
-                    || node
-                        .id
-                        .as_str()
-                        .strip_prefix(node_id.as_str())
-                        .is_some_and(|runner| runner.starts_with('@'))
-            })
-            .collect();
-        if named.is_empty() {
-            problems.push(format!(
-                "node {node_id}: expected {expected}, and the workflow declares no such node"
-            ));
-        }
-        for node in named {
-            let got = crate::render::standing(&node.state).word.word();
-            if got != expected {
-                problems.push(format!("node {}: expected {expected}, got {got}", node.id));
-            }
-        }
-    }
+/// Every mismatch between what the case played and what it expects, each
+/// reported as a sentence a person compares.
+fn verdict(case: &TestCase, fixture_path: &Path, played: &Played) -> Vec<String> {
+    let mut problems = unclaimed_problems(fixture_path, played.script.as_ref());
+    problems.extend(standing_problems(case, played));
     for (task_id, expected) in &case.expect.tasks {
-        let got = report
+        let got = played
+            .report
             .state
             .tasks
             .status(task_id.as_str())
@@ -339,7 +337,7 @@ pub(crate) async fn run_case(
             problems.push(format!("task {task_id}: expected {expected}, got {got}"));
         }
     }
-    Ok(problems)
+    problems
 }
 
 /// Answers each gate the case names and hands the run back, until the
@@ -378,14 +376,14 @@ async fn answered(
             &ctx.clock,
             yunta_core::events::HumanChoice {
                 option,
-                by: crate::identity::responder(None),
+                by: crate::identity::responder(None, ctx.env.user.as_deref()),
                 free_text: None,
             },
             &redactor,
         )
         .await
         .map_err(|refusal| CliError::gate_refused(&prepared.run_id, refusal))?;
-        report = crate::commands::drive::execute(crate::commands::drive::Executing {
+        report = execute(Executing {
             run_id: &prepared.run_id,
             manifest,
             run_dir: &prepared.run_dir,

@@ -6,6 +6,7 @@
 //! `view::closed_as`, every enum its own published word — nothing here
 //! formats a domain type with `Debug`.
 
+use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
     GateResolvedPayload, TaskStatus, TokenUsage, ToolTarget,
@@ -220,7 +221,17 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         H::RailSummary { model, moments } => {
             super::rail_words::rail_summary(model.as_ref(), moments)
         }
+        H::BestEffortFailed { step, cause } => best_effort(*step, cause),
     }
+}
+
+/// A step the run went on past: what the step was doing, then the cause
+/// its source gave, verbatim.
+fn best_effort(step: BestEffortStep, cause: &str) -> String {
+    let doing = match step {
+        BestEffortStep::McpClientClose => "the MCP client did not close",
+    };
+    format!("{doing}: {cause}")
 }
 
 /// A session opening: the agent it works as, the model it runs on and

@@ -260,12 +260,13 @@ impl DecisionJson {
             .iter()
             .map(|option| {
                 let id = option.id.to_string();
-                // The command names the option alone: the option's `asks` says
-                // whether it takes an answer.
+                // The command names the option, and carries the answer's flag
+                // when the option asks for words: a program that runs it as
+                // written is not refused for want of them.
                 let step = NextStep::ResolveGate {
                     run: run_id.clone(),
                     option: Some(option.id.clone()),
-                    text: false,
+                    text: option.asks.is_some(),
                 };
                 (id, advice::spell_for(&step, Reader::Agent))
             })
@@ -430,6 +431,26 @@ mod tests {
         assert_eq!(
             json["commands"]["retry"],
             "yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 retry"
+        );
+    }
+
+    #[test]
+    fn the_json_command_for_an_option_that_asks_for_words_carries_the_text_flag() {
+        let asking = GateOption {
+            asks: Some("say why".to_string()),
+            ..option("retry", "Retry", "runs it again")
+        };
+        let payload = Escalation::new(
+            Claim::NeedsDecision { node: NODE },
+            Evidence::none(),
+            NonEmpty::from((asking, Vec::new())),
+        )
+        .expect("an engine claim repeats no fact")
+        .into_payload();
+        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, payload)).unwrap();
+        assert_eq!(
+            json["commands"]["retry"],
+            "yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 retry --text \"<answer>\""
         );
     }
 

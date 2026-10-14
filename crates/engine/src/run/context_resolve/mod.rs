@@ -48,7 +48,7 @@
 //!   and no second implementer (packs are still ahead), a trait object
 //!   buys nothing a real boundary would. Every builtin is a plain
 //!   resolver function behind
-//!   one `match`; nothing here stops a future dynamic-dispatch version
+//!   one `match`; a dynamic-dispatch version becomes the right shape only
 //!   once a pack actually needs to plug in its own source.
 
 mod error;

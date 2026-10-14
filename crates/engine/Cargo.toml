@@ -64,7 +64,7 @@ axum = { workspace = true, features = ["tokio", "http1"] }
 uuid = { workspace = true, features = ["v4"] }
 # `reqwest::Client` is named directly in `context_resolve.rs` to build the
 # streamable-HTTP transport rmcp's own reqwest feature only wires
-# internally — rustls (not native-tls/OpenSSL), matching the TLS backend
+# internally — rustls (not native-tls/OpenSSL), matching the TLS implementation
 # the `reqwest` feature above already selects for rmcp's side.
 reqwest = { workspace = true, features = ["rustls"] }
 # `inputs:`'s `pattern:` validation — the one place the workspace

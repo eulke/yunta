@@ -102,7 +102,7 @@ pub struct AdapterSettings {
     pub adapter_settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// `storage:` — SQLite is the only backend.
+/// `storage:` — SQLite is the only storage engine.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {

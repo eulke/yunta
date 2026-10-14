@@ -329,7 +329,9 @@ pub(super) async fn undo_half_added(
     supervision: Supervision<'_>,
 ) {
     let undo = CancellationToken::new();
-    let undo = Supervision::outside_any_run(&undo, supervision.clock).with_env(supervision.env);
+    let undo = Supervision::outside_any_run(&undo, supervision.clock)
+        .with_env(supervision.env)
+        .with_path(supervision.path);
     let path = worktree_path.display().to_string();
     for args in [
         ["worktree", "remove", "--force", &path].as_slice(),

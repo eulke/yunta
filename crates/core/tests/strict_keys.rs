@@ -116,11 +116,11 @@ fn an_artifact_and_a_prompt_file_refuse_unknown_keys() {
 #[test]
 fn a_mode_and_an_input_refuse_unknown_keys() {
     let text = err::<Workflow>(&format!(
-        "{NODE}modes:\n  quick: {{ include: [a], includes: [] }}\n"
+        "{NODE}modes:\n  alpha: {{ include: [a], includes: [] }}\n"
     ));
     assert_eq!(
         text,
-        "`modes.quick.includes`: unknown field `includes`, expected `include` or `ask` — did you mean `include`? at line 7 column 26"
+        "`modes.alpha.includes`: unknown field `includes`, expected `include` or `ask` — did you mean `include`? at line 7 column 26"
     );
     let text = err::<Workflow>(&format!(
         "{NODE}inputs:\n  idea: {{ type: string, descripton: x }}\n"

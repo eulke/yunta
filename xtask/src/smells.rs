@@ -20,9 +20,12 @@
 //! the rebuild's own acceptance commands used, so a contributor and CI see
 //! the same number `grep -c` would.
 
+mod cli;
 mod corpus;
+mod disk;
 mod prose;
 mod references;
+mod scan;
 mod shape;
 mod sites;
 mod thresholds;
@@ -31,9 +34,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use yunta_core::durable::{self, Durability};
 
+use corpus::{crate_src_dirs, crate_test_dirs, is_test_source, rs_files, Corpus};
+use disk::{count_engine_fs_outside_runtime, count_sync_fs_in_async, discarded_results};
+use scan::blanked_lines;
 use shape::{
     functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
-    production_only, strip_noise, sync_fs_in_async,
+    production_only,
 };
 use thresholds::numeric_consts_without_reason;
 
@@ -48,58 +54,6 @@ fn workspace_root() -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
-}
-
-/// Every `.rs` file under `dir`, recursively; missing directories yield
-/// nothing so a counter over a path that does not exist is simply zero.
-fn rs_files(dir: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    collect_rs(dir, &mut out);
-    out.sort();
-    out
-}
-
-fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
-    for path in corpus::entries(dir) {
-        if path.is_dir() {
-            collect_rs(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
-}
-
-/// The `src` directory of every crate under `crates/`.
-fn crate_src_dirs(root: &Path) -> Vec<PathBuf> {
-    crate_subdirs(root, "src")
-}
-
-/// The `tests` directory of every crate under `crates/`.
-fn crate_test_dirs(root: &Path) -> Vec<PathBuf> {
-    crate_subdirs(root, "tests")
-}
-
-/// The files the ratchet reads about code: the sources of every crate and
-/// the tests that drive them. One corpus, so two counters naming the same
-/// pattern never disagree about where they looked.
-pub(super) fn ratchet_corpus(root: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = crate_src_dirs(root)
-        .iter()
-        .chain(crate_test_dirs(root).iter())
-        .flat_map(|dir| rs_files(dir))
-        .collect();
-    files.sort();
-    files
-}
-
-fn crate_subdirs(root: &Path, name: &str) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = corpus::entries(&root.join("crates"))
-        .into_iter()
-        .map(|entry| entry.join(name))
-        .filter(|sub| sub.is_dir())
-        .collect();
-    dirs.sort();
-    dirs
 }
 
 /// A file the ratchet cannot read stops the measure, never reads clean.
@@ -120,31 +74,22 @@ fn count_lines(files: &[PathBuf], matches: impl Fn(&str) -> bool) -> usize {
 /// Every counter, by name, computed fresh from the tree.
 fn measure() -> BTreeMap<String, usize> {
     let root = workspace_root();
-    let src_files: Vec<PathBuf> = crate_src_dirs(&root)
-        .iter()
-        .flat_map(|dir| rs_files(dir))
-        .collect();
-    let tests: Vec<PathBuf> = crate_test_dirs(&root)
-        .iter()
-        .flat_map(|dir| rs_files(dir))
-        .collect();
-    let cli_src = rs_files(&root.join("crates/cli/src"));
-    // What a person reads on a terminal is drawn by the command line and
-    // the crate it draws with.
-    let drawn_src: Vec<PathBuf> = ["crates/cli/src", "crates/render/src"]
-        .iter()
-        .flat_map(|dir| rs_files(&root.join(dir)))
-        .collect();
-
-    // Production text (unit-test modules blanked) for the counters the audit
-    // measured outside tests.
-    let prod: Vec<String> = src_files
-        .iter()
-        .map(|path| production_only(&read_corpus(path)))
-        .collect();
-
+    let corpus = Corpus::of(&root);
     let mut counts = BTreeMap::new();
+    code_counts(&corpus, &mut counts);
+    string_counts(&corpus, &mut counts);
+    text_counts(&root, &corpus, &mut counts);
+    test_counts(&corpus, &mut counts);
+    // The counters that read one question each, from the tree they name.
+    for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
+        counts.insert((*name).to_string(), count(&root));
+    }
+    counts
+}
 
+/// The counters over how production code is shaped: what it discards, and how
+/// long its functions and files run.
+fn code_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
     // Production `unwrap`/`expect`/`panic`/indexing are not counted here:
     // the crate-root `#![deny(clippy::…)]` lints make each a compile error,
     // which CI's `cargo clippy -- -D warnings` already enforces — a stronger
@@ -154,57 +99,100 @@ fn measure() -> BTreeMap<String, usize> {
     // A discarded `Result` hides a degradation the log should carry.
     counts.insert(
         "let_underscore_in_prod".to_string(),
-        prod.iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| line.trim_start().starts_with("let _ ="))
-            .count(),
+        corpus.prod.iter().map(|text| discarded_results(text)).sum(),
     );
     // A production function near 50 lines is a seam not yet cut.
     counts.insert(
         "prod_fns_over_50_lines".to_string(),
-        prod.iter().map(|text| functions_over(text, 50)).sum(),
+        corpus
+            .prod
+            .iter()
+            .map(|text| functions_over(text, 50))
+            .sum(),
+    );
+    // A production function of 100 lines or more is the hard limit: there
+    // is no exception to it.
+    counts.insert(
+        "prod_fns_over_100_lines".to_string(),
+        corpus
+            .prod
+            .iter()
+            .map(|text| functions_over(text, 100))
+            .sum(),
     );
     // A file near 500 lines is another (counted whole — its tests are part
     // of what a reader scrolls).
     counts.insert(
         "src_files_over_500_lines".to_string(),
-        src_files
+        corpus
+            .src
             .iter()
             .filter(|path| read_corpus(path).lines().count() > 500)
             .count(),
     );
-    // The CLI has one error translator; `main` maps the exit code.
-    counts.insert(
-        "exit_failure_in_cli".to_string(),
-        count_lines(&cli_src, |line| line.contains("ExitCode::FAILURE")),
-    );
-    // Test infrastructure lives in the support crate, never copied into a
-    // test that needs it. Counted over `src` as well as `tests`, because
-    // a `#[cfg(test)]` module inside a crate is a test that needs it too,
-    // and a copy there drifts from the one place just as quietly — the
-    // one this found had dropped the initial-branch pin that makes the
-    // support crate's version hermetic.
-    let test_code: Vec<PathBuf> = tests.iter().chain(src_files.iter()).cloned().collect();
-    counts.insert(
-        "copied_test_helpers".to_string(),
-        count_lines(&test_code, |line| {
-            let t = line.trim_start();
-            t.starts_with("fn git(")
-                || t.starts_with("fn yunta_in(")
-                || t.starts_with("fn init_repo(")
-                || t.starts_with("struct FixedClock")
-        }),
-    );
+}
 
-    // A glyph that says how a line reads — the separator between two
-    // facts, the mark of a line that goes on — written as a literal: a
-    // surface drawing with the ASCII set still prints it, where the
-    // glyph set would have printed what that terminal can draw.
+/// The counters over the text a production string carries: its spacing, its
+/// plurals and the values it formats with `Debug`.
+fn string_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
+    // A run of spaces inside a message is a `\` continuation that went
+    // missing: the reader gets the source's indentation in the text.
+    counts.insert(
+        "space_runs_in_prod_strings".to_string(),
+        corpus
+            .prod
+            .iter()
+            .flat_map(|text| text.lines())
+            .filter(|line| has_inner_space_run(line))
+            .count(),
+    );
+    // A count hedged with `(s)` while its number stands beside it: the
+    // message says `3 file(s)` where it knows to say `3 files`.
+    counts.insert(
+        "parenthesized_plural_in_prod_strings".to_string(),
+        corpus
+            .prod
+            .iter()
+            .flat_map(|text| text.lines())
+            .filter(|line| has_parenthesized_plural(line))
+            .count(),
+    );
+    // A value formatted with `Debug` in text a reader is told. Counted over
+    // the crates that ship: a test-support crate talks to the one who wrote
+    // the code.
+    counts.insert(
+        "debug_format_reaching_reader".to_string(),
+        corpus
+            .src
+            .iter()
+            .filter(|path| {
+                let shown = path.to_string_lossy();
+                !shown.contains("crates/testkit") && !is_test_source(path)
+            })
+            .map(|path| read_corpus(path))
+            .map(|text| {
+                production_only(&text)
+                    .lines()
+                    .filter(|line| has_debug_format(line))
+                    .count()
+            })
+            .sum(),
+    );
+}
+
+/// The counters over the text a reader is shown: the glyphs a line is drawn
+/// with, a ledger's fold, and the words and tense the repository states.
+fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
+    // A glyph that says how a line reads — the separator between two facts,
+    // the mark of a line that goes on — written as a literal: a surface
+    // drawing with the ASCII set prints it nonetheless, where the glyph set would
+    // have printed what that terminal can draw.
     counts.insert(
         "separator_literal_outside_glyphs".to_string(),
-        drawn_src
+        corpus
+            .drawn
             .iter()
-            .filter(|path| !path.ends_with("render/src/glyphs.rs") && !path.ends_with("tests.rs"))
+            .filter(|path| !path.ends_with("render/src/glyphs.rs") && !is_test_source(path))
             .map(|path| read_corpus(path))
             .map(|text| {
                 production_only(&text)
@@ -216,75 +204,41 @@ fn measure() -> BTreeMap<String, usize> {
             })
             .sum(),
     );
-
-    // A `_ =>` inside a ledger's fold is a kind that derives nothing
-    // with nothing saying so: the arm exists, the reader sees no
-    // diagnostic, and the state is simply wrong. Every kind is named,
-    // and one that moves nothing is listed by name in the replay test.
+    // A `_ =>` inside a ledger's fold is a kind that derives nothing with
+    // nothing saying so: the arm exists, the reader sees no diagnostic, and
+    // the state is simply wrong. Every kind is named, and one that moves
+    // nothing is listed by name in the replay test.
     counts.insert(
         "wildcard_in_ledger_apply".to_string(),
-        wildcards_in_folds(&root),
+        wildcards_in_folds(root),
     );
-
     // A word this repository retired still naming the thing it retired it
     // for, and a text that describes a plan or a past instead of what the
     // repository does. Both read prose, over a corpus wider than `.rs`.
     counts.insert(
         "banned_vocabulary".to_string(),
-        prose::banned_vocabulary(&root),
+        prose::banned_vocabulary(root),
     );
-    counts.insert("tense_markers".to_string(), prose::tense_markers(&root));
+    counts.insert("tense_markers".to_string(), prose::tense_markers(root));
+}
 
-    // A run of spaces inside a message is a `\` continuation that went
-    // missing: the reader gets the source's indentation in the text.
+/// The counters over test code kept outside the support crate.
+fn test_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
+    // Test infrastructure lives in the support crate, never copied into a
+    // test that needs it. Counted over `src` as well as `tests`, because a
+    // `#[cfg(test)]` module inside a crate is a test that needs it too, and
+    // a copy there drifts from the one place just as quietly.
+    let test_code: Vec<PathBuf> = corpus.tests.iter().chain(&corpus.src).cloned().collect();
     counts.insert(
-        "space_runs_in_prod_strings".to_string(),
-        prod.iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| has_inner_space_run(line))
-            .count(),
+        "copied_test_helpers".to_string(),
+        count_lines(&test_code, |line| {
+            let t = line.trim_start();
+            t.starts_with("fn git(")
+                || t.starts_with("fn yunta_in(")
+                || t.starts_with("fn init_repo(")
+                || t.starts_with("struct FixedClock")
+        }),
     );
-
-    // A count hedged with `(s)` while its number stands beside it: the
-    // message says `3 file(s)` where it knows to say `3 files`.
-    counts.insert(
-        "parenthesized_plural_in_prod_strings".to_string(),
-        prod.iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| has_parenthesized_plural(line))
-            .count(),
-    );
-
-    // A value formatted with `Debug` in text a reader is told. Counted
-    // over the crates that ship: a test-support crate talks to the one
-    // who wrote the code.
-    counts.insert(
-        "debug_format_reaching_reader".to_string(),
-        src_files
-            .iter()
-            .filter(|path| {
-                let shown = path.to_string_lossy();
-                !shown.contains("crates/testkit") && !shown.ends_with("tests.rs")
-            })
-            .map(|path| read_corpus(path))
-            .map(|text| {
-                production_only(&text)
-                    .lines()
-                    .filter(|line| has_debug_format(line))
-                    .count()
-            })
-            .sum(),
-    );
-
-    // The shape of a test, the thread an async body holds, the threshold
-    // with no reason written beside it, and every capability written
-    // outside the site that owns it. Each of these is a function of the
-    // tree alone.
-    for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
-        counts.insert((*name).to_string(), count(&root));
-    }
-
-    counts
 }
 
 /// The counters that read the corpus of code and nothing else, beside the
@@ -298,16 +252,8 @@ const COUNTERS: &[sites::Counter] = &[
         "numeric_const_without_reason",
         count_numeric_const_without_reason,
     ),
+    ("engine_fs_outside_runtime", count_engine_fs_outside_runtime),
 ];
-
-/// A synchronous file call inside an async body: it holds the thread the
-/// runtime gave the task until the disk answers.
-fn count_sync_fs_in_async(root: &Path) -> usize {
-    ratchet_corpus(root)
-        .iter()
-        .map(|path| sync_fs_in_async(&read_corpus(path)))
-        .sum()
-}
 
 /// A test file past the budget a source file has. What a reader scrolls
 /// to understand a failure is the test as well as the code it drives.
@@ -337,15 +283,24 @@ fn count_numeric_const_without_reason(root: &Path) -> usize {
         .iter()
         .filter(|dir| !dir.to_string_lossy().contains("/testkit"))
         .flat_map(|dir| rs_files(dir))
+        .filter(|path| !is_test_source(path))
         .map(|path| numeric_consts_without_reason(&production_only(&read_corpus(&path))))
         .sum()
 }
 
+/// The test files: every file a crate keeps under `tests/`, and the test
+/// modules kept in a file of their own under `src/`.
 fn test_files(root: &Path) -> Vec<PathBuf> {
-    crate_test_dirs(root)
+    let src: Vec<PathBuf> = crate_src_dirs(root)
         .iter()
         .flat_map(|dir| rs_files(dir))
-        .collect()
+        .collect();
+    let mut files: Vec<PathBuf> = crate_test_dirs(root)
+        .iter()
+        .flat_map(|dir| rs_files(dir))
+        .collect();
+    files.extend(src.into_iter().filter(|path| is_test_source(path)));
+    files
 }
 
 fn render(counts: &BTreeMap<String, usize>) -> String {
@@ -389,10 +344,7 @@ fn wildcards_in_apply(source: &str) -> usize {
     let mut count = 0;
     let mut depth = 0usize;
     let mut inside = false;
-    let mut block = false;
-    for line in source.lines() {
-        let (code, next) = strip_noise(line, block);
-        block = next;
+    for code in blanked_lines(source) {
         if !inside && code.contains("fn apply") {
             inside = true;
             depth = 0;
@@ -458,6 +410,32 @@ pub fn check() -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The counters that stand at zero, each held there by the ratchet: a
+    /// count that reached zero is listed here, so that no change can raise it.
+    const ZERO_COUNTERS: &[&str] = &[
+        "banned_vocabulary",
+        "tense_markers",
+        "sync_fs_in_async",
+        "system_clock_outside_boundary",
+        "let_underscore_in_prod",
+        "env_read_outside_boundary",
+        "exit_failure_in_cli",
+        "create_run_outside_testkit",
+        "execute_run_outside_testkit",
+        "git_command_outside_git_rs",
+        "reason_built_by_format",
+        "run_tool_named_outside_vocabulary",
+        "separator_literal_outside_glyphs",
+        "sleep_outside_mock_latency",
+        "src_files_over_500_lines",
+        "prod_fns_over_100_lines",
+        "engine_fs_outside_runtime",
+        "numeric_const_without_reason",
+        "doc_reference",
+        "cli_word_outside_cli",
+        "cli_print_outside_output",
+    ];
+
     #[test]
     fn the_ratchet_measures_the_vocabulary_and_the_tense_the_repository_rules_on() {
         let counts = measure();
@@ -490,6 +468,14 @@ mod tests {
         let counts = measure();
         assert_eq!(counts.get("doc_reference"), Some(&0));
         assert_eq!(counts.get("numeric_const_without_reason"), Some(&0));
+    }
+
+    #[test]
+    fn the_tree_holds_each_counter_that_reaches_zero_at_zero() {
+        let counts = measure();
+        for name in ZERO_COUNTERS {
+            assert_eq!(counts.get(*name), Some(&0), "{name}");
+        }
     }
 
     #[test]

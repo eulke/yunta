@@ -40,7 +40,7 @@ pub use phase::{RunPhase, WaitingOn};
 pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 
 /// Work split by where it stands, at one level: the DAG's nodes, or the
-/// ledger's tasks.
+/// run's tasks.
 ///
 /// **No method divides `done` by `total`.** A percentage lies the moment
 /// a re-route grows the denominator, so leaving the division out of the
@@ -101,8 +101,8 @@ pub struct RunFrame {
     pub elapsed: Option<Duration>,
     /// The DAG's nodes.
     pub flow: Counter,
-    /// The ledger's tasks — `None` until a `task_registered` arrives, so
-    /// a run with no ledger reports no ledger instead of `0/0`.
+    /// The run's tasks — `None` until a `task_registered` arrives, so
+    /// a run with no tasks reports no tasks instead of `0/0`.
     pub tasks: Option<Counter>,
     /// Every `node_rerouted` on the log: the count that makes a grown
     /// denominator attributable.

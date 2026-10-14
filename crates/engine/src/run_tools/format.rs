@@ -153,10 +153,10 @@ impl SessionTools {
             .await;
         let duration_ms = yunta_core::units::whole_millis(started.elapsed());
         // The output is read back by the hash its event names, which verifies it.
-        // best-effort: a store that fails leaves the event without output.
         let output = ObjectStore::at(&self.host.run_dir)
             .put_redacted(&spawned.bytes, &self.host.redactor)
             .await
+            // best-effort: a store that fails leaves the event without output.
             .ok();
         let printed: Vec<String> = spawned
             .lines

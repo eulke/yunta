@@ -188,6 +188,9 @@ impl NodeLedger {
             // A degradation is the adapter's, not the attempt's: the
             // session ledger holds it.
             SessionEvent::CapabilityDegraded(_) => {}
+            // A step the run went on past is audit only: the log keeps
+            // it, and no node's state reads it.
+            SessionEvent::BestEffortFailed(_) => {}
         }
         let after = record.standing();
         self.track(before, after);

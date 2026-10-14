@@ -69,7 +69,7 @@ pub(crate) async fn verdict(
     errors.extend(refs.errors);
     warnings.extend(refs.warnings);
     let (unprovided, missing_programs) =
-        super::refusals::environment(&ctx.cwd, workflow, config, &origin);
+        super::refusals::environment(&ctx.env, &ctx.cwd, workflow, config, &origin);
     errors.extend(unprovided);
     warnings.extend(missing_programs);
     if reach == Reach::Workflow {

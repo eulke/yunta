@@ -1,8 +1,8 @@
 //! `modes:` exercised end-to-end: a node a mode excludes is never
 //! scheduled; an in-mode node that depended on an excluded node waits
 //! for the excluded node's own in-mode dependencies instead (the
-//! "quick"/"standard"/"full" example does exactly this — `implement`
-//! depends_on the excluded `approve-plan` in "quick", so it waits for
+//! "alpha"/"beta"/"gamma" example does exactly this — `implement`
+//! depends_on the excluded `approve-plan` in "alpha", so it waits for
 //! `plan`); and the run finishes once every *included* node is done,
 //! never waiting on one that was never going to run.
 
@@ -13,8 +13,8 @@ use yunta_testkit::Bench;
 const WORKFLOW: &str = r#"
 name: mode-scenario
 modes:
-  quick:  { include: [start, ship] }
-  full:   { include: all }
+  alpha:  { include: [start, ship] }
+  gamma:  { include: all }
 nodes:
   - id: start
     kind: bash
@@ -32,8 +32,8 @@ nodes:
 const FIXTURE: &str = "dialect: claude-code\nsessions: []\n";
 
 #[tokio::test]
-async fn quick_mode_skips_the_excluded_node_and_still_finishes() {
-    let bench = Bench::with_run_id("run-quick").in_mode("quick");
+async fn alpha_mode_skips_the_excluded_node_and_still_finishes() {
+    let bench = Bench::with_run_id("run-alpha").in_mode("alpha");
     let RunReport { terminal, state } = bench.run(WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -51,14 +51,14 @@ async fn quick_mode_skips_the_excluded_node_and_still_finishes() {
 }
 
 #[tokio::test]
-async fn full_mode_runs_every_node() {
-    let bench = Bench::with_run_id("run-full").in_mode("full");
+async fn gamma_mode_runs_every_node() {
+    let bench = Bench::with_run_id("run-gamma").in_mode("gamma");
     let RunReport { terminal, state } = bench.run(WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(
             matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
-            "node `{id}` should have finished under `full`, got {:?}",
+            "node `{id}` should have finished under `gamma`, got {:?}",
             state.nodes.state(id)
         );
     }
@@ -95,8 +95,8 @@ async fn an_unknown_mode_name_is_refused_before_the_run_is_created() {
 const ORDER_WORKFLOW: &str = r#"
 name: mode-order
 modes:
-  quick:  { include: [ship, start] }
-  full:   { include: all }
+  alpha:  { include: [ship, start] }
+  gamma:  { include: all }
 nodes:
   - id: ship
     kind: bash
@@ -114,8 +114,8 @@ nodes:
 const GATE_WORKFLOW: &str = r#"
 name: mode-gate
 modes:
-  quick:  { include: [start, ship] }
-  full:   { include: all }
+  alpha:  { include: [start, ship] }
+  gamma:  { include: all }
 nodes:
   - id: start
     kind: bash
@@ -149,7 +149,7 @@ fn seq_of(
 
 #[tokio::test]
 async fn a_dependent_of_an_excluded_node_waits_for_that_nodes_own_dependencies() {
-    let bench = Bench::with_run_id("run-order").in_mode("quick");
+    let bench = Bench::with_run_id("run-order").in_mode("alpha");
     let RunReport { terminal, .. } = bench.run(ORDER_WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
@@ -172,7 +172,7 @@ async fn a_dependent_of_an_excluded_node_waits_for_that_nodes_own_dependencies()
 async fn a_gate_behind_an_excluded_node_waits_for_that_nodes_own_dependencies() {
     // With nobody to answer it, the internal gate pauses the run — but
     // only once everything it effectively depends on has run.
-    let bench = Bench::with_run_id("run-gate").in_mode("quick");
+    let bench = Bench::with_run_id("run-gate").in_mode("alpha");
     let RunReport { terminal, state } = bench.run(GATE_WORKFLOW, FIXTURE).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),

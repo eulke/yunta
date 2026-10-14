@@ -17,6 +17,7 @@ use yunta_core::{
 };
 
 use super::layers::layer_files;
+use super::listing::{self, SymlinkPolicy};
 use super::prompt::{read_prompts, PromptRoot};
 use super::provenance::pack_provenance;
 use super::read::{executor_path, read_file, read_file_text, registration, workflow_dir};
@@ -259,34 +260,7 @@ fn skill_root(repo: &Path, config: &ConfigLayer, name: &SkillName) -> Result<Pat
 /// through the link. A symlink to a directory is not followed, so no link
 /// can loop.
 async fn skill_files(dir: &Path) -> Result<Vec<PathBuf>, FrozenError> {
-    let mut files = Vec::new();
-    let mut pending = vec![PathBuf::new()];
-    while let Some(relative) = pending.pop() {
-        let here = dir.join(&relative);
-        let io = |source: std::io::Error| FrozenError::Io {
-            context: format!("list `{}`", here.display()),
-            source,
-        };
-        let mut listing = tokio::fs::read_dir(&here).await.map_err(io)?;
-        while let Some(entry) = listing.next_entry().await.map_err(io)? {
-            let path = relative.join(entry.file_name());
-            let kind = entry.file_type().await.map_err(io)?;
-            if kind.is_dir() {
-                pending.push(path);
-            } else if kind.is_file() || (kind.is_symlink() && is_file(&entry.path()).await) {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
-}
-
-/// Whether `path` is a file once its symlinks are followed.
-async fn is_file(path: &Path) -> bool {
-    tokio::fs::metadata(path)
-        .await
-        .is_ok_and(|meta| meta.is_file())
+    listing::files(dir, SymlinkPolicy::FollowFiles).await
 }
 
 async fn freeze_executors(

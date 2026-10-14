@@ -25,6 +25,7 @@ use crate::diagnostic::{
 use crate::glob::might_overlap;
 
 pub use super::expand::{expand_implicit_dependencies, expand_runner_fanout};
+use crate::ids::ModeName;
 use crate::{ModeInclude, Node, NodeId, NodeKind, Workflow};
 
 /// Every rule a workflow is held to by the file alone, stated for
@@ -356,70 +357,109 @@ fn modes_still_run(workflow: &Workflow) -> Vec<Diagnostic> {
             continue;
         };
         let included: HashSet<&NodeId> = named.iter().collect();
-        let mut fails = |index: usize, id: &NodeId, code: RuleCode, detail: String| {
-            broken.push(about(index, id, code, detail));
-        };
-        for (index, id) in named.iter().enumerate() {
-            if !top_level.contains(id) {
-                fails(
-                    index,
-                    id,
-                    RuleCode::UnknownDependency,
-                    format!("mode `{mode}` includes `{id}`, and no top-level node carries that id"),
-                );
-            }
+        broken.extend(unlisted_or_invariant(
+            mode,
+            named,
+            &included,
+            &top_level,
+            &invariants,
+        ));
+        broken.extend(cut_links(
+            workflow,
+            mode,
+            &included,
+            &top_of,
+            &earlier,
+            earlier_all,
+        ));
+        earlier.extend(included);
+    }
+    broken
+}
+
+/// What a mode breaks by naming a node the file does not declare, or by
+/// leaving out an invariant.
+fn unlisted_or_invariant(
+    mode: &ModeName,
+    named: &[NodeId],
+    included: &HashSet<&NodeId>,
+    top_level: &HashSet<&NodeId>,
+    invariants: &[&NodeId],
+) -> Vec<Diagnostic> {
+    let mut broken = Vec::new();
+    for (index, id) in named.iter().enumerate() {
+        if !top_level.contains(id) {
+            broken.push(about(
+                index,
+                id,
+                RuleCode::UnknownDependency,
+                format!("mode `{mode}` includes `{id}`, and no top-level node carries that id"),
+            ));
         }
-        for (index, id) in invariants.iter().enumerate() {
-            if !included.contains(id) {
-                fails(
+    }
+    for (index, id) in invariants.iter().enumerate() {
+        if !included.contains(id) {
+            broken.push(about(
+                index,
+                id,
+                RuleCode::IncoherentMode,
+                format!(
+                    "this node is `invariant` and mode `{mode}` leaves it out; a mode chooses \
+                     what to skip, never what the workflow cannot run without"
+                ),
+            ));
+        }
+    }
+    broken
+}
+
+/// What a mode breaks by cutting a link a node it keeps has: a
+/// re-route, or a read, whose target the mode leaves out.
+fn cut_links(
+    workflow: &Workflow,
+    mode: &ModeName,
+    included: &HashSet<&NodeId>,
+    top_of: &std::collections::HashMap<&NodeId, &NodeId>,
+    earlier: &HashSet<&NodeId>,
+    earlier_all: bool,
+) -> Vec<Diagnostic> {
+    let mut broken = Vec::new();
+    for (index, node) in workflow
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| included.contains(&node.id))
+    {
+        for (field, target) in reroute_targets(node) {
+            if !included.contains(target) {
+                broken.push(about(
                     index,
-                    id,
+                    &node.id,
                     RuleCode::IncoherentMode,
                     format!(
-                        "this node is `invariant` and mode `{mode}` leaves it out; a mode chooses \
-                         what to skip, never what the workflow cannot run without"
+                        "`{field}` sends control to `{target}`, and mode `{mode}` leaves \
+                         `{target}` out; a mode that keeps a node keeps what it reroutes to"
                     ),
-                );
+                ));
             }
         }
-        for (index, node) in workflow
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(_, node)| included.contains(&node.id))
-        {
-            for (field, target) in reroute_targets(node) {
-                if !included.contains(target) {
-                    fails(
-                        index,
-                        &node.id,
-                        RuleCode::IncoherentMode,
-                        format!(
-                            "`{field}` sends control to `{target}`, and mode `{mode}` leaves \
-                             `{target}` out; a mode that keeps a node keeps what it reroutes to"
-                        ),
-                    );
-                }
-            }
-            // An unknown source is the unknown-reference rule's to name.
-            for (field, source) in super::reads::read_sources(node) {
-                if top_of.get(source).is_some_and(|top| {
-                    !included.contains(*top) && !earlier_all && !earlier.contains(*top)
-                }) {
-                    fails(
-                        index,
-                        &node.id,
-                        RuleCode::IncoherentMode,
-                        format!(
-                            "`{field}` reads from `{source}`, and mode `{mode}` leaves \
-                             `{source}` out, as does every mode before it; a mode that keeps \
-                             a node keeps what it reads from"
-                        ),
-                    );
-                }
+        // An unknown source is the unknown-reference rule's to name.
+        for (field, source) in super::reads::read_sources(node) {
+            if top_of.get(source).is_some_and(|top| {
+                !included.contains(*top) && !earlier_all && !earlier.contains(*top)
+            }) {
+                broken.push(about(
+                    index,
+                    &node.id,
+                    RuleCode::IncoherentMode,
+                    format!(
+                        "`{field}` reads from `{source}`, and mode `{mode}` leaves \
+                         `{source}` out, as does every mode before it; a mode that keeps \
+                         a node keeps what it reads from"
+                    ),
+                ));
             }
         }
-        earlier.extend(included);
     }
     broken
 }

@@ -45,33 +45,6 @@ pub(crate) fn collect_push_to_base_warnings(
         .enumerate()
         .map(|(i, node)| (&node.id, i))
         .collect();
-    fn gate_protected(
-        i: usize,
-        nodes: &[Node],
-        index_of: &HashMap<&NodeId, usize>,
-        cache: &mut [Option<bool>],
-    ) -> bool {
-        if let Some(&Some(known)) = cache.get(i) {
-            return known;
-        }
-        if let Some(slot) = cache.get_mut(i) {
-            *slot = Some(false); // cycle guard; real cycles error elsewhere
-        }
-        let protected = nodes.get(i).is_some_and(|node| {
-            node.depends_on.iter().any(|dep| {
-                index_of.get(dep).is_some_and(|&d| {
-                    nodes
-                        .get(d)
-                        .is_some_and(|n| matches!(n.kind, NodeKind::Gate { .. }))
-                        || gate_protected(d, nodes, index_of, cache)
-                })
-            })
-        });
-        if let Some(slot) = cache.get_mut(i) {
-            *slot = Some(protected);
-        }
-        protected
-    }
     let mut cache: Vec<Option<bool>> = vec![None; nodes.len()];
 
     for (i, node) in nodes.iter().enumerate() {
@@ -79,17 +52,6 @@ pub(crate) fn collect_push_to_base_warnings(
         // A parallel child's commands push from the same ancestry as
         // its group.
         let mut targets: Vec<(&Node, &RunCommand)> = Vec::new();
-        fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a RunCommand)>) {
-            targets.extend(yunta_core::node_commands(node).map(|run| (node, run)));
-            if let NodeKind::Parallel {
-                nodes: children, ..
-            } = &node.kind
-            {
-                for child in children {
-                    collect_commands(child, targets);
-                }
-            }
-        }
         collect_commands(node, &mut targets);
         for (owner, command) in targets {
             let Some(command) = command.text(config) else {
@@ -103,6 +65,46 @@ pub(crate) fn collect_push_to_base_warnings(
                     });
                 }
             }
+        }
+    }
+}
+
+fn gate_protected(
+    i: usize,
+    nodes: &[Node],
+    index_of: &HashMap<&NodeId, usize>,
+    cache: &mut [Option<bool>],
+) -> bool {
+    if let Some(&Some(known)) = cache.get(i) {
+        return known;
+    }
+    if let Some(slot) = cache.get_mut(i) {
+        *slot = Some(false); // cycle guard; real cycles error elsewhere
+    }
+    let protected = nodes.get(i).is_some_and(|node| {
+        node.depends_on.iter().any(|dep| {
+            index_of.get(dep).is_some_and(|&d| {
+                nodes
+                    .get(d)
+                    .is_some_and(|n| matches!(n.kind, NodeKind::Gate { .. }))
+                    || gate_protected(d, nodes, index_of, cache)
+            })
+        })
+    });
+    if let Some(slot) = cache.get_mut(i) {
+        *slot = Some(protected);
+    }
+    protected
+}
+
+fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a RunCommand)>) {
+    targets.extend(yunta_core::node_commands(node).map(|run| (node, run)));
+    if let NodeKind::Parallel {
+        nodes: children, ..
+    } = &node.kind
+    {
+        for child in children {
+            collect_commands(child, targets);
         }
     }
 }

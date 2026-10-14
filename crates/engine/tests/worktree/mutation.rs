@@ -11,7 +11,7 @@ use yunta_engine::lock::{self, LockError, SystemProbe};
 use yunta_engine::process::Supervision;
 use yunta_engine::{prepare_worktree, WorktreeError};
 use yunta_testkit::{init_repo, Owner};
-use yunta_testkit_core::FixedClock;
+use yunta_testkit_core::{fixed_now, FixedClock};
 
 use super::head;
 use super::lock::{dead_pid, lock_file, mutation_lock_file, owner_record, read_owner};
@@ -27,7 +27,7 @@ async fn both_locks_share_one_protocol() {
 
     // The same stale record on both locks: a dead holder that took them
     // an hour ago.
-    let stale = owner_record(dead_pid(), Utc::now() - chrono::Duration::hours(1));
+    let stale = owner_record(dead_pid(), fixed_now() - chrono::Duration::hours(1));
     std::fs::write(lock_file(&repo), &stale).unwrap();
     std::fs::write(mutation_lock_file(&repo), &stale).unwrap();
     // A hard link to the holder's file: it keeps the stale record if the

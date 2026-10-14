@@ -175,18 +175,18 @@ fn a_frozen_manifest_that_says_inherit_reads_as_none() {
 fn a_frozen_fanout_manifest_round_trips_without_reordering_modes() {
     let mut manifest = manifest();
     manifest.workflow = yunta_core::workflow::read::read(
-        "name: ship\nmodes:\n  quick: { include: [review] }\n  standard: { include: [review] }\n  full: { include: all }\nnodes:\n  - id: review\n    kind: prompt\n    runners: [first, second]\n    prompt: audit\n",
+        "name: ship\nmodes:\n  alpha: { include: [review] }\n  beta: { include: [review] }\n  gamma: { include: all }\nnodes:\n  - id: review\n    kind: prompt\n    runners: [first, second]\n    prompt: audit\n",
         std::path::Path::new("ship.yaml"),
     ).expect("an authored fan-out expands");
     let bytes = PersistedDoc::of(manifest.clone())
         .write()
         .expect("manifest writes");
     let text = String::from_utf8(bytes.clone()).expect("YAML is UTF-8");
-    let quick = text.find("quick:").expect("quick is present");
-    let standard = text.find("standard:").expect("standard is present");
-    let full = text.find("full:").expect("full is present");
+    let alpha = text.find("alpha:").expect("alpha is present");
+    let beta = text.find("beta:").expect("beta is present");
+    let gamma = text.find("gamma:").expect("gamma is present");
     assert!(
-        quick < standard && standard < full,
+        alpha < beta && beta < gamma,
         "declaration order survives writing: {text}"
     );
     let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("generated ids read");
@@ -199,7 +199,7 @@ fn a_frozen_fanout_manifest_round_trips_without_reordering_modes() {
         .keys()
         .map(|name| name.as_str())
         .collect();
-    assert_eq!(modes, ["quick", "standard", "full"]);
+    assert_eq!(modes, ["alpha", "beta", "gamma"]);
     let ids: Vec<_> = read
         .doc
         .workflow

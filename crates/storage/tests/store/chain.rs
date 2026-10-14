@@ -15,19 +15,13 @@ fn an_untouched_log_verifies_intact() {
     let (_dir, storage) = open_temp();
     let run_id = RunId::from("run-1");
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     storage
-        .append(
-            &paused_draft("run-1", "first pause"),
-            &yunta_core::SystemClock,
-        )
+        .append(&paused_draft("run-1", "first pause"), &FixedClock)
         .unwrap();
     storage
-        .append(
-            &paused_draft("run-1", "second pause"),
-            &yunta_core::SystemClock,
-        )
+        .append(&paused_draft("run-1", "second pause"), &FixedClock)
         .unwrap();
 
     match storage.verify_chain(&run_id).unwrap() {
@@ -43,13 +37,13 @@ fn a_tampered_payload_breaks_the_chain_at_that_exact_seq() {
     let storage = Storage::open(&db).unwrap();
     let run_id = RunId::from("run-1");
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-1", "honest"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-1", "honest"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-1", "later"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-1", "later"), &FixedClock)
         .unwrap();
     drop(storage);
 
@@ -68,7 +62,11 @@ fn a_tampered_payload_breaks_the_chain_at_that_exact_seq() {
     match storage.verify_chain(&run_id).unwrap() {
         ChainVerification::Broken { seq, detail } => {
             assert_eq!(seq.get(), 2);
-            assert!(!detail.is_empty());
+            assert_eq!(
+                detail,
+                "stored hash does not match the recomputed chain — the event or its \
+                 predecessor's hash was altered"
+            );
         }
         other => panic!("expected a broken chain at seq 2, got {other:?}"),
     }
@@ -81,13 +79,13 @@ fn a_deleted_event_breaks_the_chain_where_the_gap_starts() {
     let storage = Storage::open(&db).unwrap();
     let run_id = RunId::from("run-1");
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-1", "a"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-1", "a"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-1", "b"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-1", "b"), &FixedClock)
         .unwrap();
     drop(storage);
 
@@ -100,9 +98,48 @@ fn a_deleted_event_breaks_the_chain_where_the_gap_starts() {
     match storage.verify_chain(&run_id).unwrap() {
         ChainVerification::Broken { seq, detail } => {
             assert_eq!(seq.get(), 3, "the gap is visible where seq jumps");
-            assert!(!detail.is_empty());
+            assert_eq!(
+                detail,
+                "expected seq 2 but found 3 — an event was deleted, inserted or reordered"
+            );
         }
         other => panic!("expected a broken chain, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_row_without_a_stored_hash_reads_as_broken_as_written_before_the_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("yunta.db");
+    let storage = Storage::open(&db).unwrap();
+    let run_id = RunId::from("run-1");
+    storage
+        .append(&created_draft("run-1"), &FixedClock)
+        .unwrap();
+    storage
+        .append(&paused_draft("run-1", "a"), &FixedClock)
+        .unwrap();
+    drop(storage);
+
+    // A row the chain never hashed, as a log written without the column holds.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE events SET event_hash = NULL WHERE run_id = 'run-1' AND seq = 2",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let storage = Storage::open(&db).unwrap();
+    match storage.verify_chain(&run_id).unwrap() {
+        ChainVerification::Broken { seq, detail } => {
+            assert_eq!(seq.get(), 2);
+            assert_eq!(
+                detail,
+                "event has no stored hash (written before the chain existed)"
+            );
+        }
+        other => panic!("expected a broken chain at seq 2, got {other:?}"),
     }
 }
 
@@ -116,9 +153,7 @@ fn a_deleted_tail_breaks_the_chain_at_the_stored_head() {
         paused_draft("run-1", "a"),
         paused_draft("run-1", "b"),
     ] {
-        storage
-            .append(&draft, &yunta_testkit_core::FixedClock)
-            .unwrap();
+        storage.append(&draft, &FixedClock).unwrap();
     }
     drop(storage);
     let conn = rusqlite::Connection::open(&db).unwrap();
@@ -141,9 +176,7 @@ fn a_log_without_a_stored_head_reads_as_broken() {
     let db = dir.path().join("yunta.db");
     let storage = Storage::open(&db).unwrap();
     for draft in [created_draft("run-1"), paused_draft("run-1", "a")] {
-        storage
-            .append(&draft, &yunta_testkit_core::FixedClock)
-            .unwrap();
+        storage.append(&draft, &FixedClock).unwrap();
     }
     drop(storage);
     let conn = rusqlite::Connection::open(&db).unwrap();
@@ -165,9 +198,7 @@ fn a_stored_head_that_names_another_hash_reads_as_broken() {
     let db = dir.path().join("yunta.db");
     let storage = Storage::open(&db).unwrap();
     for draft in [created_draft("run-1"), paused_draft("run-1", "a")] {
-        storage
-            .append(&draft, &yunta_testkit_core::FixedClock)
-            .unwrap();
+        storage.append(&draft, &FixedClock).unwrap();
     }
     drop(storage);
     let conn = rusqlite::Connection::open(&db).unwrap();
@@ -200,9 +231,7 @@ fn a_single_byte_flip_at_any_position_breaks_the_chain() {
     for seq in 1..=drafts.len() as i64 {
         let (_dir, storage) = open_temp();
         for draft in &drafts {
-            storage
-                .append(draft, &yunta_testkit_core::FixedClock)
-                .unwrap();
+            storage.append(draft, &FixedClock).unwrap();
         }
 
         storage
@@ -317,13 +346,13 @@ proptest! {
 
         // A run's first event is its `run_created`: the chain's genesis.
         storage
-            .append(&created_draft(run_id.as_str()), &yunta_testkit_core::FixedClock)
+            .append(&created_draft(run_id.as_str()), &FixedClock)
             .unwrap();
         for (kind, node_scoped) in &appends {
             storage
                 .append(
                     &scoped_draft(&run_id, *node_scoped, kinds[*kind].clone()),
-                    &yunta_testkit_core::FixedClock,
+                    &FixedClock,
                 )
                 .unwrap();
         }
@@ -357,7 +386,7 @@ fn a_run_whose_first_event_is_not_run_created_is_refused_at_append() {
     let err = storage
         .append(
             &paused_draft("run-genesis", "no birth certificate"),
-            &yunta_core::SystemClock,
+            &FixedClock,
         )
         .unwrap_err();
     assert!(

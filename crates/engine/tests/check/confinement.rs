@@ -65,7 +65,8 @@ fn a_bash_node_asking_for_the_network_under_a_read_only_sandbox_is_not_refused()
 }
 
 /// A closed network a project declares is a session's network: a bash node
-/// is not refused for it, while a `full` prompt under the same project is.
+/// is not refused for it, while a prompt with `permissions: full` under the
+/// same project is.
 #[test]
 fn a_bash_node_marked_full_is_not_refused_under_a_project_that_closes_the_network() {
     let closed: ConfigLayer =

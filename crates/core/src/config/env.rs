@@ -36,6 +36,24 @@ pub(super) fn expand_path(
     Ok(())
 }
 
+/// The terminal variables the shell reads once, at its edge, by name.
+pub const TERMINAL_VARS: &[&str] = &[
+    "TERM",
+    "TERM_PROGRAM",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LANG",
+    "COLUMNS",
+    "NO_COLOR",
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "YUNTA_HYPERLINKS",
+    "YUNTA_GLYPHS",
+    "VTE_VERSION",
+    "KITTY_WINDOW_ID",
+    "WT_SESSION",
+];
+
 /// The ambient environment a run resolves against, captured once at a
 /// shell boundary so no code below the boundary reads the process itself —
 /// core stays pure, and a test injects a value instead of mutating the
@@ -68,14 +86,28 @@ pub struct Env {
     /// service by — a proxy, a base URL — which its CLI inherits: what a
     /// probe of that service has to look at to reach the same endpoint.
     pub service: BTreeMap<String, String>,
+    /// `$USER`, when it is UTF-8: the name a person's identity is read from.
+    pub user: Option<String>,
+    /// The values of `TERMINAL_VARS` that are set and UTF-8, by name: what
+    /// a surface reads for its colors, links, glyphs and width.
+    pub terminal: BTreeMap<String, String>,
+    /// `$RUST_LOG`, when it is UTF-8: the filter the process's log is built
+    /// from, read at the shell's edge with the other variables.
+    pub rust_log: Option<String>,
 }
 
 impl Env {
     /// The process environment, read once here, at the shell's edge, so
     /// nothing below reads it live: what core and the engine resolve
-    /// against, and the value of every name in `service` that is set.
+    /// against, the value of every name in `service` that is set, and the
+    /// user and terminal variables a surface reads.
     pub fn of_process(service: &[&str]) -> Env {
-        let var = std::env::var_os;
+        Env::of_vars(&|name| std::env::var_os(name), service)
+    }
+
+    /// The environment `var` answers, read as [`Env::of_process`] reads the
+    /// process's own.
+    pub fn of_vars(var: &dyn Fn(&str) -> Option<std::ffi::OsString>, service: &[&str]) -> Env {
         Env {
             home: var("HOME").map(PathBuf::from),
             yunta_home: var("YUNTA_HOME").map(PathBuf::from),
@@ -99,7 +131,19 @@ impl Env {
                     Some((name.to_string(), value))
                 })
                 .collect(),
+            user: var("USER").and_then(|value| value.into_string().ok()),
+            terminal: TERMINAL_VARS
+                .iter()
+                .filter_map(|name| Some((name.to_string(), var(name)?.into_string().ok()?)))
+                .collect(),
+            rust_log: var("RUST_LOG").and_then(|value| value.into_string().ok()),
         }
+    }
+
+    /// The terminal variable `name` as the shell read it, when it was set
+    /// and is UTF-8.
+    pub fn terminal_var(&self, name: &str) -> Option<&str> {
+        self.terminal.get(name).map(String::as_str)
     }
 }
 
@@ -397,5 +441,14 @@ mod tests {
                 name: "PORT".to_string()
             }
         );
+    }
+
+    #[test]
+    fn the_log_filter_is_read_with_the_other_variables() {
+        let read = Env::of_vars(
+            &|name| (name == "RUST_LOG").then(|| "yunta=debug".into()),
+            &[],
+        );
+        assert_eq!(read.rust_log.as_deref(), Some("yunta=debug"));
     }
 }

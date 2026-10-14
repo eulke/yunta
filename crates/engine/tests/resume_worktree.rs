@@ -12,9 +12,10 @@
 //! describes a tree this one does not continue.
 
 use yunta_core::events::{EventDraft, EventPayload, NodeEvent, NodeStartedPayload, RunEvent};
-use yunta_core::{Isolation, SystemClock};
+use yunta_core::Isolation;
 use yunta_engine::{run_branch, RunError, RunReport, RunTerminal, WorktreeError};
 use yunta_testkit::{git, git_output, Bench, MOCK_CONFIG};
+use yunta_testkit_core::FixedClock;
 
 /// One node the engine finds interrupted with no terminal event, whose
 /// policy is to pause rather than guess — so every invocation of this run
@@ -69,7 +70,7 @@ async fn paused_run(isolation: Isolation) -> Bench {
                 EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
             )
             .expect("a draft names its subject"),
-            &SystemClock,
+            &FixedClock,
         )
         .unwrap();
 

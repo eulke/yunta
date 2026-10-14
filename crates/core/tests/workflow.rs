@@ -79,7 +79,7 @@ fn modes_include_all_round_trips_through_serialization() {
     let yaml = r#"
 name: fixture
 modes:
-  full: { include: all }
+  gamma: { include: all }
 nodes:
   - id: a
     kind: bash
@@ -91,7 +91,7 @@ nodes:
         yunta_core::yaml::parse(&re_serialized).expect("include: all must round-trip");
     assert_eq!(first, second);
     assert_eq!(
-        first.modes.as_ref().unwrap()["full"].include,
+        first.modes.as_ref().unwrap()["gamma"].include,
         yunta_core::ModeInclude::All
     );
 }
@@ -102,7 +102,7 @@ fn modes_include_a_node_list_round_trips_and_declaration_order_survives() {
 name: fixture
 modes:
   hotfix:   { include: [a, c] }
-  standard: { include: [a, b, c] }
+  beta: { include: [a, b, c] }
 nodes:
   - id: a
     kind: bash
@@ -129,7 +129,7 @@ nodes:
         .keys()
         .map(|name| name.as_str())
         .collect();
-    assert_eq!(names, vec!["hotfix", "standard"]);
+    assert_eq!(names, vec!["hotfix", "beta"]);
     assert!(first.nodes[0].invariant);
     assert!(!first.nodes[1].invariant);
 }
@@ -1340,16 +1340,16 @@ nodes:
 ";
         // A mode naming a node nobody declared.
         let text = refuse(&format!(
-            "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, ghost]\n"
+            "name: ship\n{nodes}modes:\n  alpha:\n    include: [lint, ghost]\n"
         ));
         assert!(text.contains("`ghost`"), "{text}");
 
         // A mode leaving out what the workflow cannot run without.
         let text = refuse(&format!(
-            "name: ship\n{nodes}modes:\n  quick:\n    include: [ship]\n"
+            "name: ship\n{nodes}modes:\n  alpha:\n    include: [ship]\n"
         ));
         assert!(
-            text.contains("invariant") && text.contains("quick"),
+            text.contains("invariant") && text.contains("alpha"),
             "{text}"
         );
 
@@ -1364,16 +1364,16 @@ nodes:
     on_failure: { goto: fix, max_reroutes: 2 }
   - { id: fix, kind: bash, run: \"true\" }
 modes:
-  quick:
+  alpha:
     include: [lint]
 ",
         );
-        assert!(text.contains("`fix`") && text.contains("quick"), "{text}");
+        assert!(text.contains("`fix`") && text.contains("alpha"), "{text}");
 
         // `include: all` holds every one of those vacuously, and a mode
         // that keeps both ends is fine.
         reads(&format!(
-            "name: ship\n{nodes}modes:\n  full:\n    include: all\n  quick:\n    \
+            "name: ship\n{nodes}modes:\n  gamma:\n    include: all\n  alpha:\n    \
              include: [lint, ship]\n"
         ));
     }
@@ -1411,14 +1411,14 @@ modes:
                  artifacts: {{ produces: [report.md] }} }}\n{reader}"
             );
             let text = refuse(&format!(
-                "name: ship\n{nodes}modes:\n  quick:\n    include: [fix]\n"
+                "name: ship\n{nodes}modes:\n  alpha:\n    include: [fix]\n"
             ));
             assert!(
-                text.contains("`lint`") && text.contains("quick") && text.contains(field),
+                text.contains("`lint`") && text.contains("alpha") && text.contains(field),
                 "{text}"
             );
             reads(&format!(
-                "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, fix]\n"
+                "name: ship\n{nodes}modes:\n  alpha:\n    include: [lint, fix]\n"
             ));
             // A run promoted into `followup` is born holding what `first`
             // produced, so the source an earlier mode keeps is not missing.
@@ -1442,7 +1442,7 @@ nodes:
   - { id: fix, kind: bash, run: \"true\" }
   - { id: ship, kind: bash, run: \"true\" }
 modes:
-  quick:
+  alpha:
     include: [ship]
 ",
         );

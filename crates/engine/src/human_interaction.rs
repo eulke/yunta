@@ -93,10 +93,9 @@ pub trait HumanInteraction: Send + Sync {
     /// questions these are.
     async fn ask(
         &self,
-        node: &yunta_core::NodeId,
-        questions: &QuestionsFile,
+        _node: &yunta_core::NodeId,
+        _questions: &QuestionsFile,
     ) -> Option<QuestionsReply> {
-        let _ = (node, questions);
         None
     }
 }

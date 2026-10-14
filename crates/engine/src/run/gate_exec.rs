@@ -22,7 +22,7 @@ use yunta_core::events::{
     PauseReason, Shown, TokenUsage,
 };
 use yunta_core::port::{
-    Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome,
+    Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewComment, ReviewOutcome,
 };
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, Responder};
 
@@ -93,22 +93,7 @@ pub(super) async fn publish_gate(
         return Ok(GateStep::Resolved);
     };
 
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(
-            Escalation::published_to(
-                summary,
-                vec![Fact::labelled("published at", published.url.clone())].into(),
-                encode_ref(&published),
-            )
-            .map_err(|source| RunError::Escalation {
-                context: format!("node `{}`'s external gate", node.id),
-                source,
-            })?
-            .into_payload(),
-        )),
-    )
-    .await?;
+    emit_waiting(ctx, node, summary, &published).await?;
     Ok(GateStep::Waiting(PauseReason::ExternalGate {
         url: published.url,
     }))
@@ -139,6 +124,32 @@ async fn publish_or_fail(
             Ok(None)
         }
     }
+}
+
+/// Emits the gate's waiting event, naming the pull request it waits on.
+async fn emit_waiting(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    summary: Claim,
+    published: &PullRequestRef,
+) -> Result<(), RunError> {
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Waiting(
+            Escalation::published_to(
+                summary,
+                vec![Fact::labelled("published at", published.url.clone())].into(),
+                encode_ref(published),
+            )
+            .map_err(|source| RunError::Escalation {
+                context: format!("node `{}`'s external gate", node.id),
+                source,
+            })?
+            .into_payload(),
+        )),
+    )
+    .await?;
+    Ok(())
 }
 
 /// What the reviewer decides on, as the run holds it: each artifact's
@@ -287,55 +298,10 @@ async fn resolve_from_poll(
             reviewed_sha,
             comments,
         } if *reviewed_sha == polled.head_sha => {
-            emit_started(ctx, node).await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
-                    by: by.clone(),
-                })),
-            )
-            .await?;
-            for (i, comment) in comments.iter().enumerate() {
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
-                        finding: Finding {
-                            id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
-                            severity: FindingSeverity::Major,
-                            title: format!("changes requested by {}", comment.author),
-                            location: Location::work(
-                                RelativePath::of(comment.path.as_deref()),
-                                None,
-                            ),
-                            detail: comment.body.clone(),
-                            proposed_criterion: None,
-                        },
-                    })),
-                )
-                .await?;
-            }
-            let failure = Failure::ChangesRequested {
-                requested_by: by.to_string(),
-                reviewed_sha: reviewed_sha.clone(),
-                comments: comments.len(),
-            };
-            fail(ctx, node, failure).await?;
-            Ok(GateStep::Resolved)
+            resolve_changes_requested(ctx, node, by, reviewed_sha, comments).await
         }
-        ReviewOutcome::Closed => {
-            emit_started(ctx, node).await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
-            )
-            .await?;
-            let failure = Failure::PullRequestClosed {
-                closed_pull_request: Some(published.url.clone()),
-            };
-            fail(ctx, node, failure).await?;
-            Ok(GateStep::Resolved)
-        }
-        // Pending, or a review that no longer covers the current head —
+        ReviewOutcome::Closed => resolve_closed(ctx, node, published).await,
+        // Pending, or a review that does not cover the current head —
         // the engine detects that by comparing SHAs — not a decision.
         ReviewOutcome::Pending
         | ReviewOutcome::Approved { .. }
@@ -345,6 +311,66 @@ async fn resolve_from_poll(
             }))
         }
     }
+}
+
+/// Resolves a changes-requested review: each comment becomes a finding, and the node fails.
+async fn resolve_changes_requested(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    by: &Responder,
+    reviewed_sha: &CommitSha,
+    comments: &[ReviewComment],
+) -> Result<GateStep, RunError> {
+    emit_started(ctx, node).await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
+            by: by.clone(),
+        })),
+    )
+    .await?;
+    for (i, comment) in comments.iter().enumerate() {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: Finding {
+                    id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
+                    severity: FindingSeverity::Major,
+                    title: format!("changes requested by {}", comment.author),
+                    location: Location::work(RelativePath::of(comment.path.as_deref()), None),
+                    detail: comment.body.clone(),
+                    proposed_criterion: None,
+                },
+            })),
+        )
+        .await?;
+    }
+    let failure = Failure::ChangesRequested {
+        requested_by: by.to_string(),
+        reviewed_sha: reviewed_sha.clone(),
+        comments: comments.len(),
+    };
+    fail(ctx, node, failure).await?;
+    Ok(GateStep::Resolved)
+}
+
+/// Resolves a gate whose pull request closed without merging: the node fails.
+async fn resolve_closed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    published: &PullRequestRef,
+) -> Result<GateStep, RunError> {
+    emit_started(ctx, node).await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
+    )
+    .await?;
+    let failure = Failure::PullRequestClosed {
+        closed_pull_request: Some(published.url.clone()),
+    };
+    fail(ctx, node, failure).await?;
+    Ok(GateStep::Resolved)
 }
 
 /// Re-checks every already-`Finished` `kind: gate` node against its

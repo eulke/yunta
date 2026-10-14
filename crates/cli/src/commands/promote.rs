@@ -8,12 +8,14 @@
 //! its returned `(run_id, manifest, worktree, report)` — the *last*
 //! run in the chain — for everything after (release/report).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_core::port::Forge;
-use yunta_core::{Manifest, RunId};
-use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal};
+use yunta_core::{Manifest, ModeName, RunId};
+use yunta_engine::{
+    HumanInteraction, PromotionSuccessor, RunError, RunObserver, RunReport, RunTerminal,
+};
 use yunta_storage::AsyncStorage;
 
 use crate::context::Context;
@@ -66,48 +68,9 @@ pub(crate) async fn drive_promotions(
 ) -> Result<(RunId, Manifest, PathBuf, RunReport), CliError> {
     while let RunTerminal::Promoted { suggested_mode } = &report.terminal {
         let suggested_mode = suggested_mode.clone();
-        // The creation mechanics live in the engine (shared with
-        // `kind: workflow` children that promote); this loop keeps only
-        // what's the CLI's — the console surface, the system clock and
-        // the id source.
-        let successor = yunta_engine::create_promotion_successor(
-            yunta_engine::Predecessor {
-                id: &run_id,
-                manifest: &manifest,
-                worktree: &worktree,
-                run_dir: &env.ctx.project.runs_root.join(run_id.as_str()),
-            },
-            &suggested_mode,
-            yunta_engine::RunRoots {
-                runs: &env.ctx.project.runs_root,
-                worktrees: &env.ctx.project.worktrees_root,
-            },
-            yunta_engine::CallerInfra {
-                storage: env.storage,
-                ids: &env.ctx.ids,
-                supervision: env.ctx.supervision(),
-                environment: yunta_engine::process::execution_environment(Some(&env.ctx.env)),
-                secrets: &yunta_core::ProcessSecrets,
-            },
-        )
-        .await?;
-        let successor_report = super::drive::execute(super::drive::Executing {
-            run_id: &successor.run_id,
-            manifest: &successor.manifest,
-            run_dir: &successor.run_dir,
-            worktree: &successor.worktree,
-            adapters: env.adapters,
-            storage: env.storage,
-            clock: Arc::new(env.ctx.clock),
-            ids: &env.ctx.ids,
-            human_interaction: env.human_interaction,
-            forge: env.forge,
-            cancel: env.ctx.cancellation(),
-            observer: env.observer.clone(),
-            rail_command: env.ctx.rail_command.clone(),
-            ambient: &env.ctx.env,
-        })
-        .await?;
+        let successor =
+            create_successor(env, &run_id, &manifest, &worktree, &suggested_mode).await?;
+        let successor_report = run_successor(env, &successor).await?;
 
         // Where the successor works as it stopped: a move may have taken
         // it out of the checkout it was handed.
@@ -119,15 +82,70 @@ pub(crate) async fn drive_promotions(
     Ok((run_id, manifest, worktree, report))
 }
 
+/// Creates the successor a promotion to `suggested_mode` asks for.
+async fn create_successor(
+    env: &PromotionEnv<'_>,
+    run_id: &RunId,
+    manifest: &Manifest,
+    worktree: &Path,
+    suggested_mode: &ModeName,
+) -> Result<PromotionSuccessor, RunError> {
+    // The creation mechanics live in the engine (shared with
+    // `kind: workflow` children that promote); this function keeps only
+    // what's the CLI's — the console surface, the system clock and
+    // the id source.
+    yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: run_id,
+            manifest,
+            worktree,
+            run_dir: &env.ctx.project.runs_root.join(run_id.as_str()),
+        },
+        suggested_mode,
+        yunta_engine::RunRoots {
+            runs: &env.ctx.project.runs_root,
+            worktrees: &env.ctx.project.worktrees_root,
+        },
+        yunta_engine::CallerInfra {
+            storage: env.storage,
+            ids: &env.ctx.ids,
+            supervision: env.ctx.supervision(),
+            environment: yunta_engine::process::execution_environment(Some(&env.ctx.env)),
+            secrets: &yunta_core::ProcessSecrets,
+        },
+    )
+    .await
+}
+
+/// Runs the successor to its stop, in the environment its chain shares.
+async fn run_successor(
+    env: &PromotionEnv<'_>,
+    successor: &PromotionSuccessor,
+) -> Result<RunReport, RunError> {
+    super::registry::execute(super::registry::Executing {
+        run_id: &successor.run_id,
+        manifest: &successor.manifest,
+        run_dir: &successor.run_dir,
+        worktree: &successor.worktree,
+        adapters: env.adapters,
+        storage: env.storage,
+        clock: Arc::new(env.ctx.clock),
+        ids: &env.ctx.ids,
+        human_interaction: env.human_interaction,
+        forge: env.forge,
+        cancel: env.ctx.cancellation(),
+        observer: env.observer.clone(),
+        rail_command: env.ctx.rail_command.clone(),
+        ambient: &env.ctx.env,
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use yunta_core::events::{EventPayload, GateWaitingPayload, HumanChoice};
-    use yunta_core::{ConfigLayer, RunId, SystemClock, Workflow};
-    use yunta_engine::{build_manifest, create_run, execute_run, HumanInteraction, RunEnv};
-    use yunta_storage::Storage;
-    use yunta_testkit::{init_repo, RecordingObserver};
+    use yunta_core::ConfigLayer;
+    use yunta_testkit::{Bench, RecordingObserver};
 
     use super::*;
     use yunta_core::events::RunEvent;
@@ -150,8 +168,8 @@ mod tests {
     const WORKFLOW: &str = r#"
 name: promotable
 modes:
-  quick:  { include: [plan, lint, fix-lint] }
-  full:   { include: [ship] }
+  alpha:  { include: [plan, lint, fix-lint] }
+  beta:   { include: [ship] }
 nodes:
   - id: plan
     kind: bash
@@ -170,97 +188,42 @@ nodes:
     run: "true"
 "#;
 
+    /// A mock fixture with no sessions: every node of the workflow is `bash`.
+    const FIXTURE: &str = "dialect: claude-code\nsessions: []\n";
+
     #[tokio::test]
     async fn drive_promotions_creates_and_runs_a_successor_with_the_chain_audited() {
         let recorder = RecordingObserver::new();
-        let root = tempfile::tempdir().unwrap();
-        let cwd = root.path().join("repo");
-        std::fs::create_dir_all(&cwd).unwrap();
-        init_repo(&cwd);
-        std::fs::create_dir_all(cwd.join(".yunta")).unwrap();
+        // The parent is created in `alpha` and woken once, as a bench run
+        // is: its wake answers the promotion gate with `promote`.
+        let bench = Bench::with_run_id("run-parent")
+            .in_mode("alpha")
+            .with_observer(recorder.clone());
+        let report = bench
+            .run_with_interaction(WORKFLOW, FIXTURE, &AlwaysPromote)
+            .await;
+        assert!(matches!(
+            report.terminal,
+            yunta_engine::RunTerminal::Promoted { .. }
+        ));
 
+        // The successors are made under the bench's runs root, so the context
+        // names that root as its own. The chain reads the store through the
+        // bench's handle, never through the context's storage path.
+        let root = tempfile::tempdir().unwrap();
         let ctx = Context::for_test(
-            cwd.clone(),
+            bench.worktree.clone(),
             crate::project::Project {
                 config: ConfigLayer::default(),
-                runs_root: root.path().join("runs"),
+                runs_root: bench.runs_root.clone(),
                 worktrees_root: root.path().join("worktrees"),
                 storage_path: root.path().join("yunta.db"),
             },
         );
         let project = &ctx.project;
-        let storage = Storage::open(&project.storage_path).unwrap();
+        let storage = &bench.storage;
         let adapters = crate::commands::Adapters::new();
-
-        let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
-        let frozen = build_manifest(
-            &workflow,
-            &project.config,
-            &cwd,
-            &cwd,
-            &HashMap::new(),
-            ctx.supervision(),
-            None,
-        )
-        .await
-        .unwrap();
-        let manifest = frozen.manifest.clone();
-
-        let run_id = RunId::from("run-parent");
-        let worktree = project.worktrees_root.join(run_id.as_str());
-        yunta_engine::prepare_worktree(
-            &cwd,
-            &worktree,
-            &manifest.base_commit,
-            &yunta_engine::run_branch(&run_id),
-            manifest.isolation,
-            ctx.supervision(),
-        )
-        .await
-        .unwrap();
-        let run_dir = create_run(
-            yunta_engine::CreateRunParams {
-                run_id: &run_id,
-                manifest: &manifest,
-                runs_root: &project.runs_root,
-                mode: &"quick".into(),
-                worktree: &worktree,
-                promoted_from: None,
-                artifacts: &[],
-                blobs: &frozen.blobs,
-                baseline: None,
-                environment: None,
-                redactor: &yunta_core::Redactor::default(),
-            },
-            &storage.async_handle(),
-            ctx.supervision(),
-        )
-        .await
-        .unwrap();
-
-        let report = execute_run(RunEnv {
-            run_id: &run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &worktree,
-            adapters: &adapters,
-            storage: &storage.async_handle(),
-            clock: std::sync::Arc::new(SystemClock),
-            ids: &yunta_core::SystemIdSource,
-            human_interaction: &AlwaysPromote,
-            forge: None,
-            cancel: ctx.cancellation(),
-            ambient: None,
-            secrets: std::sync::Arc::new(yunta_core::ProcessSecrets),
-            observer: Some(recorder.clone()),
-            rail_command: Some(crate::context::rail_command()),
-        })
-        .await
-        .unwrap();
-        assert!(matches!(
-            report.terminal,
-            yunta_engine::RunTerminal::Promoted { .. }
-        ));
+        let run_id = bench.run_id.clone();
 
         let (final_id, _final_manifest, _final_worktree, final_report) = drive_promotions(
             &PromotionEnv {
@@ -272,8 +235,8 @@ nodes:
                 observer: Some(recorder.clone()),
             },
             run_id.clone(),
-            manifest,
-            worktree,
+            bench.manifest(),
+            bench.tree(),
             report,
         )
         .await
@@ -290,7 +253,7 @@ nodes:
             _ => None,
         });
         assert_eq!(created.unwrap().promoted_from, Some(run_id.clone()));
-        assert_eq!(created.unwrap().mode, "full");
+        assert_eq!(created.unwrap().mode, "beta");
 
         // And on the parent's own log — already asserted at the engine
         // level (promotion.rs), reconfirmed here as the visible half of the

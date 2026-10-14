@@ -76,7 +76,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 61 event kinds in 51 rows; some rows group related variants:
+La tabla actual contiene 62 tipos de evento en 52 filas; algunas filas agrupan variantes relacionadas:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -128,6 +128,7 @@ The current table contains 61 event kinds in 51 rows; some rows group related va
 | `run_tool_refused` | engine | el tool conocido de `yunta-run` que nombró la llamada, y el motivo cerrado por el que el engine la rechazó |
 | `host_suspended` | engine | cuánto durmió el host (ms), notado al despertar; no despierta el run y las duraciones lo descuentan |
 | `service_unreachable` / `service_reachable` | engine | la sesión que perdió su servicio y lo que dijo su CLI / cuánto esperó (ms, tiempo despierto) hasta que el servicio respondió y la misma sesión siguió |
+| `best_effort_failed` | engine | un paso que el run siguió tras fallar: cuál era y la causa que dio su fuente, tal cual (hoy, el cierre del cliente MCP tras su única consulta) |
 | `run_paused` / `run_resumed` / `run_finished` | engine | pausa tipada / estado terminal, métricas |
 | `run_moved` | engine | el checkout del pool, ya compilado en el commit del run, al que se mudó entre dos de sus pasos |
 
@@ -681,7 +682,7 @@ Un nodo `kind: workflow` ejecuta otro workflow como sub-run:
 # 13. Runners: roles, resolución y agentes del adapter
 Terminología del contrato, tres niveles que no se mezclan: un **adapter** es la integración con un CLI (claude-code, codex, mock); un **runner** es un binding concreto `{adapter, model, agent?, effort?, permissions, env}` definido en config, que es lo que los nodos piden; un **agente** es un nombre que resuelve a una definición de Yunta —`.yunta/agents/<nombre>.md` en el árbol donde nace el run, o la que un pack declara en `contents.agents` y se nombra `publisher/agente`—, cuyo cuerpo son instrucciones que la sesión suma a las de su CLI, y que el run congela al crearse. El campo `agent:` de un runner es **portable**: la definición es la misma en todo adapter, y cada uno se la entrega a su CLI y declara la capacidad `custom_agents`; un runner que pide `agent:` sobre un adapter sin la capacidad es error de `yunta check`. La definición no lleva modelo —es del runner, porque un modelo es de un proveedor— ni herramientas —son del perfil de permisos— (D253). No existen claves propietarias por adapter para esto — lo específico de un adapter que no tenga expresión portable va en `adapter_settings`, y la selección de agente no califica.
 Los workflows declaran **roles**, no runners concretos: `runner: planner`, `runner: executor`. La config en capas resuelve cada rol; nombres concretos siguen permitidos pero desaconsejados en workflows compartidos — el rol es lo que hace que el mismo workflow corra en equipos con herramientas distintas.
-Nota terminológica normativa: "rol" es vocabulario descriptivo de esta spec y **nunca una clave del schema** — el keyword es `runner:` en nodos y `runners:` en config, y el mismo campo acepta un nombre resoluble por config (canónico) o una referencia concreta. No existe `role:` como clave, deliberadamente: la palabra queda libre para los roles humanos de los gates (`assignee`), que son otra cosa y no deben colisionar.
+Nota terminológica normativa: "rol" es vocabulario descriptivo de esta spec y **nunca una clave del schema** — el keyword es `runner:` en nodos y `runners:` en config, y el mismo campo acepta un nombre resoluble por config (canónico) o una referencia concreta. No existe `role` como clave, deliberadamente: la palabra queda libre para los roles humanos de los gates (`assignee`), que son otra cosa y no deben colisionar.
 ## 13.1 Candidatos ordenados
 Un rol puede resolver a una **lista ordenada de candidatos**, mezclando adapters, modelos y agentes libremente:
 ```

@@ -863,7 +863,7 @@ pub async fn resume_orphan_with_mock(
                 .expect("a draft names its subject");
                 bench
                     .storage
-                    .append(&draft, &yunta_core::SystemClock)
+                    .append(&draft, &yunta_testkit_core::FixedClock)
                     .unwrap();
             };
             emit(

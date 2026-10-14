@@ -41,9 +41,9 @@ pub(crate) use scope::{
     scope_expansion_withdrawn,
 };
 pub(crate) use session::{
-    agent_message, agent_session_opened, capability_degraded, rail_failed, rail_summary,
-    run_tool_failed, run_tool_refused, service_reachable, service_unreachable, stop_refused,
-    write_formatted, write_refused,
+    agent_message, agent_session_opened, best_effort_failed, capability_degraded, rail_failed,
+    rail_summary, run_tool_failed, run_tool_refused, service_reachable, service_unreachable,
+    stop_refused, write_formatted, write_refused,
 };
 pub(crate) use tasks::{
     criterion_declared_unpassable, deviation_declared, deviation_resolved, task_check_answered,

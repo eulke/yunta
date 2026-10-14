@@ -52,6 +52,10 @@ pub enum TaskCycleError {
         #[source]
         source: yunta_core::Unbuildable,
     },
+    /// A session stages its paths once, so a record already taken is an
+    /// engine fault: the cycle names it rather than dropping it.
+    #[error("task `{task}`'s session staged its paths twice")]
+    AlreadyStaged { task: TaskId },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
     #[error("failed to put the work task `{task}` left back into its checkout")]

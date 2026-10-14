@@ -18,7 +18,7 @@
       }
     },
     "modes": {
-      "description": "`modes:` — an ordered map, free in name and count:\nquick/standard/full are the reference workflows' own convention,\nnever reserved schema words. **Declaration order is the\npromotion ladder** — promotion only ever targets a mode\nlater in this map's own iteration order, never an earlier one.\nAbsent entirely means the workflow has no modes at all: every\nnode always runs.",
+      "description": "`modes:` — an ordered map, free in name and count: each workflow\nnames its own, and no name is reserved as a schema word.\n**Declaration order is the promotion ladder** — promotion only\never targets a mode\nlater in this map's own iteration order, never an earlier one.\nAbsent entirely means the workflow has no modes at all: every\nnode always runs.",
       "type": [
         "object",
         "null"

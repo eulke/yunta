@@ -14,9 +14,10 @@ use yunta_core::events::{
     ArtifactEvent, ArtifactId, ArtifactWrittenPayload, EventDraft, EventPayload, NodeEvent,
     NodeStartedPayload, RunEvent,
 };
-use yunta_core::{sha256_hex, ContentHash, SystemClock};
+use yunta_core::{sha256_hex, ContentHash};
 use yunta_engine::{BirthArtifact, BirthOrigin, RunError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
+use yunta_testkit_core::FixedClock;
 
 /// One node the engine finds interrupted with no terminal event, whose
 /// policy is to pause rather than guess — so every invocation of this run
@@ -69,7 +70,7 @@ fn interrupt(bench: &Bench) {
                 EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
             )
             .expect("a draft names its subject"),
-            &SystemClock,
+            &FixedClock,
         )
         .unwrap();
 }
@@ -219,7 +220,7 @@ async fn a_run_whose_log_predates_the_object_store_resumes_and_says_what_it_coul
                         })),
                     )
                     .expect("a draft names its subject"),
-                    &SystemClock,
+                    &FixedClock,
                 )
                 .unwrap();
         })

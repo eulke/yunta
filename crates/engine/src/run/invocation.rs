@@ -3,6 +3,7 @@
 //! subprocess, and the shared directories those name, made before
 //! anything writes there.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -23,6 +24,23 @@ pub(super) fn build_ctx(
     env: RunEnv<'_>,
     depth: u32,
 ) -> Result<(RunCtx<'_>, CancellationToken, Option<std::io::Error>), RunError> {
+    // Resolved once, when the run wakes and before anything is written:
+    // every append this invocation makes takes the same values back out,
+    // and a run that declares no secret builds an empty one and pays nothing.
+    let redactor = yunta_core::Redactor::of(&env.manifest.config.secret_names(), &*env.secrets)?;
+    let (registry, registry_error) = open_registry(env.run_dir, &*env.clock);
+    // One cache of criterion results per invocation, read by every task
+    // cycle and by every check a task session asks for through the host.
+    let memo = Arc::new(Memo::new(env.manifest.config_hash.clone()));
+    let pool = crate::worktree::CheckoutPool::of_run(
+        &crate::run_dir::worktrees_root(env.manifest, env.run_dir),
+        env.worktree,
+        env.run_dir,
+        env.manifest,
+        env.clock.clone(),
+    );
+    let subprocess_vars = super::invocation::subprocess_vars(env.ambient, &env.manifest.config);
+    let run_tools_host = mcp_host(&env, &redactor, &memo, &pool, &registry, &subprocess_vars);
     let RunEnv {
         run_id,
         manifest,
@@ -40,37 +58,7 @@ pub(super) fn build_ctx(
         observer,
         rail_command,
     } = env;
-    // Resolved once, when the run wakes and before anything is written:
-    // every append this invocation makes takes the same values back out,
-    // and a run that declares no secret builds an empty one and pays nothing.
-    let redactor = yunta_core::Redactor::of(&manifest.config.secret_names(), &*secrets)?;
-    let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
-        run_dir,
-        Pid::current(),
-        clock.now(),
-    ) {
-        Ok(registry) => (Some(std::sync::Arc::new(registry)), None),
-        Err(e) => (None, Some(e)),
-    };
-    // The per-run MCP host outlives every borrow of this invocation, so
-    // it owns a clone of the run's clock and of its observer rather than
-    // borrowing them — the one injected clock and the one display
-    // surface reach the listener's own event appends.
-    let clock_for_host = clock.clone();
     let awake = Arc::new(crate::wakefulness::Wakefulness::new(clock.clone()));
-    let observer_for_host = observer.clone();
-    // One cache of criterion results per invocation, read by every task
-    // cycle and by every check a task session asks for through the host.
-    let memo = std::sync::Arc::new(Memo::new(manifest.config_hash.clone()));
-    let pool = crate::worktree::CheckoutPool::of_run(
-        &crate::run_dir::worktrees_root(manifest, run_dir),
-        worktree,
-        run_dir,
-        manifest,
-        clock.clone(),
-    );
-    let registry_for_host = registry.clone();
-    let subprocess_vars = super::invocation::subprocess_vars(ambient, &manifest.config);
     let ctx = RunCtx {
         rail_command,
         run_id,
@@ -81,52 +69,88 @@ pub(super) fn build_ctx(
         storage,
         clock,
         ids,
-        memo: memo.clone(),
-        pool: pool.clone(),
+        memo,
+        pool,
         human_interaction,
-        budget_lifted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        budget_lifted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         process_registry: registry,
         root_cancel: cancel.clone(),
         forge,
         depth,
         ambient,
-        subprocess_vars: subprocess_vars.clone().into(),
+        subprocess_vars: subprocess_vars.into(),
         secrets,
-        redactor: redactor.clone(),
+        redactor,
         observer,
         unit: None,
-        landing: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+        landing: Arc::new(tokio::sync::Mutex::new(())),
         awake,
         protected: Arc::new(std::sync::RwLock::new(Arc::new(Protected::default()))),
-        // One host per execute_run invocation, shared by every session
-        // listener; each of them reads and writes through the host's own
-        // clone of the log handle.
-        run_tools_host: Arc::new(crate::run_tools::RunToolsHost::new(
-            &manifest.workflow,
-            crate::run_tools::HostOf {
-                storage: storage.clone(),
-                run_id: run_id.clone(),
-                clock: clock_for_host,
-                observer: observer_for_host,
-                run_dir: run_dir.to_path_buf(),
-                max_artifact_bytes: manifest
-                    .config
-                    .limits
-                    .as_ref()
-                    .and_then(|limits| limits.max_artifact_bytes),
-                redactor,
-                memo,
-                pool,
-                process_registry: registry_for_host,
-                subprocess_vars,
-                environment: crate::process::execution_environment(ambient),
-                worktree: worktree.to_path_buf(),
-                suite: crate::run::baseline::suite(manifest).and_then(yunta_core::Suite::of),
-                formatters: crate::run_tools::Formatter::of(&manifest.config),
-            },
-        )),
+        run_tools_host,
     };
     Ok((ctx, cancel.clone(), registry_error))
+}
+
+/// Opens the run's process registry. A failed write is returned beside the
+/// context rather than failing it, since the write has no log to record itself
+/// on until the context exists.
+fn open_registry(
+    run_dir: &Path,
+    clock: &dyn yunta_core::Clock,
+) -> (
+    Option<Arc<crate::process_registry::ProcessRegistry>>,
+    Option<std::io::Error>,
+) {
+    match crate::process_registry::ProcessRegistry::create(run_dir, Pid::current(), clock.now()) {
+        Ok(registry) => (Some(Arc::new(registry)), None),
+        Err(e) => (None, Some(e)),
+    }
+}
+
+/// The per-run MCP host, built beside the context it outlives. It outlives
+/// every borrow of this invocation, so it owns a clone of each value it reads:
+/// the one injected clock and the one display surface reach the listener's
+/// own event appends through those clones.
+fn mcp_host(
+    env: &RunEnv<'_>,
+    redactor: &yunta_core::Redactor,
+    memo: &Arc<Memo>,
+    pool: &Arc<crate::worktree::CheckoutPool>,
+    registry: &Option<Arc<crate::process_registry::ProcessRegistry>>,
+    subprocess_vars: &[(String, String)],
+) -> Arc<crate::run_tools::RunToolsHost> {
+    // One host per execute_run invocation, shared by every session
+    // listener; each of them reads and writes through the host's own
+    // clone of the log handle.
+    Arc::new(crate::run_tools::RunToolsHost::new(
+        &env.manifest.workflow,
+        crate::run_tools::HostOf {
+            storage: env.storage.clone(),
+            run_id: env.run_id.clone(),
+            clock: env.clock.clone(),
+            observer: env.observer.clone(),
+            run_dir: env.run_dir.to_path_buf(),
+            max_artifact_bytes: env
+                .manifest
+                .config
+                .limits
+                .as_ref()
+                .and_then(|limits| limits.max_artifact_bytes),
+            redactor: redactor.clone(),
+            memo: memo.clone(),
+            pool: pool.clone(),
+            process_registry: registry.clone(),
+            subprocess_vars: subprocess_vars.to_vec(),
+            search_path: env
+                .ambient
+                .map(|ambient| ambient.path.clone())
+                .unwrap_or_default(),
+            environment: crate::process::execution_environment(env.ambient),
+            worktree: env.worktree.to_path_buf(),
+            suite: crate::run::baseline::suite(env.manifest).and_then(yunta_core::Suite::of),
+            formatters: crate::run_tools::Formatter::of(&env.manifest.config),
+        },
+    ))
 }
 
 /// Every variable layered onto a subprocess of the run: the ambient

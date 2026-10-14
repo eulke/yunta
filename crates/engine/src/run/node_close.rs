@@ -11,8 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    EngineFact, EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeOutcome,
-    QuestionsAskedPayload, TokenUsage,
+    EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, TokenUsage,
 };
 use yunta_core::protected::{Protection, Trespass};
 use yunta_core::{Node, RunId};
@@ -20,13 +19,19 @@ use yunta_core::{Node, RunId};
 use crate::artifacts::close_artifacts;
 
 use super::hooks_exec::after_hooks;
-use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
+use super::node_artifacts::{
+    acquire_from_child, asked, derive_findings, record_artifacts, Acquired,
+};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::shared_tree::Landing;
 use super::{RunCtx, RunError};
 use yunta_core::events::ArtifactId;
-use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::events::NodeEvent;
 use yunta_core::{ArtifactKind, ContentHash, NodeId};
+
+use self::questions::ask_round;
+
+mod questions;
 
 /// The child run a `kind: workflow` node closes on: what it produced is
 /// what that node produced, and the run's log is where that is stated.
@@ -132,39 +137,16 @@ pub(super) async fn close_node(
     if let Some(end) = derive_findings(ctx, node, ceiling, staged, tokens).await? {
         return Ok(end);
     }
-    // A `kind: workflow` node writes no file of its own: what it
-    // declares is what its child run produced, so the run takes those
-    // over from that log instead of asking its own. Held by value here
-    // because the close below borrows what that child's log leaves
-    // standing.
-    let acquired = match close.child {
-        Some(child) => match acquire_from_child(ctx, node, child).await? {
-            Ok(acquired) => Some(acquired),
-            Err(problem) => {
-                let failure: Failure = problem.into();
-                return fail_with_staged(ctx, node, failure, tokens, staged).await;
-            }
-        },
-        None => None,
+    // Held by value here because the close below borrows what the child's
+    // log leaves standing.
+    let declared = match declared_artifacts(ctx, node, close.child, ceiling, staged, tokens).await?
+    {
+        Ok(declared) => declared,
+        Err(end) => return Ok(end),
     };
-    let own;
-    let (verified, standing) = match &acquired {
-        Some(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
-        None => {
-            let events = ctx.load_events().await?;
-            own = match close_artifacts(node, ctx.run_dir, &events, ceiling).await {
-                Ok(verified) => verified,
-                Err(failures) => {
-                    let failure = Failure::artifacts(failures);
-                    return fail_with_staged(ctx, node, failure, tokens, staged).await;
-                }
-            };
-            if let Some(failure) = unexplained_plan(ctx, node, &own).await? {
-                let failure = Failure::artifacts(vec![failure]);
-                return fail_with_staged(ctx, node, failure, tokens, staged).await;
-            }
-            (own.as_slice(), None)
-        }
+    let (verified, standing) = match &declared {
+        Declared::Child(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
+        Declared::Own(own) => (own.as_slice(), None),
     };
 
     record_artifacts(ctx, node, verified, standing).await?;
@@ -174,54 +156,57 @@ pub(super) async fn close_node(
     // of a terminal is what makes the wait a wait rather than a failure
     // read as one.
     match asked(verified) {
-        Some(asked) => {
-            // The hash the fact names is the one the run's own store
-            // answers for, read back off the log rather than taken from
-            // the bytes the close happened to hold: the round that
-            // follows resolves the same acceptance, and one number that
-            // came from two places is one that can disagree with itself.
-            let crate::replay::RunView { events, state } = ctx.run_view().await?;
-            let questions_hash = held_questions(ctx, &events, &node.id)?;
-            // Whether the round waits is the workflow's to say, under the
-            // mode the run was created in.
-            let waits = asked.waits(ctx.manifest.workflow.ask(node, state.run.mode()));
-            match QuestionsAskedPayload::new(questions_hash, asked.ids, tokens) {
-                Some(payload) => {
-                    ctx.emit(
-                        Some(&node.id),
-                        EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
-                    )
-                    .await?;
-                    if waits {
-                        return Ok(NodeEnd::Asked);
-                    }
-                    // The workflow lets a round with nothing required go:
-                    // each question says what the work assumes without an
-                    // answer, and the run goes on with that rather than
-                    // waiting for a person.
-                    crate::answers::record_assumed(&ctx.log(), ctx.run_dir, &node.id)
-                        .await
-                        .map_err(|source| RunError::Broken {
-                            diagnostic: source.to_string(),
-                        })?;
-                    let outcome = NodeOutcome::Fact(EngineFact::QuestionsAssumed);
-                    let spent = TokenUsage::default();
-                    finish_node_staged(ctx, node, outcome, spent, staged).await
-                }
-                // A questions document with no questions asked nothing.
-                // Its answers still exist, empty and the engine's own,
-                // so the node after it mounts what it declared to mount.
-                None => {
-                    crate::answers::record_nothing_asked(&ctx.log(), ctx.run_dir, &node.id)
-                        .await
-                        .map_err(|source| RunError::Broken {
-                            diagnostic: source.to_string(),
-                        })?;
-                    finish_node_staged(ctx, node, close.outcome, tokens, staged).await
-                }
-            }
-        }
+        Some(asked) => ask_round(ctx, node, asked, close.outcome, tokens, staged).await,
         None => finish_node_staged(ctx, node, close.outcome, tokens, staged).await,
+    }
+}
+
+/// The artifacts a close verifies: a `kind: workflow` node's, which the child
+/// run produced, or the ones this run checks for a node of its own.
+enum Declared {
+    Child(Acquired),
+    Own(Vec<crate::artifacts::VerifiedArtifact>),
+}
+
+/// Takes the artifacts a close verifies. `Err` carries the node's end when a
+/// failure ends the node instead.
+async fn declared_artifacts(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    child: Option<ChildRun<'_>>,
+    ceiling: Option<u64>,
+    staged: &[PathBuf],
+    tokens: TokenUsage,
+) -> Result<Result<Declared, NodeEnd>, RunError> {
+    // A `kind: workflow` node writes no file of its own: what it
+    // declares is what its child run produced, so the run takes those
+    // over from that log instead of asking its own.
+    match child {
+        Some(child) => match acquire_from_child(ctx, node, child).await? {
+            Ok(acquired) => Ok(Ok(Declared::Child(acquired))),
+            Err(problem) => {
+                let failure: Failure = problem.into();
+                let end = fail_with_staged(ctx, node, failure, tokens, staged).await?;
+                Ok(Err(end))
+            }
+        },
+        None => {
+            let events = ctx.load_events().await?;
+            let own = match close_artifacts(node, ctx.run_dir, &events, ceiling).await {
+                Ok(verified) => verified,
+                Err(failures) => {
+                    let failure = Failure::artifacts(failures);
+                    let end = fail_with_staged(ctx, node, failure, tokens, staged).await?;
+                    return Ok(Err(end));
+                }
+            };
+            if let Some(failure) = unexplained_plan(ctx, node, &own).await? {
+                let failure = Failure::artifacts(vec![failure]);
+                let end = fail_with_staged(ctx, node, failure, tokens, staged).await?;
+                return Ok(Err(end));
+            }
+            Ok(Ok(Declared::Own(own)))
+        }
     }
 }
 

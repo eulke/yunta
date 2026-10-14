@@ -737,6 +737,33 @@
         "summary"
       ]
     },
+    "BestEffortFailedPayload": {
+      "description": "A best-effort step that failed and that the run carried on past: the\nstep, and the cause its source gave.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "description": "The source's message, verbatim.",
+          "type": "string"
+        },
+        "step": {
+          "$ref": "#/$defs/BestEffortStep"
+        }
+      },
+      "required": [
+        "step",
+        "cause"
+      ]
+    },
+    "BestEffortStep": {
+      "description": "The closed set of best-effort steps the log names.",
+      "oneOf": [
+        {
+          "description": "Closing the MCP client after its one query.",
+          "type": "string",
+          "const": "mcp_client_close"
+        }
+      ]
+    },
     "Capabilities": {
       "description": "An adapter's declared capabilities. Constant for the\nlifetime of the adapter — the engine consults this before asking\nfor anything, and never emulates what is not declared.\n\nLives in `yunta-core` rather than `yunta-adapters` because it is also\nthe shape of `agent_session_opened`'s `capabilities` field;\nboth the event log and the `Adapter` trait\nshare this one definition instead of duplicating it.",
       "type": "object",
@@ -3236,6 +3263,19 @@
             }
           },
           "$ref": "#/$defs/ServiceReachablePayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "best_effort_failed"
+            }
+          },
+          "$ref": "#/$defs/BestEffortFailedPayload",
           "required": [
             "kind"
           ]

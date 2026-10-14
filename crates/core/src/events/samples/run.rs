@@ -58,7 +58,7 @@ pub(crate) fn promotion_signaled() -> PromotionSignaledPayload {
             failure: None,
         },
         vec![Fact::labelled("criteria", "log")].into(),
-        "standard".into(),
+        "beta".into(),
     )
 }
 

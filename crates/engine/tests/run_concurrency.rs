@@ -2,6 +2,7 @@
 
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench};
+use yunta_testkit_core::FixedClock;
 
 mod common;
 #[path = "run_concurrency/join_any_failure.rs"]
@@ -91,7 +92,7 @@ fn orphan_a_node(bench: &Bench, node: &str) {
                 )),
             )
             .expect("a draft names its subject"),
-            &yunta_core::SystemClock,
+            &FixedClock,
         )
         .expect("the log takes the start a crash left behind");
 }
@@ -382,10 +383,7 @@ nodes:
                 )
                 .expect("a draft names its subject"),
             ] {
-                bench
-                    .storage
-                    .append(&event, &yunta_core::SystemClock)
-                    .unwrap();
+                bench.storage.append(&event, &FixedClock).unwrap();
             }
             // If write-docs re-ran, it would overwrite this — instead assert it
             // survives untouched, since a second `touch` would only prove nothing.
@@ -789,10 +787,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
                 // task-q never got a follow-up — orphaned Running, no p.txt-style
                 // commit ever landed for it.
             ] {
-                bench
-                    .storage
-                    .append(&event, &yunta_core::SystemClock)
-                    .unwrap();
+                bench.storage.append(&event, &FixedClock).unwrap();
             }
         })
         .await;
@@ -836,7 +831,7 @@ nodes:
     depends_on: [plan]
     join: any
     nodes:
-      - id: quick
+      - id: alpha
         kind: bash
         run: "true"
       - id: slow-loop
@@ -901,7 +896,7 @@ nodes:
     kind: parallel
     join: any
     nodes:
-      - id: quick
+      - id: alpha
         kind: bash
         run: "true"
       - id: slow-check
@@ -928,6 +923,23 @@ nodes:
         }
         other => panic!("the losing check must be recorded interrupted, got {other:?}"),
     }
+}
+
+/// The plan session hands over one task, and the executor's task session
+/// finishes it.
+fn resolved_runner_fixture() -> String {
+    format!(
+        "dialect: claude-code\nsessions:\n{}{}",
+        tasks_session(
+            &format!(
+                "tasks:\n{}",
+                task_yaml("T001", "Write out.txt", "out.txt", "test -f out.txt")
+            ),
+            "planned",
+        ),
+        "  - effects:\n      - { path: out.txt, content: \"1\" }\n    \
+         outcome: { type: completed, summary: \"did T001\" }\n",
+    )
 }
 
 #[tokio::test]
@@ -960,18 +972,7 @@ nodes:
     until: all_tasks_complete
     prompt: "Implement your task."
 "#;
-    let fixture = format!(
-        "dialect: claude-code\nsessions:\n{}{}",
-        tasks_session(
-            &format!(
-                "tasks:\n{}",
-                task_yaml("T001", "Write out.txt", "out.txt", "test -f out.txt")
-            ),
-            "planned",
-        ),
-        "  - effects:\n      - { path: out.txt, content: \"1\" }\n    \
-         outcome: { type: completed, summary: \"did T001\" }\n",
-    );
+    let fixture = resolved_runner_fixture();
 
     install_agent(&bench.worktree, "builder");
     let RunReport { terminal, .. } = bench.run_with_config(workflow, &fixture, config).await;
@@ -1067,7 +1068,7 @@ nodes:
                             )),
                         )
                         .expect("a draft names its subject"),
-                        &yunta_core::SystemClock,
+                        &FixedClock,
                     )
                     .unwrap();
             }

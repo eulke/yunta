@@ -12,33 +12,24 @@ mod depart;
 mod dispatch;
 mod escalate;
 mod integrate;
+mod iteration;
 mod reopen;
 mod respecify;
 mod unstopped;
 
-use yunta_core::events::{
-    EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome, TaskCause, TaskStatus,
-    TaskStop, TokenUsage, UnpassableTask,
-};
+use yunta_core::events::{Failure, TokenUsage};
 use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TasksFile};
 
 use crate::replay::RunState;
-use crate::scope_expansion::GrantWindow;
 
-use super::node_close::{close_node, fail, fail_with, fail_with_tokens, Close};
+use super::node_close::fail;
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::prompt_exec::prompt_text;
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
 use batch::select_batch;
-use depart::resolve_departures;
-use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
-use escalate::resolve_escalations;
-use integrate::{integrate_batch, BatchIntegration};
-
-use crate::worktree::head_commit;
-use yunta_core::events::ChildEvent;
+use iteration::{batch_round, depart_batch, idle_round, past_cap};
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
@@ -67,181 +58,22 @@ pub(super) async fn execute_loop(
         }
         let view = ctx.run_view().await?;
         let batch = select_batch(&prep.tasks, &view.state, prep.concurrency);
-
         if batch.is_empty() {
-            let not_done: Vec<_> = prep
-                .tasks
-                .tasks
-                .iter()
-                .filter(|task| view.state.tasks.status(&task.id) != Some(TaskStatus::Done))
-                .map(|task| task.id.clone())
-                .collect();
-            let all_done = not_done.is_empty();
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
-                    iteration: state.iteration,
-                    until_result: all_done,
-                })),
-            )
-            .await?;
-            let stopped = view.state.tasks.stops();
-            // A departure no person has answered is put again on each invocation
-            // that finds nothing to run: a resume after an abort asks it again.
-            let owed = depart::owed_by(&stopped);
-            if !owed.is_empty() {
-                let holders = depart::Holders {
-                    held: &prep.setup.held,
-                    spec: prep.setup.spec.as_deref(),
-                    writer: prep.writer.as_ref(),
-                };
-                if let Some(end) =
-                    resolve_departures(ctx, node, owed, &holders, state.tokens).await?
-                {
-                    return Ok(end);
-                }
-                prep.rejudge(ctx).await?;
-                continue;
-            }
-            // A criterion no task can pass is for the planner to rewrite; a
-            // repeat of the declaration that failed the node before is not.
-            if let Some(unpassable) = unpassable_of(&stopped) {
-                let earlier = view
-                    .state
-                    .nodes
-                    .get(&node.id)
-                    .and_then(|record| record.failed_before.as_ref());
-                let failure = match earlier {
-                    Some(earlier) if declares_again(&earlier.failure, &unpassable) => {
-                        Failure::unchanged(earlier.attempt, earlier.failure.clone())
-                    }
-                    _ => unpassable,
-                };
-                return fail_with(ctx, node, failure, state.tokens).await;
-            }
-            // A decision owed a person is what nothing else can stand in
-            // for: the loop ends on it, done or not, and the person grants
-            // or denies each request from there.
-            if let Some(failure) = escalate::owed(&state.owed)? {
-                return fail_with(ctx, node, failure, state.tokens).await;
-            }
-            if all_done {
-                let outcome = NodeOutcome::Fact(EngineFact::TasksDone {
-                    count: prep.tasks.tasks.len(),
-                });
-                return close_node(ctx, node, Close::new(outcome, state.tokens)).await;
-            }
-            // What the tasks the ledger holds stopped on ends the loop: each
-            // stop is kept as data, and an account's limit is the failure
-            // itself, since it waits for its reset.
-            if let Some(failure) = stopped_failure(stopped) {
-                return fail_with(ctx, node, failure, state.tokens).await;
-            }
-            let failure = Failure::LoopStalled {
-                not_ready: not_done,
-            };
-            return fail_with_tokens(ctx, node, failure, state.tokens).await;
-        }
-
-        if state.iteration > prep.max_iterations && !state.iterations_lifted {
-            let (escalation, reason) = super::budget::loop_overrun_escalation(
-                &node.id,
-                state.iteration,
-                prep.max_iterations,
-            )
-            .map_err(|source| RunError::Escalation {
-                context: format!("loop `{}`'s escalation", node.id),
-                source,
-            })?;
-            match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
-                super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
-                super::budget::BudgetDecision::Pause { .. } => {
-                    let failure = Failure::LoopCapped {
-                        node: node.id.clone(),
-                        loop_cap: prep.max_iterations,
-                    };
-                    return fail_with_tokens(ctx, node, failure, state.tokens).await;
-                }
+            match idle_round(ctx, node, &mut prep, &mut state, &view).await? {
+                Some(end) => return Ok(end),
+                None => continue,
             }
         }
-
-        // Every batch member's worktree branches from the same starting
-        // point — one worktree per task, derived from the current base
-        // commit — captured once so all N tasks work from an identical
-        // snapshot.
-        let base_commit = head_commit(ctx.worktree, ctx.root_supervision()).await?;
-
-        // Each batch member's brief carries the loop's declared `context:` —
-        // resolved per task (volatile sources fresh, stable ones from the
-        // memo), audited as one `context_assembled` per task. A failing
-        // source is the node's failure, before any session is spent.
-        let mut briefs: Vec<String> = Vec::with_capacity(batch.len());
-        for task in &batch {
-            match super::context_resolve::resolve_for_task(
-                ctx,
-                node,
-                (&task.id, &prep.context_memo),
-                prep.adapter.capabilities().tool_naming,
-                cancel,
-            )
-            .await?
-            {
-                Step::Value(Some(block)) => briefs.push(format!("{block}\n\n{}", prep.instruction)),
-                Step::Value(None) => briefs.push(prep.instruction.clone()),
+        if let Some(end) = past_cap(ctx, node, &prep, &mut state).await? {
+            return Ok(end);
+        }
+        let departures =
+            match batch_round(ctx, node, &prep, &mut state, &view, &batch, cancel).await? {
+                Step::Value(departures) => departures,
                 Step::Ended(end) => return Ok(end),
-            }
-        }
-
-        // One grant window per batch, seeded from the grants the log holds —
-        // the atomic cap every concurrent member's evaluation commits through,
-        // so `max_per_run` holds exactly.
-        let grants = GrantWindow::seeded(view.state.grants.granted());
-        let batch_env = BatchDispatchEnv {
-            events: &view.events,
-            state: &view.state,
-            batch: &batch,
-            base_commit: &base_commit,
-            adapter: prep.adapter.as_ref(),
-            scope_expansion: prep.scope_expansion,
-            grants: &grants,
-            cancel,
-            setup: &prep.setup,
-        };
-        let dispatches =
-            futures::future::join_all(batch.iter().zip(&briefs).map(|(task, brief)| {
-                dispatch_task_in_isolation(ctx, node, &batch_env, task, brief)
-            }))
-            .await;
-
-        let (pending, departures) =
-            match integrate_batch(ctx, node, dispatches, cancel, &mut state).await? {
-                BatchIntegration::Cancelled(end) | BatchIntegration::Ended(end) => return Ok(end),
-                BatchIntegration::Done {
-                    escalations,
-                    departures,
-                } => (escalations, departures),
             };
-
-        if !pending.is_empty() {
-            // What was decided re-dispatches next iteration with the
-            // decision on the log; what was not stays owed.
-            let unresolved = resolve_escalations(ctx, node, pending, &grants).await?;
-            state.owed.extend(unresolved);
-        }
-        if !departures.is_empty() {
-            let holders = depart::Holders {
-                held: &prep.setup.held,
-                spec: prep.setup.spec.as_deref(),
-                writer: prep.writer.as_ref(),
-            };
-            if let Some(end) =
-                resolve_departures(ctx, node, departures, &holders, state.tokens).await?
-            {
-                return Ok(end);
-            }
-            // An accepted departure from a criterion of the plan waives
-            // it: the tasks are judged again by what the log now holds.
-            prep.rejudge(ctx).await?;
+        if let Some(end) = depart_batch(ctx, node, &mut prep, state.tokens, departures).await? {
+            return Ok(end);
         }
     }
 }
@@ -295,55 +127,6 @@ impl LoopPrep<'_> {
         self.setup.plan = Some(std::sync::Arc::new(self.tasks.clone()));
         Ok(())
     }
-}
-
-/// The plan-unpassable failure of the tasks the ledger holds stopped on a
-/// declared criterion, or `None` when none did.
-fn unpassable_of(stopped: &[TaskStop]) -> Option<Failure> {
-    let unpassable: Vec<UnpassableTask> = stopped
-        .iter()
-        .filter_map(|stop| match &stop.cause {
-            TaskCause::CriterionUnpassable { declared } => Some(UnpassableTask {
-                task_id: declared.task_id.clone(),
-                cmd: declared.criterion.clone(),
-                why: declared.why.clone(),
-            }),
-            _ => None,
-        })
-        .collect();
-    (!unpassable.is_empty()).then_some(Failure::PlanUnpassable { unpassable })
-}
-
-/// What the tasks the ledger holds stopped end the loop on: the account's
-/// limit when a session hit one, and otherwise the stops themselves as data.
-/// `None` when no task stopped.
-fn stopped_failure(stopped: Vec<TaskStop>) -> Option<Failure> {
-    let limit = stopped.iter().find_map(|stop| match &stop.cause {
-        TaskCause::SessionLimited(limit) => Some(limit.clone()),
-        _ => None,
-    });
-    if let Some(limit) = limit {
-        return Some(Failure::Limit { limit });
-    }
-    (!stopped.is_empty()).then_some(Failure::TasksStopped { stopped })
-}
-
-/// Whether `failure` names only tasks and criteria `earlier` named too. The
-/// pair is the cause; the wording and the exit code of a new declaration
-/// are not, so the two failures are never compared whole.
-fn declares_again(earlier: &Failure, failure: &Failure) -> bool {
-    let (
-        Failure::PlanUnpassable { unpassable: before },
-        Failure::PlanUnpassable { unpassable: now },
-    ) = (earlier, failure)
-    else {
-        return false;
-    };
-    now.iter().all(|task| {
-        before
-            .iter()
-            .any(|known| known.task_id == task.task_id && known.cmd == task.cmd)
-    })
 }
 
 /// Resolves everything a loop needs once, before any task runs: the rendered

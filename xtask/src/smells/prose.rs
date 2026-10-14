@@ -53,9 +53,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) {
     }
 }
 
-/// The documents the prose counters do not read. Each records a rule's
-/// history or work still ahead, so it quotes the words a rule retired and
-/// names what is still to do, rather than saying what the repository does now.
+/// The files the prose counters do not read. A document records a rule's
+/// history or work that lies ahead, so it quotes the words a rule retired; a
+/// negative fixture or test quotes one to prove it is refused. Each entry
+/// states why it is exempt beside it.
 const EXEMPT_DOCUMENTS: &[&str] = &[
     "glosario.md",
     "docs/design/adr/",
@@ -63,6 +64,10 @@ const EXEMPT_DOCUMENTS: &[&str] = &[
     "docs/design/plan-de-raiz/",
     "deuda-consciente.md",
     "smoke-checklist.md",
+    // A negative fixture proves a retired key is rejected, so it names the key.
+    "cli/tests/fixtures/",
+    // A negative test proves a retired key is rejected, so it names the key.
+    "core/tests/strict_keys.rs",
 ];
 
 fn exempt(path: &Path, list: &[&str]) -> bool {
@@ -154,19 +159,8 @@ fn contains_word(low: &str, word: &str) -> bool {
     false
 }
 
-/// The words that put a text somewhere other than the present: what the
-/// repository does not do for now, what it does not do yet, what it used
-/// to do, and what it is going to do.
-const MARKERS: &[&str] = &[
-    "for now",
-    "not yet",
-    " yet",
-    "today",
-    "now built",
-    "the old",
-    "will be",
-    "future ",
-];
+/// Markers of a line that describes a future or a past state rather than the code.
+const MARKERS: &[&str] = &["for now", "will be", "future ", "now built"];
 
 /// Lines of prose that describe a plan or a past instead of what the
 /// repository does. In Rust only a comment is prose; in markdown every
@@ -192,6 +186,7 @@ pub fn tense_markers(root: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::smells::corpus::scratch_tree;
 
     #[test]
     fn ledger_counts_in_front_of_the_tasks_and_never_behind_them() {
@@ -236,5 +231,24 @@ mod tests {
         assert!(contains_word("two backends", "backend"));
         assert!(!contains_word("a webdriver crate", "driver"));
         assert!(!contains_word("driver_name", "driver"));
+    }
+
+    #[test]
+    fn a_negative_fixture_is_exempt_and_a_marker_is_read_in_present_tense() {
+        let fixtures = scratch_tree(
+            "fixtures",
+            &[("crates/cli/tests/fixtures/typo.yaml", "role: planner\n")],
+        );
+        assert_eq!(banned_vocabulary(&fixtures), 0);
+        let present = scratch_tree(
+            "present",
+            &[("crates/engine/src/a.rs", "// no run exists yet\n")],
+        );
+        assert_eq!(tense_markers(&present), 0);
+        let future = scratch_tree(
+            "future",
+            &[("crates/engine/src/b.rs", "// a future resume\n")],
+        );
+        assert_eq!(tense_markers(&future), 1);
     }
 }

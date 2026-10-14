@@ -17,6 +17,7 @@ pub use mock::{MockForge, MockForgeState, MockPullRequest};
 use yunta_core::port::{PublishRequest, PullRequestRequest};
 use yunta_core::step::NextStep;
 use yunta_render::surface::{Markdown, Surface};
+use yunta_render::Glyphs;
 
 /// What ties a pull request's body to its run: a comment a forge's page
 /// does not show, so the marker never sits in what a reviewer reads.
@@ -42,10 +43,15 @@ pub(crate) fn pull_request_body(
     req: &PullRequestRequest,
     spell: &dyn Fn(&NextStep) -> String,
 ) -> String {
-    let receipt = req
-        .receipt
-        .as_ref()
-        .map(|receipt| Markdown.draw(&yunta_render::receipt::document(receipt, spell)));
+    let receipt = req.receipt.as_ref().map(|receipt| {
+        // A pull request body is UTF-8 Markdown, so its separators are
+        // the Unicode set whatever look the terminal chose.
+        Markdown.draw(&yunta_render::receipt::document(
+            receipt,
+            spell,
+            Glyphs::Unicode,
+        ))
+    });
     let parts: Vec<String> = [Some(req.body.trim().to_string()), receipt]
         .into_iter()
         .flatten()

@@ -31,13 +31,16 @@
 use serde::Serialize;
 use yunta_core::durable::{self, Durability};
 use yunta_core::events::findings::effective;
-use yunta_core::events::ArtifactId;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
 use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep, WorkflowName};
 
 use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
 use yunta_core::{Location, RelativePath};
+
+mod copy;
+
+use self::copy::copy_declared;
 
 /// `provenance.yaml`'s whole document — serialized from structs so the
 /// field order is fixed and the same inputs always give the same bytes.
@@ -185,67 +188,24 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
     let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
     for declaration in &declared {
-        let wanted = ArtifactId::from(&declaration.id);
-        // The distilled copy carries the name the run's own view gives
-        // it, so a reader opening the knowledge directory and a reader
-        // opening the run find the same file name.
-        let name = wanted.view_name();
-        match held.held(&wanted, Some(&declaration.node)) {
-            Some(artifact) => {
-                let bytes = held.bytes(artifact).await?;
-                let dest = dest_dir.join(&name);
-                if let Some(parent) = dest.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|source| RunError::Io {
-                            context: format!("create `{}`", parent.display()),
-                            source,
-                        })?;
-                }
-                // blocking: one distilled artifact, replaced whole.
-                durable::replace(&dest, &bytes, Durability::Atomic).map_err(|source| {
-                    RunError::Io {
-                        context: format!("write `{}`", dest.display()),
-                        source,
-                    }
-                })?;
-                artifacts.push(ProvenanceArtifact {
-                    name,
-                    content_hash: Some(format!("sha256:{}", artifact.content_hash)),
-                    missing: false,
-                });
-            }
-            None => {
-                // Declared durable, never produced (a mode excluded its
-                // node, a reroute never reached it): registered, never
-                // lost — reported as a finding — and the rest distills
-                // anyway.
-                ctx.engine_finding(
-                    None,
-                    &format!("distill-missing-{}-{}", declaration.node, declaration.id),
-                    FindingSeverity::Minor,
-                    format!("distill: declared artifact {declaration} was never produced"),
-                    Location::run(
-                        RelativePath::of([crate::artifacts::store::view_path(
-                            Some(&declaration.node),
-                            &name,
-                        )]),
-                        None,
-                    ),
-                    "the workflow's `on_finish.distill` names this artifact \
-                     but the node that produces it never did in this run"
-                        .to_string(),
-                )
-                .await?;
-                artifacts.push(ProvenanceArtifact {
-                    name,
-                    content_hash: None,
-                    missing: true,
-                });
-            }
-        }
+        artifacts.push(copy_declared(ctx, &held, &dest_dir, declaration).await?);
     }
+    write_provenance(ctx, &dest_dir, artifacts, mode).await?;
 
+    if ctx.manifest.isolation == Isolation::Worktree {
+        commit_and_maybe_push(ctx).await?;
+    }
+    Ok(())
+}
+
+/// Writes `provenance.yaml` beside the distilled copies: the evidence a later
+/// reader checks them against, read from the run's own log.
+async fn write_provenance(
+    ctx: &RunCtx<'_>,
+    dest_dir: &std::path::Path,
+    artifacts: Vec<ProvenanceArtifact>,
+    mode: &ModeName,
+) -> Result<(), RunError> {
     let provenance = Provenance {
         source_run: ctx.run_id.to_string(),
         workflow: ctx.manifest.workflow.name.clone(),
@@ -265,12 +225,7 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
             context: format!("write `{}`", provenance_path.display()),
             source,
         }
-    })?;
-
-    if ctx.manifest.isolation == Isolation::Worktree {
-        commit_and_maybe_push(ctx).await?;
-    }
-    Ok(())
+    })
 }
 
 /// The knowledge travels on the run's own branch. A git failure here is

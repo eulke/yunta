@@ -27,7 +27,7 @@ mod mode;
 pub(crate) use detach::start_detached;
 
 use super::drive::Prepared;
-use super::registry::{read_fixture, servable};
+use super::registry::{create_frozen_run, read_fixture, servable};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
@@ -431,26 +431,14 @@ pub(super) async fn create_run_from(
 
     let resolved_mode = resolve_mode(manifest, mode);
 
-    let run_dir = yunta_engine::create_run(
-        yunta_engine::CreateRunParams {
-            run_id: &run_id,
-            manifest,
-            runs_root: &ctx.project.runs_root,
-            mode: &resolved_mode,
-            worktree: &worktree,
-            promoted_from: None,
-            // The run is born holding every document its `inputs:`
-            // named, accepted right after `run_created`.
-            artifacts: &frozen.documents,
-            blobs: &frozen.blobs,
-            // A run a caller starts is the root of its lineage: it
-            // measures on its first wake, if its config names a suite.
-            baseline: None,
-            environment: yunta_engine::process::execution_environment(Some(&ctx.env)),
-            redactor: &redactor,
-        },
+    let run_dir = create_frozen_run(
+        ctx,
         storage,
-        ctx.supervision(),
+        frozen,
+        &run_id,
+        &resolved_mode,
+        &worktree,
+        &redactor,
     )
     .await?;
 

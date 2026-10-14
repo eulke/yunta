@@ -30,9 +30,10 @@ nodes:
     on_failure: { goto: plan, max_reroutes: 1 }
 "#;
 
-#[tokio::test]
-async fn a_criterion_declared_again_after_the_rewrite_pauses_for_a_person() {
-    let bench = Bench::new();
+/// The planner's two sessions the repeat runs on: the first plan keeps an
+/// impossible criterion and declares it, and the rewrite keeps it and
+/// declares it again.
+fn repeating_fixture() -> String {
     let tasks = format!("tasks:\n{}", task_yaml("task-u", "u", "u.txt", "false"));
     let declare = "  - match_prompt_contains: \"`task-u`\"
     steps:
@@ -52,7 +53,13 @@ async fn a_criterion_declared_again_after_the_rewrite_pauses_for_a_person() {
       - cmd: \"false\"
       - cmd: \"test -f u.txt\"
 ";
-    let fixture = plan_session(&tasks) + declare + &tasks_session(rewritten, "replanned") + declare;
+    plan_session(&tasks) + declare + &tasks_session(rewritten, "replanned") + declare
+}
+
+#[tokio::test]
+async fn a_criterion_declared_again_after_the_rewrite_pauses_for_a_person() {
+    let bench = Bench::new();
+    let fixture = repeating_fixture();
 
     let RunReport { terminal, .. } = bench.run(REPEAT_WORKFLOW, &fixture).await;
 

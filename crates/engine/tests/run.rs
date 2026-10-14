@@ -940,7 +940,15 @@ nodes:
         ),
         "the run exists in the log before the document it holds is stated"
     );
-    let accepted = yunta_testkit::accepted(&events);
+    let frozen_value = assert_accepted_as_an_input(&events);
+    assert_frozen_as_its_hash(&bench, &events, frozen_value);
+    assert_tasks_registered_at_birth(&events);
+}
+
+/// The document an input named is accepted at birth with no producer, under
+/// the input's name. Returns the value the manifest freezes for it.
+fn assert_accepted_as_an_input(events: &[yunta_core::events::StoredEvent]) -> String {
+    let accepted = yunta_testkit::accepted(events);
     assert_eq!(accepted.len(), 1, "{accepted:?}");
     assert_eq!(
         accepted[0].producer, None,
@@ -958,8 +966,16 @@ nodes:
             kind: yunta_core::ArtifactKind::Tasks
         }
     );
+    format!("sha256:{}", accepted[0].content_hash)
+}
 
-    let frozen_value = format!("sha256:{}", accepted[0].content_hash);
+/// The manifest and `run_created` freeze the document by its hash, never by
+/// the path it was read from.
+fn assert_frozen_as_its_hash(
+    bench: &Bench,
+    events: &[yunta_core::events::StoredEvent],
+    frozen_value: String,
+) {
     assert_eq!(
         bench.manifest().inputs["tasks"],
         frozen_value,
@@ -973,9 +989,13 @@ nodes:
         })
         .expect("run_created is the first event");
     assert_eq!(created.inputs["tasks"], frozen_value);
+}
 
+/// No node produces a document input, so its birth is where its tasks are
+/// registered.
+fn assert_tasks_registered_at_birth(events: &[yunta_core::events::StoredEvent]) {
     assert_eq!(
-        yunta_engine::derive(&events)
+        yunta_engine::derive(events)
             .tasks
             .iter()
             .map(|(id, record)| (id.clone(), record.status))
@@ -987,6 +1007,25 @@ nodes:
         "the tasks of a document the run was given are tasks of the run: no node produces it, \
          so its birth is where they are registered"
     );
+}
+
+/// A crash mid-node: `node_started` with no terminal event, so the run's one
+/// node is an orphan the next invocation has to resolve.
+fn crash_mid_node(bench: &Bench) {
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft::new(
+                bench.run_id.clone(),
+                Some("only".into()),
+                yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            )
+            .expect("a draft names its subject"),
+            &FixedClock,
+        )
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1003,21 +1042,7 @@ nodes:
 
     let RunReport { terminal, .. } = bench
         .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_| {
-            // A crash mid-node: node_started with no terminal event.
-            bench
-                .storage
-                .append(
-                    &yunta_core::events::EventDraft::new(
-                        bench.run_id.clone(),
-                        Some("only".into()),
-                        yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                            yunta_core::events::NodeStartedPayload::attempt(1),
-                        )),
-                    )
-                    .expect("a draft names its subject"),
-                    &yunta_core::SystemClock,
-                )
-                .unwrap();
+            crash_mid_node(&bench)
         })
         .await;
     assert!(
@@ -1230,7 +1255,7 @@ async fn accept_an_inherited_tasks_document(bench: &Bench, run_dir: &std::path::
                 )),
             )
             .expect("a draft names its subject"),
-            &yunta_core::SystemClock,
+            &FixedClock,
         )
         .unwrap();
 }

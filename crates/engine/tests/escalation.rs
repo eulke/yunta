@@ -172,8 +172,8 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
 const PROMOTABLE_WORKFLOW: &str = r#"
 name: promotable
 modes:
-  quick: { include: [lint, fix-lint] }
-  full:  { include: [ship] }
+  alpha: { include: [lint, fix-lint] }
+  beta:  { include: [ship] }
 nodes:
   - id: lint
     kind: bash
@@ -189,11 +189,11 @@ nodes:
 
 #[tokio::test]
 async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
-    // The paused run sits in mode `quick` with `full` later in the
+    // The paused run sits in mode `alpha` with `beta` later in the
     // declaration order — `promote` is on its menu. resolve_gate
     // records the choice; the resuming engine (a live process, exactly
     // what promotion's distill+close needs) applies it.
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let report = bench.run(PROMOTABLE_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
 
@@ -203,7 +203,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     assert_eq!(
         report.terminal,
         RunTerminal::Promoted {
-            suggested_mode: "full".into()
+            suggested_mode: "beta".into()
         }
     );
     let events = bench.events();

@@ -12,7 +12,7 @@ use yunta_core::rail::RailCommand;
 
 use yunta_core::events::StoredEvent;
 use yunta_core::persisted::PersistedDoc;
-use yunta_core::{Manifest, RunId, SystemClock, SystemIdSource};
+use yunta_core::{Clock, Manifest, RunId, SystemClock, SystemIdSource};
 use yunta_storage::{AsyncStorage, Storage};
 
 use crate::error::CliError;
@@ -64,7 +64,7 @@ impl Context {
         Ok(Self {
             cwd,
             project,
-            clock: SystemClock,
+            clock: *process_clock(),
             ids: SystemIdSource,
             env: crate::project::process_env(),
             interrupt,
@@ -90,6 +90,7 @@ impl Context {
     pub fn supervision(&self) -> yunta_engine::process::Supervision<'_> {
         yunta_engine::process::Supervision::outside_any_run(self.cancellation(), &self.clock)
             .with_env(&self.env.subprocess_vars)
+            .with_path(&self.env.path)
     }
 
     /// What gives a take back once the work stopped — `released`, a
@@ -97,6 +98,7 @@ impl Context {
     /// *because* the first interrupt fired cannot answer to it.
     pub fn teardown(&self) -> yunta_engine::process::Supervision<'_> {
         yunta_engine::process::Supervision::outside_any_run(self.interrupt.abort(), &self.clock)
+            .with_path(&self.env.path)
     }
 
     /// A context over a project a test built by hand, with nothing to
@@ -108,7 +110,7 @@ impl Context {
         Self {
             cwd,
             project,
-            clock: SystemClock,
+            clock: *process_clock(),
             ids: SystemIdSource,
             env: yunta_core::Env::default(),
             interrupt: Interrupt::never(),
@@ -250,8 +252,14 @@ pub fn rail_command() -> RailCommand {
     RailCommand::new(own_binary())
 }
 
+/// The wall clock of this process, built only here; `init` takes it from here.
+pub(crate) fn process_clock() -> &'static SystemClock {
+    static CLOCK: SystemClock = SystemClock;
+    &CLOCK
+}
+
 /// How long until `at` by the system clock: zero once it has passed. The
 /// one reading of the clock a command takes before it has a run's clock.
 pub fn time_until(at: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
-    (at - chrono::Utc::now()).to_std().unwrap_or_default()
+    (at - process_clock().now()).to_std().unwrap_or_default()
 }

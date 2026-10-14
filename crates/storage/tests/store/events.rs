@@ -38,7 +38,7 @@ fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
 fn unknown_kind_is_preserved_not_fatal() {
     let (dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     // A row a newer binary wrote: a kind this one does not know.
     let conn = rusqlite::Connection::open(dir.path().join("yunta.db")).unwrap();
@@ -72,7 +72,7 @@ fn unknown_kind_is_preserved_not_fatal() {
 fn a_known_kind_whose_payload_is_not_its_shape_is_corrupt_not_unknown() {
     let (dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     let conn = rusqlite::Connection::open(dir.path().join("yunta.db")).unwrap();
     conn.execute(
@@ -145,10 +145,10 @@ fn a_storage_error_keeps_its_cause_without_naming_the_backend() {
 fn purging_a_run_reports_the_rows_it_removed() {
     let (_dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-old"), &yunta_core::SystemClock)
+        .append(&created_draft("run-old"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-old", "x"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-old", "x"), &FixedClock)
         .unwrap();
     assert_eq!(
         storage.purge_run(&RunId::from("run-old")).unwrap(),

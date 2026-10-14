@@ -36,7 +36,7 @@ pub enum ForgeError {
         status: u16,
         body: String,
     },
-    /// The forge refused for now: the rate limit is spent. `retry_after`
+    /// The forge refuses the call: the rate limit is spent. `retry_after`
     /// is the wait it named, when it named one.
     #[error(
         "forge: rate limited while trying to {action}{}",

@@ -15,6 +15,7 @@ use yunta_core::events::{
 };
 use yunta_core::{sha256_hex, ArtifactKind, Node};
 use yunta_engine::{close_artifacts, ArtifactContent, ObjectStore, RunReport};
+use yunta_testkit_core::fixed_now;
 
 /// A run that has accepted nothing: what a node with no history closes
 /// against.
@@ -75,7 +76,7 @@ async fn accepted(run_dir: &Path, node: &str, kind: ArtifactKind, content: &str)
     StoredEvent {
         run_id: "run-1".into(),
         seq: 1.into(),
-        timestamp: chrono::Utc::now(),
+        timestamp: fixed_now(),
         node_id: Some(node.into()),
         body: EventBody::Known(EventPayload::Artifacts(ArtifactEvent::Accepted(
             ArtifactAcceptedPayload::new(

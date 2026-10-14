@@ -18,7 +18,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use yunta_core::events::{ArtifactId, Failure, PauseReason, SessionDeath};
-use yunta_core::{ArtifactKind, NodeId, RunnerCandidate, RunnerName};
+use yunta_core::{
+    AdapterId, ArtifactKind, NodeId, RunTool, RunnerCandidate, RunnerName, ToolNaming,
+};
 
 use crate::commands::test::{init_git, sandboxed_checkout, SandboxedCheckout};
 use crate::context::Context;
@@ -28,18 +30,31 @@ use crate::render::blocks::{Check, Found};
 /// The workflow every probe run drives: one node, one prompt, the run
 /// tools a real node is given. The verdict requires the submission to be
 /// accepted and the run to finish.
-const PROBE_WORKFLOW: &str = r#"
+fn probe_workflow(prompt: &str) -> String {
+    format!(
+        r#"
 name: doctor-session
 nodes:
   - id: probe
     kind: prompt
     runner: probe
-    prompt: 'Call yunta_submit_questions with exactly {"document":{"questions":[]}}. Then finish.'
+    prompt: '{prompt}'
     artifacts:
       produces: [questions]
-"#;
+"#
+    )
+}
 
-/// The runner [`PROBE_WORKFLOW`] declares. Only this one is left in the
+/// The submit tool's name as `adapter` calls it: the name its session is
+/// given, with the prefix its CLI mounts its tools under. An adapter this
+/// binary does not build has no naming of its own, so the bare name stands in.
+fn submit_called(adapter: &AdapterId) -> String {
+    let naming = crate::commands::built_adapter(adapter)
+        .map_or(ToolNaming::Bare, |built| built.capabilities().tool_naming);
+    RunTool::Submit(ArtifactKind::Questions).called(naming)
+}
+
+/// The runner the probe workflow declares. Only this one is left in the
 /// sandbox's config, so the run resolves to exactly the binding under
 /// test and `probe_or_refuse` probes exactly its adapter.
 const PROBE_RUNNER: RunnerName = RunnerName::from_static("probe");
@@ -169,7 +184,11 @@ fn label(candidate: &RunnerCandidate) -> String {
 async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outcome, CliError> {
     let sandbox = sandboxed_checkout(&ctx.cwd)?;
     let workflow = sandbox.worktree().join("doctor-session.yaml");
-    tokio::fs::write(&workflow, PROBE_WORKFLOW)
+    let submit = submit_called(&candidate.adapter);
+    let text = probe_workflow(&format!(
+        "Call {submit} with exactly {{\"document\":{{\"questions\":[]}}}}. Then finish."
+    ));
+    tokio::fs::write(&workflow, text)
         .await
         .map_err(|e| CliError::io("write", workflow.display(), e))?;
     init_git(sandbox.worktree(), ctx.supervision()).await?;
@@ -443,5 +462,21 @@ mod tests {
             panic!("the run closed failed");
         };
         assert_eq!(ProbeFacts::from_events(&events).failure, page);
+    }
+
+    #[test]
+    fn the_probe_names_the_submit_tool_the_way_its_adapter_calls_it() {
+        let claude = yunta_adapters::CLAUDE_CODE_ID.clone();
+        let text = probe_workflow(&format!("Call {} with exactly", submit_called(&claude)));
+        assert!(text.contains("prompt: 'Call mcp__yunta-run__"), "{text}");
+    }
+
+    #[test]
+    fn an_adapter_this_binary_does_not_build_names_the_submit_tool_bare() {
+        let unbuilt = AdapterId::from_static("unbuilt");
+        assert_eq!(
+            submit_called(&unbuilt),
+            RunTool::Submit(ArtifactKind::Questions).name()
+        );
     }
 }

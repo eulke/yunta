@@ -30,7 +30,8 @@ use node::{NodeJson, NodeWaitJson};
 
 use crate::commands::advice;
 use crate::commands::status::{decision, progress};
-use crate::error::{CliError, Outcome};
+use crate::error::Outcome;
+pub use crate::output::print_json;
 use crate::render::state::RunWord;
 
 /// What the invocation that creates a run says before the first token —
@@ -62,14 +63,6 @@ impl PreRunWarnings {
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
 pub const SCHEMA_VERSION: u32 = 7;
-
-/// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
-/// command prints its document, reporting a serialization failure as the
-/// one error it can hit rather than unwrapping it.
-pub fn print_json<T: serde::Serialize>(value: &T) -> Result<Outcome, CliError> {
-    println!("{}", to_json_string(value).map_err(CliError::msg)?);
-    Ok(Outcome::Success)
-}
 
 /// Serializes a DTO as pretty JSON to a string — what the control plane
 /// hands back in a tool result instead of printing, so a `println!` never

@@ -205,7 +205,7 @@ impl Painter {
     }
 
     /// Redraws the region from the run as it stands at this instant,
-    /// unless the terminal is somebody else's for now.
+    /// unless a prompt has the terminal.
     fn redraw(&mut self) {
         if self.standing == Standing::StoodDown {
             return;

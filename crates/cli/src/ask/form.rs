@@ -14,7 +14,7 @@
 //! something the engine might refuse.
 
 use yunta_core::events::Channel;
-use yunta_core::{Answer, AnswerType, Question, QuestionsFile};
+use yunta_core::{Answer, AnswerType, Env, Question, QuestionsFile};
 use yunta_engine::QuestionsReply;
 
 use crate::render::blocks::{Drawn, Headline};
@@ -35,6 +35,7 @@ const SKIP: &str = "(no answer)";
 /// answers the round needs.
 pub(crate) fn answer(
     console: &Console,
+    env: &Env,
     node: &yunta_core::NodeId,
     questions: &QuestionsFile,
 ) -> Answered<QuestionsReply> {
@@ -76,7 +77,7 @@ pub(crate) fn answer(
     Ok(QuestionsReply {
         answers,
         channel: Channel::Tty,
-        responder: Some(attributed(console)?),
+        responder: Some(attributed(console, env)?),
     })
 }
 

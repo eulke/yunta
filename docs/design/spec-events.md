@@ -12,7 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 51 rows and **61 `kind` names**.
+The current Run Contract event table has 52 rows and **62 `kind` names**.
+It had 51 rows and 61 kinds before `best_effort_failed` was added.
 It had 49 rows and 59 kinds before `rail_failed` and `rail_summary` were added.
 It had 47 rows and 57 kinds before `scope_expansion_withdrawn` and
 `criterion_declared_unpassable` were added. It had 46 rows and 56 kinds before
@@ -124,7 +125,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
-## 5. Los 61 tipos de evento, campo por campo
+## 5. Los 62 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -932,6 +933,14 @@ histogramas.
 | `session_id` | `SessionId` | sí | la sesión cuyo riel resume |
 | `model` | `ModelName` | no | el primer modelo que oyó el riel; ausente cuando ningún hook lo trajo |
 | `moments` | mapa de `RailEvent` a histograma | sí | por momento, un histograma de `count` y `buckets`: cuántas respuestas hubo y cuánto tardó cada una, en microsegundos y en escala logarítmica; dos histogramas se suman |
+
+### 5.25a.7 `best_effort_failed` — engine
+**Fuente:** un paso que el run siguió tras fallar, con la causa que devolvió su fuente tal cual (`best_effort::record`). Auditoría: no mueve estado. Hoy el único paso es el cierre del cliente MCP tras su única consulta: la consulta conserva su resultado, y la falla del cierre queda grabada aquí en lugar de descartarse. Un log escrito antes de este kind no lo trae.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `step` | `BestEffortStep` | sí | el paso que siguió tras fallar; hoy solo `mcp_client_close`, el cierre del cliente MCP tras su consulta |
+| `cause` | texto | sí | el mensaje que devolvió la fuente del fallo, sin cambios |
 
 ### 5.25b `host_suspended` — engine
 

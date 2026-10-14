@@ -10,6 +10,8 @@ use std::fmt::Display;
 
 use yunta_core::RunId;
 
+pub use crate::output::{note, warn};
+
 pub(crate) mod words;
 
 /// How a subcommand came back when nothing stopped it from running.
@@ -407,25 +409,9 @@ impl CliError {
     }
 }
 
-/// A warning to stderr — the one place the CLI prints `warning:` lines,
-/// so a run that succeeds with caveats still says so without an error.
-/// The word is painted in the caution color on a stream that draws one,
-/// so a warning said before a run starts is not lost among the lines
-/// around it.
-pub fn warn(message: impl Display) {
-    eprintln!("{}: {message}", warning_word());
-}
-
 /// `warning`, as stderr is painted.
 pub(crate) fn warning_word() -> String {
     crate::render::stderr_ink().word(crate::render::ink::Tone::Caution, "warning")
-}
-
-/// An informational block to stderr — verification findings and the
-/// like, printed beside a command's own output without claiming to be an
-/// error.
-pub fn note(message: impl Display) {
-    eprintln!("{message}");
 }
 
 #[cfg(test)]

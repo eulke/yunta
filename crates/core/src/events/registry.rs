@@ -180,6 +180,8 @@ event_kinds! {
         => Session(SessionEvent::ServiceUnreachable) sample samples::service_unreachable;
     ServiceReachable(ServiceReachablePayload) = "service_reachable"
         => Session(SessionEvent::ServiceReachable) sample samples::service_reachable;
+    BestEffortFailed(BestEffortFailedPayload) = "best_effort_failed"
+        => Session(SessionEvent::BestEffortFailed) sample samples::best_effort_failed;
     HostSuspended(HostSuspendedPayload) = "host_suspended"
         => Run(RunEvent::HostSuspended) sample samples::host_suspended;
     RunPaused(RunPausedPayload) = "run_paused" => Run(RunEvent::Paused) sample samples::run_paused;

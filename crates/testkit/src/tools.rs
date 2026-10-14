@@ -16,14 +16,15 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
 use yunta_core::protected::Protected;
 use yunta_core::{
-    sha256_hex, Clock, CommitSha, NodeId, NodeKind, RunId, ScopeExpansionMode, Seq, SystemClock,
-    Task, TaskId, TreeId, Workflow,
+    sha256_hex, Clock, CommitSha, NodeId, NodeKind, RunId, ScopeExpansionMode, Seq, Task, TaskId,
+    TreeId, Workflow,
 };
 use yunta_engine::{
     open_session_listener, Memo, NodeScopeAccess, RunToolsHost, RunToolsSession, TaskAccess,
     TaskExpansion, Unit, UnitId,
 };
 use yunta_storage::Storage;
+use yunta_testkit_core::FixedClock;
 
 /// A born run, the directories it owns, and the host its tools answer
 /// through.
@@ -43,11 +44,11 @@ pub struct ToolsHost {
 }
 
 impl ToolsHost {
-    /// A host over `workflow_yaml`, stamping what it writes with the
-    /// wall clock — for a test about what a tool call lands on the log
-    /// rather than about when.
+    /// A host over `workflow_yaml`, stamping what it writes with a fixed
+    /// clock — for a test about what a tool call lands on the log rather
+    /// than about when.
     pub fn over(workflow_yaml: &str) -> Self {
-        Self::stamped_by(workflow_yaml, Arc::new(SystemClock))
+        Self::stamped_by(workflow_yaml, Arc::new(FixedClock))
     }
 
     /// The same host, stamping what it writes with `clock` — which is
@@ -80,6 +81,7 @@ impl ToolsHost {
                 ),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
+                search_path: Vec::new(),
                 environment: Some(tools_environment()),
                 worktree,
                 suite: None,

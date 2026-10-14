@@ -39,28 +39,24 @@
 //! produces without the parent ever reading the child's directory.
 
 mod child;
+mod children;
+mod hooks;
 mod mounts;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{ChildRefusal, ChildRunCreatedPayload, EventPayload, Failure};
+use yunta_core::events::{ChildRefusal, Failure};
 use yunta_core::{InputName, Isolation, MountSpec, Node};
 
-use yunta_core::template::render_template;
+use crate::frozen::read::Source;
+
+use super::node_close::fail;
+use super::node_exec::NodeEnd;
+use super::{RunCtx, RunError};
 
 use child::{drive_child, resume_child, Child};
-use mounts::resolve_mounts;
-
-use crate::frozen::read::{ChildWorkflow, Source};
-use crate::frozen::FrozenError;
-
-use super::node_close::{fail, fail_with};
-use super::node_exec::{template_vars, NodeEnd};
-use super::CreateRunParams;
-use super::{RunCtx, RunError};
-use yunta_core::events::ChildEvent;
 
 /// Where this parent's runs live — the parent's own run.dir sits inside
 /// it, so no configuration lookup can ever disagree with where the
@@ -86,79 +82,6 @@ fn child_refused(use_name: &str, refusal: ChildRefusal) -> Failure {
     }
 }
 
-/// The child's static check, asked of it as it is born with what its node
-/// mounts into it: the code of each diagnostic that fails it, or `None` when
-/// it passes. Each adapter the check names is read as the run holds it, with
-/// the sandbox its edits run under.
-fn check_child(
-    ctx: &RunCtx<'_>,
-    child: &yunta_core::Workflow,
-    mounts: &[MountSpec],
-) -> Option<Vec<String>> {
-    let errors = crate::check::check_mounted(
-        child,
-        &ctx.manifest.config,
-        &|adapter| {
-            ctx.adapters
-                .get(adapter)
-                .map(|adapter| crate::check::AdapterFacts {
-                    capabilities: adapter.capabilities(),
-                    edit_sandbox: adapter.edit_sandbox(),
-                })
-        },
-        mounts,
-    );
-    if errors.is_empty() {
-        return None;
-    }
-    Some(errors.iter().map(|e| e.to_string()).collect())
-}
-
-/// Births the child a fresh node starts. A child of a run that froze its
-/// inputs is born from that run's frozen set. A run that predates frozen
-/// inputs has none to hand on: its child is born from the checkout as it
-/// stands, and freezes what it reads as any run born now does.
-async fn birth_child(
-    ctx: &RunCtx<'_>,
-    cancel: &CancellationToken,
-    child: ChildWorkflow<'_>,
-    workflow: &yunta_core::Workflow,
-    config: &yunta_core::ConfigLayer,
-    provided: &std::collections::HashMap<InputName, String>,
-    use_name: &str,
-) -> Result<crate::manifest::FrozenRun, crate::manifest::ManifestError> {
-    match child {
-        ChildWorkflow::Frozen { parent, .. } => {
-            crate::manifest::child_run(
-                workflow,
-                config,
-                ctx.worktree,
-                provided,
-                ctx.supervision(cancel),
-                crate::manifest::ParentRun {
-                    use_name,
-                    frozen: parent,
-                    run_dir: ctx.run_dir,
-                },
-            )
-            .await
-        }
-        ChildWorkflow::Checkout { dir, .. } => {
-            let user_knowledge = ctx.ambient.and_then(yunta_core::user_knowledge_dir);
-            crate::manifest::build_manifest(
-                workflow,
-                config,
-                &dir,
-                ctx.worktree,
-                provided,
-                ctx.supervision(cancel),
-                user_knowledge.as_deref(),
-            )
-            .await
-        }
-    }
-}
-
 /// What a `kind: workflow` node declares: which workflow to run, what
 /// to hand it, and how much of the parent's tree it sees. One value
 /// because it is one clause of the node, read together and never apart.
@@ -169,33 +92,27 @@ pub(super) struct WorkflowCall<'a> {
     pub mounts: &'a [MountSpec],
 }
 
+/// What a step of a `kind: workflow` node decides: carry on with what it made,
+/// or end the node the way the step ended it.
+pub(super) enum Step<T> {
+    Proceed(T),
+    Ended(NodeEnd),
+}
+
+/// The end of a node that the step refusing it ended: the failure it closes
+/// with, or the cut it stops at.
+pub(super) fn ended<T>(end: Result<NodeEnd, RunError>) -> Result<Step<T>, RunError> {
+    Ok(Step::Ended(end?))
+}
+
 pub(super) async fn execute_workflow(
     ctx: &RunCtx<'_>,
     node: &Node,
     call: WorkflowCall<'_>,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let WorkflowCall {
-        use_name,
-        inputs,
-        isolation,
-        mounts,
-    } = call;
-    // The configurable max depth, enforced where the depth
-    // actually grows — `check`'s static walk covers the files as they
-    // are at check time; this guard covers what the run really loads.
-    let max_depth = ctx.manifest.config.resolved_max_workflow_depth();
-    if ctx.depth + 1 > max_depth {
-        return fail(
-            ctx,
-            node,
-            Failure::NestedTooDeep {
-                workflow: use_name.to_string(),
-                depth: ctx.depth + 1,
-                max_depth,
-            },
-        )
-        .await;
+    if let Some(failure) = hooks::nested_too_deep(ctx, call.use_name) {
+        return fail(ctx, node, failure).await;
     }
 
     // Resume before create (a parent's resume recursively resumes
@@ -204,8 +121,12 @@ pub(super) async fn execute_workflow(
     // dangling reference from a crash between the parent's event and
     // the child's run_created has no events, and is superseded below).
     let view = ctx.run_view().await?;
-    let state = &view.state;
-    if let Some(open_child) = state.children.open_under(&node.id).map(|link| &link.run_id) {
+    if let Some(open_child) = view
+        .state
+        .children
+        .open_under(&node.id)
+        .map(|link| &link.run_id)
+    {
         if !ctx
             .storage
             .events_for_run(open_child.clone())
@@ -220,239 +141,22 @@ pub(super) async fn execute_workflow(
     // child — the copy its parent froze at birth, or the checkout's file
     // for a run that predates frozen inputs.
     let source = Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient);
-    let child = match source.workflow(use_name).await {
-        Ok(child) => child,
-        Err(FrozenError::Unresolved(problem)) => {
-            let refusal = ChildRefusal::Unresolved { problem };
-            return fail(ctx, node, child_refused(use_name, refusal)).await;
-        }
-        Err(e) => return super::session_policy::close_frozen(ctx, node, e).await,
+    let admitted = match hooks::admit(ctx, node, &call, &source, &view).await? {
+        Step::Proceed(admitted) => admitted,
+        Step::Ended(end) => return Ok(end),
     };
-    let child_workflow = match yunta_core::workflow::read::read(child.text(), Path::new(use_name)) {
-        Ok(workflow) => workflow,
-        Err(report) => {
-            let refusal = ChildRefusal::Invalid { report };
-            return fail(ctx, node, child_refused(use_name, refusal)).await;
-        }
+    let born = match children::birth(ctx, node, cancel, &call, admitted, &view.state).await? {
+        Step::Proceed(born) => born,
+        Step::Ended(end) => return Ok(end),
     };
-    // The same static gate `yunta run` applies before spending anything
-    // — a child born broken is refused at birth, with the check's own
-    // diagnostics — asked of the child as it is born: holding what this
-    // node mounts into it.
-    if let Some(rules) = check_child(ctx, &child_workflow, mounts) {
-        let refusal = ChildRefusal::FailsCheck { rules };
-        return fail(ctx, node, child_refused(use_name, refusal)).await;
-    }
-
-    // The parent's frozen contribution: the declared inputs, rendered
-    // in the parent's own template scope.
-    let vars = template_vars(ctx, node);
-    let mut provided: std::collections::HashMap<InputName, String> = Default::default();
-    for (name, template) in inputs {
-        match render_template(template, &vars) {
-            Ok(value) => {
-                provided.insert(name.clone(), value);
-            }
-            Err(error) => {
-                let failure = Failure::Template {
-                    template: error,
-                    input: Some(name.clone()),
-                };
-                return fail(ctx, node, failure).await;
-            }
-        }
-    }
-
-    // Mounts resolve to bytes here, before anything is linked or
-    // born — a missing source is this node's failure, with no dangling
-    // child left behind.
-    let mounted = match resolve_mounts(ctx, state, &view.events, mounts).await {
-        Ok(mounted) => mounted,
-        Err(problem) => {
-            return fail_with(
-                ctx,
-                node,
-                problem.into(),
-                yunta_core::events::TokenUsage::default(),
-            )
-            .await
-        }
-    };
-
-    // Budgets cascade: the child's frozen cap is what the parent
-    // has left — auditable in the child's own manifest, and the child's
-    // ordinary budget machinery enforces the parent's ceiling over the
-    // whole subtree. A human's `continue` on the parent (budget already
-    // lifted) leaves the child's own configured cap untouched instead
-    // of freezing an unlimited child forever.
-    let mut child_config = ctx.manifest.config.clone();
-    if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
-        if let Some(limits) = child_config.limits.as_mut() {
-            if let Some(cap) = limits.max_tokens_per_run {
-                let spent = state.spend().so_far().total();
-                limits.max_tokens_per_run = Some(cap.saturating_sub(spent));
-            }
-        }
-    }
-
-    let birth = birth_child(
-        ctx,
-        cancel,
-        child,
-        &child_workflow,
-        &child_config,
-        &provided,
-        use_name,
-    )
-    .await;
-    let crate::manifest::FrozenRun {
-        manifest: mut child_manifest,
-        documents,
-        blobs,
-    } = match birth {
-        // A child runs on the adapter its parent was asked to run on.
-        Ok(child) => child.with_adapter(ctx.manifest.adapter.clone()),
-        // A freeze the token cut ends the node the way a birth cut does
-        // below: a stop is not a failed child.
-        Err(e) if e.cancelled() => return crate::run::node_exec::cancelled_end(ctx, node).await,
-        // The inputs the node hands the child do not fit what it declares.
-        Err(crate::manifest::ManifestError::Inputs(error)) => {
-            let refusal = ChildRefusal::Inputs { problem: error };
-            return fail(ctx, node, child_refused(use_name, refusal)).await;
-        }
-        Err(e) => {
-            let engine_error =
-                format!("child workflow `{use_name}` cannot freeze its manifest: {e}");
-            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
-        }
-    };
-    // One word all the way down: what the node declares is what the
-    // child's manifest freezes, with nothing in between to translate.
-    child_manifest.isolation = isolation;
-    let runs = runs_root(ctx);
-    let trees = worktrees_root(ctx);
-    child_manifest.paths = match yunta_core::FrozenPaths::new(runs.clone(), trees.clone()) {
-        Ok(frozen) => Some(frozen),
-        Err(e) => {
-            let engine_error =
-                format!("child run of `{use_name}` cannot freeze its state roots: {e}");
-            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
-        }
-    };
-
-    // A fresh id from the injected source: the link to this parent and
-    // node is the `child_run_created` below, never the name.
-    let child_id = ctx.ids.mint_run_id(ctx.clock.now());
-
-    // Resolved before the child's tree is taken or its link is written: a
-    // short declared secret refuses the birth with nothing taken or linked.
-    let redactor = super::run_redactor(&child_manifest, &*ctx.secrets)?;
-    let child_tree = match isolation {
-        // `none` shares the tree this node works in: the engine never
-        // commits, cleans up or locks a tree this run does not own.
-        Isolation::None => ctx.worktree.to_path_buf(),
-        // A tree of its own is a checkout of the project's pool, like the
-        // parent's.
-        Isolation::Worktree => {
-            // Boxed: a child's tree is taken at the bottom of every composed
-            // run's stack.
-            let opened = Box::pin(ctx.pool.open_run(
-                &child_id,
-                &child_manifest.base_commit,
-                crate::worktree::Birth::of(&child_manifest.workflow),
-                ctx.root_supervision(),
-            ))
-            .await;
-            match opened {
-                Ok((tree, _held)) => tree,
-                // Somebody stopped the run while its child's tree was
-                // being made: that is not the node failing, it is the
-                // node being cut.
-                Err(e) if e.cancelled() => {
-                    return crate::run::node_exec::cancelled_end(ctx, node).await;
-                }
-                Err(e) => {
-                    let engine_error =
-                        format!("child run `{child_id}` cannot prepare its worktree: {e}");
-                    return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
-                }
-            }
-        }
-    };
-
-    // Link first, then create: the identity pair (`child_run_id` +
-    // `child_workflow_hash`) is on the parent's log before the child
-    // exists, so no crash window can orphan a child the parent never
-    // heard of — a link whose birth never completed has no run_created
-    // and is superseded on resume. The mounts are the child's birth
-    // artifacts: the promotion inheritance mechanism generalized, files
-    // into the child's own `artifacts/`, where its ordinary machinery
-    // (context `artifact: {name}`, `{{run.dir}}` templates) already
-    // looks. The documents its own `inputs:` named join them: both are
-    // artifacts the child holds before any of its nodes runs.
-    let mut born = mounted;
-    born.extend(documents);
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
-            child_run_id: child_id.clone(),
-            child_workflow_hash: child_manifest.workflow_hash.clone(),
-        })),
-    )
-    .await?;
-
-    // Same mode convention as the CLI: a child declaring `modes:`
-    // starts at the floor (first declared — promotion only ever
-    // escalates forward); one without runs everything.
-    let child_mode = child_workflow
-        .modes
-        .as_ref()
-        .and_then(|modes| modes.keys().next().cloned())
-        .unwrap_or_default();
-    let child_run_dir = match super::create_run(
-        CreateRunParams {
-            run_id: &child_id,
-            manifest: &child_manifest,
-            runs_root: &runs,
-            mode: &child_mode,
-            worktree: &child_tree,
-            promoted_from: None,
-            artifacts: &born,
-            // The lineage measures once: the child is born holding what
-            // its root measured, so its comparisons see what its parent
-            // did to the tree.
-            baseline: crate::run::baseline::inherited(ctx.run_id, state).as_ref(),
-            environment: crate::process::execution_environment(ctx.ambient),
-            redactor: &redactor,
-            blobs: &blobs,
-        },
-        ctx.storage,
-        ctx.supervision(cancel),
-    )
-    .await
-    {
-        Ok(run_dir) => run_dir,
-        // A birth the cancellation cut has no log of its own to pause:
-        // it says so to the node that asked for it, which ends cut
-        // like any other, and the loop's next turn pauses the run.
-        Err(RunError::Cancelled) => return crate::run::node_exec::cancelled_end(ctx, node).await,
-        // The child's frozen inputs could not be written: the node fails with
-        // that, as a birth that cannot read its workflow does.
-        Err(RunError::Frozen(e)) => {
-            let engine_error = format!("child workflow `{use_name}` cannot be born: {e}");
-            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
-        }
-        Err(other) => return Err(other),
-    };
-
     drive_child(
         ctx,
         node,
         Child {
-            id: &child_id,
-            manifest: &child_manifest,
-            run_dir: &child_run_dir,
-            tree: &child_tree,
+            id: &born.id,
+            manifest: &born.manifest,
+            run_dir: &born.run_dir,
+            tree: &born.tree,
         },
         cancel,
     )

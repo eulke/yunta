@@ -13,7 +13,7 @@ use watch::{watch, Watching};
 use std::path::{Path, PathBuf};
 
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{PriorEstimation, RunEnv, RunReport, RunTerminal};
+use yunta_engine::{PriorEstimation, RunReport, RunTerminal};
 use yunta_storage::AsyncStorage;
 
 use crate::commands::{reset_at, spawn_detached_resume, DetachedResumeError};
@@ -23,6 +23,10 @@ use crate::json::PreRunWarnings;
 use crate::output::Mode;
 use crate::render::{Glyphs, Look};
 use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
+
+// The one call into the engine is `registry::execute`; this module keeps the
+// path its callers already name.
+pub(crate) use super::registry::{execute, Executing};
 
 /// A run's identity and the paths it lives at — what the executing path,
 /// the detaching path and a resume all name it by.
@@ -112,54 +116,6 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         }
     };
     finish(&env, forge.as_deref(), &root_cancel, watching, report).await
-}
-
-/// One run, handed to the engine.
-///
-/// Everything below this line is the same for the run an invocation was
-/// given and for every successor a promotion makes: the retry ceiling,
-/// the ambient environment, the secrets source, how a `RunEnv` is
-/// filled in. It used to be written twice — here and in the promotion
-/// loop — and the two agreed only by attention, so a field added to one
-/// was a field missing from the other.
-pub(crate) struct Executing<'a> {
-    pub(crate) run_id: &'a RunId,
-    pub(crate) manifest: &'a Manifest,
-    pub(crate) run_dir: &'a Path,
-    pub(crate) worktree: &'a Path,
-    pub(crate) adapters: &'a super::Adapters,
-    pub(crate) storage: &'a AsyncStorage,
-    pub(crate) clock: std::sync::Arc<dyn Clock>,
-    pub(crate) ids: &'a dyn yunta_core::IdSource,
-    pub(crate) human_interaction: &'a dyn yunta_engine::HumanInteraction,
-    pub(crate) forge: Option<&'a dyn yunta_core::port::Forge>,
-    pub(crate) cancel: &'a tokio_util::sync::CancellationToken,
-    pub(crate) observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
-    pub(crate) rail_command: yunta_core::rail::RailCommand,
-    pub(crate) ambient: &'a yunta_core::Env,
-}
-
-/// Runs one run to its stop — the one `execute_run` call this binary
-/// makes.
-pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine::RunError> {
-    yunta_engine::execute_run(RunEnv {
-        run_id: on.run_id,
-        manifest: on.manifest,
-        run_dir: on.run_dir,
-        worktree: on.worktree,
-        adapters: on.adapters,
-        storage: on.storage,
-        clock: on.clock,
-        ids: on.ids,
-        human_interaction: on.human_interaction,
-        forge: on.forge,
-        cancel: on.cancel,
-        ambient: Some(on.ambient),
-        secrets: std::sync::Arc::new(yunta_core::ProcessSecrets),
-        observer: on.observer,
-        rail_command: Some(on.rail_command),
-    })
-    .await
 }
 
 /// Chases a promotion to its end, takes the surface down, and reports
@@ -297,7 +253,7 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
 /// Hands back what the run held, when the run is done holding it.
 ///
 /// Only a *finished* run releases isolation `none`'s lock — a paused
-/// run expects a future `resume` on the same checkout, which is the
+/// run waits for its `resume` on the same checkout, which is the
 /// same logical run, not a second concurrent one. A user cancellation
 /// also releases it: the engine process is exiting, and a Ctrl-C is
 /// designed to leave nothing held.

@@ -521,6 +521,8 @@ const AUDIT_KINDS: &[&str] = &[
     "rail_failed",
     "run_tool_refused",
     "service_reachable",
+    // Audit only: the run went on past the step, and no ledger reads its cause.
+    "best_effort_failed",
     "task_check_answered",
     "criterion_declared_unpassable",
     "scope_expansion_withdrawn",

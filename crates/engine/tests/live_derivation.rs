@@ -1,6 +1,6 @@
 //! The derivations a view of a run *in progress* rests on: the elapsed
 //! time of an attempt still open, a run clock that keeps moving while a
-//! node says nothing, the node a ledger task belongs to, the sessions
+//! node says nothing, the node a task belongs to, the sessions
 //! and tool calls of the attempt now running, and the tokens spent so
 //! far. Each is a pure function of the event log plus an instant the
 //! caller supplies — the logs here are built by hand with fixed

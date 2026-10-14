@@ -62,10 +62,10 @@ pub struct Workflow {
     pub name: WorkflowName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// `modes:` — an ordered map, free in name and count:
-    /// quick/standard/full are the reference workflows' own convention,
-    /// never reserved schema words. **Declaration order is the
-    /// promotion ladder** — promotion only ever targets a mode
+    /// `modes:` — an ordered map, free in name and count: each workflow
+    /// names its own, and no name is reserved as a schema word.
+    /// **Declaration order is the promotion ladder** — promotion only
+    /// ever targets a mode
     /// later in this map's own iteration order, never an earlier one.
     /// Absent entirely means the workflow has no modes at all: every
     /// node always runs.

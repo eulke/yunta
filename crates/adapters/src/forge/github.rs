@@ -15,17 +15,19 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use yunta_core::commit_message::CommitMessage;
 
-use base64::Engine;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use yunta_core::step::Spell;
-use yunta_core::{git_blob_id, CommitSha, GitHubRepo, Responder, Secret};
+use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
 
 use yunta_core::port::{
     Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
-    ReviewComment, ReviewOutcome,
+    ReviewComment,
 };
+
+mod commit;
+mod poll;
 
 const API_VERSION: &str = "2022-11-28";
 
@@ -181,115 +183,6 @@ impl GitHubForge {
         Ok(items)
     }
 
-    async fn base_branch_sha(&self, base_branch: &str) -> Result<String, ForgeError> {
-        #[derive(Deserialize)]
-        struct RefObject {
-            object: RefSha,
-        }
-        #[derive(Deserialize)]
-        struct RefSha {
-            sha: String,
-        }
-        let parsed: RefObject = self
-            .read(
-                "resolve the base branch",
-                self.request(
-                    reqwest::Method::GET,
-                    &self.repo_path(&format!("/git/ref/heads/{base_branch}")),
-                ),
-            )
-            .await?;
-        Ok(parsed.object.sha)
-    }
-
-    /// Idempotent: GitHub answers 422 when the ref already exists, which
-    /// is exactly the "already published, `resume` is calling this
-    /// again" case — not an error here.
-    async fn ensure_branch(&self, branch: &str, base_sha: &str) -> Result<(), ForgeError> {
-        let request = self
-            .request(reqwest::Method::POST, &self.repo_path("/git/refs"))
-            .json(&serde_json::json!({
-                "ref": format!("refs/heads/{branch}"),
-                "sha": base_sha,
-            }));
-        match self.send("create the branch", request).await {
-            Ok(_) | Err(ForgeError::Http { status: 422, .. }) => Ok(()),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// GitHub's Contents API needs the existing blob's `sha` to update a
-    /// file that's already there (409 without it) but must omit it to
-    /// create a new one — so this looks the file up first. Only a 404
-    /// means "no such file"; any other refusal is reported as it is.
-    async fn existing_file(
-        &self,
-        path: &str,
-        branch: &str,
-    ) -> Result<Option<ExistingFile>, ForgeError> {
-        #[derive(Deserialize)]
-        struct Contents {
-            sha: String,
-        }
-        let action = "read an artifact's current version";
-        let request = self.request(
-            reqwest::Method::GET,
-            &self.repo_path(&format!("/contents/{path}?ref={branch}")),
-        );
-        match self.send(action, request).await {
-            Ok(response) => {
-                let found: Contents =
-                    response
-                        .json()
-                        .await
-                        .map_err(|source| ForgeError::Response {
-                            action,
-                            source: Box::new(source),
-                        })?;
-                Ok(Some(ExistingFile { sha: found.sha }))
-            }
-            Err(ForgeError::Http { status: 404, .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Commits `content` to `path` on `branch` — unless the file already
-    /// holds it: a commit that changes nothing would move the branch's
-    /// head, and a review of it would no longer cover what it reviewed.
-    async fn commit_artifact(
-        &self,
-        path: &str,
-        content: &[u8],
-        branch: &str,
-        message: &str,
-    ) -> Result<(), ForgeError> {
-        let existing = self.existing_file(path, branch).await?;
-        // The forge reports the blob id git gives the bytes it holds, so
-        // equal ids are equal bytes at any size, even where it sends none.
-        if existing
-            .as_ref()
-            .is_some_and(|file| file.sha == git_blob_id(content))
-        {
-            return Ok(());
-        }
-        let mut body = serde_json::json!({
-            "message": message,
-            "content": base64::engine::general_purpose::STANDARD.encode(content),
-            "branch": branch,
-        });
-        if let (Some(file), Some(object)) = (existing, body.as_object_mut()) {
-            object.insert("sha".to_string(), serde_json::Value::String(file.sha));
-        }
-        let request = self
-            .request(
-                reqwest::Method::PUT,
-                &self.repo_path(&format!("/contents/{path}")),
-            )
-            .json(&body);
-        self.send("commit an artifact", request).await?;
-        Ok(())
-    }
-
     /// The open pull request on `branch` carrying this run's marker —
     /// the one a resumed gate keeps using. A PR someone closed or
     /// merged is never picked up again.
@@ -411,12 +304,6 @@ fn rate_limit(status: u16, headers: &HeaderMap) -> Option<RateLimit> {
     })
 }
 
-/// A file a branch already holds: the blob id an update names, which also
-/// tells whether the branch holds given bytes.
-struct ExistingFile {
-    sha: String,
-}
-
 fn header(headers: &HeaderMap, name: &str) -> Option<String> {
     headers.get(name)?.to_str().ok().map(str::to_string)
 }
@@ -468,101 +355,7 @@ impl Forge for GitHubForge {
     }
 
     async fn poll(&self, gate: &PullRequestRef) -> Result<PolledGate, ForgeError> {
-        #[derive(Deserialize)]
-        struct PrDetail {
-            state: String,
-            #[serde(default)]
-            merged: bool,
-            merged_by: Option<User>,
-            merge_commit_sha: Option<String>,
-            head: PrHead,
-        }
-        #[derive(Deserialize)]
-        struct PrHead {
-            sha: String,
-        }
-        #[derive(Deserialize)]
-        struct User {
-            login: String,
-        }
-        let detail: PrDetail = self
-            .read(
-                "read the pull request",
-                self.request(
-                    reqwest::Method::GET,
-                    &self.repo_path(&format!("/pulls/{}", gate.number)),
-                ),
-            )
-            .await?;
-
-        let head_sha = parse_sha("read the pull request", &detail.head.sha)?;
-        if detail.state != "open" {
-            let review = if detail.merged {
-                ReviewOutcome::Merged {
-                    by: match detail.merged_by {
-                        Some(user) => parse_responder("read the pull request", &user.login)?,
-                        None => Responder::from_static("(unknown)"),
-                    },
-                    merge_sha: match detail.merge_commit_sha {
-                        Some(sha) => parse_sha("read the pull request", &sha)?,
-                        None => head_sha.clone(),
-                    },
-                }
-            } else {
-                ReviewOutcome::Closed
-            };
-            return Ok(PolledGate { head_sha, review });
-        }
-
-        #[derive(Deserialize)]
-        struct Review {
-            state: String,
-            user: User,
-            commit_id: Option<String>,
-        }
-        let reviews: Vec<Review> = self
-            .read_pages(
-                "read the reviews",
-                &self.repo_path(&format!("/pulls/{}/reviews", gate.number)),
-            )
-            .await?;
-
-        // Last decisive review wins (APPROVED/CHANGES_REQUESTED) —
-        // COMMENTED/DISMISSED aren't decisions this maps to anything.
-        // GitHub returns reviews in submission order, oldest first.
-        let last_decision = reviews
-            .into_iter()
-            .rfind(|r| r.state == "APPROVED" || r.state == "CHANGES_REQUESTED");
-
-        let review = match last_decision {
-            None => ReviewOutcome::Pending,
-            Some(r) => match r.commit_id.as_deref().map(str::parse::<CommitSha>) {
-                Some(Ok(reviewed_sha)) if r.state == "APPROVED" => ReviewOutcome::Approved {
-                    by: parse_responder("read the pull request reviews", &r.user.login)?,
-                    reviewed_sha,
-                },
-                Some(Ok(reviewed_sha)) => {
-                    let comments = self.review_comments(gate.number).await?;
-                    ReviewOutcome::ChangesRequested {
-                        by: parse_responder("read the pull request reviews", &r.user.login)?,
-                        reviewed_sha,
-                        comments,
-                    }
-                }
-                // A review that names no commit covers no code: it decides
-                // nothing, so the gate keeps waiting and the log says why.
-                _ => {
-                    tracing::warn!(
-                        review_state = %r.state,
-                        commit_id = ?r.commit_id,
-                        "a review without a commit id is not a decision; the gate keeps waiting"
-                    );
-                    ReviewOutcome::Pending
-                }
-            },
-        };
-
-        Ok(PolledGate { head_sha, review })
+        self.poll_gate(gate).await
     }
 }
 

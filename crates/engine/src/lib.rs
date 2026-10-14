@@ -53,6 +53,7 @@ mod manifest;
 pub mod mcp;
 mod modes;
 mod observer;
+pub mod pace;
 mod pack_audit;
 mod pack_requires;
 mod permissions;

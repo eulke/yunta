@@ -25,6 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::{Isolation, Manifest, RunId};
+use yunta_storage::Storage;
 
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
@@ -281,36 +282,37 @@ async fn reclaim(
                     }
                 }
             }
-            None if dry_run => {
-                say(
-                    look,
-                    format!(
-                        "would purge {} of run {}",
-                        yunta_core::text::counted(events.len(), "event"),
-                        run_id.handle()
-                    ),
-                );
-                reclaimed += 1;
-            }
-            None => match storage.purge_run(&run_id) {
-                Ok(purged) => {
-                    say(
-                        look,
-                        format!(
-                            "purged {} of run {}",
-                            yunta_core::text::counted(purged.rows, "event"),
-                            run_id.handle()
-                        ),
-                    );
+            None => {
+                if purge_rows(&storage, &run_id, events.len(), dry_run, look) {
                     reclaimed += 1;
                 }
-                Err(e) => warn(format!("run {}: {e}", run_id.handle())),
-            },
+            }
         }
     }
 
     tally(look, reclaimed, dry_run);
     Ok(collected)
+}
+
+/// Purges the rows of a terminal run whose `run.dir` is already gone, and
+/// answers whether they went; under `dry_run` they only would.
+fn purge_rows(storage: &Storage, run: &RunId, events: usize, dry_run: bool, look: &Look) -> bool {
+    if dry_run {
+        let count = yunta_core::text::counted(events, "event");
+        say(look, format!("would purge {count} of run {}", run.handle()));
+        return true;
+    }
+    match storage.purge_run(run) {
+        Ok(purged) => {
+            let count = yunta_core::text::counted(purged.rows, "event");
+            say(look, format!("purged {count} of run {}", run.handle()));
+            true
+        }
+        Err(e) => {
+            warn(format!("run {}: {e}", run.handle()));
+            false
+        }
+    }
 }
 
 /// What a pass says once it has looked at every run: how many it reclaimed,
@@ -443,7 +445,7 @@ async fn remove_run(
         if dry_run {
             say(look, format!("would remove {}", shown(run_dir)));
             removed_any = true;
-        } else if let Err(e) = std::fs::remove_dir_all(run_dir) {
+        } else if let Err(e) = tokio::fs::remove_dir_all(run_dir).await {
             warn(format!("failed to remove {}: {e}", shown(run_dir)));
             all_removed = false;
         } else {

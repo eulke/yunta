@@ -2,40 +2,39 @@
 //! task at a time, its criteria re-run after the rebase, and the result
 //! committed or recorded as a conflict.
 
+mod member;
+
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, Decider, EventPayload, Phase, ScopeCheckedPayload,
-    TaskCause, TaskStatus, TaskStatusChangedPayload,
+    CriteriaCheckedPayload, CriterionResult, Decider, EventPayload, NodeEvent, Phase,
+    ScopeCheckedPayload,
 };
-use yunta_core::expansion::Decision;
 use yunta_core::protected::{Closing, Protected};
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task, TreeId};
 
 use crate::run::node_exec::NodeEnd;
-use crate::run::scope_record::{self, Recording, Subject, Withdrawal};
+use crate::run::scope_record::{self, Recording, Subject};
 use crate::task_cycle::{
-    judge, scope_in_force, JudgeEnv, Judgement, Memo, Refusals, Settle, Sitting, TaskOutcome, Work,
+    judge, scope_in_force, JudgeEnv, Judgement, Memo, Refusals, Settle, Sitting, Work,
 };
 use crate::worktree::{land, rebase_onto, Rebase, Unit};
 
 use super::depart::PendingDeparture;
-use super::dispatch::{commit_task_work, left_work};
+use super::dispatch::commit_task_work;
 use super::escalate::PendingEscalation;
 use super::unstopped::{end_on_unstopped, WalkStop};
 use super::LoopState;
 use crate::run::{RunCtx, RunError};
-use yunta_core::events::{NodeEvent, TaskEvent};
+use member::{settle_member, Settled};
 
 /// What integrating one batch produced: how the node ends, when the walk
-/// stops it at a cancellation or at a session the engine could not stop, or
-/// what is owed a person once the batch is on the log — the scope requests
-/// escalated, and the departures from the plan declared.
+/// stops it, or what is owed a person once the batch is on the log — the
+/// scope requests escalated, and the departures from the plan declared.
 pub(super) enum BatchIntegration {
-    Cancelled(NodeEnd),
-    /// The node failed with a session the engine could not stop, among the
-    /// dispatches from the walk's stop on.
-    Ended(NodeEnd),
+    /// The node ends here: at a cancelled dispatch, or at a session the engine
+    /// could not stop, among the dispatches from the walk's stop on.
+    Stopped(NodeEnd),
     Done {
         escalations: Vec<PendingEscalation>,
         departures: Vec<PendingDeparture>,
@@ -67,164 +66,24 @@ pub(super) async fn integrate_batch(
     let owed = ctx.run_view().await?.state.tasks;
     let mut batch = dispatches.into_iter();
     while let Some(dispatch) = batch.next() {
-        // The checkout stays held until this task is integrated or set
-        // aside below, and is given back then.
-        let super::dispatch::Dispatched {
-            task,
-            unit,
-            lease,
-            mut report,
-        } = match dispatch {
+        let member = match dispatch {
             Ok(dispatched) => dispatched,
             Err(error) => {
                 return end_on_unstopped(ctx, node, state, WalkStop::Failed(error), batch).await
             }
         };
-        if let Some(cause) = super::depart::owed_first(&owed, &report) {
-            report.outcome = TaskOutcome::Blocked { cause };
-        }
-        let needs_human_decision = report.needs_human_decision;
-        // The escalated request itself (paths, reason, criterion + its
-        // pre-check exit), captured off the attempt that raised it — what the
-        // escalation object is built from.
-        let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
-
-        // The cycle recorded each of its checks the moment it ran; what
-        // it hands over is where the last one landed, which the status
-        // change closing the cycle cites.
-        let mut last_check_seq = report.last_check.ok_or_else(|| RunError::Broken {
-            diagnostic: format!("task `{}`'s cycle recorded no check", task.id),
-        })?;
-
-        // The request the attempt before this one decided, if it made one: a
-        // fresh session re-reads a request still pending, and the log holds it once.
-        let mut previous_asked: Option<crate::scope_expansion::ScopeExpansionRequest> = None;
-        for attempt in report.attempts.drain(..) {
-            state.tokens += attempt.tokens;
-            // `run_task` has no ctx to record on, so it hands the
-            // breach here, after the check that found it.
-            if let Some(breach) = &attempt.fence_breach {
-                ctx.record_breach(&node.id, breach).await?;
+        match settle_member(ctx, node, state, &owed, cancel, member).await? {
+            Settled::Done {
+                escalation,
+                departure,
+            } => {
+                pending_escalations.extend(escalation);
+                departures.extend(departure);
             }
-
-            if let Some(outcome) = &attempt.scope_expansion {
-                let new_request = outcome.asked.is_some() && outcome.asked != previous_asked;
-                record_attempt(ctx, node, task, attempt.attempt, outcome, new_request).await?;
-                if matches!(outcome.decision, Decision::Escalate { .. }) {
-                    escalated = Some((attempt.attempt, outcome.clone()));
-                }
-            }
-            previous_asked = attempt
-                .scope_expansion
-                .as_ref()
-                .and_then(|outcome| outcome.asked.clone());
-            // A request the task closed with, unanswered, is withdrawn: nobody
-            // decided it, so the log says it left with the task.
-            if let Some(paths) = &attempt.withdrawn {
-                let request = Withdrawal {
-                    task: &task.id,
-                    paths,
-                };
-                scope_record::withdraw(&ctx.log(), &node.id, request).await?;
-            }
-        }
-
-        // A cancelled dispatch ends the whole loop node without a verdict —
-        // the task stays `running` in the log (orphaned), which is exactly
-        // what makes a later resume re-execute it — unless a session still to
-        // come could not be stopped, which fails the node instead.
-        if matches!(report.outcome, TaskOutcome::Interrupted) {
-            return end_on_unstopped(ctx, node, state, WalkStop::Interrupted, batch).await;
-        }
-        let blocked_cause = match report.outcome {
-            TaskOutcome::Blocked { cause } => {
-                let left_work = left_work(ctx, node, task, &unit, cancel).await?;
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::Tasks(TaskEvent::StatusChanged(
-                        TaskStatusChangedPayload::blocked(
-                            task.id.clone(),
-                            last_check_seq,
-                            left_work,
-                            cause.clone(),
-                        ),
-                    )),
-                )
-                .await?;
-                Some(cause)
-            }
-            TaskOutcome::Done => {
-                let outcome = integrate_task(
-                    ctx,
-                    node,
-                    VerifiedTask {
-                        task,
-                        unit: &unit,
-                        lease: &lease,
-                        staged: &report.staged,
-                    },
-                    &ctx.memo,
-                    &mut last_check_seq,
-                    cancel,
-                )
-                .await?;
-                // A rejected integration goes back to ready on the new tree —
-                // back to `Pending`, so a future batch retries it
-                // automatically. This is deliberately NOT `Blocked`: green in
-                // isolation but broken by a sibling's integration is a timing
-                // artifact of concurrency, not evidence the task itself can't
-                // succeed — that verdict only comes from `run_task`'s own
-                // retry exhaustion, the branch above. The `task_status_changed`
-                // emitted just below is the log's record of the rejection
-                // (with the rebase-conflict `criteria_checked` that caused
-                // it), so no warning duplicates that event. A `done`
-                // names the commit the tree stands at once the work is
-                // in it, which is what lets another run tell whether its
-                // own tree has that work.
-                let changed = match outcome {
-                    IntegrationOutcome::Integrated { commit } => {
-                        TaskStatusChangedPayload::done(task.id.clone(), last_check_seq, commit)
-                    }
-                    IntegrationOutcome::Rejected => TaskStatusChangedPayload::to(
-                        task.id.clone(),
-                        TaskStatus::Pending,
-                        last_check_seq,
-                    ),
-                };
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::Tasks(TaskEvent::StatusChanged(changed)),
-                )
-                .await?;
-                // Never counted toward the loop's own "no task ready"
-                // diagnostic — a `Pending` task is retriable, not stuck, so
-                // there's nothing to cite a human decision for yet.
-                None
-            }
-            // Handled by the early return above.
-            TaskOutcome::Interrupted => None,
-        };
-        ctx.pool.give_back(lease, ctx.supervision(cancel)).await?;
-        // A task a departure blocks is reopened by its answer, never by
-        // the answer to a scope request its done work also made.
-        let was_blocked = blocked_cause
-            .as_ref()
-            .is_some_and(|cause| !matches!(cause, TaskCause::DeviationOwed { .. }));
-        // Departures are put to a person once the batch is on the log.
-        if let Some(TaskCause::DeviationOwed { deviations }) = blocked_cause {
-            departures.push(PendingDeparture {
-                task_id: task.id.clone(),
-                deviations,
-            });
-        }
-        if needs_human_decision {
-            if let Some((attempt_no, outcome)) = escalated {
-                pending_escalations.push(PendingEscalation {
-                    task_id: task.id.clone(),
-                    attempt_no,
-                    outcome,
-                    was_blocked,
-                });
+            // The walk ends at this member. Its hold on the checkout is let go
+            // when the binding drops, which is after the node has ended.
+            Settled::Interrupted(_lease) => {
+                return end_on_unstopped(ctx, node, state, WalkStop::Interrupted, batch).await;
             }
         }
     }

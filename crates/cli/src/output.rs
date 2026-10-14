@@ -7,8 +7,16 @@
 //! way that mode asks. A refusal goes through [`refused`]: a person reads it
 //! on stderr, and a program that asked for `--json` reads one document on
 //! stdout, with stderr left empty.
+//!
+//! Warnings and notes reach stderr through [`warn`] and [`note`], and a JSON
+//! document reaches stdout through [`print_json`], and a shell's completion
+//! script or a hook's answer through [`completions`] and [`hook_reply`].
+//! Nothing else in the CLI calls a print macro.
 
-use crate::error::{note, CliError, Outcome, Reader};
+use std::fmt::Display;
+
+use crate::error::{warning_word, CliError, Outcome, Reader};
+use crate::json::to_json_string;
 use crate::render::doc::{Block, Doc};
 use crate::render::ink::Line;
 use crate::render::{self, Look};
@@ -46,7 +54,7 @@ pub(crate) trait Answer: serde::Serialize {
 pub(crate) fn emit<A: Answer>(mode: Mode, answer: &A, look: &Look) -> Result<Outcome, CliError> {
     match mode {
         Mode::Json => {
-            crate::json::print_json(answer)?;
+            print_json(answer)?;
         }
         Mode::Human => document(look, answer.document(look)),
         // `--quiet` says the run id and nothing else, and an answer has
@@ -89,6 +97,44 @@ pub(crate) fn blank() {
 /// a schema.
 pub(crate) fn raw(text: &str) {
     print!("{text}");
+}
+
+/// A shell's completion script, written to stdout as the generator writes it.
+pub(crate) fn completions(shell: clap_complete::Shell, command: &mut clap::Command) {
+    clap_complete::generate(shell, command, "yunta", &mut std::io::stdout());
+}
+
+/// A hook's answer: its stdout, then its stderr, each written exactly as the
+/// protocol gives it. The caller reads both streams.
+pub(crate) fn hook_reply(stdout: &[u8], stderr: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    std::io::stdout()
+        .write_all(stdout)
+        .and_then(|()| std::io::stderr().write_all(stderr))
+}
+
+/// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
+/// command prints its document, reporting a serialization failure as the
+/// one error it can hit rather than unwrapping it.
+pub fn print_json<T: serde::Serialize>(value: &T) -> Result<Outcome, CliError> {
+    println!("{}", to_json_string(value).map_err(CliError::msg)?);
+    Ok(Outcome::Success)
+}
+
+/// A warning to stderr — the one place the CLI prints `warning:` lines,
+/// so a run that succeeds with caveats still says so without an error.
+/// The word is painted in the caution color on a stream that draws one,
+/// so a warning said before a run starts is not lost among the lines
+/// around it.
+pub fn warn(message: impl Display) {
+    eprintln!("{}: {message}", warning_word());
+}
+
+/// An informational block to stderr — verification findings and the
+/// like, printed beside a command's own output without claiming to be an
+/// error.
+pub fn note(message: impl Display) {
+    eprintln!("{message}");
 }
 
 /// A refusal as a program reads it under `--json`: one document, and the
@@ -144,7 +190,7 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
     if mode == Mode::Json {
         // The whole id, which is what a program copies from a refusal.
         let refusal = ErrorDocument::of(error, Reader::Agent);
-        if let Err(problem) = crate::json::print_json(&refusal) {
+        if let Err(problem) = print_json(&refusal) {
             note(problem);
         }
         return;

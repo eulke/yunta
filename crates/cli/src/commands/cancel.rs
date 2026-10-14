@@ -22,6 +22,7 @@ use yunta_core::process::group::force_kill_group;
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
 use yunta_core::text::counted;
 use yunta_core::{describe, Pid, RunId};
+use yunta_engine::pace::Pace;
 use yunta_engine::NodeState;
 
 use crate::commands::advice;
@@ -181,7 +182,7 @@ async fn await_engine(
         // a wait, so it answers to its own interrupt like the run
         // it is stopping answers to the engine's.
         tokio::select! {
-            () = tokio::time::sleep(ENGINE_SHUTDOWN_POLL) => {}
+            () = Pace::every(ENGINE_SHUTDOWN_POLL).beat() => {}
             () = ctx.cancellation().cancelled() => {
                 note(format!(
                     "run {called}: interrupted while waiting — the SIGINT is with the \
@@ -331,7 +332,7 @@ pub(crate) async fn settle_crash(
         redactor,
     )
     .await?;
-    if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(run_dir)) {
+    if let Err(e) = tokio::fs::remove_file(yunta_engine::registry_path(run_dir)).await {
         if e.kind() != std::io::ErrorKind::NotFound {
             warn(format!("could not delete engine.json: {e}"));
         }

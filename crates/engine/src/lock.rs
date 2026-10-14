@@ -20,10 +20,12 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::process::signal::{self, Liveness};
 use yunta_core::{Clock, Pid};
 
+use crate::pace::Pace;
+
 /// What the host says about a lock's holder. `Send + Sync` so a
-/// `&dyn OwnerProbe` can be held across the awaits in [`acquire`] inside a
-/// `Send` future — the in-process control plane prepares a worktree from
-/// one.
+/// `&dyn OwnerProbe` can be held across the awaits in [`acquire`] in a
+/// `Send` async body — the in-process control plane prepares a worktree
+/// from one.
 pub trait OwnerProbe: Send + Sync {
     fn liveness(&self, pid: Pid) -> Liveness;
 
@@ -279,7 +281,7 @@ async fn pause(
     cancel: &CancellationToken,
 ) -> Result<(), LockError> {
     tokio::select! {
-        _ = tokio::time::sleep(poll) => Ok(()),
+        () = Pace::every(poll).beat() => Ok(()),
         _ = cancel.cancelled() => Err(LockError::Cancelled {
             lock_path: lock_path.to_path_buf(),
         }),
@@ -316,8 +318,9 @@ fn io_error(lock_path: &Path, action: &'static str, source: std::io::Error) -> L
 /// `owner` is the lock this process took and still holds, and a file that
 /// names anybody else has moved on, so it is left alone.
 pub fn release(lock_path: &Path, owner: &LockOwner) -> Result<(), LockError> {
-    // blocking: a release is one read and at most one removal, and it runs
-    // from a `Drop`, which has no `await` to give.
+    // A release is one read and at most one removal, and it runs from a
+    // `Drop`, which has no `await` to give.
+    // blocking: one read on this thread, from the `Drop` that releases.
     let bytes = match std::fs::read(lock_path) {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),

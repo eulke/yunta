@@ -18,7 +18,7 @@
 //! decides.
 //!
 //! Node states are covered in full: `waiting` is derived (a
-//! published gate, or unanswered questions — sections 0/0b below) and
+//! published gate, or unanswered questions) and
 //! `skipped` is the render-side reading of a mode-excluded node (the
 //! filter here + `status`'s own display), and what an included node
 //! waits on under that mode comes from `crate::modes`. `on_interrupt` covers every
@@ -31,163 +31,30 @@
 //! `concurrency:`, both separate mechanisms.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use yunta_core::events::{Failure, NodeWait, Outlook, PauseReason, ResumePolicy};
-use yunta_core::protected::Protected;
-use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_core::events::{NodeWait, PauseReason, ResumePolicy};
+use yunta_core::{Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 mod baseline;
+mod decision;
 mod failure;
 mod follow;
 mod grant;
+mod policy;
+mod ready;
 mod retry;
 mod reverify;
 
 pub use baseline::owed_baseline;
+pub use decision::Decision;
 use failure::failure_step;
 pub use follow::follows_build;
+pub(crate) use policy::person_may_grant_scope;
+pub use policy::{next_mode_after, Policy};
+use ready::ready_batch;
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
-
-/// The mode immediately after `mode_name` in `modes:`'s own declaration
-/// order — the *only* direction promotion ever moves (going back to an
-/// earlier mode in the declaration doesn't exist), and the smallest
-/// possible escalation past the current one, rather than jumping
-/// straight to whichever mode a human might name off-hand.
-/// `None` when the workflow declares no modes, the current mode name
-/// isn't one of them (the `"default"` sentinel, or a stale/renamed
-/// mode), or it's already the last one declared — nothing to promote
-/// to, so promotion is never offered.
-pub fn next_mode_after(workflow: &Workflow, mode_name: &ModeName) -> Option<ModeName> {
-    let modes = workflow.modes.as_ref()?;
-    let index = modes.get_index_of(mode_name)?;
-    modes.get_index(index + 1).map(|(name, _)| name.clone())
-}
-
-/// What the run does next. A batch of `Execute` entries is never empty
-/// and is always homogeneous — the scheduler never mixes control actions
-/// (`Reroute`/`Pause`/`Finish`/`Broken`) into the same step as node
-/// executions, so the imperative shell only ever inspects one variant per
-/// loop iteration.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Decision {
-    /// The run owes its lineage's measurement, and none of its nodes
-    /// has run: what worked before the invocation started is measured
-    /// on the tree the run opens on, once, before anything changes it.
-    MeasureBaseline {
-        owed: crate::run::baseline::Owed,
-    },
-    /// One or more independently-ready nodes to execute concurrently —
-    /// `(node, attempt)` pairs, in workflow declaration order.
-    Execute(Vec<(NodeId, u32)>),
-    Reroute {
-        from: NodeId,
-        to: NodeId,
-        attempt: u32,
-        max_reroutes: u32,
-        cause: Failure,
-    },
-    Pause {
-        reason: PauseReason,
-    },
-    /// A node failed with no re-route of its own and the run's
-    /// `defaults.on_failure` closes the run as failed rather than pausing:
-    /// `abort` at the first such failure, `continue` once every node not
-    /// blocked behind a failure has run. `failure` is the causing node's
-    /// failure, as the log holds it. The imperative shell writes
-    /// `run_finished { terminal_state: Failed }` and stops.
-    Fail {
-        node: NodeId,
-        failure: Failure,
-    },
-    /// A node's re-routes are exhausted — the one pause that
-    /// carries real options, since "retry the same
-    /// destination once more" and "abort" are both well-defined here
-    /// (unlike a plain failure with no `on_failure` at all, which stays
-    /// `Pause`). The imperative shell builds the actual
-    /// `GateWaitingPayload` from these facts and asks `HumanInteraction`
-    /// — this function stays a pure read of the log, no I/O.
-    GateExhaustedReroutes {
-        node: NodeId,
-        goto: NodeId,
-        max_reroutes: u32,
-        cause: Failure,
-    },
-    /// A node failed with no re-route of its own, and the run's
-    /// `defaults.on_failure` is `pause`: a person decides whether it runs
-    /// again. The imperative shell asks — or consumes a decision
-    /// `resolve_gate` seeded while the run was parked — and pauses when
-    /// nobody is there to ask. A `retry` it records comes back through
-    /// `unrerouted` as an `Execute` of `next_attempt`.
-    EscalateFailure {
-        node: NodeId,
-        failure: Failure,
-        next_attempt: u32,
-        /// What can change the failure, as the log holds it: the remedies a
-        /// person may choose from, or why none can change it.
-        outlook: Outlook,
-    },
-    /// A node failed on a limit that resets at `at`, and the run's
-    /// `defaults.on_failure` is `pause`: the run pauses until the reset, and
-    /// a resume after it runs the node again. A resume detached to that hour
-    /// picks the run up.
-    WaitUntil {
-        node: NodeId,
-        at: DateTime<Utc>,
-    },
-    /// A `kind: gate` node is ready and has never been published —
-    /// the imperative shell commits its declared artifacts,
-    /// opens the PR (or degrades to console without a forge), and
-    /// pauses. One at a time, same reasoning as `GateExhaustedReroutes`:
-    /// publishing is I/O this pure function only decides is needed.
-    PublishGate {
-        node: NodeId,
-    },
-    /// A `kind: gate` node has already been published and isn't
-    /// resolved yet (or its prior approval needs re-checking against
-    /// the PR's current head — the SHA-drift case) — the imperative
-    /// shell polls the forge and maps approved/changes-requested/
-    /// closed/pending. `external_ref` is the forge's own handle, carried
-    /// forward from this node's last `gate_waiting` event so the
-    /// imperative shell never needs to re-derive it itself.
-    PollGate {
-        node: NodeId,
-        external_ref: String,
-    },
-    /// An internal gate (`external: None`) is ready (or came
-    /// back after its chosen option's re-route completed): the
-    /// imperative shell builds the escalation object from
-    /// `message`/`options`/`on` and asks `HumanInteraction`. One at a
-    /// time, same reasoning as the other gate steps.
-    ResolveInternalGate {
-        node: NodeId,
-    },
-    /// A non-gate node the log derives as waiting on the questions it
-    /// asked: a `questions_asked` with no `questions_answered` after
-    /// it. The imperative shell re-reads the questions from the
-    /// artifact and puts them to `HumanInteraction` (`questions_exec`)
-    /// — the ONE ask site for first run and resume alike. One at a
-    /// time, same reasoning as the gate steps.
-    AskQuestions {
-        node: NodeId,
-    },
-    /// A node whose questions were answered and whose close still owes
-    /// it a terminal. The answer reopened it exactly where asking left
-    /// it, so what is left is the `node_finished` the close deferred —
-    /// no session, no new attempt. The ask round, a resume after a
-    /// crash between the answer and the terminal, and an answer a
-    /// control-plane client pre-seeded all land here.
-    FinishAnswered {
-        node: NodeId,
-    },
-    Finish,
-    Broken {
-        diagnostic: String,
-    },
-}
 
 /// Whether `node`'s `kind` is `gate` — the one kind whose "ready"/
 /// "orphaned" handling never goes through the generic `Execute` path:
@@ -269,89 +136,6 @@ fn is_external_gate(node: &Node) -> bool {
     )
 }
 
-/// What the run was frozen with: the knobs every decision reads.
-/// Built once, when the run wakes, and handed to [`decide`] unchanged
-/// for the rest of the invocation — a decision that re-read them could
-/// answer two different things about the same log.
-#[derive(Debug, Clone)]
-pub struct Policy {
-    /// How many independently-ready nodes may run at once.
-    pub max_parallel_nodes: u32,
-    /// What a node with no `on_interrupt` of its own inherits.
-    pub on_interrupt: OnInterrupt,
-    /// What a failed node with no `on_failure` of its own does to the run.
-    pub on_failure: DefaultOnFailure,
-    /// The nodes this run schedules — its mode's, less what it left out
-    /// for lack of config; `None` when nothing narrows the graph.
-    pub mode_nodes: Option<HashSet<NodeId>>,
-    /// The suite this run's lineage measures, from `baseline.suite`;
-    /// `None` when the config names none and nothing is measured.
-    pub baseline_suite: Option<String>,
-    /// The commands `baseline.held` names, measured beside the suite.
-    pub baseline_held: Vec<(yunta_core::CommandName, String)>,
-    /// Whether the suite is measured in a checkout of its own while the
-    /// run goes on: a run born in a checkout holding exactly the commit
-    /// it opened on. Otherwise it is measured in the run's own tree,
-    /// before anything of the run's changes it.
-    pub measures_aside: bool,
-    /// Whether a later mode follows this run's, so that an exhausted
-    /// re-route offers to promote to it — and a successor is born holding
-    /// this run's measurement.
-    pub may_promote: bool,
-    /// Whether a person may widen a node's scope from the menu of a
-    /// failure it had on that scope: `false` only under a permission
-    /// ceiling of `scope_expansion.max_mode: deny`.
-    pub grants_scope: bool,
-    /// What no session of the run may write: a grant that reaches it is
-    /// never offered.
-    pub protected: Arc<Protected>,
-    /// Whether the run may move into the checkout its last unit built in:
-    /// it works in a checkout of the project's pool of its own.
-    pub follows_builds: bool,
-}
-
-impl Policy {
-    /// The knobs `manifest` froze, for the mode this invocation runs and
-    /// the nodes its birth left out, with the set of paths no session may
-    /// write. Built once when the run wakes: the node set is a pure
-    /// function of the workflow, the mode and what the log recorded, and
-    /// re-deriving it per decision would be the same answer at scheduler
-    /// cost.
-    pub fn of(
-        manifest: &yunta_core::Manifest,
-        mode_name: &ModeName,
-        run: &yunta_core::events::RunLedger,
-        protected: Arc<Protected>,
-    ) -> Self {
-        Policy {
-            max_parallel_nodes: manifest.max_parallel_nodes,
-            on_interrupt: manifest.config.resolved_on_interrupt(),
-            on_failure: manifest.config.resolved_on_failure(),
-            mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, run.left_out()),
-            baseline_suite: crate::run::baseline::suite(manifest).map(str::to_string),
-            baseline_held: crate::run::baseline::held(manifest),
-            measures_aside: run.opens_on_base(),
-            may_promote: next_mode_after(&manifest.workflow, mode_name).is_some(),
-            grants_scope: person_may_grant_scope(&manifest.config),
-            protected,
-            follows_builds: manifest.isolation == yunta_core::Isolation::Worktree
-                && run.checkout().is_some(),
-        }
-    }
-}
-
-/// Whether a person may widen a node's scope on this run: every layer
-/// allows it but a permission ceiling of `scope_expansion.max_mode:
-/// deny`. The one reading of that rule — the menu, the node's close and
-/// its session all ask here.
-pub(crate) fn person_may_grant_scope(config: &yunta_core::ConfigLayer) -> bool {
-    config
-        .permissions
-        .as_ref()
-        .and_then(|permissions| permissions.scope_expansion)
-        .is_none_or(|ceiling| ceiling.max_mode.lets_a_person_grant())
-}
-
 /// Everything the seven questions read, resolved once so none of them
 /// re-derives it: the nodes this mode includes, the dependencies that
 /// implies, and which of them exist only as a re-route's destination.
@@ -368,10 +152,10 @@ impl<'a> Board<'a> {
         // A node this run's mode excludes is never scheduled and never
         // counted toward completion — `check`'s own `check_modes` already
         // guarantees no *included* node's `on_failure.goto` reaches outside
-        // the mode. An excluded node's dependents (a mode's own examples:
-        // `implement` depends_on the excluded `approve-plan` in "quick")
-        // wait on what the excluded node itself waited on — a mode cuts
-        // deliberation, never the order of the work around it.
+        // the mode. An excluded node's dependents (for example `implement`,
+        // which depends_on the excluded `approve-plan` in a mode that leaves
+        // it out) wait on what the excluded node itself waited on — a mode
+        // cuts deliberation, never the order of the work around it.
         let mode_nodes = policy.mode_nodes.as_ref();
         let nodes: Vec<&Node> = workflow
             .nodes
@@ -585,209 +369,15 @@ fn orphan_step(board: &Board<'_>) -> Option<Decision> {
     ))
 }
 
-/// A failure already re-routed to `to`: what happens next depends on
-/// where that correction got to.
-fn after_reroute(
-    board: &Board<'_>,
-    node: &Node,
-    to: &NodeId,
-    reroute_seq: yunta_core::Seq,
-) -> Option<Decision> {
-    let corrective = board.state.nodes.get(to).cloned().unwrap_or_default();
-    if let Some(corrected) = corrective.last_finished.filter(|seq| *seq > reroute_seq) {
-        // What lies between the correction and the failed node read what
-        // the correction replaced: it runs again, in the graph's order,
-        // before the failed node does — a gate never asks about a plan
-        // alongside what was made from the one it sent back.
-        match stale_between(board, to, &node.id, corrected) {
-            // A gate among them asks again, the way any gate is driven.
-            Some(Stale::Rerun(id)) => {
-                return Some(match board.nodes.iter().find(|n| n.id == id) {
-                    Some(gate) if is_gate(gate) => board.drive_gate(gate),
-                    _ => Decision::Execute(vec![(id.clone(), board.next_attempt(&id))]),
-                })
-            }
-            // Its own failure is its own to resolve, on its turn.
-            Some(Stale::Failed) => return None,
-            None => {}
-        }
-        // The destination completed — the failed node returns to ready
-        // and re-runs. A gate never goes through `Execute`: it re-asks
-        // (internal) or re-polls/republishes (external).
-        return Some(if is_gate(node) {
-            board.drive_gate(node)
-        } else {
-            Decision::Execute(vec![(node.id.clone(), board.next_attempt(&node.id))])
-        });
-    }
-    if corrective.last_failed.is_some_and(|seq| seq > reroute_seq) {
-        // The corrective node failed on its own; it is a Failed node
-        // itself and this same scan resolves it on its own turn.
-        return None;
-    }
-    // Re-route emitted, corrective node not run yet.
-    Some(Decision::Execute(vec![(
-        to.clone(),
-        board.next_attempt(to),
-    )]))
-}
-
-/// A node between a correction and the node that failed, still holding
-/// what it made before the correction.
-enum Stale {
-    /// The first, in the graph's order: it runs again.
-    Rerun(NodeId),
-    /// The first failed when it ran again after the correction.
-    Failed,
-}
-
-/// The first node downstream of `to` and upstream of `failed` that last
-/// finished before `to` did at `corrected` — declaration order, and only
-/// one whose own inputs between the two are fresh, so they run again in
-/// the order the graph gives them.
-fn stale_between(
-    board: &Board<'_>,
-    to: &NodeId,
-    failed: &NodeId,
-    corrected: yunta_core::Seq,
-) -> Option<Stale> {
-    let between: Vec<&NodeId> = board
-        .nodes
-        .iter()
-        .map(|node| &node.id)
-        .filter(|id| *id != to && *id != failed)
-        .filter(|id| board.depends_on(id, to) && board.depends_on(failed, id))
-        .collect();
-    let stale = |id: &NodeId| {
-        board
-            .state
-            .nodes
-            .get(id)
-            .and_then(|record| record.last_finished)
-            .is_none_or(|seq| seq < corrected)
-    };
-    let next = between.iter().copied().find(|id| {
-        stale(id)
-            && board
-                .deps_of(id)
-                .iter()
-                .all(|dep| !between.contains(&dep) || !stale(dep))
-    })?;
-    let failed_again = board
-        .state
-        .nodes
-        .get(next)
-        .and_then(|record| record.last_failed)
-        .is_some_and(|seq| seq > corrected);
-    Some(match failed_again {
-        true => Stale::Failed,
-        false => Stale::Rerun(next.clone()),
-    })
-}
-
-/// What is ready now, and what it means when nothing is: every node
-/// finished closes the run, and anything else is stuck behind something
-/// this run left unresolved.
-fn ready_batch(board: &Board<'_>) -> Decision {
-    ready_gate(board)
-        .or_else(|| ready_nodes(board))
-        .unwrap_or_else(|| nothing_runnable(board))
-}
-
-/// A ready `kind: gate` is never batched with ordinary nodes — its
-/// resolution is a forge round-trip, one at a time, same as every other
-/// gate decision. A stateless ready gate is always unpublished
-/// (external) or never-asked (internal); a published one carries
-/// `Waiting` and [`waiting_step`] took it.
-fn ready_gate(board: &Board<'_>) -> Option<Decision> {
-    let node = board.nodes.iter().copied().find(|node| {
-        is_gate(node)
-            && !board.state.nodes.has_state(&node.id)
-            && !board.reroute_only(&node.id)
-            && board.deps_satisfied(node)
-    })?;
-    Some(board.drive_gate(node))
-}
-
-/// Fresh nodes whose dependencies are all finished, up to capacity, in
-/// workflow declaration order.
-fn ready_nodes(board: &Board<'_>) -> Option<Decision> {
-    // A degenerate 0 would starve every ready node forever. `yunta
-    // check` refuses it up front (`MaxParallelNodesZero`); this clamp
-    // stays as defense in depth for a manifest frozen before that rule
-    // existed — a stuck-looking run is worse than a sequential one.
-    let capacity = board.policy.max_parallel_nodes.max(1) as usize;
-    let batch: Vec<(NodeId, u32)> = board
-        .nodes
-        .iter()
-        .copied()
-        // finished, failed-and-handled above, a gate (handled above), or
-        // a node only a re-route may start.
-        .filter(|node| {
-            !board.state.nodes.has_state(&node.id)
-                && !is_gate(node)
-                && !board.reroute_only(&node.id)
-                && board.deps_satisfied(node)
-        })
-        .take(capacity)
-        .map(|node| (node.id.clone(), 1))
-        .collect();
-    (!batch.is_empty()).then_some(Decision::Execute(batch))
-}
-
-/// Nothing is runnable: either every node this mode includes finished,
-/// or something is stuck behind a failure this run left unresolved.
-///
-/// Only nodes the mode actually includes count toward completion — an
-/// excluded node never reaches any terminal state (it is never scheduled
-/// at all), so requiring it here would mean the run could never finish.
-/// Same for an untouched reroute-only target that was simply never
-/// needed: its source never failed, or the gate never chose its option.
-fn nothing_runnable(board: &Board<'_>) -> Decision {
-    let Some(stuck) = board.nodes.iter().copied().find(|node| {
-        !board.finished(&node.id)
-            && !(board.reroute_only(&node.id) && !board.state.nodes.has_state(&node.id))
-    }) else {
-        return Decision::Finish;
-    };
-
-    // Under `continue` a stuck run is the run's end — every node not
-    // behind the failure has already run — so it closes failed, naming a
-    // node that failed; under `pause` it freezes resumable.
-    if board.policy.on_failure == DefaultOnFailure::Continue {
-        let failed = board
-            .nodes
-            .iter()
-            .find_map(|node| match board.state.nodes.state(&node.id) {
-                Some(NodeState::Failed { failure, .. }) => Some((node.id.clone(), failure.clone())),
-                _ => None,
-            });
-        if let Some((node, failure)) = failed {
-            return Decision::Fail { node, failure };
-        }
-    }
-    Decision::Pause {
-        reason: PauseReason::Blocked {
-            node: stuck.id.clone(),
-            on: board
-                .deps_of(&stuck.id)
-                .iter()
-                .filter(|dep| !board.finished(dep))
-                .cloned()
-                .collect(),
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::next_mode_after;
     use yunta_core::persisted::{Persisted, PersistedDoc};
 
     #[test]
-    fn a_persisted_mode_ladder_promotes_standard_to_full() {
+    fn a_persisted_mode_ladder_promotes_beta_to_gamma() {
         let workflow = yunta_core::yaml::parse(
-            "name: ship\nmodes:\n  quick: { include: all }\n  standard: { include: all }\n  full: { include: all }\nnodes:\n  - { id: review, kind: bash, run: 'true' }\n",
+            "name: ship\nmodes:\n  alpha: { include: all }\n  beta: { include: all }\n  gamma: { include: all }\nnodes:\n  - { id: review, kind: bash, run: 'true' }\n",
         ).expect("a mode ladder");
         let manifest = yunta_core::Manifest {
             schema_version: <yunta_core::Manifest as Persisted>::SCHEMA_VERSION,
@@ -812,8 +402,8 @@ mod tests {
         let bytes = PersistedDoc::of(manifest).write().expect("manifest writes");
         let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("manifest reads");
         assert_eq!(
-            next_mode_after(&read.doc.workflow, &"standard".into()),
-            Some("full".into()),
+            next_mode_after(&read.doc.workflow, &"beta".into()),
+            Some("gamma".into()),
         );
     }
 }

@@ -65,9 +65,9 @@ pub(super) async fn end_on_unstopped(
     match failure {
         Some(failure) => {
             let end = fail_unstopped(ctx, node, failure, spent).await?;
-            Ok(BatchIntegration::Ended(end))
+            Ok(BatchIntegration::Stopped(end))
         }
-        None => Ok(BatchIntegration::Cancelled(cancelled_end(ctx, node).await?)),
+        None => Ok(BatchIntegration::Stopped(cancelled_end(ctx, node).await?)),
     }
 }
 

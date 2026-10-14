@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_core::QuestionsFile;
+use yunta_core::{Env, QuestionsFile};
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
 use crate::ask::{answer, decide, Answered, Console, Escape, NoAnswer};
@@ -43,16 +43,26 @@ pub struct ConsoleInteraction {
     /// a cancelled run stops waiting here, and the engine unwinds it the
     /// way every other cancellation path unwinds it.
     cancel: CancellationToken,
+    /// The ambient environment the answers are attributed by: a copy of
+    /// the invocation's, so a prompt never reads the process again.
+    env: Env,
 }
 
 impl ConsoleInteraction {
     /// The surface for a run drawn under `curtain`, saying what it has
-    /// to say through `diagnostics`, and stopped by `cancel`.
-    pub fn new(curtain: Curtain, diagnostics: Diagnostics, cancel: CancellationToken) -> Self {
+    /// to say through `diagnostics`, stopped by `cancel`, and attributing
+    /// what a person answers by `env`.
+    pub fn new(
+        curtain: Curtain,
+        diagnostics: Diagnostics,
+        cancel: CancellationToken,
+        env: Env,
+    ) -> Self {
         Self {
             curtain,
             diagnostics,
             cancel,
+            env,
         }
     }
 
@@ -106,7 +116,8 @@ impl HumanInteraction for ConsoleInteraction {
 
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let escalation = escalation.clone();
-        self.prompted(move |console| decide(console, &escalation, None))
+        let env = self.env.clone();
+        self.prompted(move |console| decide(console, &env, &escalation, None))
             .await
     }
 
@@ -120,7 +131,8 @@ impl HumanInteraction for ConsoleInteraction {
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();
         let run = asking.run.clone();
-        self.prompted(move |console| decide(console, &escalation, Some((&run, &shown))))
+        let env = self.env.clone();
+        self.prompted(move |console| decide(console, &env, &escalation, Some((&run, &shown))))
             .await
     }
 
@@ -133,7 +145,8 @@ impl HumanInteraction for ConsoleInteraction {
     ) -> Option<QuestionsReply> {
         let questions = questions.clone();
         let node = node.clone();
-        self.prompted(move |console| answer(console, &node, &questions))
+        let env = self.env.clone();
+        self.prompted(move |console| answer(console, &env, &node, &questions))
             .await
     }
 }

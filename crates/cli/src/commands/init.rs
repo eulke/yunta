@@ -261,8 +261,9 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     // owns the interruption itself, like any other invocation.
     let interrupt = Interrupt::ctrl_c()
         .map_err(|source| CliError::io("install the interrupt handler for", "init", source))?;
-    let clock = yunta_core::SystemClock;
-    let supervision = Supervision::outside_any_run(interrupt.stop(), &clock);
+    let clock = crate::context::process_clock();
+    let env = crate::project::process_env();
+    let supervision = Supervision::outside_any_run(interrupt.stop(), clock).with_path(&env.path);
 
     let config_path = repo.join(".yunta/config.yaml");
     if config_path.exists() && !force {
@@ -295,6 +296,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
         Some(console) => {
             // What Escape does, said once above the prompts it applies
             // to — the same place every other surface says it.
+            // best-effort: the notice informs only; a refused write falls back to the defaults.
             let _ = console.say(console.escape().said());
             (
                 asked(console, "project name", &default_name),
@@ -305,39 +307,8 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     };
 
     let probed = crate::detect::probe_known_adapters().await;
-
-    let mut wrote = Vec::new();
-    let mut skipped = Vec::new();
-
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|source| CliError::io("create", parent.display(), source))?;
-    }
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
-    // Never write a config this binary can't read back: parse the
-    // generated text into a real `ConfigLayer` first, so a broken template
-    // fails here instead of leaving an unreadable file — the more so under
-    // `--force`, which would otherwise overwrite a good config with a bad
-    // one.
-    yunta_core::yaml::parse::<yunta_core::ConfigLayer>(&config_yaml)
-        .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
-    std::fs::write(&config_path, config_yaml)
-        .map_err(|source| CliError::io("write", config_path.display(), source))?;
-    wrote.push(".yunta/config.yaml".to_string());
-
-    match write_gitignore(&repo) {
-        Ok(true) => wrote.push(".gitignore".to_string()),
-        Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
-        Err(source) => return Err(CliError::io("update", ".gitignore", source)),
-    }
-
-    match write_mechanism_skill(&repo, force) {
-        Ok(true) => wrote.push(format!("{MECHANISM_SKILL_DIR}/SKILL.md")),
-        Ok(false) => skipped.push(format!(
-            "{MECHANISM_SKILL_DIR}/SKILL.md (already exists, pass --force to rewrite)"
-        )),
-        Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
-    }
+    let (wrote, skipped) = write_project(&repo, &config_path, config_yaml, force).await?;
 
     crate::output::raw(&report(
         &Wrote {
@@ -350,6 +321,51 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
         look,
     ));
     Ok(Outcome::Success)
+}
+
+/// Writes what `init` puts in the project: the config first, then the
+/// ignore entries and the mechanism skill. Answers what it wrote, and what
+/// it left as it was.
+async fn write_project(
+    repo: &Path,
+    config_path: &Path,
+    config_yaml: String,
+    force: bool,
+) -> Result<(Vec<String>, Vec<String>), CliError> {
+    let mut wrote = Vec::new();
+    let mut skipped = Vec::new();
+
+    if let Some(parent) = config_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| CliError::io("create", parent.display(), source))?;
+    }
+    // Never write a config this binary can't read back: parse the
+    // generated text into a real `ConfigLayer` first, so a broken template
+    // fails here instead of leaving an unreadable file — the more so under
+    // `--force`, which would otherwise overwrite a good config with a bad
+    // one.
+    yunta_core::yaml::parse::<yunta_core::ConfigLayer>(&config_yaml)
+        .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
+    tokio::fs::write(config_path, config_yaml)
+        .await
+        .map_err(|source| CliError::io("write", config_path.display(), source))?;
+    wrote.push(".yunta/config.yaml".to_string());
+
+    match write_gitignore(repo) {
+        Ok(true) => wrote.push(".gitignore".to_string()),
+        Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
+        Err(source) => return Err(CliError::io("update", ".gitignore", source)),
+    }
+
+    match write_mechanism_skill(repo, force) {
+        Ok(true) => wrote.push(format!("{MECHANISM_SKILL_DIR}/SKILL.md")),
+        Ok(false) => skipped.push(format!(
+            "{MECHANISM_SKILL_DIR}/SKILL.md (already exists, pass --force to rewrite)"
+        )),
+        Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
+    }
+    Ok((wrote, skipped))
 }
 
 /// What `init` did and found, for the report it ends with.

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::best_effort::BestEffortStep;
 use crate::confinement::{Commands, Confinement, Worktree};
 use crate::fence::Coverage;
 use crate::hash::ContentHash;
@@ -440,4 +441,13 @@ impl CapabilityDegradedPayload {
             policy: PolicyApplied::Known(policy),
         }
     }
+}
+
+/// A best-effort step that failed and that the run carried on past: the
+/// step, and the cause its source gave.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BestEffortFailedPayload {
+    pub step: BestEffortStep,
+    /// The source's message, verbatim.
+    pub cause: String,
 }

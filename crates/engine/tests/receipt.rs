@@ -102,7 +102,11 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
 /// The receipt as a file holds it.
 fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
     use yunta_render::surface::Surface;
-    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(receipt, &spell))
+    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(
+        receipt,
+        &spell,
+        yunta_render::Glyphs::Unicode,
+    ))
 }
 
 /// The command words a receipt names, spelled the way the CLI accepts them.

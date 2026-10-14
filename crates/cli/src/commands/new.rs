@@ -9,6 +9,8 @@
 //! skeleton the project's config cannot run is written, and said not to
 //! run.
 
+use std::path::{Path, PathBuf};
+
 use yunta_core::{ConfigLayer, Workflow};
 
 use crate::ask::{choose, Choice, Console, Escape};
@@ -187,20 +189,14 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn new_workflow(
-    name: &str,
-    shape: Option<&str>,
-    interactive: bool,
-    force: bool,
-    look: &Look,
-) -> Result<Outcome, CliError> {
-    validate_name(name).map_err(CliError::msg)?;
-
-    let shape = match shape {
-        Some(raw) => Shape::parse(raw).map_err(CliError::msg)?,
+/// The shape a new workflow starts as: the one `--shape` names, or else the
+/// one a person picks on the console under `--interactive`, or `one-node`.
+async fn choose_shape(shape: Option<&str>, interactive: bool) -> Result<Shape, CliError> {
+    match shape {
+        Some(raw) => Shape::parse(raw).map_err(CliError::msg),
         // There is no run drawing here, so what opening the console has
         // to say goes out through a door onto nothing, which is stderr.
-        None => match interactive {
+        None => Ok(match interactive {
             false => Shape::OneNode,
             true => match Console::open(&Diagnostics::none(), Escape::TakesTheFirst).await {
                 Some(console) => picked(&console),
@@ -212,8 +208,20 @@ pub async fn new_workflow(
                     Shape::OneNode
                 }
             },
-        },
-    };
+        }),
+    }
+}
+
+pub async fn new_workflow(
+    name: &str,
+    shape: Option<&str>,
+    interactive: bool,
+    force: bool,
+    look: &Look,
+) -> Result<Outcome, CliError> {
+    validate_name(name).map_err(CliError::msg)?;
+
+    let shape = choose_shape(shape, interactive).await?;
 
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     // Same layered config `yunta check` resolves without an explicit
@@ -233,13 +241,34 @@ pub async fn new_workflow(
     // a `Workflow` never reaches disk, so `--force` can't leave an invalid
     // file behind.
     let yaml = shape.skeleton(name, lint_declared);
-    let workflow: Workflow = yunta_core::yaml::parse(&yaml).map_err(|e| {
+    let workflow = parse_skeleton(shape, &yaml)?;
+
+    let path = write_skeleton(&cwd, name, &yaml, force).await?;
+    say(
+        look,
+        format!("wrote {} ({})", path.display(), shape.label()),
+    );
+
+    report_verdict(&cwd, &workflow, &path, &config, look).await
+}
+
+/// The workflow a `shape` skeleton parses to, or why it does not parse.
+fn parse_skeleton(shape: Shape, yaml: &str) -> Result<Workflow, CliError> {
+    yunta_core::yaml::parse(yaml).map_err(|e| {
         CliError::msg(format!(
             "the {} skeleton does not parse as a workflow: {e}",
             shape.label()
         ))
-    })?;
+    })
+}
 
+/// Writes `yaml` as workflow `name` under `cwd` and gives back its path.
+async fn write_skeleton(
+    cwd: &Path,
+    name: &str,
+    yaml: &str,
+    force: bool,
+) -> Result<PathBuf, CliError> {
     let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
     if path.exists() && !force {
         return Err(CliError::msg(format!(
@@ -248,25 +277,34 @@ pub async fn new_workflow(
         )));
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        tokio::fs::create_dir_all(parent)
+            .await
             .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
-    std::fs::write(&path, &yaml).map_err(|source| CliError::io("write", path.display(), source))?;
-    say(
-        look,
-        format!("wrote {} ({})", path.display(), shape.label()),
-    );
+    tokio::fs::write(&path, yaml)
+        .await
+        .map_err(|source| CliError::io("write", path.display(), source))?;
+    Ok(path)
+}
 
+/// Reports the verdict `yunta check` reaches on the written file.
+async fn report_verdict(
+    cwd: &Path,
+    workflow: &Workflow,
+    path: &Path,
+    config: &ConfigLayer,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     // The verdict `yunta check` reaches on the file, said under it: a
     // workflow the config cannot run is reported as one, whatever it is
     // the config has to declare first.
     let ctx = crate::context::Context::load()?;
     let verdict = super::verdict::verdict(
         &ctx,
-        &workflow,
-        &path,
-        &config,
-        super::verdict::layer_conflicts(&cwd)?,
+        workflow,
+        path,
+        config,
+        super::verdict::layer_conflicts(cwd)?,
         super::verdict::Reach::Workflow,
     )
     .await?;

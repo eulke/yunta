@@ -206,7 +206,7 @@ async fn a_promoted_run_hands_over_the_checkout_it_moved_to() {
     let child = builds_then(
         "  - { id: lint, kind: bash, depends_on: [implement], run: \"test -f fixed.txt\", on_failure: { goto: fix, max_reroutes: 0 } }\n  - { id: fix, kind: bash, run: \"true\" }\n  - { id: ship, kind: bash, run: \"test -f target/marker\" }\n",
     )
-    .replace("name: follows\n", "name: follows\nmodes:\n  quick: { include: [plan, implement, lint, fix] }\n  full: { include: [ship] }\n");
+    .replace("name: follows\n", "name: follows\nmodes:\n  alpha: { include: [plan, implement, lint, fix] }\n  beta: { include: [ship] }\n");
     let parent = "name: parent\nnodes:\n  - { id: feat, kind: workflow, use: follows }\n";
     // The build the child's session makes is a command's output, which no fence judges.
     let bench = Bench::new()

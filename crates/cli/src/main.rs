@@ -41,23 +41,25 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::{CommandFactory, FromArgMatches};
+use yunta_core::Env;
 
 use crate::error::{CliError, Outcome};
 
 fn main() -> ExitCode {
     let started = Instant::now();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
 
     let command = cli::Cli::command();
     let template = help::template(&command);
     let matches = command.help_template(template).get_matches();
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    render::settle_color(color_policy(cli.color));
-    render::settle_columns(columns());
-    render::settle_glyphs(&glyph_env());
-    surface::terminal::settle();
+    // The process environment, read once here at the shell's edge: every
+    // color, glyph, width, terminal and log decision below reads this value.
+    let env = project::process_env();
+    init_tracing(&env);
+    render::settle_color(color_policy(&env, cli.color));
+    render::settle_columns(columns(&env));
+    render::settle_glyphs(&glyph_env(&env));
+    surface::terminal::settle(&env);
     // Read once the settling above is done, so every line this process
     // writes to stdout takes the same color, width and glyphs.
     let look = render::stdout_look();
@@ -71,47 +73,75 @@ fn main() -> ExitCode {
     // the terminal back off the shell this process returns to.
     ask::restore_terminal();
 
+    exit_status(outcome, mode, &look)
+}
+
+/// The status of every failure, reported or refused: the one place the CLI spells it.
+const FAILED: ExitCode = ExitCode::FAILURE;
+
+/// The status a command's outcome leaves the process with. A refused error
+/// is written to the reader first, in the mode and look the command ran with.
+fn exit_status(
+    outcome: Result<Outcome, CliError>,
+    mode: output::Mode,
+    look: &render::Look,
+) -> ExitCode {
     match outcome {
         Ok(Outcome::Success) => ExitCode::SUCCESS,
-        Ok(Outcome::Reported) => ExitCode::FAILURE,
         Ok(Outcome::Code(code)) => ExitCode::from(code),
+        Ok(Outcome::Reported) => FAILED,
         Err(error) => {
-            output::refused(&error, mode, &look);
-            ExitCode::FAILURE
+            output::refused(&error, mode, look);
+            FAILED
         }
     }
 }
 
+/// Installs the process's log subscriber, filtered by `RUST_LOG` as `env`
+/// holds it. Unset or unreadable, the filter keeps errors only, as
+/// `EnvFilter::from_default_env` does.
+fn init_tracing(env: &Env) {
+    let filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(tracing_subscriber::filter::LevelFilter::ERROR.into())
+        .parse_lossy(env.rust_log.as_deref().unwrap_or_default());
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
+/// The terminal variable `name` as this process was started with it, when
+/// it is set and not empty: an empty variable reads as unset.
+fn set_var<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
+    env.terminal_var(name).filter(|value| !value.is_empty())
+}
+
 /// What decides whether a stream gets color: the command line, and the
-/// variables the convention reads, read here once for the whole process.
-fn color_policy(when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
-    let set = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+/// variables the convention reads, as this process was started with them.
+fn color_policy(env: &Env, when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
     render::ink::ColorPolicy {
         when,
-        no_color: set("NO_COLOR").is_some(),
-        force: set("CLICOLOR_FORCE").is_some_and(|value| value != "0"),
-        off: set("CLICOLOR").is_some_and(|value| value == "0"),
-        dumb: set("TERM").is_some_and(|value| value == "dumb"),
-        links: links(&set),
+        no_color: set_var(env, "NO_COLOR").is_some(),
+        force: set_var(env, "CLICOLOR_FORCE").is_some_and(|value| value != "0"),
+        off: set_var(env, "CLICOLOR").is_some_and(|value| value == "0"),
+        dumb: set_var(env, "TERM").is_some_and(|value| value == "dumb"),
+        links: links(env),
     }
 }
 
 /// Whether a path is a link on a stream with color: what
 /// `YUNTA_HYPERLINKS` says outright, or what the terminal announced about
 /// itself.
-fn links(set: &dyn Fn(&str) -> Option<String>) -> render::ink::Links {
+fn links(env: &Env) -> render::ink::Links {
     use render::ink::Links;
-    match set("YUNTA_HYPERLINKS").as_deref() {
+    match set_var(env, "YUNTA_HYPERLINKS") {
         Some("1") => return Links::Forced,
         Some("0") => return Links::Refused,
         _ => {}
     }
-    let program = set("TERM_PROGRAM");
-    let vte = set("VTE_VERSION").and_then(|version| version.parse::<u32>().ok());
-    let announced = matches!(program.as_deref(), Some("iTerm.app" | "WezTerm" | "vscode"))
+    let program = set_var(env, "TERM_PROGRAM");
+    let vte = set_var(env, "VTE_VERSION").and_then(|version| version.parse::<u32>().ok());
+    let announced = matches!(program, Some("iTerm.app" | "WezTerm" | "vscode"))
         || vte.is_some_and(|version| version >= 5000)
-        || set("KITTY_WINDOW_ID").is_some()
-        || set("WT_SESSION").is_some();
+        || set_var(env, "KITTY_WINDOW_ID").is_some()
+        || set_var(env, "WT_SESSION").is_some();
     match announced {
         true => Links::Announced,
         false => Links::Unknown,
@@ -120,21 +150,22 @@ fn links(set: &dyn Fn(&str) -> Option<String>) -> render::ink::Links {
 
 /// The three values the glyph policy reads, as this process was started
 /// with them.
-fn glyph_env() -> render::glyphs::GlyphEnv {
+fn glyph_env(env: &Env) -> render::glyphs::GlyphEnv {
     render::glyphs::GlyphEnv {
-        explicit: std::env::var(render::glyphs::OVERRIDE_VAR).ok(),
+        explicit: env
+            .terminal_var(render::glyphs::OVERRIDE_VAR)
+            .map(str::to_string),
         locale: ["LC_ALL", "LC_CTYPE", "LANG"]
             .iter()
-            .find_map(|name| std::env::var(name).ok().filter(|v| !v.is_empty())),
-        term: std::env::var("TERM").ok(),
+            .find_map(|name| set_var(env, name).map(str::to_string)),
+        term: env.terminal_var("TERM").map(str::to_string),
     }
 }
 
 /// The width a reader asked every line to be laid out in, when
 /// `COLUMNS` names one.
-fn columns() -> Option<usize> {
-    std::env::var("COLUMNS")
-        .ok()
+fn columns(env: &Env) -> Option<usize> {
+    env.terminal_var("COLUMNS")
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|cells| *cells > 0)
 }

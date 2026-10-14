@@ -13,7 +13,10 @@
 
 use std::path::Path;
 
-use Mark::{Spelled, StructNamed, Text};
+use super::cli::{count_cli_print_outside_output, count_exit_failure_in_cli};
+use super::corpus::ratchet_corpus;
+use super::read_corpus;
+use Mark::{Macro, Spelled, StructNamed, Text};
 
 /// A counter: the name it carries in the baseline, and the function that
 /// measures it against a workspace root.
@@ -66,10 +69,12 @@ pub const COUNTERS: &[Counter] = &[
         count_run_tool_named_outside_vocabulary,
     ),
     ("cli_word_outside_cli", count_cli_word_outside_cli),
+    ("exit_failure_in_cli", count_exit_failure_in_cli),
+    ("cli_print_outside_output", count_cli_print_outside_output),
 ];
 
 /// What a line carries to count as a write of the pattern.
-enum Mark {
+pub(super) enum Mark {
     /// The line carries this text anywhere on it.
     Text(&'static str),
     /// The line carries this text followed by a lowercase letter, the way a
@@ -79,6 +84,9 @@ enum Mark {
     /// The line declares a struct with this word in its name, whatever
     /// stands between the keyword and the word.
     StructNamed(&'static str),
+    /// The line calls this macro: the name stands alone, so `println!` does
+    /// not match inside `eprintln!`.
+    Macro(&'static str),
 }
 
 impl Mark {
@@ -86,7 +94,7 @@ impl Mark {
     /// naming a mechanism is a reader being told about it, and a counter
     /// that rises when someone explains the rule measures the
     /// explanation.
-    fn on(&self, line: &str) -> bool {
+    pub(super) fn on(&self, line: &str) -> bool {
         if line.trim_start().starts_with("//") {
             return false;
         }
@@ -98,6 +106,12 @@ impl Mark {
             StructNamed(word) => line
                 .split_once("struct ")
                 .is_some_and(|(_, name)| name.contains(word)),
+            Macro(name) => line.match_indices(name).any(|(at, _)| {
+                line[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !(c.is_alphabetic() || c == '_'))
+            }),
         }
     }
 }
@@ -109,14 +123,16 @@ impl Mark {
 /// covers what is under it, and `*` stands for the rest of one path
 /// segment, so `crates/testkit*/src/repo.rs` names that file in every
 /// harness crate. A line carrying two marks counts once, the way a
-/// line-oriented search counts it.
-fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
-    super::ratchet_corpus(root)
+/// line-oriented search counts it. A `pub use` line is a re-export, and
+/// is not a write of anything.
+pub(super) fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
+    ratchet_corpus(root)
         .iter()
         .filter(|path| !owned(path, owners))
-        .map(|path| super::read_corpus(path))
+        .map(|path| read_corpus(path))
         .map(|text| {
             text.lines()
+                .filter(|line| !line.trim_start().starts_with("pub use"))
                 .filter(|line| marks.iter().any(|mark| mark.on(line)))
                 .count()
         })
@@ -163,7 +179,7 @@ fn count_token_count_formatted_outside_units(root: &Path) -> usize {
 }
 
 /// Whether `path` is one of the sites `owners` names.
-fn owned(path: &Path, owners: &[&str]) -> bool {
+pub(super) fn owned(path: &Path, owners: &[&str]) -> bool {
     let shown = path.to_string_lossy().replace('\\', "/");
     owners.iter().any(|owner| match owner.split_once('*') {
         None => shown.contains(owner),
@@ -175,29 +191,39 @@ fn owned(path: &Path, owners: &[&str]) -> bool {
     })
 }
 
-/// A run executed outside the harness that owns the call.
+/// A run executed outside the owners that call it.
 ///
-/// Driving the engine by hand repeats the setup the harness performs —
-/// the store, the clock, the process registry — and a repeat drifts from
-/// it. `drive` is the command whose whole job is to execute one run.
+/// Driving the engine by hand repeats the setup the owners perform — the
+/// store, the clock, the process registry — and a repeat drifts from it.
+/// The engine's run module owns the run's own steps, and the command
+/// registry owns the call from a command.
 fn count_execute_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
         &[Text("execute_run(")],
-        &["crates/testkit/", "crates/cli/src/commands/drive.rs"],
+        &[
+            "crates/testkit/",
+            "crates/engine/src/run/",
+            "crates/cli/src/commands/registry.rs",
+        ],
     )
 }
 
-/// A run created outside the harness that owns the call.
+/// A run created outside the owners that call it.
 ///
 /// Creating a run is where the plan is frozen and the baseline taken; a
-/// second site that does it by hand freezes a different one. `run` is the
-/// command whose whole job is to create one.
+/// second site that does it by hand freezes a different one. The engine's
+/// run module creates a run, and the command registry is the one command
+/// path that does it for a person.
 fn count_create_run_outside_testkit(root: &Path) -> usize {
     outside(
         root,
         &[Text("create_run(")],
-        &["crates/testkit/", "crates/cli/src/commands/run.rs"],
+        &[
+            "crates/testkit/",
+            "crates/engine/src/run/",
+            "crates/cli/src/commands/registry.rs",
+        ],
     )
 }
 
@@ -227,11 +253,7 @@ fn count_system_clock_outside_boundary(root: &Path) -> usize {
     outside(
         root,
         &[Text("SystemClock"), Text("Utc::now")],
-        &[
-            "crates/core/src/clock.rs",
-            "crates/cli/src/main.rs",
-            "crates/cli/src/context.rs",
-        ],
+        &["crates/core/src/clock.rs", "crates/cli/src/context.rs"],
     )
 }
 
@@ -246,7 +268,6 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
         root,
         &[Text("std::env::var")],
         &[
-            "crates/cli/src/main.rs",
             "crates/core/src/config/env.rs",
             // A stub stands in for a program on `PATH`: knowing what
             // `PATH` is, and where the real program lives, is the whole
@@ -255,10 +276,6 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             // Blessing a golden is what a person asks of a test run, and
             // reading that request is what the module is for.
             "crates/testkit-core/src/golden.rs",
-            // The engine's shell reads the `PATH` a child inherits, where it
-            // looks a program up at spawn: the same module the engine's own
-            // purity rule names as the one that touches the machine.
-            "crates/engine/src/process.rs",
         ],
     )
 }
@@ -272,20 +289,22 @@ fn count_env_mutation_in_tests(root: &Path) -> usize {
     outside(root, &[Text("env::set_var"), Text("env::remove_var")], &[])
 }
 
-/// A sleep outside the two places where waiting is the behaviour.
+/// A sleep outside the places where waiting is the behaviour.
 ///
 /// A sleep as synchronization is a guess about how long something takes:
 /// it passes on a fast machine, fails on a loaded one, and costs its
 /// duration either way. A condition is waited for explicitly. The mock
-/// adapter's scripted latency and the harness's wait are the places where
-/// the delay is the thing being built.
+/// adapter's scripted latency, the harness's wait, and the pace of a poll
+/// over another process's state are the places where the delay is the
+/// thing being built.
 fn count_sleep_outside_mock_latency(root: &Path) -> usize {
     outside(
         root,
-        &[Text("tokio::time::sleep"), Text("thread::sleep")],
+        &[Text("tokio::time::sleep("), Text("thread::sleep(")],
         &[
             "crates/adapters/src/mock/script.rs",
             "crates/testkit*/src/wait.rs",
+            "crates/engine/src/pace.rs",
         ],
     )
 }
@@ -401,7 +420,7 @@ fn count_run_tool_named_outside_vocabulary(root: &Path) -> usize {
 /// backticks, so the flags git takes never count.
 fn count_cli_word_outside_cli(root: &Path) -> usize {
     let marks = [Spelled("`yunta "), Spelled("`--")];
-    super::ratchet_corpus(root)
+    ratchet_corpus(root)
         .iter()
         .filter(|path| owned(path, &["crates/engine/src/", "crates/core/src/"]))
         .filter_map(|path| std::fs::read_to_string(path).ok())
@@ -414,62 +433,4 @@ fn count_cli_word_outside_cli(root: &Path) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_text_mark_reads_the_spelling_the_code_writes() {
-        // The counters that stand at zero stand there because the tree
-        // holds none of their pattern, not because the pattern cannot
-        // match: these are the lines each of them is waiting for.
-        assert!(Text("env::set_var").on("    std::env::set_var(\"HOME\", home);"));
-        assert!(Text("env::remove_var").on("    env::remove_var(\"YUNTA_HOME\");"));
-        assert!(Text("fn event(").on("pub fn event(self, payload: EventPayload) -> Self {"));
-        assert!(!Text("fn event(").on("    let event = log.event(payload);"));
-        assert!(Text("} tok").on("        \"{INDENT}{}  {total:>8} tok\\n\","));
-        assert!(Text("} tok").on("    \"CPTV: {cptv:.1} tokens/task\""));
-        assert!(!Text("} tok").on("    \"tokens: {} in / {} out\""));
-        assert!(Text("Command::new(\"git\"").on("    std::process::Command::new(\"git\")"));
-        assert!(Text("Command::new(\"git\"").on("    GovernedCommand::new(\"git\", cwd)"));
-    }
-
-    #[test]
-    fn a_struct_mark_reads_the_name_and_not_the_line_before_the_keyword() {
-        assert!(StructNamed("Bench").on("pub struct Bench {"));
-        assert!(StructNamed("Clock").on("    struct FixedClock;"));
-        assert!(!StructNamed("Bench").on("let bench = Bench::new();"));
-    }
-
-    #[test]
-    fn an_owner_covers_a_directory_and_a_file_in_every_crate_a_star_names() {
-        assert!(owned(
-            Path::new("/w/crates/testkit/src/bench/mod.rs"),
-            &["crates/testkit/"]
-        ));
-        assert!(!owned(
-            Path::new("/w/crates/testkit-core/src/log.rs"),
-            &["crates/testkit/"]
-        ));
-        // `crates/testkit*/src/repo.rs` names that file in either harness
-        // crate, and nothing beside it.
-        let pattern = ["crates/testkit*/src/repo.rs"];
-        assert!(owned(Path::new("/w/crates/testkit/src/repo.rs"), &pattern));
-        assert!(owned(
-            Path::new("/w/crates/testkit-core/src/repo.rs"),
-            &pattern
-        ));
-        assert!(!owned(Path::new("/w/crates/engine/src/repo.rs"), &pattern));
-    }
-
-    #[test]
-    fn a_cli_spelling_in_backticks_counts_and_a_comment_or_a_git_argument_does_not() {
-        assert!(Spelled("`--").on("    \"pass `--input {name}=...` to name it\""));
-        assert!(Spelled("`yunta ").on("    \"make room (`yunta gc`) and resume\","));
-        // A comment explains, a git argument array has no backticks, a
-        // delimiter is not a flag, and a schema title names no command.
-        assert!(!Spelled("`--").on("    /// pass `--input` to name an input"));
-        assert!(!Spelled("`--").on("    &[\"diff\", \"--name-only\", \"HEAD\"],"));
-        assert!(!Spelled("`--").on("    \"start it with `---`, its `name`\""));
-        assert!(!Spelled("`yunta ").on("    titled(schema_for!(Workflow), \"yunta workflow\")"));
-    }
-}
+mod tests;

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction};
 use yunta_core::events::{
     EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent, KIND_VERSION,
 };
@@ -101,6 +101,33 @@ fn genesis_hash(manifest_hash: &str) -> ContentHash {
     yunta_core::sha256_hex(manifest_hash.as_bytes())
 }
 
+/// The hash the event at `seq` chains onto: the manifest-derived genesis for
+/// a run's first event, the stored hash of the previous event otherwise.
+fn previous_hash(tx: &Transaction<'_>, draft: &EventDraft, seq: i64) -> Result<String> {
+    if seq == 1 {
+        let EventPayload::Run(RunEvent::Created(created)) = draft.payload() else {
+            return Err(StorageError::GenesisMissing {
+                run_id: draft.run_id().clone(),
+            });
+        };
+        return Ok(genesis_hash(created.manifest_hash.as_str()).to_string());
+    }
+    let stored = tx
+        .query_row(
+            "SELECT event_hash FROM events WHERE run_id = ?1 AND seq = ?2",
+            params![draft.run_id().as_str(), seq - 1],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map_err(|error| StorageError::Append {
+            run_id: draft.run_id().clone(),
+            source: cause(error),
+        })?;
+    // A NULL here means the run predates the hash chain — its chain is
+    // already unverifiable; anchoring on the empty string keeps the append
+    // working while `verify_chain` reports the truth.
+    Ok(stored.unwrap_or_default())
+}
+
 fn cause(error: rusqlite::Error) -> Cause {
     Box::new(error)
 }
@@ -193,28 +220,8 @@ impl Storage {
             })?;
 
         // The chain hash, computed inside the same transaction that
-        // assigns `seq` — the previous event's stored hash (or the
-        // manifest-derived genesis for the run's first event) anchors it.
-        let prev_hash = if seq == 1 {
-            let EventPayload::Run(RunEvent::Created(created)) = draft.payload() else {
-                return Err(StorageError::GenesisMissing {
-                    run_id: draft.run_id().clone(),
-                });
-            };
-            genesis_hash(created.manifest_hash.as_str()).to_string()
-        } else {
-            tx.query_row(
-                "SELECT event_hash FROM events WHERE run_id = ?1 AND seq = ?2",
-                params![draft.run_id().as_str(), seq - 1],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .map_err(append_err)?
-            // A NULL here means the run predates the hash chain — its
-            // chain is already unverifiable; anchoring on the empty
-            // string keeps the append working while `verify_chain`
-            // reports the truth.
-            .unwrap_or_default()
-        };
+        // assigns `seq`, anchored on the previous event's hash.
+        let prev_hash = previous_hash(&tx, draft, seq)?;
 
         let ts = at.to_rfc3339();
         let event_hash = chain_hash(ChainHashFields {

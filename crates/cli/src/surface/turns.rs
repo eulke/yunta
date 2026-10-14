@@ -130,12 +130,10 @@ impl Curtain {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{EventPayload, NodeStartedPayload};
-    use yunta_core::{
-        CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId, SystemClock,
-    };
+    use yunta_core::{CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId};
     use yunta_storage::AsyncStorage;
     use yunta_testkit::wait_until_async;
-    use yunta_testkit_core::{Captured, Log};
+    use yunta_testkit_core::{Captured, FixedClock, Log};
 
     use crate::render::Glyphs;
     use crate::surface::feed::{Beat, Diagnostics, Feed};
@@ -229,7 +227,7 @@ mod tests {
                 manifest: &manifest,
                 prior: None,
                 storage: &storage,
-                clock: Arc::new(SystemClock),
+                clock: Arc::new(FixedClock),
                 delivery,
                 glyphs: Glyphs::Ascii,
             };

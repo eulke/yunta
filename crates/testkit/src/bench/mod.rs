@@ -84,6 +84,30 @@ pub struct Bench {
     capabilities: Option<Capabilities>,
 }
 
+impl Drop for Bench {
+    /// A process group a run's registry names when the bench ends is
+    /// one the engine could not stop. The run owns it, so the bench that
+    /// owns the tree kills it here, and no test leaves a process running.
+    fn drop(&mut self) {
+        if self._root.is_none() {
+            return;
+        }
+        let Ok(runs) = std::fs::read_dir(&self.runs_root) else {
+            return;
+        };
+        for run in runs.flatten() {
+            let yunta_engine::Registry::Read(registry) = yunta_engine::read_registry(&run.path())
+            else {
+                continue;
+            };
+            for group in yunta_engine::running_groups(&registry.doc.process_groups) {
+                // best-effort: a group that ends between the read and the kill has nothing left to stop
+                crate::child::force_kill_process_group(group).ok();
+            }
+        }
+    }
+}
+
 /// The run a bench created, as its next wake needs it.
 pub(super) struct Driven {
     manifest: yunta_core::Manifest,
@@ -288,6 +312,10 @@ impl Bench {
     pub fn with_user_state_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.ambient = Some(yunta_core::Env {
             yunta_home: Some(root.into()),
+            // A bench reads no user and no terminal variable of the machine
+            // it runs on: its identity and its surface are the test's own.
+            user: None,
+            terminal: Default::default(),
             ..Default::default()
         });
         self

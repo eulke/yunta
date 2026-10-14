@@ -127,23 +127,34 @@ pub async fn new_pack(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> 
     let workflow: Workflow = yunta_core::yaml::parse(&workflow_yaml)
         .map_err(|e| CliError::msg(format!("the workflow skeleton does not parse: {e}")))?;
 
-    let write = |rel: &str, contents: &str| -> Result<(), CliError> {
-        let path = dir.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|s| CliError::io("create", parent.display(), s))?;
-        }
-        std::fs::write(&path, contents).map_err(|s| CliError::io("write", path.display(), s))
-    };
-    write("pack.yaml", &manifest_yaml)?;
-    write("README.md", &fill(PACK_README_TEMPLATE))?;
-    write(".yunta/config.yaml", PACK_SELFTEST_CONFIG)?;
-    write(".yunta/workflows/example.yaml", &workflow_yaml)?;
-    write(".yunta/tests/example.yaml", PACK_CASE_TEMPLATE)?;
-    write(".yunta/tests/fixtures/example.yaml", PACK_FIXTURE_TEMPLATE)?;
+    write_under(&dir, "pack.yaml", &manifest_yaml).await?;
+    write_under(&dir, "README.md", &fill(PACK_README_TEMPLATE)).await?;
+    write_under(&dir, ".yunta/config.yaml", PACK_SELFTEST_CONFIG).await?;
+    write_under(&dir, ".yunta/workflows/example.yaml", &workflow_yaml).await?;
+    write_under(&dir, ".yunta/tests/example.yaml", PACK_CASE_TEMPLATE).await?;
+    write_under(
+        &dir,
+        ".yunta/tests/fixtures/example.yaml",
+        PACK_FIXTURE_TEMPLATE,
+    )
+    .await?;
     say(look, format!("wrote {}", dir.display()));
 
     verify_scaffold(&dir, &workflow, look).await
+}
+
+/// Writes one file of the scaffold under `dir`, creating its directory
+/// first, and names the path it could not write.
+async fn write_under(dir: &Path, rel: &str, contents: &str) -> Result<(), CliError> {
+    let path = dir.join(rel);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|s| CliError::io("create", parent.display(), s))?;
+    }
+    tokio::fs::write(&path, contents)
+        .await
+        .map_err(|s| CliError::io("write", path.display(), s))
 }
 
 /// Checks the scaffolded workflow against the pack's own self-test config,

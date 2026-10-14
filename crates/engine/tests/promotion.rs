@@ -14,7 +14,7 @@ use yunta_core::events::{BaselineOrigin, Failure, FindingEvent, RunEvent, TaskEv
 use yunta_core::ModeName;
 use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
 use yunta_testkit::{baselines, Bench, ScriptedInteraction};
-use yunta_testkit_core::{Log, SeqIdSource};
+use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
 
 /// The fixture every run of this suite is driven on: no session is
 /// scripted, because every node of these workflows runs a command.
@@ -26,8 +26,8 @@ const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 const PROMOTABLE_WORKFLOW: &str = r#"
 name: promotable
 modes:
-  quick:  { include: [lint, fix-lint] }
-  full:   { include: all }
+  alpha:  { include: [lint, fix-lint] }
+  beta:   { include: all }
 nodes:
   - id: lint
     kind: bash
@@ -41,7 +41,7 @@ nodes:
 const NO_LATER_MODE_WORKFLOW: &str = r#"
 name: promotable
 modes:
-  full:   { include: all }
+  beta:   { include: all }
 nodes:
   - id: lint
     kind: bash
@@ -157,7 +157,7 @@ fn record(bench: &Bench, payload: EventPayload) {
         .append(
             &yunta_core::events::EventDraft::new(bench.run_id.clone(), None, payload)
                 .expect("a draft names its subject"),
-            &yunta_core::SystemClock,
+            &FixedClock,
         )
         .unwrap();
 }
@@ -165,14 +165,14 @@ fn record(bench: &Bench, payload: EventPayload) {
 #[tokio::test]
 async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     let interaction = ScriptedInteraction::choose("promote");
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let RunReport { terminal, .. } = bench
         .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
         .await;
     let events = bench.events();
 
     match &terminal {
-        RunTerminal::Promoted { suggested_mode } => assert_eq!(suggested_mode, "full"),
+        RunTerminal::Promoted { suggested_mode } => assert_eq!(suggested_mode, "beta"),
         other => panic!("expected Promoted, got {other:?}"),
     }
 
@@ -181,7 +181,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
         _ => None,
     });
     let signaled = signaled.expect("promotion_signaled must be on the parent's own log");
-    assert_eq!(signaled.suggested_mode, "full");
+    assert_eq!(signaled.suggested_mode, "beta");
     let cause = signaled.cause.as_ref().expect("a promotion with a cause");
     assert_eq!(cause.node.as_str(), "lint");
     assert_eq!(cause.goto.as_str(), "fix-lint");
@@ -216,7 +216,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
 async fn promote_is_never_offered_with_no_later_mode() {
     let interaction = ScriptedInteraction::choose("abort");
     let RunReport { terminal, .. } = Bench::new()
-        .in_mode("full")
+        .in_mode("beta")
         .run_with_interaction(NO_LATER_MODE_WORKFLOW, NO_SESSIONS, &interaction)
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
@@ -230,7 +230,7 @@ async fn promote_is_never_offered_with_no_later_mode() {
 
 #[tokio::test]
 async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let RunReport { terminal, .. } = bench.run(PROMOTABLE_WORKFLOW, NO_SESSIONS).await;
     let events = bench.events();
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
@@ -279,7 +279,7 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
         ),
     ];
     let (bench, terminal) =
-        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "alpha", &interaction, &planted).await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
     let path = bench.run_dir().join("artifacts/findings.yaml");
@@ -297,7 +297,7 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 #[tokio::test]
 async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
     let interaction = ScriptedInteraction::choose("promote");
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let RunReport { terminal, .. } = bench
         .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
         .await;
@@ -309,7 +309,7 @@ async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
 }
 
 /// `create_promotion_successor` with everything this suite's world
-/// fixes: the `full` mode every test promotes into, the bench's roots,
+/// fixes: the `beta` mode every test promotes into, the bench's roots,
 /// its clock and the ids the successor is minted from. Creating a
 /// successor is the CLI's job, never `execute_run`'s, so every test
 /// here does it by hand — through this one door.
@@ -320,7 +320,7 @@ async fn successor_of(
 ) -> yunta_engine::PromotionSuccessor {
     yunta_engine::create_promotion_successor(
         predecessor,
-        &ModeName::from("full"),
+        &ModeName::from("beta"),
         yunta_engine::RunRoots {
             runs: &bench.runs_root,
             worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
@@ -369,7 +369,7 @@ baseline:
 /// its predecessor already worked.
 #[tokio::test]
 async fn a_successor_is_born_holding_its_predecessors_measurement() {
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
         .await
         .unwrap();
@@ -380,7 +380,7 @@ async fn a_successor_is_born_holding_its_predecessors_measurement() {
 /// question that may promote it waits for the measurement it hands on.
 #[tokio::test]
 async fn a_successor_of_a_run_measuring_aside_is_born_holding_its_measurement() {
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
         .await
         .unwrap();
@@ -431,7 +431,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     let interaction = ScriptedInteraction::choose("promote");
     let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
     let (bench, terminal) =
-        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "alpha", &interaction, &planted).await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
     let manifest = bench.manifest();
@@ -493,7 +493,7 @@ async fn a_successor_inherits_what_the_log_holds_and_not_a_stray_file() {
     let interaction = ScriptedInteraction::choose("promote");
     let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
     let (bench, terminal) =
-        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "alpha", &interaction, &planted).await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
     let manifest = bench.manifest();
@@ -562,7 +562,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
     let interaction = ScriptedInteraction::choose("promote");
     let (bench, terminal) = run_planted(
         PROMOTABLE_WORKFLOW,
-        "quick",
+        "alpha",
         &interaction,
         Planted {
             tasks: Some(TWO_TASKS),
@@ -647,7 +647,7 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
     let interaction = ScriptedInteraction::choose("promote");
     let (bench, terminal) = run_planted(
         PROMOTABLE_WORKFLOW,
-        "quick",
+        "alpha",
         &interaction,
         Planted {
             tasks: Some(TWO_TASKS),
@@ -785,7 +785,7 @@ async fn a_promotion_successor_is_stamped_by_the_run_clock() {
     // never the wall clock read behind its back. A chain whose members
     // disagree about when they happened is a chain nobody can replay.
     let interaction = ScriptedInteraction::choose("promote");
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let RunReport { terminal, .. } = bench
         .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
         .await;
@@ -812,7 +812,7 @@ async fn a_successor_holds_its_predecessors_unsettled_findings_as_the_runs_own()
     let interaction = ScriptedInteraction::choose("promote");
     let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
     let (bench, terminal) =
-        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "alpha", &interaction, &planted).await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
     let manifest = bench.manifest();
@@ -869,7 +869,7 @@ fn two_nodes_findings_under_one_id_are_inherited_as_two() {
 /// and the successor's birth names that checkout.
 #[tokio::test]
 async fn successor_works_in_its_predecessors_checkout() {
-    let bench = Bench::new().in_mode("quick");
+    let bench = Bench::new().in_mode("alpha");
     let interaction = ScriptedInteraction::choose("promote");
     let RunReport { terminal, .. } = bench
         .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)

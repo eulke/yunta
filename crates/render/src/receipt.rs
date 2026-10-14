@@ -21,7 +21,7 @@ use crate::blocks::{
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
 use crate::spend::Breakdown;
-use crate::{Mark, RunWord};
+use crate::{Glyphs, Mark, RunWord};
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
 /// `manifest.rs`) — grouped here purely for the receipt's review check; the JSON receipt exposes the flat
@@ -48,8 +48,13 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// The run's word heads it, then what it is a receipt of, then one check
 /// per thing the run held its work to — a cross only for what failed, a
 /// `·` for what was never asked for — then each criterion and each path
-/// outside the scope, and the command that checks it all again.
-pub fn document<'a>(receipt: &'a Receipt, spell: &dyn Fn(&NextStep) -> String) -> Doc<'a> {
+/// outside the scope, and the command that checks it all again. `glyphs`
+/// draws the separators between the facts a line states.
+pub fn document<'a>(
+    receipt: &'a Receipt,
+    spell: &dyn Fn(&NextStep) -> String,
+    glyphs: Glyphs,
+) -> Doc<'a> {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -70,7 +75,7 @@ pub fn document<'a>(receipt: &'a Receipt, spell: &dyn Fn(&NextStep) -> String) -
                 .push_if("workflow", receipt.workflow.to_string())
                 .push_if("mode", receipt.mode.to_string())
                 .push_if("run", receipt.run_id.to_string())
-                .push_if("cost", cost(receipt)),
+                .push_if("cost", cost(receipt, glyphs)),
         )
         .with(checks(receipt));
     for failed in &receipt.failed {
@@ -162,9 +167,23 @@ fn run_word(state: TerminalState) -> RunWord {
     }
 }
 
-/// One check per thing the run held its work to.
+/// One check per thing the run held its work to, in the order a reader
+/// meets them.
 fn checks(receipt: &Receipt) -> Checklist {
     let mut checks = Checklist::default();
+    criteria_check(&mut checks, receipt);
+    caution_checks(&mut checks, receipt);
+    let (found, said) = baseline(receipt.baseline.as_ref());
+    checks.push(found, "baseline", said);
+    scope_check(&mut checks, receipt);
+    review_checks(&mut checks, receipt);
+    event_chain_check(&mut checks, receipt);
+    checks
+}
+
+/// The run's criteria, each command green or not; none declared is not
+/// applicable.
+fn criteria_check(checks: &mut Checklist, receipt: &Receipt) {
     let criteria = &receipt.criteria;
     match (criteria.total, criteria.green == criteria.total) {
         (0, _) => checks.push(
@@ -178,6 +197,11 @@ fn checks(receipt: &Receipt) -> Checklist {
             format!("{}/{total} green, each command below", criteria.green),
         ),
     }
+}
+
+/// The event kinds this binary reads only in part, and the artifact problems
+/// reported during the run, when there are any.
+fn caution_checks(checks: &mut Checklist, receipt: &Receipt) {
     if !receipt.unknown_kinds.is_empty() {
         let kinds: Vec<String> = receipt
             .unknown_kinds
@@ -213,8 +237,10 @@ fn checks(receipt: &Receipt) -> Checklist {
             ),
         );
     }
-    let (found, said) = baseline(receipt.baseline.as_ref());
-    checks.push(found, "baseline", said);
+}
+
+/// The files the run touched, and the paths it wrote outside its scope.
+fn scope_check(checks: &mut Checklist, receipt: &Receipt) {
     checks.push(
         match receipt.scope.violations.is_empty() {
             true => Found::Holds,
@@ -230,6 +256,11 @@ fn checks(receipt: &Receipt) -> Checklist {
             }
         ),
     );
+}
+
+/// The review of the run's work: one check per group of fan-out siblings, or
+/// a note that no runner fanned out.
+fn review_checks(checks: &mut Checklist, receipt: &Receipt) {
     let groups = fan_out_groups(&receipt.runners);
     if groups.is_empty() {
         checks.push(
@@ -253,6 +284,10 @@ fn checks(receipt: &Receipt) -> Checklist {
             ),
         );
     }
+}
+
+/// Whether the run's events form one hash-linked chain, or where it breaks.
+fn event_chain_check(checks: &mut Checklist, receipt: &Receipt) {
     match &receipt.event_chain {
         EventChainStatus::Intact { events } => checks.push(
             Found::Holds,
@@ -265,12 +300,11 @@ fn checks(receipt: &Receipt) -> Checklist {
             yunta_core::text::detailed(format!("broken at seq {seq}"), detail),
         ),
     }
-    checks
 }
 
 /// What the run spent: every token, in and out, per task once the run
 /// had tasks, and the re-routes it took.
-fn cost(receipt: &Receipt) -> String {
+fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
     let cost = &receipt.cost;
     if cost.tokens.total() == 0 && cost.reroutes == 0 {
         return "nothing spent".to_string();
@@ -281,9 +315,17 @@ fn cost(receipt: &Receipt) -> String {
         Breakdown(&cost.tokens)
     );
     if let Some(cptv) = cost.cptv {
-        said.push_str(&format!(" · CPTV: {} per task", Tokens::rounded(cptv)));
+        said.push_str(&format!(
+            " {} CPTV: {} per task",
+            glyphs.sep(),
+            Tokens::rounded(cptv)
+        ));
     }
-    said.push_str(&format!(" · {}", counted(cost.reroutes, "reroute")));
+    said.push_str(&format!(
+        " {} {}",
+        glyphs.sep(),
+        counted(cost.reroutes, "reroute")
+    ));
     said
 }
 

@@ -210,7 +210,10 @@ pub(super) async fn tool_answer_questions(
         yunta_engine::AnswersReply {
             answers,
             channel: yunta_core::events::Channel::Mcp,
-            responder: Some(crate::identity::responder(by.as_ref())),
+            responder: Some(crate::identity::responder(
+                by.as_ref(),
+                ctx.env.user.as_deref(),
+            )),
         },
     )
     .await?;

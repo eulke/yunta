@@ -222,6 +222,14 @@ async fn open_node_session(
             let failure = Failure::Confinement { confinement };
             Ok(Err(super::node_close::fail(ctx, node, failure).await?))
         }
+        // A session that finds its staged record already taken is an engine
+        // fault: the node closes naming it, with no token spent.
+        Err(error @ OpenSessionError::AlreadyStaged) => {
+            let failure = Failure::EngineFailed {
+                engine_error: error.to_string(),
+            };
+            Ok(Err(super::node_close::fail(ctx, node, failure).await?))
+        }
         Err(OpenSessionError::Audit(source)) => Err(RunError::Storage(source)),
     }
 }

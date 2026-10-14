@@ -127,13 +127,13 @@ mod tests {
         let legacy = serde_json::json!({
             "reason": "exhausted",
             "evidence": [],
-            "suggested_mode": "standard",
+            "suggested_mode": "beta",
         });
         let read: PromotionSignaledPayload = serde_json::from_value(legacy).unwrap();
         assert_eq!(
             Happening::from(&RunEvent::PromotionSignaled(read)),
             Happening::PromotionSignaled {
-                to: ModeName::from_static("standard"),
+                to: ModeName::from_static("beta"),
                 cause: None,
                 legacy_reason: Some("exhausted".to_string()),
                 evidence: Evidence::none(),

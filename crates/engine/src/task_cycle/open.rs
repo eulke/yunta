@@ -125,6 +125,11 @@ async fn open_the_session(
                 source,
             }
         }
+        crate::run::session_plan::OpenSessionError::AlreadyStaged => {
+            TaskCycleError::AlreadyStaged {
+                task: params.task.id.clone(),
+            }
+        }
     })
 }
 

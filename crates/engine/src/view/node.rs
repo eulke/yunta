@@ -59,7 +59,7 @@ pub struct NodeFrame {
     /// by hash and the directory is a view of it, so what a node
     /// produced is a fact of the log and not of the filesystem.
     pub artifacts: Vec<ArtifactId>,
-    /// The ledger tasks this node has in `running`, by id.
+    /// The tasks this node has in `running`, by id.
     pub running_tasks: Vec<RunningTask>,
     /// The sessions open on the attempt now running, oldest first — one
     /// per task in the batch for a `loop` node above concurrency 1.
@@ -211,7 +211,7 @@ impl Reading<'_> {
         }
     }
 
-    /// The ledger tasks `node` has in `running`, by id — sorted, so two
+    /// The tasks `node` has in `running`, by id — sorted, so two
     /// frames of the same log list them in the same order.
     fn running_tasks(&self, node: &NodeId) -> Vec<RunningTask> {
         self.state
