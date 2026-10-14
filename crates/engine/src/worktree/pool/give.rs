@@ -5,7 +5,7 @@ use std::path::Path;
 
 use yunta_core::protected::Pathspecs;
 
-use super::{space, CheckoutPool, Lease};
+use super::{slot, space, CheckoutPool, Lease};
 use crate::git::{self, Effect};
 use crate::process::Supervision;
 use crate::worktree::capture::clean_covered;
@@ -46,6 +46,27 @@ impl CheckoutPool {
                 }
             }
             Err(error) => tracing::debug!(%error, "a probe's checkout stays out of the pool"),
+        }
+    }
+}
+
+impl Lease {
+    /// Leaves the hold standing once this lease is gone: the checkout's lock
+    /// stays in this engine's name, and the pool's take rule keeps the checkout
+    /// while a process group its run registered still runs. A session the
+    /// engine could not stop may still write in the checkout, so nothing lets
+    /// it go.
+    pub fn keep(mut self) {
+        self.owner = None;
+    }
+
+    /// Whether a process group registered by the run that held this checkout
+    /// last still runs: the groups the take rule keeps the checkout by.
+    pub async fn groups_running(&self) -> bool {
+        match slot::last_held(&self.home, self.number).await {
+            // blocking: one small registry, read whole, as the take rule reads it.
+            Some(held) => slot::groups_at_work(&held.by),
+            None => false,
         }
     }
 }

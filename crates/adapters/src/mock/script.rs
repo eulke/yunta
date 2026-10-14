@@ -27,7 +27,7 @@ use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
 use yunta_core::port::{AgentError, AgentEvent, RunToolsEndpoint};
 use yunta_core::process::stream::StreamGuard;
 use yunta_core::process::subprocess::LineParser;
-use yunta_core::rail::{RailAnswer, RailEvent};
+use yunta_core::rail::answer::StopAnswer;
 use yunta_core::{ModelName, RunTool, SessionId, ToolNaming};
 
 use super::effects::{ask_hook, Asked};
@@ -71,13 +71,12 @@ pub(super) struct BeforeStop {
 }
 
 impl BeforeStop {
-    /// What the CLI reads from the engine's reply to this session's wish to
-    /// stop. A stop names no path, so the hook is asked with an empty one.
-    async fn asked(&self, session: &SessionId) -> Result<RailAnswer, String> {
+    /// The engine's answer to this session's wish to stop. A stop names no
+    /// path, so the hook is asked with an empty one.
+    async fn asked(&self, session: &SessionId) -> StopAnswer {
         ask_hook(
             self.writes.dialect,
             &self.writes.rail,
-            RailEvent::BeforeStop,
             session,
             Path::new(""),
         )
@@ -421,9 +420,8 @@ async fn stopped(
     let mut after = Some((stop.writes.effects.clone(), stop.steps.clone()));
     for _ in 0..3 {
         match stop.asked(session).await {
-            Ok(RailAnswer::Proceed | RailAnswer::Tell { .. }) => return true,
-            Ok(RailAnswer::Refuse { .. }) => {}
-            Err(message) => return stream.fail(message),
+            StopAnswer::Proceed => return true,
+            StopAnswer::Refuse { .. } => {}
         }
         let Some((effects, steps)) = after.take() else {
             continue;

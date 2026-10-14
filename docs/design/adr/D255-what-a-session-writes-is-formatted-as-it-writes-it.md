@@ -1,12 +1,14 @@
 ---
 number: D255
 title: "What a session writes is formatted the moment it writes it"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D266]
 ---
 
 # D255 — What a session writes is formatted the moment it writes it
+
+*(Revised by D266: decisions 2 to 4 are revised in part. The formatters of one write share one bound of 5 seconds, a formatter still running at it is stopped and recorded with `timed_out`, `write_formatted` carries the redacted output the engine kept, and `stats` reads the p50 and p95 of each moment from each session's `rail_summary`.)*
 
 ## Context
 

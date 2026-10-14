@@ -11,7 +11,7 @@ use super::dispatch::{dispatch_session, DispatchError};
 use super::judge::scope_in_force;
 use super::TaskCycleError;
 use crate::run::session_plan::OpenedSession;
-use crate::run_tools::{unrecorded_cause, RunToolsSession, TaskAccess};
+use crate::run_tools::{unrecorded_storage_cause, RunToolsSession, TaskAccess};
 
 /// Opens a fresh session for one attempt and drives it to a terminal
 /// outcome: a per-attempt run-tools listener (its bind failure degrades to
@@ -45,8 +45,8 @@ pub(super) async fn open_and_dispatch(
     // with the storage cause the log gave it.
     let unrecorded = run_tools
         .as_ref()
-        .and_then(|session| session.rails().take_unrecorded());
-    if let Some(source) = unrecorded.and_then(unrecorded_cause) {
+        .and_then(|session| unrecorded_storage_cause(session.rails()));
+    if let Some(source) = unrecorded {
         return Err(TaskCycleError::Audit {
             task: params.task.id.clone(),
             source,
@@ -140,6 +140,7 @@ async fn dispatch(
     let opening = crate::task_cycle::Opening {
         task: Some(&params.task.id),
         arrivals: run_tools.map(RunToolsSession::arrivals),
+        rails: run_tools.map(RunToolsSession::rails),
         resume: params.resume.map(|continuing| crate::task_cycle::Resume {
             session: &continuing.session,
             fresh_prompt: Some(brief),

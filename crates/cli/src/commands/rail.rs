@@ -10,62 +10,45 @@
 //! session may write letting the write through is the one outcome nobody
 //! could defend.
 
-use std::time::Duration;
+use std::time::Instant;
 
 use yunta_core::port::{HookReply, RailCodec};
-use yunta_core::rail::{unasked, RailCall, RailEndpoint, RailEvent};
+use yunta_core::rail::answer::{FormatAnswer, HookAnswer, StopAnswer, WriteAnswer};
+use yunta_core::rail::hook::{settle, RailFailure};
+use yunta_core::rail::window::{AskBudget, Wait};
+use yunta_core::rail::{RailEndpoint, RailEvent};
 
-/// How long a write hook waits for the engine before it answers on its
-/// own — well inside the time a CLI gives that hook, so the CLI never runs
-/// out of patience first and lets a write through unanswered. A stop hook
-/// waits as long as the engine judges: a CLI that runs out of patience
-/// there lets the session end, which the close still judges.
-const DEADLINE: Duration = Duration::from_secs(8);
-
-/// What the call fails with when it cannot be read or asked at all:
-/// a refusal, with the reason on stderr where the CLI shows it.
+/// What the call fails with when the adapter has no codec to read it: a
+/// refusal, with the reason on stderr where the CLI shows it.
 const MISCONFIGURED: i32 = 2;
 
+/// Answers one hook call at its moment and writes the answer the codec
+/// reads. A write waits for the engine inside the window this process has
+/// left, counted from `started`, and is refused once that window is spent.
+/// An after-write waits the same way and is told what its formatters did.
+/// A stop waits for the engine's judgement without a window of its own; a
+/// stop that cannot be asked lets the session stop, and the attempt's close
+/// still judges the work.
 pub fn run(
     codec: Option<&dyn RailCodec>,
     event: RailEvent,
     endpoint: Option<&RailEndpoint>,
     stdin: &[u8],
-    ask: impl FnOnce(&RailEndpoint, &RailCall) -> Result<yunta_core::rail::RailAnswer, String>,
+    started: Instant,
 ) -> HookReply {
     let Some(codec) = codec else {
         return misconfigured("this adapter has no rail codec".to_string());
     };
-    let call = match codec.decode(event, stdin) {
-        Ok(Some(call)) => call,
-        // A call with nothing to ask goes on without asking.
-        Ok(None) => return codec.encode(event, &yunta_core::rail::RailAnswer::Proceed),
-        Err(source) => {
-            return codec.encode(event, &unasked(event, &yunta_core::describe(&source)));
-        }
-    };
-    let Some(endpoint) = endpoint else {
-        return codec.encode(
-            event,
-            &unasked(event, "this session's environment names no engine to ask"),
-        );
-    };
-    let answer = ask(endpoint, &call).unwrap_or_else(|why| unasked(event, &why));
-    codec.encode(event, &answer)
-}
-
-/// The engine's answer, asked over the loopback listener.
-pub fn over_loopback(
-    endpoint: &RailEndpoint,
-    call: &RailCall,
-) -> Result<yunta_core::rail::RailAnswer, String> {
-    let deadline = match call.act.moment() {
-        RailEvent::BeforeWrite | RailEvent::AfterWrite => Some(DEADLINE),
-        RailEvent::BeforeStop => None,
-    };
-    endpoint
-        .ask(call, deadline)
-        .map_err(|source| yunta_core::describe(&source))
+    let call = codec
+        .decode(event, stdin)
+        .map_err(|source| RailFailure::Undecodable(yunta_core::describe(&source)));
+    let endpoint = endpoint.ok_or(RailFailure::NoEngine);
+    let window = Wait::Write(AskBudget::from_process_start(started));
+    match event {
+        RailEvent::BeforeWrite => settle::<WriteAnswer>(endpoint, call, window).reply(codec),
+        RailEvent::AfterWrite => settle::<FormatAnswer>(endpoint, call, window).reply(codec),
+        RailEvent::BeforeStop => settle::<StopAnswer>(endpoint, call, Wait::Judgement).reply(codec),
+    }
 }
 
 fn misconfigured(reason: String) -> HookReply {

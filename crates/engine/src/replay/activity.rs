@@ -8,25 +8,29 @@
 use std::collections::BTreeMap;
 
 use yunta_core::events::{
-    ArtifactEvent, EventPayload, FindingEvent, StoredEvent, SubmissionOutcome,
+    ArtifactEvent, EventPayload, FindingEvent, SessionEvent, StoredEvent, SubmissionOutcome,
 };
+use yunta_core::rail::timing::Histogram;
+use yunta_core::rail::RailEvent;
 use yunta_core::NodeId;
 
 use crate::stats::{FindingActivity, Submissions};
 
 /// The submissions and finding calls a log carries, for the run and for
-/// each node that made one.
+/// each node that made one, and the rail's call timings merged per moment.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Activity {
     pub(crate) submissions: Submissions,
     pub(crate) submissions_by_node: BTreeMap<NodeId, Submissions>,
     pub(crate) findings: FindingActivity,
     pub(crate) findings_by_node: BTreeMap<NodeId, FindingActivity>,
+    /// How long the rail's calls took at each moment, over every session's summary.
+    pub(crate) rails: BTreeMap<RailEvent, Histogram>,
 }
 
 impl Activity {
-    /// Counts `event` when it is a submission or a finding call. Every
-    /// other kind is nothing to count here.
+    /// Counts `event` when it is a submission or a finding call, and merges
+    /// a session's rail summary. Every other kind is nothing to count here.
     pub(crate) fn apply(&mut self, event: &StoredEvent) {
         let node = event.node_id.as_ref();
         match event.payload() {
@@ -56,6 +60,11 @@ impl Activity {
             }
             Some(EventPayload::Findings(FindingEvent::Proved(_))) => {
                 self.count_finding(node, |f| &mut f.proved)
+            }
+            Some(EventPayload::Session(SessionEvent::RailSummary(p))) => {
+                for (moment, took) in &p.moments {
+                    self.rails.entry(*moment).or_default().merge(took);
+                }
             }
             _ => {}
         }

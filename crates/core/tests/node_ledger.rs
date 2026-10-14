@@ -1,10 +1,11 @@
 //! What a node's record remembers across its attempts.
 
 use yunta_core::events::{
-    EventMeta, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeOutcome, NodeStartedPayload,
-    Suspensions, TokenUsage,
+    EventMeta, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeOutcome,
+    NodeStartedPayload, SessionEvent, Suspensions, TokenUsage,
 };
 use yunta_core::{NodeId, TreeId};
+use yunta_testkit_core::all_kinds;
 
 /// Folds `events` onto one node, in order.
 fn fold(events: Vec<NodeEvent>) -> NodeLedger {
@@ -176,4 +177,93 @@ fn only_a_reroute_its_own_on_failure_made_counts_against_its_max() {
         record.on_failure_reroutes, 1,
         "a person's choice that sent the run elsewhere is no retry"
     );
+}
+
+/// The sample the registry builds for the session event `kind`.
+fn sampled_session(kind: &str) -> SessionEvent {
+    match all_kinds()
+        .into_iter()
+        .find(|payload| payload.kind_name() == kind)
+    {
+        Some(EventPayload::Session(event)) => event,
+        _ => panic!("the registry samples `{kind}` as a session event"),
+    }
+}
+
+/// Folds session events onto one node's record, in order.
+fn heard(events: &[SessionEvent]) -> NodeLedger {
+    let node = NodeId::from_static("compare");
+    let mut ledger = NodeLedger::default();
+    for (seq, event) in events.iter().enumerate() {
+        let meta = EventMeta {
+            seq: (seq as u64 + 1).into(),
+            at: chrono::DateTime::UNIX_EPOCH,
+            node: Some(&node),
+        };
+        ledger.apply_session(event, &meta).unwrap();
+    }
+    ledger
+}
+
+/// The sample session the attempt opened, with the model it named cleared.
+fn opened_without_model() -> SessionEvent {
+    let SessionEvent::Opened(mut opened) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    opened.model = None;
+    SessionEvent::Opened(opened)
+}
+
+#[test]
+fn a_rail_summary_fills_the_model_its_open_session_opened_without() {
+    let ledger = heard(&[opened_without_model(), sampled_session("rail_summary")]);
+    let sessions = &ledger
+        .get(&NodeId::from_static("compare"))
+        .unwrap()
+        .sessions;
+    assert_eq!(
+        sessions[0].model.as_ref().map(ToString::to_string),
+        Some("mock-model".to_string())
+    );
+}
+
+#[test]
+fn a_rail_summary_keeps_the_model_its_session_reported_at_opening() {
+    let SessionEvent::Opened(mut opened) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    opened.model = Some("opened-model".parse().unwrap());
+    let ledger = heard(&[
+        SessionEvent::Opened(opened),
+        sampled_session("rail_summary"),
+    ]);
+    let sessions = &ledger
+        .get(&NodeId::from_static("compare"))
+        .unwrap()
+        .sessions;
+    assert_eq!(
+        sessions[0].model.as_ref().map(ToString::to_string),
+        Some("opened-model".to_string())
+    );
+}
+
+#[test]
+fn a_rail_summary_for_another_session_fills_nothing() {
+    let SessionEvent::RailSummary(mut summary) = sampled_session("rail_summary") else {
+        panic!("the registry samples a rail summary");
+    };
+    summary.session_id = "sess-2".into();
+    let ledger = heard(&[opened_without_model(), SessionEvent::RailSummary(summary)]);
+    let sessions = &ledger
+        .get(&NodeId::from_static("compare"))
+        .unwrap()
+        .sessions;
+    assert_eq!(sessions[0].model, None);
+}
+
+#[test]
+fn a_rail_summary_with_no_open_session_changes_nothing() {
+    let ledger = heard(&[sampled_session("rail_summary")]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    assert!(record.sessions.is_empty());
 }

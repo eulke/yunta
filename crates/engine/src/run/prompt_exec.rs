@@ -13,7 +13,7 @@ use yunta_core::port::{AgentError, SessionRequest};
 use yunta_core::{AdapterId, Node, PromptSource};
 
 use crate::run_dir::Opening;
-use crate::run_tools::RunToolsSession;
+use crate::run_tools::{unrecorded_storage_cause, RunToolsSession};
 use crate::task_cycle::{
     dispatch_session, not_stopped_failure, DispatchError, DispatchOutcome, Dispatched, SessionSetup,
 };
@@ -270,6 +270,14 @@ async fn dispatch_node_session(
     )
     .await
     .map_err(RunError::Storage)?;
+    // A refusal the engine answered and could not write fails the node with
+    // the storage cause the log gave it, as an attempt fails.
+    let unrecorded = run_tools
+        .as_ref()
+        .and_then(|session| unrecorded_storage_cause(session.rails()));
+    if let Some(source) = unrecorded {
+        return Err(RunError::Storage(source));
+    }
     Ok(Step::Value((dispatched, staged)))
 }
 
@@ -373,6 +381,7 @@ fn attempt_opening<'a>(
     crate::task_cycle::Opening {
         task: None,
         arrivals: run_tools.map(RunToolsSession::arrivals),
+        rails: run_tools.map(RunToolsSession::rails),
         // A continued session has the brief to fall back on; an
         // interrupted one was already checked to be resumable.
         resume: resume.map(|session| crate::task_cycle::Resume {

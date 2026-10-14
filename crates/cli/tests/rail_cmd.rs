@@ -4,10 +4,17 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
-use yunta_core::rail::{RailAct, RailAnswer, RailCall, TOKEN_VAR, URL_VAR};
+use yunta_core::fence::REFUSAL_MARKER;
+use yunta_core::rail::answer::{FormatAnswer, FormatNote, StopAnswer, WriteAnswer, WriteRefusal};
+use yunta_core::rail::window::{AskBudget, Wait};
+use yunta_core::rail::{RailAct, RailCall, RailEndpoint, TOKEN_VAR, URL_VAR};
+use yunta_core::{CommandName, Secret};
+use yunta_testkit::after;
 
 const TOKEN: &str = "the-session-token";
 
@@ -74,23 +81,83 @@ fn request(stream: &std::net::TcpStream) -> (String, bool, Option<RailCall>) {
     )
 }
 
-/// The engine's rule: a write under `src/` goes on, anything else is
-/// refused.
-fn answer(call: Option<RailCall>) -> RailAnswer {
-    match call.map(|call| call.act) {
+/// The engine's rule at each moment: a write under `src/` goes on and any
+/// other is refused; a write that landed is told what its formatter
+/// changed; a stop is sent back to its work. Each answer is serialized the
+/// way the engine sends it.
+fn answer(call: Option<RailCall>) -> serde_json::Value {
+    let value = match call.map(|call| call.act) {
         Some(RailAct::BeforeWrite { paths })
             if paths.iter().all(|path| {
                 let path = path.to_string_lossy();
                 path.starts_with("src/") || path.contains("/src/")
             }) =>
         {
-            RailAnswer::Proceed
+            serde_json::to_value(WriteAnswer::Proceed)
         }
-        _ => RailAnswer::Refuse {
-            reason: "yunta: write refused: docs/readme.md is outside this session's scope."
-                .to_string(),
-        },
-    }
+        Some(RailAct::AfterWrite { paths }) => serde_json::to_value(FormatAnswer::Tell {
+            notes: vec![FormatNote::Changed {
+                run: CommandName::from_static("rustfmt"),
+                paths,
+            }],
+        }),
+        Some(RailAct::BeforeStop) => serde_json::to_value(StopAnswer::Refuse {
+            reason: "the work is not finished, so the session goes on.".to_string(),
+        }),
+        _ => serde_json::to_value(WriteAnswer::Refuse {
+            reason: WriteRefusal::try_from(format!(
+                "{REFUSAL_MARKER}docs/readme.md is outside this session's scope."
+            ))
+            .unwrap(),
+        }),
+    };
+    value.unwrap()
+}
+
+/// Answers each connection on its own: a write answer waits `delay`, a
+/// report is answered at once, and every request is recorded as it arrives.
+fn slow_engine(delay: Duration) -> (String, mpsc::Receiver<(String, Option<RailCall>)>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a port for the engine");
+    let url = format!("http://{}/rail", listener.local_addr().unwrap());
+    let (asked, heard) = mpsc::channel();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let (path, _, call) = request(&stream);
+            let _ = asked.send((path.clone(), call.clone()));
+            let wait = if path.ends_with("/report") {
+                Duration::ZERO
+            } else {
+                delay
+            };
+            after(wait, move || {
+                let body = serde_json::to_string(&answer(call)).unwrap();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+            });
+        }
+    });
+    (url, heard)
+}
+
+/// Answers one request, then sends a byte every `every`, `ticks` times.
+fn trickle(every: Duration, ticks: u32) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/rail", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = stream.read(&mut [0; 4096]);
+        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n");
+        for tick in 1..=ticks {
+            let mut writer = stream.try_clone().unwrap();
+            after(every * tick, move || {
+                let _ = writer.write_all(b"x");
+            });
+        }
+    });
+    url
 }
 
 /// Runs the hook with `rail` in its environment and the call on stdin.
@@ -285,4 +352,45 @@ fn what_the_engine_says_after_a_write_is_context_for_every_adapter() {
     let out = hook_at("claude-code", "after-write", None, &writing("a.rs"));
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty());
+}
+
+/// The window is one total, not one per read: a server that keeps the
+/// socket busy with a byte every 300 ms cannot hold the ask past what is
+/// left of its budget.
+#[test]
+fn an_ask_gives_up_when_its_window_is_spent_in_total() {
+    let endpoint = RailEndpoint {
+        url: trickle(Duration::from_millis(300), 16),
+        token: Secret::new("t".to_string()),
+    };
+    let call = RailCall {
+        session_id: "s-1".parse().unwrap(),
+        act: RailAct::BeforeWrite {
+            paths: vec![PathBuf::from("src/a.rs")],
+        },
+        model: None,
+    };
+    let started = Instant::now();
+    let window = Wait::Write(AskBudget::from_process_start(
+        started - Duration::from_millis(6_500),
+    ));
+    assert!(endpoint.ask::<WriteAnswer>(&call, window).is_err());
+    assert!(
+        started.elapsed() < Duration::from_millis(1_500),
+        "a deadline per read waited out the trickle"
+    );
+}
+
+/// A write whose engine does not answer inside its window is refused, and
+/// the timeout reaches the log through one report.
+#[test]
+fn a_write_hook_past_its_window_refuses_and_reports_the_timeout() {
+    let (url, heard) = slow_engine(Duration::from_secs(9));
+    let out = hook(Some((&url, TOKEN)), &writing("src/lib.rs"));
+    assert_eq!(out.status.code(), Some(2));
+    let reports = heard
+        .try_iter()
+        .filter(|(path, _)| path.ends_with("/rail/report"))
+        .count();
+    assert_eq!(reports, 1, "the timeout reaches the log once");
 }

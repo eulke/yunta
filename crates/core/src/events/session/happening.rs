@@ -1,8 +1,15 @@
 //! What a session-level event says happened, read as a person reads it.
 
-use crate::events::{AgentMessageType, SessionEvent, ToolTarget};
+use std::collections::BTreeMap;
+
+use crate::events::{
+    AgentMessageType, RailFailedPayload, RailSummaryPayload, SessionEvent, ToolTarget,
+};
 use crate::fence::Coverage;
 use crate::port::PolicyApplied;
+use crate::rail::hook::RailFailureCause;
+use crate::rail::timing::Histogram;
+use crate::rail::RailEvent;
 use crate::{AdapterId, AgentName, Capability, ModelName};
 
 /// One thing that happened inside a node's session.
@@ -43,11 +50,24 @@ pub enum Happening {
     /// A stop sent back to the work, and what kept that work from closing.
     StopRefused(Vec<crate::events::StopRefusal>),
     /// What a session wrote, formatted: by which command, what it changed,
-    /// and how the command exited.
+    /// how the command exited, and whether it was stopped at its bound.
     Formatted {
         run: crate::ids::CommandName,
         changed: Vec<std::path::PathBuf>,
         exit_code: i32,
+        timed_out: bool,
+    },
+    /// A failure of the rail: the moment it was for, when one could be
+    /// read, and its cause.
+    RailFailed {
+        event: Option<RailEvent>,
+        cause: RailFailureCause,
+    },
+    /// What the rail heard of a session: its model, and how long each
+    /// moment's calls took.
+    RailSummary {
+        model: Option<ModelName>,
+        moments: BTreeMap<RailEvent, Histogram>,
     },
     /// One failed call is a moment in the chronicle.
     RunToolFailed {
@@ -96,7 +116,10 @@ impl From<&SessionEvent> for Happening {
                 run: p.run.clone(),
                 changed: p.changed.clone(),
                 exit_code: p.exit_code,
+                timed_out: p.timed_out,
             },
+            SessionEvent::RailFailed(p) => p.into(),
+            SessionEvent::RailSummary(p) => p.into(),
             SessionEvent::RunToolFailed(p) => Happening::RunToolFailed {
                 tool: p.tool,
                 cause: p.cause,
@@ -111,6 +134,24 @@ impl From<&SessionEvent> for Happening {
             SessionEvent::ServiceReachable(p) => Happening::Reconnected {
                 waited: std::time::Duration::from_millis(p.waited_ms),
             },
+        }
+    }
+}
+
+impl From<&RailFailedPayload> for Happening {
+    fn from(payload: &RailFailedPayload) -> Self {
+        Happening::RailFailed {
+            event: payload.event,
+            cause: payload.cause,
+        }
+    }
+}
+
+impl From<&RailSummaryPayload> for Happening {
+    fn from(payload: &RailSummaryPayload) -> Self {
+        Happening::RailSummary {
+            model: payload.model.clone(),
+            moments: payload.moments.clone(),
         }
     }
 }

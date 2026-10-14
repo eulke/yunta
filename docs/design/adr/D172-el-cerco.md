@@ -3,7 +3,7 @@ number: D172
 title: "El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía"
 status: revised
 revises: [D13, D167]
-revised_by: [D249, D250, D251, D265]
+revised_by: [D249, D250, D251, D265, D266]
 ---
 
 # D172 — El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía
@@ -126,3 +126,5 @@ cuando la confinación guardada en `agent_session_opened.confinement` deja el
 checkout solo al cerco: comandos confinados y `worktree: nothing`. Las demás
 escrituras que llegan al diff son solo violaciones. Un log escrito antes de ese
 registro se lee por su cobertura, donde `exact` marcaba la brecha.)*
+
+*(Revisada por D266: la decisión 9 cambia de lugar y no de valor. Los 10 segundos del hook de escritura son `WRITE_HOOK_CLI_MS` en `core::rail::window`, y el engine responde dentro de 7 segundos desde el arranque del proceso del hook.)*

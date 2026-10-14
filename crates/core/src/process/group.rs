@@ -104,9 +104,11 @@ pub enum GroupError {
 
 /// Kills every member of `pgid`, including descendants that joined while
 /// an earlier signal was being delivered, until none can still execute.
-/// The caller must keep the group leader unreaped until this returns: its
-/// pid is the group id, and retaining it prevents that identity from
-/// being recycled while signals are still sent.
+/// The engine keeps the group leader unreaped until this returns: its pid
+/// is the group id, and retaining it prevents that identity from being
+/// recycled while signals are still sent. `yunta cancel` calls this on the
+/// groups its registry names after the engine has exited, when the leader
+/// may already be reaped.
 pub async fn force_kill_group(pgid: Pid) -> Result<(), GroupError> {
     let mut observation = tokio::time::interval(OBSERVATION_INTERVAL);
     let mut last_members = Vec::new();
@@ -141,6 +143,17 @@ pub async fn force_kill_group(pgid: Pid) -> Result<(), GroupError> {
             members: listed(&last_members),
         },
     })
+}
+
+/// Whether any member of `pgid` can execute. A leader that exited
+/// can leave a child running in the group, and that child keeps the group
+/// running, so every member is read rather than the leader alone. A group
+/// with no member, or only zombies, does not run: the reading
+/// `force_kill_group` takes for an empty group.
+pub fn group_runs(pgid: Pid) -> io::Result<bool> {
+    Ok(inspect(pgid)?
+        .iter()
+        .any(|member| member.state != State::Terminated))
 }
 
 fn emergency_kill(pgid: Pid, cause: GroupError) -> GroupError {

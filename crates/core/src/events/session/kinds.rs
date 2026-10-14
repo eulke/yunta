@@ -14,6 +14,11 @@ pub enum SessionEvent {
     StopRefused(StopRefusedPayload),
     /// What the session wrote, formatted the moment it wrote it.
     WriteFormatted(WriteFormattedPayload),
+    /// A failure of the rail, with the closed cause that names it.
+    RailFailed(RailFailedPayload),
+    /// What the rail heard of the session: the model it named, and how
+    /// long each moment took.
+    RailSummary(RailSummaryPayload),
     RunToolFailed(RunToolFailedPayload),
     /// A call this binary refused, and why; the session was answered with
     /// the refusal.

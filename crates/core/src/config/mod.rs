@@ -288,7 +288,9 @@ impl ConfigLayer {
     }
 
     /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
-    /// hidden default: absent means unlimited, exactly as before.
+    /// hidden default: absent means the session runs without a time bound,
+    /// and the stop judgement's window for such a session is
+    /// [`crate::rail::window::UNSET_WINDOW_SECS`], one hour.
     pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {
         self.defaults
             .as_ref()

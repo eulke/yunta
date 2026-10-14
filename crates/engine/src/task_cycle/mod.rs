@@ -49,7 +49,7 @@ pub(crate) use record::recorded;
 use record::Recorder;
 
 pub(crate) use criteria::{
-    could_not_run, exit_code_of, pre_check_unless_cut, probe, probe_command, unanswered_words,
+    could_not_run, pre_check_unless_cut, probe, probe_command, unanswered_words,
 };
 pub use criteria::{post_check, pre_check, PostCheck};
 pub(crate) use dispatch::not_stopped_failure;

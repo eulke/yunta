@@ -18,12 +18,14 @@
 use std::time::Duration;
 
 use yunta_core::events::RunPhaseRaw;
+use yunta_core::process::group::force_kill_group;
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
 use yunta_core::{describe, Pid, RunId};
 use yunta_engine::NodeState;
 
 use crate::commands::advice;
-use crate::context::Context;
+use crate::commands::close::give_back;
+use crate::context::{Context, Opened};
 use crate::error::{note, warn, CliError, Outcome};
 
 /// How long the engine gets to react to the SIGINT before the escalation
@@ -41,21 +43,25 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
     let open = ctx.open_run(run_id).await?;
-    let events = open.events;
 
-    let state = yunta_engine::derive(&events);
+    let state = yunta_engine::derive(&open.events);
     // Where the log leaves the run now: a pause a later wake resumed
     // stopped nothing that is still stopped.
     let parked = matches!(state.run.phase(), RunPhaseRaw::Paused);
     let stopped = parked || matches!(state.run.phase(), RunPhaseRaw::Closed);
 
     if state.broken.is_some() || stopped {
-        match parked {
-            true => println!(
+        let killed = settle_stopped(&ctx, &open, run_id).await;
+        match (parked, killed) {
+            (_, count) if count > 0 => println!(
+                "run {called}: already stopped — killed {}, which the engine could not stop",
+                yunta_core::text::counted(count, "process group")
+            ),
+            (true, _) => println!(
                 "run {called}: already stopped — nothing to cancel; `{}` closes it for good",
                 advice::close(run_id.handle())
             ),
-            false => println!("run {called}: already stopped — nothing to cancel"),
+            (false, _) => println!("run {called}: already stopped — nothing to cancel"),
         }
         return Ok(Outcome::Success);
     }
@@ -63,11 +69,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     // Resolved before anything is signalled or written: a short declared
     // secret leaves the run as it is.
     let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
-    let run_dir = ctx
-        .project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let registry = match yunta_engine::read_registry(&run_dir) {
+    let registry = match yunta_engine::read_registry(&open.run_dir) {
         yunta_engine::Registry::Read(registry) => registry.doc,
         // A registry that will not read is not a registry that was
         // never written: the person is told which of the two it is,
@@ -158,13 +160,27 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     }
 
     // Case 2 — the engine crashed; its leftovers are ours to clean.
-    settle_crash(&ctx, &storage, run_id, &run_dir, &registry, &redactor).await?;
+    settle_crash(&ctx, &storage, run_id, &open.run_dir, &registry, &redactor).await?;
     println!(
         "run {called}: engine (pid {}) was already dead — killed {}, recorded the pause",
         registry.engine_pid,
         yunta_core::text::counted(registry.process_groups.len(), "orphaned process group")
     );
     Ok(Outcome::Success)
+}
+
+/// Kills the process groups a stopped run's engine could not stop, and gives
+/// back the checkouts they held. Runs when `cancel` finds the run paused or
+/// closed, or its log broken. Each group its registry names is killed, unless
+/// [`may_signal`] refuses it. When any of them is alive, the checkouts go
+/// back to the pool, as `close` gives them back; the run's own state is left
+/// as it is. Answers how many of the named groups are alive as it looks.
+async fn settle_stopped(ctx: &Context, open: &Opened, run_id: &RunId) -> usize {
+    let killed = kill_unstopped_groups(&open.run_dir).await;
+    if killed > 0 {
+        give_back(ctx, open, run_id).await;
+    }
+    killed
 }
 
 /// What a run whose engine died left behind, settled: every process
@@ -204,17 +220,52 @@ pub(crate) async fn settle_crash(
 /// [`signalable_group`]) is skipped with a loud note rather than signalled.
 fn kill_groups(groups: &[Pid]) {
     for pgid in groups {
-        if !signalable_group(*pgid) {
-            warn(format!(
-                "refusing to signal process group {pgid}: not a run's own process group — \
-                 engine.json is corrupt, skipping it"
-            ));
+        if !may_signal(*pgid) {
             continue;
         }
         if let Err(e) = signal_group(*pgid, Signal::SIGKILL) {
             warn(describe(&e));
         }
     }
+}
+
+/// Whether `pgid` may be signalled as a run's group. One that may not is
+/// warned about, and skipped.
+fn may_signal(pgid: Pid) -> bool {
+    if signalable_group(pgid) {
+        return true;
+    }
+    warn(format!(
+        "refusing to signal process group {pgid}: not a run's own process group — \
+         engine.json is corrupt, skipping it"
+    ));
+    false
+}
+
+/// SIGKILL to every process group a stopped run's registry names, as the crash
+/// path does: the groups its engine could not stop, which hold the run's
+/// checkout taken while they run. A group whose leader has exited is signalled
+/// too, since its members may still run. Each group is killed until none of its
+/// members can run. Answers how many of the named groups still answered when it
+/// looked.
+async fn kill_unstopped_groups(run_dir: &std::path::Path) -> usize {
+    let yunta_engine::Registry::Read(registry) = yunta_engine::read_registry(run_dir) else {
+        return 0;
+    };
+    let groups = &registry.doc.process_groups;
+    let running = answering(groups);
+    for pgid in groups.iter().copied().filter(|pgid| may_signal(*pgid)) {
+        if let Err(e) = force_kill_group(pgid).await {
+            warn(describe(&e));
+        }
+    }
+    running
+}
+
+/// How many of `groups` still run, read as the engine reads them: a group
+/// whose leader exited while a child it left runs still counts.
+fn answering(groups: &[Pid]) -> usize {
+    yunta_engine::running_groups(groups).len()
 }
 
 /// Whether `cancel` may signal a process group. `signal_group` is

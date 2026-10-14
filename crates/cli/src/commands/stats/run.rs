@@ -81,6 +81,7 @@ pub(super) fn render_run_stats(
     let mut out = format!("run {run_id} — mode {mode}\n");
     out.push_str(&crate::render::draw(Doc::new().with(fields), look));
     out.push_str(&super::time::render(&stats.time, look));
+    out.push_str(&super::time::rail_latency(&stats.rails, look));
     out.push_str(&render_nodes(stats, state, look));
     out.push_str(&render_runners(stats, look));
     out
@@ -270,6 +271,7 @@ fn node_line(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
@@ -317,6 +319,7 @@ mod tests {
             wall_clock: Some(Duration::from_secs(90)),
             asleep: Duration::ZERO,
             time: Default::default(),
+            rails: BTreeMap::new(),
             nodes,
             unknown_kinds: Vec::new(),
             artifact_submissions: yunta_engine::Submissions {
@@ -375,6 +378,7 @@ mod tests {
             findings: Default::default(),
             findings_effective: 0,
             findings_settled: 0,
+            rails: BTreeMap::new(),
             ..stats(Vec::new())
         };
         let text = render(&quiet, &Look::plain());
@@ -397,6 +401,7 @@ mod tests {
     fn the_cache_rate_above_one_reads_as_a_multiple() {
         let cached = RunStats {
             cache_rate: Some(1.4),
+            rails: BTreeMap::new(),
             ..stats(Vec::new())
         };
         let text = render(&cached, &Look::plain());
@@ -428,6 +433,7 @@ mod tests {
             cache_rate: Some(1.4),
             total_tokens: spend.so_far(),
             spend,
+            rails: BTreeMap::new(),
             ..stats(vec![
                 node("plan", 4_000, 40),
                 node("implement-the-whole-feature", 14_000, 300),

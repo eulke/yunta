@@ -10,7 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use yunta_core::fence::{Advice, Fence, Verdict};
-use yunta_core::rail::{RailAct, RailAnswer, RailCall, RailEndpoint};
+use yunta_core::rail::answer::{FormatAnswer, StopAnswer, WriteAnswer, WriteRefusal};
+use yunta_core::rail::{RailAct, RailCall, RailEndpoint};
 
 use axum::extract::State;
 use axum::routing::post;
@@ -38,6 +39,9 @@ mod confinement;
 
 #[path = "mock/continuity.rs"]
 mod continuity;
+
+#[path = "mock/refusal.rs"]
+mod refusal;
 
 #[tokio::test]
 async fn a_successful_session_opens_then_completes() {
@@ -188,12 +192,15 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
     ));
 }
 
-/// A `/rail` that rules as the engine's rail does: a write is judged by the
-/// judge's fence under its confinement, and each path it refuses is answered
-/// with the fence's own refusal, named as the adapter names tools.
+/// A `/rail` that rules as the engine's rail does, with one route per moment:
+/// a write is judged by the judge's fence under its confinement, and each path
+/// it refuses is answered with the fence's own refusal, named as the adapter
+/// names tools.
 async fn judging_rail(judge: Judge) -> RailEndpoint {
     let app = Router::new()
-        .route("/rail/{moment}", post(rule))
+        .route("/rail/before-write", post(judge_write))
+        .route("/rail/after-write", post(judge_after_write))
+        .route("/rail/before-stop", post(judge_before_stop))
         .with_state(judge);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -215,29 +222,36 @@ struct Judge {
     naming: ToolNaming,
 }
 
-/// The engine's answer to one hook call: a write is refused when the fence
-/// refuses any path it names, judged under the confinement; every other
-/// moment goes on.
-async fn rule(State(judge): State<Judge>, Json(call): Json<RailCall>) -> Json<RailAnswer> {
+/// The engine's answer to a write: it is refused when the fence refuses any
+/// path it names, judged under the confinement, and the reason is the engine's
+/// own wording of those refusals.
+async fn judge_write(State(judge): State<Judge>, Json(call): Json<RailCall>) -> Json<WriteAnswer> {
     let RailAct::BeforeWrite { paths } = call.act else {
-        return Json(RailAnswer::Proceed);
+        return Json(WriteAnswer::Proceed);
     };
-    let reasons: Vec<String> = paths
+    let refusals: Vec<_> = paths
         .iter()
         .filter_map(
             |path| match judge.fence.judge(&judge.worktree, path, &judge.confinement) {
-                Verdict::Refused(refusal) => Some(refusal.message(judge.naming)),
+                Verdict::Refused(refusal) => Some(refusal),
                 Verdict::Allowed => None,
             },
         )
         .collect();
-    Json(if reasons.is_empty() {
-        RailAnswer::Proceed
-    } else {
-        RailAnswer::Refuse {
-            reason: reasons.join("\n\n"),
-        }
+    Json(match WriteRefusal::of(&refusals, judge.naming) {
+        Some(reason) => WriteAnswer::Refuse { reason },
+        None => WriteAnswer::Proceed,
     })
+}
+
+/// The judge formats nothing, so no write is told anything after it lands.
+async fn judge_after_write(Json(_call): Json<RailCall>) -> Json<FormatAnswer> {
+    Json(FormatAnswer::Proceed)
+}
+
+/// The judge lets every stop go on.
+async fn judge_before_stop(Json(_call): Json<RailCall>) -> Json<StopAnswer> {
+    Json(StopAnswer::Proceed)
 }
 
 /// The request with its hooks pointed at a judge of its own fence, which names
@@ -291,9 +305,8 @@ outcome: { type: completed, summary: "done" }
     assert!(!dir.path().join("outside/scope.rs").exists());
 }
 
-/// The same refusal under the codex dialect, whose hook refuses a patch only
-/// when its reply gives the reason on stderr: a reply that loses the reason
-/// lets the write through, as it would under the CLI.
+/// The same refusal under the codex dialect, whose hook is asked about each
+/// file the patch names.
 #[tokio::test]
 async fn a_codex_fixture_effect_outside_the_fence_is_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -637,7 +650,7 @@ sessions:
 
 #[tokio::test]
 async fn unmatched_scripts_still_serve_in_declaration_order() {
-    // Fixtures that never set match_prompt_contains keep today's exact
+    // Fixtures that never set match_prompt_contains keep their exact
     // behavior — this field is additive, not a breaking change.
     let dir = tempfile::tempdir().unwrap();
     let fixture = r#"

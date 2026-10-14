@@ -76,7 +76,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 59 event kinds in 49 rows; some rows group related variants:
+The current table contains 61 event kinds in 51 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -120,7 +120,9 @@ The current table contains 59 event kinds in 49 rows; some rows group related va
 | `child_run_created` / `child_run_finished` | engine | node_id, child run_id, `workflow_hash` del hijo, estado terminal |
 | `capability_degraded` | engine | capacidad, adapter, política (un conjunto cerrado) |
 | `write_refused` | engine (riel) | sesión que la rechazó, y el path que la escritura nombraba (§6) |
-| `write_formatted` | engine (riel) | sesión que escribió, el comando de `format:` que formateó, los paths, cuáles cambió, su exit code y su duración (D255) |
+| `write_formatted` | engine (riel) | sesión que escribió, el comando de `format:` que formateó, los paths, cuáles cambió, su exit code, su duración, la salida redactada que guardó y si la cota la cortó (D255, D266) |
+| `rail_failed` | engine (riel) | sesión a la que pertenece la falla, momento de la llamada cuando se pudo leer, y la causa cerrada por la que el riel falló (D266) |
+| `rail_summary` | engine (riel) | sesión cuyo riel resume, el primer modelo que oyó, y por momento el histograma de cuánto tardó cada respuesta (D266) |
 | `stop_refused` | engine (riel) | sesión que quiso terminar con trabajo que su cierre no tomaría, el estado de ese trabajo y qué lo impedía (§5.2) |
 | `run_tool_failed` | adapter (recorded by engine) | session ID, known `yunta-run` tool, closed failure cause; no arguments, response, or raw error text |
 | `run_tool_refused` | engine | el tool conocido de `yunta-run` que nombró la llamada, y el motivo cerrado por el que el engine la rechazó |

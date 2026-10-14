@@ -354,6 +354,24 @@ juicio que el cierre del intento, en seco: si el cierre no lo tomaría, la
 sesión vuelve a él.
 _Evitar_: fence hook, FenceHook, yunta fence.
 
+**Falla del riel** (`rail_failed`):
+Una llamada del riel que el engine oyó y no pudo juzgar ni responder a tiempo.
+Lleva una causa cerrada (`decode`, `unauthorized`, `timeout`, `judgement_failed`,
+`formatter_failed`, `no_fence` o `listener_died`) y, cuando se conocen, la sesión
+y el momento de la llamada. Un hook que no alcanza a ningún engine no deja falla:
+la negativa lleva la causa (D266).
+
+**Reporte del riel** (`/rail/report`):
+La llamada con que un hook le dice al engine una falla que el engine no vio, con
+su causa cerrada. Se envía una vez por falla, y no vuelve a preguntar: es un
+reporte, no un reintento (D266).
+
+**Resumen de tiempos del riel** (`rail_summary`):
+El evento que cierra cada sesión con riel. Guarda, por momento, un histograma de
+cuánto tardó cada respuesta, que se suma con los de otras sesiones, y el primer
+modelo que oyó el riel. `yunta stats` lee de él el p50 y el p95 de cada momento
+(D266).
+
 **Codec** (`RailCodec`):
 La traducción entre el riel y el hook de un CLI: qué pregunta la llamada que
 llegó por stdin, y en qué forma ese CLI lee la respuesta. Un adapter escribe

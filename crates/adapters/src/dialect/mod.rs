@@ -11,9 +11,9 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::events::FailureCause;
 use yunta_core::fence::Coverage;
 use yunta_core::port::session::SessionEnv;
-use yunta_core::port::{HookReply, RailCodec, SessionRequest};
+use yunta_core::port::{RailCodec, SessionRequest};
 use yunta_core::process::subprocess::LineParser;
-use yunta_core::rail::{RailAnswer, RailCommand, RailEndpoint, RailEvent};
+use yunta_core::rail::{RailCommand, RailEndpoint, RailEvent};
 use yunta_core::{
     AdapterError, AdapterId, AdapterSettings, Capabilities, EditSandbox, ModelName, Result,
     ScopeGlob, SessionId, ToolNaming, Unbuildable,
@@ -116,15 +116,6 @@ impl DialectName {
         match self {
             Self::ClaudeCode => claude_code::wire::hook_stdin(event, session, path),
             Self::Codex => codex::wire::hook_stdin(event, session, path),
-        }
-    }
-
-    /// The answer this CLI takes from a hook's reply for `event`: the reading
-    /// that undoes the codec's `encode`, as the CLI itself reads the reply.
-    pub(crate) fn read_reply(self, event: RailEvent, reply: &HookReply) -> RailAnswer {
-        match self {
-            Self::ClaudeCode => claude_code::rail::read_reply(event, reply),
-            Self::Codex => codex::rail::read_reply(event, reply),
         }
     }
 

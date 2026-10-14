@@ -1,6 +1,8 @@
 //! Routes each parsed subcommand to the module under `commands/` that
 //! runs it.
 
+use std::time::Instant;
+
 use super::{Command, PackAction};
 use crate::commands;
 use crate::commands::run_ref::named;
@@ -8,8 +10,9 @@ use crate::error::{CliError, Outcome};
 use crate::graph;
 
 /// Runs one subcommand, handing back its verdict or the one error the
-/// caller turns into a line on stderr and a failing exit code.
-pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
+/// caller turns into a line on stderr and a failing exit code. `started`
+/// is when this process began, which a hook's window counts from.
+pub(super) async fn dispatch(command: Command, started: Instant) -> Result<Outcome, CliError> {
     match command {
         Command::Completions { shell } => {
             use clap::CommandFactory;
@@ -120,7 +123,7 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
                 .await
         }
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
-        Command::Rail { adapter, event } => rail_hook(&adapter, event),
+        Command::Rail { adapter, event } => rail_hook(&adapter, event, started),
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
         Command::New {
             name,
@@ -139,6 +142,7 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
 fn rail_hook(
     adapter: &yunta_core::AdapterId,
     event: yunta_core::rail::RailEvent,
+    started: Instant,
 ) -> Result<Outcome, CliError> {
     use std::io::{Read, Write};
 
@@ -153,7 +157,7 @@ fn rail_hook(
         event,
         env.rail.as_ref(),
         &stdin,
-        commands::rail::over_loopback,
+        started,
     );
     // A hook that cannot deliver its answer has not answered, and the
     // exit code alone is what the calling CLI then reads: a failure

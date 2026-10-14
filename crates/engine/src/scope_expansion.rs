@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
+use yunta_core::events::STOPPED_EXIT_CODE;
 use yunta_core::expansion::{
     touched_under, Ask, Bounds, Candidate, Decision, Denial, Precheck, Proposal, Screen,
 };
@@ -29,7 +30,7 @@ use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeGlob;
 
 use crate::git::GitError;
-use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
+use crate::process::{spawn_governed, Capture, GovernedCommand, Supervision};
 
 mod request;
 
@@ -240,12 +241,12 @@ pub(crate) async fn run_criterion(
             cmd: cmd.to_string(),
             source,
         })?;
-    Ok(match outcome {
-        Outcome::Exited { status, .. } => match status.code().unwrap_or(-1) {
-            0 => Precheck::Passes,
-            exit => Precheck::Red { exit },
-        },
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => Precheck::CouldNotRun,
+    let exit_code = outcome.exit_code();
+    Ok(match exit_code {
+        0 => Precheck::Passes,
+        // The engine stopped it before it answered, so it could not run.
+        STOPPED_EXIT_CODE => Precheck::CouldNotRun,
+        exit => Precheck::Red { exit },
     })
 }
 

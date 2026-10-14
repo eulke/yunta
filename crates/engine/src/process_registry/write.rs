@@ -252,6 +252,17 @@ mod tests {
         registry.doc.process_groups.clone()
     }
 
+    /// A process group that runs until its leader is killed: a `sleep` leads
+    /// it, so the group has a member that runs.
+    fn running_group() -> std::process::Child {
+        use std::os::unix::process::CommandExt;
+        std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap()
+    }
+
     #[test]
     fn a_kept_registration_leaves_its_group_registered_once_its_guard_is_gone() {
         let run = tempfile::tempdir().unwrap();
@@ -276,14 +287,16 @@ mod tests {
     fn a_kept_group_that_still_runs_outlives_the_engine_that_kept_it() {
         let run = tempfile::tempdir().unwrap();
         let registry = registry_in(run.path());
-        // This test process is running, so it stands in for a group the
-        // engine could not stop.
-        let group = Pid::current();
+        // The group runs, so it stands in for a group the engine could not stop.
+        let mut leader = running_group();
+        let group = Pid::try_from(leader.id()).expect("a pid");
         register(Some(&registry), Some(group))
             .expect("a registration")
             .keep();
         drop(registry);
         assert_eq!(groups_on_disk(run.path()), vec![group]);
+        leader.kill().expect("the sleep is killed");
+        leader.wait().expect("the sleep is reaped");
     }
 
     #[test]
@@ -303,7 +316,8 @@ mod tests {
     fn a_later_invocation_keeps_the_running_groups_an_earlier_one_kept() {
         let run = tempfile::tempdir().unwrap();
         let earlier = registry_in(run.path());
-        let group = Pid::current();
+        let mut leader = running_group();
+        let group = Pid::try_from(leader.id()).expect("a pid");
         register(Some(&earlier), Some(group))
             .expect("a registration")
             .keep();
@@ -311,5 +325,7 @@ mod tests {
         let later = registry_in(run.path());
         assert_eq!(groups_on_disk(run.path()), vec![group]);
         drop(later);
+        leader.kill().expect("the sleep is killed");
+        leader.wait().expect("the sleep is reaped");
     }
 }

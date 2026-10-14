@@ -46,6 +46,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{Spend, StoredEvent, Suspensions, TokenUsage};
+use yunta_core::rail::timing::Histogram;
+use yunta_core::rail::RailEvent;
 use yunta_core::{Node, NodeId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, TimeSpent, UnknownKindCount};
@@ -186,6 +188,9 @@ pub struct RunStats {
     pub findings_effective: u64,
     /// How many of those a proof or a person settled.
     pub findings_settled: u64,
+    /// How long the rail's calls took at each moment, merged over every
+    /// session of the run; empty when no rail call was made.
+    pub rails: BTreeMap<RailEvent, Histogram>,
 }
 
 impl RunStats {
@@ -291,6 +296,7 @@ pub(crate) fn stats_observed_at(
         findings_by_node: activity.findings_by_node.clone(),
         findings_effective: state.findings.effective().len() as u64,
         findings_settled: findings_settled(state),
+        rails: activity.rails.clone(),
     }
 }
 

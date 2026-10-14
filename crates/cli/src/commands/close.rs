@@ -76,10 +76,10 @@ async fn settled_liveness(
     Ok(engine)
 }
 
-/// Gives a closed run's checkouts back to the project's pool: nothing will
-/// continue in them. One that cannot be given back stays the run's until
-/// `gc` collects it.
-async fn give_back(ctx: &Context, open: &crate::context::Opened, run_id: &RunId) {
+/// Gives a run's checkouts back to the project's pool, as `close` does for a
+/// closed run and `cancel` does once a stopped run's groups are gone. A
+/// checkout that cannot be given back stays the run's until `gc` collects it.
+pub(crate) async fn give_back(ctx: &Context, open: &crate::context::Opened, run_id: &RunId) {
     let manifest = &open.manifest.doc;
     let bound = crate::project::bound_checkout(&yunta_engine::derive(&open.events));
     let tree = ctx

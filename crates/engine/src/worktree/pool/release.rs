@@ -36,7 +36,9 @@ pub async fn release_unit_checkouts(
 /// lets go of the run's branch where it stands, unless something in it is
 /// uncommitted — somebody's. The branch stays: it holds what the run did.
 /// A checkout outside the pool, one a run made before its project kept
-/// checkouts, stays where it is.
+/// checkouts, stays where it is. A checkout a process group still runs in
+/// is kept instead, since a session the engine could not stop may still
+/// write there, and its branch stays with it.
 pub async fn release_run_checkout(
     pool: &CheckoutPool,
     tree: &Path,
@@ -51,6 +53,10 @@ pub async fn release_run_checkout(
     let Some(lease) = held else {
         return Ok(());
     };
+    if lease.groups_running().await {
+        lease.keep();
+        return Ok(());
+    }
     let branch = super::super::run_branch(run_id);
     let status = git::tree_state(&tree, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
     let lets_go = status.clean && status.branch.as_deref() == Some(branch.as_str());

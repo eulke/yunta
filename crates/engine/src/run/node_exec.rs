@@ -97,11 +97,16 @@ pub(super) async fn execute_node(
     }
     // The checkout stays held until the node's attempt has ended — its
     // work landed, or left for a session to continue — and is given back
-    // then.
+    // then, unless a session the engine could not stop is still running in
+    // it: the hold then stands for the pool's take rule.
     let (unit, lease, continuing) = node_unit(ctx, node, attempt).await?;
     let in_unit = ctx.in_unit(&unit, continuing.as_ref());
     let ended = Box::pin(execute_in_its_tree(&in_unit, node, attempt, cancel)).await;
-    ctx.pool.give_back(lease, ctx.supervision(cancel)).await?;
+    if super::cleanup::unstopped_session_runs(ctx, node, &ended, &lease).await? {
+        lease.keep();
+    } else {
+        ctx.pool.give_back(lease, ctx.supervision(cancel)).await?;
+    }
     ended
 }
 

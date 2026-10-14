@@ -25,6 +25,18 @@ impl NodeRecord {
         });
     }
 
+    /// The model the rail heard for an open session that opened without
+    /// one. A model the session reported at its opening stays as it is.
+    fn heard_model(&mut self, p: &crate::events::RailSummaryPayload) {
+        let open = self
+            .sessions
+            .iter_mut()
+            .find(|open| open.session_id == p.session_id);
+        if let Some(open) = open.filter(|open| open.model.is_none()) {
+            open.model = p.model.clone();
+        }
+    }
+
     /// What an agent message of the open attempt's session records: a tool
     /// it called, or the usage it reported. Usage moves the spend only while
     /// an attempt is open; reported outside one, it belongs to no attempt.
@@ -161,6 +173,10 @@ impl NodeLedger {
             SessionEvent::RunToolFailed(p) => record.last_tool_failure = Some(p.clone()),
             // What was formatted is `stats`' and the chronicle's to read.
             SessionEvent::WriteFormatted(_) => {}
+            // A failed rail call is audit only: the log keeps it, and no
+            // node's state reads it.
+            SessionEvent::RailFailed(_) => {}
+            SessionEvent::RailSummary(p) => record.heard_model(p),
             // The refusal itself reaches a reader through the log; for the
             // node it is a moment of activity and nothing more.
             SessionEvent::RunToolRefused(_) => {}

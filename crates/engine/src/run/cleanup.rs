@@ -3,12 +3,16 @@
 //! whose work its tree holds, and its own, unless a successor carries on
 //! in it. A run that finished asking to be cleaned up
 //! (`on_finish.cleanup: worktree`) also lets its own branch go. None of it
-//! ever un-finishes the run the log already closed.
+//! ever un-finishes the run the log already closed. A node's checkout, given
+//! back as its attempt ends, is kept instead while a session the engine could
+//! not stop still runs in it.
 
-use yunta_core::events::FindingSeverity;
-use yunta_core::{Location, RelativePath};
+use yunta_core::events::{Failure, FindingSeverity};
+use yunta_core::{Location, Node, NodeKind, RelativePath};
 
+use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
+use crate::replay::NodeState;
 
 /// Gives the checkouts the run's units hold back to the project's pool.
 /// One that cannot be given back stays its unit's until `gc` collects the
@@ -49,6 +53,35 @@ pub(super) async fn run(ctx: &RunCtx<'_>) {
     if let Err(error) = released.await {
         tracing::warn!(%error, "the checkout the run worked in was not given back");
     }
+}
+
+/// Whether the attempt that ended with `ended` left a session the engine
+/// could not stop in the checkout `lease` holds, and a process group its run
+/// registered still runs there: then the checkout is kept, not given back.
+/// Only a prompt node's session runs in the checkout its own attempt holds;
+/// a loop's sessions run in the checkouts of its tasks, which each task's
+/// dispatch holds. An attempt that finished reads nothing; a failed one reads
+/// the registry, and the log only once a group of the run still runs.
+pub(super) async fn unstopped_session_runs(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    ended: &Result<NodeEnd, RunError>,
+    lease: &crate::worktree::Lease,
+) -> Result<bool, RunError> {
+    if !matches!(ended, Ok(NodeEnd::Failed)) || !matches!(node.kind, NodeKind::Prompt { .. }) {
+        return Ok(false);
+    }
+    if !lease.groups_running().await {
+        return Ok(false);
+    }
+    let view = ctx.run_view().await?;
+    Ok(matches!(
+        view.state.nodes.state(&node.id),
+        Some(NodeState::Failed {
+            failure: Failure::SessionNotStopped { .. },
+            ..
+        })
+    ))
 }
 
 /// Lets the run's own branch go when its workflow asks for it and the run

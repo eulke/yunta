@@ -3,6 +3,7 @@
 //! the result to an exit code; every command lives under `commands/`.
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use yunta_core::{AdapterId, ModeName, OptionId, PackRef, Responder};
@@ -32,8 +33,10 @@ use dispatch::dispatch;
 impl Cli {
     /// Runs the parsed subcommand, handing back its verdict or the one
     /// error `main` turns into a line on stderr and a failing exit code.
-    pub async fn run(self) -> Result<Outcome, CliError> {
-        dispatch(self.command).await
+    /// `started` is when this process began, which a hook's window counts
+    /// from.
+    pub async fn run(self, started: Instant) -> Result<Outcome, CliError> {
+        dispatch(self.command, started).await
     }
 }
 

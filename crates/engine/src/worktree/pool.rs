@@ -110,17 +110,16 @@ pub(super) enum Taken {
 }
 
 /// A hold on one checkout of the pool, let go when dropped. A user done
-/// with the checkout gives it back instead
-/// ([`CheckoutPool::give_back`]), which records the use and the build it
-/// leaves.
+/// with the checkout gives it back instead ([`CheckoutPool::give_back`]),
+/// which records the use and the build it leaves.
 pub struct Lease {
     /// The pool the checkout is one of.
     home: PathBuf,
     /// Its number there.
     number: u32,
-    /// The record this process wrote into the checkout's lock: the lock is
-    /// removed only while it still names this record.
-    owner: LockOwner,
+    /// The record this process wrote into the checkout's lock, which is
+    /// removed only while it names this record; `None` once kept.
+    owner: Option<LockOwner>,
 }
 
 impl Lease {
@@ -138,19 +137,21 @@ impl Lease {
         Lease {
             home: home.to_path_buf(),
             number,
-            owner,
+            owner: Some(owner),
         }
     }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        let lock = self.home.join(format!("{SLOT}{}.lock", self.number));
-        // blocking: a `Drop` has no `await` to give, and releasing one
-        // lock file is a read and at most one removal. Doing it here is
-        // what makes an early `?` unable to leak the hold.
-        if let Err(error) = lock::release(&lock, &self.owner) {
-            tracing::debug!(%error, lock = %lock.display(), "a checkout's hold outlived it");
+        if let Some(owner) = &self.owner {
+            let lock = self.home.join(format!("{SLOT}{}.lock", self.number));
+            // blocking: a `Drop` has no `await` to give, and releasing one
+            // lock file is a read and at most one removal. Doing it here is
+            // what makes an early `?` unable to leak the hold.
+            if let Err(error) = lock::release(&lock, owner) {
+                tracing::debug!(%error, lock = %lock.display(), "a checkout's hold outlived it");
+            }
         }
     }
 }

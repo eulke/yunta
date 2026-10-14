@@ -150,7 +150,7 @@ impl SessionTools {
             yunta_core::events::RunToolRefusedPayload { tool, reason },
         ));
         if let Err(error) = self.append(payload).await {
-            tracing::debug!(%error, "a refused run tool call went unrecorded");
+            self.rails.left_unrecorded(error);
         }
     }
 

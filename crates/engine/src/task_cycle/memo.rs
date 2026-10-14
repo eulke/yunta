@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use yunta_core::protected::Pathspecs;
 use yunta_core::ContentHash;
 
-use super::criteria::{could_not_run, exit_code_of};
+use super::criteria::could_not_run;
 use super::tree::{asks_git, Tree};
 use super::TaskCycleError;
 use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Printed, Supervision};
@@ -232,7 +232,7 @@ impl Memo {
                 source,
             })?;
         let output = CommandOutput::of(&outcome);
-        let exit_code = exit_code_of(outcome);
+        let exit_code = outcome.exit_code();
         self.put(key, exit_code, &output);
         Ok(Memoized {
             exit_code,

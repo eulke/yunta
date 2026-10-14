@@ -276,6 +276,14 @@ the rail started from; "after" carries it.
 | Codex before | `continue-work` | green first time | — | 0 / — | 7m | — | 43m |
 | Codex after | `grant` ×3 | green first time | 1 | 7 / 31 | 23m | 1 s | 26m |
 
+- La columna `rails` es el tiempo que `stats` le dio al formateo de cada run, citado
+  aquí en segundos enteros. Dividirlo entre los formatos, la cuenta después de la
+  barra en `writes refused / formatted`, da un promedio por escritura redondeado al
+  segundo, no un p50. El p50 sale de los `duration_ms` de los eventos
+  `write_formatted` del run: pásale un payload por línea a
+  `jq -s '[.[] | select(.kind=="write_formatted") | .duration_ms] | sort'` y lee el
+  elemento del medio de la lista ordenada.
+
 - Un límite de cuenta que nombra su hora de reset pausa como `awaiting_reset` y
   retoma a esa hora, sin un `retry` de una persona; el `retry` de una persona se
   aplica a un límite solo cuando no nombró hora de reset. La parada `retry

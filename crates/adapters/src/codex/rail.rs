@@ -22,8 +22,10 @@ use std::path::PathBuf;
 use serde_json::Value;
 use toml::{Table, Value as Toml};
 use yunta_core::port::{CodecError, HookReply, RailCodec};
-use yunta_core::rail::{RailAct, RailAnswer, RailCall, RailCommand, RailEvent};
-use yunta_core::SessionId;
+use yunta_core::rail::answer::{FormatAnswer, StopAnswer, WriteAnswer};
+use yunta_core::rail::window::{hook_seconds, write_hook_cli_seconds};
+use yunta_core::rail::{RailAct, RailCall, RailCommand, RailEvent};
+use yunta_core::{ModelName, SessionId};
 
 use super::config::ConfigOverride;
 
@@ -38,18 +40,21 @@ const SESSION_FLAGS: &str = "/<session-flags>/config.toml";
 pub(crate) struct CodexRailCodec;
 
 impl RailCodec for CodexRailCodec {
-    fn decode(&self, event: RailEvent, stdin: &[u8]) -> Result<Option<RailCall>, CodecError> {
+    fn decode(&self, event: RailEvent, stdin: &[u8]) -> Result<RailCall, CodecError> {
         let call: Value = serde_json::from_slice(stdin)?;
         let session_id = call
             .get("session_id")
             .and_then(Value::as_str)
             .and_then(|id| id.parse::<SessionId>().ok())
             .ok_or(CodecError::MissingField("session_id"))?;
-        match event {
-            RailEvent::BeforeStop => Ok(Some(RailCall {
-                session_id,
-                act: RailAct::BeforeStop,
-            })),
+        // A model the CLI names is read onto the call; a name that is not a
+        // valid model name is read as no name.
+        let model = call
+            .get("model")
+            .and_then(Value::as_str)
+            .and_then(|model| model.parse::<ModelName>().ok());
+        let act = match event {
+            RailEvent::BeforeStop => RailAct::BeforeStop,
             RailEvent::BeforeWrite | RailEvent::AfterWrite => {
                 let patch = call
                     .get("tool_input")
@@ -60,56 +65,29 @@ impl RailCodec for CodexRailCodec {
                 if paths.is_empty() {
                     return Err(CodecError::MissingField("a file the patch names"));
                 }
-                let act = match event {
+                match event {
                     RailEvent::AfterWrite => RailAct::AfterWrite { paths },
                     _ => RailAct::BeforeWrite { paths },
-                };
-                Ok(Some(RailCall { session_id, act }))
+                }
             }
-        }
+        };
+        Ok(RailCall {
+            session_id,
+            act,
+            model,
+        })
     }
 
-    fn encode(&self, event: RailEvent, answer: &RailAnswer) -> HookReply {
-        match (event, answer) {
-            // Codex reads a refusal with nothing on stderr as a hook that
-            // failed, and runs the patch anyway: the reason is never empty.
-            (RailEvent::BeforeWrite, RailAnswer::Refuse { reason }) => HookReply {
-                stdout: Vec::new(),
-                stderr: match reason.is_empty() {
-                    true => b"yunta: write refused".to_vec(),
-                    false => reason.clone().into_bytes(),
-                },
-                exit: 2,
-            },
-            (RailEvent::BeforeStop, RailAnswer::Refuse { reason }) => {
-                crate::session::kept_working(reason)
-            }
-            (
-                RailEvent::AfterWrite,
-                RailAnswer::Tell { context: said } | RailAnswer::Refuse { reason: said },
-            ) => crate::session::told_after_write(said),
-            (_, RailAnswer::Proceed | RailAnswer::Tell { .. }) => HookReply {
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-                exit: 0,
-            },
-        }
+    fn before_write(&self, answer: &WriteAnswer) -> HookReply {
+        crate::session::before_write_reply(answer)
     }
-}
 
-/// The answer the `codex` CLI takes from a hook's reply: exit 2 refuses a
-/// patch only when stderr gives the reason, because a refusal with nothing
-/// on stderr is a hook that failed, and the patch runs anyway.
-pub(crate) fn read_reply(event: RailEvent, reply: &HookReply) -> RailAnswer {
-    match event {
-        RailEvent::BeforeWrite if reply.exit == 2 && !reply.stderr.is_empty() => {
-            RailAnswer::Refuse {
-                reason: String::from_utf8_lossy(&reply.stderr).into_owned(),
-            }
-        }
-        RailEvent::BeforeWrite => RailAnswer::Proceed,
-        RailEvent::BeforeStop => crate::session::stop_answer(reply),
-        RailEvent::AfterWrite => crate::session::after_write_answer(reply),
+    fn after_write(&self, answer: &FormatAnswer) -> HookReply {
+        crate::session::after_write_reply(answer)
+    }
+
+    fn before_stop(&self, answer: &StopAnswer) -> HookReply {
+        crate::session::before_stop_reply(answer)
     }
 }
 
@@ -192,7 +170,7 @@ fn installed(judging: std::time::Duration, formats: bool) -> Vec<Hook> {
         key,
         matcher: Some(WRITING_TOOL),
         rail,
-        timeout: u64::from(crate::session::HOOK_TIMEOUT_SECONDS),
+        timeout: u64::from(write_hook_cli_seconds()),
     };
     let mut hooks = vec![
         patching("PreToolUse", "pre_tool_use", RailEvent::BeforeWrite),
@@ -201,7 +179,7 @@ fn installed(judging: std::time::Duration, formats: bool) -> Vec<Hook> {
             key: "stop",
             matcher: None,
             rail: RailEvent::BeforeStop,
-            timeout: judging.as_secs(),
+            timeout: hook_seconds(judging),
         },
     ];
     if formats {
@@ -277,6 +255,8 @@ fn sorted(value: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::rail::answer::{WriteRefusal, REFUSAL_MARKER};
+
     use super::*;
 
     fn call(patch: &str) -> Vec<u8> {
@@ -305,7 +285,6 @@ mod tests {
                 RailEvent::BeforeWrite,
                 &call("*** Begin Patch\n*** Add File: a.txt\n+x\n*** Add File: b/c.txt\n+y\n*** End Patch"),
             )
-            .unwrap()
             .unwrap();
         assert_eq!(decoded.session_id.as_str(), "s-1");
         assert_eq!(
@@ -317,6 +296,18 @@ mod tests {
     }
 
     #[test]
+    fn a_model_the_cli_names_is_read_onto_the_call() {
+        let named = br#"{"session_id":"s-1","model":"gpt-5","tool_input":{"command":"*** Begin Patch\n*** Add File: a.txt\n+x\n*** End Patch"}}"#;
+        let decoded = CodexRailCodec
+            .decode(RailEvent::BeforeWrite, named)
+            .unwrap();
+        assert_eq!(
+            decoded.model.map(|model| model.to_string()),
+            Some("gpt-5".to_string())
+        );
+    }
+
+    #[test]
     fn a_patch_that_names_no_file_is_a_call_this_codec_cannot_read() {
         assert!(CodexRailCodec
             .decode(
@@ -324,18 +315,6 @@ mod tests {
                 &call("*** Begin Patch\n*** End Patch")
             )
             .is_err());
-    }
-
-    #[test]
-    fn a_refusal_never_leaves_stderr_empty() {
-        let reply = CodexRailCodec.encode(
-            RailEvent::BeforeWrite,
-            &RailAnswer::Refuse {
-                reason: String::new(),
-            },
-        );
-        assert_eq!(reply.exit, 2);
-        assert!(!reply.stderr.is_empty());
     }
 
     /// The hash of a hook the person's own Codex trusts, as its
@@ -430,14 +409,21 @@ mod tests {
 
     #[test]
     fn a_refused_stop_keeps_the_session_working_with_the_reason() {
-        let reply = CodexRailCodec.encode(
-            RailEvent::BeforeStop,
-            &RailAnswer::Refuse {
-                reason: "a criterion is red".to_string(),
-            },
-        );
+        let reply = CodexRailCodec.before_stop(&StopAnswer::Refuse {
+            reason: "a criterion is red".to_string(),
+        });
         let said: Value = serde_json::from_slice(&reply.stdout).unwrap();
         assert_eq!((reply.exit, said["decision"].as_str()), (0, Some("block")));
         assert_eq!(said["reason"], "a criterion is red");
+    }
+
+    #[test]
+    fn a_refusal_is_exit_two_with_the_reason_on_stderr() {
+        let refusal = WriteRefusal::try_from(format!("{REFUSAL_MARKER}no")).unwrap();
+        let reply = CodexRailCodec.before_write(&WriteAnswer::Refuse { reason: refusal });
+        assert_eq!(
+            (reply.exit, reply.stderr),
+            (2, format!("{REFUSAL_MARKER}no").into_bytes())
+        );
     }
 }

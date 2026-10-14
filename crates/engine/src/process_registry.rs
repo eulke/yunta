@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use yunta_core::persisted::Persisted;
+use yunta_core::process::group::group_runs;
 use yunta_core::process::signal::Liveness;
 use yunta_core::{NodeId, Pid, RelativePath};
 
@@ -111,13 +112,14 @@ pub fn read_registry(run_dir: &Path) -> Registry {
     }
 }
 
-/// The groups among `groups` whose process still answers. What a registry
-/// keeps of a group once the engine that registered it is gone.
-pub(crate) fn running_groups(groups: &[Pid]) -> Vec<Pid> {
+/// The groups among `groups` that run, or that cannot be inspected: what a
+/// registry keeps of a group once the engine that registered it is gone. A
+/// group is dropped only when no member of it runs.
+pub fn running_groups(groups: &[Pid]) -> Vec<Pid> {
     groups
         .iter()
         .copied()
-        .filter(|group| yunta_core::process::signal::liveness(*group) == Liveness::Alive)
+        .filter(|group| group_runs(*group).unwrap_or(true))
         .collect()
 }
 
@@ -344,5 +346,35 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600, "engine.json is readable by others");
+    }
+
+    /// A group whose leader exited and was reaped is kept while a child the
+    /// leader left in it runs: the leader's pid names no process, so the
+    /// group is read through its members.
+    #[cfg(unix)]
+    #[test]
+    fn running_groups_keeps_a_group_whose_leader_exited_while_a_child_runs() {
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+        use yunta_core::process::signal::{signal_group, Signal};
+
+        let mut leader = Command::new("sh")
+            .args(["-c", "sleep 30 & exit 0"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let group = Pid::try_from(leader.id()).unwrap();
+        leader.wait().unwrap();
+
+        assert_eq!(
+            running_groups(&[group]),
+            vec![group],
+            "the sleep the leader left behind runs in the group"
+        );
+        // The sleep is killed, so the test leaves no process behind.
+        signal_group(group, Signal::SIGKILL).unwrap();
     }
 }

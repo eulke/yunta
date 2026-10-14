@@ -1,9 +1,12 @@
 //! What every adapter in this crate shares: reading its own settings,
-//! handing a prompt to a CLI that already runs, and naming what a tool
-//! acted on without repeating the thing itself.
+//! handing a prompt to a CLI that already runs, naming what a tool
+//! acted on without repeating the thing itself, and the replies a hook
+//! leaves for the CLI that runs it.
 //!
 //! The port these adapters implement is `yunta_core::port`.
 
+use yunta_core::port::HookReply;
+use yunta_core::rail::answer::{FormatAnswer, StopAnswer, WriteAnswer};
 use yunta_core::{AdapterError, AdapterId, Result};
 
 /// Reads an adapter's `adapter_settings` map into its typed settings:
@@ -29,22 +32,26 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
     })
 }
 
-/// How long a CLI waits for its write hook to answer. A hook that does not
-/// answer in time lets the call through — so the hook itself gives up on
-/// the engine sooner and refuses, and the post-check diff catches anything
-/// else.
-pub(crate) const HOOK_TIMEOUT_SECONDS: u32 = 10;
+/// The reply that lets a hook's CLI go on: nothing printed on either
+/// stream, and exit 0.
+fn goes_on() -> HookReply {
+    HookReply {
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        exit: 0,
+    }
+}
 
 /// What a hook after a write answers to tell the model something about
 /// it: the context both CLIs add to what the model reads next.
-pub(crate) fn told_after_write(context: &str) -> yunta_core::port::HookReply {
+pub(crate) fn told_after_write(context: &str) -> HookReply {
     let said = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "additionalContext": context,
         }
     });
-    yunta_core::port::HookReply {
+    HookReply {
         stdout: said.to_string().into_bytes(),
         stderr: Vec::new(),
         exit: 0,
@@ -53,47 +60,49 @@ pub(crate) fn told_after_write(context: &str) -> yunta_core::port::HookReply {
 
 /// What a stop hook answers to keep a session working: the decision both
 /// CLIs read on stdout, with the reason the model is shown.
-pub(crate) fn kept_working(reason: &str) -> yunta_core::port::HookReply {
+pub(crate) fn kept_working(reason: &str) -> HookReply {
     let said = serde_json::json!({ "decision": "block", "reason": reason });
-    yunta_core::port::HookReply {
+    HookReply {
         stdout: said.to_string().into_bytes(),
         stderr: Vec::new(),
         exit: 0,
     }
 }
 
-/// The answer a stop hook's reply gives the session: `Refuse` with the
-/// reason when stdout blocks the stop, which is how both CLIs keep a session
-/// working, and `Proceed` otherwise.
-pub(crate) fn stop_answer(reply: &yunta_core::port::HookReply) -> yunta_core::rail::RailAnswer {
-    let said: serde_json::Value = serde_json::from_slice(&reply.stdout).unwrap_or_default();
-    match said.get("decision").and_then(serde_json::Value::as_str) {
-        Some("block") => yunta_core::rail::RailAnswer::Refuse {
-            reason: said
-                .get("reason")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+/// What a write hook answers to the engine's verdict on a write: nothing
+/// when the write may go on, and the refusal's text on stderr with exit 2
+/// when it may not, which both CLIs read as a denial.
+pub(crate) fn before_write_reply(answer: &WriteAnswer) -> HookReply {
+    match answer {
+        WriteAnswer::Proceed => goes_on(),
+        WriteAnswer::Refuse { reason } => HookReply {
+            stdout: Vec::new(),
+            stderr: String::from(reason.clone()).into_bytes(),
+            exit: 2,
         },
-        _ => yunta_core::rail::RailAnswer::Proceed,
     }
 }
 
-/// The answer an after-write hook's reply gives the session: `Tell` with the
-/// context the model is shown, when stdout carries one, and `Proceed`
-/// otherwise.
-pub(crate) fn after_write_answer(
-    reply: &yunta_core::port::HookReply,
-) -> yunta_core::rail::RailAnswer {
-    let said: serde_json::Value = serde_json::from_slice(&reply.stdout).unwrap_or_default();
-    match said
-        .pointer("/hookSpecificOutput/additionalContext")
-        .and_then(serde_json::Value::as_str)
-    {
-        Some(context) => yunta_core::rail::RailAnswer::Tell {
-            context: context.to_string(),
-        },
-        None => yunta_core::rail::RailAnswer::Proceed,
+/// What an after-write hook answers to the notes the engine made of a
+/// write: nothing when it has none, and otherwise each note's text, told
+/// to the model as one context.
+pub(crate) fn after_write_reply(answer: &FormatAnswer) -> HookReply {
+    match answer {
+        FormatAnswer::Proceed => goes_on(),
+        FormatAnswer::Tell { notes } => {
+            let texts: Vec<String> = notes.iter().map(ToString::to_string).collect();
+            told_after_write(&texts.join("\n\n"))
+        }
+    }
+}
+
+/// What a stop hook answers to the engine's judgement of a stop: nothing
+/// when the stop may go on, and the reason that keeps the session working
+/// when it may not.
+pub(crate) fn before_stop_reply(answer: &StopAnswer) -> HookReply {
+    match answer {
+        StopAnswer::Proceed => goes_on(),
+        StopAnswer::Refuse { reason } => kept_working(reason),
     }
 }
 

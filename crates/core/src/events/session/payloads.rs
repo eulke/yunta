@@ -10,7 +10,11 @@ use crate::fence::Coverage;
 use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId, TaskId};
 use crate::port::{PermissionProfile, Policy, PolicyApplied};
+use crate::rail::hook::RailFailureCause;
+use crate::rail::RailEvent;
 use crate::{Capabilities, Capability};
+
+pub use crate::rail::timing::RailSummaryPayload;
 
 /// The closed reason a run tool call failed, without adapter error text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -246,6 +250,26 @@ pub struct WriteFormattedPayload {
     pub exit_code: i32,
     /// How long the command took, which the session waited.
     pub duration_ms: u64,
+    /// What the command printed, redacted and kept under its hash. Absent
+    /// when the store did not keep it, and in logs written before this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentHash>,
+    /// Whether the bound stopped the command before it finished.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub timed_out: bool,
+}
+
+/// A failure of the rail, with the moment it was for and its closed cause.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RailFailedPayload {
+    /// The session the failure belongs to; absent when no session does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
+    /// The moment the failed call was for; absent when none could be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<RailEvent>,
+    /// The closed reason the rail failed.
+    pub cause: RailFailureCause,
 }
 
 /// A session that asked to stop with work its close would not take, told

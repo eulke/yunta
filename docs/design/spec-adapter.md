@@ -400,9 +400,15 @@ directorio: `WidenedToRoots { [cwd, …raíces, temporal] }` bajo `edit` con
 `workspace-write`, `WidenedToRoots { [raíces, temporal] }` bajo `read_only` y bajo
 `edit` con `read-only`, y `ToolsOnly` bajo `full` y bajo `edit` con
 `danger-full-access`. `read_only` conserva `Write`/`Edit` solo cuando el cerco
-tiene raíces, que es donde van los archivos declarados. Límite declarado: si el
-hook no responde en su timeout, el CLI deja pasar la llamada; el post-check la
-atrapa como violación, y el nodo falla con la lista de paths. Cuando la sesión
+tiene raíces, que es donde van los archivos declarados. Los plazos vienen de
+`core::rail::window`: el `PreToolUse` y el `PostToolUse` corren con
+`write_hook_cli_seconds()`, 10 s, y el `Stop` con `hook_seconds` de su espera de
+juicio, con piso de un segundo. El codec tiene un método por momento
+(`before_write`, `after_write` y `before_stop`), y cada uno pide a
+`adapters/src/session.rs` la forma de su respuesta, la misma que en Codex (D266).
+Límite declarado: si el CLI corta su hook de 10 s antes de que el engine responda,
+deja pasar la llamada; el post-check la atrapa como violación, y el nodo falla con
+la lista de paths. Cuando la sesión
 deja el checkout solo al cerco (comandos confinados y `worktree: nothing`), la
 escritura es además un `engine_finding` (`engine-fence-breach`) contra el adapter
 (D265).
@@ -451,7 +457,11 @@ cada path que el patch nombra, uno `Stop` ejecuta `yunta rail codex before-stop`
 (D254) y, cuando el run formatea, uno `PostToolUse` sobre `apply_patch` ejecuta
 `yunta rail codex after-write` (D255); los hooks llegan como overrides `-c` junto con su propia
 confianza en `hooks.state` (el hash con que Codex confía en un hook), así que ningún
-hook ajeno corre sin revisar (D251). Los comandos quedan confinados por un perfil de
+hook ajeno corre sin revisar (D251). Los plazos de sus hooks vienen de
+`core::rail::window`, como en `claude-code`: `write_hook_cli_seconds()` para el
+`PreToolUse` y el `PostToolUse`, y `hook_seconds` de la espera de juicio para el
+`Stop` (D266). Su codec tiene un método por momento, con las mismas formas de
+respuesta que el de `claude-code`. Los comandos quedan confinados por un perfil de
 permisos propio de la sesión, `yunta-session`, que la sesión nombra con
 `default_permissions`: extiende `:workspace` cuando la sesión escribe su worktree y
 `:read-only` cuando no. Su sistema de archivos da escritura al temporal (`:tmpdir` y

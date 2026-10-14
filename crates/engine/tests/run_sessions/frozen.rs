@@ -1,7 +1,8 @@
 //! What a run freezes at its birth, and the sessions the engine cannot stop: a
 //! session whose kill is refused ends its node with that fact and keeps what it
-//! spent, a loop task of the same kind ends its loop node, and a node's
-//! confinement holds across its wakes.
+//! spent, a loop task of the same kind ends its loop node and keeps its
+//! checkout taken while its process group runs, and a node's confinement
+//! holds across its wakes.
 
 use super::*;
 use tokio_util::sync::CancellationToken;
@@ -261,6 +262,65 @@ async fn a_cancelled_batch_with_a_session_that_cannot_be_stopped_fails_the_loop_
             .any(|failure| matches!(failure, Failure::SessionNotStopped { .. })),
         "{failed:?}"
     );
+}
+
+/// A loop task whose session the engine could not stop keeps its checkout
+/// taken while the session's process group runs, since that group may still
+/// write in it.
+#[tokio::test]
+async fn a_loop_task_whose_session_cannot_be_stopped_keeps_its_checkout_taken() {
+    let bench = Bench::new();
+    let workflow = concurrency_workflow(1);
+    let fixture = format!(
+        "{}  - match_prompt_contains: \"task-1\"\n    kill: refuse\n    steps:\n      - {{ type: usage, input_tokens: 200, output_tokens: 0 }}\n    outcome: {{ type: hang, on_interrupt: ignore }}\n",
+        plan_session(&independent_tasks(1)),
+    );
+    let config = format!(
+        "{}limits:\n  max_tokens_per_run: 100\n",
+        yunta_testkit::MOCK_CONFIG
+    );
+    let _run = bench.run_with_config(&workflow, &fixture, &config).await;
+
+    let held = slot_locks(&bench.pool());
+    let groups = registered_groups(&bench.run_dir());
+    // Killed before any assertion, so the test leaves no process behind.
+    for group in &groups {
+        yunta_core::process::group::force_kill_group(*group)
+            .await
+            .expect("the session's group is killed");
+    }
+    assert!(
+        !groups.is_empty(),
+        "the session's group stays registered while it runs"
+    );
+    assert!(
+        !held.is_empty(),
+        "the task's checkout stays taken while its session's group runs"
+    );
+}
+
+/// The checkout locks of the pool at `pool`.
+fn slot_locks(pool: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(pool)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "lock")
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("slot-"))
+        })
+        .collect()
+}
+
+/// The process groups the run's registry names.
+fn registered_groups(run_dir: &std::path::Path) -> Vec<yunta_core::Pid> {
+    match yunta_engine::read_registry(run_dir) {
+        yunta_engine::Registry::Read(registry) => registry.doc.process_groups.clone(),
+        _ => Vec::new(),
+    }
 }
 
 // --- a node's confinement across two wakes ---------------------------------

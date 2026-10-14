@@ -59,19 +59,21 @@ mod stop;
 mod submission;
 mod tasks;
 mod verdicts;
+mod watch;
 
 pub use blackboard::consolidate_blackboard;
 pub use host::{
     Formatter, HostOf, NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess, TaskExpansion,
 };
 mod format;
+pub(crate) use error::RunToolError;
 pub(crate) use listener::run_tools_unreachable;
 pub use listener::{open_session_listener, RunToolsSession};
 pub(crate) use notice::{
     continuation_notice, fresh_respecify_notice, fresh_review_notice, naming_notice,
     submission_notice, task_notice, Asker,
 };
-pub(crate) use rail::{refused_writes, unrecorded_cause};
+pub(crate) use rail::{refused_writes, unrecorded_storage_cause, SessionRails};
 pub(crate) use session::Arrivals;
 pub(crate) use submission::verify_declared;
 pub use yunta_core::RunTool;

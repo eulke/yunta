@@ -18,10 +18,11 @@ use yunta_core::durable::{self, Durability};
 use yunta_core::events::SessionExit;
 use yunta_core::port::{AgentEvent, AgentSession, RunToolsEndpoint, SessionRequest};
 use yunta_core::process::subprocess::Held;
-use yunta_core::{AdapterError, AgentName, ModelName, SessionId};
+use yunta_core::{AdapterError, AgentName, ModelName, Pid, SessionId};
 
 use super::error::FixtureError;
 use super::script::{play, Script, Stops};
+use super::stand_in::StandIn;
 use super::{read, KillBehavior, MockAdapter, ID, MOCK_SESSION_PREFIX};
 
 /// The session a claimed script is played by: the stream the engine reads
@@ -34,6 +35,9 @@ pub(super) struct MockSession {
     /// Whether the script refuses `kill` while it still plays: the player
     /// then keeps running.
     refuses_kill: bool,
+    /// The process a refused kill leaves running. It is ended once the script
+    /// has ended, so a session that finished leaves no process behind.
+    stand_in: Option<StandIn>,
     /// Whether the player still plays its script. The player clears it before
     /// its stream closes, so a reader that has seen the stream end sees it too.
     playing: Arc<AtomicBool>,
@@ -61,12 +65,14 @@ pub(super) fn start(
     let playing = Arc::new(AtomicBool::new(true));
     let stops = Stops::of(&script.outcome, Arc::clone(&interrupt), Arc::clone(&kill));
     let refuses_kill = script.kill == Some(KillBehavior::Refuse);
+    let stand_in = refuses_kill.then(StandIn::start).flatten();
     let player = tokio::spawn(play(script, events, stops, Arc::clone(&playing)));
     Box::new(MockSession {
         receiver: Some(receiver),
         interrupt,
         kill,
         refuses_kill,
+        stand_in,
         playing,
         player,
         interrogated,
@@ -74,9 +80,23 @@ pub(super) fn start(
     })
 }
 
+impl MockSession {
+    /// Ends the stand-in once the script has ended. A session still playing
+    /// keeps it: that process is the one the engine could not stop.
+    fn end_stand_in_when_done(&mut self) {
+        if self.playing.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Some(stand_in) = self.stand_in.take() {
+            stand_in.end();
+        }
+    }
+}
+
 impl Drop for MockSession {
     fn drop(&mut self) {
         self.player.abort();
+        self.end_stand_in_when_done();
     }
 }
 
@@ -109,11 +129,19 @@ impl AgentSession for MockSession {
             });
         }
         self.kill.notify_one();
+        self.end_stand_in_when_done();
         Ok(())
+    }
+
+    /// The group of the process a refused kill left running, which the
+    /// engine's process registry names for as long as it runs.
+    fn pgid(&self) -> Option<Pid> {
+        self.stand_in.as_ref().map(StandIn::group)
     }
 
     /// Takes back what the launch set up for this session.
     async fn release(&mut self) -> yunta_core::Result<()> {
+        self.end_stand_in_when_done();
         match self.held.take() {
             Some(held) => held.release(),
             None => Ok(()),

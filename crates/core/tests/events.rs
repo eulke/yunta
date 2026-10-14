@@ -117,12 +117,12 @@ fn a_done_task_carries_its_commit_and_nothing_else_does() {
 }
 
 #[test]
-fn there_are_exactly_59_kinds_with_distinct_names() {
+fn there_are_exactly_61_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 59);
+    assert_eq!(kinds.len(), 61);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 59, "expected 59 distinct kind names");
+    assert_eq!(names.len(), 61, "expected 61 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -217,6 +217,8 @@ const KIND_NAMES: &[&str] = &[
     "write_refused",
     "stop_refused",
     "write_formatted",
+    "rail_failed",
+    "rail_summary",
     "run_tool_failed",
     "run_tool_refused",
     "service_unreachable",
@@ -502,6 +504,18 @@ fn write_refused_is_a_session_kind_that_moves_the_ledger() {
     );
     let event = EventPayload::Session(yunta_core::events::SessionEvent::WriteRefused(refused));
     assert_eq!(event.kind_name(), "write_refused");
+}
+
+#[test]
+fn a_write_formatted_line_from_before_the_output_field_reads() {
+    // Guard: a line written before the new fields existed still reads.
+    let line = r#"{"kind":"write_formatted","session_id":"s-1","run":"upper","paths":["a.txt"],"exit_code":0,"duration_ms":12}"#;
+    match serde_json::from_str::<EventPayload>(line).unwrap() {
+        EventPayload::Session(SessionEvent::WriteFormatted(formatted)) => {
+            assert_eq!((formatted.exit_code, formatted.duration_ms), (0, 12))
+        }
+        other => panic!("read as {other:?}"),
+    }
 }
 
 /// A log written before the fence existed carries `edit_hooks`, and a

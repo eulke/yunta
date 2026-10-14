@@ -1,6 +1,7 @@
 //! What a session writes is formatted the moment it writes it, by the
 //! command the project's `format:` rule names for that file — and the
-//! session hears of it only when something changed or the command failed.
+//! session hears of it only when something changed, or the command failed
+//! or was stopped at its bound.
 
 use yunta_core::events::{EventPayload, SessionEvent, WriteFormattedPayload};
 use yunta_engine::{RunReport, RunTerminal};
@@ -106,4 +107,56 @@ async fn a_run_without_format_rules_formats_nothing() {
         !bench.mock().requests_seen()[0].formats,
         "no hook after a write is installed"
     );
+}
+
+#[tokio::test]
+async fn a_formatter_past_its_bound_is_stopped_and_recorded_as_stopped() {
+    let bench = bench().await;
+    // The shell comment swallows the path the engine appends to the command.
+    let config = "runners:\n  executor:\n    - { adapter: mock, model: mock-model }\ncommands:\n  slow: \"sleep 6 #\"\nformat:\n  - { paths: [\"*.txt\"], run: slow }\n";
+    let fixture = "dialect: claude-code\neffects:\n  - { path: a.txt, content: \"x\" }\noutcome: { type: completed, summary: wrote }\n";
+
+    bench.run_with_config(WORKFLOW, fixture, config).await;
+
+    let formatted = formatted(&bench);
+    assert_eq!(formatted[0].exit_code, -2);
+    assert!(
+        formatted[0].duration_ms < 10_000,
+        "the bound stops it at 5 s"
+    );
+    assert_eq!(
+        serde_json::to_value(&formatted[0]).unwrap()["timed_out"],
+        true
+    );
+}
+
+#[tokio::test]
+async fn a_failed_formatter_keeps_what_it_printed() {
+    let bench = bench().await;
+    let fixture = "dialect: claude-code\neffects:\n  - { path: bad.txt, content: \"x\" }\noutcome: { type: completed, summary: wrote }\n";
+
+    bench.run_with_config(WORKFLOW, fixture, CONFIG).await;
+
+    let wire = serde_json::to_value(&formatted(&bench)[0]).unwrap();
+    let hash: yunta_core::ContentHash =
+        serde_json::from_value(wire["output"].clone()).expect("on the log");
+    assert_eq!(bench.object(&hash).unwrap(), b"bad.txt: cannot format\n");
+}
+
+#[tokio::test]
+async fn a_session_closes_with_one_summary_of_its_rail_calls() {
+    let bench = bench().await;
+    let fixture = "dialect: claude-code\neffects:\n  - { path: a.txt, content: \"hello\" }\n  - { path: b.md, content: \"hello\" }\n  - { path: c.txt, content: \"x\" }\noutcome: { type: completed, summary: wrote }\n";
+
+    bench.run_with_config(WORKFLOW, fixture, CONFIG).await;
+
+    let summaries: Vec<serde_json::Value> = bench
+        .events()
+        .iter()
+        .filter_map(|e| e.payload())
+        .filter(|p| p.kind_name() == "rail_summary")
+        .map(|p| serde_json::to_value(p).unwrap())
+        .collect();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0]["moments"]["before-write"]["count"], 3);
 }

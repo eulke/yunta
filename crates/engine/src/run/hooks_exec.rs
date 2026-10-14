@@ -5,11 +5,10 @@ use std::path::PathBuf;
 
 use yunta_core::events::{
     CommandExit, CommandOrigin, EventPayload, Failure, HookExecutedPayload, HookPhase, TokenUsage,
-    STOPPED_EXIT_CODE,
 };
 use yunta_core::{ConfigKey, HookFailurePolicy, HookStep, Hooks, Node, Resolved};
 
-use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome};
+use crate::process::{spawn_governed, CommandOutput, GovernedCommand};
 use yunta_core::template::render_template;
 
 use super::node_close::{fail_with_staged, fail_with_tokens_staged};
@@ -117,13 +116,7 @@ pub(super) async fn run_hook(
         command = command.timeout(std::time::Duration::from_secs(seconds));
     }
     let outcome = spawn_governed(command, ctx.supervision(&ctx.root_cancel)).await?;
-    let exit_code = match &outcome {
-        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-        // Never a real process exit code (those are 0..=255) — distinct
-        // from -1's "couldn't even render/run", so a hook the engine
-        // stopped is diagnosable from the event alone.
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => STOPPED_EXIT_CODE,
-    };
+    let exit_code = outcome.exit_code();
     let printed = CommandOutput::of(&outcome);
     let output = crate::artifacts::store::ObjectStore::at(ctx.run_dir)
         .put_redacted(printed.bytes(), &ctx.redactor)

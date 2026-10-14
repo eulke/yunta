@@ -24,7 +24,7 @@ use yunta_storage::StorageError;
 use super::session::{end_running, stream_session, SessionObserver};
 use super::stream::{emit_audit, read_stream, Terms, Totals};
 use super::DispatchOutcome;
-use crate::run_tools::Arrivals;
+use crate::run_tools::{Arrivals, SessionRails};
 
 /// How [`dispatch_session`] failed: the adapter refused, a session it ended
 /// could not be taken back, the engine could not stop a session it asked to
@@ -104,13 +104,16 @@ pub(crate) struct Dispatched {
 }
 
 /// How a session opens: the task it works, if any, the conversation it
-/// continues, if any, and the run tools whose calls say which of the
-/// session's rejections reached a server.
+/// continues, if any, the run tools whose calls say which of the session's
+/// rejections reached a server, and the rail its CLI asks through.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Opening<'a> {
     pub(crate) task: Option<&'a yunta_core::TaskId>,
     pub(crate) resume: Option<Resume<'a>>,
     pub(crate) arrivals: Option<&'a Arrivals>,
+    /// The rail the session's CLI asks through. The session closes with a
+    /// summary of the calls the rail answered for it.
+    pub(crate) rails: Option<&'a SessionRails>,
 }
 
 /// A conversation to pick back up, and what a fresh session is told
@@ -192,6 +195,7 @@ fn resumed<'a>(
             fresh_prompt: Some(&request.prompt),
         }),
         arrivals: opening.arrivals,
+        rails: opening.rails,
     }
 }
 

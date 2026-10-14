@@ -13,7 +13,7 @@ use yunta_core::protected::Protected;
 use yunta_storage::StorageError;
 
 use super::dispatch::{read_and_end, DispatchError, Dispatched, Opening, Resume};
-use super::stream::{counts_tokens_mid_session, emit_audit, Terms, Totals};
+use super::stream::{counts_tokens_mid_session, emit_audit, record_rail_summary, Terms, Totals};
 use super::DispatchOutcome;
 
 /// Everything about *how* one node's sessions open, resolved
@@ -335,10 +335,25 @@ pub(super) async fn stream_session(
     drained
 }
 
+/// Reads an opened session to its terminal outcome, releases it, and writes
+/// the summary of its rail's calls once the outcome is decided. Every way the
+/// read ends passes through that write.
+async fn drain(
+    session: &mut dyn AgentSession,
+    cancel: &CancellationToken,
+    terms: &Terms<'_>,
+    opening: Opening<'_>,
+    continues: Option<&yunta_core::SessionId>,
+) -> Result<(Dispatched, bool), DispatchError> {
+    let drained = read_and_release(session, cancel, terms, opening, continues).await;
+    record_rail_summary(terms, opening.rails).await;
+    drained
+}
+
 /// Reads an opened session to its terminal outcome, ends it when the read was
 /// cut short, and says what it spent and whether it ended on a lost service.
 /// The session is released whatever the read and the end did.
-async fn drain(
+async fn read_and_release(
     session: &mut dyn AgentSession,
     cancel: &CancellationToken,
     terms: &Terms<'_>,

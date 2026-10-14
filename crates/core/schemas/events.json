@@ -3005,6 +3005,32 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "rail_failed"
+            }
+          },
+          "$ref": "#/$defs/RailFailedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "rail_summary"
+            }
+          },
+          "$ref": "#/$defs/RailSummaryPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_tool_failed"
             }
           },
@@ -3955,6 +3981,34 @@
         "summary",
         "evidence",
         "options"
+      ]
+    },
+    "Histogram": {
+      "description": "Call durations counted per bucket, in microseconds on a log scale: a\nbucket holds the durations that share their leading bits.",
+      "type": "object",
+      "properties": {
+        "buckets": {
+          "description": "The count held by each bucket, keyed by its index.",
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^\\d+$": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        },
+        "count": {
+          "description": "Every duration observed, in any bucket.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "count",
+        "buckets"
       ]
     },
     "HookExecutedPayload": {
@@ -5473,6 +5527,132 @@
         "questions_hash",
         "questions",
         "tokens_used"
+      ]
+    },
+    "RailEvent": {
+      "description": "When in a session a CLI asks.",
+      "oneOf": [
+        {
+          "description": "A file tool is about to write.",
+          "type": "string",
+          "const": "before-write"
+        },
+        {
+          "description": "A file tool wrote.",
+          "type": "string",
+          "const": "after-write"
+        },
+        {
+          "description": "The session is about to end its turn, and with it its work.",
+          "type": "string",
+          "const": "before-stop"
+        }
+      ]
+    },
+    "RailFailedPayload": {
+      "description": "A failure of the rail, with the moment it was for and its closed cause.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "description": "The closed reason the rail failed.",
+          "$ref": "#/$defs/RailFailureCause"
+        },
+        "event": {
+          "description": "The moment the failed call was for; absent when none could be read.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RailEvent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "description": "The session the failure belongs to; absent when no session does.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cause"
+      ]
+    },
+    "RailFailureCause": {
+      "description": "The causes a failure reaches the log under: a closed set, so every\nsurface names a cause the same way.",
+      "oneOf": [
+        {
+          "description": "A call or an answer that does not read.",
+          "type": "string",
+          "const": "decode"
+        },
+        {
+          "description": "The engine refused the session's credential.",
+          "type": "string",
+          "const": "unauthorized"
+        },
+        {
+          "description": "The engine did not answer within the window.",
+          "type": "string",
+          "const": "timeout"
+        },
+        {
+          "description": "A formatter could not be started.",
+          "type": "string",
+          "const": "formatter_failed"
+        },
+        {
+          "description": "The listener that serves the session stopped.",
+          "type": "string",
+          "const": "listener_died"
+        },
+        {
+          "description": "A stop's judgement failed, and the stop went on.",
+          "type": "string",
+          "const": "judgement_failed"
+        },
+        {
+          "description": "The session asked with no fence to judge its writes by.",
+          "type": "string",
+          "const": "no_fence"
+        }
+      ]
+    },
+    "RailSummaryPayload": {
+      "description": "What a session's rail calls took, written once when the session closes.",
+      "type": "object",
+      "properties": {
+        "model": {
+          "description": "The model the rail heard first, when a hook named one.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "moments": {
+          "description": "One histogram per moment that was asked.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Histogram"
+          }
+        },
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "session_id",
+        "moments"
       ]
     },
     "Reach": {
@@ -7781,6 +7961,17 @@
           "type": "integer",
           "format": "int32"
         },
+        "output": {
+          "description": "What the command printed, redacted and kept under its hash. Absent\nwhen the store did not keep it, and in logs written before this field.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentHash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "paths": {
           "description": "Every file it was handed, relative to the worktree.",
           "type": "array",
@@ -7794,6 +7985,10 @@
         },
         "session_id": {
           "$ref": "#/$defs/SessionId"
+        },
+        "timed_out": {
+          "description": "Whether the bound stopped the command before it finished.",
+          "type": "boolean"
         }
       },
       "required": [

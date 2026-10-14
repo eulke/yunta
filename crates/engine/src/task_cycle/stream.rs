@@ -20,7 +20,7 @@ use yunta_storage::StorageError;
 use super::dispatch::{DispatchError, Opening};
 use super::session::{note_summary, SessionObserver};
 use super::DispatchOutcome;
-use crate::run_tools::Arrivals;
+use crate::run_tools::{Arrivals, RunToolError, SessionRails};
 
 /// Records that a session's run tools never reached it: one that was
 /// offered its tools, opened, and never listed them or called one, which
@@ -85,6 +85,9 @@ pub(super) struct AgentEventCtx<'a> {
     /// The calls the session's run tools took in, which say whether a
     /// rejection the adapter reports reached the server.
     pub(super) arrivals: &'a Arrivals,
+    /// The rail the session's CLI asks through, which hears the session the
+    /// stream opens.
+    pub(super) rails: Option<&'a SessionRails>,
     /// What the session was opened to reach, recorded with the session.
     pub(super) confinement: yunta_core::events::ConfinementRecord,
 }
@@ -150,6 +153,7 @@ pub(super) async fn read_stream(
         task: opening.task,
         continues,
         arrivals: opening.arrivals.unwrap_or(&no_run_tools),
+        rails: opening.rails,
         confinement: terms.confinement.clone(),
     };
     let mut stream = session.events();
@@ -264,6 +268,10 @@ async fn session_opened(
     *ctx.opened = Some(session_id.clone());
     ctx.fence.clone_from(&fence);
     *ctx.fence_confinement = Some(ctx.confinement.clone());
+    // The rail answers for the session this stream opened last.
+    if let Some(rails) = ctx.rails {
+        rails.own(session_id.clone());
+    }
     let payload = yunta_core::events::AgentSessionOpenedPayload {
         session_id,
         agent: ctx.requested_agent.clone(),
@@ -434,5 +442,21 @@ pub(super) async fn emit_audit(
     match audit {
         Some((observer, node_id)) => observer.record(node_id, payload).await.map(|_| ()),
         None => Ok(()),
+    }
+}
+
+/// Writes the summary of the calls a session's rail answered, once the session
+/// has ended. A summary the log does not take is kept with the rail's
+/// unrecorded error, since the session's outcome is decided already.
+pub(super) async fn record_rail_summary(terms: &Terms<'_>, rails: Option<&SessionRails>) {
+    let Some(rails) = rails else {
+        return;
+    };
+    let Some(summary) = rails.take_summary() else {
+        return;
+    };
+    let payload = EventPayload::Session(SessionEvent::RailSummary(summary));
+    if let Err(error) = emit_audit(terms.audit, payload).await {
+        rails.left_unrecorded(RunToolError::from(error));
     }
 }

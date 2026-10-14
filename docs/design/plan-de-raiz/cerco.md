@@ -36,14 +36,14 @@ escribe se formatea al escribirlo).
 | **cobertura** (`Coverage`) | lo que la sesión quedó cercada, calculado de lo que el adapter construyó: `exact`, `widened_to_roots` o `tools_only`. Es la del canal más débil | `agent_session_opened.fence` |
 | **riel** | el hook de una CLI y la conversación que abre con el engine: la CLI pregunta antes de escribir, después de escribir y antes de parar | `yunta_core::rail` |
 | **evento** (`RailEvent`) | el momento en que la CLI pregunta: `before-write`, `after-write` o `before-stop` | `yunta_core::rail` |
-| **llamada y respuesta** (`RailCall`, `RailAnswer`) | lo que la CLI pregunta, con sus rutas; lo que el engine responde: `proceed`, `refuse` o `tell` | `yunta_core::rail` |
+| **llamada y respuesta** (`RailCall`, `RailAnswer`) | lo que la CLI pregunta, con sus rutas; lo que el engine responde: `proceed`, `refuse` o `tell` (superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md): `WriteAnswer`, `FormatAnswer` y `StopAnswer`) | `yunta_core::rail` |
 | **codec** (`RailCodec`) | la traducción de una CLI al riel: lee la llamada de su stdin y escribe la respuesta en la forma que esa CLI lee | un codec por adapter; el trait está en `yunta_core::port` |
 | **comando del riel** (`RailCommand`) | la línea que la configuración de la CLI ejecuta: `yunta rail <adapter-id> <evento>` | `yunta_core::rail`, construido por el CLI |
 | **rechazo** (`write_refused`) | una escritura que el engine negó antes de que ocurriera; el evento queda en el log antes de que la CLI lo reciba | evento del dominio `session` |
 
 En prosa: cerco, juez, nivel, canal, cobertura, riel, codec y rechazo. En
 código: `Fence`, `Fence::judge`, `FenceLevel`, `Coverage`, `RailEvent`,
-`RailAnswer`, `RailCodec` y `write_refused`.
+`RailAnswer` (superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md)), `RailCodec` y `write_refused`.
 
 ---
 
@@ -96,6 +96,7 @@ impl Fence {
     pub fn naming(self, naming: ToolNaming) -> Self;
     pub fn judge(&self, worktree: &Path, target: &Path) -> Verdict;   // pura: no lee el disco
 }
+// Superado por D266: el marcador se define una vez, en `core::rail::answer`, y `fence` lo reexporta.
 pub const REFUSAL_MARKER: &str = "yunta: write refused: ";
 pub fn lexical_absolute(base: &Path, path: &Path) -> PathBuf;
 
@@ -111,6 +112,8 @@ pub enum RailAct {
     AfterWrite { paths: Vec<PathBuf> },
     BeforeStop,
 }
+// Superado por D266: WriteAnswer, FormatAnswer y StopAnswer, uno por momento, sustituyen a RailAnswer.
+// La negativa de una escritura sin engine la arma WriteRefusal::unasked; no hay un unasked común.
 pub enum RailAnswer { Proceed, Refuse { reason: String }, Tell { context: String } }
 pub fn unasked(event: RailEvent, why: &str) -> RailAnswer;
 pub struct RailCommand { bin: PathBuf }   // RailCommand::new(bin); argv(&AdapterId, RailEvent) -> [bin, "rail", id, evento]
@@ -118,6 +121,7 @@ pub struct RailEndpoint { pub url: String, pub token: Secret<String> }
 
 // crates/core/src/port/session.rs
 pub trait RailCodec: Send + Sync {
+    // Superado por D266: decode devuelve RailCall sin Option, y hay un método por momento (before_write, after_write y before_stop).
     fn decode(&self, event: RailEvent, stdin: &[u8]) -> Result<Option<RailCall>, CodecError>;
     fn encode(&self, event: RailEvent, answer: &RailAnswer) -> HookReply;
 }
@@ -127,7 +131,7 @@ En el cable, `RailCall` lleva `{"session_id": …, "act": {"event": "before-writ
 "paths": [...]}}`; `RailAnswer`, `{"answer": "proceed"}`, `{"answer": "refuse",
 "reason": …}` o `{"answer": "tell", "context": …}`; `Coverage`, `{"coverage":
 "exact"}`, `{"coverage": "widened_to_roots", "roots": [...]}` o `{"coverage":
-"tools_only"}`.
+"tools_only"}`. *Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md): cada momento tiene su respuesta, `FormatAnswer` lleva `notes` en vez de `context`, y `StopAnswer` lleva su `reason`.*
 
 ### Reglas del juez
 
@@ -245,6 +249,8 @@ después de cada una y antes de parar, con la llamada en stdin y con
 `YUNTA_RAIL_URL` y `YUNTA_RAIL_TOKEN` en el entorno. El adapter que abrió la
 sesión es quien puso ese comando en la configuración de la CLI.
 
+> **Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md).** Los pasos 3 a 5 cambian: `decode` ya no devuelve `None`; la ventana de escritura cuenta desde el arranque del proceso del hook (7 s); y cada pregunta pasa por `settle`, que responde con el tipo del momento y reporta una vez, por `/rail/report`, una falla que tiene causa cerrada. Lo que sigue es el diseño original.
+
 `rail_hook` (`crates/cli/src/cli/dispatch.rs`) llama a `commands::rail::run`, en
 este orden:
 
@@ -260,6 +266,8 @@ este orden:
    la sesión. Espera 8 s en `before-write` y en `after-write`; en `before-stop`
    espera lo que el engine tarde. Si la pregunta falla, responde como `unasked`.
 6. `encode` escribe la respuesta en la forma de esa CLI.
+
+> **Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md).** `unasked` ya no es una respuesta común: cada tipo de respuesta tiene su propio `unasked`, y la negativa de una escritura sin engine lleva la causa en su texto (`WriteRefusal::unasked`). Un `after-write` y un `before-stop` que no pueden preguntar pasan.
 
 `unasked` es la respuesta de un hook que no puede preguntar. Un `before-write`
 responde `refuse` con `yunta: write refused: the engine could not be asked
@@ -279,6 +287,8 @@ las dos formas de parada y de contexto:
 Codex lee un rechazo con stderr vacío como un hook roto y corre el parche de
 todos modos. Por eso su codec nunca deja el motivo vacío: pone `yunta: write
 refused`.
+
+> **Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md).** Las ventanas viven en `core::rail::window`: el engine responde a un hook de escritura dentro de 7 s desde el arranque del proceso, y la CLI corta ese hook a los 10 s (`WRITE_HOOK_CLI_MS`). `HOOK_TIMEOUT_SECONDS` y el plazo de 8 s desde la pregunta ya no existen. El hook de parada sigue esperando hasta el límite de la sesión, con un `timeout` de al menos un segundo.
 
 Tiempos. La CLI corta su hook de escritura a los 10 s (`HOOK_TIMEOUT_SECONDS`);
 el hook se rinde a los 8 s y rechaza antes que la CLI. Si un hook no responde a
@@ -305,12 +315,12 @@ parada espera al engine hasta el límite de la sesión
   Juzga cada ruta con `Fence::judge`. Por cada rechazo registra `write_refused`
   antes de responder; la ruta se guarda relativa al worktree, cuando está bajo
   él. La respuesta es `refuse` con los textos de rechazo unidos por una línea en
-  blanco. Si ninguna ruta se rechaza, `proceed`.
+  blanco. Si ninguna ruta se rechaza, `proceed`. *Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md): el registro va bajo la sesión que atiende el listener, no bajo la que nombra el cuerpo, y una llamada que no puede juzgarse queda como `rail_failed` con su causa.*
 - **Después de escribir** (`crates/engine/src/run_tools/format.rs`). De las rutas
   que el cerco permite y que son archivos, corre el comando de cada regla
   `format:` que las cubre y registra `write_formatted`. Responde `tell` solo si
   algo cambió o si el comando falló, para que la sesión vuelva a leer el archivo
-  antes de editarlo.
+  antes de editarlo. *Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md): los formateadores de una escritura comparten una cota de 5 s (`FORMAT_MS`); el que sigue corriendo al llegar a ella se corta, con `exit_code` -2 y `timed_out`; la salida se guarda redactada y `write_formatted` la lleva por su hash.*
 - **Antes de parar** (`crates/engine/src/run_tools/stop.rs`). El trabajo de una
   sesión de tarea se juzga como lo juzga `yunta_check_task`; el de una sesión de
   nodo, como lo juzga su cierre: los documentos que entrega y su alcance. Si el
@@ -324,7 +334,7 @@ parada espera al engine hasta el límite de la sesión
   (`crates/engine/src/scope.rs`) decide el caso exacto: bajo `Coverage::Exact`,
   una violación en el diff es además un hallazgo del engine (`engine-fence-breach`,
   severidad mayor), además de la falla de la tarea. Bajo `widened_to_roots` o
-  `tools_only`, la violación es solo la falla de siempre.
+  `tools_only`, la violación es solo la falla de siempre. *Superado por [D265](../adr/D265-a-breach-is-filed-where-the-recorded-confinement-leaves-the-checkout-to-the-fence-alone.md): la brecha se registra según la confinación guardada, no según `Coverage::Exact`.*
 
 ---
 
@@ -357,7 +367,7 @@ Reglas comunes:
 - **Codec** (`crates/adapters/src/claude_code/rail.rs`). La llamada es el JSON del
   hook: `session_id` y, en una escritura, `tool_input.file_path`, o
   `tool_input.notebook_path` en `NotebookEdit`. Sin ninguno de los dos, el codec
-  no la lee y el riel responde `unasked`.
+  no la lee y el riel responde `unasked`. *Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md): una llamada que no se lee es una falla `decode`, y la negativa lleva su causa.*
 - **Cobertura.** Las herramientas son `exact`. Los comandos: con `read_only` y sin
   raíces, `exact` (la sandbox no deja escribir nada); con `read_only` y raíces,
   las raíces; con `edit`, el worktree y las raíces; con `full`, nada
@@ -409,7 +419,7 @@ Reglas comunes:
 - **Symlinks.** El juicio es léxico: un symlink que apunta fuera del worktree no
   se sigue. El post-check diff lo atrapa.
 - **Tiempo.** Si un hook no responde a tiempo, la CLI deja pasar la llamada. El
-  post-check diff la atrapa.
+  post-check diff la atrapa. *Superado por [D266](../adr/D266-the-rail-owns-its-windows-answers-and-failures.md) en la ventana: el engine niega una escritura a los 7 s, antes del corte de 10 s de la CLI, y la negativa lleva su causa.*
 - **Sandbox de la CLI.** Una negativa del sandbox de la CLI no pasa por el riel.
   El parser de codex la registra solo si la CLI la informa en su stream, y la
   versión medida no la informa.

@@ -10,7 +10,8 @@ use yunta_core::{CommitSha, Node, Task};
 
 use crate::scope_expansion::GrantWindow;
 use crate::task_cycle::{
-    run_task, scope_in_force, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport,
+    run_task, scope_in_force, AttemptEnv, Continuing, ScopeGovernance, TaskCycleError,
+    TaskCycleReport,
 };
 use crate::worktree::{commit_work, head_commit, Lease, Unit, UnitHome, UnitId};
 
@@ -203,7 +204,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     )
     .await?;
 
-    let report = run_task(
+    let outcome = run_task(
         task,
         instruction,
         AttemptEnv {
@@ -239,7 +240,18 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         cancel,
         setup,
     )
-    .await?;
+    .await;
+    let report = match outcome {
+        Ok(report) => report,
+        Err(error) => {
+            // A session the engine could not stop may still write in this
+            // checkout, so the hold stands while one of its groups runs.
+            if matches!(error, TaskCycleError::NotStopped { .. }) && lease.groups_running().await {
+                lease.keep();
+            }
+            return Err(error.into());
+        }
+    };
 
     Ok(Dispatched {
         task,

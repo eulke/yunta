@@ -12,7 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 49 rows and **59 `kind` names**.
+The current Run Contract event table has 51 rows and **61 `kind` names**.
+It had 49 rows and 59 kinds before `rail_failed` and `rail_summary` were added.
 It had 47 rows and 57 kinds before `scope_expansion_withdrawn` and
 `criterion_declared_unpassable` were added. It had 46 rows and 56 kinds before
 `baseline_held` was added. The table defines the normative set; this document
@@ -123,7 +124,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
-## 5. Los 59 tipos de evento, campo por campo
+## 5. Los 61 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -891,7 +892,9 @@ recibe el segundo (§11.2).
 ### 5.25a.4 `write_formatted` — engine (el riel de la sesión)
 **Fuente:** lo que una sesión escribió y una regla de `format:` cubre,
 formateado por el comando del proyecto en cuanto el hook después de escribir
-le avisó al engine (D255). Auditoría: no mueve estado.
+le avisó al engine (D255). Auditoría: no mueve estado. Los formateadores de una
+escritura comparten una cota de 5 s (D266): el que sigue corriendo al llegar a
+ella se corta, con `exit_code` -2 y `timed_out`.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
@@ -899,8 +902,34 @@ le avisó al engine (D255). Auditoría: no mueve estado.
 | `run` | `CommandName` | sí | el comando del proyecto que formateó |
 | `paths` | lista de paths | sí | los archivos que recibió, relativos al worktree |
 | `changed` | lista de paths | vacía —y omitida— cuando no cambió nada | los que cambió |
-| `exit_code` | `i32` | sí | cómo salió el comando |
+| `exit_code` | `i32` | sí | cómo salió el comando; `-2` cuando la cota lo cortó |
 | `duration_ms` | `u64` | sí | cuánto tardó, que la sesión esperó; `stats` lo cuenta como `rails` |
+| `output` | `Option<ContentHash>` | no | el hash de lo que imprimió el comando, redactado y guardado en el store; ausente cuando el store no lo guardó, y en los logs anteriores a este campo |
+| `timed_out` | `bool` | falso —y omitido— cuando la cota no lo cortó | sí cuando la cota lo cortó; en los logs anteriores, falso |
+
+### 5.25a.5 `rail_failed` — engine (el riel de la sesión)
+**Fuente:** una llamada del riel que el engine oyó y no pudo juzgar o responder a
+tiempo, con su causa cerrada (D266). Auditoría: no mueve estado. Un hook que no
+alcanza a ningún engine no la deja: no hay engine que la registre, y la negativa
+del hook lleva la causa.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `session_id` | `SessionId` | no | la sesión a la que pertenece la falla; ausente cuando ninguna le pertenece, como en un 401 |
+| `event` | `RailEvent` | no | el momento de la llamada fallida (`before-write`, `after-write` o `before-stop`); ausente cuando no se pudo leer, como en un 401 o en la muerte de un listener |
+| `cause` | `decode \| unauthorized \| timeout \| formatter_failed \| listener_died \| judgement_failed \| no_fence` | sí | clasificación cerrada de la falla |
+
+### 5.25a.6 `rail_summary` — engine (el riel de la sesión)
+**Fuente:** el riel de una sesión, al cerrarse: cuántas llamadas respondió en cada
+momento y cuánto tardó cada respuesta (D266). Mueve un solo dato del estado: el
+modelo de la sesión cuyo `agent_session_opened` no lo trajo. `stats` lee sus
+histogramas.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `session_id` | `SessionId` | sí | la sesión cuyo riel resume |
+| `model` | `ModelName` | no | el primer modelo que oyó el riel; ausente cuando ningún hook lo trajo |
+| `moments` | mapa de `RailEvent` a histograma | sí | por momento, un histograma de `count` y `buckets`: cuántas respuestas hubo y cuánto tardó cada una, en microsegundos y en escala logarítmica; dos histogramas se suman |
 
 ### 5.25b `host_suspended` — engine
 

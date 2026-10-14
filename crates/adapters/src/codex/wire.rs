@@ -244,7 +244,7 @@ mod tests {
         let call = CodexRailCodec.decode(RailEvent::BeforeWrite, &stdin);
         assert!(matches!(
             call,
-            Ok(Some(RailCall { act: RailAct::BeforeWrite { paths }, .. }))
+            Ok(RailCall { act: RailAct::BeforeWrite { paths }, .. })
                 if paths == [PathBuf::from("src/lib.rs")]
         ));
     }

@@ -3,6 +3,7 @@
 //! tools, and the scoping rules as observable behavior,
 //! not as unit assertions on internals.
 
+use std::io::{Read, Write};
 use std::sync::Arc;
 
 use rmcp::model::CallToolRequestParams;
@@ -15,7 +16,11 @@ use yunta_core::events::{
     Phase, RunToolRefusal, ScopeCheckedPayload, SessionEvent, TaskEvent, TaskStatus,
     TaskStatusChangedPayload,
 };
-use yunta_core::TaskId;
+use yunta_core::fence::{Advice, Fence};
+use yunta_core::port::PermissionProfile;
+use yunta_core::protected::Protected;
+use yunta_core::rail::RailEndpoint;
+use yunta_core::{Confinement, ConfinementInput, EditSandbox, ScopeGlob, Secret, TaskId};
 use yunta_engine::scope_expansion::ScopeExpansionRequest;
 use yunta_engine::RunToolsSession;
 use yunta_testkit::ToolsHost;
@@ -25,6 +30,9 @@ use common::scope_expansion_workflow;
 
 #[path = "run_tools/task_reads.rs"]
 mod task_reads;
+
+#[path = "run_tools/rail_calls.rs"]
+mod rail_calls;
 
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: coordinated

@@ -168,6 +168,10 @@ event_kinds! {
         => Session(SessionEvent::StopRefused) sample samples::stop_refused;
     WriteFormatted(WriteFormattedPayload) = "write_formatted"
         => Session(SessionEvent::WriteFormatted) sample samples::write_formatted;
+    RailFailed(RailFailedPayload) = "rail_failed"
+        => Session(SessionEvent::RailFailed) sample samples::rail_failed;
+    RailSummary(RailSummaryPayload) = "rail_summary"
+        => Session(SessionEvent::RailSummary) sample samples::rail_summary;
     RunToolFailed(RunToolFailedPayload) = "run_tool_failed"
         => Session(SessionEvent::RunToolFailed) sample samples::run_tool_failed;
     RunToolRefused(RunToolRefusedPayload) = "run_tool_refused"

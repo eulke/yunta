@@ -101,8 +101,8 @@ enforce, and each session's opening says which:
 
 | Adapter | How it fences | What it covers |
 |---|---|---|
-| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens; commands stay inside the CLI's sandbox. | Edits exactly; commands by directory — the worktree, the run's directories and the temporary directories under `edit` with the `workspace-write` sandbox (the default); the run's directories and the temporary directories under `read-only`, and under `edit` with the `read-only` sandbox; anything under `full`, and under `edit` with `danger-full-access`. |
-| `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree, the run's directories and the temporary directories under `edit` with the `workspace-write` sandbox (the default); the run's directories and the temporary directories under `read-only`, and under `edit` with the `read-only` sandbox; anything under `full`, and under `edit` with `danger-full-access`. |
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens, and refuses the write, with the cause, when the engine cannot be asked; commands stay inside the CLI's sandbox. | Edits exactly; commands by directory — the worktree, the run's directories and the temporary directories under `edit` with the `workspace-write` sandbox (the default); the run's directories and the temporary directories under `read-only`, and under `edit` with the `read-only` sandbox; anything under `full`, and under `edit` with `danger-full-access`. |
+| `codex` | A `PreToolUse` hook on `apply_patch` runs `yunta rail`, which asks the run's engine about every file the patch names, and refuses the patch, with the cause, when the engine cannot be asked; commands stay inside the process's sandbox. | Edits exactly; commands by directory — the worktree, the run's directories and the temporary directories under `edit` with the `workspace-write` sandbox (the default); the run's directories and the temporary directories under `read-only`, and under `edit` with the `read-only` sandbox; anything under `full`, and under `edit` with `danger-full-access`. |
 | `mock` | The fixture's `dialect:` (`claude-code` or `codex`) decides what the mock declares, as that CLI's adapter does; each scripted effect asks the engine the way that CLI's hook does. | What that CLI's adapter covers. |
 
 Every session also loads its person's own configuration of the CLI — settings,
@@ -159,9 +159,18 @@ close can grant or escalate a scope request the session made: the close decides
 that request, and a task's request the project refuses is answered in the run tool's
 reply, at once. A criterion that cannot run, or one declared impossible, does not
 send the session back either: the close blocks its task on the first, and the
-planner takes the second. A hook that cannot reach the engine lets the session
+planner takes the second. A stop hook that cannot reach the engine lets the session
 stop: the close still judges it.
 Both CLIs wait for that answer as long as a run-tool call may take.
+A write hook that cannot reach the engine refuses the write, and the refusal says
+why; it records no `rail_failed`, because no engine is listening to record it. A
+failure the engine hears of is recorded as `rail_failed` with one closed cause:
+`decode` for a call that does not read, `unauthorized` for a call without the
+session's token, `timeout` for an answer that misses its window,
+`judgement_failed` for a stop whose judgement cannot run, `formatter_failed` for a
+formatter that does not start, `no_fence` for a write in a session with no fence
+to judge it by, and `listener_died` when a listener stops serving. A 400 and a 401
+are each recorded once per listener.
 
 Whatever the adapter, the session's prompt reaches the CLI on its standard
 input, never as a command-line argument, so it is not readable from the

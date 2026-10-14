@@ -1,12 +1,18 @@
 //! The samples of the session's own kinds: an agent session opening and
 //! speaking, the writes and stops the engine refused, the formats it ran on
-//! writes, the run-tool calls it refused, and the service it waited on.
+//! writes, the rail's failures and summaries, the run-tool calls it refused,
+//! and the service it waited on.
 
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::confinement::{Commands, Worktree};
 use crate::events::*;
 use crate::port::PermissionProfile;
+use crate::rail::hook::RailFailureCause;
+use crate::rail::timing::Histogram;
+use crate::rail::RailEvent;
 
 pub(crate) fn agent_session_opened() -> AgentSessionOpenedPayload {
     AgentSessionOpenedPayload {
@@ -71,6 +77,26 @@ pub(crate) fn write_formatted() -> WriteFormattedPayload {
         changed: vec!["src/graph.rs".into()],
         exit_code: 0,
         duration_ms: 34,
+        output: Some(crate::sha256_hex(b"rustfmt printed nothing")),
+        timed_out: false,
+    }
+}
+
+pub(crate) fn rail_failed() -> RailFailedPayload {
+    RailFailedPayload {
+        session_id: Some("sess-1".into()),
+        event: Some(RailEvent::BeforeWrite),
+        cause: RailFailureCause::Timeout,
+    }
+}
+
+pub(crate) fn rail_summary() -> RailSummaryPayload {
+    let mut before_write = Histogram::default();
+    before_write.observe(Duration::from_millis(12));
+    RailSummaryPayload {
+        session_id: "sess-1".into(),
+        model: Some("mock-model".into()),
+        moments: BTreeMap::from([(RailEvent::BeforeWrite, before_write)]),
     }
 }
 

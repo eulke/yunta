@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use yunta_core::events::STOPPED_EXIT_CODE;
 use yunta_core::process::exit::ExitWatch;
 use yunta_core::process::group::force_kill_group;
 use yunta_core::process::signal::{signal_group, Signal};
@@ -216,6 +217,20 @@ pub enum Outcome {
         stdout: Vec<u8>,
         stderr: Vec<u8>,
     },
+}
+
+impl Outcome {
+    /// The exit code the log records for how this command ended: the
+    /// process's own code, or `-1` for one a signal killed. A command the
+    /// engine stopped, by its timeout or by the run's cancellation, has no
+    /// exit of its own and is recorded as [`STOPPED_EXIT_CODE`], which is
+    /// `-2`: the one value no process exits with.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => STOPPED_EXIT_CODE,
+        }
+    }
 }
 
 /// Runs `command` to its end under the engine's governance: in its own

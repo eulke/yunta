@@ -7,17 +7,28 @@
 //! session it authenticated. The token is compared against the one
 //! string this attempt was born with, which is what keeps the loopback
 //! port from being a way into the run for anything else on the machine.
+//!
+//! The rail's calls arrive on this listener under the same token, and they
+//! are answered under the session this listener serves, whatever session a
+//! call names in its body.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::host::{NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
+use super::rail::rail_routes;
 use super::session::{Arrivals, SessionTools};
+use super::watch::watch_server;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
+use tokio::task::{AbortHandle, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{CapabilityDegradedPayload, EventPayload, SessionEvent};
 use yunta_core::port::{Policy, RunToolsEndpoint};
+use yunta_core::rail::hook::RailFailureCause;
 use yunta_core::{AdapterId, Capability, RunTool};
 
 /// One live listener, tied to one session attempt. Dropping it tears
@@ -42,7 +53,8 @@ pub struct RunToolsSession {
     /// The tools this session is served, in the order it reads them.
     offered: Vec<RunTool>,
     shutdown: CancellationToken,
-    server: tokio::task::JoinHandle<()>,
+    /// Stops the server task, whose watcher owns the task itself.
+    server: AbortHandle,
 }
 
 impl RunToolsSession {
@@ -133,8 +145,10 @@ pub async fn open_session_listener(
         Arc::clone(&arrivals),
     );
     let offered = super::catalog::offered(&tools);
-    let server = serve(listener, tools, &shutdown, token.expose());
-
+    let server = watch_server(
+        serve(listener, tools.clone(), &shutdown, token.expose()),
+        tools,
+    );
     Ok(RunToolsSession {
         endpoint: RunToolsEndpoint {
             url,
@@ -176,61 +190,35 @@ fn redacting(access: RunToolsAccess, token: &yunta_core::Secret<String>) -> RunT
 }
 
 /// Serves `tools` on `listener` until `shutdown`: the session's run
-/// tools at `/mcp` and its rail beside them, both behind `token`.
+/// tools at `/mcp` and its rail beside them, both behind `token`. The
+/// handle ends with the server, so an I/O error or a panic is visible to
+/// the watcher that owns it.
 fn serve(
     listener: tokio::net::TcpListener,
     tools: SessionTools,
     shutdown: &CancellationToken,
     token: &str,
-) -> tokio::task::JoinHandle<()> {
-    let rail_tools = tools.clone();
+) -> JoinHandle<std::io::Result<()>> {
+    let gate = tools.clone();
+    let rail = rail_routes(tools.clone());
     let service = StreamableHttpService::new(
         move || Ok(tools.clone()),
         Arc::new(transport_sessions()),
         StreamableHttpServerConfig::default().with_cancellation_token(shutdown.child_token()),
     );
     let router = behind_bearer(
-        axum::Router::new().nest_service("/mcp", service).route(
-            &format!("{}/{{event}}", yunta_core::rail::ROUTE),
-            rail_route(rail_tools),
-        ),
+        axum::Router::new()
+            .nest_service("/mcp", service)
+            .merge(rail),
         token,
+        gate,
     );
     let serve_ct = shutdown.clone();
     tokio::spawn(async move {
-        let _ = axum::serve(listener, router)
+        axum::serve(listener, router)
             .with_graceful_shutdown(async move { serve_ct.cancelled().await })
-            .await;
+            .await
     })
-}
-
-/// The route a session's hooks call: one call in, one answer out. A call
-/// that does not read, or names an event its body does not carry, is
-/// answered `400` — the hook then answers as one that could not ask.
-fn rail_route(tools: SessionTools) -> axum::routing::MethodRouter {
-    axum::routing::post(
-        move |axum::extract::Path(event): axum::extract::Path<String>, body: axum::body::Bytes| {
-            let tools = tools.clone();
-            async move {
-                use axum::response::IntoResponse;
-                let call = serde_json::from_slice::<yunta_core::rail::RailCall>(&body)
-                    .ok()
-                    .filter(|call| call.act.moment().as_str() == event);
-                let Some(call) = call else {
-                    return axum::http::StatusCode::BAD_REQUEST.into_response();
-                };
-                let answer = tools.rail(call).await;
-                match serde_json::to_string(&answer) {
-                    Ok(body) => (
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        body,
-                    )
-                        .into_response(),
-                    Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-                }
-            }
-        },
-    )
 }
 
 /// The transport sessions one listener keeps, none of which is ever
@@ -259,30 +247,44 @@ fn mint_token() -> String {
     )
 }
 
+/// Larger than any hook's call, so a refused request is read whole. A longer
+/// body is cut off, and the refusal goes out all the same.
+const REFUSED_BODY_BYTES: usize = 64 * 1024;
+
 /// `router`, refusing with `401` every request that does not present
-/// `token`.
+/// `token`. The first refusal is recorded once, under no session: a request
+/// without the credential names none.
 ///
 /// The gate wraps the whole router rather than the tool handlers, so a
 /// request that carries no credential is answered before any session
 /// state is touched — including the initialize that would otherwise open
 /// a transport session of its own.
-fn behind_bearer(router: axum::Router, token: &str) -> axum::Router {
+fn behind_bearer(router: axum::Router, token: &str, tools: SessionTools) -> axum::Router {
     let expected = yunta_core::Secret::from(format!("Bearer {token}"));
+    let refused = Arc::new(AtomicBool::new(false));
     router.layer(axum::middleware::from_fn(
         move |req: axum::extract::Request, next: axum::middleware::Next| {
-            let expected = expected.clone();
+            let (expected, tools, refused) =
+                (expected.clone(), tools.clone(), Arc::clone(&refused));
             async move {
-                use axum::response::IntoResponse;
                 let presented = req
                     .headers()
                     .get(axum::http::header::AUTHORIZATION)
                     .map(axum::http::HeaderValue::as_bytes)
                     .unwrap_or_default();
                 if presents_the_credential(presented, &expected) {
-                    next.run(req).await
-                } else {
-                    axum::http::StatusCode::UNAUTHORIZED.into_response()
+                    return next.run(req).await;
                 }
+                if !refused.swap(true, Ordering::Relaxed) {
+                    tools
+                        .failed(None, None, RailFailureCause::Unauthorized)
+                        .await;
+                }
+                // best-effort: a body that cannot be read leaves only the refusal to answer
+                axum::body::to_bytes(req.into_body(), REFUSED_BODY_BYTES)
+                    .await
+                    .ok();
+                StatusCode::UNAUTHORIZED.into_response()
             }
         },
     ))

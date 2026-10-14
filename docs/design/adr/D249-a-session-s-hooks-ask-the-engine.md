@@ -1,12 +1,14 @@
 ---
 number: D249
 title: "A session's hooks ask the engine"
-status: accepted
+status: revised
 revises: [D172]
-revised_by: []
+revised_by: [D266]
 ---
 
 # D249 — A session's hooks ask the engine
+
+*(Revised by D266: decision 4's answer deadline is 7 seconds from the start of the hook process, not 8 seconds from the ask, and a failure the engine hears of is recorded once in the log, with a closed cause, through the report route `/rail/report`.)*
 
 ## Context
 

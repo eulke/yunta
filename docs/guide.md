@@ -282,10 +282,20 @@ format:
 
 The first rule whose globs cover a file formats it; its command receives the
 files of one write as arguments and must be one `commands:` declares, which
-`yunta check` verifies. When the command changes a file, the session is told to
-read it again before editing it; when it fails, what it printed. Otherwise the
-session hears nothing. Each format is on the log as `write_formatted`, and
-`yunta stats` shows the time sessions waited for it as `rails`.
+`yunta check` verifies. The formatters of one write share a bound of 5 seconds: a
+formatter still running when the bound ends is stopped, and its `write_formatted`
+records exit code `-2` and `timed_out: true`. When the command changes a file, the
+session is told to read it again before editing it; when it fails, what it
+printed. Otherwise the session hears nothing. Each format is on the log as
+`write_formatted`, with its duration and the output it printed, redacted and
+stored under its content hash. `yunta stats` shows the time sessions waited for
+formatting as `rails`, and the p50 and p95 of each moment's answers, read from
+each session's `rail_summary`.
+
+A write's hooks give the engine 7 seconds from the start of their own process to
+answer. A before-write that is not answered in time is refused, with the reason;
+an after-write that is not answered tells the session nothing. Either way the log
+records `rail_failed` with the cause `timeout`.
 
 `yunta init` writes `commands:` for what it finds in the repository: the
 scripts a `package.json` declares for `lint`, `typecheck`, `test`, `format` and

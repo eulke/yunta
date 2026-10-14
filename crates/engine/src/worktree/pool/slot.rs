@@ -227,7 +227,7 @@ fn agents_still_work(home: &Path, number: u32) -> bool {
 
 /// Whether one of the process groups the registry under `run_dir` names
 /// still answers.
-fn groups_at_work(run_dir: &Path) -> bool {
+pub(super) fn groups_at_work(run_dir: &Path) -> bool {
     match process_registry::read_registry(run_dir) {
         process_registry::Registry::Read(registry) => {
             !process_registry::running_groups(&registry.doc.process_groups).is_empty()

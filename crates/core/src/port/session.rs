@@ -20,7 +20,10 @@ use std::time::Duration;
 use crate::confinement::{Confinement, EditSandbox};
 use crate::events::SessionExit;
 use crate::fence::{Coverage, Fence};
-use crate::rail::{RailAnswer, RailCall, RailCommand, RailEndpoint, RailEvent};
+use crate::rail::{
+    answer::{FormatAnswer, StopAnswer, WriteAnswer},
+    RailCall, RailCommand, RailEndpoint, RailEvent,
+};
 use crate::{
     AdapterError, AdapterId, Capabilities, Capability, ModelName, Pid, Result, Secret, SessionId,
 };
@@ -184,7 +187,9 @@ impl RunToolsEndpoint {
     /// which take as long as the build behind them, and a CLI's own
     /// default would cut the answer off before it arrives.
     pub fn call_timeout(budget: &Budget) -> Duration {
-        budget.timeout.unwrap_or(Duration::from_secs(60 * 60))
+        budget
+            .timeout
+            .unwrap_or(Duration::from_secs(crate::rail::window::UNSET_WINDOW_SECS))
     }
 }
 
@@ -446,17 +451,19 @@ pub trait AgentSession: Send {
 /// this: what the engine answers is the engine's, the same for every
 /// adapter.
 pub trait RailCodec: Send + Sync {
-    /// The call, read out of what the CLI sent on stdin for `event`.
-    /// `None` when the call has nothing to ask — a write that names no
-    /// path — and goes on without asking.
-    fn decode(
-        &self,
-        event: RailEvent,
-        stdin: &[u8],
-    ) -> std::result::Result<Option<RailCall>, CodecError>;
+    /// The call, read out of what the CLI sent on stdin for `event`. A
+    /// call that does not read, or a write that names no path, is an
+    /// error: there is no call to skip.
+    fn decode(&self, event: RailEvent, stdin: &[u8]) -> std::result::Result<RailCall, CodecError>;
 
-    /// The engine's answer in the shape this CLI reads for `event`.
-    fn encode(&self, event: RailEvent, answer: &RailAnswer) -> HookReply;
+    /// The engine's answer to a write, in the shape this CLI reads.
+    fn before_write(&self, answer: &WriteAnswer) -> HookReply;
+
+    /// The engine's answer after a write, in the shape this CLI reads.
+    fn after_write(&self, answer: &FormatAnswer) -> HookReply;
+
+    /// The engine's answer when the session would stop, in the shape this CLI reads.
+    fn before_stop(&self, answer: &StopAnswer) -> HookReply;
 }
 
 /// What the hook process leaves behind: a CLI reads the exit code, the

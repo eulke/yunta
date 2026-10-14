@@ -26,6 +26,7 @@ mod launch;
 mod run_tool;
 mod script;
 mod session;
+mod stand_in;
 
 pub use fixture::{
     FixtureError, KillBehavior, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt,

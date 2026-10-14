@@ -14,6 +14,9 @@ use yunta_testkit::{
     git, handle, run_id_from, stderr, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
 };
 
+#[path = "parked_runs/checkout.rs"]
+mod checkout;
+
 /// A node that fails with its one re-route already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
 const EXHAUSTED_REROUTE: &str = r#"

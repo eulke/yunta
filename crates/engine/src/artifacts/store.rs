@@ -95,15 +95,22 @@ impl<'a> ObjectStore<'a> {
     /// Stores `bytes` with every secret `redactor` knows taken out, as
     /// the log takes them out of what it appends — for what a command
     /// printed, which the run keeps and a secret may have reached.
+    ///
+    /// Stored with [`Durability::Atomic`], so the object is linked whole
+    /// without the sync that `put` makes. A command's output is evidence a
+    /// reader reads, never the only copy of any work, and the reader
+    /// verifies the object against its name: a lost object reads back as
+    /// missing or corrupt, never as other bytes.
     pub async fn put_redacted(
         &self,
         bytes: &[u8],
         redactor: &yunta_core::Redactor,
     ) -> std::io::Result<ContentHash> {
         if redactor.is_empty() {
-            return self.put(bytes).await;
+            return self.put_with(bytes, Durability::Atomic).await;
         }
-        self.put(&redactor.bytes(bytes)).await
+        self.put_with(&redactor.bytes(bytes), Durability::Atomic)
+            .await
     }
 
     /// This store as what a command printed is kept in it: with every

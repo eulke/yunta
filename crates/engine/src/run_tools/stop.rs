@@ -23,7 +23,9 @@ use yunta_core::events::{
     StopRefusedPayload, StoredEvent, TaskCheckAnsweredPayload, TaskCheckStartedPayload, TaskEvent,
 };
 use yunta_core::protected::Closing;
-use yunta_core::rail::RailAnswer;
+use yunta_core::rail::answer::StopAnswer;
+use yunta_core::rail::hook::RailFailureCause;
+use yunta_core::rail::RailEvent;
 use yunta_core::{ContentHash, RunTool, SessionId, TaskId};
 
 use super::host::TaskAccess;
@@ -39,30 +41,24 @@ use std::path::Path;
 
 impl SessionTools {
     /// Whether the session may stop now.
-    pub(super) async fn before_stop(&self, session: &SessionId) -> RailAnswer {
+    pub(super) async fn before_stop(&self, session: &SessionId) -> StopAnswer {
         let judgement = match self
             .judge_session(Settle::Dry, std::slice::from_ref(session))
             .await
         {
             Ok(judgement) => judgement,
-            Err(error) => {
-                tracing::debug!(%error, "a stop went unjudged");
-                return RailAnswer::Proceed;
-            }
+            Err(_) => return self.unjudged(session).await,
         };
         let state = judgement.state();
         if self.stop.is_cancelled() || !judgement.holds_a_stop() {
-            return RailAnswer::Proceed;
+            return StopAnswer::Proceed;
         }
         let seen = match self.refused_before(session, &state).await {
             Ok(seen) => seen,
-            Err(error) => {
-                tracing::debug!(%error, "a stop's earlier refusals went unread");
-                return RailAnswer::Proceed;
-            }
+            Err(_) => return self.unjudged(session).await,
         };
         if seen {
-            return RailAnswer::Proceed;
+            return StopAnswer::Proceed;
         }
         let payload = EventPayload::Session(SessionEvent::StopRefused(StopRefusedPayload {
             session_id: session.clone(),
@@ -73,15 +69,27 @@ impl SessionTools {
         // A refusal the log does not hold could be repeated forever: the
         // session stops instead.
         if let Err(error) = self.append(payload).await {
-            tracing::debug!(%error, "a refused stop went unrecorded");
-            return RailAnswer::Proceed;
+            self.rails.left_unrecorded(error);
+            return StopAnswer::Proceed;
         }
         // The text leaves the engine, so the secrets the run holds are taken
         // out of it, as they are out of the log.
         let text = verdicts::stop_text(&judgement, &self.called(RunTool::RequestScopeExpansion));
-        RailAnswer::Refuse {
+        StopAnswer::Refuse {
             reason: self.host.redactor.text(&text),
         }
+    }
+
+    /// A stop the engine could not judge: the failure is recorded, and the
+    /// session is let stop.
+    async fn unjudged(&self, session: &SessionId) -> StopAnswer {
+        self.failed(
+            Some(session),
+            Some(RailEvent::BeforeStop),
+            RailFailureCause::JudgementFailed,
+        )
+        .await;
+        StopAnswer::Proceed
     }
 
     /// A task session's work judged on its checkout as its attempt's close

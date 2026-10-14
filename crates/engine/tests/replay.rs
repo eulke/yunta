@@ -513,6 +513,8 @@ const AUDIT_KINDS: &[&str] = &[
     "hook_executed",
     "pull_request_opened",
     "write_formatted",
+    // Audit only: a failed rail call is kept in the log, and no ledger reads it.
+    "rail_failed",
     "run_tool_refused",
     "service_reachable",
     "task_check_answered",
@@ -570,15 +572,23 @@ fn a_kind_that_moves_no_state_says_so_by_name() {
 }
 
 /// The log every other kind needs behind it: a node that started, a task
-/// that was registered, and a finding that was posted.
+/// that was registered, a finding that was posted, and a session that
+/// opened with no model, which the rail summary fills.
 fn establishing() -> Vec<yunta_core::events::EventPayload> {
     yunta_testkit_core::all_kinds()
         .into_iter()
         .filter(|payload| {
             matches!(
                 payload.kind_name(),
-                "node_started" | "task_registered" | "finding_posted"
+                "node_started" | "task_registered" | "finding_posted" | "agent_session_opened"
             )
+        })
+        .map(|payload| match payload {
+            EventPayload::Session(SessionEvent::Opened(mut opened)) => {
+                opened.model = None;
+                EventPayload::Session(SessionEvent::Opened(opened))
+            }
+            other => other,
         })
         .collect()
 }

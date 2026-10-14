@@ -3,20 +3,19 @@
 //! engine.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::Instant;
 
 use yunta_core::fence::{Fence, Verdict};
 use yunta_core::port::SessionRequest;
-use yunta_core::rail::{RailAnswer, RailEndpoint, RailEvent};
+use yunta_core::rail::answer::{FormatAnswer, HookAnswer, WriteAnswer};
+use yunta_core::rail::hook::{settle, RailFailure};
+use yunta_core::rail::window::{AskBudget, Wait};
+use yunta_core::rail::{RailEndpoint, RailEvent};
 use yunta_core::{AdapterError, FenceLevel, Result, SessionId};
 
 use super::fixture::{MockEffect, SessionScript, Via};
 use super::{MockAdapter, ID};
 use crate::dialect::DialectName;
-
-/// The longest a mock hook waits for the engine's answer. The engine judges
-/// a call in moments, so this bounds only a listener that never answers.
-const HOOK_DEADLINE: Duration = Duration::from_secs(30);
 
 /// A session's effects, each asked of the engine before it is written, as
 /// the CLI's own write hook asks.
@@ -32,79 +31,63 @@ pub(super) struct Asked {
 
 impl Asked {
     /// Asks the engine about each tool effect and writes the ones it allows.
-    /// A write made through a shell command reaches no write hook, so the
-    /// command effects handed here, which have landed, are written as they
-    /// are made, with nothing asked and nothing reported.
+    /// A refused write is skipped: the engine's refusal is the answer, not a
+    /// failed session. A write made through a shell command reaches no write
+    /// hook, so the command effects handed here, which have landed, are
+    /// written as they are made, with nothing asked and nothing reported.
     pub(super) async fn written(&self, session: &SessionId) -> std::result::Result<(), String> {
         for effect in &self.effects {
             if effect.via == Via::Command {
                 write_effect(&self.cwd, effect).map_err(|e| e.to_string())?;
                 continue;
             }
-            let answer = ask_hook(
-                self.dialect,
-                &self.rail,
-                RailEvent::BeforeWrite,
-                session,
-                &effect.path,
-            )
-            .await?;
-            if answer != RailAnswer::Proceed {
+            let answer: WriteAnswer =
+                ask_hook(self.dialect, &self.rail, session, &effect.path).await;
+            if answer != WriteAnswer::Proceed {
                 continue;
             }
             write_effect(&self.cwd, effect).map_err(|e| e.to_string())?;
             if self.formats {
-                ask_hook(
-                    self.dialect,
-                    &self.rail,
-                    RailEvent::AfterWrite,
-                    session,
-                    &effect.path,
-                )
-                .await?;
+                ask_hook::<FormatAnswer>(self.dialect, &self.rail, session, &effect.path).await;
             }
         }
         Ok(())
     }
 }
 
-/// Asks the engine about one moment of a session, as its CLI asks: the stdin
-/// the CLI's hook sends, decoded by the dialect's codec, answered by the
-/// engine, and encoded into the reply the hook leaves. The session decides on
-/// what the CLI reads back from that reply, so an encoding the CLI would
-/// misread changes this session as it changes the real one. A call with
-/// nothing to ask goes on without asking.
-pub(super) async fn ask_hook(
+/// Asks the engine about one moment of a session, as its CLI's hook asks: the
+/// stdin the CLI sends is decoded by the dialect's codec, and the engine's
+/// answer is settled as the real hook settles it, within the moment's window.
+/// A write's answer is due within the write window and a stop's within the
+/// judgement. A call that cannot be asked gets the moment's unasked answer,
+/// so no moment fails the session.
+pub(super) async fn ask_hook<A: HookAnswer + Send + 'static>(
     dialect: DialectName,
     rail: &RailEndpoint,
-    event: RailEvent,
     session: &SessionId,
     path: &Path,
-) -> std::result::Result<RailAnswer, String> {
-    let codec = dialect
-        .rail_codec()
-        .ok_or_else(|| "the CLI has no hook codec".to_string())?;
-    let stdin = dialect.hook_stdin(event, session, path);
-    let call = codec
-        .decode(event, &stdin)
-        .map_err(|e| format!("the {event} hook call did not read: {e}"))?;
-    let Some(call) = call else {
-        return Ok(RailAnswer::Proceed);
+) -> A {
+    let call = match dialect.rail_codec() {
+        Some(codec) => {
+            let stdin = dialect.hook_stdin(A::MOMENT, session, path);
+            codec
+                .decode(A::MOMENT, &stdin)
+                .map_err(|e| RailFailure::Undecodable(e.to_string()))
+        }
+        None => Err(RailFailure::Undecodable(
+            "the CLI has no hook codec".to_string(),
+        )),
+    };
+    let wait = match A::MOMENT {
+        RailEvent::BeforeStop => Wait::Judgement,
+        RailEvent::BeforeWrite | RailEvent::AfterWrite => {
+            Wait::Write(AskBudget::from_process_start(Instant::now()))
+        }
     };
     let rail = rail.clone();
-    let answer = tokio::task::spawn_blocking(move || rail.ask(&call, Some(HOOK_DEADLINE)))
+    tokio::task::spawn_blocking(move || settle::<A>(Ok(&rail), call, wait))
         .await
-        .map_err(|e| format!("the {event} hook did not finish: {e}"))?
-        .map_err(|e| format!("the {event} hook could not ask the engine: {e}"))?;
-    let reply = codec.encode(event, &answer);
-    let read = dialect.read_reply(event, &reply);
-    tracing::debug!(
-        exit = reply.exit,
-        engine = ?answer,
-        cli = ?read,
-        "a mock hook answered as its CLI reads it"
-    );
-    Ok(read)
+        .unwrap_or_else(|e| A::unasked(&format!("the {} hook did not finish: {e}", A::MOMENT)))
 }
 
 impl MockAdapter {

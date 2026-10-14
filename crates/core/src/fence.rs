@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Every refusal starts with this, so whoever reads one — the model, a
 /// person reading its transcript — knows it was the fence.
-pub const REFUSAL_MARKER: &str = "yunta: write refused: ";
+pub use crate::rail::answer::REFUSAL_MARKER;
 
 /// What a session's file tools may write under the worktree: the globs
 /// its scope admits, and what a refusal advises.

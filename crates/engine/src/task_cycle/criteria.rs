@@ -4,32 +4,19 @@
 
 use std::path::Path;
 
-use yunta_core::events::{CriterionType, TaskLedger, Unanswered, STOPPED_EXIT_CODE};
+use yunta_core::events::{CriterionType, TaskLedger, Unanswered};
 use yunta_core::Criterion;
 use yunta_core::{Task, TaskId};
 
 use super::memo::Memo;
 use super::tree::{asks_git, Tree};
 use super::{CriterionRun, TaskCycleError};
-use crate::process::{
-    spawn_governed, CommandOutput, GovernedCommand, Outcome, Printed, Supervision,
-};
-
-/// The exit code the log records for how a criterion's command ended.
-/// A command the engine stopped before it answered — a timeout, or a
-/// cancellation — has no exit code of its own, so it is recorded as
-/// [`STOPPED_EXIT_CODE`], which no process exits with; one killed by a
-/// signal as `-1`.
-pub(crate) fn exit_code_of(outcome: Outcome) -> i32 {
-    match outcome {
-        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => STOPPED_EXIT_CODE,
-    }
-}
+use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Printed, Supervision};
 
 /// Why a criterion never answered, when its exit code says it did not:
 /// the shell could not find its command, found it but could not execute
-/// it, or the engine stopped it first (see [`exit_code_of`]). `None` for
+/// it, or the engine stopped it first (see
+/// [`Outcome::exit_code`](crate::process::Outcome::exit_code)). `None` for
 /// every other exit code, which is the command's own answer.
 ///
 /// A criterion that could not run is neither red nor green: no work on
@@ -73,7 +60,7 @@ async fn run_criterion(
             source,
         })?;
     let output = CommandOutput::of(&outcome);
-    let exit_code = exit_code_of(outcome);
+    let exit_code = outcome.exit_code();
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     Ok((exit_code, duration_ms, output))
 }

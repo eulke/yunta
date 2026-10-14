@@ -36,12 +36,14 @@ mod surface;
 
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use clap::{CommandFactory, FromArgMatches};
 
 use crate::error::{CliError, Outcome};
 
 fn main() -> ExitCode {
+    let started = Instant::now();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -56,7 +58,7 @@ fn main() -> ExitCode {
     surface::terminal::settle();
     tracing::debug!("yunta starting");
 
-    let outcome = drive(cli);
+    let outcome = drive(cli, started);
     // Last, because a prompt this run abandoned mid-key left a thread
     // that is still reading the terminal and still turning raw mode on
     // between its own reads. Nothing runs after this, so nothing takes
@@ -179,12 +181,15 @@ fn columns() -> Option<usize> {
 ///
 /// Everything the run owns is already released by then: what this
 /// leaves behind is one thread inside a `read`, and the exit takes it.
-fn drive(cli: cli::Cli) -> Result<Outcome, CliError> {
+///
+/// `started` is the first instant of this process, handed on to the
+/// command so a hook's window counts from the start of the process.
+fn drive(cli: cli::Cli, started: Instant) -> Result<Outcome, CliError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|source| CliError::io("build the runtime for", "this command", source))?;
-    let outcome = runtime.block_on(cli.run());
+    let outcome = runtime.block_on(cli.run(started));
     runtime.shutdown_background();
     outcome
 }
