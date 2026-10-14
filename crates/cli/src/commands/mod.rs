@@ -45,6 +45,8 @@ use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
 use yunta_engine::{RunState, UnknownKindCount};
 
 use crate::error::CliError;
+use crate::output::Mode;
+use crate::render::Look;
 
 /// A detached `yunta resume` that never started, and the run it was
 /// for. Recover by running that command yourself: the run is on disk
@@ -389,14 +391,19 @@ pub(crate) async fn context_files_at_head(
 
 /// The line a run starts with: its whole id — the record a script and a
 /// log keep — what is happening to it, and the command that follows it
-/// by its handle. Under `--quiet`, the id and nothing else.
-pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, quiet: bool) {
-    match quiet {
-        true => println!("{run_id}"),
-        false => println!(
-            "run {run_id}: {doing} — `{}` follows it",
-            advice::status(run_id.handle())
+/// by its handle. Under `--quiet`, the id and nothing else; under `--json`,
+/// nothing, because the document is the whole answer.
+pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, look: &Look) {
+    match output {
+        Mode::Human => crate::output::say(
+            look,
+            format!(
+                "run {run_id}: {doing} — `{}` follows it",
+                advice::status(run_id.handle())
+            ),
         ),
+        Mode::Quiet => crate::output::say(look, run_id.to_string()),
+        Mode::Json => {}
     }
 }
 

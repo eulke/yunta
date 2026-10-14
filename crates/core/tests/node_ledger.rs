@@ -31,7 +31,9 @@ fn started(attempt: u32, tree: &str) -> NodeEvent {
 
 fn failed(outcome: &str) -> NodeEvent {
     NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::message(outcome),
+        Failure::Message {
+            outcome: outcome.into(),
+        },
         TokenUsage::default(),
     ))
 }
@@ -49,7 +51,12 @@ fn the_attempt_after_a_failure_remembers_that_failure() {
         .as_ref()
         .expect("the attempt before failed");
     assert_eq!(earlier.attempt, 1);
-    assert_eq!(earlier.failure, Failure::message("regression"));
+    assert_eq!(
+        earlier.failure,
+        Failure::Message {
+            outcome: "regression".into(),
+        }
+    );
 }
 
 #[test]
@@ -108,8 +115,13 @@ fn a_close_that_moved_the_tree_marks_the_attempts_beside_it() {
         (
             "fix",
             NodeEvent::Failed(
-                NodeFailedPayload::new(Failure::message("exit 1"), TokenUsage::default())
-                    .leaving("b2b2b2b".parse().unwrap()),
+                NodeFailedPayload::new(
+                    Failure::Message {
+                        outcome: "exit 1".into(),
+                    },
+                    TokenUsage::default(),
+                )
+                .leaving("b2b2b2b".parse().unwrap()),
             ),
         ),
     ]);
@@ -155,7 +167,9 @@ fn a_new_attempt_starts_unmarked() {
 fn rerouted(origin: yunta_core::events::RerouteOrigin) -> NodeEvent {
     NodeEvent::Rerouted(yunta_core::events::NodeReroutedPayload::new(
         NodeId::from_static("spec"),
-        Failure::message("sent back"),
+        Failure::Message {
+            outcome: "sent back".into(),
+        },
         origin,
         Some(1),
         Some(1),

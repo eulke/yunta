@@ -59,10 +59,10 @@ pub(super) async fn send_back(
     else {
         return Ok(None);
     };
-    let cause = Failure::message(format!(
-        "a person accepted that task `{task}`'s tests are wrong — `{by}` writes them again \
-         before the loop goes on"
-    ));
+    let cause = Failure::TestsAccepted {
+        task,
+        owed_by: by.clone(),
+    };
     let end = fail_with(ctx, node, cause.clone(), tokens).await?;
     ctx.emit(
         Some(&node.id),

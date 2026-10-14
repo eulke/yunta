@@ -7,7 +7,7 @@ use std::path::Path;
 
 use yunta_core::events::NodeState;
 use yunta_core::{NodeId, RunId};
-use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
+use yunta_engine::{NodeFrame, NodeStanding, RunFrame, RunState};
 use yunta_render::spend::Breakdown;
 
 use crate::commands::advice;
@@ -16,11 +16,13 @@ use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole}
 use crate::render::doc::Doc;
 use crate::render::ink::{Line, Tone};
 use crate::render::{duration, paths, wrap, Look, INDENT};
+use crate::run_page::section;
 
 /// What the page is drawn from.
 pub(super) struct NodePage<'a> {
     pub(super) run_id: &'a RunId,
-    pub(super) frame: &'a RunFrame,
+    /// The node the page is about, as the run's frame derives it.
+    pub(super) node: &'a NodeFrame,
     pub(super) run_dir: &'a Path,
     /// Where paths are shown from: the directory this was run in, and
     /// the home `~` stands for.
@@ -28,58 +30,62 @@ pub(super) struct NodePage<'a> {
     pub(super) home: Option<&'a Path>,
     /// The documents the node produced, each read whole here.
     pub(super) documents: &'a [yunta_core::shown::ShownDocument],
-    pub(super) state: &'a yunta_engine::RunState,
+    pub(super) state: &'a RunState,
+}
+
+/// The node `id` names in `frame`. A name the run does not declare is
+/// refused with what the run calls the node it meant, when it has one.
+pub(super) fn find<'a>(
+    run_id: &RunId,
+    frame: &'a RunFrame,
+    id: &NodeId,
+) -> Result<&'a NodeFrame, CliError> {
+    frame
+        .nodes
+        .iter()
+        .find(|node| node.id == *id)
+        .ok_or_else(|| {
+            let declared = frame.nodes.iter().map(|node| node.id.as_str());
+            CliError::msg(format!(
+                "run {} has no node `{id}`{}",
+                run_id.handle(),
+                yunta_core::text::did_you_mean(id.as_str(), declared)
+            ))
+        })
 }
 
 impl NodePage<'_> {
-    /// The page for `id`, or what the run calls the node it meant when
-    /// it declares none by that name.
-    pub(super) fn render(&self, id: &NodeId, look: &Look) -> Result<String, CliError> {
-        let Some(node) = self.frame.nodes.iter().find(|node| node.id == *id) else {
-            let declared = self.frame.nodes.iter().map(|node| node.id.as_str());
-            return Err(CliError::msg(format!(
-                "run {} has no node `{id}`{}",
-                self.run_id.handle(),
-                yunta_core::text::did_you_mean(id.as_str(), declared)
-            )));
-        };
-        let display = crate::render::standing(&node.state);
+    /// The page for the node, as one document: where it stands, what it
+    /// said or what failed it, its failure whole, what it took, the
+    /// documents it produced, and what to type next.
+    pub(super) fn document(&self, look: &Look) -> Doc<'_> {
+        let display = crate::render::standing(&self.node.state);
         let headline = Headline {
-            subject: format!("node {id} of run {}", self.run_id.handle()),
+            subject: format!("node {} of run {}", self.node.id, self.run_id.handle()),
             mark: display.word.mark(),
             said: display.word.word().to_string(),
         };
-        let mut out = crate::render::draw(Doc::new().with(headline), look);
         let mut documents = Vec::new();
         for document in self.documents {
             let doc = crate::render::shown::document(
                 document,
-                self.run_id.handle(),
+                self.run_id,
                 crate::render::shown::Form::Whole,
+                &advice::spell,
             );
             documents.extend(crate::render::surface_lines(doc, look));
         }
-        for part in [
-            self.said(node, look),
-            self.evidence(node, look),
-            self.fields(node).lines(look),
-            documents,
-            self.next().lines(look),
-        ] {
-            if !part.is_empty() {
-                out.push('\n');
-                for line in &part {
-                    out.push_str(&format!("{}\n", look.ink.paint(line)));
-                }
-            }
-        }
-        Ok(out)
+        let doc = section(Doc::new().with(headline), self.said(look));
+        let doc = section(doc, self.evidence(look));
+        let doc = section(doc, self.fields().lines(look));
+        let doc = section(doc, documents);
+        section(doc, self.next().lines(look))
     }
 
     /// The whole of what the node's state says: its failure, every line
     /// of it, or what its agent said when it finished.
-    fn said(&self, node: &NodeFrame, look: &Look) -> Vec<Line> {
-        let (tone, text) = match &node.state {
+    fn said(&self, look: &Look) -> Vec<Line> {
+        let (tone, text) = match &self.node.state {
             NodeStanding::Reached(NodeState::Failed { failure, .. }) => {
                 (Tone::Failed, crate::render::failure::headline(failure))
             }
@@ -104,8 +110,8 @@ impl NodePage<'_> {
     /// The end of what the node printed and where the whole of it is
     /// kept, each document it refused, the paths it should not have
     /// touched.
-    fn evidence(&self, node: &NodeFrame, look: &Look) -> Vec<Line> {
-        let NodeStanding::Reached(NodeState::Failed { failure, .. }) = &node.state else {
+    fn evidence(&self, look: &Look) -> Vec<Line> {
+        let NodeStanding::Reached(NodeState::Failed { failure, .. }) = &self.node.state else {
             return Vec::new();
         };
         let whole = failure.output().map(|output| {
@@ -119,7 +125,8 @@ impl NodePage<'_> {
     }
 
     /// What the node is and what it took.
-    fn fields(&self, node: &NodeFrame) -> Fields {
+    fn fields(&self) -> Fields {
+        let node = self.node;
         let runner = node
             .runner
             .as_ref()

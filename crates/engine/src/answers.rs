@@ -247,7 +247,8 @@ pub(crate) async fn asked_from(
     }
     let bytes = held.bytes(found).await.map_err(|source| {
         AnswerQuestionsError::Unreadable(format!(
-            "cannot read the questions of node `{node}`: {source}"
+            "cannot read the questions of node `{node}`: {}",
+            source.sentence()
         ))
     })?;
     let file = yunta_core::shape::read::<QuestionsFile>(&bytes, crate::artifacts::describe(found))

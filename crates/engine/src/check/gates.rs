@@ -15,7 +15,7 @@ use yunta_core::{OptionId, RunCommand};
 pub(crate) fn collect_push_to_base_warnings(
     workflow: &Workflow,
     config: &ConfigLayer,
-    warnings: &mut Vec<CheckWarning>,
+    warnings: &mut Vec<Caution>,
 ) {
     let base_branch = config
         .project
@@ -97,7 +97,7 @@ pub(crate) fn collect_push_to_base_warnings(
             };
             if let Some(branch) = pushes_to_base(command) {
                 if !protected {
-                    warnings.push(CheckWarning::PushToBaseWithoutGate {
+                    warnings.push(Caution::PushToBaseWithoutGate {
                         node: owner.id.clone(),
                         branch,
                     });
@@ -171,22 +171,6 @@ pub enum UntakenRoute {
     Undeclared(OptionId),
     /// `abort` pauses the run whatever `on:` says.
     Abort,
-}
-
-impl std::fmt::Display for UntakenRoute {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UntakenRoute::Undeclared(option) => write!(
-                f,
-                "`on.{option}` maps an option `options:` does not declare, so no one can \
-                 choose it"
-            ),
-            UntakenRoute::Abort => f.write_str(
-                "`on.abort` is never taken — choosing `abort` pauses the run; give the option \
-                 that sends the run back another id",
-            ),
-        }
-    }
 }
 
 /// A `parallel` group's children share a worktree

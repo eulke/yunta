@@ -1,95 +1,21 @@
-//! The page `yunta status` prints for a run, in the order a person reads
-//! it for: where the run stands, what — if anything — needs them, the
-//! nodes, the evidence of what failed, the facts, and what to type next.
+//! The sections `yunta status` shows for a run that may be moving: its
+//! nodes, the evidence of what failed, the facts a reader checks, and what
+//! to type next. The page that holds them is composed in [`crate::run_page`].
 
-use std::path::Path;
-
-use yunta_core::events::{Failure, GateWaitingPayload};
-use yunta_core::RunId;
-use yunta_engine::{NodeState, RunFrame, RunPhase, RunState};
-use yunta_render::spend::Breakdown;
+use yunta_core::events::Failure;
+use yunta_engine::{NodeState, RunState};
 
 use crate::commands::advice;
-use crate::render::blocks::{
-    Drawn, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable, Whole,
-};
+use crate::render::blocks::{Drawn, FailureDetail, Fields, Next, NodeRow, NodeTable, Whole};
 use crate::render::ink::{Line, Tone};
 use crate::render::state::{RunWord, StateWord};
-use crate::render::{indent, prose, truncate, Look, INDENT};
+use crate::render::{indent, prose, Glyphs, Look, INDENT};
+use crate::run_page::{caution_row, RunPage};
 
-/// What the page is drawn from.
-pub(super) struct Page<'a> {
-    pub(super) run_id: &'a RunId,
-    pub(super) frame: &'a RunFrame,
-    pub(super) state: &'a RunState,
-    pub(super) engine: crate::render::Engine,
-    pub(super) run_dir: &'a Path,
-    /// Where paths are shown from: the directory this was run in, and
-    /// the home `~` stands for.
-    pub(super) cwd: &'a Path,
-    pub(super) home: Option<&'a Path>,
-}
-
-impl Page<'_> {
-    /// The word the run is called by, and the sentence that says what
-    /// holds it: the verdict a reader came for, in two lines.
-    pub(super) fn head(&self) -> Vec<Line> {
-        let word = crate::render::observed_word(self.frame, &self.engine);
-        let mut lines = Headline {
-            subject: format!("run {}", self.run_id),
-            mark: word.mark(),
-            said: word.word().to_string(),
-        }
-        .lines(&crate::render::stdout_look());
-        let (tone, said) = self.holds(word);
-        let look = crate::render::stdout_look();
-        let room = look.width.cells().saturating_sub(INDENT.len());
-        lines.push(
-            Line::new()
-                .plain(INDENT)
-                .push(tone, truncate(&said, room, look.glyphs).trim_end()),
-        );
-        lines
-    }
-
-    /// What holds the run, or that nothing does.
-    fn holds(&self, word: RunWord) -> (Tone, String) {
-        match (word, &self.frame.phase) {
-            (RunWord::Stalled, _) => (Tone::Caution, advice::STALLED.to_string()),
-            (RunWord::NeedsYou, RunPhase::Created | RunPhase::Running) => match &self.engine.prompt
-            {
-                Some(prompt) => (Tone::NeedsYou, advice::asking(prompt, self.engine.at)),
-                None => (Tone::NeedsYou, "it needs you".to_string()),
-            },
-            // A limit's reset moves the run on its own, so the wait is not a
-            // stop a person is asked to answer.
-            (RunWord::Waiting, RunPhase::Waiting { on }) => {
-                (Tone::Muted, advice::parked_in_full(on))
-            }
-            (_, RunPhase::Waiting { on }) => (Tone::NeedsYou, advice::parked_in_full(on)),
-            (_, RunPhase::Broken { diagnostic }) => {
-                (Tone::Failed, yunta_core::text::one_line(diagnostic))
-            }
-            (
-                _,
-                RunPhase::Failed {
-                    failure: Some(failure),
-                },
-            ) => (
-                Tone::Failed,
-                yunta_core::text::one_line(&crate::render::failure::sentence(failure)),
-            ),
-            (_, RunPhase::Created | RunPhase::Running) => {
-                (Tone::Muted, "nothing needs you: it is moving".to_string())
-            }
-            _ => (Tone::Muted, "nothing needs you".to_string()),
-        }
-    }
-
+impl RunPage<'_> {
     /// Every node the frozen workflow declares, in declaration order, a
     /// group's children one step under it.
-    pub(super) fn nodes(&self) -> NodeTable {
-        let look = crate::render::stdout_look();
+    pub(crate) fn status_nodes(&self, look: &Look) -> Vec<Line> {
         let rows = self
             .frame
             .nodes
@@ -128,7 +54,7 @@ impl Page<'_> {
                 }
             })
             .collect();
-        NodeTable { rows }
+        NodeTable { rows }.lines(look)
     }
 
     /// The last call of a run tool each node's attempt made that failed,
@@ -136,7 +62,7 @@ impl Page<'_> {
     /// is not why it stands where it does, so it is not its row's note.
     /// A node that finished is past it: how its documents were accepted
     /// says what the way there took.
-    pub(super) fn calls(&self) -> Vec<Line> {
+    pub(crate) fn status_calls(&self) -> Vec<Line> {
         self.frame
             .nodes
             .iter()
@@ -164,15 +90,14 @@ impl Page<'_> {
     /// What every failed node's failure says beyond its row: the end of
     /// what a command printed and where the rest is, the problems of each
     /// document it refused, the paths it should not have touched.
-    pub(super) fn evidence(&self) -> Vec<Line> {
-        let look = crate::render::stdout_look();
+    pub(crate) fn status_evidence(&self, look: &Look) -> Vec<Line> {
         let mut lines = Vec::new();
         for node in &self.frame.nodes {
             let Some(NodeState::Failed { failure, .. }) = self.state.nodes.state(&node.id) else {
                 continue;
             };
-            let mut said = self.claim_cut_short(failure, &look);
-            said.extend(self.detail(failure, &look));
+            let mut said = self.claim_cut_short(failure, look);
+            said.extend(self.detail(failure, look));
             if said.is_empty() {
                 continue;
             }
@@ -222,17 +147,16 @@ impl Page<'_> {
     fn detail(&self, failure: &Failure, look: &Look) -> Vec<Line> {
         let whole = failure.output().map(|output| {
             Whole::file(
-                yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
-                self.cwd,
-                self.home,
+                yunta_engine::ObjectStore::at(self.paths.run_dir).path_of(output),
+                self.paths.cwd,
+                self.paths.home,
             )
         });
         FailureDetail { failure, whole }.lines(look)
     }
 
     /// The facts a reader checks once they know where the run stands.
-    pub(super) fn fields(&self, glyphs: crate::render::Glyphs) -> Fields {
-        let tokens = self.state.spend().so_far();
+    pub(crate) fn status_fields(&self, glyphs: Glyphs) -> Fields {
         let mut tasks: Vec<_> = self.state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
         let sep = format!(" {} ", glyphs.sep());
@@ -255,7 +179,8 @@ impl Page<'_> {
             });
         Fields::new()
             .push_if("progress", crate::render::counter::line(self.frame, glyphs))
-            .push_if("tokens", spent(tokens))
+            .push_if("tokens", self.tokens().unwrap_or_default())
+            .push_if("caution", caution_row(self.frame))
             .push_if("tasks", tasks)
             .push_if(
                 "environment",
@@ -273,9 +198,8 @@ impl Page<'_> {
             )
     }
 
-    /// What a person types next, for where the run stands. `decision` is
-    /// the decision the run stopped on, when the log rebuilds one.
-    pub(super) fn next(&self, decision: Option<&GateWaitingPayload>) -> Next {
+    /// What a person types next, for where the run stands.
+    pub(crate) fn status_next(&self) -> Next {
         // A run asking at its terminal is alive: what moves it is the
         // answer given there, and what stops it is what stops any run
         // that is moving.
@@ -284,16 +208,8 @@ impl Page<'_> {
             None => crate::render::observed_word(self.frame, &self.engine),
         };
         Next {
-            steps: advice::after(word, self.run_id.handle(), decision),
+            steps: advice::after(word, self.run_id.handle(), self.decided_escalation()),
         }
-    }
-}
-
-/// What a run spent, in and out — nothing for a run that spent none.
-fn spent(tokens: yunta_core::events::TokenUsage) -> String {
-    match tokens.total() {
-        0 => String::new(),
-        _ => Breakdown(&tokens).to_string(),
     }
 }
 

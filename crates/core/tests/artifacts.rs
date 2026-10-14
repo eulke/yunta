@@ -3,7 +3,7 @@
 //! the argument of `yunta schema` — and each of those doors still reads
 //! the spelling `task-ledger` that earlier workflows and logs carry.
 
-use yunta_core::events::{ArtifactId, ArtifactWrittenPayload};
+use yunta_core::events::{ArtifactId, ArtifactWrittenPayload, NameProblem};
 use yunta_core::{
     ArtifactContextRef, ArtifactKind, ArtifactRefId, ArtifactSpec, Artifacts, ContextSpec, NodeId,
 };
@@ -167,8 +167,9 @@ fn the_tasks_context_source_reads_under_both_spellings_and_writes_tasks() {
 #[test]
 fn an_artifact_name_with_a_parent_segment_is_refused() {
     for climbing in ["../escaped.md", "out/../../escaped.md", "..", "/etc/passwd"] {
-        assert!(
-            yunta_core::ArtifactName::parse(climbing).is_err(),
+        assert_eq!(
+            yunta_core::ArtifactName::parse(climbing),
+            Err(NameProblem::OutsideRun),
             "`{climbing}` leaves the run directory",
         );
     }
@@ -190,10 +191,16 @@ fn an_artifact_name_with_a_parent_segment_is_refused() {
 fn an_artifact_name_that_claims_what_the_engine_writes_is_refused() {
     for identity in yunta_core::ReservedIdentity::all() {
         let claimed = identity.file_name();
-        assert!(
-            yunta_core::ArtifactName::parse(&claimed).is_err(),
+        assert_eq!(
+            yunta_core::ArtifactName::parse(&claimed),
+            Err(NameProblem::Reserved { identity }),
             "`{claimed}` is what the run's view writes for {identity}",
         );
     }
     assert!(yunta_core::ArtifactName::parse("tasks.yml").is_ok());
+}
+
+#[test]
+fn an_empty_artifact_name_is_refused_as_empty() {
+    assert_eq!(yunta_core::ArtifactName::parse(""), Err(NameProblem::Empty));
 }

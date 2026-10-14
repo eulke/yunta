@@ -1,158 +1,119 @@
-//! Why a run tool call could not be honored, rendered once at the MCP
-//! boundary as the text the session reads back.
+//! Why a run tool call could not be honored. The variant is the cause and
+//! its fields are the data; the text the session reads back is written
+//! once, by `words::tool_error`, at the MCP boundary.
 
 use yunta_core::NodeId;
 
-/// Why a tool call could not be honored — rendered once, at the MCP
-/// boundary, as the text the session gets back.
+/// Why a tool call could not be honored. The display is a code: the words
+/// a session reads are `words::tool_error`'s.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunToolError {
     /// A refusal a session acts on: the numbered problems to fix, in the
     /// words the document's own diagnostics use. Never a deserializer's
     /// account of itself.
-    #[error("{text}")]
+    #[error("refused")]
     Refused { text: String },
     /// The call carries a value that the log cannot keep out of the typed
     /// record it would become, so nothing was recorded.
-    #[error(
-        "nothing was recorded: a value this call carries cannot be kept out of the {kind} record"
-    )]
+    #[error("unredactable")]
     Unredactable { kind: String },
-    #[error(
-        "invalid submission — requires `document` (an object), the {names} document this node \
-         declares: {detail}"
-    )]
+    #[error("invalid_submission")]
     InvalidSubmission { names: String, detail: String },
-    #[error(
-        "invalid request — requires paths (list) and reason, with an optional \
-         proposed_criterion {{cmd}} or evidence (one of your task's criteria)"
-    )]
+    #[error("invalid_request")]
     InvalidRequest {
         #[source]
         source: serde_json::Error,
     },
-    #[error(
-        "invalid declaration — requires `kind`: `departure`, with `from` (one of \
-         `{{\"shape\": name}}`, `{{\"decision\": id}}`, `{{\"change\": at}}`, \
-         `{{\"criterion\": cmd}}` or `\"outcome\"`), `planned`, `instead` and `why`; or \
-         `unpassable`, with `criterion` and `why`"
-    )]
+    #[error("invalid_departure")]
     InvalidDeparture {
         #[source]
         source: serde_json::Error,
     },
-    #[error(
-        "invalid answer — requires `node` and `id`, the finding answered as its node reported \
-         it, `answer` (`fixed` or `declined`) and `why`"
-    )]
+    #[error("invalid_answer")]
     InvalidAnswer {
         #[source]
         source: serde_json::Error,
     },
-    #[error("an answer says why — `why` is empty")]
+    #[error("empty_answer")]
     EmptyAnswer,
-    #[error(
-        "`{id}` is a finding this node reported: change it with `{update}`, or take it back \
-         with `{withdraw}`, saying why"
-    )]
+    #[error("own_finding")]
     OwnFinding {
         id: yunta_core::FindingId,
         update: String,
         withdraw: String,
     },
-    #[error("node `{node}`'s finding `{id}` is settled — {settled}; there is nothing to answer")]
+    #[error("settled_finding")]
     SettledFinding {
         node: NodeId,
         id: yunta_core::FindingId,
         settled: String,
     },
-    #[error("node `{node}` reported no finding `{id}` on this run")]
+    #[error("no_such_finding")]
     NoSuchFinding {
         node: NodeId,
         id: yunta_core::FindingId,
     },
-    #[error("node `{node}` took its finding `{id}` back — {reason}; there is nothing to answer")]
+    #[error("withdrawn_finding")]
     WithdrawnFinding {
         node: NodeId,
         id: yunta_core::FindingId,
         reason: String,
     },
-    #[error("a declaration says what it is — `{field}` is empty")]
+    #[error("empty_departure")]
     EmptyDeparture { field: &'static str },
-    #[error("the plan holds no {from} — it holds {known}")]
+    #[error("not_in_the_plan")]
     NotInThePlan { from: String, known: String },
-    #[error(
-        "`{cmd}` is a command the run measured green before any work, which holds every task \
-         — it is not the plan's to depart from: keep what passed passing"
-    )]
+    #[error("suite_departure")]
     SuiteDeparture { cmd: String },
-    #[error(
-        "this session's node is not in a `coordination: blackboard` group — the blackboard is \
-         never mounted outside one"
-    )]
+    #[error("not_in_blackboard_group")]
     NotInBlackboardGroup,
-    #[error(
-        "this session has no scope an answer could widen — it works no task, and its node \
-         either declares no scope or may not be granted more on this run"
-    )]
+    #[error("no_scope_to_widen")]
     NoScopeToWiden,
-    #[error("this tool judges a node's own scope, and this session's node declares none")]
+    #[error("no_node_scope")]
     NoNodeScope,
-    #[error("this attempt's start is not on the log, so there is no tree to judge its work from")]
+    #[error("no_starting_tree")]
     NoStartingTree,
-    #[error(
-        "a scope expansion request under `{pending}` is already waiting for this attempt's end, \
-         and only requests under the same criterion join it"
-    )]
+    #[error("criterion_conflict")]
     CriterionConflict { pending: String },
-    #[error(
-        "`{criterion}` does not fail on the work (exit {exit}), so it cannot be declared \
-         unpassable — only a criterion that is red on the work can be"
-    )]
+    #[error("not_red_on_the_work")]
     NotRedOnTheWork { criterion: String, exit: i32 },
-    #[error("the criterion could not be run to see whether it is red on the work")]
+    #[error("criterion")]
     Criterion {
         #[source]
         source: crate::scope_expansion::ScopeExpansionError,
     },
-    #[error("the scope decision could not be recorded on the run's log")]
+    #[error("record")]
     Record {
         #[source]
         source: crate::run::RunError,
     },
-    #[error(
-        "`{tool}` answers about a task, and this session works none — only a loop's task \
-         sessions are served it"
-    )]
+    #[error("not_a_task_session")]
     NotATaskSession { tool: String },
-    #[error("the criteria could not be run where the engine runs them: {detail}")]
+    #[error("handover")]
     Handover { detail: String },
-    #[error("the run's plan could not be read")]
+    #[error("plan")]
     Plan {
         #[source]
         source: crate::artifacts::HeldError,
     },
-    #[error("the task's work could not be checked")]
+    #[error("check")]
     Check {
         #[source]
         source: crate::task_cycle::TaskCycleError,
     },
-    #[error(
-        "this check stopped: the checkout changed, and the check asked after it judges what \
-         the checkout holds now — its answer is the one that counts"
-    )]
+    #[error("superseded")]
     Superseded,
     /// The run stopped while the call was being answered. Nothing about the
     /// call was refused, so it gets no refusal text and no refusal is
     /// recorded for it.
-    #[error("cancelled by user")]
+    #[error("cancelled")]
     Cancelled,
-    #[error("the run's log cannot be reached")]
+    #[error("storage")]
     Storage {
         #[source]
         source: yunta_storage::StorageError,
     },
-    #[error("the answer cannot be rendered as JSON")]
+    #[error("render")]
     Render {
         #[source]
         source: serde_json::Error,
@@ -162,9 +123,9 @@ pub(crate) enum RunToolError {
     Request {
         source: crate::scope_expansion::RequestError,
     },
-    #[error("node `{node}` declares no artifacts, so there is nothing to check")]
+    #[error("no_artifacts")]
     NoArtifacts { node: NodeId },
-    #[error("`{name}` is not an artifact this node declares; it declares {declared}")]
+    #[error("undeclared_artifact")]
     UndeclaredArtifact { name: String, declared: String },
     #[error(transparent)]
     Accept {

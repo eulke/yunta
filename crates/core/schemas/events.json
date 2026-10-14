@@ -494,6 +494,33 @@
         }
       ]
     },
+    "ArtifactRefId": {
+      "description": "What a reference names an artifact by: `kind:` for a document the\nengine reads, `name:` for a file it only carries.\n\nThe mapping form of [`ArtifactSpec`], for the references that carry\nmore than the artifact itself — a `context:` source and a `mounts:`\nentry also name the node it comes from, and a mount also names what\nthe child carries it as.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ]
+    },
     "ArtifactSubmittedPayload": {
       "description": "What a session offered as a whole document, and what the engine\nanswered.",
       "type": "object",
@@ -808,6 +835,54 @@
         "policy"
       ]
     },
+    "CapabilityUse": {
+      "description": "What a node needs a capability for.",
+      "oneOf": [
+        {
+          "description": "The node is in a blackboard group, which the run tools carry.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "blackboard"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The node declares a typed artifact of `kind`, which the run tools carry.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            },
+            "type": {
+              "type": "string",
+              "const": "typed_artifact"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
+          ]
+        },
+        {
+          "description": "The node is a loop, whose task sessions read their task through the run tools.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "loop_tasks"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
     "Channel": {
       "oneOf": [
         {
@@ -821,6 +896,82 @@
           "description": "Nobody answered: every question was optional, and the engine closed\nthe round on what each one assumes.",
           "type": "string",
           "const": "assumed"
+        }
+      ]
+    },
+    "ChildRefusal": {
+      "description": "Why a composed workflow the run could not start.",
+      "oneOf": [
+        {
+          "description": "No workflow answers to the name; `problem` is the catalog's own account.",
+          "type": "object",
+          "properties": {
+            "problem": {
+              "type": "string"
+            },
+            "refusal": {
+              "type": "string",
+              "const": "unresolved"
+            }
+          },
+          "required": [
+            "refusal",
+            "problem"
+          ]
+        },
+        {
+          "description": "Its file does not read as a workflow.",
+          "type": "object",
+          "properties": {
+            "refusal": {
+              "type": "string",
+              "const": "invalid"
+            },
+            "report": {
+              "$ref": "#/$defs/Report"
+            }
+          },
+          "required": [
+            "refusal",
+            "report"
+          ]
+        },
+        {
+          "description": "Its own check refuses it; `rules` are the codes of what it refused.",
+          "type": "object",
+          "properties": {
+            "refusal": {
+              "type": "string",
+              "const": "fails_check"
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "refusal",
+            "rules"
+          ]
+        },
+        {
+          "description": "The inputs the node hands it do not fit what it declares; `problem`\nsays what does not fit.",
+          "type": "object",
+          "properties": {
+            "problem": {
+              "$ref": "#/$defs/InputsProblem"
+            },
+            "refusal": {
+              "type": "string",
+              "const": "inputs"
+            }
+          },
+          "required": [
+            "refusal",
+            "problem"
+          ]
         }
       ]
     },
@@ -865,6 +1016,17 @@
         "child_run_id",
         "child_workflow_hash",
         "terminal_state"
+      ]
+    },
+    "Claim": {
+      "description": "What an escalation says happened: a claim the engine states about a node,\nor a summary whoever escalated wrote.\n\nOn the log an engine claim is an object tagged by `claim`, and a plain\nstring reads back as a summary the escalating party wrote.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/StatedClaim"
+        }
       ]
     },
     "CommandExit": {
@@ -1425,7 +1587,7 @@
       ]
     },
     "Denial": {
-      "description": "Why a request was denied, typed. The event log keeps this value, and its\nsentence is written from it by the `Display` impl.",
+      "description": "Why a request was denied, typed. The event log keeps this value; the\nwords a reader sees are written from it where that reader is.",
       "oneOf": [
         {
           "type": "object",
@@ -2330,8 +2492,8 @@
           }
         },
         "summary": {
-          "description": "The claim: what happened, in the words of whoever escalated.\nIt ends where the record begins — a summary that quotes what\n`evidence` holds leaves every surface printing it twice.",
-          "type": "string"
+          "description": "The claim: what happened, as the engine states it or in the words of\nwhoever escalated. A written summary ends where the record begins — one\nthat quotes what `evidence` holds leaves every surface printing it twice.",
+          "$ref": "#/$defs/Claim"
         },
         "withheld": {
           "description": "The options the gate does not offer, each with why: what stands\nagainst them is part of the decision.",
@@ -3232,7 +3394,7 @@
       ]
     },
     "Failure": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], one carrying\n`frozen_input:` as [`Failure::FrozenInput`], one carrying\n`session_not_stopped:` as [`Failure::SessionNotStopped`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged: each variant is read by the keys it requires, and each requires\nat least one key no other variant has. A payload that names none of them\nis refused rather than read as some variant. `Message` reads a log line\nthat carries `outcome:` alone, a failure written as a sentence, so it\ncomes last. A field the wire always names but may leave `null` is read\nwith `deserialize_with`, since serde reads a missing `Option` as `None`,\nwhich would let a payload match a variant it does not belong to.",
       "anyOf": [
         {
           "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
@@ -3474,7 +3636,504 @@
           ]
         },
         {
-          "description": "A failure the engine states in one sentence.",
+          "description": "A session or an executor past its wall-clock budget: `after_ms` is the\nbudget, and `timed` says whose it was.",
+          "type": "object",
+          "properties": {
+            "after_ms": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "timed": {
+              "$ref": "#/$defs/Timed",
+              "default": {
+                "type": "session"
+              }
+            }
+          },
+          "required": [
+            "after_ms"
+          ]
+        },
+        {
+          "description": "A task that spends more tokens than its budget.",
+          "type": "object",
+          "properties": {
+            "max": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "used": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "used",
+            "max"
+          ]
+        },
+        {
+          "description": "A template that does not render, and why. `input` is the child's input\nthe template was rendering, when it was rendering one.",
+          "type": "object",
+          "properties": {
+            "input": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InputName"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "template": {
+              "$ref": "#/$defs/TemplateError"
+            }
+          },
+          "required": [
+            "template"
+          ]
+        },
+        {
+          "description": "An artifact the run cannot hand over; `problem` says whether its\nobject is missing or holds other bytes.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactId"
+            },
+            "problem": {
+              "$ref": "#/$defs/ObjectProblem"
+            }
+          },
+          "required": [
+            "artifact",
+            "problem"
+          ]
+        },
+        {
+          "description": "A name the engine refuses for an artifact; `problem` says which rule it breaks.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "problem": {
+              "$ref": "#/$defs/NameProblem"
+            }
+          },
+          "required": [
+            "name",
+            "problem"
+          ]
+        },
+        {
+          "description": "A mount that cannot bring its artifact into the node; `error` says why.\nBoxed for the same reason as the child refusal: a failure is copied\nthrough every frame that holds one.",
+          "type": "object",
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/MountError"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        },
+        {
+          "description": "A gate whose person chose `option`, which routes the run to `target`;\n`said` is what the person wrote with the choice, when they wrote any.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "option": {
+              "$ref": "#/$defs/OptionId"
+            },
+            "said": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "node",
+            "option",
+            "target"
+          ]
+        },
+        {
+          "description": "A person accepted that the tests a task is held to are wrong; `owed_by` owes the fix.",
+          "type": "object",
+          "properties": {
+            "owed_by": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "task",
+            "owed_by"
+          ]
+        },
+        {
+          "description": "A composed workflow the run could not start. The refusal is boxed: it\nis the largest payload a failure carries, and every frame that holds a\nfailure pays for it.",
+          "type": "object",
+          "properties": {
+            "refusal": {
+              "$ref": "#/$defs/ChildRefusal"
+            },
+            "workflow": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workflow",
+            "refusal"
+          ]
+        },
+        {
+          "description": "A composed workflow that would nest past the depth the run allows;\n`depth` is the level it would reach, and `workflow` the composed one.",
+          "type": "object",
+          "properties": {
+            "depth": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "max_depth": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "workflow": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "depth",
+            "max_depth"
+          ]
+        },
+        {
+          "description": "An artifact an external gate hands over that no node of this run produces.",
+          "type": "object",
+          "properties": {
+            "gate_artifact": {
+              "$ref": "#/$defs/ArtifactId"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "node",
+            "gate_artifact"
+          ]
+        },
+        {
+          "description": "A capability the frozen adapter does not declare, which a node needs;\n`used_for` says what for, and `agent` names the agent that asked, when one did.",
+          "type": "object",
+          "properties": {
+            "adapter": {
+              "$ref": "#/$defs/AdapterId"
+            },
+            "agent": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentName"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "capability": {
+              "$ref": "#/$defs/Capability"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "used_for": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CapabilityUse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "node",
+            "capability",
+            "adapter"
+          ]
+        },
+        {
+          "description": "An engine step failed on its own; `engine_error` is the step's error as it reported itself.",
+          "type": "object",
+          "properties": {
+            "engine_error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "engine_error"
+          ]
+        },
+        {
+          "description": "A command the project's permissions deny; `denied_rule` is the rule that denies it.",
+          "type": "object",
+          "properties": {
+            "denied_rule": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "denied_rule"
+          ]
+        },
+        {
+          "description": "A skill the node names that the run does not hold; `searched` lists the roots it looked in.",
+          "type": "object",
+          "properties": {
+            "missing_skill": {
+              "$ref": "#/$defs/SkillName"
+            },
+            "searched": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "missing_skill"
+          ]
+        },
+        {
+          "description": "A loop that reached the iteration cap the run declares; `loop_cap` is that cap.",
+          "type": "object",
+          "properties": {
+            "loop_cap": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "node",
+            "loop_cap"
+          ]
+        },
+        {
+          "description": "A session the engine cannot confine as the run asks; `confinement` says why.",
+          "type": "object",
+          "properties": {
+            "confinement": {
+              "$ref": "#/$defs/Unbuildable"
+            }
+          },
+          "required": [
+            "confinement"
+          ]
+        },
+        {
+          "description": "A frozen read that cannot give the node what it asked for; `frozen_read` says why.",
+          "type": "object",
+          "properties": {
+            "frozen_read": {
+              "$ref": "#/$defs/FrozenRead"
+            }
+          },
+          "required": [
+            "frozen_read"
+          ]
+        },
+        {
+          "description": "A parallel group that failed under its join: for `join: all`, the failed\nchildren with the first first; for `join: any`, every child.",
+          "type": "object",
+          "properties": {
+            "children_failed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NodeId"
+              }
+            },
+            "join": {
+              "$ref": "#/$defs/JoinPolicy"
+            }
+          },
+          "required": [
+            "join",
+            "children_failed"
+          ]
+        },
+        {
+          "description": "A child that ran with no terminal event when the engine last stopped,\nunder `on_interrupt: fail_if_uncertain`.",
+          "type": "object",
+          "properties": {
+            "uncertain": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "uncertain"
+          ]
+        },
+        {
+          "description": "A gate a person rejected from the console, on the approval it asked for.",
+          "type": "object",
+          "properties": {
+            "on": {
+              "$ref": "#/$defs/Approval"
+            },
+            "rejected_by": {
+              "$ref": "#/$defs/Responder"
+            }
+          },
+          "required": [
+            "rejected_by",
+            "on"
+          ]
+        },
+        {
+          "description": "A plan the planner did not publish, sent back with the flaws it has.",
+          "type": "object",
+          "properties": {
+            "sent_back": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Flaw"
+              }
+            }
+          },
+          "required": [
+            "sent_back"
+          ]
+        },
+        {
+          "description": "A findings gate with findings at or above its severity.",
+          "type": "object",
+          "properties": {
+            "at_or_above": {
+              "$ref": "#/$defs/FindingSeverity"
+            },
+            "open_findings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FindingId"
+              }
+            }
+          },
+          "required": [
+            "at_or_above",
+            "open_findings"
+          ]
+        },
+        {
+          "description": "The loser of a `join: any` race, which a sibling in its group finished ahead of.",
+          "type": "object",
+          "properties": {
+            "interrupted_by": {
+              "$ref": "#/$defs/Interruption"
+            }
+          },
+          "required": [
+            "interrupted_by"
+          ]
+        },
+        {
+          "description": "A reviewer requested changes on an external gate's pull request, at `reviewed_sha`.",
+          "type": "object",
+          "properties": {
+            "comments": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "requested_by": {
+              "type": "string"
+            },
+            "reviewed_sha": {
+              "$ref": "#/$defs/CommitSha"
+            }
+          },
+          "required": [
+            "requested_by",
+            "reviewed_sha",
+            "comments"
+          ]
+        },
+        {
+          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one.",
+          "type": "object",
+          "properties": {
+            "closed_pull_request": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A loop with no task ready and not every task done; `not_ready` names\nthe tasks that are waiting.",
+          "type": "object",
+          "properties": {
+            "not_ready": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskId"
+              }
+            }
+          },
+          "required": [
+            "not_ready"
+          ]
+        },
+        {
+          "description": "A loop whose run holds no tasks document; `tasks_for` is the loop's node.",
+          "type": "object",
+          "properties": {
+            "tasks_for": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "tasks_for"
+          ]
+        },
+        {
+          "description": "A node's runner that did not resolve to an adapter, and why.",
+          "type": "object",
+          "properties": {
+            "runner": {
+              "$ref": "#/$defs/RunnerName"
+            },
+            "runner_refusal": {
+              "$ref": "#/$defs/RunnerRefusal"
+            }
+          },
+          "required": [
+            "runner",
+            "runner_refusal"
+          ]
+        },
+        {
+          "description": "Reads a log line that carries `outcome:` alone; no writer creates it.",
           "type": "object",
           "properties": {
             "outcome": {
@@ -3828,6 +4487,212 @@
         "reason"
       ]
     },
+    "Flaw": {
+      "description": "What keeps a plan from being proven as it is written: a test that\ncannot fail for the right reason, or a plan that contradicts the spec\nthat holds it.",
+      "oneOf": [
+        {
+          "description": "A criterion that passes once `file`, which the task changes, holds\na name — whatever the code does.",
+          "type": "object",
+          "properties": {
+            "PassesByAName": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "cmd",
+                "file"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PassesByAName"
+          ]
+        },
+        {
+          "description": "A test of the task's spec that runs none of the files the spec\nwrote.",
+          "type": "object",
+          "properties": {
+            "HollowSpecTest": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "HollowSpecTest"
+          ]
+        },
+        {
+          "description": "A file the spec wrote for the task that none of its tests runs.",
+          "type": "object",
+          "properties": {
+            "UnrunSpecFile": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "path"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "UnrunSpecFile"
+          ]
+        },
+        {
+          "description": "A change the plan names on a test the spec wrote, which no\nsession may write.",
+          "type": "object",
+          "properties": {
+            "ChangesASpecTest": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "at",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ChangesASpecTest"
+          ]
+        },
+        {
+          "description": "A criterion that runs the test the spec gives another task: it\npasses once that task is done.",
+          "type": "object",
+          "properties": {
+            "JudgedByAnotherTasksTest": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "cmd",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "JudgedByAnotherTasksTest"
+          ]
+        }
+      ]
+    },
+    "FrozenRead": {
+      "description": "Why a frozen read cannot give a node what it asked for: a name that\nresolves to nothing, a pack path that leaves its pack, or a prompt file\nthat cannot be read.",
+      "oneOf": [
+        {
+          "description": "A name that resolves to nothing, or to a definition that cannot be read;\n`problem` is the resolver's own account.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unresolved"
+            },
+            "problem": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "problem"
+          ]
+        },
+        {
+          "description": "A path a pack declares that leaves the pack's own directory.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "escapes"
+            },
+            "pack": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pack",
+            "path"
+          ]
+        },
+        {
+          "description": "A prompt file a node reads that cannot be read.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "prompt"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "node",
+            "path"
+          ]
+        }
+      ]
+    },
     "GateOption": {
       "description": "One choice in a gate's escalation: `id` is what\n`GateResolvedPayload.chosen_option` names back. `label` and `tradeoff`\nare the words a person reads beside it, when the option stores them.\nAn option that stores neither has its words written when it is shown,\nfrom the data its escalation carries, so neither is required here.",
       "type": "object",
@@ -3966,8 +4831,8 @@
           }
         },
         "summary": {
-          "description": "The claim: what happened, in the words of whoever escalated.\nIt ends where the record begins — a summary that quotes what\n`evidence` holds leaves every surface printing it twice.",
-          "type": "string"
+          "description": "The claim: what happened, as the engine states it or in the words of\nwhoever escalated. A written summary ends where the record begins — one\nthat quotes what `evidence` holds leaves every surface printing it twice.",
+          "$ref": "#/$defs/Claim"
         },
         "withheld": {
           "description": "The options the gate does not offer, each with why: what stands\nagainst them is part of the decision.",
@@ -4074,6 +4939,341 @@
       "description": "An input name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
+    },
+    "InputsProblem": {
+      "description": "Why the inputs a run was handed do not resolve to the inputs its\nworkflow declares. Each variant carries the data that explains it, and\nthe display is a code: a surface writes the words from these fields.",
+      "oneOf": [
+        {
+          "description": "Every input name the workflow does not declare, sorted, so one run\nof the command reports them all.",
+          "type": "object",
+          "properties": {
+            "declared": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InputName"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InputName"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "names",
+            "declared"
+          ]
+        },
+        {
+          "description": "An input with no default that the run was not handed.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "missing"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "invalid_number"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "invalid_boolean"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "below_min"
+            },
+            "min": {
+              "type": "number",
+              "format": "double"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "value",
+            "min"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "above_max"
+            },
+            "max": {
+              "type": "number",
+              "format": "double"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "value",
+            "max"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "actual": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "too_short"
+            },
+            "min_length": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "min_length",
+            "actual"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pattern_mismatch"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "pattern",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "not_in_enum"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "value": {
+              "type": "string"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "value",
+            "values"
+          ]
+        },
+        {
+          "description": "An input naming a path that does not exist.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "path_not_found"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "path"
+          ]
+        },
+        {
+          "description": "A `document` input whose path is there and whose bytes are not: a\ndirectory, or a file the filesystem refuses.",
+          "type": "object",
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "document_unreadable"
+            },
+            "label": {
+              "description": "The label the document's kind names itself with.",
+              "type": "string"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "path",
+            "label",
+            "detail"
+          ]
+        },
+        {
+          "description": "A `document` input whose content is not what its kind declares.\n\nCarries the report rather than a sentence about it: every problem\nthe document has reaches the person who has to fix the file, in\nthe document's own vocabulary, and one correction answers them\nall.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "document_refused"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "report": {
+              "$ref": "#/$defs/Report"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "report"
+          ]
+        },
+        {
+          "description": "Reachable only if a bad `pattern:` slipped past `check` (which\nvalidates every pattern compiles) — resolution reports it as\na typed error rather than panicking on a regex it never saw.",
+          "type": "object",
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "invalid_pattern"
+            },
+            "name": {
+              "$ref": "#/$defs/InputName"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "pattern",
+            "detail"
+          ]
+        }
+      ]
+    },
+    "Interruption": {
+      "description": "Why a `join: any` race's loser stopped: a sibling in its group finished first.",
+      "oneOf": [
+        {
+          "description": "A sibling in the same group succeeded first, and this child lost the race.",
+          "type": "string",
+          "const": "sibling_won"
+        }
+      ]
+    },
+    "JoinPolicy": {
+      "description": "`parallel.join`. `all` (default): the group finishes only\nonce every child does, and one failed child fails the group. `any`:\nthe group finishes with the first child to *succeed*; the engine\nsends the rest `interrupt`, escalating to `kill` if they don't close\nin time (same ordered-then-forceful mechanism as an agent session's\nown cancellation).",
+      "type": "string",
+      "enum": [
+        "all",
+        "any"
+      ]
     },
     "LeftOut": {
       "description": "A top-level node a run leaves out, and why.",
@@ -4209,6 +5409,166 @@
       "type": "string",
       "minLength": 1
     },
+    "MountError": {
+      "description": "Why a mount cannot bring the artifact a node names into the node.",
+      "oneOf": [
+        {
+          "description": "No linked child run of `node` reached a terminal state in this run.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactRefId"
+            },
+            "kind": {
+              "type": "string",
+              "const": "no_terminal_child"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "kind",
+            "artifact",
+            "node"
+          ]
+        },
+        {
+          "description": "The child run of `node` cannot hand over the bytes the mount names.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactRefId"
+            },
+            "kind": {
+              "type": "string",
+              "const": "unreadable"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            },
+            "source": {
+              "$ref": "#/$defs/ObjectProblem"
+            }
+          },
+          "required": [
+            "kind",
+            "artifact",
+            "node",
+            "run",
+            "source"
+          ]
+        },
+        {
+          "description": "The frozen truth of the child run cannot be read; `detail` says why.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactRefId"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "unfrozen"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "kind",
+            "artifact",
+            "node",
+            "run",
+            "detail"
+          ]
+        },
+        {
+          "description": "The child run's log cannot be read for the artifact; `source` is the\nstorage's own account of why, when it gave one.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactRefId"
+            },
+            "kind": {
+              "type": "string",
+              "const": "unlogged"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "artifact",
+            "node",
+            "run"
+          ]
+        }
+      ]
+    },
+    "NameProblem": {
+      "description": "Why a name cannot name an artifact: the three rules an artifact name keeps.",
+      "oneOf": [
+        {
+          "description": "The name is empty: an artifact is named by a file name.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The name is absolute or climbs with `..`, so it leaves the run directory.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "outside_run"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "The name is the one the run's view writes for `identity`.",
+          "type": "object",
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/ReservedIdentity"
+            },
+            "kind": {
+              "type": "string",
+              "const": "reserved"
+            }
+          },
+          "required": [
+            "kind",
+            "identity"
+          ]
+        }
+      ]
+    },
     "Named": {
       "description": "One entry of a document: by name when its id parsed, by position\nwhen the id is the thing that could not be read.\n\nThe pair is one concept, so it is one type. Spelled as two loose\nfields, the half that is easiest to forget is the position, and a\nposition that goes missing does not read as absent — it reads as\nzero, and names the first entry with confidence.",
       "type": "object",
@@ -4306,7 +5666,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], one carrying\n`frozen_input:` as [`Failure::FrozenInput`], one carrying\n`session_not_stopped:` as [`Failure::SessionNotStopped`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged: each variant is read by the keys it requires, and each requires\nat least one key no other variant has. A payload that names none of them\nis refused rather than read as some variant. `Message` reads a log line\nthat carries `outcome:` alone, a failure written as a sentence, so it\ncomes last. A field the wire always names but may leave `null` is read\nwith `deserialize_with`, since serde reads a missing `Option` as `None`,\nwhich would let a payload match a variant it does not belong to.",
       "type": "object",
       "properties": {
         "commit": {
@@ -4591,7 +5951,504 @@
           ]
         },
         {
-          "description": "A failure the engine states in one sentence.",
+          "description": "A session or an executor past its wall-clock budget: `after_ms` is the\nbudget, and `timed` says whose it was.",
+          "type": "object",
+          "properties": {
+            "after_ms": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "timed": {
+              "$ref": "#/$defs/Timed",
+              "default": {
+                "type": "session"
+              }
+            }
+          },
+          "required": [
+            "after_ms"
+          ]
+        },
+        {
+          "description": "A task that spends more tokens than its budget.",
+          "type": "object",
+          "properties": {
+            "max": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "used": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "used",
+            "max"
+          ]
+        },
+        {
+          "description": "A template that does not render, and why. `input` is the child's input\nthe template was rendering, when it was rendering one.",
+          "type": "object",
+          "properties": {
+            "input": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InputName"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "template": {
+              "$ref": "#/$defs/TemplateError"
+            }
+          },
+          "required": [
+            "template"
+          ]
+        },
+        {
+          "description": "An artifact the run cannot hand over; `problem` says whether its\nobject is missing or holds other bytes.",
+          "type": "object",
+          "properties": {
+            "artifact": {
+              "$ref": "#/$defs/ArtifactId"
+            },
+            "problem": {
+              "$ref": "#/$defs/ObjectProblem"
+            }
+          },
+          "required": [
+            "artifact",
+            "problem"
+          ]
+        },
+        {
+          "description": "A name the engine refuses for an artifact; `problem` says which rule it breaks.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "problem": {
+              "$ref": "#/$defs/NameProblem"
+            }
+          },
+          "required": [
+            "name",
+            "problem"
+          ]
+        },
+        {
+          "description": "A mount that cannot bring its artifact into the node; `error` says why.\nBoxed for the same reason as the child refusal: a failure is copied\nthrough every frame that holds one.",
+          "type": "object",
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/MountError"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        },
+        {
+          "description": "A gate whose person chose `option`, which routes the run to `target`;\n`said` is what the person wrote with the choice, when they wrote any.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "option": {
+              "$ref": "#/$defs/OptionId"
+            },
+            "said": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "node",
+            "option",
+            "target"
+          ]
+        },
+        {
+          "description": "A person accepted that the tests a task is held to are wrong; `owed_by` owes the fix.",
+          "type": "object",
+          "properties": {
+            "owed_by": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "task",
+            "owed_by"
+          ]
+        },
+        {
+          "description": "A composed workflow the run could not start. The refusal is boxed: it\nis the largest payload a failure carries, and every frame that holds a\nfailure pays for it.",
+          "type": "object",
+          "properties": {
+            "refusal": {
+              "$ref": "#/$defs/ChildRefusal"
+            },
+            "workflow": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workflow",
+            "refusal"
+          ]
+        },
+        {
+          "description": "A composed workflow that would nest past the depth the run allows;\n`depth` is the level it would reach, and `workflow` the composed one.",
+          "type": "object",
+          "properties": {
+            "depth": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "max_depth": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "workflow": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "depth",
+            "max_depth"
+          ]
+        },
+        {
+          "description": "An artifact an external gate hands over that no node of this run produces.",
+          "type": "object",
+          "properties": {
+            "gate_artifact": {
+              "$ref": "#/$defs/ArtifactId"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "node",
+            "gate_artifact"
+          ]
+        },
+        {
+          "description": "A capability the frozen adapter does not declare, which a node needs;\n`used_for` says what for, and `agent` names the agent that asked, when one did.",
+          "type": "object",
+          "properties": {
+            "adapter": {
+              "$ref": "#/$defs/AdapterId"
+            },
+            "agent": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentName"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "capability": {
+              "$ref": "#/$defs/Capability"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "used_for": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CapabilityUse"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "node",
+            "capability",
+            "adapter"
+          ]
+        },
+        {
+          "description": "An engine step failed on its own; `engine_error` is the step's error as it reported itself.",
+          "type": "object",
+          "properties": {
+            "engine_error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "engine_error"
+          ]
+        },
+        {
+          "description": "A command the project's permissions deny; `denied_rule` is the rule that denies it.",
+          "type": "object",
+          "properties": {
+            "denied_rule": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "denied_rule"
+          ]
+        },
+        {
+          "description": "A skill the node names that the run does not hold; `searched` lists the roots it looked in.",
+          "type": "object",
+          "properties": {
+            "missing_skill": {
+              "$ref": "#/$defs/SkillName"
+            },
+            "searched": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "missing_skill"
+          ]
+        },
+        {
+          "description": "A loop that reached the iteration cap the run declares; `loop_cap` is that cap.",
+          "type": "object",
+          "properties": {
+            "loop_cap": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "node",
+            "loop_cap"
+          ]
+        },
+        {
+          "description": "A session the engine cannot confine as the run asks; `confinement` says why.",
+          "type": "object",
+          "properties": {
+            "confinement": {
+              "$ref": "#/$defs/Unbuildable"
+            }
+          },
+          "required": [
+            "confinement"
+          ]
+        },
+        {
+          "description": "A frozen read that cannot give the node what it asked for; `frozen_read` says why.",
+          "type": "object",
+          "properties": {
+            "frozen_read": {
+              "$ref": "#/$defs/FrozenRead"
+            }
+          },
+          "required": [
+            "frozen_read"
+          ]
+        },
+        {
+          "description": "A parallel group that failed under its join: for `join: all`, the failed\nchildren with the first first; for `join: any`, every child.",
+          "type": "object",
+          "properties": {
+            "children_failed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/NodeId"
+              }
+            },
+            "join": {
+              "$ref": "#/$defs/JoinPolicy"
+            }
+          },
+          "required": [
+            "join",
+            "children_failed"
+          ]
+        },
+        {
+          "description": "A child that ran with no terminal event when the engine last stopped,\nunder `on_interrupt: fail_if_uncertain`.",
+          "type": "object",
+          "properties": {
+            "uncertain": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "uncertain"
+          ]
+        },
+        {
+          "description": "A gate a person rejected from the console, on the approval it asked for.",
+          "type": "object",
+          "properties": {
+            "on": {
+              "$ref": "#/$defs/Approval"
+            },
+            "rejected_by": {
+              "$ref": "#/$defs/Responder"
+            }
+          },
+          "required": [
+            "rejected_by",
+            "on"
+          ]
+        },
+        {
+          "description": "A plan the planner did not publish, sent back with the flaws it has.",
+          "type": "object",
+          "properties": {
+            "sent_back": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Flaw"
+              }
+            }
+          },
+          "required": [
+            "sent_back"
+          ]
+        },
+        {
+          "description": "A findings gate with findings at or above its severity.",
+          "type": "object",
+          "properties": {
+            "at_or_above": {
+              "$ref": "#/$defs/FindingSeverity"
+            },
+            "open_findings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FindingId"
+              }
+            }
+          },
+          "required": [
+            "at_or_above",
+            "open_findings"
+          ]
+        },
+        {
+          "description": "The loser of a `join: any` race, which a sibling in its group finished ahead of.",
+          "type": "object",
+          "properties": {
+            "interrupted_by": {
+              "$ref": "#/$defs/Interruption"
+            }
+          },
+          "required": [
+            "interrupted_by"
+          ]
+        },
+        {
+          "description": "A reviewer requested changes on an external gate's pull request, at `reviewed_sha`.",
+          "type": "object",
+          "properties": {
+            "comments": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "requested_by": {
+              "type": "string"
+            },
+            "reviewed_sha": {
+              "$ref": "#/$defs/CommitSha"
+            }
+          },
+          "required": [
+            "requested_by",
+            "reviewed_sha",
+            "comments"
+          ]
+        },
+        {
+          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one.",
+          "type": "object",
+          "properties": {
+            "closed_pull_request": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A loop with no task ready and not every task done; `not_ready` names\nthe tasks that are waiting.",
+          "type": "object",
+          "properties": {
+            "not_ready": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskId"
+              }
+            }
+          },
+          "required": [
+            "not_ready"
+          ]
+        },
+        {
+          "description": "A loop whose run holds no tasks document; `tasks_for` is the loop's node.",
+          "type": "object",
+          "properties": {
+            "tasks_for": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "tasks_for"
+          ]
+        },
+        {
+          "description": "A node's runner that did not resolve to an adapter, and why.",
+          "type": "object",
+          "properties": {
+            "runner": {
+              "$ref": "#/$defs/RunnerName"
+            },
+            "runner_refusal": {
+              "$ref": "#/$defs/RunnerRefusal"
+            }
+          },
+          "required": [
+            "runner",
+            "runner_refusal"
+          ]
+        },
+        {
+          "description": "Reads a log line that carries `outcome:` alone; no writer creates it.",
           "type": "object",
           "properties": {
             "outcome": {
@@ -4766,6 +6623,49 @@
       "items": {
         "$ref": "#/$defs/QuestionId"
       }
+    },
+    "ObjectProblem": {
+      "description": "Why the bytes an artifact names cannot be handed over: the run's store\nholds no object under the hash, or the object holds other bytes.",
+      "oneOf": [
+        {
+          "description": "The run holds no object under `hash`.",
+          "type": "object",
+          "properties": {
+            "hash": {
+              "$ref": "#/$defs/ContentHash"
+            },
+            "kind": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "required": [
+            "kind",
+            "hash"
+          ]
+        },
+        {
+          "description": "The object under `hash` holds content that hashes to `found`: these\nare not the bytes the run accepted.",
+          "type": "object",
+          "properties": {
+            "found": {
+              "$ref": "#/$defs/ContentHash"
+            },
+            "hash": {
+              "$ref": "#/$defs/ContentHash"
+            },
+            "kind": {
+              "type": "string",
+              "const": "corrupt"
+            }
+          },
+          "required": [
+            "kind",
+            "hash",
+            "found"
+          ]
+        }
+      ]
     },
     "OnInterrupt": {
       "description": "A node's crash-recovery policy — the full triple of options.",
@@ -5316,6 +7216,11 @@
           "required": [
             "command_runnable"
           ]
+        },
+        {
+          "description": "A person lifts the loop's iteration cap when the run resumes.",
+          "type": "string",
+          "const": "cap_lifted"
         }
       ]
     },
@@ -5672,7 +7577,7 @@
       ]
     },
     "RedCheck": {
-      "description": "Why a judging check came out red: a coverage figure under its\nthreshold or none at all, a command that exited non-zero, or a baseline\nsuite that passed when it was measured and fails now.",
+      "description": "Why a judging check came out red: a coverage figure under its\nthreshold or none at all, a command that exited non-zero, or a baseline\nsuite that passed when it was measured and fails in this check.",
       "oneOf": [
         {
           "description": "The coverage the run measured, when it measured one, and the\nthreshold it fell short of. `cmd` is the command that measured it.",
@@ -5742,7 +7647,7 @@
           ]
         },
         {
-          "description": "The baseline suite passed when the lineage measured it and fails now;\n`tail` is what it printed last, which says why.",
+          "description": "The baseline suite passed when the lineage measured it and fails in this check;\n`tail` is what it printed last, which says why.",
           "type": "object",
           "properties": {
             "cmd": {
@@ -5863,6 +7768,24 @@
       "enum": [
         "on_failure",
         "gate_choice"
+      ]
+    },
+    "ReservedIdentity": {
+      "description": "A name under a node's artifact view that the engine writes itself,\nso an opaque artifact may not claim it.\n\nThe run's view of a node holds one file per identity, and an\ninterpreted artifact is written from the document the engine\naccepted. A declared name equal to one of those would put two\nwriters on one path, and the file a reader opened would say nothing\nabout which of them wrote it.",
+      "oneOf": [
+        {
+          "description": "The view of the document of this kind: `<kind>.yaml`.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ArtifactKind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        }
       ]
     },
     "ReservedOption": {
@@ -6511,6 +8434,44 @@
       "type": "string",
       "minLength": 1
     },
+    "RunnerRefusal": {
+      "description": "Why a node's runner did not resolve to an adapter a run can use.",
+      "oneOf": [
+        {
+          "description": "No `runners:` entry defines the runner.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "None of the runner's candidates is available; `tried` names the adapters it looked at.",
+          "type": "object",
+          "properties": {
+            "tried": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AdapterId"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "no_candidate"
+            }
+          },
+          "required": [
+            "type",
+            "tried"
+          ]
+        }
+      ]
+    },
     "RunnerRejection": {
       "description": "Why a runner candidate was not used. A log written before the typed\nreason stored the sentence, which reads back as `Recorded { sentence: String }`.",
       "oneOf": [
@@ -7054,6 +9015,110 @@
       "required": [
         "artifact",
         "content_hash"
+      ]
+    },
+    "SkillName": {
+      "description": "A skill name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "StatedClaim": {
+      "description": "An engine claim as the log holds it, tagged by `claim`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "needs_decision"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "claim",
+            "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "node_failed"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "claim",
+            "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "assignee": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "claim": {
+              "type": "string",
+              "const": "awaits_review"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "claim",
+            "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "assignee": {
+              "type": "string"
+            },
+            "claim": {
+              "type": "string",
+              "const": "forge_unreachable"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "claim",
+            "node",
+            "assignee"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "recheck_unreachable"
+            },
+            "external_ref": {
+              "type": "string"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "claim",
+            "node",
+            "external_ref"
+          ]
+        }
       ]
     },
     "StopRefusal": {
@@ -7685,6 +9750,68 @@
         "cause"
       ]
     },
+    "TemplateError": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "undefined": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/TemplateVar"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "undefined"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unclosed": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "at"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unclosed"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown": {
+              "$ref": "#/$defs/UnknownVariable"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown"
+          ]
+        }
+      ]
+    },
+    "TemplateVar": {
+      "description": "Every variable a `{{…}}` may name.\n\nWhat each one is worth is the renderer's to say — the engine fills a\nnode's, a mock fixture fills a scripted session's — but what they are\ncalled is decided here and nowhere else.",
+      "type": "string"
+    },
     "TerminalState": {
       "description": "Exact variant names are provisional; a `cancel` command\nexists, so `Cancelled` is included alongside the obvious two.",
       "oneOf": [
@@ -7700,6 +9827,41 @@
           "description": "The run closed because its own gate accepted promotion\nto a later-declared mode — never because the work itself failed\nor was cancelled.",
           "type": "string",
           "const": "promoted"
+        }
+      ]
+    },
+    "Timed": {
+      "description": "The wall-clock bound a run's work went past: a session's own, or an executor's.",
+      "oneOf": [
+        {
+          "description": "A session's wall-clock bound.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "An executor's wall-clock bound.",
+          "type": "object",
+          "properties": {
+            "executor": {
+              "$ref": "#/$defs/ExecutorName"
+            },
+            "type": {
+              "type": "string",
+              "const": "executor"
+            }
+          },
+          "required": [
+            "type",
+            "executor"
+          ]
         }
       ]
     },
@@ -7775,6 +9937,53 @@
       "type": "string",
       "minLength": 1
     },
+    "Unbuildable": {
+      "description": "Why a session's confinement cannot be built as asked, or an adapter\ncannot apply it.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "hook_unavailable"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A session whose commands run unconfined has no sandbox to close its network with.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "network_unclosable"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "description": "A writable root inside the checkout would admit writes the scope does not.",
+          "type": "object",
+          "properties": {
+            "dir": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "shared_dir_in_checkout"
+            }
+          },
+          "required": [
+            "kind",
+            "dir"
+          ]
+        }
+      ]
+    },
     "Unchanged": {
       "description": "The attempt that last actually ran on the tree a refused attempt\nwould have run on, and what it failed with.",
       "type": "object",
@@ -7791,6 +10000,22 @@
       "required": [
         "since",
         "failure"
+      ]
+    },
+    "UnknownVariable": {
+      "description": "A `{{…}}` naming something that is not a variable.",
+      "type": "object",
+      "properties": {
+        "known": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "known"
       ]
     },
     "UnpassableTask": {

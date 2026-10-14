@@ -9,13 +9,15 @@
 
 use std::collections::BTreeMap;
 
+use yunta_core::caution::Caution;
+use yunta_core::workflow::{reads::ReadSite, Place};
 use yunta_core::{
     ArtifactSpec, ConfigLayer, JoinPolicy, Node, NodeKind, OnFailure, PromptSource,
     RunnerCandidate, Workflow,
 };
 use yunta_engine::{
-    check as check_against, check_warnings, AdapterFacts, CheckError, CheckWarning, Composition,
-    Unanswerable, UntakenRoute,
+    check as check_against, check_warnings as warnings_against, AdapterFacts, CheckError,
+    Composition, Unanswerable, UntakenRoute,
 };
 
 #[path = "check/confinement.rs"]
@@ -26,6 +28,14 @@ mod confinement;
 /// so a capability nothing declares is a capability nothing can refuse.
 fn check(workflow: &yunta_core::Workflow, config: &yunta_core::ConfigLayer) -> Vec<CheckError> {
     check_against(workflow, config, &|_| None)
+}
+
+/// The warnings of [`check`]'s binary: the same adapter-free view.
+fn check_warnings(
+    workflow: &yunta_core::Workflow,
+    config: &yunta_core::ConfigLayer,
+) -> Vec<Caution> {
+    warnings_against(workflow, config, &|_| None)
 }
 
 fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
@@ -388,11 +398,6 @@ fn a_gate_that_routes_abort_somewhere_is_reported() {
             route: UntakenRoute::Abort,
         }]
     );
-    assert_eq!(
-        errors[0].to_string(),
-        "gate `approve`: `on.abort` is never taken — choosing `abort` pauses the run; give \
-         the option that sends the run back another id"
-    );
 }
 
 #[test]
@@ -426,27 +431,6 @@ fn a_node_that_asks_questions_declares_nothing_else() {
 }
 
 #[test]
-fn the_refusal_spells_the_split_and_how_to_read_the_answers() {
-    let refusal = CheckError::QuestionsAlongsideOtherArtifacts {
-        node: "grill".into(),
-        others: vec![ArtifactSpec::Opaque("brief.md".to_string())],
-    }
-    .to_string();
-    assert!(
-        refusal.contains("`brief.md`"),
-        "the refusal names what has to move: {refusal}"
-    );
-    assert!(
-        refusal.contains("a node that follows it"),
-        "the refusal says where it goes: {refusal}"
-    );
-    assert!(
-        refusal.contains("kind: answers"),
-        "the refusal spells how the next node reads the answers: {refusal}"
-    );
-}
-
-#[test]
 fn a_node_cannot_owe_the_answers_the_engine_writes() {
     // The answers arrive when a person replies, so a node that declared
     // them would end owing a document nobody can hand it.
@@ -457,18 +441,12 @@ fn a_node_cannot_owe_the_answers_the_engine_writes() {
         )],
     });
     let errors = check(&workflow(vec![node]), &ConfigLayer::default());
-    let refusal = errors
-        .iter()
-        .find_map(|e| match e {
-            CheckError::AnswersDeclaredAsProduced { node } if node.as_str() == "a" => {
-                Some(e.to_string())
-            }
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("`answers` is not a node's to produce, got {errors:?}"));
     assert!(
-        refusal.contains("kind: answers"),
-        "the refusal spells how the answers are read instead: {refusal}"
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::AnswersDeclaredAsProduced { node } if node.as_str() == "a"
+        )),
+        "`answers` is not a node's to produce, got {errors:?}"
     );
 }
 
@@ -603,7 +581,7 @@ fn two_children_without_declared_scope_produce_a_warning_not_an_error() {
     assert!(
         warnings.iter().any(|w| matches!(
             w,
-            CheckWarning::UndeclaredParallelScope { group } if group.as_str() == "group"
+            Caution::UndeclaredParallelScope { group } if group.as_str() == "group"
         )),
         "expected an UndeclaredParallelScope warning, got {warnings:?}"
     );
@@ -618,36 +596,6 @@ fn a_single_child_group_never_warns_about_collision() {
     )]);
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
     assert_eq!(check_warnings(&wf, &ConfigLayer::default()), Vec::new());
-}
-
-#[test]
-fn every_error_message_names_its_rule() {
-    assert_eq!(
-        CheckError::DependsOnCycle {
-            cycle: vec!["a".into(), "b".into(), "a".into()]
-        }
-        .to_string(),
-        "cycle in depends_on: a -> b -> a"
-    );
-    assert_eq!(
-        CheckError::UnknownRunner {
-            node: "a".into(),
-            runner: "planner".into(),
-            near: None,
-        }
-        .to_string(),
-        "node `a` references runner `planner`, which `runners:` does not define"
-    );
-    assert_eq!(
-        CheckError::UnknownRunner {
-            node: "a".into(),
-            runner: "planer".into(),
-            near: Some("planner".into()),
-        }
-        .to_string(),
-        "node `a` references runner `planer`, which `runners:` does not define — did you mean \
-         `planner`?"
-    );
 }
 
 fn config_with_denied(patterns: &[&str]) -> ConfigLayer {
@@ -942,10 +890,11 @@ fn independent_nodes_with_overlapping_scope_error_under_parallel_fanout() {
     ]);
     let errors = check(&wf, &config_with_fanout(2));
     assert!(
-        errors.iter().any(|e| {
-            let text = e.to_string();
-            text.contains("`a`") && text.contains("`b`")
-        }),
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::OverlappingFanOutScope { a, b, .. }
+                if a.as_str() == "a" && b.as_str() == "b"
+        )),
         "the error must cite both nodes: {errors:?}"
     );
 }
@@ -993,8 +942,8 @@ fn scopeless_independent_writers_warn_once_per_component() {
     );
     assert_eq!(
         warnings[0],
-        CheckWarning::UndeclaredFanOutScope {
-            nodes: "`a`, `b`, `c`".to_string()
+        Caution::UndeclaredFanOutScope {
+            nodes: vec!["a".into(), "b".into(), "c".into()]
         }
     );
 
@@ -1015,7 +964,6 @@ fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
     assert!(
         errors.iter().any(
             |e| matches!(e, CheckError::YuntaSchemaOutside { range, .. } if range.as_str() == ">=2")
-                && e.to_string().contains("yunta_schema")
         ),
         "an out-of-range requirement must fail check: {errors:?}"
     );
@@ -1053,10 +1001,18 @@ on_finish:
 "#;
     let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
+    let refused = errors.iter().find_map(|e| match e {
+        CheckError::DistillUnknownArtifact { artifact } => Some(artifact),
+        _ => None,
+    });
     assert!(
-        errors
-            .iter()
-            .any(|e| e.to_string().contains("ghost.md") && e.to_string().contains("distill")),
+        refused.is_some_and(|artifact| {
+            artifact.node.as_str() == "plan"
+                && artifact.id
+                    == yunta_core::ArtifactRefId::Name {
+                        name: "ghost.md".into(),
+                    }
+        }),
         "got: {errors:?}"
     );
 
@@ -1361,7 +1317,7 @@ fn a_suite_nothing_compares_is_a_warning() {
     assert!(
         warnings.iter().any(|w| matches!(
             w,
-            CheckWarning::BaselineNeverCompared { suite } if suite == "make test"
+            Caution::BaselineNeverCompared { suite } if suite == "make test"
         )),
         "got: {warnings:?}"
     );
@@ -1479,24 +1435,19 @@ nodes:
 "#;
     let wf: Workflow = yunta_core::yaml::parse(ungated).unwrap();
     assert!(
-        check_warnings(&wf, &config)
-            .iter()
-            .any(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { node, .. } if node.as_str() == "pr")),
+        check_warnings(&wf, &config).iter().any(
+            |w| matches!(w, Caution::PushToBaseWithoutGate { node, .. } if node.as_str() == "pr")
+        ),
         "got: {:?}",
         check_warnings(&wf, &config)
     );
-    // The remedy the warning proposes is a variable, so it is spelled
-    // the way the renderer reads it — the warning's own text is the one
-    // copy a compile-time format string forces, and this is what keeps
-    // it honest.
     let warned = check_warnings(&wf, &config)
         .into_iter()
-        .find(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { .. }))
-        .expect("the ungated push warns")
-        .to_string();
+        .find(|w| matches!(w, Caution::PushToBaseWithoutGate { .. }))
+        .expect("the ungated push warns");
     assert!(
-        warned.contains(&yunta_core::template::TemplateVar::RunBranch.braced()),
-        "{warned}"
+        matches!(&warned, Caution::PushToBaseWithoutGate { branch, .. } if branch == "main"),
+        "{warned:?}"
     );
 
     // The same push behind a gate is deliberate — no warning: a gate
@@ -1519,7 +1470,7 @@ nodes:
     let wf: Workflow = yunta_core::yaml::parse(gated).unwrap();
     assert!(check_warnings(&wf, &config)
         .iter()
-        .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
+        .all(|w| !matches!(w, Caution::PushToBaseWithoutGate { .. })));
 
     // A push referencing the template form counts the same.
     let templated = r#"
@@ -1532,7 +1483,7 @@ nodes:
     let wf: Workflow = yunta_core::yaml::parse(templated).unwrap();
     assert!(check_warnings(&wf, &config)
         .iter()
-        .any(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
+        .any(|w| matches!(w, Caution::PushToBaseWithoutGate { .. })));
 
     // The reference workflow's own `pr` node pushes to {{run.branch}} —
     // clean.
@@ -1546,7 +1497,7 @@ nodes:
     let wf: Workflow = yunta_core::yaml::parse(run_branch).unwrap();
     assert!(check_warnings(&wf, &config)
         .iter()
-        .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
+        .all(|w| !matches!(w, Caution::PushToBaseWithoutGate { .. })));
 }
 
 // --- scope_expansion ceiling in check --------------------------------------------
@@ -1830,11 +1781,6 @@ nodes:
         )),
         "got: {errors:?}"
     );
-    let text = errors[0].to_string();
-    assert!(
-        text.contains("at most one") && text.contains("identified by its kind"),
-        "the refusal names the rule: {text}"
-    );
 }
 
 /// A document that enters as an input and a node that produces the same
@@ -1856,14 +1802,15 @@ nodes:
 "#;
     let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
     let errors = check(&wf, &ConfigLayer::default());
-    let clash = errors
-        .iter()
-        .find(|e| matches!(e, CheckError::InputDocumentAlsoProduced { .. }))
-        .unwrap_or_else(|| panic!("got: {errors:?}"));
-    let text = clash.to_string();
     assert!(
-        text.contains("`plan`") && text.contains("`plan-it`") && text.contains("tasks document"),
-        "the refusal names both producers and the document they claim: {text}"
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::InputDocumentAlsoProduced { input, node, kind }
+                if input.as_str() == "plan"
+                    && node.as_str() == "plan-it"
+                    && *kind == yunta_core::ArtifactKind::Tasks
+        )),
+        "got: {errors:?}"
     );
 }
 
@@ -1917,21 +1864,39 @@ nodes:
         .iter()
         .find(|e| matches!(e, CheckError::ReservedArtifactName { name, .. } if name == "findings"))
         .unwrap_or_else(|| panic!("got: {errors:?}"));
-    let text = reserved.to_string();
     assert!(
-        text.contains("kind: findings") && text.contains("`fix`"),
-        "the refusal names the form that works and where it was written: {text}"
+        matches!(
+            reserved,
+            CheckError::ReservedArtifactName {
+                place: Place::Read { node, read: ReadSite::Context },
+                ..
+            } if node.as_str() == "fix"
+        ),
+        "the refusal points at the reference it was written in: {reserved:?}"
     );
 }
 
 #[test]
 fn an_artifact_name_the_run_could_not_take_is_refused() {
-    for name in [
-        "../escape.md",
-        "/tmp/escape.md",
-        "notes/../../escape.md",
-        "tasks.yaml",
-        "answers.yaml",
+    use yunta_core::events::NameProblem;
+    use yunta_core::{ArtifactKind, ReservedIdentity};
+
+    for (name, problem) in [
+        ("../escape.md", NameProblem::OutsideRun),
+        ("/tmp/escape.md", NameProblem::OutsideRun),
+        ("notes/../../escape.md", NameProblem::OutsideRun),
+        (
+            "tasks.yaml",
+            NameProblem::Reserved {
+                identity: ReservedIdentity::Kind(ArtifactKind::Tasks),
+            },
+        ),
+        (
+            "answers.yaml",
+            NameProblem::Reserved {
+                identity: ReservedIdentity::Kind(ArtifactKind::Answers),
+            },
+        ),
     ] {
         let mut node = bash("a", "true", &[]);
         node.artifacts = Some(yunta_core::Artifacts {
@@ -1941,10 +1906,10 @@ fn an_artifact_name_the_run_could_not_take_is_refused() {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                CheckError::ArtifactNameRefused { node, said }
-                    if node.as_str() == "a" && said.contains(name)
+                CheckError::ArtifactNameRefused { node, name: written, problem: refused }
+                    if node.as_str() == "a" && written == name && *refused == problem
             )),
-            "`{name}` must be refused, got {errors:?}"
+            "`{name}` must be refused for {problem:?}, got {errors:?}"
         );
     }
 
@@ -2373,16 +2338,14 @@ fn the_refusal_names_the_node_and_what_to_declare() {
         "name: w\nnodes:\n  - { id: gate, kind: check, builtin: coverage_gate }\n",
     )
     .unwrap();
-    let text = check(&wf, &ConfigLayer::default())
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let errors = check(&wf, &ConfigLayer::default());
     assert!(
-        text.contains("node `gate`")
-            && text.contains("`coverage.cmd`")
-            && text.contains("`coverage.threshold`"),
-        "got: {text}"
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::Unset { node, key: yunta_core::ConfigKey::Coverage, .. }
+                if node.as_str() == "gate"
+        )),
+        "got: {errors:?}"
     );
 }
 
@@ -2427,11 +2390,6 @@ fn a_loop_with_nothing_to_give_it_tasks_is_refused() {
             [CheckError::Unanswerable(Unanswerable::LoopWithoutTasks { node, mode: None })] if node.as_str() == "build"
         ),
         "got: {errors:?}"
-    );
-    let text = errors[0].to_string();
-    assert!(
-        text.contains("produces: [tasks]") && text.contains("kind: tasks"),
-        "the refusal names the ways to give it one: {text}"
     );
 }
 
@@ -2504,7 +2462,6 @@ nodes:
         ),
         "got: {errors:?}"
     );
-    assert!(errors[0].to_string().contains("in mode `quick`"));
 }
 
 /// A reference that names its node reaches that node's artifacts and
@@ -2564,8 +2521,8 @@ nodes:
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { site, node, .. })]
-                if node.as_str() == "a" && site.to_string().contains("mounts:")
+            [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { place: Place::Read { read: ReadSite::Mount, .. }, node, .. })]
+                if node.as_str() == "a"
         ),
         "got: {errors:?}"
     );
@@ -2583,8 +2540,8 @@ nodes:
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { site, node, .. })]
-                if node.as_str() == "a" && site.to_string().contains("shows:")
+            [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { place: Place::Read { read: ReadSite::Shows, .. }, node, .. })]
+                if node.as_str() == "a"
         ),
         "got: {errors:?}"
     );
@@ -2676,7 +2633,12 @@ nodes:
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::Unanswerable(Unanswerable::ArtifactFromNowhere { site, .. })] if site.to_string().contains("external gate")
+            [CheckError::Unanswerable(
+                Unanswerable::ArtifactFromNowhere {
+                    place: Place::ExternalGate { .. },
+                    ..
+                }
+            )]
         ),
         "got: {errors:?}"
     );
@@ -2744,7 +2706,6 @@ fn a_comparison_with_no_suite_to_measure_is_refused() {
         ),
         "got: {errors:?}"
     );
-    assert!(errors[0].to_string().contains("`baseline.suite`"));
 
     assert_eq!(
         refs_errors(COMPARES, &[], "baseline: { suite: \"make test\" }"),
@@ -2775,7 +2736,13 @@ fn a_composed_workflow_its_birth_would_refuse_is_refused_before_the_parent_runs(
         matches!(
             errors.as_slice(),
             [CheckError::Composition(Composition::Fails { node, name, problems })]
-                if node.as_str() == "sub" && name == "a" && problems.contains("node `gate`")
+                if node.as_str() == "sub"
+                    && name == "a"
+                    && matches!(
+                        problems.as_slice(),
+                        [CheckError::Unset { node: inner, key: yunta_core::ConfigKey::Coverage, .. }]
+                            if inner.as_str() == "gate"
+                    )
         ),
         "got: {errors:?}"
     );
@@ -2807,7 +2774,12 @@ nodes:
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::Composition(Composition::Fails { problems, .. })] if problems.contains("loop `build`")
+            [CheckError::Composition(Composition::Fails { problems, .. })]
+                if matches!(
+                    problems.as_slice(),
+                    [CheckError::Unanswerable(Unanswerable::LoopWithoutTasks { node, .. })]
+                        if node.as_str() == "build"
+                )
         ),
         "got: {errors:?}"
     );
@@ -2894,14 +2866,30 @@ nodes:
     let wf: Workflow = yunta_core::workflow::read::read(&yaml, std::path::Path::new("w.yaml"))
         .expect("a mode may read what an earlier mode keeps");
     let config: ConfigLayer = yunta_core::yaml::parse(SOURCES_CONFIG).unwrap();
-    let warned: Vec<String> = check_warnings(&wf, &config)
-        .iter()
-        .filter(|w| matches!(w, CheckWarning::ReadOnlyThroughPromotion { .. }))
-        .map(ToString::to_string)
+    let warned: Vec<Caution> = check_warnings(&wf, &config)
+        .into_iter()
+        .filter(|w| matches!(w, Caution::ReadOnlyThroughPromotion { .. }))
         .collect();
-    assert_eq!(warned.len(), 2, "{warned:?}");
     assert!(
-        warned.iter().all(|w| w.contains("--mode followup")),
+        matches!(
+            warned.as_slice(),
+            [
+                Caution::ReadOnlyThroughPromotion {
+                    place: Place::LoopTasks { node: looped },
+                    mode: first_mode,
+                    ..
+                },
+                Caution::ReadOnlyThroughPromotion {
+                    place: Place::Field { node: reader, field },
+                    mode: second_mode,
+                    ..
+                },
+            ] if looped.as_str() == "build"
+                && first_mode.as_str() == "followup"
+                && reader.as_str() == "fix"
+                && field == "context: artifact"
+                && second_mode.as_str() == "followup"
+        ),
         "{warned:?}"
     );
 

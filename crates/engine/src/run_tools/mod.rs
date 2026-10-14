@@ -38,8 +38,10 @@
 //! what that surface advertises. Each tool family then answers for
 //! itself — [`submission`] for documents, [`findings`] for findings,
 //! [`blackboard`] for the group's shared view, [`tasks`] for the tasks document —
-//! and the two text modules hold every sentence a session reads:
-//! [`notice`] before it calls anything, [`verdicts`] in answer to a call.
+//! and the text modules hold the sentences a session reads: [`words`] holds
+//! every one of them, one file per surface, and [`verdicts`] holds the shape
+//! an answer takes, with [`notice`] choosing what a session is told ahead of
+//! any call it makes.
 
 mod answer;
 mod blackboard;
@@ -60,6 +62,7 @@ mod submission;
 mod tasks;
 mod verdicts;
 mod watch;
+pub(crate) mod words;
 
 pub use blackboard::consolidate_blackboard;
 pub use host::{

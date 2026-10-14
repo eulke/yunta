@@ -15,108 +15,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use thiserror::Error;
-use yunta_core::diagnostic::Report;
 use yunta_core::events::ArtifactId;
 use yunta_core::{ArtifactKind, InputName, InputSpec};
 
 use crate::run::{BirthArtifact, BirthOrigin};
 
-#[derive(Debug, Error, PartialEq)]
-pub enum InputsError {
-    /// Every `--input` name the workflow does not declare, sorted, so
-    /// one run of the command reports them all.
-    #[error(
-        "unknown {} `{}` — this workflow declares {}",
-        yunta_core::text::agreeing(names.len(), "input", "inputs"),
-        listed(names, "`, `"),
-        if declared.is_empty() { "no inputs".to_string() } else { format!("only: {}", listed(declared, ", ")) }
-    )]
-    Unknown {
-        names: Vec<InputName>,
-        declared: Vec<InputName>,
-    },
-
-    #[error("input `{name}` is required and has no default — pass `--input {name}=...`")]
-    Missing { name: InputName },
-
-    #[error("input `{name}` expects a finite number, got `{value}`")]
-    InvalidNumber { name: InputName, value: String },
-
-    #[error("input `{name}` expects `true` or `false`, got `{value}`")]
-    InvalidBoolean { name: InputName, value: String },
-
-    #[error("input `{name}` must be >= {min}, got {value}")]
-    BelowMin {
-        name: InputName,
-        value: f64,
-        min: f64,
-    },
-
-    #[error("input `{name}` must be <= {max}, got {value}")]
-    AboveMax {
-        name: InputName,
-        value: f64,
-        max: f64,
-    },
-
-    #[error("input `{name}` must be at least {min_length} characters, got {actual}")]
-    TooShort {
-        name: InputName,
-        min_length: u32,
-        actual: usize,
-    },
-
-    #[error("input `{name}` must match pattern `{pattern}`, got `{value}`")]
-    PatternMismatch {
-        name: InputName,
-        pattern: String,
-        value: String,
-    },
-
-    #[error("input `{name}` must be one of [{}], got `{value}`", values.join(", "))]
-    NotInEnum {
-        name: InputName,
-        value: String,
-        values: Vec<String>,
-    },
-
-    #[error("input `{name}` names a path that doesn't exist: `{path}`")]
-    PathNotFound { name: InputName, path: String },
-
-    /// A `document` input whose path is there and whose bytes are not: a
-    /// directory, or a file the filesystem refuses.
-    #[error(
-        "input `{name}` names `{path}`, which cannot be read as a file: {detail} — point the \
-         input at the {label} itself"
-    )]
-    DocumentUnreadable {
-        name: InputName,
-        path: String,
-        label: &'static str,
-        detail: String,
-    },
-
-    /// A `document` input whose content is not what its kind declares.
-    ///
-    /// Carries the report rather than a sentence about it: every problem
-    /// the document has reaches the person who has to fix the file, in
-    /// the document's own vocabulary, and one correction answers them
-    /// all.
-    #[error("input `{name}` is not a {label} this run can hold\n{report}", label = report.document.label())]
-    DocumentRefused { name: InputName, report: Report },
-
-    /// Reachable only if a bad `pattern:` slipped past `check` (which
-    /// validates every pattern compiles) — resolution still
-    /// reports it as a typed error rather than panicking on attacker- or
-    /// author-supplied regex it never got to see statically.
-    #[error("input `{name}`'s pattern `{pattern}` is not a valid regex: {detail}")]
-    InvalidPattern {
-        name: InputName,
-        pattern: String,
-        detail: String,
-    },
-}
+/// Why the inputs a run was handed do not resolve to its workflow's declared
+/// inputs: the core's account of each problem, whose display is a code.
+pub use yunta_core::inputs::InputsProblem as InputsError;
 
 /// What a workflow's `inputs:` resolve to: the value of every declared
 /// input, and the documents that entered as one.
@@ -144,15 +50,6 @@ pub struct ResolvedInputs {
 /// against — the run's original checkout, since this runs before any
 /// worktree exists (isolation is a property of the run, not of resolving
 /// its inputs).
-/// Input names run together for one sentence.
-fn listed(names: &[InputName], separator: &str) -> String {
-    names
-        .iter()
-        .map(InputName::as_str)
-        .collect::<Vec<_>>()
-        .join(separator)
-}
-
 pub async fn resolve_inputs(
     specs: &BTreeMap<InputName, InputSpec>,
     provided: &HashMap<InputName, String>,
@@ -226,7 +123,7 @@ async fn read_document(
         .map_err(|source| InputsError::DocumentUnreadable {
             name: name.clone(),
             path: raw.to_string(),
-            label: kind.label(),
+            label: kind.label().to_string(),
             detail: source.to_string(),
         })?;
     let canonical = crate::artifacts::canonical_document(kind, &bytes, raw).map_err(|report| {

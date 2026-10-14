@@ -29,9 +29,11 @@ mod human_interaction;
 mod identity;
 mod interrupt;
 mod json;
+mod output;
 mod pack;
 mod project;
 mod render;
+mod run_page;
 mod surface;
 
 use std::path::Path;
@@ -56,9 +58,13 @@ fn main() -> ExitCode {
     render::settle_columns(columns());
     render::settle_glyphs(&glyph_env());
     surface::terminal::settle();
+    // Read once the settling above is done, so every line this process
+    // writes to stdout takes the same color, width and glyphs.
+    let look = render::stdout_look();
+    let mode = cli.mode();
     tracing::debug!("yunta starting");
 
-    let outcome = drive(cli, started);
+    let outcome = drive(cli, started, mode, &look);
     // Last, because a prompt this run abandoned mid-key left a thread
     // that is still reading the terminal and still turning raw mode on
     // between its own reads. Nothing runs after this, so nothing takes
@@ -70,42 +76,9 @@ fn main() -> ExitCode {
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Ok(Outcome::Code(code)) => ExitCode::from(code),
         Err(error) => {
-            refused(&error);
+            output::refused(&error, mode, &look);
             ExitCode::FAILURE
         }
-    }
-}
-
-/// A refusal on stderr: the sentence after `error:`, then where it
-/// looked and the commands that go on from here, when it has them.
-fn refused(error: &CliError) {
-    let ink = crate::render::stderr_ink();
-    eprintln!(
-        "{}: {}",
-        ink.word(render::ink::Tone::Failed, "error"),
-        error.said_to(crate::error::Reader::Person)
-    );
-    let (detail, next) = error.advice();
-    if let Some(detail) = detail {
-        eprintln!(
-            "{}{}",
-            render::INDENT,
-            ink.word(render::ink::Tone::Muted, &detail)
-        );
-    }
-    if !next.is_empty() {
-        let look = render::Look {
-            glyphs: render::glyphs(),
-            ink,
-            width: render::stderr_width(),
-        };
-        eprint!(
-            "\n{}",
-            render::draw(
-                render::doc::Doc::new().with(render::blocks::Next { steps: next }),
-                &look
-            )
-        );
     }
 }
 
@@ -184,12 +157,19 @@ fn columns() -> Option<usize> {
 ///
 /// `started` is the first instant of this process, handed on to the
 /// command so a hook's window counts from the start of the process.
-fn drive(cli: cli::Cli, started: Instant) -> Result<Outcome, CliError> {
+/// `mode` and `look` are how this process writes, decided once by `main`
+/// and handed to whichever command runs.
+fn drive(
+    cli: cli::Cli,
+    started: Instant,
+    mode: output::Mode,
+    look: &render::Look,
+) -> Result<Outcome, CliError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|source| CliError::io("build the runtime for", "this command", source))?;
-    let outcome = runtime.block_on(cli.run(started));
+    let outcome = runtime.block_on(cli.run(started, mode, look));
     runtime.shutdown_background();
     outcome
 }

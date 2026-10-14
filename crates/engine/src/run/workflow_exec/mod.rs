@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{ChildRunCreatedPayload, EventPayload};
+use yunta_core::events::{ChildRefusal, ChildRunCreatedPayload, EventPayload, Failure};
 use yunta_core::{InputName, Isolation, MountSpec, Node};
 
 use yunta_core::template::render_template;
@@ -54,6 +54,7 @@ use child::{drive_child, resume_child, Child};
 use mounts::resolve_mounts;
 
 use crate::frozen::read::{ChildWorkflow, Source};
+use crate::frozen::FrozenError;
 
 use super::node_close::{fail, fail_with};
 use super::node_exec::{template_vars, NodeEnd};
@@ -76,15 +77,24 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
     crate::run_dir::worktrees_root(ctx.manifest, ctx.run_dir)
 }
 
+/// The failure of a composed workflow the run could not start, named by the
+/// `use:` that asked for it.
+fn child_refused(use_name: &str, refusal: ChildRefusal) -> Failure {
+    Failure::ChildRefused {
+        workflow: use_name.to_string(),
+        refusal: Box::new(refusal),
+    }
+}
+
 /// The child's static check, asked of it as it is born with what its node
-/// mounts into it: the diagnostics that fail it, joined, or `None` when it
-/// passes. Each adapter the check names is read as the run holds it, with
+/// mounts into it: the code of each diagnostic that fails it, or `None` when
+/// it passes. Each adapter the check names is read as the run holds it, with
 /// the sandbox its edits run under.
 fn check_child(
     ctx: &RunCtx<'_>,
     child: &yunta_core::Workflow,
     mounts: &[MountSpec],
-) -> Option<String> {
+) -> Option<Vec<String>> {
     let errors = crate::check::check_mounted(
         child,
         &ctx.manifest.config,
@@ -101,13 +111,7 @@ fn check_child(
     if errors.is_empty() {
         return None;
     }
-    Some(
-        errors
-            .iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("; "),
-    )
+    Some(errors.iter().map(|e| e.to_string()).collect())
 }
 
 /// Births the child a fresh node starts. A child of a run that froze its
@@ -185,12 +189,11 @@ pub(super) async fn execute_workflow(
         return fail(
             ctx,
             node,
-            format!(
-                "creating child workflow `{use_name}` would nest {} deep but \
-                 `limits.max_workflow_depth` is {max_depth} — flatten the composition or \
-                 raise the limit",
-                yunta_core::text::counted(ctx.depth as usize + 1, "level")
-            ),
+            Failure::NestedTooDeep {
+                workflow: use_name.to_string(),
+                depth: ctx.depth + 1,
+                max_depth,
+            },
         )
         .await;
     }
@@ -219,25 +222,26 @@ pub(super) async fn execute_workflow(
     let source = Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient);
     let child = match source.workflow(use_name).await {
         Ok(child) => child,
+        Err(FrozenError::Unresolved(problem)) => {
+            let refusal = ChildRefusal::Unresolved { problem };
+            return fail(ctx, node, child_refused(use_name, refusal)).await;
+        }
         Err(e) => return super::session_policy::close_frozen(ctx, node, e).await,
     };
     let child_workflow = match yunta_core::workflow::read::read(child.text(), Path::new(use_name)) {
         Ok(workflow) => workflow,
         Err(report) => {
-            return fail(ctx, node, report.to_string()).await;
+            let refusal = ChildRefusal::Invalid { report };
+            return fail(ctx, node, child_refused(use_name, refusal)).await;
         }
     };
     // The same static gate `yunta run` applies before spending anything
     // — a child born broken is refused at birth, with the check's own
     // diagnostics — asked of the child as it is born: holding what this
     // node mounts into it.
-    if let Some(listed) = check_child(ctx, &child_workflow, mounts) {
-        return fail(
-            ctx,
-            node,
-            format!("child workflow `{use_name}` fails check: {listed}"),
-        )
-        .await;
+    if let Some(rules) = check_child(ctx, &child_workflow, mounts) {
+        let refusal = ChildRefusal::FailsCheck { rules };
+        return fail(ctx, node, child_refused(use_name, refusal)).await;
     }
 
     // The parent's frozen contribution: the declared inputs, rendered
@@ -249,13 +253,12 @@ pub(super) async fn execute_workflow(
             Ok(value) => {
                 provided.insert(name.clone(), value);
             }
-            Err(e) => {
-                return fail(
-                    ctx,
-                    node,
-                    format!("child input `{name}` does not render: {e}"),
-                )
-                .await;
+            Err(error) => {
+                let failure = Failure::Template {
+                    template: error,
+                    input: Some(name.clone()),
+                };
+                return fail(ctx, node, failure).await;
             }
         }
     }
@@ -312,13 +315,15 @@ pub(super) async fn execute_workflow(
         // A freeze the token cut ends the node the way a birth cut does
         // below: a stop is not a failed child.
         Err(e) if e.cancelled() => return crate::run::node_exec::cancelled_end(ctx, node).await,
+        // The inputs the node hands the child do not fit what it declares.
+        Err(crate::manifest::ManifestError::Inputs(error)) => {
+            let refusal = ChildRefusal::Inputs { problem: error };
+            return fail(ctx, node, child_refused(use_name, refusal)).await;
+        }
         Err(e) => {
-            return fail(
-                ctx,
-                node,
-                format!("child workflow `{use_name}` cannot freeze its manifest: {e}"),
-            )
-            .await;
+            let engine_error =
+                format!("child workflow `{use_name}` cannot freeze its manifest: {e}");
+            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
     };
     // One word all the way down: what the node declares is what the
@@ -329,12 +334,9 @@ pub(super) async fn execute_workflow(
     child_manifest.paths = match yunta_core::FrozenPaths::new(runs.clone(), trees.clone()) {
         Ok(frozen) => Some(frozen),
         Err(e) => {
-            return fail(
-                ctx,
-                node,
-                format!("child run of `{use_name}` cannot freeze its state roots: {e}"),
-            )
-            .await;
+            let engine_error =
+                format!("child run of `{use_name}` cannot freeze its state roots: {e}");
+            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
     };
 
@@ -370,12 +372,9 @@ pub(super) async fn execute_workflow(
                     return crate::run::node_exec::cancelled_end(ctx, node).await;
                 }
                 Err(e) => {
-                    return fail(
-                        ctx,
-                        node,
-                        format!("child run `{child_id}` cannot prepare its worktree: {e}"),
-                    )
-                    .await;
+                    let engine_error =
+                        format!("child run `{child_id}` cannot prepare its worktree: {e}");
+                    return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
                 }
             }
         }
@@ -440,12 +439,8 @@ pub(super) async fn execute_workflow(
         // The child's frozen inputs could not be written: the node fails with
         // that, as a birth that cannot read its workflow does.
         Err(RunError::Frozen(e)) => {
-            return fail(
-                ctx,
-                node,
-                format!("child workflow `{use_name}` cannot be born: {e}"),
-            )
-            .await;
+            let engine_error = format!("child workflow `{use_name}` cannot be born: {e}");
+            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
         Err(other) => return Err(other),
     };

@@ -16,6 +16,7 @@ use yunta_core::events::{
     RunFinishedPayload, RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::{
     build_receipt, render_receipt_json, BaselineSummary, CostSummary, CriteriaSummary,
@@ -101,7 +102,20 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
 /// The receipt as a file holds it.
 fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
     use yunta_render::surface::Surface;
-    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(receipt))
+    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(receipt, &spell))
+}
+
+/// The command words a receipt names, spelled the way the CLI accepts them.
+/// A receipt names only these two steps, so any other one is a regression.
+fn spell(step: &NextStep) -> String {
+    match step {
+        NextStep::Verify { run } => format!("yunta verify {}", run.handle()),
+        NextStep::Status {
+            run,
+            node: Some(node),
+        } => format!("yunta status {} --node {node}", run.handle()),
+        other => panic!("a receipt names no other step: {other:?}"),
+    }
 }
 
 /// The golden file `case` is checked against.
@@ -125,7 +139,9 @@ fn a_failed_run_s_receipt_says_what_failed() {
     receipt.terminal_state = Some(TerminalState::Failed);
     receipt.failed = vec![yunta_engine::FailedNode {
         node: NodeId::from("build"),
-        failure: Failure::message("`cargo build` exited 101: cannot find value `x`"),
+        failure: Failure::Message {
+            outcome: "`cargo build` exited 101: cannot find value `x`".to_string(),
+        },
     }];
     assert_golden(&golden("failed"), &render_receipt_markdown(&receipt));
 }

@@ -26,6 +26,7 @@ use yunta_core::events::{ExecutionEnvironment, TaskProbe};
 use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
+use super::words;
 use crate::replay::{RunState, RunView};
 use crate::task_cycle::{probe, CriterionRun};
 
@@ -160,7 +161,8 @@ impl SessionTools {
         let subject = || Subject::Spec(Named::new(one.task.clone(), index));
         let Some(task) = plan.and_then(|plan| plan.tasks.iter().find(|task| task.id == one.task))
         else {
-            let unknown = Problem::rule(RuleCode::UnknownSpecTask, unplanned(&one.task, plan));
+            let unknown =
+                Problem::rule(RuleCode::UnknownSpecTask, words::unplanned(&one.task, plan));
             return Ok((vec![Diagnostic::new(subject(), unknown)], Vec::new()));
         };
         let tested = Task {
@@ -197,15 +199,12 @@ impl SessionTools {
         let problem = if run.could_not_run().is_some() {
             Problem::rule(
                 RuleCode::CriterionCannotRun,
-                cannot_run(&run, self.host.environment.as_ref()),
+                words::cannot_run(&run, self.host.environment.as_ref()),
             )
         } else if run.exit_code == 0 {
             Problem::rule(
                 RuleCode::ProposedCriterionAlreadyPasses,
-                format!(
-                    "`{cmd}` already exits 0 on the run's tree; a criterion that proves a fix \
-                     fails until the fix is in"
-                ),
+                words::proposed_passes(cmd),
             )
         } else {
             return Ok(None);
@@ -320,16 +319,13 @@ fn rewritten(spec: &SpecFile, held: &SpecFile, owed: &[TaskId]) -> Vec<Diagnosti
                 &one.task,
                 Some(index),
                 RuleCode::DepartedSpecUnchanged,
-                "gives the task the tests a person accepted are wrong; write them again as the \
-                 departure and the person say"
-                    .to_string(),
+                words::spec_departed_unchanged().to_string(),
             ),
             (false, false) => flag(
                 &one.task,
                 Some(index),
                 RuleCode::OtherSpecChanged,
-                "nobody departed from this task's tests; hand its spec over as the run holds it"
-                    .to_string(),
+                words::spec_other_changed().to_string(),
             ),
             _ => {}
         }
@@ -339,10 +335,7 @@ fn rewritten(spec: &SpecFile, held: &SpecFile, owed: &[TaskId]) -> Vec<Diagnosti
             &gone.task,
             None,
             RuleCode::OtherSpecChanged,
-            format!(
-                "leaves out task `{}`'s spec, which the run holds; hand it over as it is",
-                gone.task
-            ),
+            words::spec_left_out(&gone.task),
         );
     }
     found
@@ -370,14 +363,7 @@ async fn already_held(
             if !listed.is_empty() {
                 found.push(Diagnostic::new(
                     Subject::Spec(Named::new(one.task.clone(), index)),
-                    Problem::rule(
-                        RuleCode::TestFileExists,
-                        format!(
-                            "`{}` is a file the run's tree already holds; a test lives in a \
-                             new file, beside the project's own tests",
-                            file.path
-                        ),
-                    ),
+                    Problem::rule(RuleCode::TestFileExists, words::test_file_held(&file.path)),
                 ));
             }
         }
@@ -401,27 +387,22 @@ fn judged(
         .enumerate()
         .filter_map(|(at, run)| {
             let (code, detail) = if run.could_not_run().is_some() {
-                (RuleCode::CriterionCannotRun, cannot_run(run, environment))
+                (
+                    RuleCode::CriterionCannotRun,
+                    words::cannot_run(run, environment),
+                )
             } else if independent && !run.is_guard && run.exit_code == 0 {
                 (
                     RuleCode::CriterionAlreadyPasses,
-                    format!(
-                        "`{}` already exits 0, before any work{}. A criterion that passes \
-                         before the work proves nothing: it must fail until the work is done \
-                         — a test filter that matches no test passes, and so does a test \
-                         that checks nothing",
-                        run.cmd,
-                        quoted_conclusion(run)
-                    ),
+                    words::already_passes(&run.cmd, &words::quoted_conclusion(run)),
                 )
             } else if independent && run.is_guard && run.exit_code != 0 {
                 (
                     RuleCode::GuardAlreadyRed,
-                    format!(
-                        "`{}` already exits {}, before any work{}",
-                        run.cmd,
+                    words::guard_already_red(
+                        &run.cmd,
                         run.exit_code,
-                        quoted_conclusion(run)
+                        &words::quoted_conclusion(run),
                     ),
                 )
             } else {
@@ -436,31 +417,6 @@ fn judged(
             ))
         })
         .collect()
-}
-
-/// What a command that answered concluded with, quoted after its verdict:
-/// the line a writer reads to see why it passed or failed.
-fn quoted_conclusion(run: &CriterionRun) -> String {
-    run.conclusion()
-        .map(|line| format!(" — it said `{line}`"))
-        .unwrap_or_default()
-}
-
-/// Why a criterion could not run, in the words a writer fixes it by:
-/// what it exited with, what the shell said, and where it looked.
-fn cannot_run(run: &CriterionRun, environment: Option<&ExecutionEnvironment>) -> String {
-    let mut detail = format!(
-        "`{}` exits {} where the engine runs criteria",
-        run.cmd,
-        run.exit_described()
-    );
-    if let Some(line) = run.conclusion() {
-        detail.push_str(&format!(" — it said `{line}`"));
-    }
-    if let Some(environment) = environment {
-        detail.push_str(&format!(" — under {environment}"));
-    }
-    detail
 }
 
 /// Writes `files` into `checkout`, where their tests run as they will once
@@ -478,20 +434,8 @@ async fn write_test_files(
         written
             .and(tokio::fs::write(&path, &test_file.content).await)
             .map_err(|source| RunToolError::Handover {
-                detail: format!("could not write `{}`: {source}", test_file.path),
+                detail: words::could_not_write(&test_file.path, source),
             })?;
     }
     Ok(())
-}
-
-/// Why a spec's task is not one the run's plan holds, naming the ones
-/// it does.
-fn unplanned(task: &yunta_core::TaskId, plan: Option<&TasksFile>) -> String {
-    match plan {
-        Some(plan) => format!(
-            "the run's plan declares no task `{task}`; its tasks are {}",
-            yunta_core::text::listed(plan.tasks.iter().map(|task| task.id.as_str()))
-        ),
-        None => "the run holds no plan for a spec to hold to".to_string(),
-    }
 }

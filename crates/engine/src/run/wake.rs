@@ -31,10 +31,7 @@ pub(super) async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunEr
             "engine-artifact-store",
             FindingSeverity::Minor,
             "the run holds artifacts this binary cannot verify".to_string(),
-            Location::run(
-                RelativePath::of([crate::artifacts::store::OBJECTS_DIR]),
-                None,
-            ),
+            Location::run(RelativePath::of([yunta_core::OBJECTS_DIR]), None),
             detail,
         )
         .await?;

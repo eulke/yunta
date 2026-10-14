@@ -20,6 +20,7 @@ use yunta_engine::audit_pack;
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::output::{blank, document, say};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
@@ -27,6 +28,7 @@ use crate::pack::{
 };
 use crate::render::blocks::{Checklist, Fields, Found};
 use crate::render::doc::Doc;
+use crate::render::Look;
 
 mod scaffold;
 
@@ -193,6 +195,7 @@ pub async fn add(
     source: &str,
     confirmed_executors: bool,
     run_tests: bool,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
     // The invocation's own composition root: `pack add` clones, and a
     // clone is a subprocess that answers to whoever ran the command.
@@ -233,8 +236,8 @@ pub async fn add(
     // The audit is read, never run: the inventory a person confirms
     // against, printed before anything is vendored.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
-    print_report(&audit);
-    println!();
+    print_report(&audit, look);
+    blank();
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
 
     let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
@@ -270,16 +273,19 @@ pub async fn add(
     }
     swap.commit();
 
-    println!(
-        "installed {}/{} @ {} ({}) {} {}",
-        manifest.publisher,
-        manifest.name,
-        manifest.version,
-        commit.abbreviated(),
-        crate::render::glyphs().arrow(),
-        crate::render::paths::shown(&dest, &cwd, None)
+    say(
+        look,
+        format!(
+            "installed {}/{} @ {} ({}) {} {}",
+            manifest.publisher,
+            manifest.name,
+            manifest.version,
+            commit.abbreviated(),
+            look.glyphs.arrow(),
+            crate::render::paths::shown(&dest, &cwd, None)
+        ),
     );
-    super::pack_needs::report(&ctx, &dest, &manifest).await?;
+    super::pack_needs::report(&ctx, &dest, &manifest, look).await?;
 
     // The pack's own cases run last, on the vendored copy, and only on
     // request — after the confirmation, never as part of deciding it.
@@ -288,7 +294,7 @@ pub async fn add(
     } else {
         count_pack_tests(&dest)
     };
-    print_test_summary(&tests);
+    print_test_summary(&tests, look);
     Ok(Outcome::Success)
 }
 
@@ -296,6 +302,7 @@ pub async fn update(
     pack: &PackRef,
     new_ref: &str,
     confirmed_executors: bool,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let cwd = ctx.cwd.clone();
@@ -336,8 +343,8 @@ pub async fn update(
         // The decision being demanded needs the same evidence `add`
         // shows — nothing executes until a human has seen the
         // inventory — printed only when there's a decision to make.
-        print_report(&audit_pack(clone_dir.path(), manifest.clone()));
-        println!();
+        print_report(&audit_pack(clone_dir.path(), manifest.clone()), look);
+        blank();
     }
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
 
@@ -371,15 +378,18 @@ pub async fn update(
     }
     swap.commit();
 
-    println!(
-        "updated {pack} {} {new_ref} ({})",
-        crate::render::glyphs().arrow(),
-        commit.abbreviated()
+    say(
+        look,
+        format!(
+            "updated {pack} {} {new_ref} ({})",
+            look.glyphs.arrow(),
+            commit.abbreviated()
+        ),
     );
     Ok(Outcome::Success)
 }
 
-pub fn remove(pack: &PackRef) -> Result<Outcome, CliError> {
+pub fn remove(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let mut lock = load_lock(&cwd)?;
     if lock.packs.remove(pack).is_none() {
@@ -397,7 +407,7 @@ pub fn remove(pack: &PackRef) -> Result<Outcome, CliError> {
         swap.commit();
     }
 
-    println!("removed {pack}");
+    say(look, format!("removed {pack}"));
     Ok(Outcome::Success)
 }
 
@@ -432,13 +442,16 @@ fn vendored_verdict(
     }
 }
 
-pub fn list() -> Result<Outcome, CliError> {
+pub fn list(look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let lock = load_lock(&cwd)?;
     if lock.packs.is_empty() {
-        println!(
-            "no packs installed under {}",
-            crate::render::paths::shown(&packs_root(&cwd), &cwd, None)
+        say(
+            look,
+            format!(
+                "no packs installed under {}",
+                crate::render::paths::shown(&packs_root(&cwd), &cwd, None)
+            ),
         );
         return Ok(Outcome::Success);
     }
@@ -454,16 +467,12 @@ pub fn list() -> Result<Outcome, CliError> {
         let (found, said) = vendored_verdict(&dest, entry, &installed);
         checks.push(found, key.to_string(), said);
     }
-    let look = crate::render::stdout_look();
     let lock_file = crate::render::paths::shown(&lock_path(&cwd), &cwd, None);
-    print!(
-        "{}",
-        crate::render::draw(
-            Doc::new()
-                .with(checks)
-                .with(Fields::new().push_if("lock", lock_file)),
-            &look
-        )
+    document(
+        look,
+        Doc::new()
+            .with(checks)
+            .with(Fields::new().push_if("lock", lock_file)),
     );
     Ok(Outcome::Success)
 }

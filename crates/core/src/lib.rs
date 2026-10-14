@@ -22,6 +22,7 @@
 
 pub mod agent;
 mod capabilities;
+pub mod caution;
 mod clock;
 pub mod commit_message;
 mod config;
@@ -39,7 +40,7 @@ pub mod graph;
 mod hash;
 mod id_source;
 mod ids;
-mod inputs;
+pub mod inputs;
 mod manifest;
 mod nonempty;
 mod pack;
@@ -60,6 +61,7 @@ pub mod shape;
 pub mod shell;
 pub mod shown;
 mod spec;
+pub mod step;
 mod tasks;
 pub mod template;
 pub mod text;
@@ -101,7 +103,7 @@ pub use ids::{
     Pid, Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SharedDirVar,
     SkillName, TaskId, WorkflowName,
 };
-pub use inputs::{InputSpec, InputSpecError};
+pub use inputs::{InputSpec, InputSpecError, InputsProblem};
 pub use manifest::{
     content_hash, Frozen, FrozenPaths, FrozenWorkflow, Manifest, PackProvenance, ProjectIdentity,
     ProvenanceGap, RelativeRootError, RunAdapter,
@@ -129,7 +131,7 @@ pub use workflow::{
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
     RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind,
-    Workflow, ARTIFACTS_DIR,
+    Workflow, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

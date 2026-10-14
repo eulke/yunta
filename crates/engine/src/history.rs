@@ -11,8 +11,8 @@
 
 use std::time::Duration;
 
+use yunta_core::caution::Caution;
 use yunta_core::events::StoredEvent;
-use yunta_core::units::Tokens;
 use yunta_core::{ContentHash, ModeName, RunId, Workflow};
 
 use crate::replay::derive;
@@ -105,25 +105,15 @@ pub const MIN_SAMPLES_FOR_ESTIMATION: usize = 3;
 /// informative, never blocking. `None` without a cap to compare, or
 /// without enough history (the estimation's own ≥3-run floor).
 ///
-/// The sentence states the fact and stops there: how a caution is marked
-/// on a surface is that surface's decision, so a CLI that prefixes its
-/// warnings prefixes this one exactly once.
-pub fn budget_p90_warning(
-    cap: Option<u64>,
-    estimation: Option<&PriorEstimation>,
-) -> Option<String> {
-    let cap = cap?;
-    let estimation = estimation?;
-    if (cap as f64) < estimation.tokens.p90 {
-        Some(format!(
-            "`limits.max_tokens_per_run` ({cap}) is below this workflow's \
-             historical p90 ({} over {}) — the run may pause on its budget",
-            Tokens::rounded(estimation.tokens.p90).exact(),
-            yunta_core::text::counted(estimation.sample_count, "run")
-        ))
-    } else {
-        None
-    }
+/// The caution carries the facts and nothing else: how it is worded, and
+/// how it is marked on a surface, are that surface's decision.
+pub fn budget_caution(cap: Option<u64>, estimation: Option<&PriorEstimation>) -> Option<Caution> {
+    let (cap, estimation) = (cap?, estimation?);
+    ((cap as f64) < estimation.tokens.p90).then_some(Caution::BudgetBelowHistory {
+        cap,
+        p90: estimation.tokens.p90,
+        samples: estimation.sample_count,
+    })
 }
 
 pub fn prior_estimation(history: &[RunSummary]) -> Option<PriorEstimation> {

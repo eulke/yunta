@@ -43,22 +43,33 @@ pub(crate) use canonical::{canonical, canonical_document, derive_findings, submi
 pub use ingest::{close_artifacts, ArtifactContent, StagedHash, VerifiedArtifact};
 pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use integrity::{ArtifactFault, ArtifactIntegrity};
-pub use store::ObjectError;
+pub use store::StoreError;
 
 /// Why a document the run holds could not be read back: its bytes, or
 /// what they say.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum HeldError {
     #[error(transparent)]
-    Object(#[from] ObjectError),
+    Store(#[from] StoreError),
     #[error("{0}")]
     Unreadable(#[from] yunta_core::diagnostic::Report),
+}
+
+/// An object the run cannot hand over is the run's object problem; the
+/// store's own failed read or write is the run's I/O failure.
+impl From<StoreError> for crate::run::RunError {
+    fn from(error: StoreError) -> Self {
+        match error {
+            StoreError::Object(problem) => Self::Object(problem),
+            StoreError::Io { context, source } => Self::Io { context, source },
+        }
+    }
 }
 
 impl From<HeldError> for crate::run::RunError {
     fn from(error: HeldError) -> Self {
         match error {
-            HeldError::Object(source) => Self::Object(source),
+            HeldError::Store(store) => store.into(),
             HeldError::Unreadable(report) => Self::UnreadableArtifact(report),
         }
     }
@@ -107,7 +118,7 @@ pub enum AcceptError {
     Project {
         name: String,
         #[source]
-        source: ObjectError,
+        source: StoreError,
     },
     #[error("failed to record `{name}` on the run's log")]
     Log {
@@ -246,7 +257,7 @@ impl<'a> RunArtifacts<'a> {
     }
 
     /// The bytes `held` names, verified against its hash.
-    pub(crate) async fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, ObjectError> {
+    pub(crate) async fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, StoreError> {
         self.store.get(&held.content_hash).await
     }
 }

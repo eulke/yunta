@@ -18,7 +18,7 @@
 //! opens a session and asks for the network is refused where the sandbox is
 //! known. The run's token cap is the other adapter-aware rule: it is checked
 //! when a session ends for an adapter that declares no `mid_session_token_cap`,
-//! and [`check_token_cap_warnings`] names those nodes.
+//! and [`super::check_warnings`] names those nodes.
 
 use super::*;
 use yunta_core::port::{absence_of, Absence, PermissionProfile};
@@ -248,11 +248,11 @@ pub(crate) fn all_known_hold(
 /// `mid_session_token_cap`: such an adapter reports no usage mid-session, so
 /// the cap cannot stop a session as it runs. Without a cap there is nothing
 /// to check.
-pub fn check_token_cap_warnings(
+pub(crate) fn token_cap_cautions(
     workflow: &Workflow,
     config: &ConfigLayer,
     declared: &dyn Fn(&AdapterId) -> Option<AdapterFacts>,
-) -> Vec<CheckWarning> {
+) -> Vec<Caution> {
     if config
         .limits
         .as_ref()
@@ -269,7 +269,7 @@ pub fn check_token_cap_warnings(
                 !facts.capabilities.declares(Capability::MidSessionTokenCap)
             })
         })
-        .map(|node| CheckWarning::TokenCapAtSessionEnd {
+        .map(|node| Caution::TokenCapAtSessionEnd {
             node: node.id.clone(),
         })
         .collect()

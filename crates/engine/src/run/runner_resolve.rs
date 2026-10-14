@@ -1,10 +1,12 @@
 //! Resolving a node's runner into an adapter, model and agent, opening
 //! its per-run tools, and recording what the adapter cannot enforce.
 
-use yunta_core::events::{EventPayload, RunnerResolvedPayload};
-use yunta_core::{AdapterId, AgentName, Node, RunAdapter};
+use yunta_core::events::{
+    CapabilityUse, EventPayload, Failure, RunnerRefusal, RunnerResolvedPayload,
+};
+use yunta_core::{AdapterId, Node, NodeId, RunAdapter};
 
-use crate::runner::resolve_runner;
+use crate::runner::{resolve_runner, RunnerError};
 
 use super::node_close::fail;
 use super::step::Step;
@@ -48,19 +50,14 @@ pub(super) async fn resolve_node_runner(
                         .declares(yunta_core::Capability::CustomAgents)
                 });
                 if !has_custom_agents {
-                    let end = fail(
-                        ctx,
-                        node,
-                        format!(
-                            "node `{}` requests agent `{}` but adapter `{}` does not declare \
-                             `custom_agents` — pick a candidate on an adapter that does, or \
-                             drop the agent",
-                            node.id,
-                            chosen.agent.as_ref().map_or("", AgentName::as_str),
-                            chosen.adapter
-                        ),
-                    )
-                    .await?;
+                    let failure = Failure::CapabilityMissing {
+                        node: node.id.clone(),
+                        capability: yunta_core::Capability::CustomAgents,
+                        adapter: chosen.adapter.clone(),
+                        used_for: None,
+                        agent: chosen.agent.clone(),
+                    };
+                    let end = fail(ctx, node, failure).await?;
                     return Ok(Step::Ended(end));
                 }
             }
@@ -75,7 +72,25 @@ pub(super) async fn resolve_node_runner(
             .await?;
             Ok(Step::Value(chosen))
         }
-        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string()).await?)),
+        Err(error) => {
+            let failure = runner_failure(error);
+            Ok(Step::Ended(fail(ctx, node, failure).await?))
+        }
+    }
+}
+
+/// The failure a node leaves when its runner does not resolve: the runner it
+/// asked for, and why no candidate of it can be used.
+fn runner_failure(error: RunnerError) -> Failure {
+    let (runner, runner_refusal) = match error {
+        RunnerError::UnknownRunner { runner } => (runner, RunnerRefusal::Unknown),
+        RunnerError::NoCandidateAvailable { runner, tried } => {
+            (runner, RunnerRefusal::NoCandidate { tried })
+        }
+    };
+    Failure::RunnerUnresolved {
+        runner,
+        runner_refusal,
     }
 }
 
@@ -141,6 +156,42 @@ pub enum RunToolsSetupError {
         #[source]
         source: std::io::Error,
     },
+}
+
+impl RunToolsSetupError {
+    /// The failure this error leaves on its node. A listener that did not
+    /// start is an engine step that failed on its own; a capability the
+    /// adapter lacks is the adapter's, and says what the node needs it for.
+    pub(crate) fn failure(&self) -> Failure {
+        match self {
+            RunToolsSetupError::NoRunToolsCapability { node, adapter } => {
+                capability_missing(node, adapter, CapabilityUse::Blackboard)
+            }
+            RunToolsSetupError::TypedArtifactNeedsRunTools {
+                node,
+                adapter,
+                kind,
+            } => capability_missing(node, adapter, CapabilityUse::TypedArtifact { kind: *kind }),
+            RunToolsSetupError::TaskNeedsRunTools { node, adapter } => {
+                capability_missing(node, adapter, CapabilityUse::LoopTasks)
+            }
+            listener => Failure::EngineFailed {
+                engine_error: listener.to_string(),
+            },
+        }
+    }
+}
+
+/// The run tools' capability is missing from `adapter`, for what the node
+/// needs them for.
+fn capability_missing(node: &NodeId, adapter: &AdapterId, used_for: CapabilityUse) -> Failure {
+    Failure::CapabilityMissing {
+        node: node.clone(),
+        capability: yunta_core::Capability::RunTools,
+        adapter: adapter.clone(),
+        used_for: Some(used_for),
+        agent: None,
+    }
 }
 
 /// Whether this node's sessions may mount the run tools, or why they

@@ -239,7 +239,8 @@ fn chose(option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
 /// node's next attempt.
 #[test]
 fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
-    let failure = Failure::message("exit 1");
+    let outcome = "exit 1".to_string();
+    let failure = Failure::Message { outcome };
     let failed = vec![
         (None, created()),
         (
@@ -355,9 +356,10 @@ fn a_scope_failure_offers_a_grant_only_where_a_person_may_widen_it() {
         other => panic!("a failed node is a decision, got {other:?}"),
     };
 
+    let outcome = "exit 1".to_string();
     assert!(offers(grantable("fix", outside(), &policy())));
     assert!(
-        !offers(grantable("fix", Failure::message("exit 1"), &policy())),
+        !offers(grantable("fix", Failure::Message { outcome }, &policy())),
         "a wider scope changes nothing about a failure that is not about scope"
     );
     assert!(

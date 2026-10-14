@@ -992,6 +992,91 @@ async fn a_run_id_that_is_not_an_id_is_refused_by_the_rule_it_breaks() {
     client.cancel().await.ok();
 }
 
+/// A well-formed run id that no run holds. Had a wrong-typed argument been
+/// read as absent, the call would reach the lookup and fail with the run's
+/// absence instead of naming the argument.
+const UNKNOWN_RUN: &str = "01AAAAAAAAAAAAAAAAAAAAAAAA";
+
+/// An optional argument of the wrong type is refused by name. Each tool
+/// answers without reading any run, so the refusal is about the argument.
+#[tokio::test]
+async fn a_wrong_type_on_an_optional_argument_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    for (tool, args, named) in [
+        (
+            "run_workflow",
+            json!({"workflow": "wf", "adapter": 7}),
+            "adapter",
+        ),
+        (
+            "resolve_gate",
+            json!({"run_id": UNKNOWN_RUN, "option": "retry", "by": 7}),
+            "by",
+        ),
+    ] {
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new(tool).with_arguments(args.as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        let text = tool_text(&result);
+        assert!(
+            result.is_error.unwrap_or(false),
+            "`{tool}` refuses the wrong type: {text}"
+        );
+        assert!(
+            text.contains(&format!("`{named}`")),
+            "`{tool}` names the argument: {text}"
+        );
+    }
+
+    client.cancel().await.ok();
+}
+
+/// The `inputs` argument is an object of values; any other type is refused
+/// by name, and no run is created.
+#[tokio::test]
+async fn run_workflow_refuses_inputs_that_are_not_an_object() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+
+    let args = json!({"workflow": "wf", "inputs": 7});
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("run_workflow")
+                .with_arguments(args.as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&result);
+    assert!(
+        result.is_error.unwrap_or(false),
+        "refuses `inputs: 7`: {text}"
+    );
+    assert!(text.contains("`inputs`"), "names the argument: {text}");
+
+    client.cancel().await.ok();
+}
+
 /// A run whose directory a person has pruned cannot be handed to a
 /// detached `yunta resume`: the tool says so with the command that was
 /// never started, so the caller can run it by hand.

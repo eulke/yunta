@@ -138,22 +138,22 @@ fn optional_on_a_node_that_needs_nothing_is_warned() {
     )
     .expect("the workflow parses");
 
-    let warnings = yunta_engine::check_warnings(&workflow, &ConfigLayer::default());
+    let warnings = yunta_engine::check_warnings(&workflow, &ConfigLayer::default(), &|_| None);
 
     assert!(
         warnings.iter().any(|warning| matches!(
             warning,
-            yunta_engine::CheckWarning::OptionalNeedsNothing { node } if node.as_str() == "plain"
+            yunta_core::caution::Caution::OptionalNeedsNothing { node } if node.as_str() == "plain"
         )),
         "{warnings:?}"
     );
     let linted: Workflow = yunta_core::yaml::parse(LINTED).expect("the workflow parses");
     assert!(
-        !yunta_engine::check_warnings(&linted, &ConfigLayer::default())
+        !yunta_engine::check_warnings(&linted, &ConfigLayer::default(), &|_| None)
             .iter()
             .any(|warning| matches!(
                 warning,
-                yunta_engine::CheckWarning::OptionalNeedsNothing { .. }
+                yunta_core::caution::Caution::OptionalNeedsNothing { .. }
             ))
     );
 }

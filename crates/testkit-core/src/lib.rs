@@ -19,10 +19,12 @@ mod ids;
 mod log;
 pub mod persisted;
 pub mod repo;
+mod spell;
 pub mod stubs;
 
 pub use capture::Captured;
 pub use clock::{fixed_now, AtClock, FixedClock, HostClock, RushingClock, FIXED_NOW};
 pub use ids::SeqIdSource;
 pub use log::Log;
+pub use spell::spell;
 pub use yunta_core::events::sample_payloads as all_kinds;

@@ -13,7 +13,9 @@ use yunta_core::{ConfigLayer, Workflow};
 
 use crate::ask::{choose, Choice, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
+use crate::output::say;
 use crate::project;
+use crate::render::Look;
 use crate::surface::Diagnostics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +192,7 @@ pub async fn new_workflow(
     shape: Option<&str>,
     interactive: bool,
     force: bool,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
     validate_name(name).map_err(CliError::msg)?;
 
@@ -249,7 +252,10 @@ pub async fn new_workflow(
             .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
     std::fs::write(&path, &yaml).map_err(|source| CliError::io("write", path.display(), source))?;
-    println!("wrote {} ({})", path.display(), shape.label());
+    say(
+        look,
+        format!("wrote {} ({})", path.display(), shape.label()),
+    );
 
     // The verdict `yunta check` reaches on the file, said under it: a
     // workflow the config cannot run is reported as one, whatever it is
@@ -264,5 +270,5 @@ pub async fn new_workflow(
         super::verdict::Reach::Workflow,
     )
     .await?;
-    verdict.report(&ctx, path.display()).await
+    verdict.report(&ctx, path.display(), look).await
 }

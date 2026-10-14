@@ -52,7 +52,7 @@ pub fn check_workflow_refs(
             .any(|node| matches!(node.kind, yunta_core::NodeKind::Loop { .. }));
     match &config.baseline {
         Some(baseline) if compares.is_empty() && measured_for_nothing => {
-            warnings.push(CheckWarning::BaselineNeverCompared {
+            warnings.push(Caution::BaselineNeverCompared {
                 suite: baseline.suite.clone(),
             });
         }
@@ -79,7 +79,7 @@ pub(crate) struct Walk<'a> {
 /// the warnings only a reader of the composed files can raise.
 pub struct RefsCheck {
     pub errors: Vec<CheckError>,
-    pub warnings: Vec<CheckWarning>,
+    pub warnings: Vec<Caution>,
 }
 
 /// Every node of `workflow` that compares against the baseline, named
@@ -225,11 +225,7 @@ pub(crate) fn walk_workflow_refs(
             errors.push(CheckError::Composition(Composition::Fails {
                 node: node.clone(),
                 name: name.clone(),
-                problems: problems
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; "),
+                problems,
             }));
         }
         path.push(name);
@@ -260,7 +256,7 @@ pub enum Composition {
     /// files. Advisory about the *current* catalog by design: the child
     /// freezes its own file at birth, so a run only ever meets the file
     /// as it is then.
-    #[error("node `{node}`: `use: {name}` cannot be resolved — {detail}")]
+    #[error("composition_missing")]
     Missing {
         node: NodeId,
         name: String,
@@ -270,7 +266,7 @@ pub enum Composition {
     /// Two packs installed under the same publisher each declare a
     /// workflow with the same file basename — the flat
     /// `publisher/workflow` namespace can't tell them apart.
-    #[error("node `{node}`: `use: {name}` is ambiguous — {detail}")]
+    #[error("composition_ambiguous")]
     Ambiguous {
         node: NodeId,
         name: String,
@@ -281,17 +277,14 @@ pub enum Composition {
     /// that lives inside a pack may only `use:` other workflows from
     /// that same pack, never the repo's own catalog or a different
     /// pack (no transitive pack dependencies).
-    #[error(
-        "node `{node}`: `use: {name}` reaches outside pack `{from_pack}` — composition across \
-         packs isn't supported; copy what you need into your own pack instead"
-    )]
+    #[error("composition_cross_pack")]
     CrossPack {
         node: NodeId,
         name: String,
         from_pack: String,
     },
 
-    #[error("workflow `{path}` (referenced through composition) does not parse: {detail}")]
+    #[error("composition_unparseable")]
     Unparseable {
         path: std::path::PathBuf,
         detail: String,
@@ -299,24 +292,20 @@ pub enum Composition {
 
     /// A workflow this one composes that its birth would refuse, found
     /// before the run that would compose it spends anything.
-    #[error("node `{node}`: `use: {name}` fails check — {problems}")]
+    #[error("composition_fails")]
     Fails {
         node: NodeId,
         name: String,
-        problems: String,
+        problems: Vec<CheckError>,
     },
 
     /// The graph of references between workflows must be acyclic.
-    #[error("workflow composition cycle: {chain}")]
+    #[error("composition_cycle")]
     Cycle { chain: String },
 
     /// The configurable maximum nesting depth, checked statically over
     /// the reference graph (the runtime guard at child birth enforces
     /// the same limit over what actually loads).
-    #[error(
-        "workflow composition {chain} nests {} deep but `limits.max_workflow_depth` is \
-         {max} — flatten the composition or raise the limit",
-        yunta_core::text::counted(*depth as usize, "level")
-    )]
+    #[error("composition_too_deep")]
     TooDeep { chain: String, depth: u32, max: u32 },
 }

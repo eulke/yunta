@@ -1,6 +1,8 @@
 //! A document an escalation shows, read from the run for the person
 //! deciding: what the log names, where its view sits, and what it says.
 
+use serde::{Deserialize, Serialize};
+
 use crate::events::artifacts::HandedOver;
 use crate::events::findings::RunFindings;
 use crate::events::{AcceptedDeparture, Shown};
@@ -118,7 +120,7 @@ impl PlanReview {
 /// What keeps a plan from being proven as it is written: a test that
 /// cannot fail for the right reason, or a plan that contradicts the spec
 /// that holds it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Flaw {
     /// A criterion that passes once `file`, which the task changes, holds
     /// a name — whatever the code does.
@@ -222,6 +224,20 @@ impl std::fmt::Display for Flaw {
     }
 }
 
+/// What a plan with a flaw says of itself, ahead of the flaw that shows it.
+pub const UNPROVABLE_PLAN: &str = "the plan cannot be proven as it is written";
+
+/// Why a plan is withheld for the flaws it has: its first flaw, and how
+/// many more follow it. `None` when there are none.
+pub fn withheld_because<'a>(flaws: impl IntoIterator<Item = &'a Flaw>) -> Option<String> {
+    let mut flaws = flaws.into_iter();
+    let first = flaws.next()?;
+    Some(match flaws.count() {
+        0 => format!("{UNPROVABLE_PLAN}: {first}"),
+        more => format!("{UNPROVABLE_PLAN}: {first} (and {more} more)"),
+    })
+}
+
 /// What holds one task, and what of its plan cannot be done.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskReview {
@@ -294,4 +310,45 @@ pub struct DeniedChange {
     pub at: String,
     /// The task whose test the file is.
     pub owner: TaskId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unrun(task: &str, path: &str) -> Flaw {
+        Flaw::UnrunSpecFile {
+            task: TaskId::from(task),
+            path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_plan_with_no_flaw_is_withheld_for_nothing() {
+        assert_eq!(withheld_because(Vec::<&Flaw>::new()), None);
+    }
+
+    #[test]
+    fn a_withheld_plan_names_its_first_flaw_and_how_many_more_follow() {
+        let one = [unrun("t1", "spec/a.rs")];
+        assert_eq!(
+            withheld_because(&one).as_deref(),
+            Some(
+                "the plan cannot be proven as it is written: `spec/a.rs`, which the spec \
+                 wrote for `t1`, is run by none of its tests"
+            )
+        );
+        let three = [
+            unrun("t1", "spec/a.rs"),
+            unrun("t2", "spec/b.rs"),
+            unrun("t3", "spec/c.rs"),
+        ];
+        assert_eq!(
+            withheld_because(&three).as_deref(),
+            Some(
+                "the plan cannot be proven as it is written: `spec/a.rs`, which the spec \
+                 wrote for `t1`, is run by none of its tests (and 2 more)"
+            )
+        );
+    }
 }

@@ -7,7 +7,8 @@
 //! reads are written by the run tools, so no prose about them lives here.
 
 use yunta_core::events::{
-    CriterionResult, FailureCause, SessionExit, Surprise, TaskCause, TokenUsage, Unanswered,
+    CriterionResult, Failure, FailureCause, SessionExit, Surprise, TaskCause, TokenUsage,
+    Unanswered,
 };
 use yunta_core::expansion::Decision;
 use yunta_core::port::AgentError;
@@ -60,7 +61,7 @@ impl CriterionRun {
             Some(why) => format!(
                 "{} ({})",
                 self.exit_code,
-                super::criteria::unanswered_words(why)
+                crate::run_tools::words::unanswered_words(why)
             ),
             None => self.exit_code.to_string(),
         }
@@ -106,7 +107,7 @@ pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise
         .collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DispatchOutcome {
     Completed {
         summary: String,
@@ -132,9 +133,9 @@ pub enum DispatchOutcome {
     /// The engine cut the session via `interrupt` → `kill`:
     /// the token count from `Usage` events or the timeout
     /// demanded it, independent of whether the adapter itself honored
-    /// `SessionRequest.budget`.
+    /// `SessionRequest.budget`. `cause` is the budget the session ran past.
     BudgetExceeded {
-        reason: String,
+        cause: Failure,
     },
 }
 

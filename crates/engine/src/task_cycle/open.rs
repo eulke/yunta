@@ -101,7 +101,7 @@ async fn open_the_session(
         crate::run::session_plan::SessionPlan {
             node: params.node,
             task: Some(access.clone()),
-            prompt: crate::run::session_plan::task_brief(params.instruction, params.task),
+            prompt: crate::run_tools::words::task_brief(params.instruction, params.task),
             cwd: params.unit.worktree.as_path().to_path_buf(),
             profile: params.profile,
             budget: params.budget,

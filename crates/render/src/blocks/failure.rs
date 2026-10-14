@@ -71,11 +71,11 @@ impl FailureDetail<'_> {
             Failure::Unchanged { unchanged } => unchanged_says(unchanged.since, &unchanged.failure),
             Failure::ScopeOwed { .. }
             | Failure::Red { .. }
+            | Failure::GateChose { .. }
             | Failure::ChildFailed {
                 child_failure: Some(_),
                 ..
             } => FailureSays::Text(words::detail(failure)),
-            Failure::TasksStopped { .. } => stopped_says(failure),
             Failure::ScopeViolated { .. }
             | Failure::PathsDenied { .. }
             | Failure::Message { .. }
@@ -90,6 +90,9 @@ impl FailureDetail<'_> {
                 child_failure: None,
                 ..
             } => FailureSays::Nothing,
+            // A failure told in one sentence: a loop's stops and the engine's own
+            // words, whose lines show only when the sentence runs over more than one.
+            _ => sentence_says(failure),
         }
     }
 }
@@ -143,9 +146,9 @@ fn unchanged_says(since: u32, failure: &Failure) -> FailureSays {
     FailureSays::Text(lines)
 }
 
-/// A loop's stopped tasks: the lines of the sentence when it runs over
-/// more than one line, and nothing beyond the row when it does not.
-fn stopped_says(failure: &Failure) -> FailureSays {
+/// A failure told in one sentence: the lines of the sentence when it runs
+/// over more than one line, and nothing beyond the row when it does not.
+fn sentence_says(failure: &Failure) -> FailureSays {
     let said = words::sentence(failure);
     match said.contains('\n') {
         true => FailureSays::Text(lines_of(&said)),
@@ -248,7 +251,7 @@ fn retry_waits(menu: &FailureMenu) -> Option<Vec<Precondition>> {
 }
 
 /// The words of a retry that starts `attempt` and waits for each of `waits`:
-/// what it starts from, and what must change before it can end differently.
+/// what it starts from, and what must change for it to end differently.
 fn retry_words(attempt: u32, waits: &[Precondition]) -> (String, Option<String>) {
     // A tree that already moved needs no waiting, so only the other inputs make
     // the clause. When none is left, the label says the tree changed rather
@@ -287,6 +290,7 @@ fn waits_for(precondition: &Precondition) -> String {
         Precondition::LimitLifted => "the service accepts requests again".to_string(),
         Precondition::ServiceReachable => "the service is reachable".to_string(),
         Precondition::CommandRunnable { cmd } => format!("`{cmd}` can run"),
+        Precondition::CapLifted => "a person lifts the cap on resume".to_string(),
     }
 }
 

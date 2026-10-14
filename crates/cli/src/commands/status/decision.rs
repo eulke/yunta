@@ -28,11 +28,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use yunta_core::events::GateWaitingPayload;
+use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::ShownDocument;
 
 use crate::commands::advice;
-use crate::render::blocks::{Chosen, Decision, DecisionOption, Drawn};
+use crate::error::Reader;
+use crate::render::blocks::{Decision, DecisionOption, Drawn};
 use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, evidence, indent, wrap, Look, Width, INDENT};
 
@@ -128,7 +130,7 @@ pub(crate) fn account(
 ) -> Vec<Line> {
     let mut lines = Vec::new();
     if !beside.claim {
-        lines.extend(under(escalation.summary(), Tone::Plain, depth, look));
+        lines.extend(under(&claim_words(escalation), Tone::Plain, depth, look));
     }
     if !beside.evidence {
         for fact in evidence(escalation) {
@@ -136,6 +138,12 @@ pub(crate) fn account(
         }
     }
     lines
+}
+
+/// The claim of a decision in the words a reader sees: what the escalation
+/// says happened, with the re-route a failed node has used up named in it.
+fn claim_words(escalation: &GateWaitingPayload) -> String {
+    yunta_render::claim::sentence(escalation.summary(), escalation.failure.as_deref())
 }
 
 /// `text` in `tone`, wrapped `depth` steps in.
@@ -152,24 +160,20 @@ fn under(text: &str, tone: Tone, depth: usize, look: &Look) -> Vec<Line> {
 /// Every option of a decision, one step in: what it costs and the
 /// command that chooses it.
 fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Line> {
-    let menu = Decision {
-        chosen: Chosen::Here {
-            handle: run_id.handle().to_string(),
-        },
-        options: escalation
-            .options()
-            .iter()
-            .map(|option| {
-                let (label, tradeoff) = yunta_render::escalation::option_words(escalation, option);
-                DecisionOption {
-                    id: option.id.to_string(),
-                    label: Some(label),
-                    tradeoff,
-                    asks: option.asks.clone(),
-                }
-            })
-            .collect(),
-    };
+    let options = escalation
+        .options()
+        .iter()
+        .map(|option| {
+            let (label, tradeoff) = yunta_render::escalation::option_words(escalation, option);
+            DecisionOption {
+                id: option.id.to_string(),
+                label: Some(label),
+                tradeoff,
+                asks: option.asks.clone(),
+            }
+        })
+        .collect();
+    let menu = Decision::here(run_id, options, &advice::spell);
     let within = Look {
         width: Width::of(Some(look.width.cells().saturating_sub(INDENT.len())), None),
         ..*look
@@ -180,28 +184,28 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
         .collect()
 }
 
-/// The block `yunta status` prints for a run parked on something with no
+/// The lines `yunta status` shows for a run parked on something with no
 /// menu: what it waits on, that nothing here is answerable by choosing
 /// an option, and what moves the run instead, wrapped to `width` cells.
-/// A run waiting on a limit's reset moves on its own, so the block says
-/// that and names no command.
+/// A run waiting on a limit's reset moves on its own, so the lines say
+/// that and name no command.
 pub(crate) fn without_menu(
     run_id: &RunId,
     reason: &str,
     awaits_reset: bool,
     width: usize,
-) -> String {
-    let mut out = "waiting on:\n".to_string();
-    out.push_str(&paragraph(reason, 1, width));
+) -> Vec<Line> {
+    let mut lines = vec![Line::new().plain("waiting on:")];
+    lines.extend(paragraph(reason, 1, width));
     if awaits_reset {
-        out.push_str(&paragraph(
+        lines.extend(paragraph(
             "nothing here needs a choice: the run resumes on its own once the limit resets.",
             1,
             width,
         ));
-        return out;
+        return lines;
     }
-    out.push_str(&paragraph(
+    lines.extend(paragraph(
         "no options to choose here: a menu is reconstructed for a failed node, \
          an exhausted re-route and an unresolved gate node, and this pause is \
          none of them. Resolve it where it was raised — a budget, a scope, an \
@@ -209,30 +213,26 @@ pub(crate) fn without_menu(
         1,
         width,
     ));
-    out.push_str(&format!(
-        "{}{}\n",
-        indent(2),
-        advice::resume(run_id.handle())
-    ));
-    out
+    lines.push(Line::new().plain(format!("{}{}", indent(2), advice::resume(run_id.handle()))));
+    lines
 }
 
 /// `text` as whole lines `depth` steps in, each one inside `width`
 /// cells. Text with no words in it draws nothing.
-fn paragraph(text: &str, depth: usize, width: usize) -> String {
+fn paragraph(text: &str, depth: usize, width: usize) -> Vec<Line> {
     let margin = indent(depth);
     let room = width.saturating_sub(cell_width(&margin));
     wrap(text, room)
         .into_iter()
         .filter(|line| !line.is_empty())
-        .map(|line| format!("{margin}{line}\n"))
+        .map(|line| Line::new().plain(format!("{margin}{line}")))
         .collect()
 }
 
 /// A parked run's decision as the versioned JSON carries it: the node it
 /// belongs to, the escalation's own fields under the names the
-/// `gate_waiting` event writes them with, and the commands that answer
-/// it.
+/// `gate_waiting` event writes them with, the claim as the words a person
+/// reads, and the commands that answer it.
 #[derive(serde::Serialize)]
 pub(crate) struct DecisionJson {
     /// The node `resolve_gate` records the answer against.
@@ -251,13 +251,23 @@ impl DecisionJson {
         // The options carry the words the text menu draws, so a program reads
         // what a person reads, including for an option that stores none.
         let escalation = escalation.worded(yunta_render::escalation::option_words);
+        // The claim is a string here whatever kind of claim the log holds,
+        // so the document says it in the words a person reads.
+        let said = claim_words(&escalation);
+        let escalation = escalation.with_claim(said);
         let commands = escalation
             .options()
             .iter()
             .map(|option| {
                 let id = option.id.to_string();
-                let command = format!("yunta resolve-gate {} {id}", run_id.as_str());
-                (id, command)
+                // The command names the option alone: the option's `asks` says
+                // whether it takes an answer.
+                let step = NextStep::ResolveGate {
+                    run: run_id.clone(),
+                    option: Some(option.id.clone()),
+                    text: false,
+                };
+                (id, advice::spell_for(&step, Reader::Agent))
             })
             .collect();
         DecisionJson {
@@ -271,10 +281,11 @@ impl DecisionJson {
 
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::{Escalation, Fact, GateOption};
+    use yunta_core::events::{Claim, Escalation, Evidence, Fact, GateOption};
     use yunta_core::NonEmpty;
 
     use super::*;
+    use crate::render::doc::{Block, Doc};
 
     fn option(id: &'static str, label: &str, tradeoff: &str) -> GateOption {
         GateOption {
@@ -335,9 +346,16 @@ mod tests {
 
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
         let look = Look::plain();
-        lines((&RUN, &NODE), escalation, &[], beside, &look)
+        let doc = Doc::new().with(Block::Lines(lines(
+            (&RUN, &NODE),
+            escalation,
+            &[],
+            beside,
+            &look,
+        )));
+        crate::render::surface_lines(doc, &look)
             .iter()
-            .map(|line| look.ink.paint(line))
+            .map(Line::text)
             .collect()
     }
 
@@ -416,9 +434,29 @@ mod tests {
     }
 
     #[test]
+    fn the_json_says_an_engine_claim_in_the_words_a_person_reads() {
+        let payload = Escalation::new(
+            Claim::NeedsDecision { node: NODE },
+            Evidence::none(),
+            NonEmpty::from((
+                option("approve", "Approve", "lets the gate go on"),
+                Vec::new(),
+            )),
+        )
+        .expect("an engine claim repeats no fact")
+        .into_payload();
+        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, payload)).unwrap();
+        assert_eq!(json["summary"], "gate `lint` needs a decision");
+    }
+
+    #[test]
     fn a_reset_pause_with_no_menu_says_the_run_resumes_on_its_own() {
         let run = RunId::from_static("run-1");
-        let text = without_menu(&run, "node `build` waits for its limit to reset", true, 80);
+        let lines = without_menu(&run, "node `build` waits for its limit to reset", true, 80);
+        let text: String = lines
+            .iter()
+            .map(|line| format!("{}\n", line.text()))
+            .collect();
         assert!(text.contains("resumes on its own"), "{text}");
         assert!(
             !text.contains("yunta resume"),

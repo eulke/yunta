@@ -17,8 +17,8 @@ mod respecify;
 mod unstopped;
 
 use yunta_core::events::{
-    loop_overrun_failure, EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome,
-    TaskCause, TaskStatus, TaskStop, TokenUsage, UnpassableTask,
+    EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome, TaskCause, TaskStatus,
+    TaskStop, TokenUsage, UnpassableTask,
 };
 use yunta_core::{Node, NodeKind, PromptSource, ScopeExpansionMode, TasksFile};
 
@@ -69,11 +69,14 @@ pub(super) async fn execute_loop(
         let batch = select_batch(&prep.tasks, &view.state, prep.concurrency);
 
         if batch.is_empty() {
-            let all_done = prep
+            let not_done: Vec<_> = prep
                 .tasks
                 .tasks
                 .iter()
-                .all(|task| view.state.tasks.status(&task.id) == Some(TaskStatus::Done));
+                .filter(|task| view.state.tasks.status(&task.id) != Some(TaskStatus::Done))
+                .map(|task| task.id.clone())
+                .collect();
+            let all_done = not_done.is_empty();
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
@@ -134,14 +137,10 @@ pub(super) async fn execute_loop(
             if let Some(failure) = stopped_failure(stopped) {
                 return fail_with(ctx, node, failure, state.tokens).await;
             }
-            return fail_with_tokens(
-                ctx,
-                node,
-                "no task is ready and not all are done — blocked or failed tasks need a decision"
-                    .to_string(),
-                state.tokens,
-            )
-            .await;
+            let failure = Failure::LoopStalled {
+                not_ready: not_done,
+            };
+            return fail_with_tokens(ctx, node, failure, state.tokens).await;
         }
 
         if state.iteration > prep.max_iterations && !state.iterations_lifted {
@@ -157,7 +156,10 @@ pub(super) async fn execute_loop(
             match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { .. } => {
-                    let failure = loop_overrun_failure(&node.id, prep.max_iterations);
+                    let failure = Failure::LoopCapped {
+                        node: node.id.clone(),
+                        loop_cap: prep.max_iterations,
+                    };
                     return fail_with_tokens(ctx, node, failure, state.tokens).await;
                 }
             }
@@ -376,15 +378,10 @@ async fn prepare_loop<'a>(
 
     let view = ctx.run_view().await?;
     let Some(held) = crate::artifacts::latest::<TasksFile>(ctx.run_dir, &view.events).await? else {
-        let end = fail(
-            ctx,
-            node,
-            "this run holds no tasks document — an earlier node declares `produces: [tasks]`, \
-             or the workflow declares a `type: document` input of `kind: tasks` and the run \
-             is given one"
-                .to_string(),
-        )
-        .await?;
+        let failure = Failure::NoTasksDocument {
+            tasks_for: node.id.clone(),
+        };
+        let end = fail(ctx, node, failure).await?;
         return Ok(LoopReady::Ended(end));
     };
     registered_here(&held, &view.state)?;

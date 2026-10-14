@@ -225,7 +225,9 @@ fn a_failure_keeps_one_entry_per_failing_document() {
 
 #[test]
 fn a_failure_stated_in_one_sentence_has_no_document_behind_it() {
-    let failure = Failure::message("the runner exited with status 2");
+    let failure = Failure::Message {
+        outcome: "the runner exited with status 2".into(),
+    };
     assert!(
         matches!(&failure, Failure::Message { outcome } if outcome == "the runner exited with status 2"),
         "{failure:?}"
@@ -239,7 +241,12 @@ fn a_log_written_before_failures_were_data_still_reads() {
     // message, and nothing about the older line has to be rewritten.
     let older: Failure =
         serde_json::from_str(r#"{"outcome":"the runner exited with status 2"}"#).expect("reads");
-    assert_eq!(older, Failure::message("the runner exited with status 2"));
+    assert_eq!(
+        older,
+        Failure::Message {
+            outcome: "the runner exited with status 2".into(),
+        }
+    );
 }
 
 #[test]

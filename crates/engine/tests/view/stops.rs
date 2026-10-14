@@ -129,7 +129,9 @@ fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
     assert_eq!(
         frame(&workflow, &events, 100).phase,
         RunPhase::Failed {
-            failure: Some(Failure::message("criteria still red".to_string())),
+            failure: Some(Failure::Message {
+                outcome: "criteria still red".to_string()
+            }),
         }
     );
 }
@@ -148,7 +150,9 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
                 PromotionCause {
                     node: "build".into(),
                     goto: "fix".into(),
-                    failure: Some(Failure::message("criteria still red")),
+                    failure: Some(Failure::Message {
+                        outcome: "criteria still red".to_string(),
+                    }),
                 },
                 vec![Fact::bare("criteria still red")].into(),
                 "beta".into(),

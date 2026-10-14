@@ -38,11 +38,14 @@ mod case;
 use std::path::{Path, PathBuf};
 
 use crate::error::{CliError, Outcome};
-use crate::render::{Mark, INDENT};
+use crate::output::{document, say};
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::{Line, Tone};
+use crate::render::{Look, Mark, INDENT};
 
 pub(crate) use case::run_case;
 
-pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
+pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> {
     let root = project_root(dir).map_err(CliError::msg)?;
     // One interruption for the whole suite: every case's sandbox shares
     // its two stages, so a Ctrl-C stops the case that is running and
@@ -71,17 +74,19 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
         .map(|path| crate::render::cell_width(&case_name(path)))
         .max()
         .unwrap_or(0);
-    let look = crate::render::stdout_look();
     let mut failures = 0usize;
     for case_path in &case_paths {
-        if !report(&root, case_path, interrupt.shared(), (column, &look)).await {
+        if !report(&root, case_path, interrupt.shared(), (column, look)).await {
             failures += 1;
         }
     }
 
-    println!(
-        "{}, {failures} failed",
-        yunta_core::text::counted(case_paths.len(), "case")
+    say(
+        look,
+        format!(
+            "{}, {failures} failed",
+            yunta_core::text::counted(case_paths.len(), "case")
+        ),
     );
     if failures == 0 {
         Ok(Outcome::Success)
@@ -225,13 +230,17 @@ async fn report(
         ),
     };
     let gap = " ".repeat(column.saturating_sub(crate::render::cell_width(&name)) + 2);
-    println!(
-        "{INDENT}{} {name}{gap}{said}",
-        look.ink.mark(look.glyphs, mark)
-    );
+    let row = Line::new()
+        .plain(INDENT)
+        .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
+        .plain(" ")
+        .plain(name)
+        .plain(gap)
+        .plain(said);
+    document(look, Doc::new().with(Block::Lines(vec![row])));
     let margin = format!("{INDENT}{INDENT}{INDENT}");
     for problem in &problems {
-        println!("{}", yunta_core::text::indent(problem, &margin));
+        say(look, yunta_core::text::indent(problem, &margin));
     }
     problems.is_empty()
 }

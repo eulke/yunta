@@ -11,9 +11,15 @@ use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::output::{blank, document};
+use crate::render::Look;
 use crate::{load_yaml, project};
 
-pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
+pub async fn check(
+    workflow_path: &Path,
+    config_path: Option<&Path>,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     // The one prologue: the directory this command resolves everything
     // against — the catalog reference, the config layers, the
     // composition graph — comes from the same `Context` its history
@@ -49,11 +55,11 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     let opened = super::stats::history(&ctx, &workflow.name).await;
     let (history, _) = super::stats::raw_history(&opened);
     let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-    let outcome = verdict.report(&ctx, workflow_path.display()).await?;
+    let outcome = verdict.report(&ctx, workflow_path.display(), look).await?;
     // Advice after the verdict, which is what was asked for.
     if let Some(advice) = super::stats::verification_findings(&findings) {
-        let look = crate::render::stdout_look();
-        print!("\n{}", crate::render::draw(advice, &look));
+        blank();
+        document(look, advice);
     }
     Ok(outcome)
 }

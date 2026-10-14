@@ -6,8 +6,12 @@ use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
 use common::*;
-use yunta_core::events::{EngineFact, GateEvent, NodeEvent, NodeOutcome, PauseReason, Refusal};
+use yunta_core::events::{
+    EngineFact, Failure, GateEvent, NodeEvent, NodeOutcome, PauseReason, Refusal,
+};
 
+#[path = "run_gates_limits/claims.rs"]
+mod claims;
 #[path = "run_gates_limits/options.rs"]
 mod options;
 
@@ -607,10 +611,18 @@ async fn a_loop_over_its_iteration_cap_fails_with_the_limit_named_when_headless(
         }
         other => panic!("an exhausted iteration cap with no surface must pause, got {other:?}"),
     }
-    assert!(matches!(
-        state.nodes.state("implement"),
-        Some(NodeState::Failed { .. })
-    ));
+    match state.nodes.state("implement") {
+        Some(NodeState::Failed { failure, .. }) => {
+            assert_eq!(
+                failure,
+                &Failure::LoopCapped {
+                    node: yunta_core::NodeId::from("implement"),
+                    loop_cap: 2,
+                }
+            )
+        }
+        other => panic!("the node must fail on its iteration cap, got {other:?}"),
+    }
     // T003 never ran: iteration 3 was refused, so it stays registered
     // but untouched.
     assert_eq!(

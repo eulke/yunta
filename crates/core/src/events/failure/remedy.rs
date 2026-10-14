@@ -10,7 +10,7 @@ use crate::events::{Surprise, TaskCause, TaskStop};
 use crate::reserved::ReservedOption;
 use crate::NonEmpty;
 
-use super::{AccountLimit, Failure, RefusalCause};
+use super::{AccountLimit, Failure, RefusalCause, RunnerRefusal, Unchanged};
 
 /// One option a failure's menu offers, with the input it waits for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -38,6 +38,8 @@ pub enum Precondition {
     ServiceReachable,
     /// The command has to run: it is installed and executable.
     CommandRunnable { cmd: String },
+    /// A person lifts the loop's iteration cap when the run resumes.
+    CapLifted,
 }
 
 /// Why a failure offers no remedy.
@@ -91,43 +93,37 @@ impl Failure {
     /// What can change this failure. Pure over the failure and `facts`, which come from the log.
     pub fn remedies(&self, facts: &Facts) -> Outlook {
         match self {
-            Failure::Unset { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::Unset { .. } | Failure::Template { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::ArtifactName { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::NestedTooDeep { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::GateArtifactMissing { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::CapabilityMissing { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::SkillMissing { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::ChildRefused { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::Confinement { .. } | Failure::FrozenRead { .. } => {
+                Outlook::Stuck(Stuck::FrozenConfig)
+            }
             Failure::FrozenInput { .. } => Outlook::Stuck(Stuck::FrozenInput),
-            Failure::PathsDenied { .. } => Outlook::Stuck(Stuck::ProjectDenies),
+            Failure::PathsDenied { .. } | Failure::CommandDenied { .. } => {
+                Outlook::Stuck(Stuck::ProjectDenies)
+            }
+            Failure::PlanUnpassable { .. } => Outlook::Stuck(Stuck::CriteriaWrong),
+            Failure::GateChose { .. } | Failure::TestsAccepted { .. } => {
+                Outlook::Stuck(Stuck::Final)
+            }
+            Failure::LoopCapped { .. } => retry(Precondition::CapLifted),
             Failure::ScopeOwed { .. } => owed_scope_outlook(facts),
             Failure::SessionRefused { session_refused } => {
                 cause_outlook(&session_refused.cause, facts)
             }
             Failure::Limit { limit } => limit_outlook(limit, facts),
-            Failure::PlanUnpassable { .. } => Outlook::Stuck(Stuck::CriteriaWrong),
-            Failure::Unchanged { unchanged }
-                if matches!(unchanged.failure.as_ref(), Failure::PlanUnpassable { .. }) =>
-            {
-                Outlook::Stuck(Stuck::CriteriaWrong)
-            }
             Failure::TasksStopped { stopped } => stopped_outlook(stopped, facts),
-            Failure::Red { .. } | Failure::Artifacts { .. } | Failure::Unchanged { .. }
-                if !facts.tree_moved =>
-            {
-                Outlook::Stuck(Stuck::TreeUnchanged)
-            }
-            Failure::Red { .. } | Failure::Artifacts { .. } => retry(Precondition::TreeChanged),
-            Failure::Unchanged { unchanged } => unchanged.failure.remedies(facts),
-            Failure::ScopeViolated { .. } | Failure::ScopeRequested { .. } if facts.may_grant => {
-                Outlook::Choose(vec![Remedy {
-                    option: ReservedOption::Grant,
-                    precondition: None,
-                }])
-            }
-            Failure::ScopeViolated { .. } | Failure::ScopeRequested { .. } => {
-                Outlook::Stuck(Stuck::NoGrant)
-            }
-            Failure::Exited { .. } => retry(if facts.tree_moved {
-                Precondition::TreeChanged
-            } else {
-                Precondition::OutsideTreeChanged
-            }),
-            Failure::SessionNotStopped { .. } => retry(Precondition::OutsideTreeChanged),
+            Failure::Red { .. } | Failure::Artifacts { .. } => tree_outlook(facts),
+            Failure::Unchanged { unchanged } => unchanged_outlook(unchanged, facts),
+            Failure::ScopeViolated { .. } => scope_outlook(facts),
+            Failure::ScopeRequested { .. } => scope_outlook(facts),
+            Failure::Exited { .. } => retry(exited_precondition(facts)),
+            Failure::RunnerUnresolved { runner_refusal, .. } => runner_outlook(runner_refusal),
             Failure::ChildFailed {
                 child_failure: Some(child),
                 ..
@@ -135,9 +131,16 @@ impl Failure {
             Failure::ChildFailed {
                 child_failure: None,
                 ..
-            }
-            | Failure::SessionDied { .. }
-            | Failure::Message { .. } => retry(Precondition::OutsideTreeChanged),
+            } => outside(),
+            Failure::SessionNotStopped { .. } | Failure::TimedOut { .. } => outside(),
+            Failure::TokenBudget { .. } | Failure::ArtifactUnreadable { .. } => outside(),
+            Failure::MountUnreachable { .. } | Failure::EngineFailed { .. } => outside(),
+            Failure::SessionDied { .. } | Failure::Message { .. } => outside(),
+            Failure::ChildrenFailed { .. } | Failure::Uncertain { .. } => outside(),
+            Failure::Rejected { .. } | Failure::SentBack { .. } => outside(),
+            Failure::FindingsOpen { .. } | Failure::Interrupted { .. } => outside(),
+            Failure::ChangesRequested { .. } | Failure::PullRequestClosed { .. } => outside(),
+            Failure::LoopStalled { .. } | Failure::NoTasksDocument { .. } => outside(),
         }
     }
 }
@@ -147,11 +150,69 @@ fn retry(precondition: Precondition) -> Outlook {
     Outlook::Choose(vec![retry_remedy(precondition)])
 }
 
+/// The outlook of a retry that waits for something outside the run's tree to change.
+fn outside() -> Outlook {
+    retry(Precondition::OutsideTreeChanged)
+}
+
+/// What a runner that did not resolve leaves open: a runner no config defines
+/// is frozen with the config, and one whose candidates are all unavailable
+/// waits for the outside.
+fn runner_outlook(refusal: &RunnerRefusal) -> Outlook {
+    match refusal {
+        RunnerRefusal::Unknown => Outlook::Stuck(Stuck::FrozenConfig),
+        RunnerRefusal::NoCandidate { .. } => outside(),
+    }
+}
+
 /// The one remedy a retry waiting for `precondition` is.
 fn retry_remedy(precondition: Precondition) -> Remedy {
     Remedy {
         option: ReservedOption::Retry,
         precondition: Some(precondition),
+    }
+}
+
+/// What a failure that judges the run's tree leaves open: a retry once the
+/// tree moved, and a stop on the tree as it stands until it does.
+fn tree_outlook(facts: &Facts) -> Outlook {
+    if facts.tree_moved {
+        retry(Precondition::TreeChanged)
+    } else {
+        Outlook::Stuck(Stuck::TreeUnchanged)
+    }
+}
+
+/// What an attempt refused as unchanged leaves open. An unpassable plan is
+/// the answer whatever the tree did; otherwise the tree decides, and then the
+/// attempt that ran decides.
+fn unchanged_outlook(unchanged: &Unchanged, facts: &Facts) -> Outlook {
+    match unchanged.failure.as_ref() {
+        Failure::PlanUnpassable { .. } => Outlook::Stuck(Stuck::CriteriaWrong),
+        _ if !facts.tree_moved => Outlook::Stuck(Stuck::TreeUnchanged),
+        failure => failure.remedies(facts),
+    }
+}
+
+/// What a request for scope leaves open: a grant when the run may give one.
+fn scope_outlook(facts: &Facts) -> Outlook {
+    if facts.may_grant {
+        Outlook::Choose(vec![Remedy {
+            option: ReservedOption::Grant,
+            precondition: None,
+        }])
+    } else {
+        Outlook::Stuck(Stuck::NoGrant)
+    }
+}
+
+/// What a failed command's retry waits for: the tree, when it moved since
+/// the failure, and something outside it otherwise.
+fn exited_precondition(facts: &Facts) -> Precondition {
+    if facts.tree_moved {
+        Precondition::TreeChanged
+    } else {
+        Precondition::OutsideTreeChanged
     }
 }
 
@@ -225,7 +286,7 @@ fn stopped_outlook(stopped: &[TaskStop], facts: &Facts) -> Outlook {
         (false, _) => Outlook::Choose(remedies),
         (true, Some(reason)) => Outlook::Stuck(reason),
         // No stop explains the loop, so it reads as a failure with no named cause.
-        (true, None) => retry(Precondition::OutsideTreeChanged),
+        (true, None) => outside(),
     }
 }
 
@@ -243,11 +304,11 @@ fn stop_outlook(cause: &TaskCause, facts: &Facts) -> Outlook {
                 cmd: run.cmd.clone(),
             }),
             // A stop that names no run names no command to fix, so the outside decides.
-            None => retry(Precondition::OutsideTreeChanged),
+            None => outside(),
         },
         TaskCause::SessionRefused(refusal) => cause_outlook(&refusal.cause, facts),
         TaskCause::SessionLimited(limit) => limit_outlook(limit, facts),
-        TaskCause::SessionDied(_) => retry(Precondition::OutsideTreeChanged),
+        TaskCause::SessionDied(_) => outside(),
         TaskCause::Unmet { .. } if facts.tree_moved => retry(Precondition::TreeChanged),
         TaskCause::Unmet { .. } => Outlook::Stuck(Stuck::TreeUnchanged),
         // The work the task carried over conflicts with the tree as it stands, and only a

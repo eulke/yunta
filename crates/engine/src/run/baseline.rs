@@ -248,7 +248,7 @@ async fn measure_held(
         super::check_exec::CommandRun::Done(output) => output,
         super::check_exec::CommandRun::Cancelled => return Ok(()),
     };
-    let took = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let took = yunta_core::units::whole_millis(started.elapsed());
     let passed = output.exit_code == 0;
     if let Some(tree) = measured_on.as_ref().filter(|_| passed) {
         ctx.memo.passed_on(&command, tree);
@@ -290,7 +290,7 @@ async fn measure_suite(
         super::check_exec::CommandRun::Done(output) => output,
         super::check_exec::CommandRun::Cancelled => return Ok(()),
     };
-    let took = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let took = yunta_core::units::whole_millis(started.elapsed());
     // Every task is held to the suite as a guard, and the first of them
     // starts from the tree just measured: a green measurement is its
     // answer there, so the suite is not run twice on one tree.

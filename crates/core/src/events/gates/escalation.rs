@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::payloads::{DepartureMenu, FailureMenu, GateOption, GateWaitingPayload, Shown};
 use crate::events::{Evidence, Fact};
-use crate::ids::OptionId;
+use crate::ids::{NodeId, OptionId};
 use crate::NonEmpty;
 
 /// Why an answer does not count as a decision on an escalation.
@@ -34,6 +34,120 @@ pub enum EscalationError {
     SummaryRepeatsEvidence { fact: Fact },
 }
 
+/// What an escalation says happened: a claim the engine states about a node,
+/// or a summary whoever escalated wrote.
+///
+/// On the log an engine claim is an object tagged by `claim`, and a plain
+/// string reads back as a summary the escalating party wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(from = "ClaimWire", into = "ClaimWire")]
+#[schemars(with = "ClaimWire")]
+pub enum Claim {
+    /// A gate's question, which a person decides.
+    NeedsDecision { node: NodeId },
+    /// A node that failed, whose menu of answers a person chooses from.
+    NodeFailed { node: NodeId },
+    /// A gate whose pull request waits for an external review, and the
+    /// assignee the gate names, when it names one.
+    AwaitsReview {
+        node: NodeId,
+        assignee: Option<String>,
+    },
+    /// An external gate whose pull request cannot be published, because no
+    /// forge is reachable from this machine, and the assignee the gate names.
+    ForgeUnreachable { node: NodeId, assignee: String },
+    /// A published external gate whose review cannot be checked again, because
+    /// no forge is reachable from this machine, and the reference its
+    /// publication left on the log.
+    RecheckUnreachable { node: NodeId, external_ref: String },
+    /// A summary the escalating party wrote.
+    Written(String),
+}
+
+/// The persisted form of a [`Claim`]: a summary as its plain text, or an
+/// engine claim as an object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum ClaimWire {
+    Written(String),
+    Stated(StatedClaim),
+}
+
+/// An engine claim as the log holds it, tagged by `claim`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "claim", rename_all = "snake_case")]
+enum StatedClaim {
+    NeedsDecision {
+        node: NodeId,
+    },
+    NodeFailed {
+        node: NodeId,
+    },
+    AwaitsReview {
+        node: NodeId,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        assignee: Option<String>,
+    },
+    ForgeUnreachable {
+        node: NodeId,
+        assignee: String,
+    },
+    RecheckUnreachable {
+        node: NodeId,
+        external_ref: String,
+    },
+}
+
+impl From<Claim> for ClaimWire {
+    fn from(claim: Claim) -> Self {
+        match claim {
+            Claim::NeedsDecision { node } => ClaimWire::Stated(StatedClaim::NeedsDecision { node }),
+            Claim::NodeFailed { node } => ClaimWire::Stated(StatedClaim::NodeFailed { node }),
+            Claim::AwaitsReview { node, assignee } => {
+                ClaimWire::Stated(StatedClaim::AwaitsReview { node, assignee })
+            }
+            Claim::ForgeUnreachable { node, assignee } => {
+                ClaimWire::Stated(StatedClaim::ForgeUnreachable { node, assignee })
+            }
+            Claim::RecheckUnreachable { node, external_ref } => {
+                ClaimWire::Stated(StatedClaim::RecheckUnreachable { node, external_ref })
+            }
+            Claim::Written(text) => ClaimWire::Written(text),
+        }
+    }
+}
+
+impl From<ClaimWire> for Claim {
+    fn from(wire: ClaimWire) -> Self {
+        match wire {
+            ClaimWire::Written(text) => Claim::Written(text),
+            ClaimWire::Stated(StatedClaim::NeedsDecision { node }) => Claim::NeedsDecision { node },
+            ClaimWire::Stated(StatedClaim::NodeFailed { node }) => Claim::NodeFailed { node },
+            ClaimWire::Stated(StatedClaim::AwaitsReview { node, assignee }) => {
+                Claim::AwaitsReview { node, assignee }
+            }
+            ClaimWire::Stated(StatedClaim::ForgeUnreachable { node, assignee }) => {
+                Claim::ForgeUnreachable { node, assignee }
+            }
+            ClaimWire::Stated(StatedClaim::RecheckUnreachable { node, external_ref }) => {
+                Claim::RecheckUnreachable { node, external_ref }
+            }
+        }
+    }
+}
+
+impl From<String> for Claim {
+    fn from(text: String) -> Self {
+        Claim::Written(text)
+    }
+}
+
+impl From<&str> for Claim {
+    fn from(text: &str) -> Self {
+        Claim::Written(text.to_string())
+    }
+}
+
 /// An escalation on its way to a person: the claim, the record it is
 /// audited against, and the menu of answers.
 ///
@@ -47,16 +161,14 @@ pub enum EscalationError {
 pub struct Escalation(pub(super) GateWaitingPayload);
 
 impl Escalation {
-    /// One escalation, refused if its claim repeats its own record.
+    /// One escalation, refused if its written summary repeats its record.
     pub fn new(
-        summary: impl Into<String>,
+        summary: impl Into<Claim>,
         evidence: Evidence,
         options: NonEmpty<GateOption>,
     ) -> Result<Self, EscalationError> {
         let summary = summary.into();
-        if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
-            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() });
-        }
+        refuse_repeat(&summary, &evidence)?;
         Ok(Escalation(GateWaitingPayload {
             summary,
             evidence,
@@ -79,14 +191,12 @@ impl Escalation {
     /// recorded on the forge. `offers` refusing every option is the
     /// truth about this gate, not the bug it would be on a local one.
     pub fn published_to(
-        summary: impl Into<String>,
+        summary: impl Into<Claim>,
         evidence: Evidence,
         external_ref: impl Into<String>,
     ) -> Result<Self, EscalationError> {
         let summary = summary.into();
-        if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
-            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() });
-        }
+        refuse_repeat(&summary, &evidence)?;
         Ok(Escalation(GateWaitingPayload {
             summary,
             evidence,
@@ -135,6 +245,18 @@ impl From<GateWaitingPayload> for Escalation {
 impl From<Escalation> for GateWaitingPayload {
     fn from(escalation: Escalation) -> Self {
         escalation.0
+    }
+}
+
+/// Refuses a written summary that repeats a fact the record holds. An engine
+/// claim names its node and states no fact in words, so it repeats none.
+fn refuse_repeat(summary: &Claim, evidence: &Evidence) -> Result<(), EscalationError> {
+    let Claim::Written(text) = summary else {
+        return Ok(());
+    };
+    match evidence.facts().iter().find(|fact| repeats(text, fact)) {
+        Some(fact) => Err(EscalationError::SummaryRepeatsEvidence { fact: fact.clone() }),
+        None => Ok(()),
     }
 }
 

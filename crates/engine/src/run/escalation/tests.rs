@@ -20,7 +20,9 @@ fn retry(precondition: Precondition) -> Remedy {
 fn escalation_offering(remedies: Vec<Remedy>) -> GateWaitingPayload {
     build_failure_escalation(
         &NodeId::from("lint"),
-        &Failure::message("the linter failed"),
+        &Failure::Message {
+            outcome: "the linter failed".to_string(),
+        },
         2,
         &Outlook::Choose(remedies),
     )

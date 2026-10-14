@@ -221,7 +221,9 @@ mod tests {
         let cause = PromotionCause {
             node: NodeId::from("lint"),
             goto: NodeId::from("fix-lint"),
-            failure: Some(yunta_core::events::Failure::message("exit 1")),
+            failure: Some(yunta_core::events::Failure::Message {
+                outcome: "exit 1".to_string(),
+            }),
         };
         assert_eq!(
             promotion_reason(Some(&cause), None, &Evidence::none()),

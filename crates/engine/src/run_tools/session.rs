@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use super::catalog::RunTool;
 pub(crate) use super::error::RunToolError;
+use super::words;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
 };
@@ -211,7 +212,7 @@ impl ServerHandler for SessionTools {
         // not a tool that ran and failed.
         let Some(tool) = RunTool::parse(request.name.as_ref()) else {
             return Err(McpError::invalid_params(
-                format!("unknown tool `{}`", request.name),
+                words::unknown_tool(&request.name),
                 None,
             ));
         };
@@ -242,11 +243,11 @@ impl ServerHandler for SessionTools {
             // A call the run stopped is not a refusal: the protocol reports it
             // as unanswered, and the log keeps no refusal for it.
             Err(stopped @ RunToolError::Cancelled) => {
-                return Err(McpError::internal_error(stopped.to_string(), None))
+                return Err(McpError::internal_error(words::tool_error(&stopped), None))
             }
             Err(error) => {
                 self.refused(tool, &error).await;
-                CallToolResult::error(vec![ContentBlock::text(yunta_core::describe(&error))]).into()
+                CallToolResult::error(vec![ContentBlock::text(words::tool_error(&error))]).into()
             }
         })
     }

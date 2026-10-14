@@ -7,7 +7,7 @@
 //! it is read: see [`close_frozen`].
 
 use yunta_core::agent::AgentDefinition;
-use yunta_core::events::{Failure, TokenUsage};
+use yunta_core::events::{Failure, FrozenRead, TokenUsage};
 use yunta_core::Node;
 
 use super::node_exec::NodeEnd;
@@ -57,29 +57,43 @@ pub(super) async fn agent(
 ///   naming the input.
 /// - `Unresolved` comes from a checkout read, which a run without a frozen
 ///   set makes, and from a frozen agent whose bytes do not read as a
-///   definition.
+///   definition. `Escapes` comes only from the freeze at birth, which no node
+///   read reaches, and `Prompt` from a prompt file a node reads. All three
+///   close the node as `FrozenRead`, which says what the read could not give.
 /// - `UnreadableKey` comes from a frozen set that holds a knowledge key no
 ///   layer reads: an entry this binary cannot place, not a changed input.
-/// - `Escapes` comes only from the freeze at birth, which no node read
-///   reaches.
-/// - `Io` comes from either.
-///
-/// Every refusal other than `Missing` and `Mismatch` keeps the sentence it
-/// carries.
+/// - `Io` comes from either. Both are steps of the engine that failed on their
+///   own, and close the node as `EngineFailed` with the error's own sentence.
 pub(super) async fn close_frozen(
     ctx: &crate::run::RunCtx<'_>,
     node: &Node,
     error: FrozenError,
 ) -> Result<NodeEnd, crate::run::RunError> {
-    let failure = match &error {
+    let failure = match error {
         FrozenError::Mismatch { input } | FrozenError::Missing { input } => Failure::FrozenInput {
-            frozen_input: input.clone(),
+            frozen_input: input,
         },
-        FrozenError::Unresolved(_)
-        | FrozenError::UnreadableKey { .. }
-        | FrozenError::Escapes { .. }
-        | FrozenError::Prompt { .. }
-        | FrozenError::Io { .. } => Failure::message(error.to_string()),
+        FrozenError::Unresolved(problem) => Failure::FrozenRead {
+            frozen_read: FrozenRead::Unresolved { problem },
+        },
+        FrozenError::Escapes { pack, path } => Failure::FrozenRead {
+            frozen_read: FrozenRead::Escapes { pack, path },
+        },
+        FrozenError::Prompt {
+            node: prompt_node,
+            path,
+            ..
+        } => Failure::FrozenRead {
+            frozen_read: FrozenRead::Prompt {
+                node: prompt_node,
+                path,
+            },
+        },
+        other @ (FrozenError::UnreadableKey { .. } | FrozenError::Io { .. }) => {
+            Failure::EngineFailed {
+                engine_error: other.to_string(),
+            }
+        }
     };
     super::node_close::fail_with(ctx, node, failure, TokenUsage::default()).await
 }

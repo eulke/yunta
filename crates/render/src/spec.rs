@@ -2,15 +2,24 @@
 //! plan: task by task, what each test proves and the command that runs
 //! it, then the file it lives in.
 
+use yunta_core::step::NextStep;
 use yunta_core::text::counted;
-use yunta_core::SpecFile;
+use yunta_core::{NodeId, RunId, SpecFile};
 
 use crate::blocks::{Code, Fields, Section};
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
 use crate::plan::{Form, CODE_SHOWN};
 
-pub fn document(file: &SpecFile, of: &str, run: &str, form: Form) -> Doc<'static> {
+/// The tests of `file`, for the run `run`; each command a reader copies
+/// is written by `spell`.
+pub fn document(
+    file: &SpecFile,
+    of: &str,
+    run: &RunId,
+    form: Form,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Doc<'static> {
     let tests: usize = file.specs.iter().map(|spec| spec.tests.len()).sum();
     let mut doc = Doc::new().with(Block::Title(
         Line::new()
@@ -34,13 +43,9 @@ pub fn document(file: &SpecFile, of: &str, run: &str, form: Form) -> Doc<'static
             let content = &test_file.content;
             blocks.push(
                 match form {
-                    Form::Review => Code::reviewed(
-                        path,
-                        None,
-                        content,
-                        CODE_SHOWN,
-                        format!("yunta status {run} --node spec"),
-                    ),
+                    Form::Review => {
+                        Code::reviewed(path, None, content, CODE_SHOWN, status_command(run, spell))
+                    }
                     Form::Whole => Code::whole(path, None, content),
                 }
                 .into(),
@@ -53,4 +58,13 @@ pub fn document(file: &SpecFile, of: &str, run: &str, form: Form) -> Doc<'static
         });
     }
     doc
+}
+
+/// The command that shows the spec's text, whole, for the run `run`: the
+/// status of the node that holds it, which `spell` writes.
+pub(crate) fn status_command(run: &RunId, spell: &dyn Fn(&NextStep) -> String) -> String {
+    spell(&NextStep::Status {
+        run: run.clone(),
+        node: Some(NodeId::from_static("spec")),
+    })
 }

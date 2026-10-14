@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
 use yunta_core::events::{
     BaselineCapturedPayload, BaselineOrigin, BaselineResults, CapabilityDegradedPayload,
     CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Evidence, Failure, Finding,
@@ -5,7 +8,12 @@ use yunta_core::events::{
     NodeReroutedPayload, Phase, PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunEvent,
     SessionEvent, StoredEvent,
 };
-use yunta_core::events::{FindingEvent, TokenUsage};
+use yunta_core::events::{Claim, Escalation, GateEvent, GateOption};
+use yunta_core::events::{FindingEvent, RailFailedPayload, RailSummaryPayload, TokenUsage};
+use yunta_core::rail::hook::RailFailureCause;
+use yunta_core::rail::timing::Histogram;
+use yunta_core::rail::RailEvent;
+use yunta_core::NonEmpty;
 use yunta_engine::chronicle as derive_chronicle;
 
 use super::*;
@@ -34,7 +42,9 @@ fn said_for(payload: EventPayload) -> String {
 fn rerouted(cause: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
         "fix-lint".into(),
-        Failure::message(cause),
+        Failure::Message {
+            outcome: cause.into(),
+        },
         RerouteOrigin::GateChoice,
         None,
         None,
@@ -168,6 +178,26 @@ fn a_promotion_names_the_node_whose_reroutes_ran_out() {
         said_for(EventPayload::Run(RunEvent::PromotionSignaled(promoted))),
         "run — promotion to `ship`: node `lint` exhausted its re-routes to `fix-lint`"
     );
+}
+
+/// The claim of a failed node reads as that node failing, in the words the
+/// claim sentence gives.
+#[test]
+fn an_escalation_whose_claim_is_a_failed_node_reads_as_that_node_failed() {
+    let retry = GateOption {
+        id: "retry".into(),
+        label: None,
+        tradeoff: None,
+        asks: None,
+    };
+    let escalation = Escalation::new(
+        Claim::NodeFailed { node: "x".into() },
+        Evidence::none(),
+        NonEmpty::from((retry, Vec::new())),
+    )
+    .expect("a claim about a failed node repeats no evidence");
+    let waiting = EventPayload::Gates(GateEvent::Waiting(escalation.into_payload()));
+    assert_eq!(said_for(waiting), "run — node `x` failed");
 }
 
 fn baseline(exit_code: i32) -> EventPayload {
@@ -315,7 +345,9 @@ fn what_a_watched_terminal_keeps_is_what_closed_or_asked() {
 
     let failed = EventPayload::Node(NodeEvent::Failed(
         yunta_core::events::NodeFailedPayload::new(
-            Failure::message("exit 1"),
+            Failure::Message {
+                outcome: "exit 1".into(),
+            },
             TokenUsage::default(),
         ),
     ));
@@ -355,5 +387,93 @@ fn a_formatter_stopped_at_its_bound_reads_as_stopped_not_as_a_failed_exit() {
     assert_eq!(
         said_for(EventPayload::Session(SessionEvent::WriteFormatted(stopped))),
         "run — `fmt` was stopped while formatting what it wrote"
+    );
+}
+
+/// A failed call of the rail is a moment a person can act on: a watched
+/// terminal keeps it above its region, saying the moment it was for and
+/// the cause the log closed it under.
+#[test]
+fn a_rail_failure_is_kept_and_says_its_moment_and_cause() {
+    let failed = EventPayload::Session(SessionEvent::RailFailed(RailFailedPayload {
+        session_id: Some("s1".into()),
+        event: Some(RailEvent::BeforeWrite),
+        cause: RailFailureCause::Timeout,
+    }));
+    assert_eq!(
+        said_for(failed.clone()),
+        "run — rail failed before a write: no answer within its window"
+    );
+    assert!(
+        kept_from_event(failed),
+        "a failed rail call closed something"
+    );
+
+    let unread = EventPayload::Session(SessionEvent::RailFailed(RailFailedPayload {
+        session_id: None,
+        event: None,
+        cause: RailFailureCause::Decode,
+    }));
+    assert_eq!(
+        said_for(unread),
+        "run — rail failed: a call the engine could not read"
+    );
+}
+
+/// What the rail heard of a session is a record, not a failure: a watched
+/// terminal says how many calls it answered and the model it heard, and
+/// keeps none of it above its region.
+#[test]
+fn a_rail_summary_is_not_kept_and_says_its_calls_and_model() {
+    let observed = |calls: u32| {
+        let mut histogram = Histogram::default();
+        for _ in 0..calls {
+            histogram.observe(Duration::from_millis(3));
+        }
+        histogram
+    };
+    let summary = EventPayload::Session(SessionEvent::RailSummary(RailSummaryPayload {
+        session_id: "s1".into(),
+        model: Some("claude-haiku-4-5".into()),
+        moments: BTreeMap::from([
+            (RailEvent::BeforeWrite, observed(4)),
+            (RailEvent::AfterWrite, observed(3)),
+        ]),
+    }));
+    assert_eq!(
+        said_for(summary.clone()),
+        "run — the rail answered 7 calls, model claude-haiku-4-5"
+    );
+    assert!(
+        !kept_from_event(summary),
+        "a summary of the rail is the run working"
+    );
+}
+
+/// A formatter the bound stopped is the project's to fix, so a watched
+/// terminal keeps it; one that finished is the run working.
+#[test]
+fn a_stopped_formatter_is_kept_and_a_finished_one_is_not() {
+    let formatted = |timed_out: bool| {
+        EventPayload::Session(SessionEvent::WriteFormatted(
+            yunta_core::events::WriteFormattedPayload {
+                session_id: "s1".into(),
+                run: "fmt".into(),
+                paths: vec!["a.rs".into()],
+                changed: Vec::new(),
+                exit_code: if timed_out { -2 } else { 0 },
+                duration_ms: 5_000,
+                output: None,
+                timed_out,
+            },
+        ))
+    };
+    assert!(
+        kept_from_event(formatted(true)),
+        "a stopped formatter is kept"
+    );
+    assert!(
+        !kept_from_event(formatted(false)),
+        "a finished formatter is not kept"
     );
 }

@@ -22,6 +22,8 @@
 
 pub mod bars;
 pub mod blocks;
+pub mod caution;
+pub mod claim;
 pub mod color;
 pub mod diagram;
 pub mod doc;
@@ -32,12 +34,15 @@ mod findings;
 mod fold;
 pub mod glyphs;
 pub mod ink;
+pub mod inputs;
+mod latency;
 pub mod line_width;
 pub mod look;
 pub mod markdown;
 pub mod outcome;
 pub mod paths;
 pub mod pause;
+pub mod place;
 mod plan;
 pub mod policy;
 pub mod prose;
@@ -55,6 +60,7 @@ pub mod width;
 pub use bars::{bar, bar_cells, sparkline};
 pub use escalation::{evidence, label};
 pub use glyphs::Glyphs;
+pub use latency::latency;
 pub use line_width::Width;
 pub use look::Look;
 pub use state::{Mark, NodeDisplay, RunWord, StateWord, STATE_WIDTH};
@@ -66,8 +72,12 @@ pub use yunta_core::units::{duration, Ratio, Tokens};
 
 #[cfg(test)]
 mod tests {
+    mod cautions;
+    mod claims;
     mod deciding;
     mod documents;
     mod failure;
+    mod failure_families;
+    mod inputs;
     mod retry;
 }

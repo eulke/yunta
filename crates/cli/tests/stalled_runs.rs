@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 use yunta_testkit::{
-    full_run_id, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout,
+    full_run_id, handle, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout,
 };
 
 /// A node that says it started and then holds until it is told to go,
@@ -73,7 +73,7 @@ fn a_run_whose_engine_was_killed_is_listed_and_shown_as_stalled() {
         "the page says nothing drives the run:\n{page}"
     );
     assert!(
-        page.contains(&format!("yunta resume {run_id}")),
+        page.contains(&format!("yunta resume {}", handle(&run_id))),
         "the page names the command that hands the run back:\n{page}"
     );
 
@@ -88,7 +88,7 @@ fn a_run_whose_engine_was_killed_is_listed_and_shown_as_stalled() {
     let list = yunta_at!(&checkout, &["list", "--runs"]);
     let inbox = stdout(&list);
     assert!(
-        inbox.lines().any(|line| line == "stalled (1)") && inbox.contains(&run_id),
+        inbox.lines().any(|line| line == "stalled (1)") && inbox.contains(handle(&run_id)),
         "the inbox files the run under stalled:\n{inbox}"
     );
 }

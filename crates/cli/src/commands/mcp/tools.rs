@@ -22,6 +22,19 @@ fn required_str<'a>(
         .ok_or_else(|| CliError::msg(format!("missing or non-string argument `{name}`")))
 }
 
+/// An optional string argument: absent or `null` is `None`, and a value of
+/// another type is refused by name rather than read as if it were not sent.
+fn optional_str<'a>(
+    args: &'a serde_json::Map<String, Value>,
+    name: &str,
+) -> Result<Option<&'a str>, CliError> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text)),
+        Some(_) => Err(CliError::msg(format!("non-string argument `{name}`"))),
+    }
+}
+
 /// The `run_id` argument as the id it has to be, so a call naming
 /// something that is not one is answered before any disk is read.
 fn required_run_id(args: &serde_json::Map<String, Value>) -> Result<RunId, CliError> {
@@ -81,23 +94,23 @@ pub(super) async fn tool_run_workflow(
 ) -> Result<String, CliError> {
     let name = required_str(args, "workflow")?;
     let mut inputs: Vec<String> = Vec::new();
-    if let Some(object) = args.get("inputs").and_then(Value::as_object) {
-        for (key, value) in object {
-            let rendered = match value {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            inputs.push(format!("{key}={rendered}"));
+    match args.get("inputs") {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(object)) => {
+            for (key, value) in object {
+                let rendered = match value {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                inputs.push(format!("{key}={rendered}"));
+            }
         }
+        Some(_) => return Err(CliError::msg("non-object argument `inputs`")),
     }
-    let adapter = args
-        .get("adapter")
-        .and_then(Value::as_str)
+    let adapter = optional_str(args, "adapter")?
         .map(str::parse::<AdapterId>)
         .transpose()?;
-    let mode = args
-        .get("mode")
-        .and_then(Value::as_str)
+    let mode = optional_str(args, "mode")?
         .map(str::parse::<ModeName>)
         .transpose()?;
 
@@ -122,7 +135,7 @@ pub(super) async fn tool_run_workflow(
     // that starts runs is the one deciding whether the run is worth
     // starting, and stderr never reaches it.
     Ok(std::iter::once(format!("run_id: {}", started.run_id))
-        .chain(started.warnings.lines().map(str::to_string))
+        .chain(started.warnings.lines())
         .collect::<Vec<_>>()
         .join("\n"))
 }
@@ -152,12 +165,10 @@ pub(super) async fn tool_resolve_gate(
 ) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
     let option = required_str(args, "option")?.parse::<yunta_core::OptionId>()?;
-    let by = args
-        .get("by")
-        .and_then(Value::as_str)
+    let by = optional_str(args, "by")?
         .map(str::parse::<yunta_core::Responder>)
         .transpose()?;
-    let text = args.get("text").and_then(Value::as_str).map(str::to_string);
+    let text = optional_str(args, "text")?.map(str::to_string);
 
     // The command's own path, called rather than copied: a client that
     // answers a gate records exactly what a person answering it records,
@@ -174,9 +185,7 @@ pub(super) async fn tool_answer_questions(
 ) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
     let node = required_str(args, "node")?.parse::<yunta_core::NodeId>()?;
-    let by = args
-        .get("by")
-        .and_then(Value::as_str)
+    let by = optional_str(args, "by")?
         .map(str::parse::<yunta_core::Responder>)
         .transpose()?;
     let answers = answers_from(args)?;

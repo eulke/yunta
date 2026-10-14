@@ -474,12 +474,12 @@ nodes:
             reason:
                 PauseReason::NodeFailed {
                     node,
-                    failure: Failure::Message { outcome },
+                    failure: Failure::Template { template, .. },
                 },
         } => {
             assert_eq!(node.as_str(), "only");
             assert_eq!(
-                outcome,
+                template.to_string(),
                 "template references `{{inputs.idea}}`, which is not defined here"
             );
         }

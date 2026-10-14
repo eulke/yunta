@@ -35,10 +35,11 @@ pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
-    loop_overrun_failure, AccountLimit, CommandExit, CommandOrigin, Facts, Failure, FailureCause,
-    LimitSource, Outlook, OwedScope, Precondition, RedCheck, RefusalCause, Remedy, RequestedScope,
-    SessionDeath, SessionEnd, SessionExit, SessionRefusal, Stuck, Unanswered, UnpassableTask,
-    PAST_THE_CAP, STOPPED_EXIT_CODE, TAIL_LINES,
+    AccountLimit, CapabilityUse, ChildRefusal, CommandExit, CommandOrigin, Facts, Failure,
+    FailureCause, FrozenRead, Interruption, LimitSource, MountError, NameProblem, ObjectProblem,
+    Outlook, OwedScope, Precondition, RedCheck, RefusalCause, Remedy, RequestedScope,
+    RunnerRefusal, SessionDeath, SessionEnd, SessionExit, SessionRefusal, Stuck, Timed, Unanswered,
+    Unchanged, UnpassableTask, STOPPED_EXIT_CODE, TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
 pub use gates::{escalation::*, ledger::*, payloads::*, scope_wait::*, GateEvent, Withheld};

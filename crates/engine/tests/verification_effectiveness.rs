@@ -3,13 +3,16 @@
 //! uses for its own pure derivation.
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Failure,
-    GateResolvedPayload, NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
+    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, GateResolvedPayload,
+    NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
 };
 use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_core::{Node, NodeKind, OnFailure, Workflow};
 use yunta_engine::{analyze_verification_effectiveness as analyze, VERIFICATION_MIN_SAMPLES};
 use yunta_testkit_core::Log;
+
+mod common;
+use common::lint_failure;
 
 fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
     Node {
@@ -192,7 +195,7 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
                 .node(
                     "lint",
                     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                        Failure::message("lint failed".to_string()),
+                        lint_failure(),
                         Default::default(),
                     ))),
                 )
@@ -219,7 +222,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                 .node(
                     "lint",
                     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                        Failure::message("lint failed".to_string()),
+                        lint_failure(),
                         Default::default(),
                     ))),
                 )
@@ -232,7 +235,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
             .node(
                 "lint",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                    Failure::message("lint failed".to_string()),
+                    lint_failure(),
                     Default::default(),
                 ))),
             )
@@ -240,7 +243,7 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
                 "lint",
                 EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
                     "fix".into(),
-                    yunta_core::events::Failure::message("lint failed"),
+                    lint_failure(),
                     yunta_core::events::RerouteOrigin::OnFailure,
                     Some(1),
                     Some(2),

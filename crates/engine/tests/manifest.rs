@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use yunta_core::{ConfigLayer, Workflow};
-use yunta_engine::{build_manifest, ManifestError};
+use yunta_engine::{build_manifest, InputsError, ManifestError};
 use yunta_testkit::{git_output, init_repo, Owner};
 
 fn workflow(yaml: &str) -> Workflow {
@@ -427,8 +427,13 @@ async fn a_required_input_with_no_value_refuses_before_any_worktree_work() {
     .await
     .unwrap_err();
 
-    assert!(matches!(err, ManifestError::Inputs(_)));
-    assert!(err.to_string().contains("idea"), "got: {err}");
+    assert!(
+        matches!(
+            &err,
+            ManifestError::Inputs(InputsError::Missing { name }) if name == "idea"
+        ),
+        "got: {err:?}"
+    );
 }
 
 #[tokio::test]

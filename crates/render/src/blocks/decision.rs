@@ -2,9 +2,12 @@
 //! command that chooses it. The words a departure from the plan is put to
 //! a person with, its answers included, are written here too.
 
+use std::collections::BTreeMap;
+
 use yunta_core::events::{DepartureMenu, Fact};
 use yunta_core::reserved::ReservedOption;
-use yunta_core::text;
+use yunta_core::step::NextStep;
+use yunta_core::{text, RunId};
 
 use super::Drawn;
 use crate::ink::{Line, Tone};
@@ -42,26 +45,46 @@ pub struct Decision {
 
 /// Where a decision's options are chosen.
 pub enum Chosen {
-    /// At a terminal, by the command each option names, for the run
-    /// called `handle`.
-    Here { handle: String },
+    /// At a terminal, by the command each option names: the command for
+    /// each option's id, written when the decision was made for its run.
+    Here { commands: BTreeMap<String, String> },
     /// On the forge holding the pull request: each option's label says
     /// what to do there, and no command chooses it.
     OnTheForge,
 }
 
 impl Decision {
+    /// A decision a terminal chooses for `run`: each option names the command
+    /// that chooses it, which `spell` writes.
+    pub fn here(
+        run: &RunId,
+        options: Vec<DecisionOption>,
+        spell: &dyn Fn(&NextStep) -> String,
+    ) -> Self {
+        let commands = options
+            .iter()
+            .map(|option| {
+                let step = NextStep::ResolveGate {
+                    run: run.clone(),
+                    option: option.id.parse().ok(),
+                    text: option.asks.is_some(),
+                };
+                (option.id.clone(), spell(&step))
+            })
+            .collect();
+        Decision {
+            chosen: Chosen::Here { commands },
+            options,
+        }
+    }
+
     /// The command that chooses `option`, with the words it asks for
     /// left for the reader to write — when a command chooses it.
     pub fn command(&self, option: &DecisionOption) -> Option<String> {
-        let Chosen::Here { handle } = &self.chosen else {
+        let Chosen::Here { commands } = &self.chosen else {
             return None;
         };
-        let text = match option.asks {
-            Some(_) => " --text \"<answer>\"",
-            None => "",
-        };
-        Some(format!("yunta resolve-gate {handle} {}{text}", option.id))
+        commands.get(&option.id).cloned()
     }
 }
 

@@ -48,7 +48,8 @@ impl RunCtx<'_> {
             .accepts(&choice)
             .map_err(|refused| RunError::RefusedAnswer {
                 refused,
-                summary: escalation.summary().to_string(),
+                summary: Box::new(escalation.summary().clone()),
+                failure: escalation.failure.clone(),
             })?;
         Ok(Some(choice))
     }

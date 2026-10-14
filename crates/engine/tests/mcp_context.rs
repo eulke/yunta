@@ -160,7 +160,10 @@ async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
         RunTerminal::Paused {
             reason:
                 PauseReason::NodeFailed {
-                    failure: Failure::Message { outcome },
+                    failure:
+                        Failure::EngineFailed {
+                            engine_error: outcome,
+                        },
                     ..
                 },
         } => {
@@ -190,7 +193,10 @@ async fn a_missing_auth_env_var_fails_the_node_before_any_connection_attempt() {
         RunTerminal::Paused {
             reason:
                 PauseReason::NodeFailed {
-                    failure: Failure::Message { outcome },
+                    failure:
+                        Failure::EngineFailed {
+                            engine_error: outcome,
+                        },
                     ..
                 },
         } => {

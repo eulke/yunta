@@ -110,7 +110,7 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
             Some(Mark::Reroute),
             detailed(
                 format!("rerouted to `{}`", it.to),
-                &one_line(&yunta_render::failure::sentence(&it.cause)),
+                &one_line(&yunta_render::failure::cause(&it.cause)),
             ),
         ),
         H::HookRan { phase, exit_code } => {
@@ -216,8 +216,10 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         }
         H::CutOff { message } => service_words(Some(message), None),
         H::Reconnected { waited } => service_words(None, Some(*waited)),
-        H::RailFailed { cause, .. } => format!("rail failed: {}", cause.as_str()),
-        H::RailSummary { .. } => "rail summary recorded".to_string(),
+        H::RailFailed { event, cause } => super::rail_words::rail_failed(*event, *cause),
+        H::RailSummary { model, moments } => {
+            super::rail_words::rail_summary(model.as_ref(), moments)
+        }
     }
 }
 
@@ -403,7 +405,10 @@ fn artifact_words(happening: &artifacts::happening::Happening) -> String {
 fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String) {
     use gates::happening::Happening as H;
     match happening {
-        H::Escalated(payload) => (Some(Mark::NeedsYou), payload.summary().to_string()),
+        H::Escalated(payload) => (
+            Some(Mark::NeedsYou),
+            yunta_render::claim::sentence(payload.summary(), payload.failure.as_deref()),
+        ),
         H::Resolved(payload) => (Some(Mark::Done), resolution(payload)),
         // The node's own label, so the chronicle and `status` say a
         // node that asked with the same bytes by construction.

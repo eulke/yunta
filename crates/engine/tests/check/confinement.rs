@@ -3,7 +3,6 @@
 //! so no session's network or sandbox refuses it.
 
 use super::*;
-use yunta_engine::check_token_cap_warnings;
 
 /// A read-only session is confined with its network closed, so a node that
 /// asks for the network is refused before a run.
@@ -147,13 +146,13 @@ fn a_prompt_under_the_token_cap_warns_when_its_adapter_cannot_check_it_mid_sessi
     )
     .unwrap();
 
-    let warned = check_token_cap_warnings(&wf, &capped, &|_| facts(Default::default()));
+    let warned = warnings_against(&wf, &capped, &|_| facts(Default::default()));
     assert!(
-        matches!(warned.as_slice(), [CheckWarning::TokenCapAtSessionEnd { node }] if node.as_str() == "audit"),
+        matches!(warned.as_slice(), [Caution::TokenCapAtSessionEnd { node }] if node.as_str() == "audit"),
         "a candidate with no mid-session cap warns for the prompt under the cap: {warned:?}"
     );
 
-    let checked = check_token_cap_warnings(&wf, &capped, &|_| {
+    let checked = warnings_against(&wf, &capped, &|_| {
         facts(only(yunta_core::Capability::MidSessionTokenCap))
     });
     assert!(

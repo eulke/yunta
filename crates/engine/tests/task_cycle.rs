@@ -10,8 +10,8 @@
 
 use yunta_adapters::MockAdapter;
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, EventPayload, NodeEvent, Phase, RefusalCause,
-    TaskLedger, Unanswered,
+    CriteriaCheckedPayload, CriterionResult, EventPayload, Failure, NodeEvent, Phase, RefusalCause,
+    TaskLedger, Timed, Unanswered,
 };
 use yunta_core::port::{Budget, PermissionProfile};
 use yunta_core::Task;
@@ -838,8 +838,8 @@ async fn a_hung_session_is_cut_by_its_timeout() {
     .unwrap();
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => {
-            assert_eq!(reason, "exceeded timeout of 1s")
+        DispatchOutcome::BudgetExceeded { cause } => {
+            assert_eq!(cause, &session_timeout(1000))
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
@@ -895,8 +895,14 @@ outcome: { type: completed, summary: "should never be reached" }
     .unwrap();
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => {
-            assert_eq!(reason, "exceeded max_tokens 100 (150 used)")
+        DispatchOutcome::BudgetExceeded { cause } => {
+            assert_eq!(
+                cause,
+                &Failure::TokenBudget {
+                    used: 150,
+                    max: 100
+                }
+            )
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
@@ -1518,4 +1524,12 @@ async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_
         "",
         "the checkout is back as the unit began"
     );
+}
+
+/// The failure a session ends with when it runs past its own timeout.
+fn session_timeout(after_ms: u64) -> Failure {
+    Failure::TimedOut {
+        after_ms,
+        timed: Timed::Session,
+    }
 }

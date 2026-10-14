@@ -314,7 +314,9 @@ mod tests {
         let mut ledger = GateLedger::default();
         let menu = FailureMenu {
             attempt: 1,
-            failure: Failure::message("criteria still red"),
+            failure: Failure::Message {
+                outcome: "criteria still red".into(),
+            },
             remedies: Vec::new(),
             stuck: None,
             reroute: None,

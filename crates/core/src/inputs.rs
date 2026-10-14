@@ -6,8 +6,12 @@
 //! schema itself makes `min`/`max` on a `boolean` input unrepresentable,
 //! rather than accepting it and rejecting it later in `check`.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
+
+use crate::diagnostic::Report;
+use crate::ids::InputName;
+use crate::workflow::ArtifactKind;
 
 /// One entry of `inputs:`. An input is required exactly when it has no
 /// `default` — a default is the only way to make one optional. The
@@ -340,5 +344,107 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
                 }
             }
         })
+    }
+}
+
+/// Why the inputs a run was handed do not resolve to the inputs its
+/// workflow declares. Each variant carries the data that explains it, and
+/// the display is a code: a surface writes the words from these fields.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InputsProblem {
+    /// Every input name the workflow does not declare, sorted, so one run
+    /// of the command reports them all.
+    #[error("unknown")]
+    Unknown {
+        names: Vec<InputName>,
+        declared: Vec<InputName>,
+    },
+    /// An input with no default that the run was not handed.
+    #[error("missing")]
+    Missing { name: InputName },
+    #[error("invalid_number")]
+    InvalidNumber { name: InputName, value: String },
+    #[error("invalid_boolean")]
+    InvalidBoolean { name: InputName, value: String },
+    #[error("below_min")]
+    BelowMin {
+        name: InputName,
+        value: f64,
+        min: f64,
+    },
+    #[error("above_max")]
+    AboveMax {
+        name: InputName,
+        value: f64,
+        max: f64,
+    },
+    #[error("too_short")]
+    TooShort {
+        name: InputName,
+        min_length: u32,
+        actual: usize,
+    },
+    #[error("pattern_mismatch")]
+    PatternMismatch {
+        name: InputName,
+        pattern: String,
+        value: String,
+    },
+    #[error("not_in_enum")]
+    NotInEnum {
+        name: InputName,
+        value: String,
+        values: Vec<String>,
+    },
+    /// An input naming a path that does not exist.
+    #[error("path_not_found")]
+    PathNotFound { name: InputName, path: String },
+    /// A `document` input whose path is there and whose bytes are not: a
+    /// directory, or a file the filesystem refuses.
+    #[error("document_unreadable")]
+    DocumentUnreadable {
+        name: InputName,
+        path: String,
+        /// The label the document's kind names itself with.
+        #[serde(deserialize_with = "kind_label")]
+        label: String,
+        detail: String,
+    },
+    /// A `document` input whose content is not what its kind declares.
+    ///
+    /// Carries the report rather than a sentence about it: every problem
+    /// the document has reaches the person who has to fix the file, in
+    /// the document's own vocabulary, and one correction answers them
+    /// all.
+    #[error("document_refused")]
+    DocumentRefused { name: InputName, report: Report },
+    /// Reachable only if a bad `pattern:` slipped past `check` (which
+    /// validates every pattern compiles) — resolution reports it as
+    /// a typed error rather than panicking on a regex it never saw.
+    #[error("invalid_pattern")]
+    InvalidPattern {
+        name: InputName,
+        pattern: String,
+        detail: String,
+    },
+}
+
+/// Reads a document kind's label back, refusing a label no kind names, so a
+/// read cannot produce a problem the engine would never have written.
+fn kind_label<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    if ArtifactKind::ALL
+        .into_iter()
+        .any(|kind| kind.label() == text)
+    {
+        Ok(text)
+    } else {
+        Err(<D::Error as serde::de::Error>::custom(format!(
+            "`{text}` names no document kind"
+        )))
     }
 }

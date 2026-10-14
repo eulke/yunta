@@ -18,16 +18,17 @@
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::ArtifactId;
-use yunta_core::events::{Failure, StoredEvent};
-use yunta_core::{ArtifactRefId, MountSpec, NodeKind, RunId};
+use yunta_core::events::{Failure, MountError, StoredEvent};
+use yunta_core::{MountArtifact, MountSpec, NodeKind, RunId};
 
 use super::runs_root;
+use crate::artifacts::StoreError;
 use crate::replay::RunState;
 use crate::run::promote::birth_artifact;
 use crate::run::{read_manifest, BirthArtifact, RunCtx};
 
 /// Why the parent's node fails instead of giving birth to the child, in
-/// the two shapes a node failure has.
+/// the shapes a node failure has.
 #[derive(Debug)]
 pub(super) enum NotMounted {
     /// The source run holds nothing under the identity the mount names.
@@ -35,9 +36,12 @@ pub(super) enum NotMounted {
     /// so a receipt counts it and `status` attributes it by artifact
     /// like any other.
     Undelivered(ArtifactFailure),
-    /// The engine cannot reach the source at all. No artifact entry
-    /// describes that, so it is the one sentence the engine states.
+    /// The engine cannot reach what the source run holds under the mount:
+    /// the typed reason it cannot.
     Unreachable(MountError),
+    /// The source run's store failed to read the bytes it names, an engine
+    /// step that failed on its own; `engine_error` is the sentence it states.
+    Engine(String),
 }
 
 impl From<MountError> for NotMounted {
@@ -47,57 +51,17 @@ impl From<MountError> for NotMounted {
 }
 
 impl From<NotMounted> for Failure {
-    /// The single border where either shape becomes what the log
-    /// records: an artifact entry, or a sentence.
+    /// The single border where each shape becomes what the log records: an
+    /// artifact entry, or the typed cause the mount found.
     fn from(problem: NotMounted) -> Self {
         match problem {
             NotMounted::Undelivered(failure) => Failure::artifacts(vec![failure]),
-            NotMounted::Unreachable(error) => Failure::message(error.to_string()),
+            NotMounted::Unreachable(error) => Failure::MountUnreachable {
+                error: Box::new(error),
+            },
+            NotMounted::Engine(engine_error) => Failure::EngineFailed { engine_error },
         }
     }
-}
-
-/// A source a mount names and the engine cannot reach.
-#[derive(Debug, thiserror::Error)]
-pub(super) enum MountError {
-    #[error(
-        "mount of the {artifact} from node `{node}`: no linked child run of `{node}` reached a \
-         terminal state in this run — did this run's mode exclude it?"
-    )]
-    NoTerminalChild {
-        artifact: ArtifactRefId,
-        node: yunta_core::NodeId,
-    },
-    #[error("mount of the {artifact} from node `{node}`: run `{run}` cannot hand over its bytes")]
-    Unreadable {
-        artifact: ArtifactRefId,
-        node: yunta_core::NodeId,
-        run: RunId,
-        #[source]
-        source: crate::artifacts::ObjectError,
-    },
-    #[error(
-        "mount of the {artifact} from node `{node}`: the frozen truth of run `{run}` cannot be \
-         read: {detail}"
-    )]
-    Unfrozen {
-        artifact: ArtifactRefId,
-        node: yunta_core::NodeId,
-        run: RunId,
-        detail: String,
-    },
-    /// Boxed: a storage failure carries far more than any other mount
-    /// problem, and every caller moves this error by value.
-    #[error(
-        "mount of the {artifact} from node `{node}`: the log of run `{run}` cannot be reached"
-    )]
-    Unlogged {
-        artifact: ArtifactRefId,
-        node: yunta_core::NodeId,
-        run: RunId,
-        #[source]
-        source: Box<yunta_storage::StorageError>,
-    },
 }
 
 /// Resolves every declared mount to bytes, in memory, *before*
@@ -121,6 +85,23 @@ pub(super) async fn resolve_mounts(
         resolved.push(resolve_one(ctx, state, events, mount).await?);
     }
     Ok(resolved)
+}
+
+/// The mount's account of bytes its source run cannot hand over: the object
+/// holds other bytes than the run accepted, or the store failed to read it.
+fn unreadable(source: StoreError, m: &MountArtifact, source_run: &RunId) -> NotMounted {
+    match source {
+        StoreError::Object(problem) => NotMounted::Unreachable(MountError::Unreadable {
+            artifact: m.id.clone(),
+            node: m.node.clone(),
+            run: source_run.clone(),
+            source: problem,
+        }),
+        StoreError::Io { .. } => NotMounted::Engine(format!(
+            "mount of the {} from node `{}`: run `{}` cannot hand over its bytes",
+            m.id, m.node, source_run
+        )),
+    }
 }
 
 /// One mount, resolved to the bytes the child is born holding.
@@ -170,6 +151,8 @@ async fn resolve_one(
                 run: source_run.clone(),
                 detail: yunta_core::describe(&source),
             })?;
+        // The mount names the log and that it cannot be read; the storage
+        // failure behind that is kept as its text, for the one who reads why.
         let child_events = ctx
             .storage
             .events_for_run(source_run.clone())
@@ -178,7 +161,7 @@ async fn resolve_one(
                 artifact: m.id.clone(),
                 node: m.node.clone(),
                 run: source_run.clone(),
-                source: Box::new(source),
+                source: source.to_string(),
             })?;
         (child_events, None)
     };
@@ -200,12 +183,7 @@ async fn resolve_one(
     let bytes = held
         .bytes(&found)
         .await
-        .map_err(|source| MountError::Unreadable {
-            artifact: m.id.clone(),
-            node: m.node.clone(),
-            run: source_run.clone(),
-            source,
-        })?;
+        .map_err(|source| unreadable(source, m, &source_run))?;
     // `as:` gives an opaque artifact another name in the child, and a
     // name is what identifies an opaque artifact — so the child holds
     // the renamed one. A document the engine reads has no name to

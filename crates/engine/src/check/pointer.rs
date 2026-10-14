@@ -80,8 +80,8 @@ impl CheckError {
             | CheckError::AnswersDeclaredAsProduced { node: id }
             | CheckError::QuestionsOnKind { node: id, .. } => produces(id),
             CheckError::InputDocumentAlsoProduced { input, .. } => inputs(input),
-            CheckError::ReservedArtifactName { site, .. }
-            | CheckError::AnswersFromNodeThatNeverAsks { site, .. } => site.pointer().clone(),
+            CheckError::ReservedArtifactName { place, .. }
+            | CheckError::AnswersFromNodeThatNeverAsks { place, .. } => place.pointer(),
             CheckError::YuntaSchemaOutside { .. } => Pointer::root().key("yunta_schema"),
             CheckError::InputEmptyEnumValues { name } => inputs(name).key("values"),
             CheckError::InputMinExceedsMax { name, .. } => inputs(name).key("min"),
@@ -128,25 +128,10 @@ impl Unanswerable {
     pub fn pointer(&self) -> Pointer {
         match self {
             Unanswerable::LoopWithoutTasks { node: id, .. } => node(id),
-            Unanswerable::ArtifactNotDeclared { site, .. }
-            | Unanswerable::ArtifactFromNowhere { site, .. }
-            | Unanswerable::SourceLeftOut { site, .. } => site.pointer().clone(),
+            Unanswerable::ArtifactNotDeclared { place, .. }
+            | Unanswerable::ArtifactFromNowhere { place, .. }
+            | Unanswerable::SourceLeftOut { place, .. } => place.pointer(),
             Unanswerable::NodeOutputOfNonBash { node: id, .. } => node(id).key("context"),
         }
     }
-}
-
-/// ` — did you mean `name`?` when a refusal holds a near miss.
-pub(super) fn near(near: Option<&String>) -> String {
-    near.map(|near| format!(" — did you mean `{near}`?"))
-        .unwrap_or_default()
-}
-
-/// `a -> b -> a`: a cycle as a sentence names it.
-pub(super) fn arrows(cycle: &[NodeId]) -> String {
-    cycle
-        .iter()
-        .map(NodeId::as_str)
-        .collect::<Vec<_>>()
-        .join(" -> ")
 }

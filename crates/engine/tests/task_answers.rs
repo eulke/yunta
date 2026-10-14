@@ -36,7 +36,9 @@ fn started(attempt: u32) -> EventPayload {
 
 fn failed() -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::message("criteria still red"),
+        Failure::Message {
+            outcome: "criteria still red".to_string(),
+        },
         TokenUsage::default(),
     )))
 }
@@ -45,7 +47,9 @@ fn failed() -> EventPayload {
 fn failure_menu() -> EventPayload {
     let menu = FailureMenu {
         attempt: 1,
-        failure: Failure::message("criteria still red"),
+        failure: Failure::Message {
+            outcome: "criteria still red".to_string(),
+        },
         remedies: Vec::new(),
         stuck: None,
         reroute: None,

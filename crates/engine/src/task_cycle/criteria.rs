@@ -25,16 +25,6 @@ pub fn could_not_run(exit_code: i32) -> Option<Unanswered> {
     Unanswered::of(exit_code)
 }
 
-/// The words an agent reads for a criterion that never answered: what
-/// happened to its command, in the terms a person fixing it would use.
-pub(crate) fn unanswered_words(why: Unanswered) -> &'static str {
-    match why {
-        Unanswered::NotFound => "command not found",
-        Unanswered::NotExecutable => "command not executable",
-        Unanswered::Stopped => "stopped before it answered",
-    }
-}
-
 /// Runs one criterion command, measuring its wall-clock cost —
 /// an observed fact about an external process, same standing as its
 /// exit code, and recorded like one: the order a later check runs its
@@ -61,7 +51,7 @@ async fn run_criterion(
         })?;
     let output = CommandOutput::of(&outcome);
     let exit_code = outcome.exit_code();
-    let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let duration_ms = yunta_core::units::whole_millis(started.elapsed());
     Ok((exit_code, duration_ms, output))
 }
 

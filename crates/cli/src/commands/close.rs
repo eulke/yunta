@@ -10,13 +10,20 @@ use yunta_engine::EngineLiveness;
 use super::cancel::settle_crash;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::json::SCHEMA_VERSION;
+use crate::output::{emit, Answer, Mode};
 use crate::render::blocks::Headline;
-use crate::render::doc::Doc;
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::Line;
 use crate::render::state::RunWord;
-use crate::render::{wrap, INDENT};
+use crate::render::{wrap, Look, INDENT};
 
-pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, CliError> {
-    let called = run_id.handle();
+pub async fn close(
+    run_id: &RunId,
+    by: Option<&Responder>,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
     let open = ctx.open_run(run_id).await?;
@@ -38,22 +45,47 @@ pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, Cl
     .await
     .map_err(|refusal| CliError::close_refused(run_id, refusal))?;
     give_back(&ctx, &open, run_id).await;
-    let word = RunWord::Cancelled;
-    let headline = Headline {
-        subject: format!("run {called}"),
-        mark: word.mark(),
-        said: word.to_string(),
+    let answer = CloseAnswer {
+        schema_version: SCHEMA_VERSION,
+        run_id: run_id.clone(),
+        word: RunWord::Cancelled,
+        by,
     };
-    let look = crate::render::stdout_look();
-    print!("{}", crate::render::draw(Doc::new().with(headline), &look));
-    let detail = format!(
-        "closed by {by} — its checkouts went back to the project, and its branch stays until \
-         `yunta gc` removes it"
-    );
-    for line in wrap(&detail, look.width.cells().saturating_sub(INDENT.len())) {
-        println!("{INDENT}{line}");
+    emit(output, &answer, look)
+}
+
+/// The close of a run as a document carries it: the word the run
+/// stands in, and who closed it.
+#[derive(serde::Serialize)]
+pub(crate) struct CloseAnswer {
+    schema_version: u32,
+    run_id: RunId,
+    word: RunWord,
+    by: Responder,
+}
+
+impl Answer for CloseAnswer {
+    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+        let headline = Headline {
+            subject: format!("run {}", self.run_id.handle()),
+            mark: self.word.mark(),
+            said: self.word.to_string(),
+        };
+        let detail = format!(
+            "closed by {} — its checkouts went back to the project, and its branch stays until \
+             `yunta gc` removes it",
+            self.by
+        );
+        let lines: Vec<Line> = wrap(&detail, look.width.cells().saturating_sub(INDENT.len()))
+            .into_iter()
+            .map(|line| Line::new().plain(INDENT).plain(line))
+            .collect();
+        Doc::new().with(headline).with(Block::Lines(lines))
     }
-    Ok(Outcome::Success)
+
+    fn outcome(&self) -> Outcome {
+        Outcome::Success
+    }
 }
 
 /// The liveness `close` judges the run by. A dead engine whose registry

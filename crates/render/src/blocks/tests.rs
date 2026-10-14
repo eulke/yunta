@@ -2,11 +2,14 @@ use std::path::{Path, PathBuf};
 
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 
+use yunta_core::RunId;
+
 use super::*;
 use crate::doc::Doc;
 use crate::ink::strip_sgr;
 use crate::surface::{Markdown, Surface, Terminal};
 use crate::Mark;
+use yunta_testkit_core::spell;
 
 fn plain(block: &dyn Drawn) -> Vec<String> {
     let look = Look::plain();
@@ -37,25 +40,21 @@ fn evidence(lines: usize) -> Evidence {
 }
 
 fn decision() -> Decision {
-    Decision {
-        chosen: Chosen::Here {
-            handle: "7E5PH4".to_string(),
+    let options = vec![
+        DecisionOption {
+            id: "retry".to_string(),
+            label: Some("runs `fix-lint` once more".to_string()),
+            tradeoff: Some("one more correction attempt beyond `max_reroutes`".to_string()),
+            asks: None,
         },
-        options: vec![
-            DecisionOption {
-                id: "retry".to_string(),
-                label: Some("runs `fix-lint` once more".to_string()),
-                tradeoff: Some("one more correction attempt beyond `max_reroutes`".to_string()),
-                asks: None,
-            },
-            DecisionOption {
-                id: "adjust".to_string(),
-                label: None,
-                tradeoff: Some("the run goes on with what you say".to_string()),
-                asks: Some("what to change".to_string()),
-            },
-        ],
-    }
+        DecisionOption {
+            id: "adjust".to_string(),
+            label: None,
+            tradeoff: Some("the run goes on with what you say".to_string()),
+            asks: Some("what to change".to_string()),
+        },
+    ];
+    Decision::here(&RunId::from_static("7E5PH4"), options, &*spell())
 }
 
 #[test]

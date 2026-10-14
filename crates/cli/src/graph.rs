@@ -95,7 +95,7 @@ pub async fn graph(
         GraphFormat::Mermaid => render_mermaid(&workflow, labels.as_ref()),
         GraphFormat::Dot => render_dot(&workflow, labels.as_ref()),
     };
-    print!("{rendered}");
+    crate::output::raw(&rendered);
     Ok(outcome)
 }
 

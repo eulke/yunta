@@ -11,8 +11,8 @@ use futures::stream::BoxStream;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventPayload, FailureCause, RefusalCause, RunToolFailedPayload, RunToolFailureCause,
-    SessionEvent, TokenUsage,
+    EventPayload, Failure, FailureCause, RefusalCause, RunToolFailedPayload, RunToolFailureCause,
+    SessionEvent, Timed, TokenUsage,
 };
 use yunta_core::port::{Adapter, AgentEvent, AgentOutcome, AgentSession, Budget};
 use yunta_storage::StorageError;
@@ -209,10 +209,10 @@ async fn next_event(
 /// the timeout it ran past.
 fn timed_out(timeout: Duration) -> DispatchOutcome {
     DispatchOutcome::BudgetExceeded {
-        reason: format!(
-            "exceeded timeout of {}",
-            yunta_core::units::duration(timeout)
-        ),
+        cause: Failure::TimedOut {
+            after_ms: yunta_core::units::whole_millis(timeout),
+            timed: Timed::Session,
+        },
     }
 }
 
@@ -418,9 +418,9 @@ fn completed(ctx: &AgentEventCtx<'_>, summary: String) -> DispatchOutcome {
 /// total is above it. Nothing while the total is within the cap or no cap is
 /// set. Both places the cap is read give this one reason.
 fn over_cap(max_tokens: Option<u64>, used: u64) -> Option<DispatchOutcome> {
-    let max_tokens = max_tokens.filter(|max| used > *max)?;
+    let max = max_tokens.filter(|max| used > *max)?;
     Some(DispatchOutcome::BudgetExceeded {
-        reason: format!("exceeded max_tokens {max_tokens} ({used} used)"),
+        cause: Failure::TokenBudget { used, max },
     })
 }
 

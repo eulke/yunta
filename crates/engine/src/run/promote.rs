@@ -22,7 +22,7 @@ use yunta_core::events::{ArtifactId, StoredEvent};
 use yunta_core::{IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
-use crate::artifacts::ObjectError;
+use crate::artifacts::HeldError;
 
 use super::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRunParams, RunError};
 
@@ -183,13 +183,14 @@ async fn read_inherited_artifacts(
     from_run_dir: &Path,
     from_run: &RunId,
     from_events: &[StoredEvent],
-) -> Result<Vec<BirthArtifact>, ObjectError> {
+) -> Result<Vec<BirthArtifact>, HeldError> {
     let held = crate::artifacts::RunArtifacts::of(from_run_dir, from_events);
     let mut inherited = Vec::new();
     for artifact in held.ledger().every() {
+        let bytes = held.bytes(artifact).await.map_err(HeldError::from)?;
         inherited.push(birth_artifact(
             artifact.artifact.clone(),
-            held.bytes(artifact).await?,
+            bytes,
             from_run,
             artifact,
         ));

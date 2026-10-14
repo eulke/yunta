@@ -17,8 +17,11 @@
 //! is ever one that run's own menu does not offer.
 
 use yunta_core::events::{GateWaitingPayload, Stuck};
+use yunta_core::step::NextStep;
+use yunta_core::RunId;
 use yunta_engine::{NodeWait, RunPhase, WaitingOn};
 
+use crate::error::Reader;
 use crate::render::state::RunWord;
 
 /// What holds a run whose log says it is moving and whose engine is gone.
@@ -215,6 +218,52 @@ pub(crate) fn after_reset(run: &str) -> Vec<(String, &'static str)> {
     ]
 }
 
+/// What a person or an agent types next, in the words of the command that
+/// accepts it. `reader` decides how the run is named: a person reads its
+/// handle, and an agent copies its whole id.
+pub(crate) fn spell_for(step: &NextStep, reader: Reader) -> String {
+    match step {
+        NextStep::Status { run, node: None } => status(named(run, reader)),
+        NextStep::Status {
+            run,
+            node: Some(node),
+        } => status_node(named(run, reader), node.as_str()),
+        NextStep::Resume { run } => resume(named(run, reader)),
+        NextStep::Cancel { run } => cancel(named(run, reader)),
+        NextStep::Close { run } => close(named(run, reader)),
+        NextStep::Receipt { run } => receipt(named(run, reader)),
+        NextStep::Verify { run } => verify(named(run, reader)),
+        NextStep::ResolveGate {
+            run, option: None, ..
+        } => decide(named(run, reader)),
+        NextStep::ResolveGate {
+            run,
+            option: Some(option),
+            text,
+        } => {
+            let answer = if *text { " --text \"<answer>\"" } else { "" };
+            format!("yunta resolve-gate {} {option}{answer}", named(run, reader))
+        }
+        NextStep::Gc => "yunta gc".to_string(),
+        NextStep::Check { workflow } => format!("yunta check {workflow}"),
+    }
+}
+
+/// What a person types next: the run named by its handle, the way every
+/// line a person reads names it.
+pub(crate) fn spell(step: &NextStep) -> String {
+    spell_for(step, Reader::Person)
+}
+
+/// The run as `reader` names it on a line: its handle for a person, its
+/// whole id for an agent.
+pub(crate) fn named(run: &RunId, reader: Reader) -> &str {
+    match reader {
+        Reader::Person => run.handle(),
+        Reader::Agent => run.as_str(),
+    }
+}
+
 /// Whether the failure a decision is about offers no retry until the run's
 /// tree changes. The same check on the same tree answers the same, so the
 /// menu says that much and the way back is a resume once the tree moved.
@@ -240,93 +289,4 @@ pub(crate) fn reset_pause(
 }
 
 #[cfg(test)]
-mod tests {
-    use chrono::TimeZone;
-    use yunta_core::events::{Escalation, Evidence, Failure, FailureMenu, GateOption, PauseReason};
-    use yunta_core::{NodeId, NonEmpty, OptionId};
-
-    use super::*;
-
-    #[test]
-    fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
-        let at = chrono::Utc
-            .with_ymd_and_hms(2026, 10, 13, 12, 0, 0)
-            .unwrap();
-        let phase = RunPhase::Waiting {
-            on: WaitingOn::Run {
-                reason: PauseReason::AwaitingReset {
-                    node: NodeId::from_static("build"),
-                    at,
-                },
-            },
-        };
-        let (node, resumes) = reset_pause(&phase).expect("a run paused on a reset");
-        assert_eq!((node.as_str(), resumes), ("build", at));
-        assert!(reset_pause(&RunPhase::Running).is_none());
-    }
-
-    /// A decision on a failed node whose menu gives `stuck` as the reason no
-    /// remedy is offered, with nothing but abort on it.
-    fn decision_stuck_on(stuck: Stuck) -> GateWaitingPayload {
-        let menu = FailureMenu {
-            attempt: 1,
-            failure: Failure::message("exit 1"),
-            remedies: Vec::new(),
-            stuck: Some(stuck),
-            reroute: None,
-        };
-        let abort = GateOption {
-            id: OptionId::from_static("abort"),
-            label: Some("Abort".to_string()),
-            tradeoff: None,
-            asks: None,
-        };
-        Escalation::new(
-            "node `build` failed",
-            Evidence::none(),
-            NonEmpty::from((abort, Vec::new())),
-        )
-        .expect("the claim does not repeat its record")
-        .with_failure(menu)
-        .into_payload()
-    }
-
-    #[test]
-    fn a_failure_stuck_on_an_unchanged_tree_lists_the_resume_that_retries_once_it_changed() {
-        let stuck = decision_stuck_on(Stuck::TreeUnchanged);
-        assert_eq!(
-            after(RunWord::NeedsYou, "run-1", Some(&stuck)),
-            vec![
-                (
-                    "yunta resume run-1".to_string(),
-                    "offers a retry once the run's tree changed",
-                ),
-                ("yunta close run-1".to_string(), "closes it for good"),
-            ]
-        );
-        let denied = decision_stuck_on(Stuck::ProjectDenies);
-        assert_eq!(
-            after(RunWord::NeedsYou, "run-1", Some(&denied)),
-            vec![("yunta close run-1".to_string(), "closes it for good")]
-        );
-    }
-
-    #[test]
-    fn a_run_that_needs_a_person_without_a_decision_is_handed_back_once_settled() {
-        assert_eq!(
-            after(RunWord::NeedsYou, "run-1", None),
-            vec![
-                (
-                    "yunta resume run-1".to_string(),
-                    "hands it back once that is settled",
-                ),
-                ("yunta close run-1".to_string(), "closes it for good"),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_run_waiting_on_a_reset_is_offered_the_reset_words() {
-        assert_eq!(after(RunWord::Waiting, "run-1", None), after_reset("run-1"));
-    }
-}
+mod tests;

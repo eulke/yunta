@@ -1,61 +1,53 @@
 //! Why a node failed, as data.
 //!
-//! The one payload field that is not a plain value: a node fails with a
-//! sentence the engine states, with declared artifacts that did not close,
-//! or with a fact the log records (a command's exit, a session's refusal,
-//! an account's limit, a loop's stops, a red check, a child run's failure).
-//! Keeping every case in one type is what lets the log record the facts and
-//! every surface produce its own prose from them, instead of the engine
-//! writing prose once and three surfaces taking it apart again.
+//! Every cause is a variant that carries the facts it is about: a command's
+//! exit, a session's refusal, an account's limit, a loop's stops, a red
+//! check, a child run's failure, and what a person decided. Keeping every
+//! case in one type is what lets the log record the facts and every surface
+//! write its own words from them.
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::diagnostic::{ArtifactFailure, Report};
-use crate::events::TaskStop;
-use crate::glob::{InvalidScopeGlob, ScopeGlob};
-use crate::hash::ContentHash;
-use crate::ids::{AdapterId, RunId};
+use crate::diagnostic::ArtifactFailure;
+use crate::events::{Approval, ArtifactId, FindingSeverity, TaskStop};
+use crate::ids::{
+    AdapterId, AgentName, FindingId, InputName, NodeId, OptionId, Responder, RunId, RunnerName,
+    SkillName, TaskId,
+};
 use crate::protected::Protection;
+use crate::shown::Flaw;
+use crate::template::TemplateError;
+use crate::workflow::JoinPolicy;
+use crate::{Capability, CommitSha, Unbuildable};
 
+mod accessors;
 mod cause;
 mod exit;
 mod records;
 mod remedy;
-mod sentences;
 
 pub use cause::{FailureCause, RefusalCause, SessionRefusal};
 pub use exit::{
     AccountLimit, CommandExit, CommandOrigin, LimitSource, SessionDeath, SessionEnd, SessionExit,
     Unanswered, STOPPED_EXIT_CODE, TAIL_LINES,
 };
-pub use records::{OwedScope, RequestedScope, Unchanged, UnpassableTask};
+pub use records::{
+    CapabilityUse, ChildRefusal, FrozenRead, Interruption, MountError, NameProblem, ObjectProblem,
+    OwedScope, RedCheck, RequestedScope, RunnerRefusal, Timed, Unchanged, UnpassableTask,
+};
 pub use remedy::{Facts, Outlook, Precondition, Remedy, Stuck};
-pub use sentences::{loop_overrun_failure, PAST_THE_CAP};
 
 /// Why a node failed.
 ///
-/// Untagged, with `Message` last: a payload carrying `artifacts:` reads
-/// as [`Failure::Artifacts`], one carrying `died:` as
-/// [`Failure::SessionDied`], one carrying `exited:` as
-/// [`Failure::Exited`], one carrying `outside_scope:` as
-/// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
-/// [`Failure::ScopeRequested`], one carrying `owed:` as
-/// [`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],
-/// one carrying `unchanged:` as [`Failure::Unchanged`], one carrying
-/// `denied_paths:` as [`Failure::PathsDenied`], one carrying
-/// `unpassable:` as [`Failure::PlanUnpassable`], one carrying
-/// `session_refused:` as [`Failure::SessionRefused`], one carrying
-/// `limit:` as [`Failure::Limit`], one carrying `stopped:` as
-/// [`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],
-/// one carrying `child_run:` as [`Failure::ChildFailed`], one carrying
-/// `frozen_input:` as [`Failure::FrozenInput`], one carrying
-/// `session_not_stopped:` as [`Failure::SessionNotStopped`], and a log
-/// written before failures were data carries `outcome:` alone and reads
-/// back as [`Failure::Message`]. That tolerance is the rule for what is
-/// persisted and versioned, and it is why no reader needs to know which
-/// version wrote the line it is looking at.
+/// Untagged: each variant is read by the keys it requires, and each requires
+/// at least one key no other variant has. A payload that names none of them
+/// is refused rather than read as some variant. `Message` reads a log line
+/// that carries `outcome:` alone, a failure written as a sentence, so it
+/// comes last. A field the wire always names but may leave `null` is read
+/// with `deserialize_with`, since serde reads a missing `Option` as `None`,
+/// which would let a payload match a variant it does not belong to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum Failure {
@@ -124,286 +116,156 @@ pub enum Failure {
     FrozenInput { frozen_input: String },
     /// The engine cannot end a session it asked to stop; its process group may still run.
     SessionNotStopped { session_not_stopped: String },
-    /// A failure the engine states in one sentence.
+    /// A session or an executor past its wall-clock budget: `after_ms` is the
+    /// budget, and `timed` says whose it was.
+    TimedOut {
+        after_ms: u64,
+        #[serde(default)]
+        timed: Timed,
+    },
+    /// A task that spends more tokens than its budget.
+    TokenBudget { used: u64, max: u64 },
+    /// A template that does not render, and why. `input` is the child's input
+    /// the template was rendering, when it was rendering one.
+    Template {
+        template: TemplateError,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<InputName>,
+    },
+    /// An artifact the run cannot hand over; `problem` says whether its
+    /// object is missing or holds other bytes.
+    ArtifactUnreadable {
+        artifact: ArtifactId,
+        problem: ObjectProblem,
+    },
+    /// A name the engine refuses for an artifact; `problem` says which rule it breaks.
+    ArtifactName { name: String, problem: NameProblem },
+    /// A mount that cannot bring its artifact into the node; `error` says why.
+    /// Boxed for the same reason as the child refusal: a failure is copied
+    /// through every frame that holds one.
+    MountUnreachable { error: Box<MountError> },
+    /// A gate whose person chose `option`, which routes the run to `target`;
+    /// `said` is what the person wrote with the choice, when they wrote any.
+    GateChose {
+        node: NodeId,
+        option: OptionId,
+        target: NodeId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        said: Option<String>,
+    },
+    /// A person accepted that the tests a task is held to are wrong; `owed_by` owes the fix.
+    TestsAccepted { task: TaskId, owed_by: NodeId },
+    /// A composed workflow the run could not start. The refusal is boxed: it
+    /// is the largest payload a failure carries, and every frame that holds a
+    /// failure pays for it.
+    ChildRefused {
+        workflow: String,
+        refusal: Box<ChildRefusal>,
+    },
+    /// A composed workflow that would nest past the depth the run allows;
+    /// `depth` is the level it would reach, and `workflow` the composed one.
+    NestedTooDeep {
+        depth: u32,
+        max_depth: u32,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        workflow: String,
+    },
+    /// An artifact an external gate hands over that no node of this run produces.
+    GateArtifactMissing {
+        node: NodeId,
+        gate_artifact: ArtifactId,
+    },
+    /// A capability the frozen adapter does not declare, which a node needs;
+    /// `used_for` says what for, and `agent` names the agent that asked, when one did.
+    CapabilityMissing {
+        node: NodeId,
+        capability: Capability,
+        adapter: AdapterId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        used_for: Option<CapabilityUse>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentName>,
+    },
+    /// An engine step failed on its own; `engine_error` is the step's error as it reported itself.
+    EngineFailed { engine_error: String },
+    /// A command the project's permissions deny; `denied_rule` is the rule that denies it.
+    CommandDenied { denied_rule: String },
+    /// A skill the node names that the run does not hold; `searched` lists the roots it looked in.
+    SkillMissing {
+        missing_skill: SkillName,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        searched: Vec<PathBuf>,
+    },
+    /// A loop that reached the iteration cap the run declares; `loop_cap` is that cap.
+    LoopCapped { node: NodeId, loop_cap: u32 },
+    /// A session the engine cannot confine as the run asks; `confinement` says why.
+    Confinement { confinement: Unbuildable },
+    /// A frozen read that cannot give the node what it asked for; `frozen_read` says why.
+    FrozenRead { frozen_read: FrozenRead },
+    /// A parallel group that failed under its join: for `join: all`, the failed
+    /// children with the first first; for `join: any`, every child.
+    ChildrenFailed {
+        join: JoinPolicy,
+        children_failed: Vec<NodeId>,
+    },
+    /// A child that ran with no terminal event when the engine last stopped,
+    /// under `on_interrupt: fail_if_uncertain`.
+    Uncertain { uncertain: NodeId },
+    /// A gate a person rejected from the console, on the approval it asked for.
+    Rejected {
+        rejected_by: Responder,
+        on: Approval,
+    },
+    /// A plan the planner did not publish, sent back with the flaws it has.
+    SentBack { sent_back: Vec<Flaw> },
+    /// A findings gate with findings at or above its severity.
+    FindingsOpen {
+        at_or_above: FindingSeverity,
+        open_findings: Vec<FindingId>,
+    },
+    /// The loser of a `join: any` race, which a sibling in its group finished ahead of.
+    Interrupted { interrupted_by: Interruption },
+    /// A reviewer requested changes on an external gate's pull request, at `reviewed_sha`.
+    ChangesRequested {
+        requested_by: String,
+        reviewed_sha: CommitSha,
+        comments: usize,
+    },
+    /// A pull request closed without approval; `closed_pull_request` is its
+    /// reference when the forge gave one.
+    PullRequestClosed {
+        #[serde(deserialize_with = "required_option")]
+        closed_pull_request: Option<String>,
+    },
+    /// A loop with no task ready and not every task done; `not_ready` names
+    /// the tasks that are waiting.
+    LoopStalled { not_ready: Vec<TaskId> },
+    /// A loop whose run holds no tasks document; `tasks_for` is the loop's node.
+    NoTasksDocument { tasks_for: NodeId },
+    /// A node's runner that did not resolve to an adapter, and why.
+    RunnerUnresolved {
+        runner: RunnerName,
+        runner_refusal: RunnerRefusal,
+    },
+    /// Reads a log line that carries `outcome:` alone; no writer creates it.
     Message { outcome: String },
 }
 
-/// Why a judging check came out red: a coverage figure under its
-/// threshold or none at all, a command that exited non-zero, or a baseline
-/// suite that passed when it was measured and fails now.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RedCheck {
-    /// The coverage the run measured, when it measured one, and the
-    /// threshold it fell short of. `cmd` is the command that measured it.
-    Coverage {
-        cmd: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        measured: Option<f64>,
-        threshold: f64,
-    },
-    /// The command that exited non-zero, with its exit code, the line it
-    /// concluded with and the run object holding everything it printed.
-    Command {
-        cmd: String,
-        exit_code: i32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        conclusion: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        output: Option<ContentHash>,
-    },
-    /// The baseline suite passed when the lineage measured it and fails now;
-    /// `tail` is what it printed last, which says why.
-    Regression {
-        cmd: String,
-        exit_code: i32,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        tail: Vec<String>,
-    },
+/// Reads a field the wire always names, `null` included. It is the one way a
+/// variant's only key can be required: serde reads a missing `Option` as `None`.
+fn required_option<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
 }
 
-impl Failure {
-    pub fn message(text: impl Into<String>) -> Self {
-        Failure::Message {
-            outcome: text.into(),
-        }
-    }
-
-    pub fn artifacts(failures: Vec<ArtifactFailure>) -> Self {
-        Failure::Artifacts {
-            artifacts: failures,
-        }
-    }
-
-    /// A session of `adapter` that ended without a terminal event.
-    /// `exit` is what its process left behind, absent for a session
-    /// with no process of its own.
-    pub fn session_died(adapter: AdapterId, exit: Option<SessionExit>) -> Self {
-        Failure::SessionDied {
-            died: SessionDeath { adapter, exit },
-        }
-    }
-
-    /// A diff that reached `outside_scope`, which the node's scope does
-    /// not allow.
-    pub fn scope_violated(outside_scope: Vec<PathBuf>) -> Self {
-        Failure::ScopeViolated { outside_scope }
-    }
-
-    /// A node whose kind cannot run without `key`, which the run's config
-    /// leaves unset.
-    pub fn unset(key: crate::config::ConfigKey) -> Self {
-        Failure::Unset { unset: key }
-    }
-
-    /// An attempt refused because nothing changed in the run's tree
-    /// since attempt `since` failed on it with `failure`. A refusal of a
-    /// refusal names the attempt that last ran, and what it failed with.
-    pub fn unchanged(since: u32, failure: Failure) -> Self {
-        match failure {
-            Failure::Unchanged { unchanged } => Failure::Unchanged { unchanged },
-            failure => Failure::Unchanged {
-                unchanged: Unchanged {
-                    since,
-                    failure: Box::new(failure),
-                },
-            },
-        }
-    }
-
-    /// A command that exited non-zero, and what it left behind.
-    pub fn exited(exited: CommandExit) -> Self {
-        Failure::Exited { exited }
-    }
-
-    /// The last lines the failing command printed, as the log holds them
-    /// here. Empty for a failure that is not about a command, for a command
-    /// whose output the log holds as a run object, and for one that printed
-    /// nothing. A child run's failure hands over its own command's lines,
-    /// which a person reads under this one.
-    pub fn tail(&self) -> &[String] {
-        match self {
-            Failure::Exited { exited } => &exited.tail,
-            Failure::Unchanged { unchanged } => unchanged.failure.tail(),
-            Failure::ChildFailed {
-                child_failure: Some(child),
-                ..
-            } => child.tail(),
-            Failure::Red {
-                red: RedCheck::Regression { tail, .. },
-            } => tail,
-            Failure::Artifacts { .. }
-            | Failure::SessionDied { .. }
-            | Failure::ScopeViolated { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::ScopeOwed { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::SessionRefused { .. }
-            | Failure::Limit { .. }
-            | Failure::TasksStopped { .. }
-            | Failure::Red { .. }
-            | Failure::ChildFailed { .. }
-            | Failure::FrozenInput { .. }
-            | Failure::SessionNotStopped { .. }
-            | Failure::Message { .. } => &[],
-        }
-    }
-
-    /// The run object holding everything the failing command printed.
-    pub fn output(&self) -> Option<&ContentHash> {
-        match self {
-            Failure::Exited { exited } => exited.output.as_ref(),
-            Failure::Red { red } => match red {
-                RedCheck::Command { output, .. } => output.as_ref(),
-                RedCheck::Coverage { .. } | RedCheck::Regression { .. } => None,
-            },
-            Failure::Unchanged { unchanged } => unchanged.failure.output(),
-            Failure::ChildFailed {
-                child_failure: Some(child),
-                ..
-            } => child.output(),
-            Failure::Artifacts { .. }
-            | Failure::SessionDied { .. }
-            | Failure::ScopeViolated { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::ScopeOwed { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::SessionRefused { .. }
-            | Failure::Limit { .. }
-            | Failure::TasksStopped { .. }
-            | Failure::ChildFailed { .. }
-            | Failure::FrozenInput { .. }
-            | Failure::SessionNotStopped { .. }
-            | Failure::Message { .. } => None,
-        }
-    }
-
-    /// Work that reached `paths`, which no session of the run may write,
-    /// each path with the reason at the same index in `reasons`.
-    pub fn paths_denied(paths: Vec<PathBuf>, reasons: Vec<Protection>) -> Self {
-        Failure::PathsDenied {
-            denied_paths: paths,
-            reasons,
-        }
-    }
-
-    /// A session that asked to be allowed `paths`, for `reason`.
-    pub fn scope_requested(paths: Vec<ScopeGlob>, reason: impl Into<String>) -> Self {
-        Failure::ScopeRequested {
-            requested_scope: RequestedScope {
-                paths,
-                reason: reason.into(),
-            },
-        }
-    }
-
-    /// The paths the node wrote outside its scope. Empty for a failure
-    /// that is not a violation of it. A child run's violations are its
-    /// own, and do not widen this node's scope.
-    pub fn outside_scope(&self) -> &[PathBuf] {
-        match self {
-            Failure::ScopeViolated { outside_scope } => outside_scope,
-            Failure::Unchanged { unchanged } => unchanged.failure.outside_scope(),
-            Failure::Artifacts { .. }
-            | Failure::SessionDied { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::ScopeOwed { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::Exited { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::SessionRefused { .. }
-            | Failure::Limit { .. }
-            | Failure::TasksStopped { .. }
-            | Failure::Red { .. }
-            | Failure::ChildFailed { .. }
-            | Failure::FrozenInput { .. }
-            | Failure::SessionNotStopped { .. }
-            | Failure::Message { .. } => &[],
-        }
-    }
-
-    /// Whether a wider scope is what this failure needs — what makes a
-    /// grant a way forward rather than a guess.
-    pub fn wants_scope(&self) -> bool {
-        match self {
-            Failure::ScopeViolated { outside_scope } => !outside_scope.is_empty(),
-            Failure::ScopeRequested { requested_scope } => !requested_scope.paths.is_empty(),
-            Failure::ScopeOwed { owed } => owed.iter().any(|owed| !owed.paths.is_empty()),
-            Failure::Unchanged { unchanged } => unchanged.failure.wants_scope(),
-            Failure::Artifacts { .. }
-            | Failure::SessionDied { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::Exited { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::SessionRefused { .. }
-            | Failure::Limit { .. }
-            | Failure::TasksStopped { .. }
-            | Failure::Red { .. }
-            | Failure::ChildFailed { .. }
-            | Failure::FrozenInput { .. }
-            | Failure::SessionNotStopped { .. }
-            | Failure::Message { .. } => false,
-        }
-    }
-
-    /// What a grant would add to the node's scope for the work behind
-    /// this failure to stand: each path it wrote outside, exactly, or
-    /// what its session asked for. Empty for a failure a wider scope
-    /// would not change.
-    pub fn scope_wanted(&self) -> Result<Vec<ScopeGlob>, InvalidScopeGlob> {
-        match self {
-            Failure::ScopeRequested { requested_scope } => Ok(requested_scope.paths.clone()),
-            // Each task's request is its own to grant: none of it widens
-            // the loop's scope.
-            Failure::ScopeOwed { .. } => Ok(Vec::new()),
-            _ => self
-                .outside_scope()
-                .iter()
-                .map(|path| ScopeGlob::exact(path))
-                .collect(),
-        }
-    }
-
-    /// Every report behind this failure, each carrying the document it
-    /// is about. What a diagnostic is rendered from; a failure whose
-    /// artifacts name no document yields none.
-    pub fn reports(&self) -> impl Iterator<Item = &Report> {
-        self.failures().filter_map(ArtifactFailure::report)
-    }
-
-    /// Every declared artifact that did not close. Empty for a failure
-    /// that has nothing to do with artifacts.
-    pub fn failures(&self) -> impl Iterator<Item = &ArtifactFailure> {
-        match self {
-            Failure::Artifacts { artifacts } => artifacts.iter(),
-            Failure::Unchanged { unchanged } => unchanged.failure.failures(),
-            // A dead session names no artifact, and neither does a scope, a
-            // command or a sentence. A refused session, a limit, a loop's
-            // stops, a check's figure and a child run's failure name no
-            // document this node declared either: the count of documents
-            // that did not close is about documents this node declared.
-            Failure::SessionDied { .. }
-            | Failure::ScopeViolated { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::ScopeOwed { .. }
-            | Failure::Unset { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::Exited { .. }
-            | Failure::PlanUnpassable { .. }
-            | Failure::SessionRefused { .. }
-            | Failure::Limit { .. }
-            | Failure::TasksStopped { .. }
-            | Failure::Red { .. }
-            | Failure::ChildFailed { .. }
-            | Failure::FrozenInput { .. }
-            | Failure::SessionNotStopped { .. }
-            | Failure::Message { .. } => [].iter(),
+/// A template that renders a node's own text: no child's input is named.
+impl From<TemplateError> for Failure {
+    fn from(template: TemplateError) -> Self {
+        Failure::Template {
+            template,
+            input: None,
         }
     }
 }
@@ -411,7 +273,6 @@ impl Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reserved::ReservedOption;
 
     #[test]
     fn a_regression_hands_over_the_tail_it_printed() {
@@ -439,40 +300,47 @@ mod tests {
     }
 
     #[test]
-    fn a_frozen_input_that_changed_is_stuck_on_its_own_frozen_input() {
-        let failure = Failure::FrozenInput {
-            frozen_input: "agents/reviewer.md".to_string(),
-        };
+    fn a_denial_read_from_a_log_without_reasons_names_its_paths() {
+        let failure: Failure =
+            serde_json::from_value(serde_json::json!({"denied_paths": ["a.txt", ".claude/x"]}))
+                .expect("a log written before reasons existed reads back");
         assert_eq!(
-            failure.remedies(&facts_at_failure()),
-            Outlook::Stuck(Stuck::FrozenInput)
+            failure,
+            Failure::PathsDenied {
+                denied_paths: vec!["a.txt".into(), ".claude/x".into()],
+                reasons: Vec::new(),
+            }
         );
     }
 
     #[test]
-    fn a_session_that_could_not_stop_offers_a_retry_that_waits_for_the_outside() {
-        let failure = Failure::SessionNotStopped {
-            session_not_stopped: "kill refused".to_string(),
-        };
-        assert_eq!(
-            failure.remedies(&facts_at_failure()),
-            Outlook::Choose(vec![Remedy {
-                option: ReservedOption::Retry,
-                precondition: Some(Precondition::OutsideTreeChanged),
-            }])
-        );
+    fn a_payload_naming_no_failure_is_refused_rather_than_read_as_one() {
+        for payload in [serde_json::json!({}), serde_json::json!({"unrelated": 1})] {
+            assert!(
+                serde_json::from_value::<Failure>(payload.clone()).is_err(),
+                "{payload}"
+            );
+        }
     }
 
-    /// The facts a node failed with. Neither failure's outlook reads them,
-    /// so any facts serve the two tests above.
-    fn facts_at_failure() -> Facts {
-        Facts {
-            failed_at: "2026-01-01T00:00:00Z"
-                .parse()
-                .expect("a fixed timestamp parses"),
-            continuable: false,
-            may_grant: false,
-            tree_moved: false,
-        }
+    #[test]
+    fn a_closed_pull_request_needs_its_key_even_when_the_reference_is_null() {
+        let closed: Failure =
+            serde_json::from_value(serde_json::json!({"closed_pull_request": null}))
+                .expect("a null reference reads back");
+        assert_eq!(
+            closed,
+            Failure::PullRequestClosed {
+                closed_pull_request: None,
+            }
+        );
+        let message: Failure = serde_json::from_value(serde_json::json!({"outcome": "closed"}))
+            .expect("an outcome alone reads back");
+        assert_eq!(
+            message,
+            Failure::Message {
+                outcome: "closed".into(),
+            }
+        );
     }
 }

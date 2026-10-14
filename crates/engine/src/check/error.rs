@@ -2,34 +2,30 @@
 
 use super::*;
 use thiserror::Error;
+use yunta_core::events::NameProblem;
 use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
 /// What refuses a workflow: something its frozen inputs make certain to
-/// stop the run, found before anything is spent. Every sentence names
-/// where and what to change.
+/// stop the run, found ahead of any spend. Its `Display` is the
+/// variant's code; the words a person reads are written where they are
+/// shown, from the data each variant holds.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
-    #[error("cycle in depends_on: {}", super::pointer::arrows(.cycle))]
+    #[error("depends_on_cycle")]
     DependsOnCycle { cycle: Vec<NodeId> },
 
     /// A node asks its adapter for something the adapter does not
     /// declare and the engine never emulates. Refused before a run is
     /// born: a session that ignored the profile or the agent it was
     /// given would run under something nobody asked for.
-    #[error(
-        "node `{node}` declares `{field}`, which needs `{capability}`, and no adapter its \
-         runner resolves to declares it ({adapters}) — pick a runner on an adapter that has it"
-    )]
+    #[error("capability_unsupported")]
     CapabilityUnsupported {
         node: NodeId,
         field: String,
         capability: yunta_core::Capability,
         adapters: String,
     },
-    #[error(
-        "node `{node}` references runner `{runner}`, which `runners:` does not define{}",
-        super::pointer::near(.near.as_ref())
-    )]
+    #[error("unknown_runner")]
     UnknownRunner {
         node: NodeId,
         runner: RunnerName,
@@ -37,15 +33,13 @@ pub enum CheckError {
         near: Option<String>,
     },
 
-    #[error(
-        "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
-    )]
+    #[error("runner_has_no_candidates")]
     RunnerHasNoCandidates { node: NodeId, runner: RunnerName },
 
     /// A config key the node's kind cannot run without, left unset. A
     /// run freezes its config when it is created, so the node would stop
     /// the run every time it is reached.
-    #[error("node `{node}`: {key}{}", super::pointer::near(.near.as_ref()))]
+    #[error("unset")]
     Unset {
         node: NodeId,
         key: yunta_core::ConfigKey,
@@ -56,21 +50,12 @@ pub enum CheckError {
 
     /// A literal `files:` path the tree a run starts from does not hold,
     /// read by a node nothing that runs before can write it for.
-    #[error(
-        "{}",
-        super::context_files::missing_sentence(
-            node,
-            path,
-            base.as_deref(),
-            missing,
-            super::context_files::Reach::NothingEarlierCan,
-        )
-    )]
+    #[error("context_file_unreachable")]
     ContextFileUnreachable {
         node: NodeId,
         path: String,
         base: Option<String>,
-        missing: super::MissingContextFile,
+        missing: MissingContextFile,
     },
 
     /// A read nothing in the run can answer, so the node that makes it
@@ -80,37 +65,26 @@ pub enum CheckError {
 
     /// `runner:` and `runners:` on one node is a contradiction,
     /// not a merge.
-    #[error("node `{node}` declares both `runner:` and `runners:` — use exactly one")]
+    #[error("both_runner_and_runners")]
     BothRunnerAndRunners { node: NodeId },
 
     /// Once `review` is many nodes there is no unambiguous
     /// "return control to review" — a re-route, gate `on:` or context
     /// artifact reference must name a specific node.
-    #[error(
-        "node `{node}` targets `{target}`, which is a `runners:` fan-out — target one of its \
-         expanded nodes (`{target}@<role>`) or a non-fan-out node"
-    )]
+    #[error("fan_out_target")]
     FanOutTarget { node: NodeId, target: NodeId },
 
     /// `on_finish.distill` names a path no node declares
     /// producing — statically wrong (the runtime "declared but not
     /// produced this run" case degrades to a finding instead).
-    #[error(
-        "`on_finish.distill` names {artifact} but that node's `artifacts.produces` does not \
-         declare it — declare the artifact on the node that produces it, or drop it from \
-         `distill`"
-    )]
+    #[error("distill_unknown_artifact")]
     DistillUnknownArtifact {
         artifact: yunta_core::DistillArtifact,
     },
 
     /// A node produces at most one document of each kind: the identity
     /// is `(node, kind)`, so a second declaration names the first.
-    #[error(
-        "node `{node}` declares `{kind}` twice — a node produces at most one {label}, and it \
-         is identified by its kind, so there is no second one to declare",
-        label = .kind.label()
-    )]
+    #[error("duplicate_artifact_kind")]
     DuplicateArtifactKind {
         node: NodeId,
         kind: yunta_core::ArtifactKind,
@@ -118,12 +92,7 @@ pub enum CheckError {
 
     /// An input document and a node producing the same kind are two
     /// producers of one identity with nothing to order them.
-    #[error(
-        "input `{input}` brings in the {label} and node `{node}` produces one too — a run \
-         resolving `{kind}` would get whichever landed last, which nothing in the workflow \
-         decides; drop the input, or `{kind}` from node `{node}`'s `artifacts.produces`",
-        label = .kind.label()
-    )]
+    #[error("input_document_also_produced")]
     InputDocumentAlsoProduced {
         input: InputName,
         node: NodeId,
@@ -132,33 +101,31 @@ pub enum CheckError {
 
     /// The three kind names are how a document the engine reads is
     /// referred to, so none of them is available as a file name.
-    #[error(
-        "{site} names the artifact `{name}`, and `{name}` is a document Yunta reads — refer to \
-         it with `kind: {name}` instead; the names {kinds} are not available as file names",
-        kinds = yunta_core::ArtifactKind::listed()
-    )]
-    ReservedArtifactName { site: Site, name: String },
+    #[error("reserved_artifact_name")]
+    ReservedArtifactName { place: Place, name: String },
 
     /// An artifact is written under `run.dir/artifacts/`; a name that
     /// is absolute or climbs with `..` would land somewhere else.
     /// The name a node declares is not one an artifact can take. The
-    /// clause comes from the name's own parser, so `check` and the run
+    /// reason comes from the name's own parser, so `check` and the run
     /// refuse the same names for the same stated reason.
-    #[error("node `{node}` produces a name that {said}")]
-    ArtifactNameRefused { node: NodeId, said: String },
+    #[error("artifact_name_refused")]
+    ArtifactNameRefused {
+        node: NodeId,
+        /// The name as the node writes it, which the reason quotes.
+        name: String,
+        problem: NameProblem,
+    },
 
     /// The workflow demands a schema this binary doesn't speak.
-    #[error(
-        "`yunta_schema: \"{range}\"` — this binary's schema is outside the required range (this \
-         binary speaks schema {binary})"
-    )]
+    #[error("yunta_schema_outside")]
     YuntaSchemaOutside { range: SchemaRange, binary: u32 },
 
     /// A pack-origin workflow's `pack.yaml` exists but cannot be read —
     /// its `declares.permissions` ceiling is the pack's only governance
     /// rule, so a manifest the check cannot read is a check error naming
     /// the file, never a silently skipped ceiling.
-    #[error("pack manifest `{path}` cannot be read: {detail}")]
+    #[error("pack_manifest_unreadable")]
     PackManifestUnreadable {
         path: std::path::PathBuf,
         detail: String,
@@ -166,7 +133,7 @@ pub enum CheckError {
 
     /// A pack-origin workflow's `pack.yaml` does not parse — same
     /// reasoning as [`CheckError::PackManifestUnreadable`].
-    #[error("pack manifest `{path}` is malformed: {detail}")]
+    #[error("pack_manifest_malformed")]
     PackManifestMalformed {
         path: std::path::PathBuf,
         detail: String,
@@ -180,11 +147,7 @@ pub enum CheckError {
     /// approximation by design: "no relative order declared" is the
     /// rule, never a simulation of what the scheduler would actually
     /// interleave.
-    #[error(
-        "nodes `{a}` and `{b}` have no dependency path between them and declare overlapping \
-         scope (`{glob_a}` / `{glob_b}`) — with `max_parallel_nodes` > 1 they can write the \
-         same paths at once; chain them with `depends_on` or make their scopes disjoint"
-    )]
+    #[error("overlapping_fan_out_scope")]
     OverlappingFanOutScope {
         a: NodeId,
         b: NodeId,
@@ -196,7 +159,7 @@ pub enum CheckError {
     /// the YAML already violates the merged `permissions` model. The scan
     /// matches the *literal* text — a command assembled by template gets
     /// caught by the second moment, at runtime, right before execution.
-    #[error("node `{node}`: {rule}")]
+    #[error("command_denied")]
     CommandDenied { node: NodeId, rule: String },
 
     /// `context:` is resolved into a session's own
@@ -205,23 +168,20 @@ pub enum CheckError {
     /// `bash`/`check`/`executor`/`gate` node has no session to consume
     /// it. Declaring it there is caught here rather than silently
     /// ignored at runtime.
-    #[error(
-        "node `{node}`: `context:` is only supported on `kind: prompt` and `kind: loop` nodes \
-         — nothing else opens a session that could consume it"
-    )]
+    #[error("context_on_unsupported_node")]
     ContextOnUnsupportedNode { node: NodeId },
 
-    #[error("input `{name}` is type `enum` with an empty `values` list")]
+    #[error("input_empty_enum_values")]
     InputEmptyEnumValues { name: InputName },
 
-    #[error("input `{name}`'s `min` ({min}) is greater than its `max` ({max})")]
+    #[error("input_min_exceeds_max")]
     InputMinExceedsMax {
         name: InputName,
         min: String,
         max: String,
     },
 
-    #[error("input `{name}`'s `pattern` `{pattern}` is not a valid regex: {detail}")]
+    #[error("input_invalid_pattern")]
     InputInvalidPattern {
         name: InputName,
         pattern: String,
@@ -237,7 +197,7 @@ pub enum CheckError {
     /// surfaces at run time.
     /// The reference as written: what an author reads back, whether or
     /// not it could have been an input name at all.
-    #[error("node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare")]
+    #[error("undeclared_input")]
     UndeclaredInput { node: NodeId, name: String },
 
     /// A `kind: gate` with `external:` has nowhere to
@@ -248,19 +208,19 @@ pub enum CheckError {
     /// — a specific machine lacking the named credential env var at
     /// *runtime* is a different, degrade-not-refuse case (it degrades
     /// to console instead of failing).
-    #[error("node `{node}`: `kind: gate` with `external: {{kind: pull_request}}` needs `forge.github` configured")]
+    #[error("external_gate_without_forge")]
     ExternalGateWithoutForge { node: NodeId },
 
     /// An external gate is decided on the forge, which shows its
     /// `artifacts:`; nothing here would ever put a `shows:` in front of
     /// anyone.
-    #[error("gate `{node}`: `shows:` is for a gate answered here; an external gate publishes its `artifacts:`")]
+    #[error("shows_on_external_gate")]
     ShowsOnExternalGate { node: NodeId },
 
     /// A gate's resolution is a forge round-trip, one at a time — never
     /// scoped to a `parallel` group's shared worktree/join semantics
     /// (neither concept is defined for a gate).
-    #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
+    #[error("gate_inside_parallel")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
     /// A group inside a group. Every surface draws a group's children
@@ -268,20 +228,13 @@ pub enum CheckError {
     /// group that holds it — both are exact at one level and false at
     /// two. Nesting arrives the day somebody asks for it, with the
     /// design it needs.
-    #[error("node `{node}`: `kind: parallel` can't be a `parallel` child (group `{group}`)")]
+    #[error("parallel_inside_parallel")]
     ParallelInsideParallel { node: NodeId, group: NodeId },
 
     /// A node that asks ends when it asks: its answers are the next
     /// node's context, so nothing it declares beside `questions` could
     /// be written after them.
-    #[error(
-        "node `{node}` produces `questions` alongside {} — a node that asks ends when it asks, \
-         and its answers reach the next node as context; keep `{node}` producing `questions` \
-         alone and move {} to a node that follows it with `context: [{{ artifact: {{ node: \
-         {node}, {} }} }}]`",
-        ArtifactSpec::listed(.others), ArtifactSpec::listed(.others),
-        yunta_core::ReservedIdentity::Kind(yunta_core::ArtifactKind::Answers).reference()
-    )]
+    #[error("questions_alongside_other_artifacts")]
     QuestionsAlongsideOtherArtifacts {
         node: NodeId,
         others: Vec<ArtifactSpec>,
@@ -289,54 +242,35 @@ pub enum CheckError {
 
     /// The engine writes the answers to a `questions` document, so a
     /// node that declared them would owe a document nobody can hand it.
-    #[error(
-        "node `{node}` produces `answers` — the engine writes the answers to a `questions` \
-         document itself when a person replies; a node produces one of {} or a file name, and \
-         the node that follows the one that asked reads the answers with `context: \
-         [{{ artifact: {{ node: {node}, kind: answers }} }}]`",
-        yunta_core::ArtifactKind::declarable_listed()
-    )]
+    #[error("answers_declared_as_produced")]
     AnswersDeclaredAsProduced { node: NodeId },
 
     /// Answers exist because a node asked, so a node that asks nothing
     /// has none to read.
-    #[error(
-        "{site} reads `kind: answers` from node `{node}`, and `{node}` asks nothing — only a \
-         node that produces `questions` leaves answers; read them from the node that asks, or \
-         drop the source"
-    )]
-    AnswersFromNodeThatNeverAsks { node: NodeId, site: Site },
+    #[error("answers_from_node_that_never_asks")]
+    AnswersFromNodeThatNeverAsks { node: NodeId, place: Place },
 
     /// Only a `prompt` node holds the session that hands questions over
     /// and the close that waits on them.
-    #[error(
-        "node `{node}` is `kind: {kind}` and produces `questions` — only a `prompt` node asks; \
-         put the questions in a `prompt` node and read its answers from here"
-    )]
+    #[error("questions_on_kind")]
     QuestionsOnKind { node: NodeId, kind: &'static str },
 
     /// The scheduler puts questions to a person one top-level node at a
     /// time, so a group's child is never asked — its wait would never
     /// end and the node after the group would mount answers that never
     /// arrive.
-    #[error(
-        "node `{node}` produces `questions` inside parallel group `{group}` — a person answers \
-         one node at a time; ask before or after the group"
-    )]
+    #[error("questions_inside_parallel")]
     QuestionsInsideParallel { node: NodeId, group: NodeId },
 
     /// An `on:` route no answer ever follows: a promise the gate cannot keep.
-    #[error("gate `{node}`: {route}")]
+    #[error("gate_route_never_taken")]
     GateRouteNeverTaken { node: NodeId, route: UntakenRoute },
 
     /// A `kind: workflow` node never opens a session of its own —
     /// the child's nodes bind their own runners — so a runner binding
     /// here would be accepted and ignored, which the engine never
     /// allows silently.
-    #[error(
-        "node `{node}`: `{field}` has no meaning on `kind: workflow` — the child workflow's \
-         own nodes bind their runners"
-    )]
+    #[error("workflow_node_runner_binding")]
     WorkflowNodeRunnerBinding { node: NodeId, field: &'static str },
 
     /// A parallel child with `isolation: none` shares the parent's
@@ -344,70 +278,44 @@ pub enum CheckError {
     /// makes disjointness unverifiable: refused, same rank as
     /// `OverlappingParallelScope` (which catches the declared-overlap
     /// half of the same rule).
-    #[error(
-        "parallel group `{group}`: child `{node}` is `kind: workflow` with `isolation: \
-         none` and no `scope` — a child sharing the tree writes where its siblings do, so \
-         each must declare a disjoint scope"
-    )]
+    #[error("inherit_child_without_scope")]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
     /// Mounting one's own artifact is a read of an outcome that
     /// cannot exist yet — the implied `depends_on` would be a self-cycle.
-    #[error(
-        "node `{node}`: `mounts` references the node itself — a mount reads a *finished* \
-         node's artifact, which this node cannot be for its own birth"
-    )]
+    #[error("mount_on_self")]
     MountOnSelf { node: NodeId },
 
     /// Same reasoning as `FanOutTarget` — once `runners:` expands
     /// a node into `<id>@<role>` siblings there is no "the" node to
     /// mount from.
-    #[error(
-        "node `{node}`: `mounts` references `{target}`, which `runners:` fans out into one \
-         node per role — mount a specific `{target}@<role>` sibling instead"
-    )]
+    #[error("mount_on_fan_out")]
     MountOnFanOut { node: NodeId, target: NodeId },
 
     /// Parallel children run concurrently — no DAG order exists
     /// inside the group, so "the source node already finished" cannot
     /// hold there and the implied `depends_on` would mean nothing.
-    #[error(
-        "parallel group `{group}`: child `{node}` declares `mounts` — parallel children have \
-         no order to guarantee a finished source; mount on a top-level workflow node instead"
-    )]
+    #[error("mount_inside_parallel")]
     MountInsideParallel { group: NodeId, node: NodeId },
 
     /// Only `kind: prompt` opens a node-scoped session —
     /// declaring `resume_session` anywhere else names a conversation
     /// that doesn't exist (a loop's per-task sessions re-run from the
     /// tasks document; bash/check/executor/gate/workflow open none).
-    #[error(
-        "node `{node}`: `on_interrupt: resume_session` is only supported on `kind: prompt` \
-         nodes — nothing else has a node-scoped session to resume; declare `restart_node` \
-         (the default) instead"
-    )]
+    #[error("resume_session_on_sessionless_node")]
     ResumeSessionOnSessionlessNode { node: NodeId },
 
     /// `ask` says which rounds of a node's questions stop the run; on a
     /// node that hands over no `questions` it says nothing.
-    #[error(
-        "node `{node}`: `ask` says which rounds of a node's questions stop the run, and this \
-         node produces no `questions` — remove `ask`, or set it on the node that asks"
-    )]
+    #[error("ask_on_a_node_that_asks_nothing")]
     AskOnANodeThatAsksNothing { node: NodeId },
 
     /// `network: true` on a session that runs read-only, which gets none.
-    #[error(
-        "node `{node}` asks for `network: true`, but its session runs read-only and gets no network: \
-         drop `network: true`, or let it write with `permissions: edit` under a non-read-only `sandbox`"
-    )]
+    #[error("network_open_under_read_only")]
     NetworkOpenUnderReadOnly { node: NodeId },
 
     /// A closed network on a session that runs unconfined, which nothing keeps closed.
-    #[error(
-        "node `{node}`: the network is closed, but its session runs unconfined, so nothing keeps its \
-         commands off it — lower `permissions` to `edit` under a confining `sandbox`, or set `network: true`"
-    )]
+    #[error("closed_network_unconfined")]
     ClosedNetworkUnconfined { node: NodeId },
 
     /// The node asks for a scope-expansion mode more
@@ -415,11 +323,7 @@ pub enum CheckError {
     /// ceiling allows — same only-narrowing model as every other
     /// `permissions` group; which *layer* set the binding ceiling
     /// is `permission_layer_conflicts`' territory at config load.
-    #[error(
-        "node `{node}`: `scope_expansion.mode: {mode}` exceeds the merged permissions ceiling \
-         `scope_expansion.max_mode: {ceiling}` — harden the node's mode, or raise \
-         the ceiling in the layer that set it"
-    )]
+    #[error("scope_expansion_mode_over_ceiling")]
     ScopeExpansionModeOverCeiling {
         node: NodeId,
         mode: &'static str,
@@ -429,19 +333,13 @@ pub enum CheckError {
     /// `scope_expansion.within` is retired: a loop that still declares it
     /// is refused, because the key would otherwise be read as a ceiling
     /// it no longer is.
-    #[error(
-        "node `{node}`: `scope_expansion.within` moved to `permissions.paths.deny`, the \
-         project's list of paths no run may write — remove `within` from this node"
-    )]
+    #[error("scope_expansion_within_retired")]
     ScopeExpansionWithinRetired { node: NodeId },
 
     /// A 0 would starve every ready node forever — a config
     /// mistake surfaced here as a refusal (the scheduler's clamp to 1
     /// stays as defense in depth).
-    #[error(
-        "`defaults.max_parallel_nodes: 0` would starve every node forever — declare 1 or more, \
-         or drop the field (default: 1)"
-    )]
+    #[error("max_parallel_nodes_zero")]
     MaxParallelNodesZero,
 
     /// A `use:` reference to another workflow, refused.
@@ -451,17 +349,13 @@ pub enum CheckError {
     /// A comparison against a baseline nothing measures: the lineage
     /// measures once, before its first node, and only the suite the
     /// config names.
-    #[error("{sites}: {}", yunta_core::ConfigKey::BaselineSuite)]
+    #[error("baseline_without_suite")]
     BaselineWithoutSuite { sites: String },
 
     /// A config key that names a project command the project does not
     /// declare — a `format:` rule, a command `baseline.held` holds tasks
     /// to — would do nothing, with nobody told why.
-    #[error(
-        "`{field}` names `{command}`, which `commands:` does not declare — declare it, or drop \
-         it{}",
-        super::pointer::near(.near.as_ref())
-    )]
+    #[error("command_unset_in")]
     CommandUnsetIn {
         field: &'static str,
         command: yunta_core::CommandName,
@@ -471,7 +365,7 @@ pub enum CheckError {
     /// A pack says what it needs from the project and the machine under
     /// `requires:`; a run of its workflows without it stops where the need
     /// is.
-    #[error("pack `{pack}` requires {requirement}")]
+    #[error("pack_requirement_unmet")]
     PackRequirementUnmet { pack: String, requirement: String },
 
     /// A pack's `declares` field is a ceiling, not a description — a
@@ -479,10 +373,7 @@ pub enum CheckError {
     /// profile above what its manifest promises, even when the node's
     /// own YAML asks for more (or asks for nothing and falls back to
     /// the engine's own `edit` default).
-    #[error(
-        "node `{node}` requests permissions `{effective}` but pack `{pack}` declares a ceiling \
-         of `{declared}` — lower the node's permissions or raise the pack's declared ceiling"
-    )]
+    #[error("pack_permissions_ceiling_exceeded")]
     PackPermissionsCeilingExceeded {
         node: NodeId,
         pack: String,
@@ -491,9 +382,6 @@ pub enum CheckError {
     },
 
     /// A pack's `declares.network: false` closes the network for each node.
-    #[error(
-        "node `{node}` asks for `network: true`, but pack `{pack}` declares the network closed, \
-         so drop `network: true`"
-    )]
+    #[error("pack_network_ceiling_exceeded")]
     PackNetworkCeilingExceeded { node: NodeId, pack: String },
 }

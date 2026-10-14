@@ -3,6 +3,7 @@
 //! re-route, exercised directly without spinning up a full run (same
 //! style `tests/progress.rs` uses for `render_progress`).
 
+use yunta_core::caution::Caution;
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{
     ArtifactSubmittedPayload, EventBody, EventPayload, Failure, Finding, FindingOperation,
@@ -13,7 +14,8 @@ use yunta_core::events::{
 };
 use yunta_core::{Node, NodeId, NodeKind, RunnerCandidate, Workflow};
 use yunta_engine::{
-    compute_run_stats, prior_estimation, run_summary, FindingActivity, RunSummary, Submissions,
+    budget_caution, compute_run_stats, prior_estimation, run_summary, FindingActivity, RunSummary,
+    Submissions,
 };
 use yunta_testkit_core::Log;
 
@@ -131,7 +133,9 @@ fn fixture_events() -> Vec<StoredEvent> {
         .node(
             "b",
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                Failure::message("criteria still red".to_string()),
+                Failure::Message {
+                    outcome: "criteria still red".to_string(),
+                },
                 tokens(80, 40, None),
             ))),
         )
@@ -139,7 +143,9 @@ fn fixture_events() -> Vec<StoredEvent> {
             "b",
             EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
                 "b".into(),
-                yunta_core::events::Failure::message("criteria still red"),
+                yunta_core::events::Failure::Message {
+                    outcome: "criteria still red".to_string(),
+                },
                 yunta_core::events::RerouteOrigin::OnFailure,
                 Some(2),
                 Some(1),
@@ -412,7 +418,7 @@ fn run_summary_reuses_compute_run_stats_for_its_own_numbers() {
     assert_eq!(summary.wall_clock, Some(std::time::Duration::from_secs(37)));
 }
 
-// --- budget-vs-p90 warning -----------------------------
+// --- budget-vs-p90 caution -----------------------------
 
 #[test]
 fn a_cap_below_the_historical_p90_produces_the_warning() {
@@ -422,17 +428,20 @@ fn a_cap_below_the_historical_p90_produces_the_warning() {
         summary(300, 30, 3),
     ];
     let estimation = prior_estimation(&history);
-    let warning = yunta_engine::budget_p90_warning(Some(250), estimation.as_ref())
-        .expect("cap 250 < p90 300 must warn");
     assert_eq!(
-        warning,
-        "`limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 runs) — the run may pause on its budget"
+        budget_caution(Some(250), estimation.as_ref()),
+        Some(Caution::BudgetBelowHistory {
+            cap: 250,
+            p90: 300.0,
+            samples: 3
+        })
     );
+    assert_eq!(budget_caution(Some(300), estimation.as_ref()), None);
 }
 
-/// The engine states what it found; the surface showing it decides how a
-/// caution is marked. A sentence that carried its own marking would reach
-/// a CLI that adds one as `warning: warning: ...`.
+/// The caution is the facts and nothing else: its cap, the p90 it sits
+/// under and the runs behind that p90 are all it carries, so a surface
+/// that words it adds its own marking exactly once.
 #[test]
 fn the_warning_sentence_carries_no_surface_s_own_marking() {
     let history = vec![
@@ -441,12 +450,12 @@ fn the_warning_sentence_carries_no_surface_s_own_marking() {
         summary(300, 30, 3),
     ];
     let estimation = prior_estimation(&history);
-    let warning = yunta_engine::budget_p90_warning(Some(250), estimation.as_ref())
-        .expect("cap 250 < p90 300 must warn");
-    assert!(
-        !warning.to_lowercase().contains("warning"),
-        "the sentence states the fact and stops there: {warning}"
-    );
+    let Some(Caution::BudgetBelowHistory { cap, p90, samples }) =
+        budget_caution(Some(250), estimation.as_ref())
+    else {
+        panic!("a cap under the p90 is a caution");
+    };
+    assert_eq!((cap, p90, samples), (250, 300.0, 3));
 }
 
 #[test]
@@ -458,17 +467,11 @@ fn a_cap_at_or_above_the_p90_or_missing_pieces_stay_silent() {
     ];
     let estimation = prior_estimation(&history);
     // Cap covers the p90: nothing to say.
-    assert_eq!(
-        yunta_engine::budget_p90_warning(Some(300), estimation.as_ref()),
-        None
-    );
+    assert_eq!(budget_caution(Some(300), estimation.as_ref()), None);
     // No cap declared: nothing to compare.
-    assert_eq!(
-        yunta_engine::budget_p90_warning(None, estimation.as_ref()),
-        None
-    );
+    assert_eq!(budget_caution(None, estimation.as_ref()), None);
     // Not enough history (<3 runs): the estimation itself is None.
-    assert_eq!(yunta_engine::budget_p90_warning(Some(1), None), None);
+    assert_eq!(budget_caution(Some(1), None), None);
 }
 
 // --- what sessions handed over -------------------------------------------------

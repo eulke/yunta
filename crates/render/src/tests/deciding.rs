@@ -7,10 +7,11 @@ use std::path::PathBuf;
 use yunta_core::shown::PlanReview;
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 
-use super::documents::{goldens, review};
+use super::documents::{goldens, review, run};
 use crate::plan::Form;
 use crate::surface::{Markdown, Surface, Terminal};
 use crate::Look;
+use yunta_testkit_core::spell;
 
 #[test]
 fn what_weighs_on_a_decision_matches_its_goldens() {
@@ -76,7 +77,7 @@ fn a_pull_request_says_what_weighs_on_its_review_before_how_to_answer_it() {
         run_id: "01K3W48MFW7H0ZZA5PZ07E5PH4".parse().unwrap(),
         decision: yunta_core::port::GateDecision {
             node: "approve-plan".into(),
-            question: "Plan registered. Approve?".to_string(),
+            question: yunta_core::events::Claim::Written("Plan registered. Approve?".to_string()),
             assignee: "lead".to_string(),
             then: Vec::new(),
             corrected_by: Some("plan".into()),
@@ -85,7 +86,7 @@ fn a_pull_request_says_what_weighs_on_its_review_before_how_to_answer_it() {
         shown: vec![shown(review())],
     };
 
-    let body = Markdown.draw(&crate::published::gate(&request));
+    let body = Markdown.draw(&crate::published::gate(&request, &*spell()));
 
     let before = body.find("before you decide").expect("what weighs on it");
     let answer = body.find("how to answer").expect("how to answer it");
@@ -116,8 +117,9 @@ fn a_markdown_document_shown_is_titled_by_its_first_heading() {
     let read = |text: &str| {
         Terminal::on(Look::plain()).draw(&crate::shown::document(
             &brief(text),
-            "7E5PH4",
+            &run(),
             Form::Review,
+            &*spell(),
         ))
     };
 

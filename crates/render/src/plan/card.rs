@@ -3,7 +3,8 @@
 //! for it; what proves it done, with the code of the test that does.
 
 use yunta_core::shown::{HeldTo, JudgedCriterion, PlanReview, TaskReview};
-use yunta_core::{Change, Shape, Task, TasksFile};
+use yunta_core::step::NextStep;
+use yunta_core::{Change, RunId, Shape, Task, TasksFile};
 
 use super::{blank, grouped, said, Form, CODE_SHOWN};
 use crate::blocks::{Code, Fields, Marked, Section};
@@ -14,7 +15,13 @@ use crate::Mark;
 /// One task: what a person sees once it is done, what it touches, keeps
 /// and waits on; then each change it makes with the code the plan writes
 /// for it; then what proves it done, with the code of the test.
-pub(super) fn card(task: &Task, review: &PlanReview, form: Form, run: &str) -> Section<'static> {
+pub(super) fn card(
+    task: &Task,
+    review: &PlanReview,
+    form: Form,
+    run: &RunId,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Section<'static> {
     let judged = review.tasks.iter().find(|judged| judged.task == task.id);
     let mut blocks: Vec<Block<'static>> = vec![facts(task, &review.plan, judged).into()];
     for change in changes(task, &review.plan, judged) {
@@ -24,7 +31,7 @@ pub(super) fn card(task: &Task, review: &PlanReview, form: Form, run: &str) -> S
     if let Some(judged) = judged {
         for criterion in &judged.criteria {
             blocks.push(blank());
-            blocks.extend(proved(criterion, judged, review, form, run));
+            blocks.extend(proved(criterion, judged, review, form, run, spell));
         }
         let unrun: Vec<String> = judged
             .files
@@ -219,7 +226,8 @@ fn proved(
     judged: &TaskReview,
     review: &PlanReview,
     form: Form,
-    run: &str,
+    run: &RunId,
+    spell: &dyn Fn(&NextStep) -> String,
 ) -> Vec<Block<'static>> {
     let mut fields = Fields::new();
     if let Some(proves) = criterion.proves.as_deref() {
@@ -237,7 +245,7 @@ fn proved(
     match &criterion.from {
         HeldTo::Spec => {
             blocks.push(fields.into());
-            blocks.extend(tests_run(criterion, judged, review, form, run));
+            blocks.extend(tests_run(criterion, judged, review, form, run, spell));
         }
         HeldTo::AnotherTask { task } => {
             blocks.push(
@@ -257,7 +265,8 @@ fn tests_run(
     judged: &TaskReview,
     review: &PlanReview,
     form: Form,
-    run: &str,
+    run: &RunId,
+    spell: &dyn Fn(&NextStep) -> String,
 ) -> Vec<Block<'static>> {
     judged
         .files
@@ -279,7 +288,7 @@ fn tests_run(
                     what,
                     content,
                     CODE_SHOWN,
-                    format!("yunta status {run} --node spec"),
+                    crate::spec::status_command(run, spell),
                 ),
                 Form::Whole => Code::whole(file.path.as_str(), what, content),
             }

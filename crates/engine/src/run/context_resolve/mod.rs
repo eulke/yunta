@@ -61,7 +61,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload};
+use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload, Failure};
 use yunta_core::{sha256_hex, ContextSpec, Node};
 
 use super::node_close::fail;
@@ -176,7 +176,12 @@ async fn assemble(
         Err(ContextResolveError::Frozen { source, .. }) => Ok(Step::Ended(
             crate::run::session_policy::close_frozen(ctx, node, source).await?,
         )),
-        Err(error) => Ok(Step::Ended(fail(ctx, node, error.to_string()).await?)),
+        Err(error) => {
+            let failure = Failure::EngineFailed {
+                engine_error: error.to_string(),
+            };
+            Ok(Step::Ended(fail(ctx, node, failure).await?))
+        }
     }
 }
 

@@ -9,13 +9,14 @@
 //! in how they are answered.
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
-use yunta_core::OptionId;
+use yunta_core::{OptionId, RunId};
 use yunta_engine::ShownDocument;
 
 use super::field::ask_line;
 use super::keys::{Stroke, Strokes};
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
+use crate::commands::advice;
 use crate::commands::status::decision::{account, before_you_decide, Beside};
 use crate::render::blocks::{Drawn, Headline};
 use crate::render::Mark;
@@ -25,15 +26,14 @@ use crate::render::Mark;
 const SETTLE: &str = "enter records it, n adds a note";
 
 /// Puts `escalation` to the person, with the documents it shows, and
-/// returns what they decided. `run` is the handle a document names the
-/// command that shows it whole by.
+/// returns what they decided. `shown` pairs the run the documents belong
+/// to with the documents; a caller that holds no run shows none.
 pub(crate) fn decide(
     console: &Console,
     escalation: &GateWaitingPayload,
-    shown: &[ShownDocument],
-    run: &str,
+    shown: Option<(&RunId, &[ShownDocument])>,
 ) -> Answered<HumanChoice> {
-    present(console, escalation, shown, run)?;
+    present(console, escalation, shown)?;
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
     let asks = escalation
@@ -106,15 +106,22 @@ fn noted(console: &Console) -> Answered<Option<String>> {
 fn present(
     console: &Console,
     escalation: &GateWaitingPayload,
-    shown: &[ShownDocument],
-    run: &str,
+    shown: Option<(&RunId, &[ShownDocument])>,
 ) -> std::io::Result<()> {
     let look = console.look();
-    for document in shown {
-        console.say("")?;
-        let doc = crate::render::shown::document(document, run, crate::render::shown::Form::Review);
-        for line in crate::render::draw(doc, &look).lines() {
-            console.say(line)?;
+    let documents = shown.map_or(&[][..], |(_, documents)| documents);
+    if let Some((run, _)) = shown {
+        for document in documents {
+            console.say("")?;
+            let doc = crate::render::shown::document(
+                document,
+                run,
+                crate::render::shown::Form::Review,
+                &advice::spell,
+            );
+            for line in crate::render::draw(doc, &look).lines() {
+                console.say(line)?;
+            }
         }
     }
     let mut lines = Headline {
@@ -128,7 +135,7 @@ fn present(
         evidence: false,
     };
     lines.extend(account(escalation, nothing_beside, 1, &look));
-    lines.extend(before_you_decide(escalation, shown, &look));
+    lines.extend(before_you_decide(escalation, documents, &look));
     console.say("")?;
     for line in &lines {
         console.say(&look.ink.paint(line))?;

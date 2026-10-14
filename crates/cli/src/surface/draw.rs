@@ -69,7 +69,9 @@ mod chronicle_tests {
                 "lint",
                 EventPayload::Node(NodeEvent::Failed(
                     yunta_core::events::NodeFailedPayload::new(
-                        Failure::message("exit 1"),
+                        Failure::Message {
+                            outcome: "exit 1".into(),
+                        },
                         TokenUsage::default(),
                     ),
                 )),

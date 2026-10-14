@@ -15,8 +15,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_adapters::MOCK_ID;
+use yunta_core::caution::Caution;
 use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, RunAdapter, Workflow};
-use yunta_engine::{FrozenRun, PriorEstimation};
+use yunta_engine::{CheckError, FrozenRun, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
 mod attached;
@@ -30,6 +31,8 @@ use super::registry::{read_fixture, servable};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
+use crate::output::Mode;
+use crate::render::Look;
 use mode::resolve_mode;
 
 /// Parses `--input name=value` entries into the raw map
@@ -81,9 +84,9 @@ pub async fn run(
     adapter: Option<&AdapterId>,
     fixture: Option<&Path>,
     mode: Option<&ModeName>,
-    quiet: bool,
+    output: Mode,
     detach: bool,
-    json: bool,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
@@ -97,8 +100,8 @@ pub async fn run(
             raw_inputs,
             adapter,
             mode,
-            quiet,
-            json,
+            output,
+            look,
         })
         .await;
     }
@@ -111,8 +114,8 @@ pub async fn run(
         adapter,
         mock_fixture,
         mode,
-        quiet,
-        json,
+        output,
+        look,
     })
     .await
 }
@@ -214,28 +217,34 @@ pub(super) async fn preflight(
     ctx: &Context,
     manifest: &Manifest,
     mode: Option<&ModeName>,
-    quiet: bool,
-    json: bool,
+    output: Mode,
+    look: &Look,
 ) -> Result<Preflight, CliError> {
     // A run started here is started fresh in its mode: what only a run
     // promoted into that mode would hold, it does not.
     let started_in = resolve_mode(manifest, mode);
     let refused = yunta_engine::check_mode_start(&manifest.workflow, &started_in);
     if !refused.is_empty() {
-        return Err(CliError::msg(yunta_core::text::problems(
-            "the workflow fails `yunta check`",
-            &refused,
-        )));
+        return Err(check_refusal(&refused));
     }
     let context_files = context_files(ctx, manifest, mode).await?;
-    let (prior, budget) = estimate(ctx, manifest, &started_in, quiet, json).await;
+    let (prior, budget) = estimate(ctx, manifest, &started_in, output, look).await;
+    // The document lists the budget first, then the files a node reads.
+    let cautions = budget.into_iter().chain(context_files).collect();
     Ok(Preflight {
         prior,
-        warnings: PreRunWarnings {
-            budget,
-            context_files,
-        },
+        warnings: PreRunWarnings { cautions },
     })
+}
+
+/// The refusal a workflow's own check makes, each error in the words a
+/// person reads.
+fn check_refusal(errors: &[CheckError]) -> CliError {
+    let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
+    CliError::msg(yunta_core::text::problems(
+        "the workflow fails `yunta check`",
+        &words,
+    ))
 }
 
 /// The literal `files:` paths the nodes of this run's mode read that the
@@ -247,7 +256,7 @@ async fn context_files(
     ctx: &Context,
     manifest: &Manifest,
     mode: Option<&ModeName>,
-) -> Result<Vec<String>, CliError> {
+) -> Result<Vec<Caution>, CliError> {
     let mode = resolve_mode(manifest, mode);
     let left_out = yunta_core::left_out(&manifest.workflow, &manifest.config);
     let included = yunta_engine::included_nodes(&manifest.workflow, &mode, &left_out);
@@ -260,31 +269,24 @@ async fn context_files(
     )
     .await?;
     if !found.errors.is_empty() {
-        return Err(CliError::msg(yunta_core::text::problems(
-            "the workflow fails `yunta check`",
-            &found.errors,
-        )));
+        return Err(check_refusal(&found.errors));
     }
-    Ok(found
-        .warnings
-        .iter()
-        .map(|warning| {
-            warn(warning);
-            warning.to_string()
-        })
-        .collect())
+    for warning in &found.warnings {
+        warn(yunta_render::caution::line(warning));
+    }
+    Ok(found.warnings)
 }
 
-/// What this workflow's past runs cost, shown before anything is spent
-/// and returned for the closing block's own comparison when the
+/// What this workflow's past runs cost, shown in advance of anything being
+/// spent and returned for the closing block's own comparison when the
 /// invocation stays to draw one.
 ///
-/// The distribution is informative, and this is where the two flags that
-/// suppress it are read: whoever asked for the run id alone (`--quiet`)
-/// or for a JSON document (`--json`) did not ask for context. The budget
-/// warning survives both — it asks for a decision before tokens are
-/// spent, and a run that stops halfway on a badly chosen cap is the most
-/// expensive waste there is.
+/// The distribution is informative, so only a person's terminal in
+/// `Human` mode is given it: whoever asked for the run id alone or for a
+/// JSON document did not ask for context. The budget caution survives
+/// every mode — it asks for a decision in advance of spending tokens, and
+/// a run that stops halfway on a badly chosen cap is the most expensive
+/// waste there is.
 ///
 /// Only the runs that started in `mode` and carry this workflow's hash
 /// are a sample of what this run costs: a run in another mode, or of
@@ -293,25 +295,19 @@ async fn estimate(
     ctx: &Context,
     manifest: &Manifest,
     mode: &ModeName,
-    quiet: bool,
-    json: bool,
-) -> (Option<PriorEstimation>, Option<String>) {
-    let history =
-        super::stats::summaries(&super::stats::history(ctx, &manifest.workflow.name).await);
-    let history: Vec<_> = history
-        .into_iter()
-        .filter(|run| run.mode == *mode && run.workflow_hash == manifest.workflow_hash)
-        .collect();
+    output: Mode,
+    look: &Look,
+) -> (Option<PriorEstimation>, Option<Caution>) {
+    let history = super::stats::budget_sample(ctx, manifest, mode, None).await;
     let estimation = yunta_engine::prior_estimation(&history);
     if let Some(estimation) = &estimation {
-        if !(quiet || json) {
-            println!(
-                "{}",
-                super::stats::format_estimation_line(estimation, crate::render::glyphs())
-            );
-        }
+        crate::output::progress(
+            output,
+            look,
+            super::stats::format_estimation_line(estimation, look.glyphs),
+        );
     }
-    let budget_warning = yunta_engine::budget_p90_warning(
+    let budget = yunta_engine::budget_caution(
         manifest
             .config
             .limits
@@ -319,10 +315,10 @@ async fn estimate(
             .and_then(|limits| limits.max_tokens_per_run),
         estimation.as_ref(),
     );
-    if let Some(warning) = &budget_warning {
-        warn(warning);
+    if let Some(caution) = &budget {
+        warn(yunta_render::caution::line(caution));
     }
-    (estimation, budget_warning)
+    (estimation, budget)
 }
 
 /// Freezes the run: its manifest, every input its nodes read, the

@@ -5,6 +5,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::CliError;
+use crate::output::Mode;
 use crate::surface::{Curtain, Diagnostics, Surface, SurfaceEnv};
 
 use super::{Driving, Presentation};
@@ -58,7 +59,7 @@ impl Drop for Watching {
 /// armed once there is a surface for it to say so through, because the
 /// line it raises belongs above the region rather than around it.
 pub(super) async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliError> {
-    let surface = if env.json {
+    let surface = if env.output == Mode::Json {
         None
     } else {
         Some(

@@ -10,9 +10,10 @@ use yunta_core::events::{BaselineOrigin, TerminalState};
 use yunta_core::receipt::{
     BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
 };
+use yunta_core::step::NextStep;
 use yunta_core::text::counted;
 use yunta_core::units::Tokens;
-use yunta_core::NodeId;
+use yunta_core::{NodeId, RunId};
 
 use crate::blocks::{
     Checklist, FailureDetail, Fields, Found, Headline, Next, Prose, Section, Whole,
@@ -48,7 +49,7 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// per thing the run held its work to — a cross only for what failed, a
 /// `·` for what was never asked for — then each criterion and each path
 /// outside the scope, and the command that checks it all again.
-pub fn document(receipt: &Receipt) -> Doc<'_> {
+pub fn document<'a>(receipt: &'a Receipt, spell: &dyn Fn(&NextStep) -> String) -> Doc<'a> {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -73,7 +74,7 @@ pub fn document(receipt: &Receipt) -> Doc<'_> {
         )
         .with(checks(receipt));
     for failed in &receipt.failed {
-        doc = doc.with(failed_node(failed, handle));
+        doc = doc.with(failed_node(failed, &receipt.run_id, spell));
     }
     if let Some(criteria) = criteria(receipt) {
         doc = doc
@@ -87,7 +88,9 @@ pub fn document(receipt: &Receipt) -> Doc<'_> {
     }
     doc.with(Next {
         steps: vec![(
-            format!("yunta verify {handle}"),
+            spell(&NextStep::Verify {
+                run: receipt.run_id.clone(),
+            }),
             "checks this run's evidence again",
         )],
     })
@@ -95,7 +98,11 @@ pub fn document(receipt: &Receipt) -> Doc<'_> {
 
 /// A node that stands failed: its id and the sentence its failure is
 /// told in, then what it printed and the command that shows the rest.
-fn failed_node<'a>(failed: &'a FailedNode, handle: &str) -> Section<'a> {
+fn failed_node<'a>(
+    failed: &'a FailedNode,
+    run: &RunId,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Section<'a> {
     let node = &failed.node;
     Section {
         mark: Some(Mark::Failed),
@@ -105,9 +112,10 @@ fn failed_node<'a>(failed: &'a FailedNode, handle: &str) -> Section<'a> {
             .plain(crate::failure::headline(&failed.failure)),
         blocks: vec![Block::Failure(FailureDetail {
             failure: &failed.failure,
-            whole: Some(Whole::Command(format!(
-                "yunta status {handle} --node {node}"
-            ))),
+            whole: Some(Whole::Command(spell(&NextStep::Status {
+                run: run.clone(),
+                node: Some(node.clone()),
+            }))),
         })],
     }
 }

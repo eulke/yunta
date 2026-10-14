@@ -7,7 +7,7 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EngineFact, EventPayload, Failure,
-    NodeOutcome, PauseReason, TerminalState,
+    NodeOutcome, PauseReason, TerminalState, TokenUsage,
 };
 use yunta_core::{Isolation, Manifest, Node, RunId};
 
@@ -15,7 +15,7 @@ use super::super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::super::node_exec::{cancelled_end, NodeEnd};
 use super::super::{RunCtx, RunError, RunTerminal};
 use super::{runs_root, worktrees_root};
-use crate::replay::RunView;
+use crate::replay::{RunState, RunView};
 
 /// Re-enters an existing, unfinished child run — everything it needs is
 /// its own frozen truth (manifest + paths + log), never re-resolved.
@@ -30,15 +30,11 @@ pub(super) async fn resume_child(
     let child_manifest: Manifest = match super::super::read_manifest(&manifest_path).await {
         Ok(manifest) => manifest.doc,
         Err(error) => {
-            return fail(
-                ctx,
-                node,
-                format!(
-                    "child run `{child_id}` cannot resume: {}",
-                    yunta_core::describe(&error)
-                ),
-            )
-            .await;
+            let engine_error = format!(
+                "child run `{child_id}` cannot resume: {}",
+                yunta_core::describe(&error)
+            );
+            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
     };
     let child_tree = match child_manifest.isolation {
@@ -67,8 +63,8 @@ pub(super) async fn resume_child(
             {
                 Ok(tree) => tree,
                 Err(e) => {
-                    let said = format!("child run `{child_id}` cannot resume: {e}");
-                    return fail(ctx, node, said).await;
+                    let engine_error = format!("child run `{child_id}` cannot resume: {e}");
+                    return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
                 }
             }
         }
@@ -95,6 +91,47 @@ pub(super) struct Child<'a> {
     pub(super) manifest: &'a Manifest,
     pub(super) run_dir: &'a Path,
     pub(super) tree: &'a Path,
+}
+
+/// Whether a child's own log closed `failed`.
+fn closed_failed(state: &RunState) -> bool {
+    state
+        .run
+        .finished()
+        .is_some_and(|finished| matches!(finished.terminal, TerminalState::Failed))
+}
+
+/// The node a child that closed `failed` fails: the link records the child's
+/// failure with its spend, and the node's failure names the child it came
+/// from. `child_failure` is the failure the child's own run holds, when it
+/// holds one.
+async fn child_failed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    (child_id, child_manifest): (&RunId, &Manifest),
+    spent: TokenUsage,
+    child_failure: Option<Failure>,
+) -> Result<NodeEnd, RunError> {
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+            child_id.clone(),
+            child_manifest.workflow_hash.clone(),
+            TerminalState::Failed,
+            spent,
+        ))),
+    )
+    .await?;
+    // The child's failure travels whole, as data, under this node's. Its
+    // diagnostics are not copied up: the child is a run of its own, and its
+    // log is where they are recorded. Flattening one run's evidence into
+    // another's outcome is what turns three levels of composition into a
+    // single unreadable line.
+    let failure = Failure::ChildFailed {
+        child_run: child_id.clone(),
+        child_failure: child_failure.map(Box::new),
+    };
+    fail_with(ctx, node, failure, TokenUsage::default()).await
 }
 
 /// Executes the child run to its next stop and maps that onto this
@@ -165,6 +202,15 @@ pub(super) async fn drive_child(
         let worked_in = report.tree(&current_tree);
 
         match report.terminal {
+            // A child re-entered after its own log closed `failed` answers as
+            // finished. The failure that log holds is the one the node fails
+            // with, as it would have from the child's report.
+            RunTerminal::Finished if closed_failed(&report.state) => {
+                let spent = report.state.metrics().tokens;
+                let child_failure = report.state.last_failure();
+                let child = (&current_id, &current_manifest);
+                return child_failed(ctx, node, child, spent, child_failure).await;
+            }
             RunTerminal::Finished => {
                 ctx.emit(
                     Some(&node.id),
@@ -237,15 +283,11 @@ pub(super) async fn drive_child(
                 {
                     Ok(successor) => successor,
                     Err(e) => {
-                        return fail(
-                            ctx,
-                            node,
-                            format!(
-                                "child run `{current_id}` promoted toward `{suggested_mode}` \
-                                 but its successor could not be created: {e}"
-                            ),
-                        )
-                        .await;
+                        let engine_error = format!(
+                            "child run `{current_id}` promoted toward `{suggested_mode}` \
+                             but its successor could not be created: {e}"
+                        );
+                        return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
                     }
                 };
                 ctx.emit(
@@ -265,32 +307,9 @@ pub(super) async fn drive_child(
                 // A child that closed itself as failed (`defaults.on_failure`)
                 // fails the workflow node — the link records the failure with
                 // its spend, and the failure names the child it came from.
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
-                        current_id.clone(),
-                        current_manifest.workflow_hash.clone(),
-                        TerminalState::Failed,
-                        report.state.metrics().tokens,
-                    ))),
-                )
-                .await?;
-                // The child's failure travels whole, as data, under this
-                // node's. Its diagnostics are not copied up: the child is a
-                // run of its own, and its log is where they are recorded.
-                // Flattening one run's evidence into another's outcome is
-                // what turns three levels of composition into a single
-                // unreadable line.
-                return fail_with(
-                    ctx,
-                    node,
-                    Failure::ChildFailed {
-                        child_run: current_id.clone(),
-                        child_failure: Some(Box::new(failure)),
-                    },
-                    yunta_core::events::TokenUsage::default(),
-                )
-                .await;
+                let spent = report.state.metrics().tokens;
+                let child = (&current_id, &current_manifest);
+                return child_failed(ctx, node, child, spent, Some(failure)).await;
             }
             RunTerminal::Paused { reason } => {
                 if ctx.root_cancel.is_cancelled() || cancel.is_cancelled() {

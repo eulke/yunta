@@ -186,7 +186,7 @@ pub(super) async fn execute_prompt(
 /// The node's one session, opened on its adapter. A session the engine cannot
 /// confine, and a node that cannot proceed without the run tools it declared,
 /// are both refused here, before a token is spent, and the node ends on the
-/// reason.
+/// cause.
 async fn open_node_session(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -213,16 +213,14 @@ async fn open_node_session(
         // A node that cannot proceed without the run tools it declared:
         // refused before a token is spent, naming what has no way in.
         Err(OpenSessionError::RunTools(error)) => {
-            Ok(Err(
-                super::node_close::fail(ctx, node, error.to_string()).await?
-            ))
+            let failure = error.failure();
+            Ok(Err(super::node_close::fail(ctx, node, failure).await?))
         }
         // A session the engine cannot confine is refused the same way, naming
         // what the confinement could not hold.
-        Err(OpenSessionError::Confinement(error)) => {
-            Ok(Err(
-                super::node_close::fail(ctx, node, error.to_string()).await?
-            ))
+        Err(OpenSessionError::Confinement(confinement)) => {
+            let failure = Failure::Confinement { confinement };
+            Ok(Err(super::node_close::fail(ctx, node, failure).await?))
         }
         Err(OpenSessionError::Audit(source)) => Err(RunError::Storage(source)),
     }
@@ -421,8 +419,8 @@ async fn close_on_outcome(
             let death = Failure::session_died(adapter.id().clone(), exit);
             fail_with_staged(ctx, node, death, tokens, staged).await
         }
-        DispatchOutcome::BudgetExceeded { reason } => {
-            fail_with_tokens_staged(ctx, node, reason, tokens, staged).await
+        DispatchOutcome::BudgetExceeded { cause } => {
+            fail_with_tokens_staged(ctx, node, cause, tokens, staged).await
         }
         DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
     }

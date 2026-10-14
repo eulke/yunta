@@ -216,6 +216,27 @@ fn status_quotes_the_tail_of_a_failed_command_and_names_where_the_rest_is() {
     assert_eq!(build["command_exit"]["tail"][1], " --> src/lib.rs:3:5");
 }
 
+/// A run id no log holds, so a command that names it is refused.
+const UNKNOWN_RUN: &str = "01AAAAAAAAAAAAAAAAAAAAAAAA";
+
+#[test]
+fn an_error_under_json_is_one_document_on_stdout() {
+    let checkout = Checkout::new()
+        .config("defaults:\n  isolation: none\n")
+        .committed();
+    let out = yunta_at!(&checkout, &["status", UNKNOWN_RUN, "--json"]);
+    assert!(!out.status.success());
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("one document on stdout");
+    assert!(
+        doc["error"]["said"]
+            .as_str()
+            .is_some_and(|said| said.contains("no run is called")),
+        "{doc}"
+    );
+    assert!(stderr(&out).is_empty(), "{}", stderr(&out));
+}
+
 /// The red pre-check carries its tail and names its output; the green
 /// post-check names its output and carries no tail. Both redacted.
 fn criteria_are_kept(checkout: &Checkout, run_id: &str, events: &[Value]) {

@@ -68,7 +68,12 @@ mod tests {
 
     /// A failure of `node` that left the run's tree on `tree`.
     fn failed(node: &'static str, tree: &str) -> (Option<&'static str>, EventPayload) {
-        let failure = NodeFailedPayload::new(Failure::message("regression"), TokenUsage::default());
+        let failure = NodeFailedPayload::new(
+            Failure::Message {
+                outcome: "regression".to_string(),
+            },
+            TokenUsage::default(),
+        );
         let failure = failure.leaving(tree.parse().unwrap());
         (Some(node), EventPayload::Node(NodeEvent::Failed(failure)))
     }
@@ -163,7 +168,12 @@ mod tests {
 
     #[test]
     fn a_failure_that_named_no_tree_reads_no_movement() {
-        let unnamed = NodeFailedPayload::new(Failure::message("regression"), TokenUsage::default());
+        let unnamed = NodeFailedPayload::new(
+            Failure::Message {
+                outcome: "regression".to_string(),
+            },
+            TokenUsage::default(),
+        );
         let entries = vec![
             started("compare", "a1a1a1a"),
             (

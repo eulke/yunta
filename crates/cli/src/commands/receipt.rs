@@ -13,16 +13,21 @@ use yunta_core::RunId;
 use yunta_engine::{build_receipt, render_receipt_json, EventChainStatus, Receipt};
 use yunta_storage::ChainVerification;
 
+use super::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::output::{emit, Answer, Mode};
+use crate::render::doc::Doc;
+use crate::render::Look;
 
-pub async fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+pub async fn receipt(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let (run_dir, receipt) = gathered(&ctx, run_id).await?;
 
     let markdown = {
         use yunta_render::surface::Surface;
-        yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(&receipt))
+        yunta_render::surface::Markdown
+            .draw(&yunta_render::receipt::document(&receipt, &advice::spell))
     };
     let json_text = render_receipt_json(&receipt)
         .map_err(|e| CliError::msg(format!("could not render receipt JSON: {e}")))?;
@@ -32,20 +37,26 @@ pub async fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     save(&run_dir.join("receipt.md"), &markdown)?;
     save(&run_dir.join("receipt.json"), &json_text)?;
 
-    if json {
-        println!("{json_text}");
-    } else {
-        // The same document `receipt.md` holds, laid out for this
-        // terminal rather than written as Markdown.
-        print!(
-            "{}",
-            crate::render::draw(
-                yunta_render::receipt::document(&receipt),
-                &crate::render::stdout_look()
-            )
-        );
+    emit(output, &ReceiptAnswer { receipt }, look)
+}
+
+/// The receipt as an answer. Its JSON is the receipt's own document, and its
+/// page is the same document laid out for this terminal rather than written
+/// as Markdown.
+#[derive(serde::Serialize)]
+#[serde(transparent)]
+struct ReceiptAnswer {
+    receipt: Receipt,
+}
+
+impl Answer for ReceiptAnswer {
+    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+        yunta_render::receipt::document(&self.receipt, &advice::spell)
     }
-    Ok(Outcome::Success)
+
+    fn outcome(&self) -> Outcome {
+        Outcome::Success
+    }
 }
 
 /// The run's receipt and the directory it belongs beside, derived from

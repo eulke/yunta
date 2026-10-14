@@ -83,7 +83,7 @@ pub use answers::{
     Reply as AnswersReply,
 };
 pub use artifacts::shown::{documents as shown_documents, produced as produced_documents, view_of};
-pub use artifacts::store::{view_path, ObjectError, ObjectStore};
+pub use artifacts::store::{view_path, ObjectStore, StoreError};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,
     VerifiedArtifact,
@@ -93,16 +93,15 @@ pub use catalog::{
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
 pub use check::{
-    check, check_context_files, check_mode_start, check_mounted, check_token_cap_warnings,
-    check_warnings, check_workflow_refs, programs_named, AdapterFacts, CheckError, CheckWarning,
-    Composition, ContextFilesCheck, MissingContextFile, RefsCheck, RunTreeOrigin, Unanswerable,
-    UntakenRoute,
+    check, check_context_files, check_mode_start, check_mounted, check_warnings,
+    check_workflow_refs, programs_named, AdapterFacts, CheckError, Composition, ContextFilesCheck,
+    RefsCheck, RunTreeOrigin, Unanswerable, UntakenRoute,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
 pub use history::{
-    budget_p90_warning, prior_estimation, run_summary, Percentiles, PriorEstimation, RunSummary,
+    budget_caution, prior_estimation, run_summary, Percentiles, PriorEstimation, RunSummary,
     MIN_SAMPLES_FOR_ESTIMATION,
 };
 pub use human_interaction::{

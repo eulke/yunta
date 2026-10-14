@@ -20,7 +20,8 @@ use crate::commands::{reset_at, spawn_detached_resume, DetachedResumeError};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::PreRunWarnings;
-use crate::render::Glyphs;
+use crate::output::Mode;
+use crate::render::{Glyphs, Look};
 use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
 
 /// A run's identity and the paths it lives at — what the executing path,
@@ -52,11 +53,13 @@ pub(crate) struct Driving<'a> {
     /// this invocation prints says it too — stderr reaches the person
     /// watching, and a `--json` reader is watching nothing.
     pub(crate) warnings: PreRunWarnings,
-    /// `--quiet`: the run id and nothing else, with the verdict in the
-    /// exit code.
-    pub(crate) quiet: bool,
-    /// `--json`: one versioned document and no live surface at all.
-    pub(crate) json: bool,
+    /// How this invocation reports: a live surface for `Human`, the verdict
+    /// in the exit code alone for `Quiet`, and one versioned document with
+    /// no live surface at all for `Json`.
+    pub(crate) output: Mode,
+    /// The stdout look `main` built, which everything this invocation
+    /// draws is drawn with.
+    pub(crate) look: &'a Look,
 }
 
 /// How this invocation shows the run — derived here rather than handed
@@ -68,9 +71,9 @@ struct Presentation {
 
 impl Presentation {
     /// What `--quiet` and the environment this process was handed allow.
-    fn of(quiet: bool) -> Self {
+    fn of(output: Mode) -> Self {
         Self {
-            delivery: Delivery::choose(quiet, TerminalEnv::settled()),
+            delivery: Delivery::choose(output == Mode::Quiet, TerminalEnv::settled()),
             glyphs: crate::render::glyphs(),
         }
     }
@@ -80,7 +83,7 @@ impl Presentation {
 /// end, and closes the invocation out — the one path `yunta run` and
 /// `yunta resume` both take once the run they drive is open.
 pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
-    let shown = Presentation::of(env.quiet);
+    let shown = Presentation::of(env.output);
     let forge = super::forge::forge_for(&env.manifest.config, &yunta_core::ProcessSecrets);
     let watching = watch(&env, &shown).await?;
     let root_cancel = watching.cancel.clone();
@@ -108,15 +111,7 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
             return Err(e.into());
         }
     };
-    finish(
-        &env,
-        &shown,
-        forge.as_deref(),
-        &root_cancel,
-        watching,
-        report,
-    )
-    .await
+    finish(&env, forge.as_deref(), &root_cancel, watching, report).await
 }
 
 /// One run, handed to the engine.
@@ -177,7 +172,6 @@ pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine
 /// surface and asks on the same console.
 async fn finish(
     env: &Driving<'_>,
-    shown: &Presentation,
     forge: Option<&dyn yunta_core::port::Forge>,
     cancel: &tokio_util::sync::CancellationToken,
     watching: Watching,
@@ -210,9 +204,8 @@ async fn finish(
         cancelled: cancel.is_cancelled(),
         prior: env.prior.as_ref(),
         warnings: env.warnings.clone(),
-        glyphs: shown.glyphs,
-        quiet: env.quiet,
-        json: env.json,
+        output: env.output,
+        look: env.look,
     })
     .await
 }
@@ -235,9 +228,11 @@ pub(crate) struct Settling<'a> {
     /// Empty on a `resume`: they are said to whoever *creates* a run,
     /// and a resume picks one up.
     pub(crate) warnings: PreRunWarnings,
-    pub(crate) glyphs: Glyphs,
-    pub(crate) quiet: bool,
-    pub(crate) json: bool,
+    /// How the report is written: the closing block, the verdict alone, or
+    /// the document.
+    pub(crate) output: Mode,
+    /// The stdout look the closing block is drawn with.
+    pub(crate) look: &'a Look,
 }
 
 /// Releases what the run held and reports how it ended — the tail every
@@ -259,8 +254,8 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
 async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
     released(&settling).await?;
     resumes_after_reset(&settling).await?;
-    if settling.json {
-        return Ok(report_run_json(
+    match settling.output {
+        Mode::Json => Ok(report_run_json(
             settling.ctx,
             settling.storage,
             &settling.run_id,
@@ -268,13 +263,11 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
             settling.warnings,
         )
         .await?
-        .verdict());
-    }
-    if settling.quiet {
+        .verdict()),
         // The run id already went out when the invocation opened, and
         // the verdict travels in the exit code — read off the run's own
         // log, the same reading the document and the closing block take.
-        return Ok(documented(
+        Mode::Quiet => Ok(documented(
             settling.ctx,
             settling.storage,
             &settling.run_id,
@@ -282,21 +275,23 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
             settling.warnings,
         )
         .await?
-        .verdict());
+        .verdict()),
+        Mode::Human => {
+            report_closing(Closed {
+                run_id: &settling.run_id,
+                manifest: &settling.manifest,
+                run_dir: &run_dir_of(settling.ctx, &settling.run_id),
+                worktree: &settling.worktree,
+                storage: settling.storage,
+                clock: &settling.ctx.clock,
+                prior: settling.prior,
+                look: settling.look,
+                cwd: &settling.ctx.cwd,
+                home: settling.ctx.env.home.as_deref(),
+            })
+            .await
+        }
     }
-    report_closing(Closed {
-        run_id: &settling.run_id,
-        manifest: &settling.manifest,
-        run_dir: &run_dir_of(settling.ctx, &settling.run_id),
-        worktree: &settling.worktree,
-        storage: settling.storage,
-        clock: &settling.ctx.clock,
-        prior: settling.prior,
-        glyphs: settling.glyphs,
-        cwd: &settling.ctx.cwd,
-        home: settling.ctx.env.home.as_deref(),
-    })
-    .await
 }
 
 /// Hands back what the run held, when the run is done holding it.
@@ -363,7 +358,8 @@ pub(crate) struct Closed<'a> {
     /// What this workflow's past runs cost, for the block's own
     /// comparison; `None` below the history floor.
     pub(crate) prior: Option<&'a PriorEstimation>,
-    pub(crate) glyphs: Glyphs,
+    /// The stdout look the block is drawn with.
+    pub(crate) look: &'a Look,
     /// Where paths are shown from: the directory this was run in, and
     /// the home `~` stands for.
     pub(crate) cwd: &'a Path,
@@ -403,11 +399,8 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
             home: closed.home,
         },
     });
-    let look = crate::render::Look {
-        glyphs: closed.glyphs,
-        ..crate::render::stdout_look()
-    };
-    print!("{}", closing.render(&look));
+    let page = closing.page(closed.look);
+    crate::output::document(closed.look, page.document(closed.look));
     Ok(closing.outcome())
 }
 

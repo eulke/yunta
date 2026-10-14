@@ -11,24 +11,52 @@ use crate::render::doc::{Block, Doc};
 use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, sparkline, truncate, Look, Tokens, INDENT, LABEL_WIDTH};
 
-/// The whole `yunta stats --workflow <name>` block, ready to print.
-pub(super) fn render_workflow_history(
-    workflow_name: &WorkflowName,
-    history: &[RunSummary],
-    look: Look,
-) -> String {
-    let mut out = format!(
-        "workflow `{workflow_name}` — {}\n",
+/// What the `yunta stats --workflow <name>` page is drawn from: a
+/// workflow's past runs, and what their logs say about its checks.
+pub(super) struct WorkflowPage<'a> {
+    pub(super) name: &'a WorkflowName,
+    pub(super) history: &'a [RunSummary],
+    pub(super) findings: Option<yunta_engine::VerificationFindings>,
+}
+
+impl WorkflowPage<'_> {
+    /// The page as one document: the history, then what the checks say
+    /// when there is anything to say. A workflow nobody has run is told so
+    /// in a line of its own.
+    pub(super) fn document(&self, look: &Look) -> Doc<'static> {
+        if self.history.is_empty() {
+            return Doc::new().with(Block::Lines(vec![
+                Line::new().plain(format!("no runs of workflow `{}` yet", self.name))
+            ]));
+        }
+        let mut doc = Doc::new().with(Block::Lines(history_lines(self.name, self.history, *look)));
+        if let Some(advice) = self.findings.as_ref().and_then(verification_findings) {
+            doc = doc
+                .with(Block::Lines(vec![Line::new()]))
+                .with(Block::Lines(crate::render::surface_lines(advice, look)));
+        }
+        doc
+    }
+}
+
+/// The lines of `yunta stats --workflow <name>`'s history: how many runs it
+/// has, its CPTV over time, its modes side by side, and what its history
+/// estimates.
+fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Look) -> Vec<Line> {
+    let mut lines = vec![Line::new().plain(format!(
+        "workflow `{workflow_name}` — {}",
         yunta_core::text::counted(history.len(), "run")
-    );
+    ))];
 
-    out.push_str("\nCPTV over time:\n");
-    out.push_str(&format!("{}\n", cptv_line(history, look)));
+    lines.push(Line::new());
+    lines.push(Line::new().plain("CPTV over time:"));
+    lines.push(Line::new().plain(cptv_line(history, look)));
 
-    out.push_str("\nmodes:\n");
+    lines.push(Line::new());
+    lines.push(Line::new().plain("modes:"));
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
-        out.push_str(&format!(
-            "{INDENT}{} {:>3} {:<4}   median CPTV {}   median tokens {}\n",
+        lines.push(Line::new().plain(format!(
+            "{INDENT}{} {:>3} {:<4}   median CPTV {}   median tokens {}",
             truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
             runs,
             yunta_core::text::agreeing(runs, "run", "runs"),
@@ -38,23 +66,19 @@ pub(super) fn render_workflow_history(
             median_tokens
                 .map(|v| Tokens::rounded(v).figure())
                 .unwrap_or_else(|| "n/a".to_string()),
-        ));
+        )));
     }
 
-    match prior_estimation(history) {
-        Some(estimation) => {
-            out.push_str(&format!(
-                "\n{}\n",
-                format_estimation_line(&estimation, look.glyphs)
-            ));
-        }
-        None => out.push_str(&format!(
-            "\nestimation: not enough runs yet (need {}, have {})\n",
+    lines.push(Line::new());
+    lines.push(Line::new().plain(match prior_estimation(history) {
+        Some(estimation) => format_estimation_line(&estimation, look.glyphs),
+        None => format!(
+            "estimation: not enough runs yet (need {}, have {})",
             yunta_engine::MIN_SAMPLES_FOR_ESTIMATION,
             history.len()
-        )),
-    }
-    out
+        ),
+    }));
+    lines
 }
 
 /// Every past run's CPTV as one cell, oldest first, with the newest

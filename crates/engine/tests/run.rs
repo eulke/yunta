@@ -1362,10 +1362,8 @@ async fn a_log_that_breaks_before_its_close_is_broken_not_finished() {
             MOCK_CONFIG,
         )
         .await;
-    let failed = NodeFailedPayload::new(
-        Failure::message("no start".to_string()),
-        TokenUsage::default(),
-    );
+    let outcome = "no start".to_string();
+    let failed = NodeFailedPayload::new(Failure::Message { outcome }, TokenUsage::default());
     let close = RunFinishedPayload {
         terminal_state: TerminalState::Done,
         metrics: RunMetrics {

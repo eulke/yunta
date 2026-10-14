@@ -8,11 +8,14 @@
 //! named node declares what is asked of it. One list of them is what
 //! keeps a fourth place from reaching one rule and not the others.
 
+use serde::{Deserialize, Serialize};
+
 use super::{ArtifactKind, ArtifactRefId, ContextSpec, Node, NodeKind};
 use crate::ids::NodeId;
 
 /// Where a node names an artifact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ReadSite {
     Context,
     Mount,
@@ -26,15 +29,6 @@ impl ReadSite {
             ReadSite::Context => "context: artifact",
             ReadSite::Mount => "mounts",
             ReadSite::Shows => "shows",
-        }
-    }
-
-    /// Where the reference sits, as a diagnostic about `reader` names it.
-    pub fn of(self, reader: &NodeId) -> String {
-        match self {
-            ReadSite::Context => format!("the `artifact:` context source of node `{reader}`"),
-            ReadSite::Mount => format!("a `mounts:` entry of node `{reader}`"),
-            ReadSite::Shows => format!("the `shows:` of gate `{reader}`"),
         }
     }
 }

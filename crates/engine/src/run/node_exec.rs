@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use yunta_core::commit_message::CommitMessage;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Failure, HookPhase, PauseReason};
+use yunta_core::events::{Failure, HookPhase, Interruption, PauseReason};
 use yunta_core::port::PermissionProfile;
 use yunta_core::{HookFailurePolicy, Node, NodeKind};
 
@@ -58,7 +58,9 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
     fail(
         ctx,
         node,
-        "interrupted: a sibling in this join: any group finished first".to_string(),
+        Failure::Interrupted {
+            interrupted_by: Interruption::SiblingWon,
+        },
     )
     .await
 }
@@ -195,7 +197,9 @@ async fn execute_in_its_tree(
     let hooks = effective_hooks(ctx, node);
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
-            HookRun::Violation(rule) => return fail(ctx, node, rule).await,
+            HookRun::Violation(denied_rule) => {
+                return fail(ctx, node, Failure::CommandDenied { denied_rule }).await;
+            }
             HookRun::Unset(key) => return super::check_exec::unset(ctx, node, key).await,
             HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
                 let failure = yunta_core::events::Failure::exited(exit);
@@ -408,7 +412,7 @@ pub(super) async fn render_or_fail(
 ) -> Result<Step<String>, RunError> {
     match render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Step::Value(rendered)),
-        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string()).await?)),
+        Err(template) => Ok(Step::Ended(fail(ctx, node, Failure::from(template)).await?)),
     }
 }
 
@@ -471,14 +475,15 @@ pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Nod
     if let Some(artifacts) = &mut rendered.artifacts {
         for spec in &mut artifacts.produces {
             if let yunta_core::ArtifactSpec::Opaque(name) = spec {
-                *name =
-                    render_template(name, &vars).map_err(|e| Failure::message(e.to_string()))?;
+                *name = render_template(name, &vars).map_err(Failure::from)?;
                 // What a template renders to is a name like any other,
                 // and this is where it is first known: a name checked
                 // as written says nothing about what its variables
                 // stand for.
-                yunta_core::ArtifactName::parse(name)
-                    .map_err(|problem| Failure::message(problem.to_string()))?;
+                yunta_core::ArtifactName::parse(name).map_err(|problem| Failure::ArtifactName {
+                    name: name.clone(),
+                    problem,
+                })?;
             }
         }
     }

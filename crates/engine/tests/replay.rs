@@ -84,7 +84,9 @@ fn a_failed_attempt_can_restart_and_then_finish() {
         .node(
             "lint",
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                Failure::message("criteria red".to_string()),
+                Failure::Message {
+                    outcome: "criteria red".into(),
+                },
                 tokens(5, 2),
             ))),
         )
@@ -357,7 +359,7 @@ fn replay_is_deterministic_across_several_fixtures() {
             .node(
                 "a",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                    Failure::message("bad".to_string()),
+                    bad_failure(),
                     tokens(2, 2),
                 ))),
             )
@@ -442,7 +444,9 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
             .node(
                 "ask",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                    Failure::message("scope violated: 1 file outside the declared globs"),
+                    Failure::Message {
+                        outcome: "scope violated: 1 file outside the declared globs".into(),
+                    },
                     tokens(0, 0),
                 ))),
             )
@@ -612,4 +616,11 @@ fn a_host_suspension_is_not_a_wake() {
     let state = derive(&events);
     assert!(!state.woken(), "{state:#?}");
     assert_eq!(state.run.suspensions().summary().map(|(n, _)| n), Some(1));
+}
+
+/// The failure a node ends with when its work is bad.
+fn bad_failure() -> Failure {
+    Failure::Message {
+        outcome: "bad".into(),
+    }
 }

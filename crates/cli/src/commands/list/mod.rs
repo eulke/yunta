@@ -20,10 +20,11 @@ use yunta_core::InputSpec;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::output::document;
 use crate::render::blocks::{Fields, Marked, Prose, Section};
 use crate::render::doc::Doc;
 use crate::render::ink::{Line, Tone};
-use crate::render::Mark;
+use crate::render::{Look, Mark};
 
 pub use runs::list_runs;
 
@@ -35,15 +36,14 @@ struct CatalogEntry {
     path: PathBuf,
 }
 
-pub async fn list_workflows() -> Result<Outcome, CliError> {
+pub async fn list_workflows(look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
 
     // Best-effort — a project with no state root yet (never ran
     // anything) simply shows no estimation, same as "fewer than three
     // runs" does; neither is an error worth refusing the catalog over.
-    let look = crate::render::stdout_look();
     let catalog = catalog(&cwd, Context::load().ok().as_ref(), look.glyphs).await;
-    print!("{}", crate::render::draw(catalog, &look));
+    document(look, catalog);
     Ok(Outcome::Success)
 }
 

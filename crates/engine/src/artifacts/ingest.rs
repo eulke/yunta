@@ -192,7 +192,7 @@ pub(crate) async fn held_document(
         ArtifactFailure::file(
             view_path(node, &artifact),
             FileProblem::Unreadable {
-                detail: source.to_string(),
+                detail: source.sentence(),
             },
         )
     })?;

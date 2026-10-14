@@ -16,14 +16,18 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
-use yunta_core::{Manifest, RunId};
-use yunta_engine::RunState;
+use yunta_core::{Clock, Manifest, RunId};
+use yunta_engine::{PriorEstimation, RunState};
 
 use super::registry::{adapters_for, servable, ScriptedPaths, ServableError};
 use crate::commands::drive::{drive, Driving, Prepared};
+use crate::commands::stats;
+use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::output::{progress, Mode};
 use crate::render::state::RunWord;
+use crate::render::Look;
 
 /// A run this invocation is about to pick up, as its own frozen manifest
 /// describes it: where its state lives and the tree it works in.
@@ -31,6 +35,7 @@ struct Parked {
     run_dir: PathBuf,
     manifest: Manifest,
     worktree: PathBuf,
+    prior: Option<PriorEstimation>,
 }
 
 /// Opens the run `run_id` names, refusing one this project cannot reach
@@ -44,9 +49,14 @@ struct Parked {
 /// is refused at once rather than after a wait.
 ///
 /// `None` when a person interrupted that wait: the run stays parked and
-/// nothing was taken. `announce` says whether the wait is said on the
+/// nothing was taken. `output` decides whether the wait is said on the
 /// terminal first.
-async fn parked(ctx: &Context, run_id: &RunId, announce: bool) -> Result<Option<Parked>, CliError> {
+async fn parked(
+    ctx: &Context,
+    run_id: &RunId,
+    output: Mode,
+    look: &Look,
+) -> Result<Option<Parked>, CliError> {
     let open = ctx.open_run(run_id).await?;
     let state = yunta_engine::derive(&open.events);
     let bound = crate::project::bound_checkout(&state);
@@ -58,17 +68,20 @@ async fn parked(ctx: &Context, run_id: &RunId, announce: bool) -> Result<Option<
         return Err(ServableError::MockBeforeFrozenAdapter.into());
     }
     servable(&manifest).await?;
-    if !waited_out_reset(ctx, &state, run_id, announce).await {
+    if !waited_out_reset(ctx, &state, run_id, output, look).await {
         return Ok(None);
     }
     let worktree = ctx
         .project
         .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
     let worktree = still_or_again(ctx, &manifest, run_id, worktree).await?;
+    let frame = progress::frame_of(run_id, &manifest, &state, ctx.clock.now());
+    let prior = stats::budget_prior(ctx, &manifest, &frame, &open.events).await;
     Ok(Some(Parked {
         run_dir,
         manifest,
         worktree,
+        prior,
     }))
 }
 
@@ -121,15 +134,21 @@ async fn waited_until(at: DateTime<Utc>, interrupt: &tokio_util::sync::Cancellat
 }
 
 /// Waits, when the run is paused on a limit's reset, until that reset has
-/// come. The wait is said once on the terminal first, when `announce` is
-/// set and the reset is still ahead. Returns `false` when a person
+/// come. The wait is said once on the terminal first, when `output` is
+/// `Human` and the reset lies ahead. Returns `false` when a person
 /// interrupted it.
-async fn waited_out_reset(ctx: &Context, state: &RunState, run_id: &RunId, announce: bool) -> bool {
+async fn waited_out_reset(
+    ctx: &Context,
+    state: &RunState,
+    run_id: &RunId,
+    output: Mode,
+    look: &Look,
+) -> bool {
     let (Some(at), Some((reason, _))) = (super::reset_at(state), state.run.paused()) else {
         return true;
     };
-    if announce && !crate::context::time_until(at).is_zero() {
-        println!("{}", waiting_line(run_id, reason));
+    if !crate::context::time_until(at).is_zero() {
+        progress(output, look, waiting_line(run_id, reason));
     }
     waited_until(at, ctx.cancellation()).await
 }
@@ -146,13 +165,14 @@ fn waiting_line(run_id: &RunId, reason: &PauseReason) -> String {
     )
 }
 
-pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, CliError> {
+pub async fn resume(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let Some(Parked {
         run_dir,
         manifest,
         worktree,
-    }) = parked(&ctx, run_id, !quiet && !json).await?
+        prior,
+    }) = parked(&ctx, run_id, output, look).await?
     else {
         return Ok(crate::render::RunExit::Interrupted.outcome());
     };
@@ -164,9 +184,7 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
         },
     )?;
     let storage = ctx.async_storage().await?;
-    if !json {
-        super::started(run_id, "resuming", quiet);
-    }
+    super::started(run_id, "resuming", output, look);
     let prepared = Prepared {
         run_id: run_id.clone(),
         run_dir,
@@ -178,15 +196,15 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
         manifest: &manifest,
         prepared: &prepared,
         adapters,
-        // A resume reports what this run did rather than what a catalog
-        // of past runs cost: the history belongs to the invocation that
-        // chose to start one.
-        prior: None,
+        // A run parked on its token budget is read against the sample its
+        // creation read, as `status` reads it, so the closing says the same
+        // caution.
+        prior,
         // The pre-run estimation is said to whoever creates a run; this
         // picks one up.
         warnings: Default::default(),
-        quiet,
-        json,
+        output,
+        look,
     })
     .await
 }

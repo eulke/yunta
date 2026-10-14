@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::ids::InputName;
@@ -22,7 +23,10 @@ use crate::ids::InputName;
 /// What each one is worth is the renderer's to say — the engine fills a
 /// node's, a mock fixture fills a scripted session's — but what they are
 /// called is decided here and nowhere else.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(into = "String", try_from = "String")]
 pub enum TemplateVar {
     /// The run's own directory: its log export, its object store, its
     /// scratch.
@@ -120,8 +124,24 @@ impl FromStr for TemplateVar {
     }
 }
 
+/// A variable serializes as its spelling, the one a template writes, so a
+/// stored error names `run.dir` as the author wrote it.
+impl From<TemplateVar> for String {
+    fn from(variable: TemplateVar) -> Self {
+        variable.to_string()
+    }
+}
+
+impl TryFrom<String> for TemplateVar {
+    type Error = UnknownVariable;
+
+    fn try_from(text: String) -> Result<Self, UnknownVariable> {
+        text.parse()
+    }
+}
+
 /// A `{{…}}` naming something that is not a variable.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[error(
     "template references `{{{{{name}}}}}`, which is not a variable — the ones that exist are \
          {known} and `inputs.<name>` for each declared input"
@@ -144,7 +164,8 @@ impl UnknownVariable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum TemplateError {
     #[error("template references `{{{{{name}}}}}`, which is not defined here")]
     Undefined { name: TemplateVar },

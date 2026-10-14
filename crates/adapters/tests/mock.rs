@@ -20,7 +20,7 @@ use futures::StreamExt;
 use yunta_adapters::{
     ClaudeCodeAdapter, MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths,
 };
-use yunta_core::events::{FailureCause, RefusalCause};
+use yunta_core::events::{Claim, FailureCause, RefusalCause};
 use yunta_core::port::{
     Adapter, AgentEvent, Forge, ForgeError, GateDecision, PermissionProfile, ProbeReport,
     PublishRequest, PullRequestRef, ReviewOutcome, RunToolsEndpoint, SessionRequest,
@@ -685,7 +685,7 @@ sessions:
 
 #[tokio::test]
 async fn polling_a_gate_the_forge_never_published_is_a_typed_error() {
-    let forge = MockForge::new(MockForgeState::new());
+    let forge = MockForge::new(MockForgeState::new(), yunta_testkit_core::spell());
     let gate = PullRequestRef {
         url: "https://forge.example/pr/99".to_string(),
         number: 99,
@@ -704,7 +704,7 @@ fn gate_request(run_id: &str) -> PublishRequest {
         run_id: run_id.parse().unwrap(),
         decision: GateDecision {
             node: "review".into(),
-            question: "Is the spec ready?".to_string(),
+            question: Claim::Written("Is the spec ready?".to_string()),
             assignee: "lead".to_string(),
             then: Vec::new(),
             corrected_by: None,
@@ -717,7 +717,7 @@ fn gate_request(run_id: &str) -> PublishRequest {
 #[tokio::test]
 async fn the_mock_forge_moves_the_head_only_when_what_it_publishes_changes() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone());
+    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
     let mut request = gate_request("run-1");
     request.artifacts = vec![("spec.md".to_string(), b"# spec".to_vec())];
 
@@ -740,7 +740,7 @@ async fn the_mock_forge_moves_the_head_only_when_what_it_publishes_changes() {
 #[tokio::test]
 async fn the_mock_forge_reuses_only_open_prs() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone());
+    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
 
     let first = forge.publish(&gate_request("run-1")).await.unwrap();
     let again = forge.publish(&gate_request("run-1")).await.unwrap();
@@ -760,7 +760,7 @@ async fn the_mock_forge_reuses_only_open_prs() {
 #[tokio::test]
 async fn the_mock_forge_reports_a_merged_pr() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone());
+    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
     let published = forge.publish(&gate_request("run-1")).await.unwrap();
 
     let merge_sha = state.merge("run-1", &"octocat".into());

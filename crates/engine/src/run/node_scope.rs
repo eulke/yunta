@@ -235,8 +235,10 @@ pub(super) async fn scope_request(
         Ok(Some(request)) => request,
         Ok(None) => return Ok(None),
         Err(error) => {
-            let outcome = yunta_core::describe(&error);
-            return fail_with_tokens_staged(ctx, node, outcome, tokens, staged)
+            let failure = Failure::EngineFailed {
+                engine_error: yunta_core::describe(&error),
+            };
+            return fail_with_tokens_staged(ctx, node, failure, tokens, staged)
                 .await
                 .map(Some);
         }

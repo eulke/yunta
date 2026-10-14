@@ -25,7 +25,7 @@ use yunta_core::expansion::Precheck;
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{self, Reply};
+use super::words;
 use crate::scope_expansion::run_criterion;
 
 /// What the session declares, by its `kind`.
@@ -88,15 +88,7 @@ impl SessionTools {
         };
         self.append(EventPayload::Tasks(TaskEvent::DeviationDeclared(declared)))
             .await?;
-        Ok(Reply::new(
-            "departure recorded — your task does not close on it: when this session ends a \
-             person accepts it or sends it back with what to do instead",
-        )
-        .next(format!(
-            "finish the rest of the task as the plan says; `{}` tells you whether it closes",
-            self.called(RunTool::CheckTask)
-        ))
-        .text())
+        Ok(words::departure_recorded(&self.called(RunTool::CheckTask)))
     }
 
     /// Records that `criterion` is red on the work and that no work of the
@@ -127,24 +119,19 @@ impl SessionTools {
             criterion,
             why,
         };
-        let next = format!(
-            "end this attempt; the plan, not more work on the task, answers for `{}`",
-            declared.criterion
-        );
+        let answer = words::declared(&declared.criterion);
         // The check and the append share one lock: a second declaration of the
         // session is answered, and never recorded.
         let mut first = access.declared.lock().await;
         if first.is_some() {
-            return Ok(verdicts::already_declared(
-                "end this attempt; the declaration already made stands",
-            ));
+            return Ok(words::already_declared());
         }
         self.append(EventPayload::Tasks(TaskEvent::CriterionDeclaredUnpassable(
             declared.clone(),
         )))
         .await?;
         *first = Some(declared);
-        Ok(verdicts::declared(&next))
+        Ok(answer)
     }
 }
 
@@ -207,10 +194,7 @@ fn held_by_the_plan(access: &TaskAccess, from: &DepartsFrom) -> Result<(), RunTo
         true => Ok(()),
         false => Err(RunToolError::NotInThePlan {
             from: from.to_string(),
-            known: match known.as_slice() {
-                [] => "nothing of that kind".to_string(),
-                _ => yunta_core::text::listed(known.iter().copied()),
-            },
+            known: words::known_list(&known),
         }),
     }
 }

@@ -43,8 +43,8 @@ pub(super) async fn execute_pull_request(
         if error.cancelled() {
             return Err(error.into());
         }
-        let said = format!("pushing `{head}` to `{remote}`: {}", error.detail());
-        return fail(ctx, node, said).await;
+        let engine_error = format!("pushing `{head}` to `{remote}`: {}", error.detail());
+        return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
     }
     let opened = match forge.open_pull_request(&request).await {
         Ok(opened) => opened,
@@ -82,8 +82,8 @@ async fn open_refused(
     if let Some(failure) = forge_limit(error, ctx.clock.now()) {
         return fail_with(ctx, node, failure, TokenUsage::default()).await;
     }
-    let said = format!("opening the pull request: {}", yunta_core::describe(error));
-    fail(ctx, node, said).await
+    let engine_error = format!("opening the pull request: {}", yunta_core::describe(error));
+    fail(ctx, node, Failure::EngineFailed { engine_error }).await
 }
 
 /// The failure a forge refusal leaves when the forge's rate limit is spent:
@@ -123,9 +123,12 @@ async fn prepared<'a>(
     // The config declares a forge; what the run could not build it from
     // is the token, which a person can set before the node runs again.
     let Some(forge) = ctx.forge else {
-        let said = "the forge the config declares is not reachable from this machine: the \
-                    variable its `token_env` names is not set";
-        return Ok(Step::Ended(fail(ctx, node, said.to_string()).await?));
+        let engine_error = "the forge the config declares is not reachable from this \
+                            machine: the variable its `token_env` names is not set";
+        let failure = Failure::EngineFailed {
+            engine_error: engine_error.to_string(),
+        };
+        return Ok(Step::Ended(fail(ctx, node, failure).await?));
     };
     let title = match render_or_fail(ctx, node, title).await? {
         Step::Value(title) => title,

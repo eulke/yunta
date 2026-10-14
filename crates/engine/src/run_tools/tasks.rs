@@ -24,7 +24,8 @@ use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
 use crate::replay::RunView;
-use crate::task_cycle::{could_not_run, unanswered_words, CriterionRun, Judgement, Settle};
+use crate::run_tools::words::unanswered_words;
+use crate::task_cycle::{could_not_run, CriterionRun, Judgement, Settle};
 
 impl SessionTools {
     pub(super) async fn task_status(&self) -> Result<String, RunToolError> {

@@ -6,12 +6,28 @@
 //! can say a different thing. The fact is stored as data; the words are
 //! produced here, where a reader is told.
 
-use yunta_core::events::{loop_overrun_failure, PauseReason, PAST_THE_CAP};
+use yunta_core::events::PauseReason;
 use yunta_core::text;
 use yunta_core::units::{Bytes, Tokens};
 use yunta_core::{NodeId, RunId};
 
 use crate::escalation;
+
+/// How a limit's reset moment reads: the day and the minute, in UTC, as a
+/// person reads a log's clock.
+pub(crate) const RESET_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
+
+/// The half every cap's sentence ends with: a reader who hit a declared
+/// limit has the same two ways past it whichever limit it was.
+pub const PAST_THE_CAP: &str =
+    "resume with an interactive surface to continue past the cap or abort";
+
+/// What a loop's iteration cap says once the loop has passed it: the limit,
+/// its value, and the two ways past it. The loop's pause and its failure
+/// both read it, so a parked run names the limit to whichever surface reads it.
+pub(crate) fn exceeded_loop_cap(cap: u32) -> String {
+    format!("exceeded `limits.max_loop_iterations` ({cap}) — {PAST_THE_CAP}")
+}
 
 /// The chronicle's words for a pause: `waiting` for a limit's reset, which
 /// the run resumes on its own, and `needs you` for every other stop, then
@@ -38,7 +54,9 @@ pub fn sentence(pause: &PauseReason) -> String {
             need,
             keep_free,
         } => no_room(*available, *need, *keep_free),
-        PauseReason::LoopOverrun { node, cap } => loop_overrun_failure(node, *cap),
+        PauseReason::LoopOverrun { node, cap } => {
+            format!("loop `{node}` {}", exceeded_loop_cap(*cap))
+        }
         PauseReason::ExternalGate { url } => format!("waiting on external gate: {url}"),
         PauseReason::UncertainOrphans { nodes } => uncertain(nodes),
         // The claim; what a command printed travels as the escalation's
@@ -52,7 +70,7 @@ pub fn sentence(pause: &PauseReason) -> String {
         PauseReason::AwaitingReset { node, at } => format!(
             "node `{node}` waits for its limit to reset at {}, and the run resumes on its own \
              then",
-            at.format(crate::failure::RESET_FORMAT)
+            at.format(RESET_FORMAT)
         ),
         PauseReason::Blocked { node, on } => blocked(node, on),
         PauseReason::GateAborted { node, free_text } => gate_aborted(node, free_text.as_deref()),
@@ -153,7 +171,9 @@ mod tests {
     fn a_failed_node_pauses_on_the_headline_of_its_failure() {
         let failed = PauseReason::NodeFailed {
             node: NodeId::from("lint"),
-            failure: Failure::message("exit 1"),
+            failure: Failure::Message {
+                outcome: "exit 1".to_string(),
+            },
         };
         assert_eq!(sentence(&failed), "node `lint` failed: exit 1");
     }

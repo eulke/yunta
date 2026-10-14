@@ -64,7 +64,7 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     .unwrap()
     .expect("a failed node is a pause with a menu");
     assert_eq!(node.as_str(), "broken");
-    assert_eq!(escalation.summary(), "node `broken` failed");
+    assert_eq!(escalation.summary(), &node_failed("broken"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
     let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
@@ -223,7 +223,7 @@ async fn a_person_who_fixes_the_cause_while_asked_retries_in_the_same_invocation
             &self,
             escalation: &yunta_core::events::GateWaitingPayload,
         ) -> Option<yunta_core::events::HumanChoice> {
-            assert_eq!(escalation.summary(), "node `broken` failed");
+            assert_eq!(escalation.summary(), &node_failed("broken"));
             write(&self.fix, "fixed");
             Some(yunta_core::events::HumanChoice {
                 option: "retry".into(),

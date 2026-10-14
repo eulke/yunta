@@ -334,3 +334,5 @@ fn a_carried_stop_is_stuck_on_the_tree_until_the_tree_moved() {
         retry_waiting_for(Precondition::TreeChanged)
     );
 }
+
+mod static_outlook;

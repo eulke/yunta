@@ -28,9 +28,11 @@ use yunta_core::{Isolation, Manifest, RunId};
 
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
+use crate::output::say;
 use crate::project::Project;
+use crate::render::Look;
 
-pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
+pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let limits = ctx
         .project
@@ -48,7 +50,7 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         removed,
         given_back,
         idle,
-    } = reclaim(&ctx, &pool, dry_run).await?;
+    } = reclaim(&ctx, &pool, dry_run, look).await?;
     for run_id in &removed {
         forget_units(&ctx, &pool, run_id).await;
     }
@@ -56,15 +58,15 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         for (run_id, tree) in &given_back {
             give_back(&ctx, &pool, run_id, tree).await;
         }
-        adopt(&ctx, &pool).await;
+        adopt(&ctx, &pool, look).await;
         for (run_id, places) in &idle {
-            take_old_layouts(&ctx, run_id, places).await;
+            take_old_layouts(&ctx, run_id, places, look).await;
         }
-        tidy(&ctx, &pool).await;
+        tidy(&ctx, &pool, look).await;
     } else {
-        would_adopt(&ctx, &pool).await;
+        would_adopt(&ctx, &pool, look).await;
         if let Ok(kept) = pool.report(ctx.supervision()).await {
-            println!("the project's checkouts: {kept}");
+            say(look, format!("the project's checkouts: {kept}"));
         }
     }
     Ok(Outcome::Success)
@@ -108,12 +110,12 @@ async fn forget_units(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: 
 /// Takes in the units' branches runs made before refs kept their work:
 /// what each unit committed stays, kept by its ref, and no list of the
 /// project's branches shows it.
-async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
     match yunta_engine::adopt_unit_branches(pool, &ctx.cwd, None, ctx.supervision()).await {
         Ok(taken) if !taken.is_empty() => {
             let branches =
                 yunta_core::text::counted_as(taken.len(), "unit branch", "unit branches");
-            println!("kept the work of {branches} by refs");
+            say(look, format!("kept the work of {branches} by refs"));
         }
         Ok(_) => {}
         Err(e) => warn(format!("the units' branches: {e}")),
@@ -122,12 +124,12 @@ async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
 
 /// Says which of the units' branches runs made before refs kept their work
 /// a pass would take in, taking none.
-async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
     match yunta_engine::adoptable_unit_branches(pool, &ctx.cwd, ctx.supervision()).await {
         Ok(branches) if !branches.is_empty() => {
             let branches =
                 yunta_core::text::counted_as(branches.len(), "unit branch", "unit branches");
-            println!("would keep the work of {branches} by refs");
+            say(look, format!("would keep the work of {branches} by refs"));
         }
         Ok(_) => {}
         Err(e) => warn(format!("the units' branches: {e}")),
@@ -138,7 +140,7 @@ async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
 /// measured where nobody did, a build unused within retention is emptied,
 /// the builds stay within the budget, and a free checkout holding no
 /// build goes — and says what the pool keeps.
-async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
     let unused = ctx
         .project
         .config
@@ -149,16 +151,22 @@ async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
     match pool.tidy(unused, ctx.supervision()).await {
         Ok(tidied) => {
             for (checkout, bytes) in &tidied.emptied {
-                println!(
-                    "emptied the build of {} ({})",
-                    checkout.display(),
-                    yunta_core::units::Bytes(*bytes)
+                say(
+                    look,
+                    format!(
+                        "emptied the build of {} ({})",
+                        checkout.display(),
+                        yunta_core::units::Bytes(*bytes)
+                    ),
                 );
             }
             for checkout in &tidied.removed {
-                println!("removed the unused checkout {}", checkout.display());
+                say(
+                    look,
+                    format!("removed the unused checkout {}", checkout.display()),
+                );
             }
-            println!("the project's checkouts: {}", tidied.kept);
+            say(look, format!("the project's checkouts: {}", tidied.kept));
         }
         Err(e) => warn(format!("the project's checkouts: {e}")),
     }
@@ -166,19 +174,23 @@ async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
 
 /// Takes away the clean checkouts run `run_id`, which nothing drives,
 /// kept at `places` before the project's pool, and names the ones kept.
-async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf]) {
+async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf], look: &Look) {
     for place in places {
         match yunta_engine::remove_old_checkouts(&ctx.cwd, place, ctx.supervision()).await {
             Ok(done) => {
                 for checkout in done {
                     match checkout {
-                        yunta_engine::OldCheckout::Removed(path) => {
-                            println!("removed {} of run {}", path.display(), run_id.handle());
-                        }
-                        yunta_engine::OldCheckout::Kept(path) => println!(
-                            "kept {} of run {}: something in it is uncommitted",
-                            path.display(),
-                            run_id.handle()
+                        yunta_engine::OldCheckout::Removed(path) => say(
+                            look,
+                            format!("removed {} of run {}", path.display(), run_id.handle()),
+                        ),
+                        yunta_engine::OldCheckout::Kept(path) => say(
+                            look,
+                            format!(
+                                "kept {} of run {}: something in it is uncommitted",
+                                path.display(),
+                                run_id.handle()
+                            ),
                         ),
                     }
                 }
@@ -196,6 +208,7 @@ async fn reclaim(
     ctx: &Context,
     pool: &yunta_engine::CheckoutPool,
     dry_run: bool,
+    look: &Look,
 ) -> Result<Reclaimed, CliError> {
     let Some(retention_days) = ctx
         .project
@@ -204,9 +217,10 @@ async fn reclaim(
         .as_ref()
         .and_then(|s| s.retention_days)
     else {
-        println!(
+        say(
+            look,
             "`storage.retention_days` isn't configured — nothing to reclaim until it is, \
-             since `gc` has no default retention to guess"
+             since `gc` has no default retention to guess",
         );
         return Ok(Reclaimed::default());
     };
@@ -260,7 +274,7 @@ async fn reclaim(
                         collected.given_back.push((run_id.clone(), tree.clone()));
                     }
                 }
-                if remove_run(ctx, pool, &run_dir, &run_id, bound, dry_run).await {
+                if remove_run(ctx, pool, &run_dir, &run_id, bound, dry_run, look).await {
                     reclaimed += 1;
                     if !dry_run {
                         collected.removed.push(run_id.clone());
@@ -268,19 +282,25 @@ async fn reclaim(
                 }
             }
             None if dry_run => {
-                println!(
-                    "would purge {} of run {}",
-                    yunta_core::text::counted(events.len(), "event"),
-                    run_id.handle()
+                say(
+                    look,
+                    format!(
+                        "would purge {} of run {}",
+                        yunta_core::text::counted(events.len(), "event"),
+                        run_id.handle()
+                    ),
                 );
                 reclaimed += 1;
             }
             None => match storage.purge_run(&run_id) {
                 Ok(purged) => {
-                    println!(
-                        "purged {} of run {}",
-                        yunta_core::text::counted(purged.rows, "event"),
-                        run_id.handle()
+                    say(
+                        look,
+                        format!(
+                            "purged {} of run {}",
+                            yunta_core::text::counted(purged.rows, "event"),
+                            run_id.handle()
+                        ),
                     );
                     reclaimed += 1;
                 }
@@ -289,17 +309,29 @@ async fn reclaim(
         }
     }
 
+    tally(look, reclaimed, dry_run);
+    Ok(collected)
+}
+
+/// What a pass says once it has looked at every run: how many it reclaimed,
+/// or that there was nothing to reclaim.
+fn tally(look: &Look, reclaimed: usize, dry_run: bool) {
     if reclaimed == 0 {
-        println!("nothing to reclaim");
+        say(look, "nothing to reclaim");
     } else if dry_run {
-        println!(
-            "{} would be reclaimed",
-            yunta_core::text::counted(reclaimed, "run")
+        say(
+            look,
+            format!(
+                "{} would be reclaimed",
+                yunta_core::text::counted(reclaimed, "run")
+            ),
         );
     } else {
-        println!("{} reclaimed", yunta_core::text::counted(reclaimed, "run"));
+        say(
+            look,
+            format!("{} reclaimed", yunta_core::text::counted(reclaimed, "run")),
+        );
     }
-    Ok(collected)
 }
 
 /// Where a run nothing drives kept checkouts before the project's pool:
@@ -379,11 +411,10 @@ async fn remove_run(
     run_id: &RunId,
     bound: Option<&Path>,
     dry_run: bool,
+    look: &Look,
 ) -> bool {
     let shown = |dir: &Path| crate::render::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
-    let mut removed_any = false;
-    let mut all_removed = true;
-
+    let (mut removed_any, mut all_removed) = (false, true);
     // The worktree goes through git, which unregisters it as well. A
     // checkout of the project's pool is given back, never taken away.
     if let Some(tree) =
@@ -393,12 +424,12 @@ async fn remove_run(
             Some(true) => {}
             None => all_removed = false,
             Some(false) if dry_run => {
-                println!("would remove {}", shown(&tree));
+                say(look, format!("would remove {}", shown(&tree)));
                 removed_any = true;
             }
             Some(false) => match yunta_engine::remove_checkout(&tree, ctx.supervision()).await {
                 Ok(()) => {
-                    println!("removed {}", shown(&tree));
+                    say(look, format!("removed {}", shown(&tree)));
                     removed_any = true;
                 }
                 Err(e) => {
@@ -410,13 +441,13 @@ async fn remove_run(
     }
     if run_dir.exists() {
         if dry_run {
-            println!("would remove {}", shown(run_dir));
+            say(look, format!("would remove {}", shown(run_dir)));
             removed_any = true;
         } else if let Err(e) = std::fs::remove_dir_all(run_dir) {
             warn(format!("failed to remove {}: {e}", shown(run_dir)));
             all_removed = false;
         } else {
-            println!("removed {}", shown(run_dir));
+            say(look, format!("removed {}", shown(run_dir)));
             removed_any = true;
         }
     }

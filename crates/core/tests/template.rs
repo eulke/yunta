@@ -52,10 +52,25 @@ fn a_name_that_is_not_a_variable_is_refused_where_the_template_is_read() {
         &vars(&[(TemplateVar::RunDir, "/r")]),
     )
     .unwrap_err();
-    let text = err.to_string();
-    assert!(matches!(err, TemplateError::Unknown(_)), "{text}");
-    assert!(text.contains("{{run.directory}}"), "{text}");
-    assert!(text.contains("`run.dir`"), "{text}");
+    assert!(
+        matches!(&err, TemplateError::Unknown(unknown) if unknown.name == "run.directory"),
+        "{err}"
+    );
+    assert!(err.to_string().contains("`run.dir`"), "{err}");
+}
+
+#[test]
+fn a_template_error_reads_back_naming_its_variable_as_the_author_wrote_it() {
+    let undefined = TemplateError::Undefined {
+        name: TemplateVar::Input("idea".parse().unwrap()),
+    };
+    let json = serde_json::to_value(&undefined).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"undefined": {"name": "inputs.idea"}})
+    );
+    let parsed: TemplateError = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, undefined);
 }
 
 #[test]

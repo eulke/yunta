@@ -17,17 +17,21 @@ use crate::ask::{Console, Escape, NoAnswer};
 use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::RunExit;
+use crate::json::SCHEMA_VERSION;
+use crate::output::{emit, Answer, Mode};
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::Line;
+use crate::render::{Look, RunExit};
 use crate::surface::Diagnostics;
 
 /// Records the decision and hands the run back, returning the sentence
 /// that says so.
 ///
 /// The one path a gate is answered through, whichever door asked: the
-/// command below prints this sentence on stdout, and the control
-/// plane's `resolve_gate` tool returns it in a tool result. Two doors,
-/// one decision, one wording — and one place that knows a decision
-/// recorded is not a decision undone when the hand-off fails.
+/// command answers with the same sentence, and the control plane's
+/// `resolve_gate` tool returns it in a tool result. Two doors, one
+/// decision, one wording — and one place that knows a decision recorded
+/// is not a decision undone when the hand-off fails.
 pub(crate) async fn resolve(
     ctx: &Context,
     run_id: &RunId,
@@ -35,6 +39,19 @@ pub(crate) async fn resolve(
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
 ) -> Result<String, CliError> {
+    record(ctx, run_id, option, resolved_by, free_text).await?;
+    Ok(sentence(run_id, option))
+}
+
+/// Records the decision on the run's log and hands the run to a detached
+/// resume that applies it.
+async fn record(
+    ctx: &Context,
+    run_id: &RunId,
+    option: &OptionId,
+    resolved_by: Option<&Responder>,
+    free_text: Option<&str>,
+) -> Result<(), CliError> {
     let open = ctx.open_run(run_id).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
@@ -61,9 +78,29 @@ pub(crate) async fn resolve(
         .map_err(|source| CliError::GateRecordedNotResumed {
             source: super::DetachedResumeError::new(run_id, source),
         })?;
-    Ok(format!(
-        "run {run_id}: resolved `{option}`, driving forward independently"
-    ))
+    Ok(())
+}
+
+/// The sentence a recorded decision is answered with.
+fn sentence(run_id: &RunId, option: &OptionId) -> String {
+    format!("run {run_id}: resolved `{option}`, driving forward independently")
+}
+
+/// Refuses a `--json` answer that names no option. The menu a decision
+/// waits on is drawn on a terminal, which a `--json` reader does not have,
+/// so the refusal is made ahead of reading the run or recording anything.
+fn needs_an_option(
+    run_id: &RunId,
+    option: Option<&OptionId>,
+    output: Mode,
+) -> Result<(), CliError> {
+    match option {
+        None if output == Mode::Json => Err(CliError::msg(format!(
+            "`--json` needs the option: the menu a decision waits on is for a terminal — \
+             name the option, as in `yunta resolve-gate {run_id} <option> --json`"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// Answers `run_id`'s decision with `option`, or — with none — with
@@ -73,7 +110,10 @@ pub async fn resolve_gate(
     option: Option<&OptionId>,
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
+    output: Mode,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
+    needs_an_option(run_id, option, output)?;
     let ctx = Context::load()?;
     let choice = match option {
         Some(option) => HumanChoice {
@@ -87,28 +127,85 @@ pub async fn resolve_gate(
                 free_text: choice.free_text.or_else(|| free_text.map(str::to_string)),
                 ..choice
             },
-            Chosen::Not(outcome) => return Ok(outcome),
+            Chosen::Not(state) => return emit(output, &answer(run_id, state), look),
         },
     };
-    println!(
-        "{}",
-        resolve(
-            &ctx,
+    record(
+        &ctx,
+        run_id,
+        &choice.option,
+        Some(&choice.by),
+        choice.free_text.as_deref(),
+    )
+    .await?;
+    emit(
+        output,
+        &answer(
             run_id,
-            &choice.option,
-            Some(&choice.by),
-            choice.free_text.as_deref()
-        )
-        .await?
-    );
-    Ok(Outcome::Success)
+            GateState::Resolved {
+                option: choice.option,
+            },
+        ),
+        look,
+    )
 }
 
 /// What the person at the menu did.
 enum Chosen {
     Answered(HumanChoice),
     /// Nothing was recorded, and the invocation ends with this.
-    Not(Outcome),
+    Not(GateState),
+}
+
+/// What a gate answer did, as a document carries it.
+#[derive(serde::Serialize)]
+pub(crate) struct ResolveGateAnswer {
+    schema_version: u32,
+    run_id: RunId,
+    #[serde(flatten)]
+    state: GateState,
+}
+
+/// How a gate answer ended.
+#[derive(serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(crate) enum GateState {
+    /// The decision is recorded and the run is handed back.
+    Resolved { option: OptionId },
+    /// Nothing was recorded: the person at the menu chose none, and the run
+    /// keeps waiting on its decision.
+    Declined,
+    /// Nothing was recorded: the menu was interrupted, and the exit code says so.
+    Interrupted,
+}
+
+fn answer(run_id: &RunId, state: GateState) -> ResolveGateAnswer {
+    ResolveGateAnswer {
+        schema_version: SCHEMA_VERSION,
+        run_id: run_id.clone(),
+        state,
+    }
+}
+
+impl Answer for ResolveGateAnswer {
+    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+        let said = match &self.state {
+            GateState::Resolved { option } => sentence(&self.run_id, option),
+            GateState::Declined => format!(
+                "run {}: nothing recorded — it still waits on the decision",
+                self.run_id.handle()
+            ),
+            GateState::Interrupted => return Doc::new(),
+        };
+        Doc::new().with(Block::Lines(vec![Line::new().plain(said)]))
+    }
+
+    fn outcome(&self) -> Outcome {
+        match &self.state {
+            GateState::Interrupted => RunExit::Interrupted.outcome(),
+            GateState::Resolved { .. } | GateState::Declined => Outcome::Success,
+        }
+    }
 }
 
 /// The option a person picks off the menu `run_id` waits on, put to them
@@ -142,13 +239,10 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
         )));
     };
     let shown = yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state).await?;
-    match crate::ask::decide(&console, &escalation, &shown, called) {
+    match crate::ask::decide(&console, &escalation, Some((run_id, &shown))) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
-        Err(NoAnswer::Declined) => {
-            println!("run {called}: nothing recorded — it still waits on the decision");
-            Ok(Chosen::Not(Outcome::Success))
-        }
-        Err(NoAnswer::Interrupted) => Ok(Chosen::Not(RunExit::Interrupted.outcome())),
+        Err(NoAnswer::Declined) => Ok(Chosen::Not(GateState::Declined)),
+        Err(NoAnswer::Interrupted) => Ok(Chosen::Not(GateState::Interrupted)),
         Err(NoAnswer::OffMenu) => Err(CliError::msg(
             "the menu answered with an option it does not offer — nothing recorded",
         )),
@@ -158,5 +252,34 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
         Err(NoAnswer::Failed(why)) => Err(CliError::msg(format!(
             "the menu ended without an answer ({why}) — nothing recorded"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::{OptionId, RunId};
+
+    use super::{answer, GateState};
+    use crate::output::Answer;
+    use crate::render::{draw, Look};
+
+    #[test]
+    fn each_gate_answer_keeps_the_words_it_has_always_had() {
+        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+        let said = |state: GateState| {
+            let reply = answer(&run, state);
+            draw(reply.document(&Look::plain()), &Look::plain())
+        };
+        assert_eq!(
+            said(GateState::Resolved {
+                option: OptionId::from_static("retry"),
+            }),
+            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `retry`, driving forward independently\n"
+        );
+        assert_eq!(
+            said(GateState::Declined),
+            "run AAAAAA: nothing recorded — it still waits on the decision\n"
+        );
+        assert_eq!(said(GateState::Interrupted), "");
     }
 }

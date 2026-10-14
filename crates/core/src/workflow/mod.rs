@@ -19,6 +19,7 @@ mod node_kind;
 mod node_policy;
 mod optional;
 mod parse;
+mod place;
 mod scope;
 
 use std::collections::BTreeMap;
@@ -36,7 +37,7 @@ pub mod reads;
 
 pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
-    UnknownArtifactKind, ARTIFACTS_DIR,
+    UnknownArtifactKind, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 pub use command::{node_commands, Resolved, RunCommand};
 pub use context::{
@@ -51,6 +52,7 @@ pub use node_kind::{
 };
 pub use node_policy::{Ask, CliConfig, Effort, LoopUntil, NodePermissions, OnInterrupt};
 pub use optional::{followers, left_out, reroute_sources, Because, LeftOut};
+pub use place::Place;
 pub use scope::NodeScope;
 
 /// A workflow definition.

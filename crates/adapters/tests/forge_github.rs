@@ -18,6 +18,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};
 use yunta_adapters::GitHubForge;
+use yunta_core::events::Claim;
 use yunta_core::port::{
     Forge, ForgeError, ForgeProbe, GateDecision, PublishRequest, PullRequestRef,
     PullRequestRequest, ReviewOutcome,
@@ -363,10 +364,14 @@ fn repo() -> GitHubRepo {
 }
 
 fn forge_at(addr: SocketAddr) -> GitHubForge {
-    GitHubForge::configure(repo(), Secret::new("token".to_string()))
-        .base_url(format!("http://{addr}"))
-        .build()
-        .unwrap()
+    GitHubForge::configure(
+        repo(),
+        Secret::new("token".to_string()),
+        yunta_testkit_core::spell(),
+    )
+    .base_url(format!("http://{addr}"))
+    .build()
+    .unwrap()
 }
 
 /// The marker a pull request opened before the comment form carries,
@@ -396,7 +401,7 @@ fn request(branch: &str, run_id: &str) -> PublishRequest {
         run_id: run_id.parse().unwrap(),
         decision: GateDecision {
             node: "approve-spec".into(),
-            question: "Is the spec ready to build on?".to_string(),
+            question: Claim::Written("Is the spec ready to build on?".to_string()),
             assignee: "lead".to_string(),
             then: vec!["build".into(), "docs".into()],
             corrected_by: Some("spec".into()),
@@ -665,11 +670,15 @@ async fn an_unanswered_request_is_a_transport_error() {
     // A port that accepts the connection and never answers.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let forge = GitHubForge::configure(repo(), Secret::new("token".to_string()))
-        .base_url(format!("http://{addr}"))
-        .timeout(Duration::from_millis(200))
-        .build()
-        .unwrap();
+    let forge = GitHubForge::configure(
+        repo(),
+        Secret::new("token".to_string()),
+        yunta_testkit_core::spell(),
+    )
+    .base_url(format!("http://{addr}"))
+    .timeout(Duration::from_millis(200))
+    .build()
+    .unwrap();
 
     let error = forge
         .poll(&PullRequestRef {

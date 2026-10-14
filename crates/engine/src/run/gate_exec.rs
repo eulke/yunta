@@ -17,9 +17,9 @@
 //! [`flawed`](super::flawed) sends it back instead.
 
 use yunta_core::events::{
-    Approval, EngineFact, Escalation, EventPayload, Fact, Finding, FindingPostedPayload,
-    FindingSeverity, GateResolvedPayload, NodeOutcome, NodeStartedPayload, PauseReason, Shown,
-    TokenUsage,
+    Approval, Claim, EngineFact, Escalation, EventPayload, Fact, Failure, Finding,
+    FindingPostedPayload, FindingSeverity, GateResolvedPayload, NodeOutcome, NodeStartedPayload,
+    PauseReason, Shown, TokenUsage,
 };
 use yunta_core::port::{
     Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome,
@@ -54,12 +54,10 @@ pub(super) async fn publish_gate(
         return super::console_gate::degrade_to_console(
             ctx,
             node,
-            format!(
-                "node `{}` wants an external gate (assignee: {assignee}) but no forge is \
-                 reachable from this machine (no credentials, or none configured) — resolve \
-                 it here instead",
-                node.id
-            ),
+            Claim::ForgeUnreachable {
+                node: node.id.clone(),
+                assignee: assignee.to_string(),
+            },
         )
         .await;
     };
@@ -78,10 +76,10 @@ pub(super) async fn publish_gate(
         return super::flawed::send_back(ctx, node, &flaws).await;
     }
 
-    let summary = format!(
-        "node `{}` is waiting on external review (assignee: {assignee})",
-        node.id
-    );
+    let summary = Claim::AwaitsReview {
+        node: node.id.clone(),
+        assignee: Some(assignee.to_string()),
+    };
     let request = PublishRequest {
         branch,
         base_branch: ctx.manifest.base_branch.clone(),
@@ -160,20 +158,18 @@ async fn held_for_review(
         let wanted = yunta_core::events::ArtifactId::from(spec);
         let Some(artifact) = held.held(&wanted, None) else {
             emit_started(ctx, node).await?;
-            fail(
-                ctx,
-                node,
-                format!(
-                    "node `{}` publishes the {} with its external gate, and this run holds \
-                     no such artifact — no node produced it",
-                    node.id,
-                    wanted.label()
-                ),
-            )
-            .await?;
+            let failure = Failure::GateArtifactMissing {
+                node: node.id.clone(),
+                gate_artifact: wanted,
+            };
+            fail(ctx, node, failure).await?;
             return Ok(None);
         };
-        artifacts.push((wanted.view_name(), held.bytes(artifact).await?));
+        let bytes = held
+            .bytes(artifact)
+            .await
+            .map_err(crate::artifacts::HeldError::from)?;
+        artifacts.push((wanted.view_name(), bytes));
         shows.push(Shown {
             producer: artifact.producer.clone(),
             artifact: artifact.artifact.clone(),
@@ -189,7 +185,7 @@ async fn held_for_review(
 fn decision(ctx: &RunCtx<'_>, node: &Node, assignee: &str, message: Option<&str>) -> GateDecision {
     GateDecision {
         node: node.id.clone(),
-        question: super::internal_gate::question(node, message),
+        question: super::internal_gate::claim(node, message),
         assignee: assignee.to_string(),
         then: ctx
             .manifest
@@ -214,11 +210,10 @@ pub(super) async fn poll_gate(
         return super::console_gate::degrade_to_console(
             ctx,
             node,
-            format!(
-                "node `{}`'s external gate (published at {external_ref}) needs re-checking, \
-                 but no forge is reachable from this machine — resolve it here instead",
-                node.id
-            ),
+            Claim::RecheckUnreachable {
+                node: node.id.clone(),
+                external_ref: external_ref.to_string(),
+            },
         )
         .await;
     };
@@ -319,15 +314,12 @@ async fn resolve_from_poll(
                 )
                 .await?;
             }
-            fail(
-                ctx,
-                node,
-                format!(
-                    "changes requested by {by} at {reviewed_sha} ({})",
-                    yunta_core::text::counted(comments.len(), "comment")
-                ),
-            )
-            .await?;
+            let failure = Failure::ChangesRequested {
+                requested_by: by.to_string(),
+                reviewed_sha: reviewed_sha.clone(),
+                comments: comments.len(),
+            };
+            fail(ctx, node, failure).await?;
             Ok(GateStep::Resolved)
         }
         ReviewOutcome::Closed => {
@@ -337,12 +329,10 @@ async fn resolve_from_poll(
                 EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
             )
             .await?;
-            fail(
-                ctx,
-                node,
-                "the pull request was closed without approval".to_string(),
-            )
-            .await?;
+            let failure = Failure::PullRequestClosed {
+                closed_pull_request: Some(published.url.clone()),
+            };
+            fail(ctx, node, failure).await?;
             Ok(GateStep::Resolved)
         }
         // Pending, or a review that no longer covers the current head —
@@ -456,9 +446,9 @@ async fn render_or_fail_here(
 ) -> Result<GateRender, RunError> {
     match yunta_core::template::render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Step::Value(rendered)),
-        Err(e) => {
+        Err(template) => {
             emit_started(ctx, node).await?;
-            fail(ctx, node, e.to_string()).await?;
+            fail(ctx, node, Failure::from(template)).await?;
             Ok(Step::Ended(GateStep::Resolved))
         }
     }

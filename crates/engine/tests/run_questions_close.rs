@@ -148,6 +148,7 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
     // then fails for an unrelated reason. The failure is a failure — a node
     // waits because it asked, never because a `questions` artifact exists.
     let bench = Bench::new();
+    let outcome = "scope violated: 1 file outside".to_string();
     let events = Log::for_run(bench.run_id.as_str())
         .node(
             "grill",
@@ -171,7 +172,7 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
             "grill",
             EventPayload::Node(NodeEvent::Failed(
                 yunta_core::events::NodeFailedPayload::new(
-                    yunta_core::events::Failure::message("scope violated: 1 file outside"),
+                    yunta_core::events::Failure::Message { outcome },
                     Default::default(),
                 ),
             )),

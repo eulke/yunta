@@ -18,6 +18,7 @@ use crate::interrupt::Interrupt;
 use crate::render::blocks::{Checklist, Fields, Found, Next};
 use crate::render::doc::Doc;
 use crate::render::ink::{Line, Tone};
+use crate::render::Look;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -253,7 +254,7 @@ fn asked(console: &Console, prompt: &str, default: &str) -> String {
     }
 }
 
-pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
+pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome, CliError> {
     let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     // `init` is the command that makes a project, so there is no
     // `Context` to resolve yet — and its probes still spawn git, so it
@@ -338,16 +339,16 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
     }
 
-    print!(
-        "{}",
-        report(&Wrote {
+    crate::output::raw(&report(
+        &Wrote {
             repo: &repo,
             wrote: &wrote,
             skipped: &skipped,
             detected: &detected,
             probed: &probed,
-        })
-    );
+        },
+        look,
+    ));
     Ok(Outcome::Success)
 }
 
@@ -364,8 +365,7 @@ struct Wrote<'a> {
 /// each adapter this machine answers for, as a check; the line to paste
 /// into the project's CLAUDE.md; and the runner to declare, because no
 /// agent node runs until one is.
-fn report(init: &Wrote<'_>) -> String {
-    let look = crate::render::stdout_look();
+fn report(init: &Wrote<'_>, look: &Look) -> String {
     let detected = init.detected;
     let ecosystem = match &detected.ecosystem {
         Some(ecosystem) => format!(
@@ -419,9 +419,9 @@ fn report(init: &Wrote<'_>) -> String {
         }
     }
     let mut out = format!("yunta init: done in {}\n\n", init.repo.display());
-    out.push_str(&crate::render::draw(Doc::new().with(fields), &look));
+    out.push_str(&crate::render::draw(Doc::new().with(fields), look));
     out.push('\n');
-    out.push_str(&crate::render::draw(Doc::new().with(adapters), &look));
+    out.push_str(&crate::render::draw(Doc::new().with(adapters), look));
     out.push_str(&format!(
         "\nsuggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to \
          that file):\n\n{}\n",
@@ -442,6 +442,6 @@ fn report(init: &Wrote<'_>) -> String {
         )],
     };
     out.push('\n');
-    out.push_str(&crate::render::draw(Doc::new().with(next), &look));
+    out.push_str(&crate::render::draw(Doc::new().with(next), look));
     out
 }

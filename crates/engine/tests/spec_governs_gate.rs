@@ -11,11 +11,12 @@ use std::sync::{Arc, Mutex};
 
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{
-    EventDraft, EventPayload, FindingEvent, FindingSeverity, GateEvent, GateResolvedPayload,
-    GateWaitingPayload, HumanChoice, NodeEvent, SessionEvent,
+    EventDraft, EventPayload, Failure, FindingEvent, FindingSeverity, GateEvent,
+    GateResolvedPayload, GateWaitingPayload, HumanChoice, NodeEvent, SessionEvent,
 };
 use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
+use yunta_testkit_core::spell;
 use yunta_testkit_core::FixedClock;
 
 mod common;
@@ -307,7 +308,7 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
 #[tokio::test]
 async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
     let forge = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone())));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(forge.clone(), spell())));
 
     let RunReport { terminal, .. } = bench
         .run(
@@ -347,6 +348,10 @@ async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
         matches!((sent_back, published), (Some(back), Some(at)) if back < at),
         "nothing was published before the plan came back: {sent_back:?} {published:?}"
     );
+    assert!(
+        sent_back_with_one_flaw(&gate),
+        "the plan goes back with its one flaw"
+    );
     let prs = forge.pull_requests();
     assert_eq!(prs.len(), 1, "only the corrected plan is published");
     let tasks = String::from_utf8(prs[0].files["tasks.yaml"].clone()).unwrap();
@@ -369,4 +374,20 @@ async fn a_gate_with_no_forge_withholds_approving_an_unprovable_plan_at_the_cons
     assert_eq!(asked.len(), 1, "{asked:?}");
     assert_eq!(menu(&asked[0]), ["reject"]);
     assert_eq!(asked[0].withheld()[0].option.as_str(), "approve");
+}
+
+/// Whether the node failed sending its plan back with the one flaw it found.
+fn sent_back_with_one_flaw(log: &[&EventPayload]) -> bool {
+    matches!(
+        failed_node_failure(log),
+        Some(Failure::SentBack { sent_back }) if sent_back.len() == 1
+    )
+}
+
+/// The failure a node's `failed` record in the log carries, when there is one.
+fn failed_node_failure<'a>(log: &[&'a EventPayload]) -> Option<&'a Failure> {
+    log.iter().find_map(|payload| match payload {
+        EventPayload::Node(NodeEvent::Failed(failed)) => Some(&failed.failure),
+        _ => None,
+    })
 }

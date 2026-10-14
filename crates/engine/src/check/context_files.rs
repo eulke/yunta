@@ -19,17 +19,6 @@ use super::*;
 use crate::git::{GitError, CHECK_IGNORE};
 use crate::process::Supervision;
 
-/// How a `files:` path that the run would not find is missing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MissingContextFile {
-    /// Neither in the commit the run starts from nor on disk.
-    Nowhere,
-    /// On disk in the person's checkout, and not committed.
-    Uncommitted,
-    /// On disk in the person's checkout, and ignored by git.
-    Ignored,
-}
-
 /// The tree a run would read its `files:` from.
 #[derive(Clone, Copy)]
 pub struct RunTreeOrigin<'a> {
@@ -47,7 +36,7 @@ pub struct RunTreeOrigin<'a> {
 #[derive(Debug, Default)]
 pub struct ContextFilesCheck {
     pub errors: Vec<CheckError>,
-    pub warnings: Vec<CheckWarning>,
+    pub warnings: Vec<Caution>,
 }
 
 /// Whether anything could still put a missing file where its reader
@@ -87,7 +76,7 @@ pub async fn check_context_files(
             let base = (origin.isolation == Isolation::Worktree && !Path::new(&path).is_absolute())
                 .then(|| origin.base.abbreviated().to_string());
             match reach(workflow, &node, &path, mode_nodes) {
-                Reach::EarlierNodeMay => found.warnings.push(CheckWarning::ContextFileMissing {
+                Reach::EarlierNodeMay => found.warnings.push(Caution::ContextFileMissing {
                     node,
                     path,
                     base,
@@ -294,43 +283,4 @@ async fn missing(
     } else {
         MissingContextFile::Uncommitted
     }))
-}
-
-/// The sentence for a missing `files:` path: what is missing, why the run
-/// would not see it, whether anything could still write it, and what to
-/// do — each shape its own remedy.
-pub(super) fn missing_sentence(
-    node: &NodeId,
-    path: &str,
-    base: Option<&str>,
-    missing: &MissingContextFile,
-    reach: Reach,
-) -> String {
-    use MissingContextFile as M;
-    let reads = format!("node `{node}` reads `{path}` (a `files:` context source)");
-    let stops = match reach {
-        Reach::EarlierNodeMay => {
-            format!("unless a node before it writes the file, `{node}` stops there")
-        }
-        Reach::NothingEarlierCan => format!(
-            "`{node}` stops there every time, since no node that runs before it can write the file"
-        ),
-    };
-    let optional = "or declare the entry `optional: true` if the node can do without it";
-    match (missing, base) {
-        (M::Nowhere, Some(base)) => format!(
-            "{reads}, which commit `{base}` — the one a run starts from — does not hold: \
-             {stops}; commit the file first, {optional}"
-        ),
-        (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}; {optional}"),
-        (M::Uncommitted, _) => format!(
-            "{reads}, which is in your checkout but not committed: a run starts from commit \
-             `{}` and never sees it, so {stops}; commit it first",
-            base.unwrap_or("HEAD")
-        ),
-        (M::Ignored, _) => format!(
-            "{reads}, which git ignores: a run's tree never carries an ignored file, so \
-             {stops}; add it with `git add -f`, or read a file git tracks"
-        ),
-    }
 }

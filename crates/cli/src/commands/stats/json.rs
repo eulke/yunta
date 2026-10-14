@@ -6,7 +6,7 @@ use yunta_core::{ContentHash, RunId, WorkflowName};
 use yunta_engine::{prior_estimation, NodeStat, RunStats, RunSummary};
 use yunta_render::spend::SpendJson;
 
-use super::run::currency_line;
+use super::currency_line;
 
 #[derive(Serialize)]
 struct NodeStatJson {

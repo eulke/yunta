@@ -15,11 +15,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use yunta_core::events::Failure;
 use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
-use yunta_core::{Confinement, ConfinementInput, Node, Task, Unbuildable};
+use yunta_core::{Confinement, ConfinementInput, Node, Unbuildable};
 
-use crate::frozen::Source;
+use crate::frozen::{FrozenError, Source};
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
 use crate::run_tools::{RunToolsSession, TaskAccess};
@@ -138,6 +139,15 @@ async fn mount_skills(
     for name in crate::skills::skill_names(&ctx.manifest.config, &ctx.manifest.workflow, node) {
         match source.skill_dir(&name).await {
             Ok(dir) => skills.push(dir),
+            // A name that resolves to no directory is a skill the run does not hold.
+            Err(FrozenError::Unresolved(_)) => {
+                let searched = searched_roots(ctx, &name);
+                let failure = Failure::SkillMissing {
+                    missing_skill: name,
+                    searched,
+                };
+                return Ok(Err(super::node_close::fail(ctx, node, failure).await?));
+            }
             Err(error) => {
                 return Ok(Err(
                     super::session_policy::close_frozen(ctx, node, error).await?
@@ -160,6 +170,16 @@ async fn mount_skills(
     ))
 }
 
+/// The directories a skill name that resolves to nothing was searched under.
+/// The checkout is the only source whose lookup fails this way, and it
+/// searches the roots its config names, the same way again.
+fn searched_roots(ctx: &crate::run::RunCtx<'_>, name: &yunta_core::SkillName) -> Vec<PathBuf> {
+    match crate::skills::locate(&ctx.manifest.config, ctx.worktree, name) {
+        Err(crate::skills::SkillsError::NotFound { searched, .. }) => searched,
+        Ok(_) => Vec::new(),
+    }
+}
+
 /// Whether this node's sessions may hold the run's tools, and what they
 /// would be allowed to check. A node whose declared document has no way
 /// in — an interpreted artifact, or a `coordination: blackboard` group,
@@ -177,12 +197,8 @@ async fn tools_access(
     // tools when the adapter can hold them and runs without them when it
     // cannot — they are an offer, so their absence states nothing.
     if let Err(error) = crate::run::runner_resolve::run_tools_allowed(ctx, node, adapter) {
-        return Ok(Err(crate::run::node_close::fail(
-            ctx,
-            node,
-            error.to_string(),
-        )
-        .await?));
+        let failure = error.failure();
+        return Ok(Err(crate::run::node_close::fail(ctx, node, failure).await?));
     }
     Ok(Ok(adapter
         .capabilities()
@@ -473,16 +489,4 @@ async fn mount_tools(
             .await?;
     }
     Ok(None)
-}
-
-/// The brief a task session gets: the node's instruction and which task
-/// is this session's — never the task's contents. Its scope, criteria and
-/// notes live in the run's tasks document, and the session reads them
-/// there through its tools, so what it is told and what it is judged by
-/// can never be two copies that disagree.
-pub(crate) fn task_brief(instruction: &str, task: &Task) -> String {
-    format!(
-        "{instruction}\n\nYour task: `{}` — {}.",
-        task.id, task.title
-    )
 }

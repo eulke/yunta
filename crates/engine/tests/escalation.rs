@@ -70,8 +70,8 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
         .await
         .expect("an exhausted re-route must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "lint");
-    assert!(escalation.summary().contains("lint"));
-    assert!(escalation.summary().contains("fix-lint"));
+    assert_eq!(escalation.summary(), &node_failed("lint"));
+    assert_eq!(reroute_goto(&escalation).as_deref(), Some("fix-lint"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
     let words = |o| yunta_render::escalation::option_words(&escalation, o).1;
@@ -109,7 +109,7 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
         .await
         .expect("an unresolved internal gate must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "approve");
-    assert_eq!(escalation.summary(), "Approve the plan?");
+    assert_eq!(escalation.summary(), &written("Approve the plan?"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["proceed", "revise", "abort"]);
     let words = |o| yunta_render::escalation::option_words(&escalation, o).1;

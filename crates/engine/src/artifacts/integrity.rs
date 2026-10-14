@@ -28,7 +28,7 @@ use std::path::Path;
 use yunta_core::events::{ArtifactOrigin, StoredEvent};
 use yunta_core::RunId;
 
-use super::{describe, ObjectError, RunArtifacts};
+use super::{describe, RunArtifacts, StoreError};
 
 /// One artifact whose bytes are not the bytes the run accepted.
 #[derive(Debug)]
@@ -37,8 +37,9 @@ pub struct ArtifactFault {
     /// path of its view, which is the file a reader opens.
     pub artifact: String,
     /// What the store answered — absent bytes, or bytes that are no
-    /// longer what their own name says, with both hashes.
-    pub error: ObjectError,
+    /// longer what their own name says, with both hashes; or the store's
+    /// own read failing.
+    pub error: StoreError,
 }
 
 /// What a run's log says it holds, checked against the bytes it has.
@@ -90,7 +91,7 @@ impl ArtifactIntegrity {
         let faults: Vec<String> = self
             .faults
             .iter()
-            .map(|fault| format!("`{}`: {}", fault.artifact, fault.error))
+            .map(|fault| format!("`{}`: {}", fault.artifact, fault.error.sentence()))
             .collect();
         Some(format!(
             "run `{run_id}` no longer holds the bytes its log accepted for {} of the {} it \
@@ -110,7 +111,7 @@ impl ArtifactIntegrity {
                  the bytes of its artifacts under `{}/` — no object answers for such an \
                  artifact, and none ever did; verified: {} the log accepted",
                 yunta_core::text::counted(self.unverifiable, "artifact"),
-                super::store::OBJECTS_DIR,
+                yunta_core::OBJECTS_DIR,
                 yunta_core::text::counted(self.verified, "artifact"),
             )
         })

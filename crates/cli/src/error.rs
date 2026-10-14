@@ -10,6 +10,8 @@ use std::fmt::Display;
 
 use yunta_core::RunId;
 
+pub(crate) mod words;
+
 /// How a subcommand came back when nothing stopped it from running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -95,15 +97,14 @@ pub enum CliError {
     #[error(transparent)]
     ResolveGate(#[from] yunta_engine::ResolveGateError),
 
-    /// A decision was put to a run that is not parked at one. The
-    /// engine's sentence says what is true of the run; which command
-    /// shows a reader where it actually is is this border's word, so it
+    /// A decision was put to a run that is not parked at one. The words of
+    /// the refusal say what is true of the run; which command shows a
+    /// reader where it actually is is this border's word, so it
     /// is added here — named by its handle for a person, and by its whole
     /// id for an agent ([`CliError::said_to`]).
-    #[error("{refusal} — `{}` shows where it is", crate::commands::advice::status(.run_id.handle()))]
+    #[error("{} — `{}` shows where it is", words::resolve_gate(.refusal), crate::commands::advice::status(.run_id.handle()))]
     NotPaused {
         run_id: RunId,
-        #[source]
         refusal: yunta_engine::ResolveGateError,
     },
 
@@ -111,10 +112,9 @@ pub enum CliError {
     /// Those pauses are settled where they were raised — a budget, a
     /// scope, an answers file, a review on a forge — and the run handed
     /// back, which is what the advice names.
-    #[error("{refusal} — settle it where it was raised, then `{}`", crate::commands::advice::resume(.run_id.handle()))]
+    #[error("{} — settle it where it was raised, then `{}`", words::resolve_gate(.refusal), crate::commands::advice::resume(.run_id.handle()))]
     NoMenu {
         run_id: RunId,
-        #[source]
         refusal: yunta_engine::ResolveGateError,
     },
 
@@ -139,13 +139,12 @@ pub enum CliError {
         source: crate::commands::DetachedResumeError,
     },
 
-    /// A run that cannot be closed. The engine's sentence says what is
+    /// A run that cannot be closed. The words of the refusal say what is
     /// true of the run; which command moves it instead is this border's
     /// word.
-    #[error("{refusal}{}", close_advice(.run_id.handle(), .refusal))]
+    #[error("{}{}", words::close(.refusal), close_advice(.run_id.handle(), .refusal))]
     CloseRefused {
         run_id: RunId,
-        #[source]
         refusal: yunta_engine::CloseRunError,
     },
 
@@ -314,26 +313,56 @@ pub enum Reader {
 }
 
 impl CliError {
+    /// The words of a refusal whose sentence already names its cause, which
+    /// the chain of causes would otherwise append a second time.
+    fn carried_words(&self) -> Option<String> {
+        match self {
+            CliError::ResolveGate(refusal @ yunta_engine::ResolveGateError::Documents(_)) => {
+                Some(words::resolve_gate(refusal))
+            }
+            CliError::Run(yunta_engine::RunError::Artifact(
+                yunta_engine::AcceptError::Project { name, source },
+            )) => Some(words::project_view(name, source)),
+            _ => None,
+        }
+    }
+
     /// The refusal as `reader` reads it, with what caused it: a run's
     /// advice names it by its handle for a person, by its whole id for
     /// an agent.
     pub fn said_to(&self, reader: Reader) -> String {
-        let id = |run_id: &RunId| match reader {
-            Reader::Person => run_id.handle().to_string(),
-            Reader::Agent => run_id.to_string(),
-        };
+        if let Some(said) = self.carried_words() {
+            return said;
+        }
+        let id = |run_id: &RunId| crate::commands::advice::named(run_id, reader).to_string();
         let said = match self {
+            CliError::ResolveGate(refusal) => words::resolve_gate(refusal),
             CliError::NotPaused { run_id, refusal } => format!(
-                "{refusal} — `{}` shows where it is",
+                "{} — `{}` shows where it is",
+                words::resolve_gate(refusal),
                 crate::commands::advice::status(&id(run_id))
             ),
             CliError::NoMenu { run_id, refusal } => format!(
-                "{refusal} — settle it where it was raised, then `{}`",
+                "{} — settle it where it was raised, then `{}`",
+                words::resolve_gate(refusal),
                 crate::commands::advice::resume(&id(run_id))
             ),
-            CliError::CloseRefused { run_id, refusal } => {
-                format!("{refusal}{}", close_advice(&id(run_id), refusal))
+            CliError::CloseRefused { run_id, refusal } => format!(
+                "{}{}",
+                words::close(refusal),
+                close_advice(&id(run_id), refusal)
+            ),
+            CliError::Manifest(yunta_engine::ManifestError::Inputs(inputs)) => {
+                words::inputs(inputs)
             }
+            CliError::Run(yunta_engine::RunError::Object(problem)) => {
+                yunta_render::failure::object(problem)
+            }
+            CliError::Run(yunta_engine::RunError::RefusedAnswer {
+                refused,
+                summary,
+                failure,
+            }) => words::refused_answer(refused, summary, failure.as_deref()),
             // The engine names the condition and carries the fact it repeats
             // as data; the fact is drawn here, where a person reads it.
             CliError::Run(error @ yunta_engine::RunError::Escalation { source, .. }) => format!(

@@ -14,20 +14,22 @@ use yunta_storage::{AsyncStorage, StorageError};
 use crate::run_log::RunLog;
 use crate::EngineLiveness;
 
-/// Why a run cannot be closed.
+/// Why a run cannot be closed. Each variant's display is its code; the
+/// words a reader sees are the caller's to write.
 #[derive(Debug, thiserror::Error)]
 pub enum CloseRunError {
-    #[error("the run is already closed")]
+    #[error("already_closed")]
     AlreadyClosed,
-    #[error("an engine is driving the run")]
+    #[error("driven")]
     Driven,
     /// Its log says it is moving and nothing says the engine that drove
     /// it is gone: it may be between two processes.
-    #[error("the run has not stopped, and nothing says the engine that drove it is gone")]
+    #[error("moving")]
     Moving,
-    #[error(transparent)]
+    #[error("storage")]
     Storage(#[from] StorageError),
-    #[error("could not write the run's events.jsonl: {0}")]
+    /// The run's exported log could not be written; `0` says why.
+    #[error("export")]
     Export(String),
 }
 

@@ -28,7 +28,8 @@ use crate::artifacts::{accept, VerifiedArtifact};
 
 use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{failure_heading, numbered, read_as, submission_refusal, Reply};
+use super::verdicts::Reply;
+use super::words;
 use yunta_core::events::ArtifactEvent;
 
 impl SessionTools {
@@ -77,7 +78,7 @@ impl SessionTools {
         spec: &ArtifactSpec,
         held: &crate::artifacts::RunArtifacts<'_>,
     ) -> String {
-        render_verdict(&spec.to_string(), self.verified(spec, held).await)
+        words::artifact_verdict(&spec.to_string(), self.verified(spec, held).await)
     }
 
     /// What this node's close would make of one declared artifact now.
@@ -130,7 +131,7 @@ impl SessionTools {
             });
         }
         let Some(document) = args.get("document").filter(|value| value.is_object()) else {
-            return Err(self.invalid_submission(kind, "`document` is missing or is not an object"));
+            return Err(self.invalid_submission(kind, words::document_missing()));
         };
         let offered = crate::artifacts::submit(
             &self.node,
@@ -161,7 +162,7 @@ impl SessionTools {
             }
             crate::artifacts::ArtifactContent::Spec(spec) => {
                 let proven = self.spec_handover(spec).await?;
-                let told = failing_now(&proven.failing, &self.host.redactor);
+                let told = words::failing_now(&proven.failing, &self.host.redactor);
                 (proven.broken, told, self.by_task(&proven.failing).await?)
             }
             _ => return Ok(Offered::told_nothing(Ok(verified))),
@@ -222,11 +223,11 @@ impl SessionTools {
                     SubmissionOutcome::Accepted {
                         content_hash: accepted.content_hash,
                     },
-                    Ok(format!("{name} — accepted. {}{told}", read_as(&verified))),
+                    Ok(words::accepted(&name, &verified, &told)),
                 )
             }
             Err(crate::artifacts::SubmitError::Refused(report)) => {
-                let text = submission_refusal(&report, &name);
+                let text = words::submission_refused(&report, &name);
                 (
                     SubmissionOutcome::Refused { report },
                     Err(RunToolError::Refused { text }),
@@ -252,9 +253,8 @@ impl SessionTools {
         let reply = Reply::new(error.to_string());
         let text = match error {
             crate::artifacts::SubmitError::Accumulated => reply
-                .next(format!(
-                    "report each finding with `{}`",
-                    self.called(RunTool::PostFinding)
+                .next(words::report_each_finding(
+                    &self.called(RunTool::PostFinding),
                 ))
                 .text(),
             _ => reply.text(),
@@ -308,21 +308,6 @@ pub(crate) async fn verify_declared(
     }
 }
 
-/// One artifact's verdict as the session reads it: what the engine
-/// understood, or the numbered problems standing in the way.
-pub(super) fn render_verdict(
-    name: &str,
-    verified: Result<VerifiedArtifact, ArtifactFailure>,
-) -> String {
-    match verified {
-        Ok(verified) => format!("{name} — ok. {}", read_as(&verified)),
-        Err(failure) => match failure.report() {
-            Some(report) => numbered(format!("{name} — {}", failure_heading(report)), report),
-            None => format!("{name} — {failure}"),
-        },
-    }
-}
-
 /// A document's verdict, and what an acceptance tells the session beside
 /// what the engine read out of it.
 struct Offered {
@@ -362,33 +347,4 @@ impl SessionTools {
         }
         Ok(probes)
     }
-}
-
-/// How each test of an accepted spec fails before the work: its exit and
-/// the line it concluded with, redacted the way the log would be. A test
-/// that fails for anything but the missing behavior — a typo, a wrong
-/// path — fails after the work too, and this is where its writer sees it.
-fn failing_now(
-    failing: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)],
-    redactor: &yunta_core::Redactor,
-) -> String {
-    if failing.is_empty() {
-        return String::new();
-    }
-    let mut text = String::from(
-        "\n\nHow each test fails now, before any work — one that fails for anything but the \
-         missing behavior fails after the work too:",
-    );
-    for (task, run) in failing {
-        let line = match run.conclusion() {
-            Some(line) => format!(" — it said `{}`", redactor.text(&line)),
-            None => ", printing nothing".to_string(),
-        };
-        text.push_str(&format!(
-            "\n  `{}` (task `{task}`): exit {}{line}",
-            run.cmd,
-            run.exit_described()
-        ));
-    }
-    text
 }

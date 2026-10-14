@@ -14,6 +14,9 @@ use yunta_core::RunId;
 use super::inbox::{Inbox, RunRow, Standing, Unreadable};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::json::SCHEMA_VERSION;
+use crate::output::{emit, Answer, Mode};
+use crate::render::doc::{Block, Doc};
 use crate::render::ink::{Line, Tone};
 use crate::render::state::RunWord;
 use crate::render::{cell_width, duration, indent, truncate, wrap, Look, INDENT};
@@ -35,33 +38,65 @@ const CLOSED_SHOWN: usize = 10;
 /// The runs of the repository this is run in — every run on the machine
 /// with `all`, or when this is run outside a repository — as the inbox,
 /// and how many runs the listing leaves to other projects.
-pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
+pub async fn list_runs(all: bool, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let inbox = Inbox::gather(&ctx, all).await?;
-    if inbox.is_empty() {
-        println!("no runs in {}", ctx.project.storage_path.display());
-        return Ok(Outcome::Success);
+    let answer = ListRunsAnswer {
+        schema_version: SCHEMA_VERSION,
+        storage: ctx.project.storage_path.display().to_string(),
+        inbox,
+    };
+    emit(output, &answer, look)
+}
+
+/// The listing as a document carries it: the runs it is about, each read
+/// off its own frame, and where this project keeps its runs, which a
+/// listing with none names.
+#[derive(serde::Serialize)]
+pub(crate) struct ListRunsAnswer {
+    schema_version: u32,
+    storage: String,
+    #[serde(flatten)]
+    inbox: Inbox,
+}
+
+impl Answer for ListRunsAnswer {
+    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+        Doc::new().with(Block::Lines(self.lines(look)))
     }
-    let Inbox {
-        rows,
-        unreadable,
-        elsewhere,
-    } = inbox;
-    if rows.is_empty() && unreadable.is_empty() {
-        println!("no runs in this repository");
-    } else {
-        print!(
-            "{}",
-            render_runs(rows, unreadable, &crate::render::stdout_look())
-        );
+
+    fn outcome(&self) -> Outcome {
+        Outcome::Success
     }
-    if elsewhere > 0 {
-        println!(
-            "\n{} in other projects — yunta list --runs --all",
-            counted(elsewhere, "run")
-        );
+}
+
+impl ListRunsAnswer {
+    /// What a listing draws: the groups it names, or the one line a
+    /// listing with nothing to name says, then the count of the runs
+    /// that are in other projects.
+    fn lines(&self, look: &Look) -> Vec<Line> {
+        if self.inbox.is_empty() {
+            return vec![Line::new().plain(format!("no runs in {}", self.storage))];
+        }
+        let Inbox {
+            rows,
+            unreadable,
+            elsewhere,
+        } = &self.inbox;
+        let mut lines = match rows.is_empty() && unreadable.is_empty() {
+            true => vec![Line::new().plain("no runs in this repository")],
+            false => listing_lines(rows, unreadable, look),
+        };
+        if *elsewhere > 0 {
+            // The blank line sets the count apart from the listing above it.
+            lines.push(Line::new());
+            lines.push(Line::new().plain(format!(
+                "{} in other projects — yunta list --runs --all",
+                counted(*elsewhere, "run")
+            )));
+        }
+        lines
     }
-    Ok(Outcome::Success)
 }
 
 /// The listing itself: what needs a person first, then what stalled,
@@ -78,15 +113,20 @@ pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
 ///
 /// A run under `unreadable` has no state to have been in for any length
 /// of time, so that group is ordered by id alone.
-fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, look: &Look) -> String {
+fn listing_lines(rows: &[RunRow], unreadable: &[Unreadable], look: &Look) -> Vec<Line> {
+    let mut rows: Vec<&RunRow> = rows.iter().collect();
     rows.sort_by(|a, b| b.age.cmp(&a.age).then_with(|| a.run_id.cmp(&b.run_id)));
-    let mut out = String::new();
+    let mut lines = Vec::new();
     for standing in Standing::ALL {
-        let mut group: Vec<&RunRow> = rows.iter().filter(|row| row.standing == standing).collect();
+        let mut group: Vec<&RunRow> = rows
+            .iter()
+            .copied()
+            .filter(|row| row.standing == standing)
+            .collect();
         if group.is_empty() {
             continue;
         }
-        push_heading(&mut out, standing.heading(), group.len());
+        push_heading(&mut lines, standing.heading(), group.len());
         let mut folded = 0;
         if standing == Standing::Closed {
             group.reverse();
@@ -94,38 +134,37 @@ fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, look: &Lo
             group.truncate(CLOSED_SHOWN);
         }
         for row in group {
-            for line in row.lines(look) {
-                out.push_str(&format!("{}\n", look.ink.paint(&line)));
-            }
+            lines.extend(row.lines(look));
         }
         if folded > 0 {
-            out.push_str(&format!(
-                "{INDENT}{} not listed\n",
+            lines.push(Line::new().plain(format!(
+                "{INDENT}{} not listed",
                 counted(folded, "older closed run")
-            ));
+            )));
         }
     }
     if !unreadable.is_empty() {
+        let mut unreadable: Vec<&Unreadable> = unreadable.iter().collect();
         unreadable.sort_by(|a, b| a.run_id.cmp(&b.run_id));
-        push_heading(&mut out, "unreadable", unreadable.len());
-        for run in &unreadable {
-            out.push_str(&format!(
-                "{INDENT}{}: {}\n",
+        push_heading(&mut lines, "unreadable", unreadable.len());
+        for run in unreadable {
+            lines.push(Line::new().plain(format!(
+                "{INDENT}{}: {}",
                 run.run_id.handle(),
                 run.problem
-            ));
+            )));
         }
     }
-    out
+    lines
 }
 
 /// A group's heading, with the runs in it counted: a reader who only
 /// reads the headings still learns how much is waiting.
-fn push_heading(out: &mut String, heading: &str, runs: usize) {
-    if !out.is_empty() {
-        out.push('\n');
+fn push_heading(lines: &mut Vec<Line>, heading: &str, runs: usize) {
+    if !lines.is_empty() {
+        lines.push(Line::new());
     }
-    out.push_str(&format!("{heading} ({runs})\n"));
+    lines.push(Line::new().plain(format!("{heading} ({runs})")));
 }
 
 impl RunRow {
@@ -240,6 +279,14 @@ mod tests {
                     })
             })
             .collect()
+    }
+
+    /// The listing drawn the way the command draws it, unpainted.
+    fn render_runs(rows: Vec<RunRow>, unreadable: Vec<Unreadable>, look: &Look) -> String {
+        crate::render::draw(
+            Doc::new().with(Block::Lines(listing_lines(&rows, &unreadable, look))),
+            look,
+        )
     }
 
     fn render(rows: Vec<RunRow>) -> String {

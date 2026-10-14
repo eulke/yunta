@@ -4,9 +4,13 @@ use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench};
 
 mod common;
+#[path = "run_concurrency/join_any_failure.rs"]
+mod join_any_failure;
 use common::*;
-use yunta_core::events::{ArtifactEvent, Failure, NodeEvent, PauseReason, RunEvent, TaskEvent};
-use yunta_core::Capabilities;
+use yunta_core::events::{
+    ArtifactEvent, Failure, Interruption, NodeEvent, PauseReason, RunEvent, TaskEvent,
+};
+use yunta_core::{Capabilities, JoinPolicy};
 
 #[tokio::test]
 async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
@@ -268,14 +272,20 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused {
-            reason:
-                PauseReason::NodeFailed {
-                    node,
-                    failure: Failure::Message { outcome },
-                },
+            reason: PauseReason::NodeFailed { node, failure },
         } => {
             assert_eq!(node.as_str(), "pre-launch");
-            assert_eq!(outcome, "child `load-test` failed under join: all");
+            assert_eq!(
+                failure,
+                Failure::ChildrenFailed {
+                    join: JoinPolicy::All,
+                    children_failed: vec!["load-test".into()],
+                }
+            );
+            assert_eq!(
+                yunta_render::failure::sentence(&failure),
+                "child `load-test` failed under join: all"
+            );
         }
         other => panic!("expected Paused, got {other:?}"),
     }
@@ -856,6 +866,12 @@ nodes:
     match state.nodes.state("slow-loop") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
+                failure,
+                &Failure::Interrupted {
+                    interrupted_by: Interruption::SiblingWon,
+                }
+            );
+            assert_eq!(
                 yunta_render::failure::sentence(failure),
                 "interrupted: a sibling in this join: any group finished first"
             );
@@ -899,6 +915,12 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("slow-check") {
         Some(NodeState::Failed { failure, .. }) => {
+            assert_eq!(
+                failure,
+                &Failure::Interrupted {
+                    interrupted_by: Interruption::SiblingWon,
+                }
+            );
             assert_eq!(
                 yunta_render::failure::sentence(failure),
                 "interrupted: a sibling in this join: any group finished first"
@@ -1058,6 +1080,12 @@ nodes:
     );
     match state.nodes.state("audit") {
         Some(NodeState::Failed { failure, .. }) => {
+            assert_eq!(
+                failure,
+                &Failure::Uncertain {
+                    uncertain: "audit".into(),
+                }
+            );
             assert!(
                 yunta_render::failure::sentence(failure).contains("fail_if_uncertain"),
                 "the failure says which policy refused, got {failure:?}",

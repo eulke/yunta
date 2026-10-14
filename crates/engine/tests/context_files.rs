@@ -8,12 +8,10 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use tokio_util::sync::CancellationToken;
+use yunta_core::caution::{Caution, MissingContextFile};
 use yunta_core::{CommitSha, Isolation, NodeId, Workflow};
 use yunta_engine::process::Supervision;
-use yunta_engine::{
-    check_context_files, CheckError, CheckWarning, ContextFilesCheck, MissingContextFile,
-    RunTreeOrigin,
-};
+use yunta_engine::{check_context_files, CheckError, ContextFilesCheck, RunTreeOrigin};
 use yunta_testkit::{git, git_output, init_repo, write};
 use yunta_testkit_core::FixedClock;
 
@@ -90,7 +88,7 @@ async fn missing(
         .warnings
         .into_iter()
         .map(|warning| match warning {
-            CheckWarning::ContextFileMissing {
+            Caution::ContextFileMissing {
                 node,
                 path,
                 missing,
@@ -268,10 +266,18 @@ nodes:
         vec![("review".to_string(), "docs/review.md".to_string())]
     );
     assert!(found.warnings.is_empty(), "{:?}", found.warnings);
-    let text = found.errors[0].to_string();
     assert!(
-        text.contains("stops there every time") && text.contains("optional: true"),
-        "the refusal says why and the way out: {text}"
+        matches!(
+            found.errors.as_slice(),
+            [CheckError::ContextFileUnreachable {
+                node,
+                path,
+                missing: MissingContextFile::Nowhere,
+                ..
+            }] if node.as_str() == "review" && path == "docs/review.md"
+        ),
+        "{:?}",
+        found.errors
     );
 }
 
@@ -320,17 +326,19 @@ async fn a_mode_that_drops_the_only_writer_is_refused() {
 
 #[test]
 fn the_warning_names_the_commit_the_run_starts_from_and_the_way_out() {
-    let warning = CheckWarning::ContextFileMissing {
+    let warning = Caution::ContextFileMissing {
         node: NodeId::from("plan"),
         path: "docs/architecture.md".to_string(),
         base: Some("36096d2c0a1b".to_string()),
         missing: MissingContextFile::Nowhere,
     };
-    assert_eq!(
-        warning.to_string(),
-        "node `plan` reads `docs/architecture.md` (a `files:` context source), which commit \
-         `36096d2c0a1b` — the one a run starts from — does not hold: unless a node before it \
-         writes the file, `plan` stops there; commit the file first, or declare the entry \
-         `optional: true` if the node can do without it"
-    );
+    assert!(matches!(
+        warning,
+        Caution::ContextFileMissing {
+            ref node,
+            ref path,
+            base: Some(ref base),
+            missing: MissingContextFile::Nowhere,
+        } if node.as_str() == "plan" && path == "docs/architecture.md" && base == "36096d2c0a1b"
+    ));
 }

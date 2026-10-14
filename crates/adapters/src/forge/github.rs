@@ -19,6 +19,7 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use yunta_core::step::Spell;
 use yunta_core::{git_blob_id, CommitSha, GitHubRepo, Responder, Secret};
 
 use yunta_core::port::{
@@ -45,6 +46,7 @@ pub struct GitHubForge {
     repo: GitHubRepo,
     token: Secret<String>,
     base_url: String,
+    pub(super) spell: Spell,
 }
 
 /// How a [`GitHubForge`] is built: the public API and the default
@@ -55,6 +57,7 @@ pub struct GitHubForgeBuilder {
     token: Secret<String>,
     base_url: String,
     timeout: Duration,
+    spell: Spell,
 }
 
 impl GitHubForgeBuilder {
@@ -83,23 +86,26 @@ impl GitHubForgeBuilder {
             repo: self.repo,
             token: self.token,
             base_url: self.base_url.trim_end_matches('/').to_string(),
+            spell: self.spell,
         })
     }
 }
 
 impl GitHubForge {
-    pub fn configure(repo: GitHubRepo, token: Secret<String>) -> GitHubForgeBuilder {
+    /// A builder for a forge that writes its next steps with `spell`.
+    pub fn configure(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> GitHubForgeBuilder {
         GitHubForgeBuilder {
             repo,
             token,
             base_url: "https://api.github.com".to_string(),
             timeout: REQUEST_TIMEOUT,
+            spell,
         }
     }
 
     /// Against the public API, with the default patience.
-    pub fn new(repo: GitHubRepo, token: Secret<String>) -> Result<Self, ForgeError> {
-        Self::configure(repo, token).build()
+    pub fn new(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> Result<Self, ForgeError> {
+        Self::configure(repo, token, spell).build()
     }
 
     pub(super) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
@@ -432,7 +438,7 @@ impl Forge for GitHubForge {
         )
         .node(&req.decision.node)
         .text();
-        for (path, content) in super::gate_files(req) {
+        for (path, content) in super::gate_files(req, &*self.spell) {
             self.commit_artifact(&path, &content, &req.branch, &message)
                 .await?;
         }
@@ -443,7 +449,7 @@ impl Forge for GitHubForge {
                     &super::gate_title(req),
                     &req.branch,
                     &req.base_branch,
-                    &super::gate_body(req),
+                    &super::gate_body(req, &*self.spell),
                 )
                 .await
             }

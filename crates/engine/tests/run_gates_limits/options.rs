@@ -151,5 +151,8 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     assert_eq!(ids, vec!["proceed", "revise", "abort"]);
     let words = |o| option_words(waiting, o).1;
     assert!(waiting.options().iter().all(|o| words(o).is_some()));
-    assert_eq!(waiting.summary(), "Approve the plan?");
+    assert_eq!(
+        waiting.summary(),
+        &yunta_core::events::Claim::Written("Approve the plan?".to_string())
+    );
 }

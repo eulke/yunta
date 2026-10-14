@@ -188,7 +188,7 @@ pub(super) async fn resolve_artifact(
                 "read the artifact `{}` the run holds",
                 crate::artifacts::describe(found)
             ),
-            source: std::io::Error::other(source.to_string()),
+            source: std::io::Error::other(source.sentence()),
         })
 }
 

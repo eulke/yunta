@@ -48,9 +48,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::recorded;
 use record::Recorder;
 
-pub(crate) use criteria::{
-    could_not_run, pre_check_unless_cut, probe, probe_command, unanswered_words,
-};
+pub(crate) use criteria::{could_not_run, pre_check_unless_cut, probe, probe_command};
 pub use criteria::{post_check, pre_check, PostCheck};
 pub(crate) use dispatch::not_stopped_failure;
 pub use dispatch::DispatchError;

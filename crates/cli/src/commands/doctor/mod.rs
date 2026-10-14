@@ -26,15 +26,21 @@ mod session;
 
 use std::collections::BTreeSet;
 
+use super::verify::{checklist, CheckRow};
 use crate::context::Context;
+use crate::error::words;
 use crate::error::{CliError, Outcome};
+use crate::json::SCHEMA_VERSION;
+use crate::output::{emit, Answer, Mode};
 use crate::render::blocks::{Checklist, Found, Next};
-use crate::render::doc::Doc;
-use crate::render::INDENT;
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::Line;
+use crate::render::{Look, INDENT};
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
+use yunta_render::caution;
 
-pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
+pub async fn doctor(session: bool, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let mut checks = Checklist::default();
     // The configuration a check found missing, as the lines to paste.
@@ -55,30 +61,64 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
         probe_sessions(&ctx, &healthy, &mut checks).await;
     }
 
-    let holds = checks.holds();
-    let look = crate::render::stdout_look();
-    let mut out = crate::render::draw(Doc::new().with(checks), &look);
-    if !steps.is_empty() {
-        out.push('\n');
-        for line in &steps {
-            out.push_str(&format!("{INDENT}{line}\n"));
+    emit(output, &DoctorAnswer::of(session, &checks, steps), look)
+}
+
+/// What `doctor` found, as a document carries it: every check in the order
+/// it ran, and the lines to paste for each configuration a check found
+/// missing.
+#[derive(serde::Serialize)]
+pub(crate) struct DoctorAnswer {
+    schema_version: u32,
+    /// Whether `--session` opened a session per binding.
+    session: bool,
+    holds: bool,
+    checks: Vec<CheckRow>,
+    steps: Vec<String>,
+}
+
+impl DoctorAnswer {
+    fn of(session: bool, checks: &Checklist, steps: Vec<String>) -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            session,
+            holds: checks.holds(),
+            checks: checks.checks().map(CheckRow::of).collect(),
+            steps,
         }
     }
-    if !session {
-        let next = Next {
-            steps: vec![(
-                "yunta doctor --session".to_string(),
-                "opens a session per binding, a prompt each",
-            )],
-        };
-        out.push('\n');
-        out.push_str(&crate::render::draw(Doc::new().with(next), &look));
-    }
-    print!("{out}");
+}
 
-    match holds {
-        true => Ok(Outcome::Success),
-        false => Ok(Outcome::Reported),
+impl Answer for DoctorAnswer {
+    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+        let mut doc = Doc::new().with(checklist(&self.checks));
+        if !self.steps.is_empty() {
+            // The lines to paste open under a blank line of their own.
+            let mut lines = vec![Line::new()];
+            lines.extend(
+                self.steps
+                    .iter()
+                    .map(|step| Line::new().plain(INDENT).plain(step.as_str())),
+            );
+            doc = doc.with(Block::Lines(lines));
+        }
+        if !self.session {
+            let next = Next {
+                steps: vec![(
+                    "yunta doctor --session".to_string(),
+                    "opens a session per binding, a prompt each",
+                )],
+            };
+            doc = doc.with(Block::Lines(vec![Line::new()])).with(next);
+        }
+        doc
+    }
+
+    fn outcome(&self) -> Outcome {
+        match self.holds {
+            true => Outcome::Success,
+            false => Outcome::Reported,
+        }
     }
 }
 
@@ -337,10 +377,10 @@ async fn check_installed_pack_workflows(
                 let errors: Vec<yunta_engine::CheckError> = refused.chain(found.errors).collect();
                 let pack = format!("pack {}", manifest.reference());
                 for error in &errors {
-                    checks.push(Found::Problem, pack.as_str(), error.to_string());
+                    checks.push(Found::Problem, pack.as_str(), words::check(error));
                 }
                 for warning in &found.warnings {
-                    checks.push(Found::Caution, pack.as_str(), warning.to_string());
+                    checks.push(Found::Caution, pack.as_str(), caution::line(warning));
                 }
                 steps.extend(crate::detect::suggestions(&errors, &detected));
             }

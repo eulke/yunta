@@ -43,8 +43,14 @@ outcome: { type: completed, summary: "should never be reached" }
     let report = run_once(&owner, &unit, run.path(), &t, &adapter, budget).await;
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => {
-            assert_eq!(reason, "exceeded max_tokens 100 (110 used)")
+        DispatchOutcome::BudgetExceeded { cause } => {
+            assert_eq!(
+                cause,
+                &Failure::TokenBudget {
+                    used: 110,
+                    max: 100
+                }
+            )
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }

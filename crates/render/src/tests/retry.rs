@@ -14,7 +14,9 @@ use crate::blocks::remedy_words;
 fn retry_menu(waits: Vec<Precondition>) -> FailureMenu {
     FailureMenu {
         attempt: 2,
-        failure: Failure::message("the linter failed"),
+        failure: Failure::Message {
+            outcome: "the linter failed".to_string(),
+        },
         remedies: waits
             .into_iter()
             .map(|precondition| Remedy {
@@ -189,5 +191,15 @@ fn a_red_guard_is_named_by_its_stop_and_its_retry_waits_on_the_outside() {
             )),
         "{}",
         tradeoff.as_deref().unwrap_or("none")
+    );
+}
+
+#[test]
+fn a_retry_that_waits_for_a_capped_loop_says_a_person_lifts_the_cap() {
+    let (label, _) = retry_words_of(vec![Precondition::CapLifted])
+        .expect("a retry that names its input has words");
+    assert_eq!(
+        label,
+        "Run it again (attempt 2) once a person lifts the cap on resume"
     );
 }

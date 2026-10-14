@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{NodeOutcome, TokenUsage};
+use yunta_core::events::{Failure, NodeOutcome, Timed, TokenUsage};
 use yunta_core::{ExecutorKind, ExecutorName, Node};
 
 use super::node_close::{close_node, fail, fail_with, Close};
@@ -80,7 +80,8 @@ async fn executor_path(
         &declared.display().to_string(),
         ctx.manifest.config.permissions.as_ref(),
     ) {
-        return Ok(Err(fail(ctx, node, rule).await?));
+        let failure = Failure::CommandDenied { denied_rule: rule };
+        return Ok(Err(fail(ctx, node, failure).await?));
     }
     Ok(Ok(path))
 }
@@ -117,12 +118,9 @@ pub(super) async fn execute_executor(
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
         Ok(bytes) => bytes,
         Err(source) => {
-            return fail(
-                ctx,
-                node,
-                format!("failed to serialize executor `{executor}`'s stdin: {source}"),
-            )
-            .await;
+            let engine_error =
+                format!("failed to serialize executor `{executor}`'s stdin: {source}");
+            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
     };
 
@@ -138,15 +136,15 @@ pub(super) async fn execute_executor(
         Outcome::Exited { status, stdout, .. } => (status, stdout),
         Outcome::Cancelled { .. } => return super::node_exec::cancelled_end(ctx, node).await,
         Outcome::TimedOut { .. } => {
-            return fail(
-                ctx,
-                node,
-                format!(
-                    "executor `{executor}` exceeded its {}s timeout",
-                    timeout_seconds.unwrap_or_default()
-                ),
-            )
-            .await;
+            // The command's bound, kept in milliseconds as the log holds it.
+            let timeout = Duration::from_secs(timeout_seconds.unwrap_or_default());
+            let failure = Failure::TimedOut {
+                after_ms: yunta_core::units::whole_millis(timeout),
+                timed: Timed::Executor {
+                    executor: executor.clone(),
+                },
+            };
+            return fail(ctx, node, failure).await;
         }
     };
 

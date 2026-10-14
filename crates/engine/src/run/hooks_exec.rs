@@ -186,8 +186,9 @@ pub(super) async fn after_hooks(
 ) -> Result<Option<NodeEnd>, RunError> {
     for step in &effective_hooks(ctx, node).after {
         let end = match run_hook(ctx, node, HookPhase::After, step).await? {
-            HookRun::Violation(rule) => {
-                fail_with_tokens_staged(ctx, node, rule, tokens, staged).await?
+            HookRun::Violation(denied_rule) => {
+                let failure = Failure::CommandDenied { denied_rule };
+                fail_with_tokens_staged(ctx, node, failure, tokens, staged).await?
             }
             HookRun::Unset(key) => {
                 fail_with_staged(ctx, node, Failure::unset(key), tokens, staged).await?

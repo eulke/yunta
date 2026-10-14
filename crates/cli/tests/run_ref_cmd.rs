@@ -4,7 +4,7 @@
 //! person. Something two runs answer to is refused naming both.
 
 use serde_json::Value;
-use yunta_testkit::{handle, run_id_from, stderr, stdout, yunta_at, Checkout};
+use yunta_testkit::{handle, run_id_from, stdout, yunta_at, Checkout};
 
 const FINISHES: &str = "name: ok\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n";
 /// A build that fails at once: the run stops on a person.
@@ -24,12 +24,12 @@ fn ran(checkout: &Checkout, workflow: &str) -> String {
     run_id_from(&yunta_at!(checkout, &["run", workflow]))
 }
 
-/// The run `reference` finds, as `status --json` names it, or what the
-/// command said instead.
+/// The run `reference` finds, as `status --json` names it, or the error
+/// document the command printed instead.
 fn found(checkout: &Checkout, reference: &str) -> Result<String, String> {
     let status = yunta_at!(checkout, &["status", reference, "--json"]);
     if !status.status.success() {
-        return Err(stderr(&status));
+        return Err(stdout(&status));
     }
     let document: Value = serde_json::from_str(&stdout(&status)).expect("one JSON document");
     Ok(document["run_id"].as_str().unwrap_or_default().to_string())

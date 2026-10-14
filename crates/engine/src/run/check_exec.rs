@@ -252,10 +252,10 @@ async fn execute_findings_gate(
     // A finding settled by its proof or by a person stands, and is past
     // what a gate on severity holds the run to.
     let effective = state.unsettled_findings();
-    let offending: Vec<&str> = effective
+    let offending: Vec<_> = effective
         .iter()
         .filter(|finding| finding.severity <= max_severity)
-        .map(|finding| finding.id.as_str())
+        .map(|finding| finding.id.clone())
         .collect();
 
     if offending.is_empty() {
@@ -264,17 +264,11 @@ async fn execute_findings_gate(
         });
         close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
     } else {
-        fail(
-            ctx,
-            node,
-            format!(
-                "{} at or above {}: {}",
-                yunta_core::text::counted(offending.len(), "finding"),
-                max_severity.as_str(),
-                offending.join(", ")
-            ),
-        )
-        .await
+        let failure = Failure::FindingsOpen {
+            at_or_above: max_severity,
+            open_findings: offending,
+        };
+        fail(ctx, node, failure).await
     }
 }
 

@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use yunta_core::commit_message::CommitMessage;
 
-use yunta_core::events::TokenUsage;
+use yunta_core::events::{Failure, TokenUsage};
 use yunta_core::protected::{Closing, Protected, Trespass};
 use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind, TreeId};
 
@@ -304,12 +304,14 @@ pub(super) async fn land_unit(
             // Released before the node fails: a close takes the same lock
             // to decide what it commits.
             drop(landing);
-            let outcome = format!(
-                "landing `{}` on the run's tree: git could not replay it over {}",
-                node.id,
-                yunta_core::text::counted(paths.len(), "path"),
-            );
-            return fail_with_tokens_staged(ctx, node, outcome, tokens, staged)
+            let failure = Failure::EngineFailed {
+                engine_error: format!(
+                    "landing `{}` on the run's tree: git could not replay it over {}",
+                    node.id,
+                    yunta_core::text::counted(paths.len(), "path"),
+                ),
+            };
+            return fail_with_tokens_staged(ctx, node, failure, tokens, staged)
                 .await
                 .map(Some);
         }

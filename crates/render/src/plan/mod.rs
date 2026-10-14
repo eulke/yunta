@@ -13,8 +13,9 @@
 
 use yunta_core::events::AcceptedDeparture;
 use yunta_core::shown::{Answered, HeldTo, PlanReview, TaskReview};
+use yunta_core::step::NextStep;
 use yunta_core::text::{agreeing, counted};
-use yunta_core::{Decision, ScopeGlob, Task, TasksFile};
+use yunta_core::{Decision, RunId, ScopeGlob, Task, TasksFile};
 
 use crate::blocks::{Fields, Marked, Next, Prose, Section};
 use crate::doc::{Block, Doc};
@@ -46,8 +47,15 @@ pub enum Form {
 pub const CODE_SHOWN: usize = 60;
 
 /// `review` as a document: `of` names the node that wrote the plan, and
-/// `run` the handle a person reads the whole plan by.
-pub fn document(review: &PlanReview, of: &str, run: &str, form: Form) -> Doc<'static> {
+/// `run` the run a person reads the whole plan by. Each command it names is
+/// written by `spell`.
+pub fn document(
+    review: &PlanReview,
+    of: &str,
+    run: &RunId,
+    form: Form,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Doc<'static> {
     let plan = &review.plan;
     let steps = plan.steps();
     let mut doc = Doc::new().with(Block::Title(
@@ -73,14 +81,17 @@ pub fn document(review: &PlanReview, of: &str, run: &str, form: Form) -> Doc<'st
     for (at, step) in steps.iter().enumerate() {
         let cards = step
             .iter()
-            .map(|task| card(task, review, form, run).into())
+            .map(|task| card(task, review, form, run, spell).into())
             .collect();
         doc = doc.with(titled(&format!("step {} of {total}", at + 1), cards));
     }
     match form {
         Form::Review => doc.with(blank()).with(Next {
             steps: vec![(
-                format!("yunta status {run} --node {}", of_node(of)),
+                spell(&NextStep::Status {
+                    run: run.clone(),
+                    node: of_node(of).parse().ok(),
+                }),
                 "the whole plan, every file whole",
             )],
         }),

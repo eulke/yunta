@@ -197,13 +197,14 @@ fn denial_finding(
         Subject::Task(task) => ("task", task.to_string()),
         Subject::Node => ("node", node.to_string()),
     };
+    let words = crate::run_tools::words::denial(denial);
     let detail = match asked {
         Some(request) => format!(
-            "{denial} — paths asked for: {}; agent's stated reason: {}",
+            "{words} — paths asked for: {}; agent's stated reason: {}",
             yunta_core::listed_globs(&request.paths),
             request.reason
         ),
-        None => denial.to_string(),
+        None => words,
     };
     Ok(Finding {
         id: FindingId::try_from(format!("scope-expansion-{name}-{attempt}"))?,

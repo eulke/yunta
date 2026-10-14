@@ -14,7 +14,7 @@ use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, Toke
 use yunta_core::{ArtifactSpec, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
-    accept, answerer, canonical, interpreted, Answerer, ArtifactContent, RunArtifacts,
+    accept, answerer, canonical, interpreted, Answerer, ArtifactContent, RunArtifacts, StoreError,
     VerifiedArtifact,
 };
 use crate::replay::RunView;
@@ -66,9 +66,12 @@ pub(super) async fn derive_findings(
     let derived = match crate::artifacts::derive_findings(Some(&node.id), posted, ceiling) {
         Ok(derived) => derived,
         Err(error) => {
+            let failure = Failure::EngineFailed {
+                engine_error: error.to_string(),
+            };
             return Ok(Some(
-                fail_with_tokens_staged(ctx, node, error.to_string(), tokens, staged).await?,
-            ))
+                fail_with_tokens_staged(ctx, node, failure, tokens, staged).await?,
+            ));
         }
     };
     accept(
@@ -99,22 +102,32 @@ pub(super) enum NotAcquired {
     /// resolution instead of being listed beside one.
     Unreachable {
         artifact: ArtifactId,
-        source: crate::artifacts::ObjectError,
+        source: StoreError,
     },
 }
 
 impl From<NotAcquired> for Failure {
     /// The node's failure in the shape its facts have: artifact entries
-    /// a receipt counts and `status` attributes by artifact, or the one
-    /// sentence the engine states when no artifact entry describes what
-    /// went wrong. This is the single border where either becomes text.
+    /// a receipt counts and `status` attributes by artifact, or the
+    /// artifact whose bytes the child run cannot hand over, which no
+    /// artifact entry describes.
     fn from(problem: NotAcquired) -> Self {
         match problem {
             NotAcquired::Undelivered(failures) => Failure::artifacts(failures),
-            NotAcquired::Unreachable { artifact, source } => Failure::message(format!(
-                "the {}: the child run cannot hand over its bytes: {source}",
-                artifact.label()
-            )),
+            NotAcquired::Unreachable {
+                artifact,
+                source: StoreError::Object(object),
+            } => Failure::ArtifactUnreadable {
+                artifact,
+                problem: object,
+            },
+            // The store's own read failed: an engine step that failed on its own.
+            NotAcquired::Unreachable { artifact, source } => Failure::EngineFailed {
+                engine_error: format!(
+                    "the {}: the child run cannot hand over its bytes: {source}",
+                    artifact.label()
+                ),
+            },
         }
     }
 }

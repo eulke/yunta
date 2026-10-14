@@ -181,10 +181,11 @@ pub enum RunError {
     /// was shown does not accept — an option it never offered, or one
     /// that asks for words given none: a decision nobody made, refused
     /// rather than recorded as the gate's outcome.
-    #[error("the human surface's answer was refused: {refused}, for: {summary}")]
+    #[error("the human surface's answer was refused: {refused}")]
     RefusedAnswer {
         refused: yunta_core::events::Refusal,
-        summary: String,
+        summary: Box<yunta_core::events::Claim>,
+        failure: Option<Box<yunta_core::events::FailureMenu>>,
     },
 
     /// `create_run`'s own guard — `check` validates every
@@ -269,11 +270,9 @@ pub enum RunError {
     #[error(transparent)]
     Artifact(#[from] crate::artifacts::AcceptError),
 
-    /// An artifact the run's log holds whose bytes the run cannot hand
-    /// over — the object is gone, or no longer hashes to what was
-    /// accepted.
-    #[error(transparent)]
-    Object(#[from] crate::artifacts::ObjectError),
+    /// An artifact whose bytes the run's store cannot hand over.
+    #[error("object")]
+    Object(yunta_core::events::ObjectProblem),
     #[error(transparent)]
     Frozen(#[from] crate::frozen::FrozenError),
 }

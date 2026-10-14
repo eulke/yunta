@@ -12,6 +12,8 @@ use crate::commands::run_ref::{RunArg, RunRef};
 
 use crate::error::{CliError, Outcome};
 use crate::graph;
+use crate::output::Mode;
+use crate::render::Look;
 
 /// Yunta — a deterministic workflow engine for code agents.
 #[derive(Parser)]
@@ -31,12 +33,23 @@ mod dispatch;
 use dispatch::dispatch;
 
 impl Cli {
+    /// The output mode of the parsed subcommand, read from its own flags.
+    pub(crate) fn mode(&self) -> Mode {
+        Mode::of(self.command.json(), self.command.quiet())
+    }
+
     /// Runs the parsed subcommand, handing back its verdict or the one
     /// error `main` turns into a line on stderr and a failing exit code.
     /// `started` is when this process began, which a hook's window counts
-    /// from.
-    pub async fn run(self, started: Instant) -> Result<Outcome, CliError> {
-        dispatch(self.command, started).await
+    /// from; `output` and `look` are how this process writes, as `main`
+    /// decided them.
+    pub async fn run(
+        self,
+        started: Instant,
+        output: Mode,
+        look: &Look,
+    ) -> Result<Outcome, CliError> {
+        dispatch(self.command, started, output, look).await
     }
 }
 
@@ -145,6 +158,11 @@ enum Command {
         /// Free-form context alongside the choice.
         #[arg(long = "text")]
         free_text: Option<String>,
+        /// Prints the answer as one versioned JSON document instead of the
+        /// terminal view. The option is then required: the run's own menu
+        /// is put to a terminal.
+        #[arg(long)]
+        json: bool,
     },
     /// Stop a running run and its sessions.
     ///
@@ -153,6 +171,10 @@ enum Command {
     Cancel {
         #[command(flatten)]
         run: RunArg,
+        /// Prints the answer as one versioned JSON document instead of the
+        /// terminal view.
+        #[arg(long)]
+        json: bool,
     },
     /// Close a stopped run nobody will continue.
     ///
@@ -166,6 +188,10 @@ enum Command {
         /// Omitted, the close is recorded as `unverified:$USER`.
         #[arg(long)]
         by: Option<Responder>,
+        /// Prints the answer as one versioned JSON document instead of the
+        /// terminal view.
+        #[arg(long)]
+        json: bool,
     },
     /// List workflows, or runs with `--runs`.
     ///
@@ -180,6 +206,10 @@ enum Command {
         /// it was created in.
         #[arg(long, requires = "runs")]
         all: bool,
+        /// With `--runs`: the runs as one versioned JSON document instead
+        /// of the terminal view.
+        #[arg(long, requires = "runs")]
+        json: bool,
     },
     /// Check adapters, git, the forge and packs.
     ///
@@ -192,6 +222,10 @@ enum Command {
         /// ended. Spends one prompt per binding.
         #[arg(long)]
         session: bool,
+        /// Prints the report as one versioned JSON document instead of the
+        /// terminal view.
+        #[arg(long)]
+        json: bool,
     },
     /// Serve the control plane over MCP on stdio.
     ///
@@ -246,6 +280,10 @@ enum Command {
     Verify {
         #[command(flatten)]
         run: RunArg,
+        /// Prints the verification as one versioned JSON document instead
+        /// of the terminal view.
+        #[arg(long)]
+        json: bool,
     },
     /// Write a finished run's Verified Work Receipt.
     ///
@@ -348,6 +386,35 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+}
+
+impl Command {
+    /// Whether this subcommand answers with one JSON document.
+    fn json(&self) -> bool {
+        match self {
+            Command::Run { json, .. }
+            | Command::Status { json, .. }
+            | Command::Resume { json, .. }
+            | Command::ResolveGate { json, .. }
+            | Command::Cancel { json, .. }
+            | Command::Close { json, .. }
+            | Command::List { json, .. }
+            | Command::Doctor { json, .. }
+            | Command::Verify { json, .. }
+            | Command::Receipt { json, .. }
+            | Command::Stats { json, .. }
+            | Command::Schema { json, .. } => *json,
+            _ => false,
+        }
+    }
+
+    /// Whether this subcommand prints the run id and nothing else.
+    fn quiet(&self) -> bool {
+        match self {
+            Command::Run { quiet, .. } | Command::Resume { quiet, .. } => *quiet,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Subcommand)]

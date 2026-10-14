@@ -7,13 +7,16 @@
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
+use yunta_core::caution::Caution;
 use yunta_core::yaml::{Location, SourceMap};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::CheckError;
 
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
+use crate::output::say;
 use crate::render::blocks::diagnostic::located;
+use crate::render::Look;
 
 /// How much of the project a verdict reads beyond the workflow itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +38,7 @@ pub(crate) struct Verdict {
     /// denies.
     conflicts: Vec<String>,
     errors: Vec<CheckError>,
-    warnings: Vec<String>,
+    warnings: Vec<Caution>,
     /// The file the workflow was read from, which its refusals quote.
     path: PathBuf,
     /// What the file itself breaks, when the workflow judged is the one it
@@ -57,28 +60,23 @@ pub(crate) async fn verdict(
 ) -> Result<Verdict, CliError> {
     let facts = super::declared_facts(config);
     let mut errors = yunta_engine::check(workflow, config, &facts);
-    let mut warnings: Vec<String> = yunta_engine::check_warnings(workflow, config)
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    let token_caps = yunta_engine::check_token_cap_warnings(workflow, config, &facts);
-    warnings.extend(token_caps.iter().map(ToString::to_string));
+    let mut warnings = yunta_engine::check_warnings(workflow, config, &facts);
     // Composition references (`use:`) resolve against the repo catalog
     // under the current directory, then packs — the same catalog a run's
     // children resolve against at birth.
     let origin = yunta_engine::origin_of(&ctx.cwd, path);
     let refs = yunta_engine::check_workflow_refs(workflow, config, &ctx.cwd, &origin, &facts);
     errors.extend(refs.errors);
-    warnings.extend(refs.warnings.iter().map(ToString::to_string));
+    warnings.extend(refs.warnings);
     let (unprovided, missing_programs) =
         super::refusals::environment(&ctx.cwd, workflow, config, &origin);
     errors.extend(unprovided);
-    warnings.extend(missing_programs.iter().map(ToString::to_string));
+    warnings.extend(missing_programs);
     if reach == Reach::Workflow {
         let files =
             super::context_files_at_head(ctx, workflow, config.resolved_isolation()).await?;
         errors.extend(files.errors);
-        warnings.extend(files.warnings.iter().map(ToString::to_string));
+        warnings.extend(files.warnings);
     }
     Ok(Verdict {
         conflicts,
@@ -147,7 +145,7 @@ impl Verdict {
     /// runs.
     pub(crate) fn warn(&self) {
         for warning in &self.warnings {
-            warn(warning);
+            warn(yunta_render::caution::line(warning));
         }
     }
 
@@ -158,10 +156,11 @@ impl Verdict {
         &self,
         ctx: &Context,
         subject: impl Display,
+        look: &Look,
     ) -> Result<Outcome, CliError> {
         self.warn();
         if self.passes() {
-            println!("{subject}: OK");
+            say(look, format!("{subject}: OK"));
             return Ok(Outcome::Success);
         }
         note(self.problems(ctx, subject).await?);
@@ -192,7 +191,7 @@ impl Verdict {
             })
             .chain(self.errors.iter().map(|error| {
                 let at = error.pointer().and_then(|pointer| map.place(&pointer));
-                (error.to_string(), at)
+                (crate::error::words::check(error), at)
             }))
             .collect();
         // In the order the file has them; what has no place in it — a

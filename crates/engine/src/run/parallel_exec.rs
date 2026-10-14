@@ -2,7 +2,7 @@
 //! under the group's `join:` policy, interrupting the losers of `any`.
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EngineFact, NodeOutcome, PauseReason, TokenUsage};
+use yunta_core::events::{EngineFact, Failure, NodeOutcome, PauseReason, TokenUsage};
 use yunta_core::{JoinPolicy, Node};
 
 use crate::replay::NodeState;
@@ -47,17 +47,10 @@ pub(super) async fn execute_parallel(
         .iter()
         .filter(|child| uncertain.contains(&child.id))
     {
-        fail(
-            ctx,
-            child,
-            format!(
-                "`{}` was running with no terminal event when the engine last stopped — \
-                 `on_interrupt: fail_if_uncertain` refuses to guess whether it finished; \
-                 verify manually before resuming",
-                child.id
-            ),
-        )
-        .await?;
+        let failure = Failure::Uncertain {
+            uncertain: child.id.clone(),
+        };
+        fail(ctx, child, failure).await?;
     }
 
     let already_failed: Vec<&Node> = children
@@ -85,13 +78,15 @@ pub(super) async fn execute_parallel(
 
     match join {
         JoinPolicy::All => {
-            if let Some(first) = already_failed.first() {
-                return fail(
-                    ctx,
-                    node,
-                    format!("child `{}` failed under join: all", first.id),
-                )
-                .await;
+            if !already_failed.is_empty() {
+                let failure = Failure::ChildrenFailed {
+                    join: JoinPolicy::All,
+                    children_failed: already_failed
+                        .iter()
+                        .map(|child| child.id.clone())
+                        .collect(),
+                };
+                return fail(ctx, node, failure).await;
             }
             let results = futures::future::join_all(
                 to_run
@@ -100,14 +95,12 @@ pub(super) async fn execute_parallel(
             )
             .await;
 
-            let mut failed_child = None;
+            let mut failed_children = Vec::new();
             let mut interrupted = false;
             let mut child_paused: Option<PauseReason> = None;
             for ((child, _), result) in to_run.iter().zip(results) {
                 match result? {
-                    NodeEnd::Failed => {
-                        failed_child.get_or_insert(&child.id);
-                    }
+                    NodeEnd::Failed => failed_children.push(child.id.clone()),
                     // A root cancellation unwound this child —
                     // the group closes nothing; the whole run is
                     // pausing, and resume re-enters it. Noted, not
@@ -145,8 +138,12 @@ pub(super) async fn execute_parallel(
             if let Some(reason) = child_paused {
                 return Ok(NodeEnd::Paused { reason });
             }
-            if let Some(id) = failed_child {
-                return fail(ctx, node, format!("child `{id}` failed under join: all")).await;
+            if !failed_children.is_empty() {
+                let failure = Failure::ChildrenFailed {
+                    join: JoinPolicy::All,
+                    children_failed: failed_children,
+                };
+                return fail(ctx, node, failure).await;
             }
             close_node(
                 ctx,
@@ -270,12 +267,11 @@ pub(super) async fn execute_parallel(
                         // re-enters the race.
                         return Ok(NodeEnd::Paused { reason });
                     }
-                    fail(
-                        ctx,
-                        node,
-                        format!("join: any — no child succeeded ({} failed)", failures.len()),
-                    )
-                    .await
+                    let failure = Failure::ChildrenFailed {
+                        join: JoinPolicy::Any,
+                        children_failed: failures.into_iter().cloned().collect(),
+                    };
+                    fail(ctx, node, failure).await
                 }
             }
         }

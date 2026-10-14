@@ -77,7 +77,12 @@ pub(crate) fn node_finished() -> NodeFinishedPayload {
 }
 
 pub(crate) fn node_failed() -> NodeFailedPayload {
-    NodeFailedPayload::new(Failure::message("criteria red"), TokenUsage::default())
+    NodeFailedPayload::new(
+        Failure::Message {
+            outcome: "criteria red".into(),
+        },
+        TokenUsage::default(),
+    )
 }
 
 pub(crate) fn hook_executed() -> HookExecutedPayload {
@@ -93,7 +98,9 @@ pub(crate) fn hook_executed() -> HookExecutedPayload {
 pub(crate) fn node_rerouted() -> NodeReroutedPayload {
     NodeReroutedPayload::new(
         "fix-lint".into(),
-        Failure::message("clippy failed"),
+        Failure::Message {
+            outcome: "clippy failed".into(),
+        },
         RerouteOrigin::OnFailure,
         Some(1),
         Some(2),

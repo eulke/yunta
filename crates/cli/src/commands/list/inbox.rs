@@ -28,7 +28,8 @@ use crate::render::state::RunWord;
 /// The order of the variants is the order the groups print in: what
 /// stopped on a person comes before what is still moving, which comes
 /// before what is already closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Standing {
     /// Stopped until a person acts: a decision to answer, or a log that
     /// stopped making sense.
@@ -87,6 +88,7 @@ impl Standing {
 }
 
 /// One run as the listing shows it, read off that run's own frame.
+#[derive(serde::Serialize)]
 pub(crate) struct RunRow {
     pub(crate) run_id: RunId,
     pub(crate) standing: Standing,
@@ -96,6 +98,7 @@ pub(crate) struct RunRow {
     pub(crate) mode: ModeName,
     /// How long the run has been where it is — what the rows of a group
     /// are ordered by.
+    #[serde(rename = "age_secs", serialize_with = "as_secs")]
     pub(crate) age: Duration,
     /// What holds the run where it is, said whole; `None` for a run
     /// nothing holds.
@@ -107,6 +110,7 @@ pub(crate) struct RunRow {
 /// A run the listing can name but not derive: its log or the manifest it
 /// froze does not read back. It is listed as itself, never dropped — a
 /// run missing from a listing is a run nobody goes looking for.
+#[derive(serde::Serialize)]
 pub(crate) struct Unreadable {
     pub(crate) run_id: RunId,
     pub(crate) problem: String,
@@ -116,6 +120,7 @@ pub(crate) struct Unreadable {
 /// of the repository this is run in — every run on the machine with
 /// `all`, or when this is run outside a repository — and how many runs
 /// that leaves to other projects.
+#[derive(serde::Serialize)]
 pub(crate) struct Inbox {
     pub(crate) rows: Vec<RunRow>,
     pub(crate) unreadable: Vec<Unreadable>,
@@ -380,6 +385,11 @@ fn time_in_state(state: &RunState, now: DateTime<Utc>) -> Duration {
         .last_at()
         .map(|at| (now - at).to_std().unwrap_or(Duration::ZERO))
         .unwrap_or(Duration::ZERO)
+}
+
+/// A run's age in seconds, as a JSON reader compares it.
+fn as_secs<S: serde::Serializer>(age: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_f64(age.as_secs_f64())
 }
 
 #[cfg(test)]

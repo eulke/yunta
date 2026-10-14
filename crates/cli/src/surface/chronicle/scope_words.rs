@@ -20,7 +20,12 @@ pub(super) fn scope_words(happening: &scope::happening::Happening) -> String {
         Step::Granted { by } => format!("scope granted by {}", decider(by)),
         Step::Denied { by, reason } => detailed(
             format!("scope denied by {}", decider(by)),
-            &one_line(reason.as_deref().unwrap_or_default()),
+            &one_line(
+                &reason
+                    .as_ref()
+                    .map(crate::render::shown::denial)
+                    .unwrap_or_default(),
+            ),
         ),
         Step::Withdrawn { paths } => format!(
             "withdrew its request for {}, unanswered because the task closed",

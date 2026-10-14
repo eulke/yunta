@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Escalation, EscalationError, EventPayload, Evidence, ExhaustedReroute, Failure, FailureMenu,
-    GateResolvedPayload, GateWaitingPayload, HumanChoice, Outlook, Refusal, Remedy,
+    Claim, Escalation, EscalationError, EventPayload, Evidence, ExhaustedReroute, Failure,
+    FailureMenu, GateResolvedPayload, GateWaitingPayload, HumanChoice, Outlook, Refusal, Remedy,
 };
 use yunta_core::protected::Protected;
 use yunta_core::reserved::ReservedOption;
@@ -54,14 +54,10 @@ pub(crate) fn build_reroute_escalation(
             next_mode: suggested_mode,
         }),
     };
-    // The cause names itself, so it travels in the menu and the claim above
-    // it stays the node's own.
+    // The cause travels in the menu, and the re-route it closes with it, so
+    // the claim names only the node.
     Escalation::new(
-        format!(
-            "node `{node}` failed and its {} to `{goto}` {} exhausted",
-            yunta_core::text::counted(max_reroutes as usize, "re-route"),
-            yunta_core::text::agreeing(max_reroutes as usize, "is", "are")
-        ),
+        Claim::NodeFailed { node: node.clone() },
         Evidence::none(),
         NonEmpty::from((offers::failure_option(ReservedOption::Retry), rest)),
     )
@@ -107,8 +103,12 @@ pub(crate) fn build_failure_escalation(
         stuck,
         reroute: None,
     };
-    Escalation::new(format!("node `{node}` failed"), Evidence::none(), options)
-        .map(|escalation| escalation.with_failure(menu))
+    Escalation::new(
+        Claim::NodeFailed { node: node.clone() },
+        Evidence::none(),
+        options,
+    )
+    .map(|escalation| escalation.with_failure(menu))
 }
 
 /// The reserved options the remedies name, each once and in the order the
@@ -380,36 +380,32 @@ pub(super) async fn decided(
     Ok(Some((choice, resolved)))
 }
 
+/// Why a run's decision cannot be answered. Each variant's display is its
+/// code; the words a reader sees are the caller's to write.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveGateError {
-    /// The sentence names the state the run is in and stops there:
-    /// which command shows a reader where that run stands is the
-    /// caller's own vocabulary, not the engine's.
-    #[error(
-        "this run isn't parked at a pause — a live process may still be driving it, or it \
-         already finished"
-    )]
+    /// The run is not stopped at a pause: a live process may drive it,
+    /// or it already finished.
+    #[error("not_paused")]
     NotPaused,
-    #[error(
-        "this run isn't currently waiting on a decision `resolve_gate` can answer — it's \
-         paused for a reason with no menu of options (a failed gate node, a budget cap, \
-         an external gate with no forge)"
-    )]
+    /// The run is paused for a reason with no menu of options to answer.
+    #[error("nothing_to_resolve")]
     NothingToResolve,
-    #[error("option `{chosen}` isn't valid here — declared options: {declared}")]
+    /// The chosen option is not on the menu; `declared` lists the options it holds.
+    #[error("unknown_option")]
     UnknownOption { chosen: OptionId, declared: String },
-    /// The option sends the run back to a session, and the words it
-    /// asks for are the one thing that session would get.
-    #[error("option `{chosen}` asks \"{asks}\" — say it with the choice")]
+    /// The option sends the run back to a session, and the words it asks for
+    /// are the one thing that session would get.
+    #[error("unsaid")]
     Unsaid { chosen: OptionId, asks: String },
-    /// The gate does not offer the option, and says why.
-    #[error("option `{chosen}` is withheld: {because}")]
+    /// The gate does not offer the option, and `because` says why.
+    #[error("withheld")]
     Withheld { chosen: OptionId, because: String },
-    #[error(transparent)]
+    #[error("storage")]
     Storage(#[from] yunta_storage::StorageError),
     /// What the gate shows could not be read, so its menu cannot be
     /// rebuilt as a person would be shown it.
-    #[error("the documents the decision shows cannot be read")]
+    #[error("documents")]
     Documents(#[from] Box<RunError>),
 }
 

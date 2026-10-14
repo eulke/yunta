@@ -30,7 +30,7 @@ use yunta_core::{ContentHash, RunTool, SessionId, TaskId};
 
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts;
+use super::words;
 use crate::replay::RunView;
 use crate::scope::ScopeCheckResult;
 use crate::scope_expansion::{read_request, GrantWindow, ScopeExpansionRequest};
@@ -74,7 +74,7 @@ impl SessionTools {
         }
         // The text leaves the engine, so the secrets the run holds are taken
         // out of it, as they are out of the log.
-        let text = verdicts::stop_text(&judgement, &self.called(RunTool::RequestScopeExpansion));
+        let text = words::stop_unfinished(&judgement, &self.called(RunTool::RequestScopeExpansion));
         StopAnswer::Refuse {
             reason: self.host.redactor.text(&text),
         }
@@ -329,6 +329,6 @@ fn answered(
         waiting: judgement.waiting.clone(),
         outside_scope: judgement.scope.violations.clone(),
         denied: judgement.scope.denied.clone(),
-        duration_ms: took.as_millis().min(u64::MAX as u128) as u64,
+        duration_ms: yunta_core::units::whole_millis(took),
     }))
 }

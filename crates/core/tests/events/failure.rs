@@ -3,6 +3,7 @@
 //! origin and output, a session's exit, and the paths a scope violation
 //! refused.
 
+use super::failure_samples::*;
 use super::*;
 
 #[test]
@@ -65,7 +66,12 @@ fn a_node_failed_by_a_command_round_trips_with_what_it_printed() {
 fn a_failure_logged_as_a_sentence_before_commands_were_data_still_reads_as_one() {
     let parsed: Failure =
         serde_json::from_value(serde_json::json!({ "outcome": "exit 1: no such file" })).unwrap();
-    assert_eq!(parsed, Failure::message("exit 1: no such file"));
+    assert_eq!(
+        parsed,
+        Failure::Message {
+            outcome: "exit 1: no such file".into(),
+        }
+    );
 }
 
 /// The command a failure is about. Only a command that exited non-zero
@@ -159,7 +165,12 @@ fn a_node_failed_outside_its_scope_round_trips_naming_each_path() {
 /// attempt that ran, and a refusal of a refusal still names that one.
 #[test]
 fn a_check_refused_on_an_unchanged_tree_round_trips_naming_the_attempt_that_ran() {
-    let refused = Failure::unchanged(1, Failure::message("regression: exit 101"));
+    let refused = Failure::unchanged(
+        1,
+        Failure::Message {
+            outcome: "regression: exit 101".into(),
+        },
+    );
     let again = Failure::unchanged(2, refused.clone());
     assert_eq!(again, refused, "the second refusal names attempt 1 too");
 
@@ -183,7 +194,15 @@ fn every_failure_variant_reads_back_as_itself() {
     let samples = plain_failure_samples()
         .into_iter()
         .chain(session_and_limit_samples())
-        .chain(loop_check_and_child_samples());
+        .chain(loop_check_and_child_samples())
+        .chain(typed_cause_samples())
+        .chain(artifact_and_template_samples())
+        .chain(mount_samples())
+        .chain(confinement_and_frozen_samples())
+        .chain(engine_step_samples())
+        .chain(join_gate_and_review_samples())
+        .chain(loop_and_runner_samples())
+        .chain(refusal_samples());
     for failure in samples {
         let json = serde_json::to_value(&failure).unwrap();
         let parsed: Failure = serde_json::from_value(json.clone()).unwrap();
@@ -191,94 +210,22 @@ fn every_failure_variant_reads_back_as_itself() {
     }
 }
 
-/// One sample of each failure that predates the typed causes, and of the
-/// two that a session or a frozen input raises.
-fn plain_failure_samples() -> Vec<Failure> {
-    vec![
-        Failure::message("exit 1"),
-        Failure::artifacts(Vec::new()),
-        Failure::session_died(AdapterId::from_static("mock"), None),
-        Failure::scope_violated(vec!["clippy.toml".into()]),
-        Failure::scope_requested(vec![ScopeGlob::from("src/a.rs")], "needs it"),
-        Failure::ScopeOwed { owed: Vec::new() },
-        Failure::unset(ConfigKey::Runner),
-        Failure::unchanged(1, Failure::message("regression: exit 101")),
-        Failure::paths_denied(vec!["secret.env".into()], Vec::new()),
-        Failure::exited(CommandExit {
-            origin: None,
-            code: 1,
-            tail: vec!["exit 1".into()],
-            output: None,
-        }),
-        Failure::PlanUnpassable {
-            unpassable: vec![UnpassableTask {
-                task_id: "task-u".into(),
-                cmd: "false".to_string(),
-                why: "false exits 1".to_string(),
-            }],
-        },
-        Failure::SessionNotStopped {
-            session_not_stopped: "kill refused".into(),
-        },
-        Failure::FrozenInput {
-            frozen_input: "agents/reviewer.md".into(),
-        },
-    ]
-}
-
-/// One sample of a refusal and of an account's limit.
-fn session_and_limit_samples() -> Vec<Failure> {
-    vec![
-        Failure::SessionRefused {
-            session_refused: SessionRefusal {
-                adapter: AdapterId::from_static("mock"),
-                cause: RefusalCause::Authentication,
-                message: "Invalid API key".into(),
+#[test]
+fn a_document_label_that_no_kind_names_is_refused_when_read() {
+    let json = serde_json::json!({
+        "workflow": "sub",
+        "refusal": {
+            "refusal": "inputs",
+            "problem": {
+                "kind": "document_unreadable",
+                "name": "plan",
+                "path": "plan.md",
+                "label": "no kind",
+                "detail": "is a directory",
             },
         },
-        Failure::Limit {
-            limit: AccountLimit {
-                source: LimitSource::Forge,
-                resets_at: None,
-                message: "rate limited".into(),
-            },
-        },
-    ]
-}
-
-/// One sample of a loop's stops, of a red check, and of a child run's
-/// failure both known and unknown.
-fn loop_check_and_child_samples() -> Vec<Failure> {
-    vec![
-        Failure::TasksStopped {
-            stopped: vec![TaskStop {
-                task_id: TaskId::from_static("greet"),
-                cause: TaskCause::ScopeDecisionOwed,
-            }],
-        },
-        Failure::Red {
-            red: RedCheck::Command {
-                cmd: "false".into(),
-                exit_code: 1,
-                conclusion: None,
-                output: None,
-            },
-        },
-        Failure::ChildFailed {
-            child_run: RunId::from("run-child-1"),
-            child_failure: Some(Box::new(Failure::Limit {
-                limit: AccountLimit {
-                    source: LimitSource::Forge,
-                    resets_at: None,
-                    message: "rate limited".into(),
-                },
-            })),
-        },
-        Failure::ChildFailed {
-            child_run: RunId::from("run-child-1"),
-            child_failure: None,
-        },
-    ]
+    });
+    assert!(serde_json::from_value::<Failure>(json).is_err());
 }
 
 #[test]
@@ -287,7 +234,11 @@ fn a_scope_violation_names_which_files_fell_outside() {
         Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]);
     assert_eq!(failure.outside_scope().len(), 2);
     assert!(
-        Failure::message("exit 1").outside_scope().is_empty(),
+        Failure::Message {
+            outcome: "exit 1".into(),
+        }
+        .outside_scope()
+        .is_empty(),
         "a failure that is not about scope names no path outside it"
     );
 }

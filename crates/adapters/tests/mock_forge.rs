@@ -18,7 +18,7 @@ fn opening(head: &str, run_id: &str) -> PullRequestRequest {
 #[tokio::test]
 async fn the_mock_opens_one_pr_per_run_branch() {
     let state = MockForgeState::new();
-    let forge = MockForge::new(state.clone());
+    let forge = MockForge::new(state.clone(), yunta_testkit_core::spell());
 
     let first = forge
         .open_pull_request(&opening("yunta/run/r1", "r1"))

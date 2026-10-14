@@ -38,7 +38,10 @@ fn opened(events: &[StoredEvent]) -> Vec<u64> {
 
 fn forged() -> (Bench, MockForgeState) {
     let state = MockForgeState::new();
-    let bench = Bench::new().with_forge(Arc::new(MockForge::new(state.clone())));
+    let bench = Bench::new().with_forge(Arc::new(MockForge::new(
+        state.clone(),
+        yunta_testkit_core::spell(),
+    )));
     bare_origin(&bench.worktree);
     (bench, state)
 }
@@ -191,7 +194,10 @@ async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
         RunTerminal::Paused {
             reason:
                 PauseReason::NodeFailed {
-                    failure: Failure::Message { outcome },
+                    failure:
+                        Failure::EngineFailed {
+                            engine_error: outcome,
+                        },
                     ..
                 },
         } => assert!(outcome.contains("token_env"), "{outcome}"),
@@ -254,8 +260,10 @@ async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
 #[tokio::test]
 async fn the_pull_request_body_reads_as_its_golden() {
     let state = MockForgeState::new();
-    let bench =
-        Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(state.clone())));
+    let bench = Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(
+        state.clone(),
+        yunta_testkit_core::spell(),
+    )));
     bare_origin(&bench.worktree);
     let RunReport { terminal, .. } = bench
         .run_with_config(

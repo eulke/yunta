@@ -6,7 +6,7 @@ use yunta_core::{
     ConfigLayer, PackDeclares, PackManifest, PackRequires, RequiredRunner, RunnerCandidate,
     RunnerName,
 };
-use yunta_engine::check_pack_requires;
+use yunta_engine::{check_pack_requires, CheckError};
 
 fn manifest(
     runners: Vec<RequiredRunner>,
@@ -171,15 +171,21 @@ fn a_gap_is_refused_for_each_thing_the_run_would_lack() {
     );
     let gap = check_pack_requires(&manifest, &ConfigLayer::default());
 
-    let refused: Vec<String> = gap
-        .unmet(&|program| program == "cargo")
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    assert_eq!(refused.len(), 3, "{refused:?}");
-    assert!(refused[0].starts_with("pack `acme/review-pack` requires runner `reviewer`"));
-    assert!(refused[1].starts_with("pack `acme/review-pack` requires MCP server `internal-docs`"));
-    assert!(refused[2].starts_with("pack `acme/review-pack` requires program `gh`"));
+    let refused = gap.unmet(&|program| program == "cargo");
+    let requirements = requirements_of(&refused);
+    assert_eq!(requirements.len(), 3, "{refused:?}");
+    assert!(
+        requirements[0].starts_with("runner `reviewer`"),
+        "{requirements:?}"
+    );
+    assert!(
+        requirements[1].starts_with("MCP server `internal-docs`"),
+        "{requirements:?}"
+    );
+    assert!(
+        requirements[2].starts_with("program `gh`"),
+        "{requirements:?}"
+    );
 
     let satisfied = check_pack_requires(
         &self::manifest(vec![], vec![], vec!["cargo"]),
@@ -222,12 +228,30 @@ declares:
     assert!(gap.missing_runners.is_empty());
     assert!(!gap.is_satisfied());
 
-    let refused: Vec<String> = gap
-        .unmet(&|_| true)
+    let refused = gap.unmet(&|_| true);
+    let requirements = requirements_of(&refused);
+    assert_eq!(requirements.len(), 1, "{refused:?}");
+    assert!(
+        requirements[0].contains("runner `reviewer`"),
+        "{requirements:?}"
+    );
+    assert!(
+        requirements[0].contains("`permissions`"),
+        "{requirements:?}"
+    );
+}
+
+/// The requirement each refusal of `acme/review-pack` carries, in order. A
+/// refusal of any other shape, or for any other pack, fails the test.
+fn requirements_of(refused: &[CheckError]) -> Vec<&str> {
+    refused
         .iter()
-        .map(ToString::to_string)
-        .collect();
-    assert_eq!(refused.len(), 1, "{refused:?}");
-    assert!(refused[0].contains("runner `reviewer`"), "{refused:?}");
-    assert!(refused[0].contains("`permissions`"), "{refused:?}");
+        .map(|error| match error {
+            CheckError::PackRequirementUnmet { pack, requirement } => {
+                assert_eq!(pack, "acme/review-pack");
+                requirement.as_str()
+            }
+            other => panic!("a refusal of the pack's own requirements: {other:?}"),
+        })
+        .collect()
 }

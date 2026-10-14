@@ -10,6 +10,8 @@ use yunta_core::{ConfigKey, NodeId, PackManifest, Workflow};
 use crate::context::Context;
 use crate::detect::Detected;
 use crate::error::CliError;
+use crate::output::{blank, say};
+use crate::render::{Look, INDENT};
 
 /// Prints what `manifest`'s workflows, vendored at `pack_dir`, need and
 /// the project lacks; nothing when they need nothing.
@@ -17,6 +19,7 @@ pub(crate) async fn report(
     ctx: &Context,
     pack_dir: &Path,
     manifest: &PackManifest,
+    look: &Look,
 ) -> Result<(), CliError> {
     let detected = Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
     let mut lines: Vec<String> = Vec::new();
@@ -33,9 +36,13 @@ pub(crate) async fn report(
     if lines.is_empty() {
         return Ok(());
     }
-    println!("\n{} needs from this project:", manifest.reference());
+    blank();
+    say(
+        look,
+        format!("{} needs from this project:", manifest.reference()),
+    );
     for line in lines {
-        println!("  {line}");
+        say(look, format!("{INDENT}{line}"));
     }
     Ok(())
 }

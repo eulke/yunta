@@ -1,5 +1,6 @@
 banned_vocabulary 19
 bench_struct_outside_testkit 0
+cli_word_outside_cli 0
 copied_test_helpers 0
 create_run_outside_testkit 4
 debug_format_reaching_reader 0
@@ -14,7 +15,7 @@ let_underscore_in_prod 8
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
 prod_fns_over_50_lines 58
-reason_built_by_format 2
+reason_built_by_format 0
 run_tool_named_outside_vocabulary 1
 separator_literal_outside_glyphs 2
 session_request_literal_outside_plan 0

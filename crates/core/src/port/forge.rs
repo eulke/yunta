@@ -12,6 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::events::Claim;
 use crate::shown::ShownDocument;
 use crate::{CommitSha, InvalidId, NodeId, Responder, RunId};
 
@@ -95,8 +96,9 @@ pub struct PublishRequest {
 pub struct GateDecision {
     /// The gate that asks.
     pub node: NodeId,
-    /// What it asks: the author's `message:`, or what the gate needs.
-    pub question: String,
+    /// What it asks: the author's `message:` as written, or that the gate
+    /// needs a decision.
+    pub question: Claim,
     /// Who it is addressed to.
     pub assignee: String,
     /// What runs once the gate passes, in the workflow's order.

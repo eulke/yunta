@@ -134,7 +134,7 @@ fn parameterized() -> impl Strategy<Value = EventPayload> {
         )),
         ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| {
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                Failure::message(outcome),
+                Failure::Message { outcome },
                 tokens_used,
             )))
         }),

@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    CommandExit, Escalation, Fact, Failure, GateOption, NodeOutcome, NodeWait, PauseReason,
-    TokenUsage,
+    CommandExit, Escalation, Fact, Failure, GateOption, NodeOutcome, NodeState, NodeWait,
+    PauseReason, TokenUsage,
 };
 use yunta_core::{ContentHash, NonEmpty};
-use yunta_engine::{Counter, WaitingOn};
+use yunta_engine::{Counter, NodeStanding, WaitingOn};
 use yunta_testkit::{assert_golden, node_frame, run_frame, ENVIRONMENTS};
+use yunta_testkit_core::fixed_now;
 
 use super::*;
 
@@ -120,14 +121,26 @@ fn exhausted() -> GateWaitingPayload {
 }
 
 fn closing(frame: RunFrame, decision: Option<(NodeId, GateWaitingPayload)>) -> Closing {
-    Closing::framed(&RUN, frame, (decision, Vec::new()), &outline())
+    Closing::framed(
+        &RUN,
+        frame,
+        RunState::default(),
+        fixed_now(),
+        (decision, Vec::new()),
+        &outline(),
+    )
+}
+
+/// The block as a terminal draws it: its page's document, drawn for `look`.
+fn draw_closing(closing: &Closing, look: &Look) -> String {
+    crate::render::draw(closing.page(look).document(look), look)
 }
 
 #[test]
 fn a_finished_run_closes_without_empty_rows() {
     let mut quiet = frame(RunPhase::Finished, vec![finished("lint"), finished("test")]);
     quiet.tokens = TokenUsage::default();
-    let drawn = closing(quiet, None).render(&Look::plain());
+    let drawn = draw_closing(&closing(quiet, None), &Look::plain());
     for label in ["tokens", "artifacts", "degraded", "unread"] {
         assert!(!drawn.contains(label), "an empty `{label}` row: {drawn}");
     }
@@ -136,16 +149,18 @@ fn a_finished_run_closes_without_empty_rows() {
 #[test]
 fn a_failed_run_closes_with_the_tail_of_what_failed() {
     let failure = lint_failure();
-    let drawn = closing(
-        frame(
-            RunPhase::Failed {
-                failure: Some(failure),
-            },
-            vec![failed_lint()],
+    let drawn = draw_closing(
+        &closing(
+            frame(
+                RunPhase::Failed {
+                    failure: Some(failure),
+                },
+                vec![failed_lint()],
+            ),
+            None,
         ),
-        None,
-    )
-    .render(&Look::plain());
+        &Look::plain(),
+    );
     assert!(drawn.contains("node `lint` failed: exit 101"), "{drawn}");
     assert!(
         drawn.contains("error[E0425]: cannot find value `x` in this scope"),
@@ -204,9 +219,10 @@ fn cases() -> Vec<(&'static str, Closing)> {
 fn the_closing_block_matches_its_goldens() {
     for (case, closing) in &cases() {
         for environment in &ENVIRONMENTS {
+            let look = crate::render::look_of(environment);
             assert_golden(
                 &environment.golden(&goldens(), case),
-                &closing.render(&crate::render::look_of(environment)),
+                &draw_closing(closing, &look),
             );
         }
     }

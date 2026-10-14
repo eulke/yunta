@@ -151,7 +151,7 @@ impl SessionTools {
                 deadline.saturating_duration_since(started),
             )
             .await;
-        let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let duration_ms = yunta_core::units::whole_millis(started.elapsed());
         // The output is read back by the hash its event names, which verifies it.
         // best-effort: a store that fails leaves the event without output.
         let output = ObjectStore::at(&self.host.run_dir)

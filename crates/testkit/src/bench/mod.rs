@@ -274,6 +274,14 @@ impl Bench {
         self
     }
 
+    /// The same world with no forge reachable from this machine: a wake
+    /// here cannot publish a gate or poll one that a forge published, so
+    /// each external gate falls back to the console.
+    pub fn without_forge(mut self) -> Self {
+        self.forge = None;
+        self
+    }
+
     /// Points the run's user state root at `root`, so a `knowledge:
     /// { layers: [user] }` source resolves `root/knowledge` — injected here
     /// rather than through a mutated `YUNTA_HOME`.

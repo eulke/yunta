@@ -361,27 +361,27 @@ pub(super) async fn tree_of(ctx: &RunCtx<'_>, node: &Node) -> Result<yunta_core:
     Ok(crate::worktree::capture_tree(run_tree, &index, &pathspecs, ctx.root_supervision()).await?)
 }
 
-/// Fails a node with one sentence the engine states. The close stages
-/// nothing: see [`fail_with_tokens_staged`].
+/// Fails a node with its cause, kept as data. The close stages nothing:
+/// see [`fail_with_tokens_staged`].
 pub(super) async fn fail(
     ctx: &RunCtx<'_>,
     node: &Node,
-    outcome: String,
+    cause: Failure,
 ) -> Result<NodeEnd, RunError> {
-    fail_with_tokens(ctx, node, outcome, TokenUsage::default()).await
+    fail_with_tokens(ctx, node, cause, TokenUsage::default()).await
 }
 
-/// Fails a node with a failure the engine states in one sentence — a
-/// hook's exit code, a budget, a runner that does not resolve. Such a
-/// failure is not missing its diagnostics: it simply is not about a
-/// document. The close stages nothing: see [`fail_with_tokens_staged`].
+/// Fails a node with its cause and what it spent — a hook's exit code, a
+/// budget, a runner that does not resolve. Such a failure is not missing
+/// its diagnostics: it simply is not about a document. The close stages
+/// nothing: see [`fail_with_tokens_staged`].
 pub(super) async fn fail_with_tokens(
     ctx: &RunCtx<'_>,
     node: &Node,
-    outcome: String,
+    cause: Failure,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    fail_with_tokens_staged(ctx, node, outcome, tokens, &[]).await
+    fail_with_tokens_staged(ctx, node, cause, tokens, &[]).await
 }
 
 /// [`fail_with_tokens`] for a close that staged `staged` in the worktree,
@@ -389,12 +389,11 @@ pub(super) async fn fail_with_tokens(
 pub(super) async fn fail_with_tokens_staged(
     ctx: &RunCtx<'_>,
     node: &Node,
-    outcome: String,
+    cause: Failure,
     tokens: TokenUsage,
     staged: &[PathBuf],
 ) -> Result<NodeEnd, RunError> {
-    let failure = Failure::message(outcome);
-    fail_with_staged(ctx, node, failure, tokens, staged).await
+    fail_with_staged(ctx, node, cause, tokens, staged).await
 }
 
 /// Fails a node with its typed failure: the cause the engine decided, kept
@@ -438,9 +437,9 @@ pub(super) async fn fail_unstopped(
 }
 
 /// The one place `node_failed` is written. The failure reaches the log as
-/// the data it is — one sentence, or the declared artifacts that did not
-/// close — and every surface produces its own prose from that, so none of
-/// them can disagree with the facts behind it.
+/// the data it is — a cause, or the declared artifacts that did not close —
+/// and every surface produces its own prose from that, so none of them can
+/// disagree with the facts behind it.
 async fn emit_failed(
     ctx: &RunCtx<'_>,
     node: &Node,

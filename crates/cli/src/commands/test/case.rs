@@ -18,6 +18,7 @@ use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, sandboxed_checkout};
+use crate::commands::advice;
 use crate::commands::registry::{adapters_and_script, ScriptedPaths};
 use crate::commands::Adapters;
 use crate::context::Context;
@@ -414,7 +415,12 @@ fn stand_in_forge(config: &yunta_core::ConfigLayer) -> Option<yunta_adapters::Mo
         .forge
         .as_ref()
         .and_then(|forge| forge.github.as_ref())
-        .map(|_| yunta_adapters::MockForge::new(yunta_adapters::MockForgeState::new()))
+        .map(|_| {
+            yunta_adapters::MockForge::new(
+                yunta_adapters::MockForgeState::new(),
+                Arc::new(advice::spell),
+            )
+        })
 }
 
 #[cfg(test)]

@@ -13,28 +13,18 @@ use thiserror::Error;
 use yunta_core::events::{DiscardedCandidate, RunnerRejection};
 use yunta_core::{AdapterId, ConfigLayer, RunnerName};
 
+/// Why a node's runner resolves to no adapter. The display is a code; the
+/// words a person reads are written by the CLI from these fields.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RunnerError {
-    #[error("no `runners:` entry defines runner `{runner}` — add it to the merged config")]
+    #[error("unknown_runner")]
     UnknownRunner { runner: RunnerName },
 
-    #[error(
-        "runner `{runner}` has no available candidate — tried {}: {}",
-        yunta_core::text::agreeing(tried.len(), "adapter", "adapters"),
-        list(tried)
-    )]
+    #[error("no_candidate")]
     NoCandidateAvailable {
         runner: RunnerName,
         tried: Vec<AdapterId>,
     },
-}
-
-fn list(adapters: &[AdapterId]) -> String {
-    adapters
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 pub use yunta_core::events::ResolvedRunner;

@@ -17,12 +17,7 @@ use yunta_core::{ArtifactKind, ArtifactRefId, ContextSpec, ModeName, MountSpec};
 pub enum Unanswerable {
     /// A loop works through the run's tasks document, and nothing in
     /// the graph a run of this workflow can be gives it one.
-    #[error(
-        "loop `{node}` works through the run's tasks document, and nothing{} gives it one — \
-         declare `produces: [tasks]` on a node that runs before it, declare a `type: document` \
-         input of `kind: tasks`, or mount one from the workflow that composes this one",
-        in_mode(.mode)
-    )]
+    #[error("unanswerable_loop_without_tasks")]
     LoopWithoutTasks {
         node: NodeId,
         mode: Option<yunta_core::ModeName>,
@@ -31,67 +26,39 @@ pub enum Unanswerable {
     /// A reference that names the node it reads from reaches that
     /// node's artifacts and nothing else, and the node does not declare
     /// this one.
-    #[error(
-        "{site} reads the {} of node `{node}`, which does not declare it in \
-         `artifacts.produces` — declare it on `{node}`, or read it from the node that produces it",
-        .artifact.label()
-    )]
+    #[error("unanswerable_artifact_not_declared")]
     ArtifactNotDeclared {
-        site: Site,
+        place: Place,
         node: NodeId,
         artifact: yunta_core::events::ArtifactId,
     },
 
     /// A reference that asks the run for an artifact, whichever node
     /// produced it, and nothing in the run can hold one.
-    #[error(
-        "{site} reads the run's {}, and nothing{} can hold one: no node declares it, no \
-         input brings it and no workflow composing this one mounts it — declare it on the node \
-         that writes it",
-        .artifact.label(),
-        in_mode(.mode)
-    )]
+    #[error("unanswerable_artifact_from_nowhere")]
     ArtifactFromNowhere {
-        site: Site,
+        place: Place,
         artifact: yunta_core::events::ArtifactId,
         mode: Option<yunta_core::ModeName>,
     },
 
     /// A run started in a mode reads from a node the mode leaves out:
     /// only a run promoted into the mode would hold what that node made.
-    #[error(
-        "{site} reads from `{from}`, which mode `{mode}` leaves out — a run started in \
-         `{mode}` holds nothing of it; start an earlier mode and promote, or include `{from}`"
-    )]
+    #[error("unanswerable_source_left_out")]
     SourceLeftOut {
-        site: Site,
+        place: Place,
         from: NodeId,
         mode: ModeName,
     },
 
     /// Only a `kind: bash` node captures the output a `node-output:`
     /// source reads.
-    #[error(
-        "node `{node}` reads the output of `{referenced}`, {} — only a `kind: bash` node \
-         captures output",
-        match .kind {
-            Some(kind) => format!("a `kind: {kind}` node"),
-            None => "which the workflow does not declare".to_string(),
-        }
-    )]
+    #[error("unanswerable_node_output_of_non_bash")]
     NodeOutputOfNonBash {
         node: NodeId,
         referenced: NodeId,
         kind: Option<&'static str>,
     },
-}
-
-/// How a refusal that holds in one mode names it: nothing when the
-/// workflow declares no modes, since then there is one graph to be.
-fn in_mode(mode: &Option<ModeName>) -> String {
-    mode.as_ref()
-        .map(|mode| format!(" in mode `{mode}`"))
-        .unwrap_or_default()
 }
 
 /// What a run holds before any node of its own runs: the documents its
@@ -187,7 +154,7 @@ enum Reach {
 #[derive(Default)]
 pub(crate) struct Reads {
     pub(crate) errors: Vec<CheckError>,
-    pub(crate) warnings: Vec<CheckWarning>,
+    pub(crate) warnings: Vec<Caution>,
 }
 
 /// Every read of `workflow` whose answer does not depend on order: a
@@ -214,20 +181,20 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
             // lands at its close.
             let loop_tasks = matches!(node.kind, NodeKind::Loop { .. }).then(|| {
                 (
-                    Site::new(super::site::node(&node.id), format!("loop `{}`", node.id)),
+                    Place::LoopTasks {
+                        node: node.id.clone(),
+                    },
                     tasks.clone(),
                 )
             });
-            for (site, wanted) in loop_tasks.into_iter().chain(run_references(node)) {
+            for (place, wanted) in loop_tasks.into_iter().chain(run_references(node)) {
                 match reach(&wanted, node, &variant, birth) {
                     Reach::Here => {}
-                    Reach::Promoted => {
-                        found.warnings.push(CheckWarning::ReadOnlyThroughPromotion {
-                            site,
-                            what: format!("the run's {}", wanted.label()),
-                            mode: mode.clone().unwrap_or_default(),
-                        })
-                    }
+                    Reach::Promoted => found.warnings.push(Caution::ReadOnlyThroughPromotion {
+                        place,
+                        what: PromotedRead::Artifact(wanted.clone()),
+                        mode: mode.clone().unwrap_or_default(),
+                    }),
                     Reach::Nowhere
                         if matches!(node.kind, NodeKind::Loop { .. }) && wanted == tasks =>
                     {
@@ -242,7 +209,7 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
                         found
                             .errors
                             .push(CheckError::from(Unanswerable::ArtifactFromNowhere {
-                                site,
+                                place,
                                 artifact: wanted,
                                 mode: mode.clone(),
                             }))
@@ -257,22 +224,21 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
                 if kept(&variant.nodes) {
                     continue;
                 }
-                let key = field.split(':').next().unwrap_or(field).trim();
-                let site = Site::new(
-                    super::site::node(&node.id).key(key),
-                    format!("`{field}` of node `{}`", node.id),
-                );
+                let place = Place::Field {
+                    node: node.id.clone(),
+                    field: field.to_string(),
+                };
                 if kept(&variant.earlier) {
-                    found.warnings.push(CheckWarning::ReadOnlyThroughPromotion {
-                        site,
-                        what: format!("from `{source}`"),
+                    found.warnings.push(Caution::ReadOnlyThroughPromotion {
+                        place,
+                        what: PromotedRead::Source(source.clone()),
                         mode: mode.clone(),
                     });
                 } else if start.is_some() {
                     found
                         .errors
                         .push(CheckError::from(Unanswerable::SourceLeftOut {
-                            site,
+                            place,
                             from: source.clone(),
                             mode: mode.clone(),
                         }));
@@ -283,16 +249,22 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
     found
 }
 
-/// `(site, identity)` for every reference `node` makes to the run's
+/// `(place, identity)` for every reference `node` makes to the run's
 /// artifact of an identity, whichever node produced it.
-fn run_references(node: &Node) -> Vec<(Site, ArtifactId)> {
-    let mut references: Vec<(Site, ArtifactId)> = artifact_reads(node)
+fn run_references(node: &Node) -> Vec<(Place, ArtifactId)> {
+    let mut references: Vec<(Place, ArtifactId)> = artifact_reads(node)
         .into_iter()
         .filter(|read| read.node.is_none() && literal_ref(read.id))
         // A gate showing the run's findings shows a view the log
         // derives, whatever node did or did not report one.
         .filter(|read| !(read.site == ReadSite::Shows && is_findings(read.id)))
-        .map(|read| (Site::read(read.site, &node.id), ArtifactId::from(read.id)))
+        .map(|read| {
+            let place = Place::Read {
+                node: node.id.clone(),
+                read: read.site,
+            };
+            (place, ArtifactId::from(read.id))
+        })
         .collect();
     if let NodeKind::Gate {
         external: Some(external),
@@ -301,10 +273,9 @@ fn run_references(node: &Node) -> Vec<(Site, ArtifactId)> {
     {
         for spec in external.artifacts.iter().filter(|spec| literal_spec(spec)) {
             references.push((
-                Site::new(
-                    super::site::node(&node.id).key("external"),
-                    format!("the external gate of node `{}`", node.id),
-                ),
+                Place::ExternalGate {
+                    node: node.id.clone(),
+                },
                 ArtifactId::from(spec),
             ));
         }
@@ -350,7 +321,7 @@ fn reach(wanted: &ArtifactId, reader: &Node, variant: &Variant<'_>, birth: &Birt
 pub(crate) fn check_named_artifact_sources(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     let by_id: HashMap<&NodeId, &Node> = workflow.iter_nodes().map(|n| (&n.id, n)).collect();
     for node in workflow.iter_nodes() {
-        for (site, named, id) in named_references(node) {
+        for (place, named, id) in named_references(node) {
             if !literal_ref(id)
                 || matches!(id, ArtifactRefId::Kind { kind } if *kind == ArtifactKind::Answers)
             {
@@ -370,7 +341,7 @@ pub(crate) fn check_named_artifact_sources(workflow: &Workflow, errors: &mut Vec
                 .any(|spec| !literal_spec(spec));
             if !templated && !declares(producer, &wanted) {
                 errors.push(CheckError::from(Unanswerable::ArtifactNotDeclared {
-                    site,
+                    place,
                     node: named.clone(),
                     artifact: wanted,
                 }));
@@ -379,14 +350,19 @@ pub(crate) fn check_named_artifact_sources(workflow: &Workflow, errors: &mut Vec
     }
 }
 
-/// `(site, node, identity)` for every reference `node` makes that names
+/// `(place, node, identity)` for every reference `node` makes that names
 /// the node it reads from.
-fn named_references(node: &Node) -> Vec<(Site, &NodeId, &ArtifactRefId)> {
+fn named_references(node: &Node) -> Vec<(Place, &NodeId, &ArtifactRefId)> {
     artifact_reads(node)
         .into_iter()
         .filter_map(|read| {
-            read.node
-                .map(|named| (Site::read(read.site, &node.id), named, read.id))
+            read.node.map(|named| {
+                let place = Place::Read {
+                    node: node.id.clone(),
+                    read: read.site,
+                };
+                (place, named, read.id)
+            })
         })
         .collect()
 }
@@ -460,7 +436,7 @@ pub(crate) fn check_answer_sources(workflow: &Workflow, errors: &mut Vec<CheckEr
             .iter_nodes()
             .any(|node| node.id == *named && node.asks())
     };
-    let mut answers_of = |site: Site, named: Option<&yunta_core::NodeId>, id: &ArtifactRefId| {
+    let mut answers_of = |place: Place, named: Option<&yunta_core::NodeId>, id: &ArtifactRefId| {
         let ArtifactRefId::Kind { kind } = id else {
             return;
         };
@@ -470,13 +446,17 @@ pub(crate) fn check_answer_sources(workflow: &Workflow, errors: &mut Vec<CheckEr
         if let Some(named) = named.filter(|named| !asks(named)) {
             errors.push(CheckError::AnswersFromNodeThatNeverAsks {
                 node: named.clone(),
-                site,
+                place,
             });
         }
     };
     for node in workflow.iter_nodes() {
         for read in artifact_reads(node) {
-            answers_of(Site::read(read.site, &node.id), read.node, read.id);
+            let place = Place::Read {
+                node: node.id.clone(),
+                read: read.site,
+            };
+            answers_of(place, read.node, read.id);
         }
     }
 }

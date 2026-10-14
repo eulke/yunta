@@ -31,7 +31,7 @@ nodes:
     assert!(
         errors
             .iter()
-            .any(|e| e.to_string().contains("permissions.paths.deny")),
+            .any(|e| matches!(e, CheckError::ScopeExpansionWithinRetired { .. })),
         "{errors:?}"
     );
 }

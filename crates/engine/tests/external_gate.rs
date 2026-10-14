@@ -7,6 +7,10 @@
 //! machine picks up the approval on a completely separate `execute_run`
 //! call, simulating `yunta resume`.
 
+mod common;
+#[path = "external_gate/console.rs"]
+mod console;
+
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
@@ -59,8 +63,10 @@ nodes:
 /// state — the handle person B acts through, with no Yunta on their end.
 fn bench_on_a_forge() -> (Bench, MockForgeState) {
     let forge_state = MockForgeState::new();
-    let bench =
-        Bench::with_run_id("run-gate-1").with_forge(Arc::new(MockForge::new(forge_state.clone())));
+    let bench = Bench::with_run_id("run-gate-1").with_forge(Arc::new(MockForge::new(
+        forge_state.clone(),
+        yunta_testkit_core::spell(),
+    )));
     (bench, forge_state)
 }
 
@@ -201,13 +207,15 @@ async fn changes_requested_posts_findings_and_fails_the_node() {
     // nowhere to reroute to just pauses — the same rule any other failed
     // node without `on_failure` already follows.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    assert!(matches!(
-        state.nodes.state("approve"),
-        Some(NodeState::Failed {
-            failure: Failure::Message { outcome },
-            ..
-        }) if outcome.starts_with("changes requested by person-b")
-    ));
+    let failure = match state.nodes.state("approve") {
+        Some(NodeState::Failed { failure, .. }) => failure,
+        other => panic!("the gate fails on the review: {other:?}"),
+    };
+    let Failure::ChangesRequested { requested_by, .. } = failure else {
+        panic!("a request for changes: {failure:?}");
+    };
+    assert_eq!(requested_by, "person-b");
+    assert!(yunta_render::failure::sentence(failure).starts_with("changes requested by person-b"));
 
     let events = bench.events();
     let finding = events.iter().find_map(|e| match e.payload() {
@@ -304,13 +312,18 @@ async fn a_closed_pr_fails_the_node_without_approval() {
     forge_state.close(bench.run_id.as_str());
 
     let RunReport { state, .. } = bench.wake().await;
-    assert!(matches!(
-        state.nodes.state("approve"),
-        Some(NodeState::Failed {
-            failure: Failure::Message { outcome },
-            ..
-        }) if outcome == "the pull request was closed without approval"
-    ));
+    let failure = match state.nodes.state("approve") {
+        Some(NodeState::Failed { failure, .. }) => failure,
+        other => panic!("the gate fails when its pull request closes: {other:?}"),
+    };
+    assert!(
+        matches!(failure, Failure::PullRequestClosed { .. }),
+        "{failure:?}"
+    );
+    assert_eq!(
+        yunta_render::failure::sentence(failure),
+        "the pull request was closed without approval"
+    );
 }
 
 #[tokio::test]

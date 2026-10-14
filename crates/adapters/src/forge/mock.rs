@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use yunta_core::step::Spell;
 use yunta_core::{CommitSha, Responder};
 
 use yunta_core::port::{
@@ -209,11 +210,13 @@ impl MockForgeState {
 
 pub struct MockForge {
     state: MockForgeState,
+    spell: Spell,
 }
 
 impl MockForge {
-    pub fn new(state: MockForgeState) -> Self {
-        Self { state }
+    /// A double over `state` that writes its next steps with `spell`.
+    pub fn new(state: MockForgeState, spell: Spell) -> Self {
+        Self { state, spell }
     }
 
     /// Commits `files` to pull request `number`'s branch. A file that
@@ -289,9 +292,9 @@ impl Forge for MockForge {
             &req.branch,
             &req.base_branch,
             &super::gate_title(req),
-            &super::gate_body(req),
+            &super::gate_body(req, &*self.spell),
         );
-        self.commit(published.number, super::gate_files(req));
+        self.commit(published.number, super::gate_files(req, &*self.spell));
         Ok(published)
     }
 
@@ -308,7 +311,7 @@ impl Forge for MockForge {
         }
         // The body a forge's page would show, composed the one way every
         // forge composes it, so a test reads what a reviewer reads.
-        let body = super::pull_request_body(req);
+        let body = super::pull_request_body(req, &*self.spell);
         Ok(self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &body))
     }
 

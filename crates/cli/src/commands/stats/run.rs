@@ -1,90 +1,76 @@
 //! `yunta stats <run>`: what one run spent, by node and by runner, and
 //! what it handed over and found.
 
+use std::collections::BTreeMap;
+
 use yunta_core::units::DURATION_WIDEST;
 use yunta_core::RunId;
-use yunta_engine::{NodeStat, RunStats};
+use yunta_engine::{NodeStat, RunState, RunStats};
 use yunta_render::spend::Breakdown;
 
 use crate::render::blocks::Fields;
-use crate::render::doc::Doc;
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::{Line, Tone};
 use crate::render::{
     bar, bar_cells, cell_width, duration, id_column, middle_cut, truncate, Glyphs, Look,
     NodeDisplay, Ratio, Tokens, INDENT, STATE_WIDTH,
 };
 
-pub(super) fn currency_line(
-    tokens: u64,
-    pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
-) -> Option<String> {
-    // A currency estimate needs a *model* to price against; with more
-    // than one model priced and no per-node attribution surfaced here,
-    // showing one blended-average line beats showing none — never
-    // silently picking the first entry a HashMap happens to iterate.
-    let pricing = pricing?;
-    if pricing.is_empty() {
-        return None;
-    }
-    let avg_per_1k: f64 = pricing
-        .values()
-        .map(|entry| entry.cost_per_1k_tokens)
-        .sum::<f64>()
-        / pricing.len() as f64;
-    let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
-    Some(format!(
-        "~{estimate:.2} (avg of {}, never authoritative)",
-        yunta_core::text::counted(pricing.len(), "priced model")
-    ))
+/// What the `yunta stats <run_id>` block is drawn from: one run's stats,
+/// the state its nodes are read from, and what its model is priced at.
+pub(super) struct RunStatsPage<'a> {
+    pub(super) run_id: &'a RunId,
+    pub(super) mode: &'a str,
+    pub(super) stats: &'a RunStats,
+    pub(super) state: &'a RunState,
+    pub(super) pricing: Option<&'a BTreeMap<String, yunta_core::PricingEntry>>,
 }
 
-/// The whole `yunta stats <run_id>` block, ready to print on a stream
-/// with `look`: the run's facts, a row each that has something to say,
-/// then its nodes and its runners.
-///
-/// A block rather than a run of `println!`s: what this command says
-/// about a run is one thing a test reads whole, and a number nobody can
-/// assert is a number nobody is holding to anything.
-pub(super) fn render_run_stats(
-    run_id: &RunId,
-    mode: &str,
-    stats: &RunStats,
-    state: &yunta_engine::RunState,
-    pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
-    look: &Look,
-) -> String {
-    let glyphs = look.glyphs;
-    let asleep = match stats.asleep.is_zero() {
-        true => String::new(),
-        false => format!("{} — left out of every duration", duration(stats.asleep)),
-    };
-    let fields = Fields::new()
-        .push_if("CPTV", cptv(stats, glyphs))
-        .push_if("rework", rework(stats, glyphs))
-        .push_if("cache", cache(stats, glyphs))
-        .push_if("tokens", spent(stats))
-        .push_if(
-            "cost",
-            currency_line(stats.total_tokens.total(), pricing).unwrap_or_default(),
-        )
-        .push_if("host asleep", asleep)
-        .push_if("documents", submissions(&stats.artifact_submissions))
-        .push_if(
-            "findings",
-            findings(&stats.findings, stats.findings_effective),
-        )
-        .push_if("answers", answers(&stats.findings, stats.findings_settled))
-        .push_if(
-            "unread",
-            crate::commands::unknown_kinds_note(&stats.unknown_kinds, look.glyphs)
-                .unwrap_or_default(),
-        );
-    let mut out = format!("run {run_id} — mode {mode}\n");
-    out.push_str(&crate::render::draw(Doc::new().with(fields), look));
-    out.push_str(&super::time::render(&stats.time, look));
-    out.push_str(&super::time::rail_latency(&stats.rails, look));
-    out.push_str(&render_nodes(stats, state, look));
-    out.push_str(&render_runners(stats, look));
-    out
+impl RunStatsPage<'_> {
+    /// The whole `yunta stats <run_id>` block: the run's facts, a row each
+    /// that has something to say, then its times, its rails, its nodes and
+    /// its runners.
+    ///
+    /// A block rather than a run of `println!`s: what this command says
+    /// about a run is one thing a test reads whole, and a number nobody can
+    /// assert is a number nobody is holding to anything.
+    pub(super) fn document(&self, look: &Look) -> Doc<'static> {
+        let stats = self.stats;
+        let asleep = match stats.asleep.is_zero() {
+            true => String::new(),
+            false => format!("{} — left out of every duration", duration(stats.asleep)),
+        };
+        let fields = Fields::new()
+            .push_if("CPTV", cptv(stats, look.glyphs))
+            .push_if("rework", rework(stats, look.glyphs))
+            .push_if("cache", cache(stats, look.glyphs))
+            .push_if("tokens", spent(stats))
+            .push_if(
+                "cost",
+                super::currency_line(stats.total_tokens.total(), self.pricing).unwrap_or_default(),
+            )
+            .push_if("host asleep", asleep)
+            .push_if("documents", submissions(&stats.artifact_submissions))
+            .push_if(
+                "findings",
+                findings(&stats.findings, stats.findings_effective),
+            )
+            .push_if("answers", answers(&stats.findings, stats.findings_settled))
+            .push_if(
+                "unread",
+                crate::commands::unknown_kinds_note(&stats.unknown_kinds, look.glyphs)
+                    .unwrap_or_default(),
+            );
+        Doc::new()
+            .with(Block::Lines(vec![
+                Line::new().plain(format!("run {} — mode {}", self.run_id, self.mode))
+            ]))
+            .with(fields)
+            .with(Block::Lines(super::time::render(&stats.time, look)))
+            .with(Block::Lines(super::time::rail_latency(&stats.rails, look)))
+            .with(Block::Lines(nodes_lines(stats, self.state, look)))
+            .with(Block::Lines(runner_lines(stats, look)))
+    }
 }
 
 /// What a verified task cost — the rate a run is read by first, and the
@@ -182,10 +168,10 @@ fn answers(activity: &yunta_engine::FindingActivity, settled: u64) -> String {
 /// One row per node that started, each opening with the state it is in:
 /// the same token count reads one way under a node that finished and
 /// another under one that failed, so the number never appears without
-/// it.
-fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, look: &Look) -> String {
+/// it. Nothing for a run whose nodes never started.
+fn nodes_lines(stats: &RunStats, state: &RunState, look: &Look) -> Vec<Line> {
     if stats.nodes.is_empty() {
-        return String::new();
+        return Vec::new();
     }
     let max_tokens = stats
         .nodes
@@ -198,23 +184,20 @@ fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, look: &Look) -
     // id, the tokens, the duration and the blocked share, and the gaps.
     let taken = cell_width(INDENT) + STATE_WIDTH + column + Tokens::WIDEST + DURATION_WIDEST + 29;
     let cells = bar_cells(look.width.cells(), taken);
-    let mut out = String::from("\nnodes:\n");
+    let mut lines = vec![Line::new(), Line::new().plain("nodes:")];
     for node in &stats.nodes {
         let display = NodeDisplay::of(state.nodes.state(&node.node_id));
-        out.push_str(&format!(
-            "{}\n",
-            node_line(node, (max_tokens, column, cells), &display, look)
-        ));
+        lines.push(node_line(node, (max_tokens, column, cells), &display, look));
     }
-    out
+    lines
 }
 
 /// The same tokens grouped by the runner that spent them: where the
 /// run's cost went, across however many nodes each runner was given.
-fn render_runners(stats: &RunStats, look: &Look) -> String {
+fn runner_lines(stats: &RunStats, look: &Look) -> Vec<Line> {
     let by_runner = stats.tokens_by_runner();
     if by_runner.is_empty() {
-        return String::new();
+        return Vec::new();
     }
     let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
     let column = id_column(by_runner.iter().map(|(runner, _)| runner.as_str()));
@@ -222,17 +205,17 @@ fn render_runners(stats: &RunStats, look: &Look) -> String {
         look.width.cells(),
         cell_width(INDENT) + column + Tokens::WIDEST + 10,
     );
-    let mut out = String::from("\nrunners:\n");
+    let mut lines = vec![Line::new(), Line::new().plain("runners:")];
     for (runner, tokens) in &by_runner {
         let total = tokens.total();
-        out.push_str(&format!(
-            "{INDENT}{}{}  {}\n",
+        lines.push(Line::new().plain(format!(
+            "{INDENT}{}{}  {}",
             middle_cut(runner.as_str(), column, look.glyphs),
             spaced(bar(total, max_runner_tokens, cells, look.glyphs)),
             Tokens(total).column().trim_end(),
-        ));
+        )));
     }
-    out
+    lines
 }
 
 /// `bar` with the space that sets it apart, or nothing for a bar the
@@ -244,29 +227,33 @@ fn spaced(bar: String) -> String {
     }
 }
 
-/// One node's row, its id in a column `column` cells wide, which is as
-/// wide as the longest id the table holds, and its bar `cells` wide.
+/// One node's row, its state's mark painted in its tone, its id in a
+/// column `column` cells wide, which is as wide as the longest id the
+/// table holds, and its bar `cells` wide.
 fn node_line(
     node: &NodeStat,
     (max_tokens, column, cells): (u64, usize, usize),
     display: &NodeDisplay,
     look: &Look,
-) -> String {
+) -> Line {
     let glyphs = look.glyphs;
     let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
         .map(|fraction| Ratio(fraction).reads(glyphs.times()))
         .unwrap_or_else(|| "n/a".to_string());
-    format!(
-        "{INDENT}{} {} {}{}  {}  {:>DURATION_WIDEST$}  {blocked:>4} blocked",
-        look.ink.mark(glyphs, display.word.mark()),
-        truncate(display.word.word(), STATE_WIDTH, glyphs),
-        middle_cut(node.node_id.as_str(), column, glyphs),
-        spaced(bar(total, max_tokens, cells, glyphs)),
-        Tokens(total).column(),
-        duration(node.wall_clock()),
-    )
+    let mark = display.word.mark();
+    Line::new()
+        .plain(INDENT)
+        .push(Tone::of(mark), glyphs.mark(mark).to_string())
+        .plain(format!(
+            " {} {}{}  {}  {:>DURATION_WIDEST$}  {blocked:>4} blocked",
+            truncate(display.word.word(), STATE_WIDTH, glyphs),
+            middle_cut(node.node_id.as_str(), column, glyphs),
+            spaced(bar(total, max_tokens, cells, glyphs)),
+            Tokens(total).column(),
+            duration(node.wall_clock()),
+        ))
 }
 
 #[cfg(test)]
@@ -282,6 +269,7 @@ mod tests {
     use yunta_testkit::{assert_golden, ENVIRONMENTS};
 
     use super::*;
+    use crate::render::surface_lines;
 
     const RUN: RunId = RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
@@ -341,6 +329,25 @@ mod tests {
         }
     }
 
+    /// The block of one run, drawn for `look`.
+    fn render_run_stats(
+        run_id: &RunId,
+        mode: &str,
+        stats: &RunStats,
+        state: &RunState,
+        pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
+        look: &Look,
+    ) -> String {
+        let page = RunStatsPage {
+            run_id,
+            mode,
+            stats,
+            state,
+            pricing,
+        };
+        crate::render::draw(page.document(look), look)
+    }
+
     fn render(stats: &RunStats, look: &Look) -> String {
         render_run_stats(
             &RUN,
@@ -358,14 +365,27 @@ mod tests {
         // `println!`s: a number nobody can read back is a number nobody
         // is holding to anything. The two counts a run's documents and
         // findings come to are in it, each said as itself.
-        let text = render(&stats(Vec::new()), &Look::plain());
+        let look = Look::plain();
+        let run_stats = stats(Vec::new());
+        let state = yunta_engine::RunState::default();
+        let page = RunStatsPage {
+            run_id: &RUN,
+            mode: "default",
+            stats: &run_stats,
+            state: &state,
+            pricing: None,
+        };
+        let rows: Vec<String> = surface_lines(page.document(&look), &look)
+            .iter()
+            .map(Line::text)
+            .collect();
         for row in [
             "  CPTV         500 tokens per verified task | 1 task done",
             "  documents    3 accepted, 1 refused",
             "  findings     5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing",
             "  answers      2 given, 1 proved — 1 settled",
         ] {
-            assert!(text.lines().any(|line| line == row), "`{row}` in: {text}");
+            assert!(rows.iter().any(|line| line == row), "`{row}` in: {rows:?}");
         }
     }
 

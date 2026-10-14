@@ -219,6 +219,13 @@ dos momentos.
 _Evitar_: línea, entrada del log, evento — un evento es lo persistido; un
 momento es cómo se lee.
 
+**Gasto** (`Spend`):
+Lo asentado más lo que está en vuelo: la cifra que leen todas las superficies. Es una
+sola cifra por run (`Spend::so_far`): el cierre, `status`, la última fila de la
+región en vivo, `stats` y los JSON la leen en la misma forma, también mientras una
+sesión está abierta.
+_Evitar_: consumo, uso, cifra de tokens.
+
 **Gasto asentado** (`Spend::settled`):
 Lo que un run ya dio por gastado: el terminal de cada nodo que cerró, la ronda de
 preguntas que asentó el uso de su sesión y el gasto de los hijos que cerraron. Lo

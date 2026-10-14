@@ -8,11 +8,20 @@ use crate::commands;
 use crate::commands::run_ref::named;
 use crate::error::{CliError, Outcome};
 use crate::graph;
+use crate::output::Mode;
+use crate::render::Look;
 
 /// Runs one subcommand, handing back its verdict or the one error the
 /// caller turns into a line on stderr and a failing exit code. `started`
-/// is when this process began, which a hook's window counts from.
-pub(super) async fn dispatch(command: Command, started: Instant) -> Result<Outcome, CliError> {
+/// is when this process began, which a hook's window counts from. `output`
+/// is the mode the subcommand's own flags chose, and `look` the stdout look
+/// `main` built: every command writes with those and nothing else.
+pub(super) async fn dispatch(
+    command: Command,
+    started: Instant,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     match command {
         Command::Completions { shell } => {
             use clap::CommandFactory;
@@ -25,7 +34,7 @@ pub(super) async fn dispatch(command: Command, started: Instant) -> Result<Outco
             Ok(Outcome::Success)
         }
         Command::Check { workflow, config } => {
-            commands::check::check(&workflow, config.as_deref()).await
+            commands::check::check(&workflow, config.as_deref(), look).await
         }
         Command::Run {
             workflow,
@@ -33,9 +42,8 @@ pub(super) async fn dispatch(command: Command, started: Instant) -> Result<Outco
             adapter,
             fixture,
             mode,
-            quiet,
             detach,
-            json,
+            ..
         } => {
             commands::run::run(
                 &workflow,
@@ -43,46 +51,51 @@ pub(super) async fn dispatch(command: Command, started: Instant) -> Result<Outco
                 adapter.as_ref(),
                 fixture.as_deref(),
                 mode.as_ref(),
-                quiet,
+                output,
                 detach,
-                json,
+                look,
             )
             .await
         }
-        Command::Status { run, json, node } => {
-            commands::status::status(&run.named().await?, json, node.as_ref()).await
+        Command::Status { run, node, .. } => {
+            commands::status::status(&run.named().await?, output, node.as_ref(), look).await
         }
-        Command::Resume { run, quiet, json } => {
-            commands::resume::resume(&run.named().await?, quiet, json).await
+        Command::Resume { run, .. } => {
+            commands::resume::resume(&run.named().await?, output, look).await
         }
         Command::ResolveGate {
             run,
             option,
             by,
             free_text,
+            ..
         } => {
             commands::resolve_gate::resolve_gate(
                 &run.named().await?,
                 option.as_ref(),
                 by.as_ref(),
                 free_text.as_deref(),
+                output,
+                look,
             )
             .await
         }
-        Command::Cancel { run } => commands::cancel::cancel(&run.named().await?).await,
-        Command::Close { run, by } => {
-            commands::close::close(&run.named().await?, by.as_ref()).await
+        Command::Cancel { run, .. } => {
+            commands::cancel::cancel(&run.named().await?, output, look).await
         }
-        Command::List { runs, all } => {
+        Command::Close { run, by, .. } => {
+            commands::close::close(&run.named().await?, by.as_ref(), output, look).await
+        }
+        Command::List { runs, all, .. } => {
             if runs {
-                commands::list::list_runs(all).await
+                commands::list::list_runs(all, output, look).await
             } else {
-                commands::list::list_workflows().await
+                commands::list::list_workflows(look).await
             }
         }
-        Command::Doctor { session } => commands::doctor::doctor(session).await,
+        Command::Doctor { session, .. } => commands::doctor::doctor(session, output, look).await,
         Command::Mcp => commands::mcp::mcp().await,
-        Command::Gc { dry_run } => commands::gc::gc(dry_run).await,
+        Command::Gc { dry_run } => commands::gc::gc(dry_run, look).await,
         Command::Graph {
             workflow,
             run,
@@ -95,42 +108,47 @@ pub(super) async fn dispatch(command: Command, started: Instant) -> Result<Outco
             )
             .await
         }
-        Command::Test { dir } => commands::test::test(dir.as_deref()).await,
-        Command::Verify { run } => commands::verify::verify(&run.named().await?).await,
-        Command::Receipt { run, json } => {
-            commands::receipt::receipt(&run.named().await?, json).await
+        Command::Test { dir } => commands::test::test(dir.as_deref(), look).await,
+        Command::Verify { run, .. } => {
+            commands::verify::verify(&run.named().await?, output, look).await
+        }
+        Command::Receipt { run, .. } => {
+            commands::receipt::receipt(&run.named().await?, output, look).await
         }
         Command::Pack { action } => match action {
             PackAction::Add {
                 source,
                 yes,
                 run_tests,
-            } => commands::pack::add(&source, yes, run_tests).await,
+            } => commands::pack::add(&source, yes, run_tests, look).await,
             PackAction::Update { pack, r#ref, yes } => {
-                commands::pack::update(&pack, &r#ref, yes).await
+                commands::pack::update(&pack, &r#ref, yes, look).await
             }
-            PackAction::New { pack } => commands::pack::new_pack(&pack).await,
-            PackAction::Remove { pack } => commands::pack::remove(&pack),
-            PackAction::List => commands::pack::list(),
-            PackAction::Audit { pack } => commands::pack_audit::audit(&pack).await,
+            PackAction::New { pack } => commands::pack::new_pack(&pack, look).await,
+            PackAction::Remove { pack } => commands::pack::remove(&pack, look),
+            PackAction::List => commands::pack::list(look),
+            PackAction::Audit { pack } => commands::pack_audit::audit(&pack, look).await,
         },
-        Command::Stats {
-            run,
-            workflow,
-            json,
-        } => {
-            commands::stats::stats(named(run.as_ref()).await?.as_ref(), workflow.as_ref(), json)
-                .await
+        Command::Stats { run, workflow, .. } => {
+            commands::stats::stats(
+                named(run.as_ref()).await?.as_ref(),
+                workflow.as_ref(),
+                output,
+                look,
+            )
+            .await
         }
-        Command::Init { interactive, force } => commands::init::init(interactive, force).await,
+        Command::Init { interactive, force } => {
+            commands::init::init(interactive, force, look).await
+        }
         Command::Rail { adapter, event } => rail_hook(&adapter, event, started),
-        Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
+        Command::Schema { kind, .. } => commands::schema::schema(kind.as_deref(), output, look),
         Command::New {
             name,
             shape,
             interactive,
             force,
-        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force).await,
+        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force, look).await,
     }
 }
 

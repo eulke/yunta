@@ -4,7 +4,7 @@
 //! runs — both driven through the real compiled binary, same style
 //! `run_flow.rs` uses.
 
-use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};
+use yunta_testkit::{init_repo, run_id_from, stderr, stdout, write, yunta_in};
 
 fn bash_only_workflow() -> &'static str {
     r#"
@@ -155,6 +155,23 @@ fn stats_workflow_with_no_runs_says_so_without_failing() {
     let result = yunta_in!(&repo, &home, &["stats", "--workflow", "never-run"]);
     assert!(result.status.success());
     assert!(stdout(&result).contains("no runs of workflow"));
+}
+
+#[test]
+fn stats_workflow_json_with_no_runs_prints_one_document() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let out = yunta_in!(
+        &repo,
+        &home,
+        &["stats", "--workflow", "never-run", "--json"]
+    );
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let doc: serde_json::Value = serde_json::from_slice(&out.stdout).expect("one JSON document");
+    assert_eq!(doc["runs"].as_array().map(Vec::len), Some(0), "{doc}");
 }
 
 #[test]

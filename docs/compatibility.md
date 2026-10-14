@@ -254,6 +254,14 @@ this release reads a `node_failed` without `retryable`, and a `run_paused` whose
 pause is `awaiting_reset`, as corrupt, like any payload that is not its kind's
 shape. This policy makes no promise about a log a newer binary wrote.
 
+An engine claim in a `gate_waiting` summary is an object tagged by `claim`:
+`needs_decision`, `node_failed`, `awaits_review`, `forge_unreachable` or
+`recheck_unreachable`, and so is the escalation that a `run_paused` carries when its
+pause is `escalation`. A binary from before those claims reads that payload as
+corrupt, as it reads the shapes above; this policy makes no promise about a log a
+newer binary wrote. A log written before them carries its summary as a plain string,
+and this binary reads that string as a summary a person or an agent wrote.
+
 A finding's `location` is where it is: a path with the lines of it when the
 finder named them (`src/lib.rs`, `src/lib.rs:142`, `src/lib.rs:142-150`). The path
 is relative and never climbs out of what it is under, because a findings document
@@ -405,6 +413,10 @@ parsing what it printed:
 | 5 | waiting: it is parked until a limit resets, and resumes on its own then — nothing is asked of a person |
 | 130 | was interrupted by a person in this invocation (Ctrl-C) |
 
+`yunta run --detach` exits 0 once the run is handed off, since the command returns
+before the run finishes: the outcome is what `yunta status` reads later. A refusal
+exits 1 with or without `--json`; under `--json` its document is on stdout.
+
 `yunta status` and `yunta close` exit 0 whatever the run says: they report a
 run, they do not drive it. `yunta test` reads a case's `final_state` in the same
 words: `finished`, `needs you`, `waiting`, `reported`, `failed`, `promoted`; a case
@@ -443,17 +455,43 @@ place never passes the terminal's edge, whatever the floor says.
 three share one stamp, so all of them carry the new number even when a change
 touched only one of them: from 6 on, a run stopped on a person is `needs you` rather
 than `paused`, and a run that finished holding blocking findings is `reported` rather
-than `finished`. From 7 on, `tokens` is the spend in one shape in each of the three:
+than `finished`. From 7 on, `tokens` is the spend in one shape in each of the three when it names one run:
 `input`, `output`, `cached` when the adapter reports it, `total`, and `in_flight` for
 the usage an open attempt has reported. A run paused on a limit's reset is `waiting`
 rather than `needs you`, and its document carries `awaiting_reset`. `waiting` joins
 version 7, which no released binary has written, so the stamp does not move for it.
 
+Under `--json`, `list --runs`, `verify`, `close`, `cancel`, `resolve-gate` and `doctor`
+print one document each: the answer the command gives, with the fields its human view
+draws. `resolve-gate --json` takes an option, since the menu it would otherwise show is
+for a terminal, so one without an option is refused. Each of these documents carries
+the same stamp.
+
+A refusal under `--json` is one document as well, on stdout, and the refusal writes
+nothing to stderr: `{"schema_version": 7, "error": {"said", "detail", "next"}}`. `said`
+is the refusal as an agent reads it, with the whole run id where it names a run;
+`detail` is `null` when there is nothing to add; `next` lists the commands that go on
+from here as `{"command", "why"}` objects, and is empty when there are none. A command
+line that does not parse has no such document: the argument parser refuses it on
+stderr, with exit code 2.
+
+`cautions` is on the run document when there is something to say. `run --json` and
+`run --detach --json` carry what was found before the run started: the budget caution,
+and each `files:` path a node reads that the commit the run starts from does not hold
+and an earlier node may write. `status --json` carries what a run parked on its token
+budget says about its cap against its history. `resume --json` and the control plane's
+`workflow_status` carry none. Each caution is an object tagged by `kind` in snake case.
+`budget_warning` and `context_warnings` keep their names and carry the words of the same
+cautions, on the documents that carry them.
+
+`tokens` in these documents is the figure the closing block and `status` print: the
+settled spend plus the usage an open attempt has reported, so the three readings agree.
+
 `run --json`, `resume --json`, `status --json` and the control plane's
 `workflow_status` all emit one document. It names the run by its whole `run_id`
 and by the `handle` every line a person reads calls it. It is derived from the run's own event
 log, so the command that drove a run to its stop and the command that reads that
-run afterwards publish the same answer, field for field. `outcome` is the word
+run afterwards publish the same answer, field for field, except the cautions above. `outcome` is the word
 every text surface prints for the run — `created`, `running`, `waiting`, `stalled`,
 `needs you`, `finished`, `reported`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
 terminal for what `status` said finds the same word in the document. A failed or
@@ -469,7 +507,9 @@ spent: `submissions` (`{accepted, refused}`) counts every document offered,
 log carries, and `findings_standing` counts the findings that stand now — the
 fold over the whole log, where an update replaces and a withdrawal removes. Each
 node row carries its own `submissions` and `findings`, zeroed for a node the log
-carries none from.
+carries none from. `stats --workflow X --json` for a workflow with no history prints the
+same document with `runs` empty and `estimation` and `verification_findings` null, where
+the human view says there are no runs.
 
 In `status --json`, `diagnostics` maps a failed node to the artifacts its failure
 names — `{"<node>": [{code?, path?, kind?, file?, run?, producer?, artifact?,
@@ -643,8 +683,10 @@ its first line and prints one line per event instead: `live view off (<reason>):
 one line per event`, the reason being `stderr is not a terminal` or `TERM=dumb`.
 `NO_COLOR` is not one: it takes the color away and leaves the region, whose
 words already say everything its color does. The same shape as the line above — what is off, why in the
-parenthesis, what happens instead after the colon. `--quiet` announces nothing,
-because it has no view to stand down.
+parenthesis, what happens instead after the colon. `--quiet` writes no `live view off`
+line, because it has no view to stand down. On `yunta run` and `yunta resume` it prints
+the run's whole id on stdout and nothing else there; a warning that asks for a decision
+goes to stderr in every mode.
 
 The `document_shape` tool refuses an unknown kind with the same sentence
 `yunta schema` prints, byte for byte.

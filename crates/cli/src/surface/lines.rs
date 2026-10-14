@@ -128,7 +128,9 @@ mod pause_reason_tests {
             },
             PauseReason::NodeFailed {
                 node: NodeId::from("lint"),
-                failure: Failure::message("exit 1"),
+                failure: Failure::Message {
+                    outcome: "exit 1".into(),
+                },
             },
             PauseReason::AwaitingReset {
                 node: NodeId::from("build"),
@@ -271,7 +273,9 @@ mod promotion_tests {
         let cause = PromotionCause {
             node: "lint".into(),
             goto: "fix-lint".into(),
-            failure: Some(Failure::message("exit 1")),
+            failure: Some(Failure::Message {
+                outcome: "exit 1".into(),
+            }),
         };
         let promoted = yunta_engine::Happening::Run(run::happening::Happening::PromotionSignaled {
             to: "ship".into(),

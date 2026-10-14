@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use Mark::{StructNamed, Text};
+use Mark::{Spelled, StructNamed, Text};
 
 /// A counter: the name it carries in the baseline, and the function that
 /// measures it against a workspace root.
@@ -65,12 +65,17 @@ pub const COUNTERS: &[Counter] = &[
         "run_tool_named_outside_vocabulary",
         count_run_tool_named_outside_vocabulary,
     ),
+    ("cli_word_outside_cli", count_cli_word_outside_cli),
 ];
 
 /// What a line carries to count as a write of the pattern.
 enum Mark {
     /// The line carries this text anywhere on it.
     Text(&'static str),
+    /// The line carries this text followed by a lowercase letter, the way a
+    /// message spells a command or a flag: `--input` and `yunta gc` match,
+    /// and a delimiter such as `---` does not.
+    Spelled(&'static str),
     /// The line declares a struct with this word in its name, whatever
     /// stands between the keyword and the word.
     StructNamed(&'static str),
@@ -87,6 +92,9 @@ impl Mark {
         }
         match self {
             Text(text) => line.contains(text),
+            Spelled(text) => line.match_indices(text).any(|(at, _)| {
+                line[at + text.len()..].starts_with(|c: char| c.is_ascii_lowercase())
+            }),
             StructNamed(word) => line
                 .split_once("struct ")
                 .is_some_and(|(_, name)| name.contains(word)),
@@ -385,6 +393,26 @@ fn count_run_tool_named_outside_vocabulary(root: &Path) -> usize {
     )
 }
 
+/// A message in the engine or the core that writes a CLI command or flag.
+///
+/// The words that tell a person what to run belong to the CLI, which owns
+/// what it accepts. A crate below it that writes `yunta gc` or `--input`
+/// keeps a spelling the CLI cannot reach. A git argument array has no
+/// backticks, so the flags git takes never count.
+fn count_cli_word_outside_cli(root: &Path) -> usize {
+    let marks = [Spelled("`yunta "), Spelled("`--")];
+    super::ratchet_corpus(root)
+        .iter()
+        .filter(|path| owned(path, &["crates/engine/src/", "crates/core/src/"]))
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| {
+            text.lines()
+                .filter(|line| marks.iter().any(|mark| mark.on(line)))
+                .count()
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +459,17 @@ mod tests {
             &pattern
         ));
         assert!(!owned(Path::new("/w/crates/engine/src/repo.rs"), &pattern));
+    }
+
+    #[test]
+    fn a_cli_spelling_in_backticks_counts_and_a_comment_or_a_git_argument_does_not() {
+        assert!(Spelled("`--").on("    \"pass `--input {name}=...` to name it\""));
+        assert!(Spelled("`yunta ").on("    \"make room (`yunta gc`) and resume\","));
+        // A comment explains, a git argument array has no backticks, a
+        // delimiter is not a flag, and a schema title names no command.
+        assert!(!Spelled("`--").on("    /// pass `--input` to name an input"));
+        assert!(!Spelled("`--").on("    &[\"diff\", \"--name-only\", \"HEAD\"],"));
+        assert!(!Spelled("`--").on("    \"start it with `---`, its `name`\""));
+        assert!(!Spelled("`yunta ").on("    titled(schema_for!(Workflow), \"yunta workflow\")"));
     }
 }

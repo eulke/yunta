@@ -86,7 +86,9 @@ fn started(attempt: u32, from: &str) -> EventPayload {
 
 fn failed() -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::message("exit 1"),
+        Failure::Message {
+            outcome: "exit 1".to_string(),
+        },
         TokenUsage::default(),
     )))
 }

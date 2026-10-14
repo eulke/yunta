@@ -134,7 +134,9 @@ fn finished() -> EventPayload {
 
 fn failed(outcome: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::message(outcome.to_string()),
+        Failure::Message {
+            outcome: outcome.to_string(),
+        },
         tokens(7, 3),
     )))
 }
@@ -142,7 +144,9 @@ fn failed(outcome: &str) -> EventPayload {
 fn rerouted(to: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
         to.into(),
-        Failure::message("criteria still red"),
+        Failure::Message {
+            outcome: "criteria still red".to_string(),
+        },
         RerouteOrigin::OnFailure,
         Some(1),
         Some(2),

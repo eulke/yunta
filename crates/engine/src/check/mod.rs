@@ -54,20 +54,15 @@ mod scopes;
 mod site;
 mod sources;
 mod unset;
-mod warning;
 
-pub use capabilities::{check_token_cap_warnings, AdapterFacts};
-pub use context_files::{
-    check_context_files, ContextFilesCheck, MissingContextFile, RunTreeOrigin,
-};
+pub use capabilities::AdapterFacts;
+pub use context_files::{check_context_files, ContextFilesCheck, RunTreeOrigin};
 pub use error::CheckError;
 pub use gates::UntakenRoute;
 pub(crate) use programs::leading_programs;
 pub use programs::programs_named;
 pub use refs::{check_workflow_refs, Composition, RefsCheck};
-pub use site::Site;
 pub use sources::Unanswerable;
-pub use warning::CheckWarning;
 
 // One home for what every family reads: the workspace types, the
 // shared helpers (the glob heuristic the tasks document's own scope rule uses,
@@ -84,7 +79,9 @@ pub(crate) use scopes::*;
 pub(crate) use sources::*;
 pub(crate) use std::collections::{HashMap, HashSet};
 pub(crate) use unset::*;
+pub(crate) use yunta_core::caution::{Caution, MissingContextFile, PromotedRead};
 pub(crate) use yunta_core::template::template_variables;
+pub(crate) use yunta_core::workflow::Place;
 pub(crate) use yunta_core::{
     might_overlap, ArtifactSpec, ConfigLayer, InputSpec, Node, NodeId, NodeKind, RunnerName,
     Workflow,
@@ -275,7 +272,16 @@ pub fn check_mode_start(workflow: &Workflow, mode: &yunta_core::ModeName) -> Vec
 /// read-only|edit|full`, so a child declaring `read-only` is out of the
 /// collision count by declaration. A child without the field stays
 /// implicitly write-capable (the engine's default profile is `edit`).
-pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWarning> {
+///
+/// A node's `network: false` that its resolved adapter cannot enforce is
+/// reported at run time, ahead of the session, as `capability_degraded` —
+/// the record that survives on the log. The adapter-aware warning is the
+/// one that judges what each candidate declares, the run's token cap.
+pub fn check_warnings(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
+) -> Vec<Caution> {
     let mut warnings = check_reads(workflow, &Birth::of(workflow, &[]), None).warnings;
     collect_parallel_warnings(&workflow.nodes, &mut warnings);
     collect_fanout_warnings(workflow, config, &mut warnings);
@@ -285,15 +291,11 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
             .nodes
             .iter()
             .filter(|node| node.optional && needs_nothing(node))
-            .map(|node| CheckWarning::OptionalNeedsNothing {
+            .map(|node| Caution::OptionalNeedsNothing {
                 node: node.id.clone(),
             }),
     );
-    // A node's `network: false` that its resolved adapter cannot enforce is
-    // reported at run time, before the session, as `capability_degraded`
-    // — the record that survives on the log. This entry takes no adapter
-    // registry, so it does not judge which candidates enforce network
-    // isolation; the adapter-aware warnings are `check_token_cap_warnings`'s.
+    warnings.extend(capabilities::token_cap_cautions(workflow, config, declared));
     warnings
 }
 

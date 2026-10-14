@@ -6,6 +6,7 @@
 use yunta_core::events::ArtifactId;
 use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::{ShownContent, ShownDocument};
+use yunta_core::step::NextStep;
 use yunta_core::NodeId;
 
 use crate::blocks::{Chosen, Decision, DecisionOption, Next, Prose};
@@ -15,10 +16,9 @@ use crate::plan::Form;
 use crate::surface::{Markdown, Surface};
 
 /// What the pull request of `request` says under its title, which is the
-/// gate's question.
-pub fn gate(request: &PublishRequest) -> Doc<'static> {
+/// gate's question. The commands a reader copies are written by `spell`.
+pub fn gate(request: &PublishRequest, spell: &dyn Fn(&NextStep) -> String) -> Doc<'static> {
     let decision = &request.decision;
-    let handle = request.run_id.handle();
     let published = files(request)
         .into_iter()
         .map(|(path, what)| {
@@ -49,10 +49,17 @@ pub fn gate(request: &PublishRequest) -> Doc<'static> {
         .with(Next {
             steps: vec![
                 (
-                    format!("yunta resume {handle}"),
+                    spell(&NextStep::Resume {
+                        run: request.run_id.clone(),
+                    }),
                     "reads the review and goes on from it",
                 ),
-                (format!("yunta cancel {handle}"), "stops the run instead"),
+                (
+                    spell(&NextStep::Cancel {
+                        run: request.run_id.clone(),
+                    }),
+                    "stops the run instead",
+                ),
             ],
         })
 }
@@ -60,14 +67,16 @@ pub fn gate(request: &PublishRequest) -> Doc<'static> {
 /// Each document of `request` a person reads drawn whole, as Markdown,
 /// under the name it is published by beside the artifact it draws:
 /// `tasks.yaml` is read as `tasks.md`.
-pub fn drawn(request: &PublishRequest) -> Vec<(String, String)> {
-    let handle = request.run_id.handle();
+pub fn drawn(
+    request: &PublishRequest,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Vec<(String, String)> {
     request
         .shown
         .iter()
         .filter_map(|document| {
             let name = drawn_name(document)?;
-            let doc = crate::shown::document(document, handle, Form::Whole);
+            let doc = crate::shown::document(document, &request.run_id, Form::Whole, spell);
             Some((name, Markdown.draw(&doc)))
         })
         .collect()

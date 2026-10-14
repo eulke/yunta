@@ -20,7 +20,8 @@ use yunta_core::ScopeGlob;
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{self, json};
+use super::verdicts::json;
+use super::words;
 use crate::replay::RunView;
 use crate::run::scope_record::{self, Recording, Subject};
 use crate::scope_expansion::{
@@ -70,23 +71,14 @@ impl SessionTools {
         if let Some(access) = self.task.as_deref() {
             if let Some(denial) = standing_refusal(&request, &access.scope_bounds()) {
                 self.record_denial(access, &request, &denial).await?;
-                return Ok(verdicts::denied(&denial, &self.called(RunTool::CheckTask)));
+                return Ok(words::denied(&denial, &self.called(RunTool::CheckTask)));
             }
         }
-        let next = match answered_by_a_person {
-            true => format!(
-                "a person decides it when this attempt ends; until then, finish what you can \
-                 within the scope you have, without writing the paths you asked for; `{}` tells \
-                 you whether what you changed is within it",
-                self.called(RunTool::CheckScope)
-            ),
-            false => "end this attempt; the work is attempted again once the request is decided"
-                .to_string(),
-        };
+        let next = words::request_next(answered_by_a_person, &self.called(RunTool::CheckScope));
         Ok(
             match write_request(&self.cwd, request, &self.host.scope_guard).await? {
-                Recorded::Written => verdicts::recorded(&next),
-                Recorded::Amended { added } => verdicts::amended(added, &next),
+                Recorded::Written => words::recorded(&next),
+                Recorded::Amended { added } => words::amended(added, &next),
             },
         )
     }

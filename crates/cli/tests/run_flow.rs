@@ -2803,11 +2803,14 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
         &["run", "wf.yaml", "--detach", "--quiet"]
     );
     assert!(quiet.status.success(), "stderr: {}", stderr(&quiet));
-    assert_eq!(
-        stdout(&quiet).lines().count(),
-        1,
-        "the distribution is context nobody asked for: {}",
-        stdout(&quiet)
+    let quiet_text = stdout(&quiet);
+    let bare = quiet_text.strip_suffix('\n').expect("one line of output");
+    assert!(
+        bare.len() == 26
+            && bare
+                .bytes()
+                .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase()),
+        "--quiet prints the bare run id and nothing else: {quiet_text:?}"
     );
     assert!(
         stderr(&quiet).contains("max_tokens_per_run") && stderr(&quiet).contains("p90"),

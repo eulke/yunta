@@ -16,13 +16,16 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{ArtifactId, EventPayload, Failure, NodeEvent, StoredEvent};
-use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, Manifest, NodeId, RunId};
+use yunta_core::caution::Caution;
+use yunta_core::events::StoredEvent;
+use yunta_core::{Manifest, RunId};
 use yunta_engine::{RunPhase, RunState, WaitingOn};
 use yunta_render::spend::SpendJson;
 
+mod diagnostics;
 mod node;
 
+use diagnostics::{node_diagnostics, ArtifactProblems};
 use node::{NodeJson, NodeWaitJson};
 
 use crate::commands::advice;
@@ -36,20 +39,18 @@ use crate::render::state::RunWord;
 /// the control plane, is watching nothing else.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PreRunWarnings {
-    /// The declared cap sits under what this workflow has historically
-    /// spent.
-    pub(crate) budget: Option<String>,
-    /// A `files:` path a node reads that the run would not find.
-    pub(crate) context_files: Vec<String>,
+    /// Every caution the invocation raised ahead of the first token, in the
+    /// order it raised them.
+    pub(crate) cautions: Vec<Caution>,
 }
 
 impl PreRunWarnings {
-    /// Every warning, one per line, in the order they were raised.
-    pub(crate) fn lines(&self) -> impl Iterator<Item = &str> {
-        self.budget
+    /// Every caution, one sentence each, in the order they were raised.
+    pub(crate) fn lines(&self) -> Vec<String> {
+        self.cautions
             .iter()
-            .chain(&self.context_files)
-            .map(String::as_str)
+            .map(yunta_render::caution::line)
+            .collect()
     }
 }
 
@@ -103,18 +104,22 @@ pub(crate) struct RunDocument {
     /// finished one has nothing to add.
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
-    /// The one piece of the pre-run estimation a person can act on: the
-    /// declared cap sits under what this workflow
-    /// has historically spent. Carried only by the invocation that
-    /// *created* the run, which is the only one that has it — a reader
-    /// of the log alone never does.
+    /// The cautions this document carries: each one a fact a person can
+    /// act on ahead of the run's spend. Carried only by an invocation that
+    /// holds them — the one that *created* the run, which is the only one
+    /// that has the pre-run estimation, or a status that derives the budget
+    /// caution a parked run stopped on.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cautions: Vec<Caution>,
+    /// The sentence for the budget caution in `cautions`: the declared cap
+    /// sits under what this workflow has historically spent. Derived from
+    /// `cautions`, so the sentence and the caution say one fact.
     #[serde(skip_serializing_if = "Option::is_none")]
     budget_warning: Option<String>,
-    /// The `files:` paths a node reads that the tree this run started
-    /// from did not hold when it was created, one sentence each — each
-    /// one a node that stops there unless something before it writes
-    /// the file. Carried, like `budget_warning`, only by the invocation
-    /// that created the run.
+    /// The sentence for each `files:` caution in `cautions`, in order: a
+    /// path a node reads that the tree this run started from did not hold,
+    /// a node that stops there unless something ahead of it writes the file.
+    /// Derived from `cautions`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     context_warnings: Vec<String>,
     /// How many findings stand blocking now. A run that finished
@@ -192,6 +197,7 @@ impl RunDocument {
             // A document reads the same whichever terminal asked for it.
             summary: progress::summary(&frame, engine, crate::render::Glyphs::Unicode),
             reason: reason(&frame.phase),
+            cautions: Vec::new(),
             budget_warning: None,
             context_warnings: Vec::new(),
             blocking_findings: frame.blocking_findings,
@@ -217,10 +223,21 @@ impl RunDocument {
     }
 
     /// The same document carrying what was said before the run's first
-    /// token.
+    /// token. The two sentences are read off the cautions, so a reader of
+    /// the list and a reader of the sentences see one fact.
     pub(crate) fn warnings(mut self, pre_run: PreRunWarnings) -> Self {
-        self.budget_warning = pre_run.budget;
-        self.context_warnings = pre_run.context_files;
+        self.budget_warning = pre_run
+            .cautions
+            .iter()
+            .find(|caution| matches!(caution, Caution::BudgetBelowHistory { .. }))
+            .map(yunta_render::caution::line);
+        self.context_warnings = pre_run
+            .cautions
+            .iter()
+            .filter(|caution| matches!(caution, Caution::ContextFileMissing { .. }))
+            .map(yunta_render::caution::line)
+            .collect();
+        self.cautions = pre_run.cautions;
         self
     }
 
@@ -352,148 +369,4 @@ impl WaitingOnJson {
             },
         })
     }
-}
-
-/// One artifact a node's failure names, with what is wrong with it. A
-/// node that failed on two artifacts produces two of these, so a reader
-/// attributes a problem to the artifact it came from instead of
-/// splitting a sentence.
-///
-/// Every field is absent when the failure has nothing to put there, so
-/// no consumer ever meets an invented path or an empty code: an artifact
-/// another run owes and a document its node never handed over have no
-/// file to open and no content that was read, and a file that was never
-/// written has no kind its content could have met.
-#[derive(Default, serde::Serialize)]
-pub(crate) struct ArtifactProblems {
-    /// The stable name of what is wrong with the artifact itself —
-    /// `artifact-missing`, `artifact-empty`, `artifact-oversized`,
-    /// `artifact-unreadable`, `artifact-undelivered`, `artifact-unheld`.
-    /// Absent when the file is there and its content is what failed,
-    /// because that is not one problem: each of the document's own
-    /// carries its code.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<yunta_core::diagnostic::DiagnosticCode>,
-    /// As a reader would type it to open the file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<String>,
-    /// The kind whose shape the content had to meet.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    kind: Option<yunta_core::diagnostic::DocumentKind>,
-    /// What is wrong with the file itself — never written, empty, past
-    /// the ceiling, refused by the filesystem.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<FileProblem>,
-    /// The run that owes this artifact and holds none of it — where a
-    /// reader goes to look. Absent when this run owes it, which is what
-    /// a document its own node never handed over is.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    run: Option<String>,
-    /// The node the artifact was asked of: of `run` when one is named,
-    /// of this run otherwise. Absent when the question is about a run as
-    /// a whole.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    producer: Option<String>,
-    /// The identity that was asked for.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    artifact: Option<ArtifactId>,
-    /// Every problem this document's content has, in document order.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    diagnostics: Vec<Diagnostic>,
-}
-
-impl From<&ArtifactFailure> for ArtifactProblems {
-    fn from(failure: &ArtifactFailure) -> Self {
-        let code = failure.code();
-        match failure {
-            ArtifactFailure::File { path, problem } => ArtifactProblems {
-                code,
-                path: Some(path.clone()),
-                file: Some(problem.clone()),
-                ..ArtifactProblems::default()
-            },
-            ArtifactFailure::Undelivered { node, artifact } => ArtifactProblems {
-                code,
-                producer: Some(node.to_string()),
-                artifact: Some(artifact.clone()),
-                ..ArtifactProblems::default()
-            },
-            ArtifactFailure::Content(report) => ArtifactProblems {
-                path: Some(report.document.path.clone()),
-                kind: Some(report.document.kind),
-                diagnostics: report.diagnostics.clone(),
-                ..ArtifactProblems::default()
-            },
-            ArtifactFailure::Unheld {
-                run,
-                producer,
-                artifact,
-            } => ArtifactProblems {
-                code,
-                run: Some(run.to_string()),
-                producer: producer.as_ref().map(NodeId::to_string),
-                artifact: Some(artifact.clone()),
-                ..ArtifactProblems::default()
-            },
-        }
-    }
-}
-
-/// The artifacts each node's most recent failure names, with what is
-/// wrong with each, keyed by node.
-///
-/// An entry describes the failure a node is in **now**, never every
-/// failure it has had: a node that failed, repaired and failed again is
-/// described by its last failure, and one that started again, or whose
-/// latest failure is a sentence naming no document, has no entry at
-/// all. A reader asking what is wrong now is not asking for a history.
-fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProblems>> {
-    let mut latest = BTreeMap::new();
-    for event in events {
-        let Some(node_id) = event.node_id.as_ref() else {
-            continue;
-        };
-        match event.payload() {
-            Some(EventPayload::Node(NodeEvent::Failed(p))) => match &p.failure {
-                Failure::Artifacts { artifacts } => {
-                    latest.insert(
-                        node_id.to_string(),
-                        artifacts.iter().map(ArtifactProblems::from).collect(),
-                    );
-                }
-                // A failure stated in one sentence names no document, and
-                // neither does a session that died, refused or could not be
-                // stopped, a limit, stopped tasks, a red check, a child's
-                // failure, anything about scope, an unset config key, a
-                // frozen input that changed, a check refused on a tree
-                // nothing changed or a criterion no work can pass: the
-                // node's own entry carries each of them whole.
-                Failure::Message { .. }
-                | Failure::Exited { .. }
-                | Failure::SessionDied { .. }
-                | Failure::SessionRefused { .. }
-                | Failure::SessionNotStopped { .. }
-                | Failure::Limit { .. }
-                | Failure::TasksStopped { .. }
-                | Failure::Red { .. }
-                | Failure::ChildFailed { .. }
-                | Failure::ScopeViolated { .. }
-                | Failure::PathsDenied { .. }
-                | Failure::ScopeRequested { .. }
-                | Failure::ScopeOwed { .. }
-                | Failure::Unset { .. }
-                | Failure::FrozenInput { .. }
-                | Failure::Unchanged { .. }
-                | Failure::PlanUnpassable { .. } => {
-                    latest.remove(node_id.as_str());
-                }
-            },
-            // A node that started again has left its last failure behind.
-            Some(EventPayload::Node(NodeEvent::Started(_))) => {
-                latest.remove(node_id.as_str());
-            }
-            _ => {}
-        }
-    }
-    latest
 }

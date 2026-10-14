@@ -92,7 +92,9 @@ fn finished(tokens_used: TokenUsage) -> EventPayload {
 
 fn failed(tokens_used: TokenUsage) -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-        Failure::message("criteria still red".to_string()),
+        Failure::Message {
+            outcome: "criteria still red".to_string(),
+        },
         tokens_used,
     )))
 }

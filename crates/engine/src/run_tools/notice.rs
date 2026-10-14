@@ -12,11 +12,17 @@
 //! The three paragraphs are the three ways an artifact comes to exist: a
 //! document the session submits, findings the engine accumulates from
 //! what the session reports, and a plain file the session writes itself.
-//! A node that declares nothing of a kind hears nothing about it.
+//! A node that declares nothing of a kind hears nothing about it. The
+//! sentences themselves are written in [`words`](super::words); this module
+//! decides which of them a session is told.
 
+use std::path::PathBuf;
+
+use yunta_core::events::ScopeAnswer;
 use yunta_core::{ArtifactKind, ArtifactSpec, RunTool};
 
 use super::listener::RunToolsSession;
+use super::words;
 
 /// The names this session's CLI gives the run's tools, beside the names
 /// any text — an author's prompt included — may give them. `None` when
@@ -26,14 +32,7 @@ pub(crate) fn naming_notice(session: Option<&RunToolsSession>) -> Option<String>
     if renamed.is_empty() {
         return None;
     }
-    let mut text = String::from(
-        "\n\nThis run's tools reach you under names of your CLI's own. Call each by the \
-         name it has here, whatever any text calls it:",
-    );
-    for (called, tool) in renamed {
-        text.push_str(&format!("\n  `{called}` — {tool}"));
-    }
-    Some(text)
+    Some(words::naming_text(&renamed))
 }
 
 /// What a session is told about the artifacts its node declares: which
@@ -69,33 +68,20 @@ pub(crate) fn task_notice(
     let task = task?;
     let approved = match tests.is_empty() {
         true => String::new(),
-        false => format!(
-            " The tests a person approved for this task are in your checkout — {} — and are \
-             not yours to change: the engine refuses a write to them. One you believe is \
-             wrong is a departure from the plan: declare it on that criterion with \
-             `{depart}`, and a person decides whether it is written again.",
-            yunta_core::text::listed(tests.iter().map(|file| file.path.as_str())),
-            depart = session.called(RunTool::DeclareDeviation),
+        false => words::approved_tests_text(
+            &yunta_core::text::listed(tests.iter().map(|file| file.path.as_str())),
+            &session.called(RunTool::DeclareDeviation),
         ),
     };
     let plan = match task.plan {
-        Some(_) => format!(
-            " It also carries the plan the task belongs to: the design the task names, and \
-             the other tasks, which own what your scope leaves out. Build the design as the \
-             plan declares it; where your task cannot, ask for the scope it needs, or declare \
-             the departure with `{depart}` — never build something else and say nothing.",
-            depart = session.called(RunTool::DeclareDeviation),
-        ),
+        Some(_) => words::plan_text(&session.called(RunTool::DeclareDeviation)),
         None => String::new(),
     };
-    Some(format!(
-        "\n\nRead this task's scope, criteria and notes with `{read}` before you change \
-         anything — the tasks document is not in your checkout, and the same call shows \
-         what earlier attempts left red.{plan}{approved} When your session ends the engine runs every \
-         criterion and rejects any change outside the scope; `{check}` judges your work \
-         exactly that way, so call it before you finish.",
-        read = session.called(RunTool::Task),
-        check = session.called(RunTool::CheckTask),
+    Some(words::task_text(
+        &session.called(RunTool::Task),
+        &session.called(RunTool::CheckTask),
+        &plan,
+        &approved,
     ))
 }
 
@@ -114,20 +100,7 @@ fn documents_to_submit(session: &RunToolsSession, declared: &[ArtifactSpec]) -> 
     if submitted.is_empty() {
         return None;
     }
-    let mut text = String::from(
-        "\n\nSubmit each document this node declares with its run tool, as a structured \
-         object — never as a file:",
-    );
-    for (kind, tool) in submitted {
-        text.push_str(&format!("\n  the `{kind}` document → `{tool}`"));
-    }
-    text.push_str(
-        "\nThe tool validates the document exactly as the node's close will and answers \
-         at once. A refusal names every problem to fix — fix them and submit again, as \
-         many times as it takes; it costs the run nothing. An acceptance reports what \
-         the engine read and writes the file. A document never submitted fails the node.",
-    );
-    Some(text)
+    Some(words::documents_text(&submitted))
 }
 
 /// The findings artifact this node declares — a file the session never
@@ -137,17 +110,11 @@ fn findings_to_report(session: &RunToolsSession, declared: &[ArtifactSpec]) -> O
         ArtifactSpec::Interpreted(kind) if kind.submit_tool().is_none() => Some(*kind),
         _ => None,
     })?;
-    Some(format!(
-        "\n\nReport each finding with `{post}` the moment you see it — one call per \
-         finding, never a file. The engine writes this node's `{kind}` artifact at the \
-         end from everything this node reported; a session that reports nothing yields \
-         an empty list. A refusal names what to fix in that one finding — fix it and \
-         post it again; the others already reported are kept. To change a finding you \
-         reported, `{update}` with the same id and the whole finding; to take one back, \
-         `{withdraw}` with its id and why. A withdrawn id is final.",
-        post = session.called(RunTool::PostFinding),
-        update = session.called(RunTool::UpdateFinding),
-        withdraw = session.called(RunTool::WithdrawFinding),
+    Some(words::findings_text(
+        kind,
+        &session.called(RunTool::PostFinding),
+        &session.called(RunTool::UpdateFinding),
+        &session.called(RunTool::WithdrawFinding),
     ))
 }
 
@@ -170,19 +137,11 @@ fn files_to_write(
         return None;
     }
     let dir = artifact_dir?;
-    let mut text = format!(
-        "\n\nWrite each file this node declares under {} — this node's own \
-         directory, which nothing else writes:",
-        dir.display()
-    );
-    for name in written {
-        text.push_str(&format!("\n  `{name}`"));
-    }
-    text.push_str(&format!(
-        "\nYou may call `{}` to confirm a file is there before this session ends.",
-        session.called(RunTool::CheckArtifact)
-    ));
-    Some(text)
+    Some(words::files_text(
+        &dir.display().to_string(),
+        &written,
+        &session.called(RunTool::CheckArtifact),
+    ))
 }
 
 /// Whose scope an answer widened or held: a loop's task, or a node's own.
@@ -201,46 +160,12 @@ pub(crate) fn continuation_notice(
 ) -> String {
     match answer {
         crate::task_cycle::Answer::Scope(scope) => scope_notice(session, scope, asker),
-        crate::task_cycle::Answer::Review(review) => format!(
-            "{} Revise it accordingly and hand it over again the way you did before.",
-            reviewed(review, "you")
-        ),
-        crate::task_cycle::Answer::Deviation(answer) => departure_notice(answer),
+        crate::task_cycle::Answer::Review(review) => words::review_continued_text(review),
+        crate::task_cycle::Answer::Deviation(answer) => words::departure_text(answer),
         crate::task_cycle::Answer::Respecify(respecify) => {
-            format!("{} {WRITE_AGAIN}", respecified(respecify, "you"))
+            words::respecify_continued_text(respecify)
         }
     }
-}
-
-/// What a node that writes the run's spec does with tests a person
-/// accepted are wrong.
-const WRITE_AGAIN: &str = "Write those tasks' tests again, as the departures and the person \
-                           say, and hand the spec over again — every other task's spec as it \
-                           is: one that changes another task's tests, or gives a task the tests \
-                           it had, is refused.";
-
-/// The tests a person accepted are wrong, task by task: what each
-/// session departed from, and what the person said.
-fn respecified(respecify: &crate::task_cycle::Respecify, whose: &str) -> String {
-    let mut text = format!(
-        "A person accepted that tests {whose} wrote are wrong, where a task departed from them:"
-    );
-    for owed in &respecify.owed {
-        for departure in &owed.departures {
-            text.push_str(&format!(
-                "\n  task `{}` departs from {}: the plan says {}; its work instead {}; because {}",
-                owed.task,
-                departure.from,
-                departure.planned.trim(),
-                departure.instead.trim(),
-                departure.why.trim()
-            ));
-        }
-        if let Some(said) = &owed.said {
-            text.push_str(&format!("\n  the person said: {}", said.trim()));
-        }
-    }
-    text
 }
 
 /// What a fresh session of the node that wrote the run's spec is told
@@ -248,52 +173,9 @@ fn respecified(respecify: &crate::task_cycle::Respecify, whose: &str) -> String 
 /// what they said, and where what the node handed over is.
 pub(crate) fn fresh_respecify_notice(
     respecify: &crate::task_cycle::Respecify,
-    handed: &[std::path::PathBuf],
+    handed: &[PathBuf],
 ) -> String {
-    format!(
-        "\n\nThis node already ran in this run. {}{} {WRITE_AGAIN}",
-        respecified(respecify, "this node"),
-        handed_at(handed)
-    )
-}
-
-/// Where what a node handed over is, as a sentence; empty when it handed
-/// over nothing.
-fn handed_at(handed: &[std::path::PathBuf]) -> String {
-    let at: Vec<String> = handed
-        .iter()
-        .map(|path| format!("`{}`", path.display()))
-        .collect();
-    match at.is_empty() {
-        true => String::new(),
-        false => format!("\nWhat it handed over is at {}.", at.join(", ")),
-    }
-}
-
-/// What a session that departed from the plan is told when a person
-/// answered: what they decided, in their words, and what to do now.
-fn departure_notice(answer: &yunta_core::events::DeviationResolvedPayload) -> String {
-    let said = answer
-        .said
-        .as_deref()
-        .map(|said| format!(": {}", said.trim()))
-        .unwrap_or_default();
-    match (answer.accepted, &answer.respecified_by) {
-        (true, Some(_)) => format!(
-            "A person accepted the departure from the plan you declared{said}, and your task's \
-             tests were written again from it. Finish the task on the work as it stands, held \
-             to its tests as they are now."
-        ),
-        (true, None) => format!(
-            "A person accepted the departure from the plan you declared{said}. Finish the \
-             task on the work as it stands."
-        ),
-        (false, _) => format!(
-            "A person sent back the departure from the plan you declared{said}. Do what they \
-             say — or, where they say nothing more, build what the plan declares; declare a \
-             departure again only for what still cannot be built as they ask."
-        ),
-    }
+    words::respecify_fresh_text(respecify, handed)
 }
 
 /// What a fresh session of a node is told when a person's review sent
@@ -302,31 +184,9 @@ fn departure_notice(answer: &yunta_core::events::DeviationResolvedPayload) -> St
 /// reads rather than being given a copy of.
 pub(crate) fn fresh_review_notice(
     review: &crate::task_cycle::Review,
-    handed: &[std::path::PathBuf],
+    handed: &[PathBuf],
 ) -> String {
-    let at: Vec<String> = handed
-        .iter()
-        .map(|path| format!("`{}`", path.display()))
-        .collect();
-    let at = match at.is_empty() {
-        true => String::new(),
-        false => format!(" What it handed over is at {}.", at.join(", ")),
-    };
-    format!(
-        "\n\nThis node already ran in this run. {}{at} Revise it accordingly and hand it \
-         over again.",
-        reviewed(review, "this node")
-    )
-}
-
-/// The review, in the person's words.
-fn reviewed(review: &crate::task_cycle::Review, whose: &str) -> String {
-    format!(
-        "A person reviewed what {whose} handed over at gate `{}` and chose `{}`: {}",
-        review.gate,
-        review.option,
-        review.said.trim()
-    )
+    words::review_fresh_text(review, handed)
 }
 
 /// What a session is told when it is picked back up after the answer to
@@ -335,39 +195,13 @@ fn reviewed(review: &crate::task_cycle::Review, whose: &str) -> String {
 /// may now do. The scope itself is never copied here: the tools read it
 /// from the same log the fence and the close read, so the session and
 /// the engine cannot hold two versions of it.
-fn scope_notice(
-    session: Option<&RunToolsSession>,
-    answer: &yunta_core::events::ScopeAnswer,
-    asker: Asker,
-) -> String {
-    use yunta_core::events::ScopeAnswer;
-    let answered = match answer {
-        ScopeAnswer::Granted(paths) => format!(
-            "The scope you asked for was granted: {}. You may write there now.",
-            yunta_core::listed_globs(paths)
-        ),
-        ScopeAnswer::Denied(Some(denial)) => format!(
-            "The scope you asked for was refused: {denial}. Stay within the scope you have."
-        ),
-        ScopeAnswer::Denied(None) => {
-            "The scope you asked for was refused. Stay within the scope you have.".to_string()
-        }
-    };
+fn scope_notice(session: Option<&RunToolsSession>, answer: &ScopeAnswer, asker: Asker) -> String {
     let read = session.map(|session| match asker {
-        Asker::Task => format!(
-            " `{read}` shows your task's scope and what still keeps it from closing; call \
-             `{check}` before you finish.",
-            read = session.called(RunTool::Task),
-            check = session.called(RunTool::CheckTask),
+        Asker::Task => words::scope_read_task_text(
+            &session.called(RunTool::Task),
+            &session.called(RunTool::CheckTask),
         ),
-        Asker::Node => format!(
-            " `{check}` shows what your close would find outside your scope.",
-            check = session.called(RunTool::CheckScope),
-        ),
+        Asker::Node => words::scope_read_node_text(&session.called(RunTool::CheckScope)),
     });
-    format!(
-        "{answered}{} The work you did is still in your checkout; continue from where you \
-         stopped.",
-        read.unwrap_or_default()
-    )
+    words::scope_answer_text(answer, read.as_deref())
 }

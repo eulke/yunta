@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::escalation::Refusal;
+use super::escalation::{Claim, Refusal};
 use crate::events::session::payloads::TokenUsage;
 use crate::events::tasks::DeviationDeclaredPayload;
 use crate::events::{Evidence, Failure, Remedy, Stuck};
@@ -63,10 +63,10 @@ impl Channel {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateWaitingPayload {
-    /// The claim: what happened, in the words of whoever escalated.
-    /// It ends where the record begins — a summary that quotes what
-    /// `evidence` holds leaves every surface printing it twice.
-    pub(super) summary: String,
+    /// The claim: what happened, as the engine states it or in the words of
+    /// whoever escalated. A written summary ends where the record begins — one
+    /// that quotes what `evidence` holds leaves every surface printing it twice.
+    pub(super) summary: Claim,
     /// The record `summary` is audited against, attached by the engine
     /// straight from the log.
     pub(super) evidence: Evidence,
@@ -100,9 +100,18 @@ pub struct GateWaitingPayload {
 }
 
 impl GateWaitingPayload {
-    /// The claim: what happened, in the words of whoever escalated.
-    pub fn summary(&self) -> &str {
+    /// The claim: what happened, as the engine states it or in the words of
+    /// whoever escalated.
+    pub fn summary(&self) -> &Claim {
         &self.summary
+    }
+
+    /// The same payload with its claim replaced. A copy of a document that
+    /// was already audited, so the claim is not checked against the evidence
+    /// again.
+    pub fn with_claim(mut self, claim: impl Into<Claim>) -> Self {
+        self.summary = claim.into();
+        self
     }
 
     /// The record the claim is audited against.

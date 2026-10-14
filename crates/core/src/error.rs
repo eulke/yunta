@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::ids::AdapterId;
@@ -66,7 +67,10 @@ pub enum AdapterError {
 
 /// Why a session's confinement cannot be built as asked, or an adapter
 /// cannot apply it.
-#[derive(Debug, thiserror::Error)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Unbuildable {
     #[error(
         "this adapter cannot reach the rail: the session was handed no yunta binary to run, \

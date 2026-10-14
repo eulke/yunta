@@ -19,6 +19,12 @@ use yunta_testkit_core::all_kinds;
 #[path = "events/failure.rs"]
 mod failure;
 
+#[path = "events/failure_samples.rs"]
+mod failure_samples;
+
+#[path = "events/claims.rs"]
+mod claims;
+
 #[test]
 fn every_wire_kind_is_sampled() {
     let sampled: BTreeSet<&str> = all_kinds().iter().map(EventPayload::kind_name).collect();

@@ -1,8 +1,8 @@
 //! Verification gates: baseline and coverage compares, findings gates, how a node's end is recorded, the executor, command-permission denials, and events.jsonl.
 
 use yunta_core::events::{
-    BaselineOrigin, CommandOrigin, EngineFact, EventPayload, Failure, NodeEvent, NodeOutcome,
-    PauseReason, RedCheck, RunEvent,
+    BaselineOrigin, CommandOrigin, EngineFact, EventPayload, Failure, FindingSeverity, NodeEvent,
+    NodeOutcome, PauseReason, RedCheck, RunEvent, Timed,
 };
 use yunta_core::{ConfigKey, NodeId};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
@@ -17,16 +17,19 @@ mod typed;
 /// A claude-code fixture that scripts no session, so a run reaches only its gates.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []";
 
-/// The node a pause stopped on, and the sentence its failure was stated
-/// in. Any other pause fails the test that asked for one.
-fn failed_in_a_sentence(reason: PauseReason) -> (NodeId, String) {
+/// The node a pause stopped on, and the failure it stopped on. Any other
+/// pause fails the test that asked for one.
+fn failed(reason: PauseReason) -> (NodeId, Failure) {
     match reason {
-        PauseReason::NodeFailed {
-            node,
-            failure: Failure::Message { outcome },
-        } => (node, outcome),
-        other => panic!("expected a node to fail in one sentence, got {other:?}"),
+        PauseReason::NodeFailed { node, failure } => (node, failure),
+        other => panic!("expected a node to fail, got {other:?}"),
     }
+}
+
+/// The node a pause stopped on, and the sentence its failure is told in.
+fn failed_in_a_sentence(reason: PauseReason) -> (NodeId, String) {
+    let (node, failure) = failed(reason);
+    (node, yunta_render::failure::sentence(&failure))
 }
 
 #[tokio::test]
@@ -478,9 +481,19 @@ nodes:
     let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            let (node, outcome) = failed_in_a_sentence(reason);
+            let (node, failure) = failed(reason);
             assert_eq!(node.as_str(), "gate");
-            assert_eq!(outcome, "1 finding at or above major: f1");
+            assert_eq!(
+                failure,
+                Failure::FindingsOpen {
+                    at_or_above: FindingSeverity::Major,
+                    open_findings: vec!["f1".into()],
+                }
+            );
+            assert_eq!(
+                yunta_render::failure::sentence(&failure),
+                "1 finding at or above major: f1"
+            );
         }
         other => panic!("expected the gate to pause the run, got {other:?}"),
     }
@@ -704,9 +717,21 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            let (node, outcome) = failed_in_a_sentence(reason);
+            let (node, failure) = failed(reason);
             assert_eq!(node.as_str(), "probe");
-            assert_eq!(outcome, "executor `probe` exceeded its 1s timeout");
+            assert_eq!(
+                failure,
+                Failure::TimedOut {
+                    after_ms: 1000,
+                    timed: Timed::Executor {
+                        executor: "probe".into(),
+                    },
+                }
+            );
+            assert_eq!(
+                yunta_render::failure::sentence(&failure),
+                "executor `probe` exceeded its 1s timeout"
+            );
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }

@@ -104,11 +104,6 @@ async fn every_unknown_input_is_named_in_order() {
             declared: vec!["idea".into()]
         }
     );
-    let text = err.to_string();
-    assert!(
-        text.contains("alpha") && text.contains("zeta") && text.contains("idea"),
-        "every unknown name and the declared ones are listed: {text}"
-    );
 }
 
 #[tokio::test]
@@ -396,13 +391,15 @@ async fn a_document_input_that_is_not_its_kind_at_all_is_refused_naming_the_path
         .await
         .unwrap_err();
 
-    let InputsError::DocumentRefused { report, .. } = &error else {
+    let InputsError::DocumentRefused { name, report } = &error else {
         panic!("a document whose shape is wrong is refused as one: {error:?}");
     };
-    let text = error.to_string();
+    assert_eq!(name, "tasks");
+    assert_eq!(report.document.path, "plan.yaml");
+    let text = report.to_string();
     assert!(
-        text.contains("plan.yaml") && text.contains("tasks[0]"),
-        "the structural problem comes with the path of the value it is about: {text}\n{report}"
+        text.contains("tasks[0]"),
+        "the structural problem comes with the path of the value it is about: {text}"
     );
 }
 

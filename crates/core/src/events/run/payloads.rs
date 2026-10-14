@@ -125,7 +125,7 @@ impl HostSuspendedPayload {
     /// A suspension that lasted `slept`.
     pub fn slept(slept: std::time::Duration) -> Self {
         HostSuspendedPayload {
-            slept_ms: u64::try_from(slept.as_millis()).unwrap_or(u64::MAX),
+            slept_ms: crate::units::whole_millis(slept),
         }
     }
 

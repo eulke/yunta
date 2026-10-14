@@ -319,7 +319,7 @@ impl Away {
                 return Ok(Back::Cancelled);
             }
         }
-        let waited_ms = u64::try_from(waited.as_millis()).unwrap_or(u64::MAX);
+        let waited_ms = yunta_core::units::whole_millis(waited);
         said(SessionEvent::ServiceReachable(ServiceReachablePayload {
             waited_ms,
         }))

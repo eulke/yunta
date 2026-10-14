@@ -8,15 +8,21 @@ use yunta_core::events::FindingSeverity;
 use yunta_core::shown::{
     Answered, DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
 };
-use yunta_core::{FindingsFile, SpecFile, TasksFile};
+use yunta_core::{FindingsFile, RunId, SpecFile, TasksFile};
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 
 use crate::plan::{document, Form};
 use crate::surface::{Markdown, Surface, Terminal};
 use crate::Look;
+use yunta_testkit_core::spell;
 
 pub(super) fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/document")
+}
+
+/// The run the goldens name: its handle is the one they print.
+pub(super) fn run() -> RunId {
+    RunId::from_static("7E5PH4")
 }
 
 const PLAN: &str = r#"
@@ -176,7 +182,7 @@ pub(super) fn review() -> PlanReview {
 
 #[test]
 fn a_plan_under_review_matches_its_goldens() {
-    let doc = document(&review(), " of `plan`", "7E5PH4", Form::Review);
+    let doc = document(&review(), " of `plan`", &run(), Form::Review, &*spell());
     for environment in &ENVIRONMENTS {
         assert_golden(
             &environment.golden(&goldens(), "plan-review"),
@@ -187,13 +193,13 @@ fn a_plan_under_review_matches_its_goldens() {
 
 #[test]
 fn a_whole_plan_as_a_file_matches_its_golden() {
-    let doc = document(&review(), " of `plan`", "7E5PH4", Form::Whole);
+    let doc = document(&review(), " of `plan`", &run(), Form::Whole, &*spell());
     assert_golden(&goldens().join("plan.md"), &Markdown.draw(&doc));
 }
 
 #[test]
 fn a_task_card_shows_the_code_of_its_changes_and_of_its_test() {
-    let doc = document(&review(), " of `plan`", "7E5PH4", Form::Review);
+    let doc = document(&review(), " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
     let card =
         &drawn[drawn.find("greet — Greet by name").unwrap()..drawn.find("step 2 of 2").unwrap()];
@@ -215,7 +221,7 @@ fn a_change_shows_its_own_code() {
     let mut review = review();
     let farewell = &mut review.plan.tasks[1];
     farewell.changes[0].code = Some("pub fn bye(&self) -> String;".to_string());
-    let doc = document(&review, " of `plan`", "7E5PH4", Form::Review);
+    let doc = document(&review, " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
     let card = &drawn[drawn.find("farewell — Say goodbye").unwrap()..];
     assert!(
@@ -229,7 +235,7 @@ fn a_shape_a_task_builds_is_in_its_card_whole_when_its_change_brings_its_own_lin
     let mut review = review();
     let greet = &mut review.plan.tasks[0];
     greet.changes[0].code = Some("pub fn hello(&self) -> String;".to_string());
-    let doc = document(&review, " of `plan`", "7E5PH4", Form::Review);
+    let doc = document(&review, " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
     let card = &drawn[drawn.find("greet — Greet by name").unwrap()
         ..drawn.find("farewell — Say goodbye").unwrap()];
@@ -257,7 +263,7 @@ fn a_shape_a_task_builds_is_in_its_card_whole_when_its_change_brings_its_own_lin
 
 #[test]
 fn what_keeps_a_plan_from_being_proven_is_said_before_any_task() {
-    let doc = document(&review(), " of `plan`", "7E5PH4", Form::Review);
+    let doc = document(&review(), " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
     let warned = drawn
         .find("`greet` plans to change `tests/greet.rs`, a test the spec wrote")
@@ -280,8 +286,13 @@ fn a_file_longer_than_a_card_holds_says_where_the_rest_is() {
     if let Some(spec) = review.spec.as_mut() {
         spec.specs[0].files[0].content = long;
     }
-    let drawn =
-        Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", "7E5PH4", Form::Review));
+    let drawn = Terminal::on(Look::plain()).draw(&document(
+        &review,
+        " of `plan`",
+        &run(),
+        Form::Review,
+        &*spell(),
+    ));
     assert!(
         drawn.contains("// line 60") && !drawn.contains("// line 61"),
         "{drawn}"
@@ -290,8 +301,13 @@ fn a_file_longer_than_a_card_holds_says_where_the_rest_is() {
         drawn.contains("20 lines more — yunta status 7E5PH4 --node spec"),
         "{drawn}"
     );
-    let whole =
-        Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", "7E5PH4", Form::Whole));
+    let whole = Terminal::on(Look::plain()).draw(&document(
+        &review,
+        " of `plan`",
+        &run(),
+        Form::Whole,
+        &*spell(),
+    ));
     assert!(whole.contains("// line 80"), "{whole}");
 }
 
@@ -321,7 +337,13 @@ fn a_task_whose_spec_no_test_runs_is_marked_on_the_plan_s_map() {
         ink: crate::ink::Ink::Plain,
         ..look
     })
-    .draw(&document(&review, " of `plan`", "7E5PH4", Form::Review));
+    .draw(&document(
+        &review,
+        " of `plan`",
+        &run(),
+        Form::Review,
+        &*spell(),
+    ));
 
     let row = drawn
         .lines()
@@ -341,7 +363,13 @@ fn read(review: &PlanReview) -> String {
         ink: crate::ink::Ink::Plain,
         ..Look::of(&ENVIRONMENTS[0])
     };
-    Terminal::on(look).draw(&document(review, " of `plan`", "7E5PH4", Form::Review))
+    Terminal::on(look).draw(&document(
+        review,
+        " of `plan`",
+        &run(),
+        Form::Review,
+        &*spell(),
+    ))
 }
 
 #[test]
@@ -417,8 +445,9 @@ fn a_card_shows_each_test_whole_and_folds_what_only_sets_it_up() {
     let mut review = review();
     let spec = review.spec.as_mut().unwrap();
     spec.specs[0].files[0].content = "fn run(args: &[&str]) -> String {\n    let out = greet(args);\n    out.trim().to_string()\n}\n\n#[test]\nfn the_greeting_names_the_person() {\n    assert_eq!(run(&[\"ana\"]), \"hello, ana\");\n}\n".to_string();
-    let draw =
-        |form| Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", "7E5PH4", form));
+    let draw = |form| {
+        Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", &run(), form, &*spell()))
+    };
 
     let reviewed = draw(Form::Review);
     assert!(
@@ -435,8 +464,13 @@ fn a_card_shows_each_test_whole_and_folds_what_only_sets_it_up() {
 fn a_card_names_only_the_shapes_its_task_builds_on() {
     let mut review = review();
     review.plan.tasks[0].uses = vec!["Greeter".to_string()];
-    let drawn =
-        Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", "7E5PH4", Form::Review));
+    let drawn = Terminal::on(Look::plain()).draw(&document(
+        &review,
+        " of `plan`",
+        &run(),
+        Form::Review,
+        &*spell(),
+    ));
 
     let greet = drawn.find("greet — Greet by name").expect(&drawn);
     let farewell = drawn.find("farewell — Say goodbye").expect(&drawn);

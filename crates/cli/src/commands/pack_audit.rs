@@ -16,14 +16,15 @@ use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
 
 use super::test::{discover_case_paths, run_case};
 use crate::error::{CliError, Outcome};
+use crate::output::{blank, document, say};
 use crate::pack::{packs_root, read_manifest, vendor_dir};
 use crate::render::blocks::{Code, Fields, Marked, Section};
 use crate::render::doc::{Block, Doc};
 use crate::render::ink::{Line, Tone};
-use crate::render::Mark;
+use crate::render::{Look, Mark};
 use yunta_core::PackRef;
 
-pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
+pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let ctx = crate::context::Context::load()?;
     let cwd = ctx.cwd.clone();
     let pack_dir = vendor_dir(&cwd, pack);
@@ -36,17 +37,16 @@ pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
     let manifest = read_manifest(&pack_dir)?;
 
     let report = audit_pack(&pack_dir, manifest);
-    print_report(&report);
+    print_report(&report, look);
     let tests = run_pack_tests(&pack_dir, &ctx).await;
-    print_test_summary(&tests);
+    print_test_summary(&tests, look);
     Ok(Outcome::Success)
 }
 
 /// Prints the full inventory — called both by `audit` (on demand) and by
 /// `pack add` (automatically, before vendoring).
-pub fn print_report(report: &PackAudit) {
-    let look = crate::render::stdout_look();
-    print!("{}", crate::render::draw(inventory(report), &look));
+pub fn print_report(report: &PackAudit, look: &Look) {
+    document(look, inventory(report));
 }
 
 /// The inventory as a document: what the pack is and declares, then each
@@ -252,28 +252,35 @@ pub async fn run_pack_tests(pack_dir: &Path, ctx: &crate::context::Context) -> P
     }
 }
 
-pub fn print_test_summary(summary: &PackTestSummary) {
+pub fn print_test_summary(summary: &PackTestSummary, look: &Look) {
+    blank();
     if !summary.has_tests {
-        println!("\ntests: none shipped");
+        say(look, "tests: none shipped");
     } else if !summary.ran {
-        println!(
-            "\ntests: {} shipped, not run (pass --run-tests)",
-            yunta_core::text::counted(summary.total, "case")
+        say(
+            look,
+            format!(
+                "tests: {} shipped, not run (pass --run-tests)",
+                yunta_core::text::counted(summary.total, "case")
+            ),
         );
     } else {
         // The heading counts cases and the lines under it count
         // problems — one failing case contributes as many as it has —
         // so each count stays with what it counts, and the block is
         // indented rather than given a second, different total.
-        println!(
-            "\ntests: {}, {} failed",
-            yunta_core::text::counted(summary.total, "case"),
-            summary.failed
+        say(
+            look,
+            format!(
+                "tests: {}, {} failed",
+                yunta_core::text::counted(summary.total, "case"),
+                summary.failed
+            ),
         );
         if !summary.failures.is_empty() {
-            println!(
-                "{}",
-                yunta_core::text::indent(&summary.failures.join("\n"), "  ")
+            say(
+                look,
+                yunta_core::text::indent(&summary.failures.join("\n"), "  "),
             );
         }
     }

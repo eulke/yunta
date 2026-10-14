@@ -5,10 +5,11 @@
 //! remembering a decision that was never really made.
 
 use yunta_core::events::{
-    Approval, EngineFact, Escalation, EventPayload, Fact, GateEvent, GateResolvedPayload,
-    NodeOutcome, PauseReason, Shown, TokenUsage, Withheld,
+    Approval, Claim, EngineFact, Escalation, EventPayload, Fact, Failure, GateEvent,
+    GateResolvedPayload, NodeOutcome, PauseReason, Shown, TokenUsage, Withheld,
 };
 use yunta_core::reserved::ReservedOption;
+use yunta_core::shown::withheld_because;
 use yunta_core::{ExternalGate, Node, NodeKind, NonEmpty};
 
 use super::gate_exec::{emit_started, GateStep};
@@ -25,7 +26,7 @@ use crate::reserved::offers;
 pub(super) async fn degrade_to_console(
     ctx: &RunCtx<'_>,
     node: &Node,
-    summary: String,
+    summary: Claim,
 ) -> Result<GateStep, RunError> {
     let escalation = asked(ctx, node, summary).await?;
     let Some(choice) = ctx.ask_human(Some(&node.id), None, &escalation).await? else {
@@ -59,14 +60,18 @@ pub(super) async fn degrade_to_console(
         )
         .await?;
     } else {
-        fail(ctx, node, "rejected from the console".to_string()).await?;
+        let failure = Failure::Rejected {
+            rejected_by: choice.by.clone(),
+            on: Approval::Console,
+        };
+        fail(ctx, node, failure).await?;
     }
     Ok(GateStep::Resolved)
 }
 
 /// What the console asks: approve or reject, with approve withheld when
 /// a plan among what the gate would publish cannot be proven.
-async fn asked(ctx: &RunCtx<'_>, node: &Node, summary: String) -> Result<Escalation, RunError> {
+async fn asked(ctx: &RunCtx<'_>, node: &Node, summary: Claim) -> Result<Escalation, RunError> {
     let because = match &node.kind {
         NodeKind::Gate {
             external: Some(external),
@@ -116,7 +121,5 @@ async fn unprovable_held(
         .collect();
     let documents = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
     let flaws = super::flawed::unprovable(&documents);
-    Ok(super::flawed::withheld_because(
-        flaws.iter().map(|(_, flaw)| flaw),
-    ))
+    Ok(withheld_because(flaws.iter().map(|(_, flaw)| flaw)))
 }

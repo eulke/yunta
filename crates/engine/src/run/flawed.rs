@@ -4,7 +4,7 @@
 //! forge is never published, and sends the plan back the way a request
 //! for changes does.
 
-use yunta_core::events::{FindingSeverity, Shown};
+use yunta_core::events::{Failure, FindingSeverity, Shown};
 use yunta_core::shown::{Flaw, ShownContent, ShownDocument};
 use yunta_core::{Location, Node, RelativePath};
 
@@ -26,17 +26,6 @@ pub(super) fn unprovable(documents: &[ShownDocument]) -> Vec<(&Shown, Flaw)> {
             _ => Vec::new(),
         })
         .collect()
-}
-
-/// Why a gate does not go on with what `flaws` were found in; `None`
-/// when nothing was.
-pub(super) fn withheld_because<'a>(flaws: impl IntoIterator<Item = &'a Flaw>) -> Option<String> {
-    let mut flaws = flaws.into_iter();
-    let first = flaws.next()?;
-    Some(match flaws.count() {
-        0 => format!("the plan cannot be proven as it is written: {first}"),
-        more => format!("the plan cannot be proven as it is written: {first} (and {more} more)"),
-    })
 }
 
 /// Sends a plan back from an external gate instead of publishing it: one
@@ -70,12 +59,7 @@ pub(super) async fn send_back(
         )
         .await?;
     }
-    let because = withheld_because(flaws.iter().map(|(_, flaw)| flaw)).unwrap_or_default();
-    fail(
-        ctx,
-        node,
-        format!("not published, and sent back: {because}"),
-    )
-    .await?;
+    let sent_back: Vec<Flaw> = flaws.iter().map(|(_, flaw)| flaw.clone()).collect();
+    fail(ctx, node, Failure::SentBack { sent_back }).await?;
     Ok(GateStep::Resolved)
 }

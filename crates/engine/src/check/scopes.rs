@@ -130,7 +130,7 @@ pub(crate) fn check_fanout_scopes(
 pub(crate) fn collect_fanout_warnings(
     workflow: &Workflow,
     config: &ConfigLayer,
-    warnings: &mut Vec<CheckWarning>,
+    warnings: &mut Vec<Caution>,
 ) {
     if config.resolved_max_parallel_nodes() <= 1 {
         return;
@@ -154,13 +154,7 @@ pub(crate) fn collect_fanout_warnings(
         }
     }
     for component in connected_components(nodes, &adjacency) {
-        warnings.push(CheckWarning::UndeclaredFanOutScope {
-            nodes: component
-                .iter()
-                .map(|id| format!("`{id}`"))
-                .collect::<Vec<_>>()
-                .join(", "),
-        });
+        warnings.push(Caution::UndeclaredFanOutScope { nodes: component });
     }
 }
 
@@ -253,7 +247,7 @@ pub(crate) fn check_commands(
     }
 }
 
-pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<CheckWarning>) {
+pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<Caution>) {
     for node in nodes {
         if let NodeKind::Parallel {
             nodes: children, ..
@@ -269,7 +263,7 @@ pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<Check
                 let group = evaluate_group_scope(children);
                 let all_writers_declared = writers.iter().all(|child| child.scope.is_declared());
                 if group.overlaps.is_empty() && !all_writers_declared {
-                    warnings.push(CheckWarning::UndeclaredParallelScope {
+                    warnings.push(Caution::UndeclaredParallelScope {
                         group: node.id.clone(),
                     });
                 }

@@ -13,8 +13,12 @@
 //! it. What weighs on the decision is said last, beside its menu.
 
 use yunta_core::events::{ArtifactId, Withheld};
+use yunta_core::expansion::Denial;
+use yunta_core::protected::Protection;
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
+use yunta_core::step::NextStep;
 use yunta_core::text::{agreeing, counted};
+use yunta_core::RunId;
 
 use crate::blocks::{Marked, Section};
 use crate::doc::{Block, Doc};
@@ -22,8 +26,14 @@ use crate::ink::{Line, Tone};
 pub use crate::plan::{Form, CODE_SHOWN};
 use crate::Mark;
 
-/// What `document` says, for the run whose handle is `run`, in `form`.
-pub fn document(document: &ShownDocument, run: &str, form: Form) -> Doc<'static> {
+/// What `document` says, for the run `run`, in `form`. Each command it names
+/// is written by `spell`.
+pub fn document(
+    document: &ShownDocument,
+    run: &RunId,
+    form: Form,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Doc<'static> {
     let of = document
         .shown
         .producer
@@ -31,8 +41,8 @@ pub fn document(document: &ShownDocument, run: &str, form: Form) -> Doc<'static>
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
     match &document.content {
-        ShownContent::Tasks(review) => crate::plan::document(review, &of, run, form),
-        ShownContent::Spec(file) => crate::spec::document(file, &of, run, form),
+        ShownContent::Tasks(review) => crate::plan::document(review, &of, run, form, spell),
+        ShownContent::Spec(file) => crate::spec::document(file, &of, run, form, spell),
         ShownContent::Findings(file) => crate::findings::document(file, &of),
         ShownContent::RunFindings(view) => crate::findings::run_document(view),
         ShownContent::Text(text) => {
@@ -128,7 +138,7 @@ fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block<'static>>
         return Vec::new();
     }
     let heading = match withheld {
-        [] => "the plan cannot be proven as it is written".to_string(),
+        [] => yunta_core::shown::UNPROVABLE_PLAN.to_string(),
         _ => {
             let options: Vec<String> = withheld
                 .iter()
@@ -228,6 +238,52 @@ fn unguarded(review: &PlanReview) -> Option<String> {
             counted(unguarded, "promise")
         )
     })
+}
+
+/// What a refused scope request says to the person it was put to: why it was
+/// refused, naming each path it reached and why that path is protected.
+pub fn denial(denial: &Denial) -> String {
+    match denial {
+        Denial::ReachesProtected { reached } => format!(
+            "it reaches what the task may never write: {}",
+            reached
+                .iter()
+                .map(|reach| format!("{} ({})", reach.path, protected_as(reach.reason)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Denial::ModeDeny => "scope_expansion mode is deny (the default)".to_string(),
+        Denial::NoCriterion => "rules mode requires a proposed_criterion".to_string(),
+        Denial::PrecheckPasses => {
+            "proposed criterion already passes — nothing to expand for".to_string()
+        }
+        Denial::CriterionCouldNotRun => {
+            "proposed criterion could not run, so nothing judges the request".to_string()
+        }
+        Denial::TooManyFiles { touched, bound } => format!(
+            "diff at the requested paths touches {}, over the {bound}-file bound",
+            counted(*touched, "file")
+        ),
+        Denial::NothingLeft => {
+            "no requested path is left to widen once the protected ones are out".to_string()
+        }
+        Denial::NotWidenable => "no person may widen this node's scope on this run".to_string(),
+        Denial::Chosen { note, .. } => note
+            .clone()
+            .unwrap_or_else(|| "denied by a human at the gate".to_string()),
+        Denial::Legacy { text: said } => said.clone(),
+    }
+}
+
+/// The words a path a refused request reached is protected by.
+fn protected_as(reason: Protection) -> &'static str {
+    match reason {
+        Protection::ProjectDeny => "the project denies it to every run: permissions.paths.deny",
+        Protection::AgentConfig => "an agent CLI's own configuration",
+        Protection::AgentInstructions => "an instruction file, which only a person grants",
+        Protection::ApprovedTest => "a test the task is held to",
+        Protection::GitRegister => "the run's git register",
+    }
 }
 
 /// The first sentence of `text`, for a list that names each thing once.

@@ -12,7 +12,6 @@ use crate::events::Decider;
 use crate::glob::{reaches_any, scope_globset, ScopeGlob};
 use crate::policy::ScopeExpansionMode;
 use crate::protected::{Protected, Protection};
-use crate::text::counted;
 
 /// The exit a criterion's record keeps for a command that stopped before it
 /// answered: the code the run's criteria record for that outcome.
@@ -118,8 +117,8 @@ pub enum Waiting {
     Person,
 }
 
-/// Why a request was denied, typed. The event log keeps this value, and its
-/// sentence is written from it by the `Display` impl.
+/// Why a request was denied, typed. The event log keeps this value; the
+/// words a reader sees are written from it where that reader is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Denial {
@@ -320,17 +319,6 @@ fn reaching(paths: &[ScopeGlob], protected: &Protected) -> Vec<Reach> {
         .collect()
 }
 
-/// What protects a path, as a refusal names it.
-fn protected_as(reason: Protection) -> &'static str {
-    match reason {
-        Protection::ProjectDeny => "the project denies it to every run: permissions.paths.deny",
-        Protection::AgentConfig => "an agent CLI's own configuration",
-        Protection::AgentInstructions => "an instruction file, which only a person grants",
-        Protection::ApprovedTest => "a test the task is held to",
-        Protection::GitRegister => "the run's git register",
-    }
-}
-
 /// Whether a reach holds a path that no person may grant.
 fn refuses_whole(reached: &[Reach]) -> bool {
     reached.iter().any(|reach| !reach.reason.person_may_grant())
@@ -347,44 +335,21 @@ impl Denial {
 }
 
 impl fmt::Display for Denial {
-    /// The sentence a finding and a refused session read: a reached path is
-    /// named with the reason it is protected. A `Legacy` denial reads back as
-    /// the text it was written with.
+    /// The code a denial is known by: its variant, spelled as the log
+    /// spells it. The words of each reader are written where that reader is.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Denial::ReachesProtected { reached } => write!(
-                f,
-                "it reaches what the task may never write: {}",
-                reached
-                    .iter()
-                    .map(|reach| format!("{} ({})", reach.path, protected_as(reach.reason)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Denial::ModeDeny => f.write_str("scope_expansion mode is deny (the default)"),
-            Denial::NoCriterion => f.write_str("rules mode requires a proposed_criterion"),
-            Denial::PrecheckPasses => {
-                f.write_str("proposed criterion already passes — nothing to expand for")
-            }
-            Denial::CriterionCouldNotRun => {
-                f.write_str("proposed criterion could not run, so nothing judges the request")
-            }
-            Denial::TooManyFiles { touched, bound } => write!(
-                f,
-                "diff at the requested paths touches {}, over the {bound}-file bound",
-                counted(*touched, "file")
-            ),
-            Denial::NothingLeft => {
-                f.write_str("no requested path is left to widen once the protected ones are out")
-            }
-            Denial::NotWidenable => {
-                f.write_str("no person may widen this node's scope on this run")
-            }
-            Denial::Chosen { note, .. } => {
-                f.write_str(note.as_deref().unwrap_or("denied by a human at the gate"))
-            }
-            Denial::Legacy { text } => f.write_str(text),
-        }
+        f.write_str(match self {
+            Denial::ReachesProtected { .. } => "reaches_protected",
+            Denial::ModeDeny => "mode_deny",
+            Denial::NoCriterion => "no_criterion",
+            Denial::PrecheckPasses => "precheck_passes",
+            Denial::CriterionCouldNotRun => "criterion_could_not_run",
+            Denial::TooManyFiles { .. } => "too_many_files",
+            Denial::NothingLeft => "nothing_left",
+            Denial::NotWidenable => "not_widenable",
+            Denial::Chosen { .. } => "chosen",
+            Denial::Legacy { .. } => "legacy",
+        })
     }
 }
 

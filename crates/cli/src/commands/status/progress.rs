@@ -27,10 +27,10 @@ use crate::commands::advice;
 /// run's wall-clock and every node's liveness against it, and nothing
 /// under here reads a clock of its own.
 ///
-/// The frame carries no prior estimation. Neither surface compares a run
-/// against its workflow's history, and reading that history costs a pass
-/// over every other run of the same workflow — once per row, for a
-/// listing.
+/// The frame carries no prior estimation: reading the history costs a pass
+/// over every other run of the same workflow, and a listing would pay it
+/// once per row. `yunta status` sets one for a run parked on its budget,
+/// the only pause whose caution compares the cap with that history.
 ///
 /// Framing a run costs what [`yunta_engine::run_frame`] says it costs.
 /// `yunta status` pays that once, for the run it opens; `yunta list

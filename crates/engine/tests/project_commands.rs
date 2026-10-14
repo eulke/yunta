@@ -143,7 +143,10 @@ async fn permissions_commands_govern_a_project_command() {
             reason:
                 PauseReason::NodeFailed {
                     node,
-                    failure: Failure::Message { outcome },
+                    failure:
+                        Failure::CommandDenied {
+                            denied_rule: outcome,
+                        },
                 },
         } => {
             assert_eq!(node.as_str(), "clean");

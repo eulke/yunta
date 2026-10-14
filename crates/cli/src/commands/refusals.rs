@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use yunta_core::caution::Caution;
 use yunta_core::{ConfigLayer, Workflow};
 
 /// What the machine a run would use has to provide for `workflow`: what
@@ -15,10 +16,7 @@ pub(crate) fn environment(
     workflow: &Workflow,
     config: &ConfigLayer,
     origin: &yunta_engine::WorkflowOrigin,
-) -> (
-    Vec<yunta_engine::CheckError>,
-    Vec<yunta_engine::CheckWarning>,
-) {
+) -> (Vec<yunta_engine::CheckError>, Vec<Caution>) {
     let unprovided = match origin {
         yunta_engine::WorkflowOrigin::Pack {
             publisher,
@@ -36,7 +34,7 @@ pub(crate) fn environment(
     let missing_programs = yunta_engine::programs_named(workflow, config)
         .into_iter()
         .filter(|(_, program)| !command_on_path(program))
-        .map(|(node, program)| yunta_engine::CheckWarning::ProgramNotOnPath { node, program })
+        .map(|(node, program)| Caution::ProgramNotOnPath { node, program })
         .collect();
     (unprovided, missing_programs)
 }

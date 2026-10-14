@@ -43,20 +43,27 @@ fn a_refusal_names_each_path_with_the_reason_it_is_protected() {
             reason: Protection::AgentConfig,
         },
     ];
-    assert_eq!(
-        Denial::ReachesProtected { reached }.to_string(),
-        "it reaches what the task may never write: .github/ci.yml (the project denies it \
-         to every run: permissions.paths.deny), .claude/settings.json (an agent CLI's own \
-         configuration)"
+    let refused = Denial::ReachesProtected {
+        reached: reached.clone(),
+    };
+    assert!(
+        matches!(&refused, Denial::ReachesProtected { reached: named } if *named == reached),
+        "{refused:?}"
     );
     let unnoted = Denial::Chosen {
         option: "deny".to_string(),
         note: None,
     };
-    assert_eq!(unnoted.to_string(), "denied by a human at the gate");
+    assert!(
+        matches!(&unnoted, Denial::Chosen { option, note: None } if option == "deny"),
+        "{unnoted:?}"
+    );
     let noted = Denial::Chosen {
         option: "deny".to_string(),
         note: Some("not this sprint".to_string()),
     };
-    assert_eq!(noted.to_string(), "not this sprint");
+    assert!(
+        matches!(&noted, Denial::Chosen { note: Some(note), .. } if note == "not this sprint"),
+        "{noted:?}"
+    );
 }

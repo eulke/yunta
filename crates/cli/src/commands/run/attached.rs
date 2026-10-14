@@ -13,6 +13,8 @@ use crate::commands::drive::{drive, Driving};
 use crate::commands::registry::{adapters_for, ScriptedPaths};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::output::Mode;
+use crate::render::Look;
 
 /// What driving a run here needs: the same workflow reference, inputs and
 /// overrides every run resolves, plus the fixture that scripts its
@@ -27,10 +29,11 @@ pub(super) struct Attaching<'a> {
     /// no real adapter is constructed or probed.
     pub(super) mock_fixture: Option<&'a Path>,
     pub(super) mode: Option<&'a ModeName>,
-    /// `--quiet`: the run id and nothing else on stdout.
-    pub(super) quiet: bool,
-    /// `--json`: one versioned document on stdout and nothing else.
-    pub(super) json: bool,
+    /// How this invocation reports: a live view for `Human`, the run id and
+    /// nothing else for `Quiet`, one versioned document for `Json`.
+    pub(super) output: Mode,
+    /// The stdout look `main` built, which the closing block is drawn with.
+    pub(super) look: &'a Look,
 }
 
 /// Resolves the workflow, freezes its manifest, creates the run and
@@ -44,8 +47,8 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         adapter,
         mock_fixture,
         mode,
-        quiet,
-        json,
+        output,
+        look,
     } = attaching;
 
     let frozen = runnable(
@@ -57,15 +60,13 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         &ctx.env,
     )
     .await?;
-    let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await?;
+    let preflight = preflight(ctx, &frozen.manifest, mode, output, look).await?;
 
     let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
     // The documents the run was born with are on its log now; what the
     // rest of the run needs is the manifest.
     let manifest = frozen.manifest;
-    if !json {
-        super::super::started(&prepared.run_id, "created", quiet);
-    }
+    super::super::started(&prepared.run_id, "created", output, look);
 
     let adapters = adapters_for(
         &manifest,
@@ -82,8 +83,8 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         adapters,
         prior: preflight.prior,
         warnings: preflight.warnings,
-        quiet,
-        json,
+        output,
+        look,
     })
     .await
 }

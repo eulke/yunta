@@ -14,24 +14,28 @@
 //! A run that composed others closes with them under it as a tree, each
 //! child under the node that bore it and never averaged into a figure of
 //! its own.
+//!
+//! The page is drawn by [`RunPage`]. This module gathers what the page
+//! reads from a stopped run, and holds the sections only a closing shows.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use yunta_core::events::{GateWaitingPayload, NodeState};
+use chrono::{DateTime, Utc};
+use yunta_core::events::GateWaitingPayload;
+use yunta_core::text::counted;
 use yunta_core::{Isolation, NodeId, RunId, Workflow};
 use yunta_engine::{
-    run_frame_of, NodeFrame, NodeStanding, PriorEstimation, RunFrame, RunPhase, RunState,
+    run_frame_of, NodeFrame, PriorEstimation, RunFrame, RunPhase, RunState, ShownDocument,
 };
-use yunta_render::spend::Breakdown;
 
 use crate::commands::status::decision;
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
-use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
+use crate::render::blocks::{Drawn, FailureDetail, Fields, Next, Whole};
 use crate::render::ink::{Line, Tone};
 use crate::render::{duration, indent, paths, wrap, Glyphs, Look, INDENT};
-use yunta_core::text::counted;
+use crate::run_page::{caution_row, failed, Decided, RunPage, Scope};
 
 use super::view;
 
@@ -41,6 +45,7 @@ const SLOWEST: usize = 3;
 
 /// Where the run lived and what it took — what the closing block reports
 /// that the run's own log does not carry.
+#[derive(Clone, Copy)]
 pub(crate) struct Outline<'a> {
     pub(crate) run_dir: &'a Path,
     pub(crate) worktree: &'a Path,
@@ -60,28 +65,32 @@ pub(crate) struct ClosingEnv<'a> {
     /// The run as its log derives it, once the run has stopped.
     pub(crate) state: &'a RunState,
     pub(crate) prior: Option<&'a PriorEstimation>,
-    pub(crate) now: chrono::DateTime<chrono::Utc>,
+    pub(crate) now: DateTime<Utc>,
     /// The decision a parked run stopped on, rebuilt from the manifest and
     /// the log. `None` for a pause with no menu to rebuild, and for a run
     /// that is not parked at all.
     pub(crate) decision: Option<(NodeId, GateWaitingPayload)>,
     /// The documents that decision shows, as the run holds them.
-    pub(crate) shown: Vec<yunta_engine::ShownDocument>,
+    pub(crate) shown: Vec<ShownDocument>,
     pub(crate) outline: Outline<'a>,
 }
 
-/// A stopped run as a person reads it.
+/// A stopped run as a person reads it. It owns what its page is drawn from,
+/// so a page can borrow it for as long as a document needs.
 pub(crate) struct Closing {
     run_id: RunId,
+    state: RunState,
     frame: RunFrame,
     decision: Option<(NodeId, GateWaitingPayload)>,
-    shown: Vec<yunta_engine::ShownDocument>,
+    shown: Vec<ShownDocument>,
     run_dir: PathBuf,
     worktree: PathBuf,
     base_branch: String,
     isolation: Isolation,
     cwd: PathBuf,
     home: Option<PathBuf>,
+    /// The process that drove the run is this one, which asks no one.
+    engine: crate::render::Engine,
 }
 
 impl Closing {
@@ -90,21 +99,28 @@ impl Closing {
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
         let frame = run_frame_of(env.run_id, env.workflow, env.state, env.prior, env.now);
-        Self::framed(env.run_id, frame, (env.decision, env.shown), &env.outline)
+        Self::framed(
+            env.run_id,
+            frame,
+            env.state.clone(),
+            env.now,
+            (env.decision, env.shown),
+            &env.outline,
+        )
     }
 
     /// The block for `frame`, as the run's log derived it.
     fn framed(
         run_id: &RunId,
         frame: RunFrame,
-        (decision, shown): (
-            Option<(NodeId, GateWaitingPayload)>,
-            Vec<yunta_engine::ShownDocument>,
-        ),
+        state: RunState,
+        now: DateTime<Utc>,
+        (decision, shown): (Option<(NodeId, GateWaitingPayload)>, Vec<ShownDocument>),
         outline: &Outline<'_>,
     ) -> Self {
         Self {
             run_id: run_id.clone(),
+            state,
             frame,
             decision,
             shown,
@@ -114,6 +130,7 @@ impl Closing {
             isolation: outline.isolation,
             cwd: outline.cwd.to_path_buf(),
             home: outline.home.map(Path::to_path_buf),
+            engine: crate::render::Engine::this(now),
         }
     }
 
@@ -124,122 +141,81 @@ impl Closing {
         crate::render::exit(crate::render::run_word(&self.frame))
     }
 
-    /// The whole block, ready to print on a stream with `look`.
-    pub(crate) fn render(&self, look: &Look) -> String {
-        let paint = |lines: Vec<Line>| -> String {
-            lines
-                .iter()
-                .map(|line| format!("{}\n", look.ink.paint(line)))
-                .collect()
+    /// The page this block is drawn from. The decision it waits on is laid
+    /// out for `look`, the look the page is drawn with.
+    pub(crate) fn page(&self, look: &Look) -> RunPage<'_> {
+        RunPage {
+            scope: Scope::Closing,
+            run_id: &self.run_id,
+            engine: self.engine.clone(),
+            frame: &self.frame,
+            state: &self.state,
+            paths: Outline {
+                run_dir: &self.run_dir,
+                worktree: &self.worktree,
+                base_branch: &self.base_branch,
+                isolation: self.isolation,
+                cwd: &self.cwd,
+                home: self.home.as_deref(),
+            },
+            decision: self.decided(look),
+        }
+    }
+
+    /// The decision a parked run stopped on: every option with the command
+    /// that chooses it, the claim and the record the page does not already
+    /// say, and where the run holds its state.
+    fn decided(&self, look: &Look) -> Option<Decided> {
+        let (node, escalation) = self.decision.as_ref()?;
+        let said_why = match &self.frame.phase {
+            RunPhase::Waiting { on } => advice::parked_says_why(on),
+            _ => false,
         };
-        let mut out = paint(self.head(look));
-        let mut facts = self.fields(look.glyphs).lines(look);
-        facts.extend(self.children(look));
-        for part in [
-            paint(self.evidence(look)),
-            paint(self.decision(look)),
-            paint(facts),
-            paint(self.next().lines(look)),
-        ] {
-            if !part.is_empty() {
-                out.push('\n');
-                out.push_str(&part);
-            }
-        }
-        out
-    }
-
-    /// The outcome as a word, and under it what holds the run — the
-    /// verdict a reader came for, before anything else.
-    fn head(&self, look: &Look) -> Vec<Line> {
-        let word = crate::render::run_word(&self.frame);
-        let mut lines = Headline {
-            subject: format!("run {}", self.run_id.handle()),
-            mark: word.mark(),
-            said: word.to_string(),
-        }
-        .lines(look);
-        if let Some((tone, said)) = self.holds() {
-            let room = look.width.cells().saturating_sub(INDENT.len());
-            lines.extend(
-                wrap(&said, room)
-                    .into_iter()
-                    .map(|part| Line::new().plain(INDENT).push(tone, part)),
-            );
-        }
-        lines
-    }
-
-    /// What holds the run where it stopped, when its word leaves that
-    /// unsaid.
-    fn holds(&self) -> Option<(Tone, String)> {
-        let blocking = self.frame.blocking_findings;
-        Some(match &self.frame.phase {
-            // A limit's reset moves the run on its own, so the wait is not a
-            // stop a person is asked to answer.
-            RunPhase::Waiting { on } if advice::reset_pause(&self.frame.phase).is_some() => {
-                (Tone::Muted, advice::parked_in_full(on))
-            }
-            RunPhase::Waiting { on } => (Tone::NeedsYou, advice::parked_in_full(on)),
-            RunPhase::Failed {
-                failure: Some(failure),
-            } => (Tone::Failed, self.failed_claim(failure)),
-            RunPhase::Broken { diagnostic } => {
-                (Tone::Failed, yunta_core::text::one_line(diagnostic))
-            }
-            // The work is done and nobody has accepted it.
-            RunPhase::Finished if blocking > 0 => (
-                Tone::Caution,
-                format!("finished holding {}", counted(blocking, "blocking finding")),
-            ),
-            RunPhase::Promoted { to: Some(mode) } => (Tone::Muted, format!("promoted to `{mode}`")),
-            // A run this block is drawn over that has not stopped is
-            // reported as what it is doing, not as a stop it has not
-            // reached.
-            RunPhase::Created | RunPhase::Running => (Tone::Muted, "still moving".to_string()),
-            RunPhase::Finished
-            | RunPhase::Failed { failure: None }
-            | RunPhase::Cancelled
-            | RunPhase::Promoted { to: None } => return None,
+        let beside = decision::Beside {
+            claim: true,
+            evidence: said_why
+                || failed(&self.frame).any(|(failed_node, _)| failed_node.id == *node),
+        };
+        let mut lines =
+            decision::lines((&self.run_id, node), escalation, &self.shown, beside, look);
+        // A person who has just watched their terminal stop is the one
+        // who needs telling that nothing holds the answer open.
+        let room = look.width.cells().saturating_sub(INDENT.len());
+        lines.extend(
+            wrap(
+                "the run holds its own state on disk — close this terminal whenever you \
+                 like and answer from anywhere.",
+                room,
+            )
+            .into_iter()
+            .map(|part| Line::new().plain(INDENT).push(Tone::Muted, part)),
+        );
+        Some(Decided {
+            lines,
+            escalation: Some(escalation.clone()),
         })
     }
+}
 
-    /// The failure that closed the run, said as the node it happened to.
-    fn failed_claim(&self, failure: &yunta_core::events::Failure) -> String {
-        let failed = self.failed().find(|(_, failed)| *failed == failure);
-        let headline = yunta_render::failure::headline(failure);
-        match failed {
-            Some((node, _)) => format!("node `{}` failed: {headline}", node.id),
-            None => headline,
-        }
-    }
-
-    /// Every node that stands failed, with its failure.
-    fn failed(&self) -> impl Iterator<Item = (&NodeFrame, &yunta_core::events::Failure)> {
-        self.frame
-            .nodes
-            .iter()
-            .filter_map(|node| match &node.state {
-                NodeStanding::Reached(NodeState::Failed { failure, .. }) => Some((node, failure)),
-                _ => None,
-            })
-    }
-
-    /// What every failed node's failure says beyond its claim: the end
-    /// of what a command printed and where the rest is kept, each
+impl RunPage<'_> {
+    /// Every failed node with what its failure says beyond its claim: the
+    /// end of what a command printed and where the rest is kept, each
     /// document it refused, the paths it should not have touched.
     ///
     /// A node whose failure has nothing more to quote, and whose claim the
     /// line under the outcome already made, is not listed again.
-    fn evidence(&self, look: &Look) -> Vec<Line> {
-        let held = self.holds().map(|(_, said)| said).unwrap_or_default();
+    pub(crate) fn closing_evidence(&self, look: &Look) -> Vec<Line> {
+        let held = self
+            .closing_said()
+            .map(|(_, said)| said)
+            .unwrap_or_default();
         let mut lines = Vec::new();
-        for (node, failure) in self.failed() {
+        for (node, failure) in failed(self.frame) {
             let whole = failure.output().map(|output| {
                 Whole::file(
-                    yunta_engine::ObjectStore::at(&self.run_dir).path_of(output),
-                    &self.cwd,
-                    self.home.as_deref(),
+                    yunta_engine::ObjectStore::at(self.paths.run_dir).path_of(output),
+                    self.paths.cwd,
+                    self.paths.home,
                 )
             });
             let detail = FailureDetail { failure, whole }.lines(look);
@@ -258,36 +234,48 @@ impl Closing {
         lines
     }
 
-    /// The decision a parked run waits on, every option with the command
-    /// that chooses it. The second line made its claim, and a failed
-    /// node's evidence is quoted above it.
-    fn decision(&self, look: &Look) -> Vec<Line> {
-        let Some((node, escalation)) = &self.decision else {
-            return Vec::new();
-        };
-        let said_why = match &self.frame.phase {
-            RunPhase::Waiting { on } => advice::parked_says_why(on),
-            _ => false,
-        };
-        let beside = decision::Beside {
-            claim: true,
-            evidence: said_why || self.failed().any(|(failed, _)| failed.id == *node),
-        };
-        let mut lines =
-            decision::lines((&self.run_id, node), escalation, &self.shown, beside, look);
-        // A person who has just watched their terminal stop is the one
-        // who needs telling that nothing holds the answer open.
-        let room = look.width.cells().saturating_sub(INDENT.len());
-        lines.extend(
-            wrap(
-                "the run holds its own state on disk — close this terminal whenever you \
-                 like and answer from anywhere.",
-                room,
-            )
-            .into_iter()
-            .map(|part| Line::new().plain(INDENT).push(Tone::Muted, part)),
-        );
+    /// The facts a reader checks once they know how the run stopped, and
+    /// the runs it composed, each under the node that bore it.
+    pub(crate) fn closing_facts(&self, look: &Look) -> Vec<Line> {
+        let mut lines = self.closing_fields(look.glyphs).lines(look);
+        lines.extend(self.closing_children(look));
         lines
+    }
+
+    /// The facts with something to say, in the order a reader checks them.
+    fn closing_fields(&self, glyphs: Glyphs) -> Fields {
+        let degraded = match self.frame.degraded.len() {
+            0 => String::new(),
+            n => counted(n, "capability the adapter lacks"),
+        };
+        Fields::new()
+            .push_if("progress", crate::render::counter::line(self.frame, glyphs))
+            .push_if("tokens", self.closing_tokens(glyphs))
+            .push_if("caution", caution_row(self.frame))
+            .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
+            .push_if("branch", self.branch())
+            .push_if("artifacts", self.artifacts())
+            .push_if("degraded", degraded)
+            .push_if(
+                "unread",
+                unknown_kinds_note(&self.frame.unknown_kinds, glyphs).unwrap_or_default(),
+            )
+    }
+
+    /// What the run spent, and what this workflow's own past runs spent —
+    /// the only honest comparison there is, because it is what already
+    /// happened rather than a prediction. Nothing when the run spent
+    /// nothing and has no history to compare with.
+    fn closing_tokens(&self, glyphs: Glyphs) -> String {
+        match &self.frame.prior {
+            Some(prior) => format!(
+                "{} {} {}",
+                yunta_render::spend::Breakdown(&self.frame.tokens),
+                glyphs.sep(),
+                history(prior, glyphs)
+            ),
+            None => self.tokens().unwrap_or_default(),
+        }
     }
 
     /// The runs this one composed, as a tree: every child under the node
@@ -299,12 +287,12 @@ impl Closing {
     /// with its own id to go and read, and what this block is for is the
     /// run it closes. Empty for a run that composed nothing, which is
     /// most of them.
-    fn children(&self, look: &Look) -> Vec<Line> {
+    fn closing_children(&self, look: &Look) -> Vec<Line> {
         if self.frame.children.is_empty() {
             return Vec::new();
         }
         let mut lines = vec![Line::new().plain(INDENT).push(Tone::Muted, "children")];
-        for (under, born) in view::children_by_node(&self.frame) {
+        for (under, born) in view::children_by_node(self.frame) {
             lines.push(Line::new().plain(indent(2)).plain(under));
             for child in born {
                 lines.push(
@@ -315,55 +303,6 @@ impl Closing {
             }
         }
         lines
-    }
-
-    /// The facts a reader checks once they know how the run stopped.
-    fn fields(&self, glyphs: Glyphs) -> Fields {
-        let degraded = match self.frame.degraded.len() {
-            0 => String::new(),
-            n => counted(n, "capability the adapter lacks"),
-        };
-        Fields::new()
-            .push_if(
-                "progress",
-                crate::render::counter::line(&self.frame, glyphs),
-            )
-            .push_if("tokens", self.tokens(glyphs))
-            .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
-            .push_if("branch", self.branch())
-            .push_if("artifacts", self.artifacts())
-            .push_if("degraded", degraded)
-            .push_if(
-                "unread",
-                unknown_kinds_note(&self.frame.unknown_kinds, glyphs).unwrap_or_default(),
-            )
-    }
-
-    /// What a person types next, given how this run stopped, and where
-    /// to read the whole of it.
-    fn next(&self) -> Next {
-        let handle = self.run_id.handle();
-        let mut steps = advice::after(
-            crate::render::run_word(&self.frame),
-            handle,
-            self.decision.as_ref().map(|(_, payload)| payload),
-        );
-        steps.push((advice::status(handle), "shows the whole run"));
-        Next { steps }
-    }
-
-    /// What the run spent, and what this workflow's own past runs spent —
-    /// the only honest comparison there is, because it is what already
-    /// happened rather than a prediction. Nothing when the run spent
-    /// nothing and has no history to compare with.
-    fn tokens(&self, glyphs: Glyphs) -> String {
-        let spent = self.frame.tokens.total();
-        let said = Breakdown(&self.frame.tokens).to_string();
-        match &self.frame.prior {
-            Some(prior) => format!("{said} {} {}", glyphs.sep(), history(prior, glyphs)),
-            None if spent == 0 => String::new(),
-            None => said,
-        }
     }
 
     /// The run's longest nodes, longest first. `None` for a run where no
@@ -391,14 +330,14 @@ impl Closing {
 
     /// The branch the run worked on and where that work sits now.
     fn branch(&self) -> String {
-        let tree = paths::shown(&self.worktree, &self.cwd, self.home.as_deref());
-        match self.isolation {
+        let tree = paths::shown(self.paths.worktree, self.paths.cwd, self.paths.home);
+        match self.paths.isolation {
             Isolation::Worktree => format!(
                 "{} off {}, in {tree}",
-                yunta_engine::run_branch(&self.run_id),
-                self.base_branch,
+                yunta_engine::run_branch(self.run_id),
+                self.paths.base_branch,
             ),
-            Isolation::None => format!("{}, in this checkout at {tree}", self.base_branch),
+            Isolation::None => format!("{}, in this checkout at {tree}", self.paths.base_branch),
         }
     }
 
@@ -418,11 +357,24 @@ impl Closing {
             "{} under {}",
             counted(written, "artifact"),
             paths::shown(
-                &yunta_engine::run_dir::artifacts_view(&self.run_dir),
-                &self.cwd,
-                self.home.as_deref()
+                &yunta_engine::run_dir::artifacts_view(self.paths.run_dir),
+                self.paths.cwd,
+                self.paths.home
             )
         )
+    }
+
+    /// What a person types next, given how this run stopped, and where
+    /// to read the whole of it.
+    pub(crate) fn closing_next(&self) -> Next {
+        let handle = self.run_id.handle();
+        let mut steps = advice::after(
+            crate::render::run_word(self.frame),
+            handle,
+            self.decided_escalation(),
+        );
+        steps.push((advice::status(handle), "shows the whole run"));
+        Next { steps }
     }
 }
 

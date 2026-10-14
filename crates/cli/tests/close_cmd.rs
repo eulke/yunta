@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 use yunta_testkit::{
-    full_run_id, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout,
+    full_run_id, handle, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout,
 };
 
 /// A build that fails at once: the run stops on a person.
@@ -107,7 +107,7 @@ fn a_live_run_is_not_closed_and_cancel_is_named() {
     let said = stderr(&close);
     assert!(
         said.contains("an engine is driving the run")
-            && said.contains(&format!("yunta cancel {run_id}")),
+            && said.contains(&format!("yunta cancel {}", handle(&run_id))),
         "{said}"
     );
 }

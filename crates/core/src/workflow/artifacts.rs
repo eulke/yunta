@@ -6,6 +6,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
+use crate::events::NameProblem;
 use crate::yaml::{Mapping, Value};
 
 /// The run directory's own name for where artifacts live. Every path a
@@ -14,6 +15,11 @@ use crate::yaml::{Mapping, Value};
 /// contract all use — so writing one and reading one back read the same
 /// name.
 pub const ARTIFACTS_DIR: &str = "artifacts";
+
+/// The run directory that holds every artifact's bytes, by hash: the store
+/// writes and reads them under this name, and what says where they are
+/// names it the same way.
+pub const OBJECTS_DIR: &str = "objects";
 
 /// `artifacts.produces`. Each entry is one bare string: `tasks`, `spec`,
 /// `findings` and `questions` name the documents the engine reads, and
@@ -369,7 +375,8 @@ impl std::str::FromStr for ArtifactKind {
 /// accepted. A declared name equal to one of those would put two
 /// writers on one path, and the file a reader opened would say nothing
 /// about which of them wrote it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ReservedIdentity {
     /// The view of the document of this kind: `<kind>.yaml`.
     Kind(ArtifactKind),
@@ -438,27 +445,15 @@ pub struct ArtifactName(String);
 
 impl ArtifactName {
     /// The name `text` spells, or why it is not one.
-    pub fn parse(text: &str) -> Result<Self, crate::diagnostic::Problem> {
+    pub fn parse(text: &str) -> Result<Self, NameProblem> {
         if text.is_empty() {
-            return Err(crate::diagnostic::Problem::parse(
-                "",
-                "an artifact is named by a file name, and this one is empty",
-            ));
+            return Err(NameProblem::Empty);
         }
         if !crate::pack::stays_inside(text) {
-            return Err(crate::diagnostic::Problem::parse(
-                "",
-                format!(
-                    "`{text}` reaches outside the run directory — an artifact name is relative, \
-                     with no `..` component"
-                ),
-            ));
+            return Err(NameProblem::OutsideRun);
         }
         if let Some(identity) = ReservedIdentity::of(text) {
-            return Err(crate::diagnostic::Problem::parse(
-                "",
-                format!("`{text}` is how the run's view names {identity}, so an artifact cannot take it"),
-            ));
+            return Err(NameProblem::Reserved { identity });
         }
         Ok(ArtifactName(text.to_string()))
     }

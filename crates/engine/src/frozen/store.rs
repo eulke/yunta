@@ -13,10 +13,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use yunta_core::durable::Durability;
+use yunta_core::events::ObjectProblem;
 use yunta_core::{ContentHash, ExecutorName, Frozen, SkillName};
 
 use super::{executor_input, named_inputs, skill_input, FrozenError};
-use crate::artifacts::store::{ObjectError, ObjectStore};
+use crate::artifacts::store::{ObjectStore, StoreError};
 
 /// The folder under a run directory that holds the copies of skills and
 /// executors.
@@ -135,13 +136,13 @@ pub(crate) async fn object(
 ) -> Result<Vec<u8>, FrozenError> {
     let store = ObjectStore::at(run_dir);
     store.get(hash).await.map_err(|error| match error {
-        ObjectError::Missing { .. } => FrozenError::Missing {
+        StoreError::Object(ObjectProblem::Missing { .. }) => FrozenError::Missing {
             input: input.to_string(),
         },
-        ObjectError::Corrupt { .. } => FrozenError::Mismatch {
+        StoreError::Object(ObjectProblem::Corrupt { .. }) => FrozenError::Mismatch {
             input: input.to_string(),
         },
-        ObjectError::Io { context, source } => FrozenError::Io { context, source },
+        StoreError::Io { context, source } => FrozenError::Io { context, source },
     })
 }
 

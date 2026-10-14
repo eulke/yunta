@@ -5,9 +5,9 @@
 use indexmap::IndexMap;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactId, EngineFact, Escalation, EscalationError, EventPayload, Fact, GateEvent,
-    GateResolvedPayload, HumanChoice, NodeEvent, NodeOutcome, PauseReason, Shown, TokenUsage,
-    Withheld,
+    ArtifactId, Claim, EngineFact, Escalation, EscalationError, EventPayload, Fact, Failure,
+    GateEvent, GateResolvedPayload, HumanChoice, NodeEvent, NodeOutcome, PauseReason, Shown,
+    TokenUsage, Withheld,
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
@@ -120,7 +120,7 @@ impl<'a> InternalGate<'a> {
         // An author's own `message:` is the claim; the assignee is the
         // record of who it is addressed to.
         Ok(Escalation::new(
-            question(self.node, self.message),
+            claim(self.node, self.message),
             vec![Fact::labelled("assignee", self.assignee)].into(),
             NonEmpty::from((first, rest)),
         )?
@@ -156,7 +156,7 @@ impl<'a> InternalGate<'a> {
             .collect();
         let documents = crate::artifacts::shown::documents(run_dir, &read, state).await?;
         let flaws = super::flawed::unprovable(&documents);
-        let because = super::flawed::withheld_because(flaws.iter().map(|(_, flaw)| flaw));
+        let because = yunta_core::shown::withheld_because(flaws.iter().map(|(_, flaw)| flaw));
         Ok(Ok(self.withholding(escalation, because)))
     }
 
@@ -215,12 +215,16 @@ impl<'a> InternalGate<'a> {
     }
 }
 
-/// What `node` asks, wherever it is asked: its author's `message:`, or
-/// that it needs a decision.
-pub(super) fn question(node: &Node, message: Option<&str>) -> String {
-    message
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("gate `{}` needs a decision", node.id))
+/// The claim a gate makes: its author's `message:` as written, or that the
+/// gate needs a decision, which names only the node. An internal gate's
+/// escalation and a forge's pull request both ask this claim.
+pub(super) fn claim(node: &Node, message: Option<&str>) -> Claim {
+    match message {
+        Some(message) => Claim::Written(message.to_string()),
+        None => Claim::NeedsDecision {
+            node: node.id.clone(),
+        },
+    }
 }
 
 /// Where on the log the gate's last decision sits.
@@ -378,9 +382,8 @@ async fn land(
 }
 
 /// A correction lap: the gate fails, and control re-routes to
-/// `target` with the person's words as the cause. Same shape as any other
-/// reroute; the scheduler brings the gate back to ask again once `target`'s
-/// subgraph completes.
+/// `target`. Same shape as any other reroute; the scheduler brings the gate
+/// back to ask again once `target`'s subgraph completes.
 async fn route_back_to(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -388,22 +391,21 @@ async fn route_back_to(
     target: &NodeId,
     free_text: Option<&str>,
 ) -> Result<(), RunError> {
-    fail(
-        ctx,
-        node,
-        format!("gate chose `{chosen}` — re-routing to `{target}`"),
-    )
-    .await?;
-    let cause = yunta_core::text::detailed(
-        format!("gate `{}` chose `{chosen}`", node.id),
-        free_text.unwrap_or_default(),
-    );
+    // The gate's failure and the re-route's cause are the same fact: what the
+    // person chose, where it sends the run, and the words they gave with it.
+    let cause = Failure::GateChose {
+        node: node.id.clone(),
+        option: chosen.clone(),
+        target: target.clone(),
+        said: free_text.map(str::to_string),
+    };
+    fail(ctx, node, cause.clone()).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Rerouted(
             yunta_core::events::NodeReroutedPayload::new(
                 target.clone(),
-                yunta_core::events::Failure::message(cause),
+                cause,
                 yunta_core::events::RerouteOrigin::GateChoice,
                 None,
                 None,

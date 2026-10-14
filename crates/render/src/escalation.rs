@@ -147,7 +147,8 @@ fn scope_facts(wait: &ScopeWait) -> [Fact; 2] {
 /// room for neither heading. Composing them here is what keeps the page
 /// and the line from disagreeing about what an escalation says.
 pub fn sentence(payload: &GateWaitingPayload) -> String {
-    text::aside(payload.summary(), &evidence(payload).join("; "))
+    let claim = crate::claim::sentence(payload.summary(), payload.failure.as_deref());
+    text::aside(claim, &evidence(payload).join("; "))
 }
 
 /// The fact a refused claim repeats, on the one line the record shows it
