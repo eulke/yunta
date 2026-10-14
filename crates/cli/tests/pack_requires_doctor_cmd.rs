@@ -80,6 +80,45 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
     );
 }
 
+/// A required runner that still sets `permissions` is refused by `check`, and
+/// `doctor` names it on the same pack with the same sentence.
+#[test]
+fn doctor_names_a_retired_permissions_key_the_way_check_refuses_it() {
+    let (root, upstream, home) = setup();
+    let repo = root.path().join("repo");
+    let manifest = upstream.join("pack.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        text.replace(
+            "runners: [{ name: reviewer }]",
+            "runners: [{ name: reviewer, permissions: read-only }]",
+        ),
+    )
+    .unwrap();
+    git(&upstream, &["commit", "-q", "-am", "retired key"]);
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add_out.status.success(), "{}", stderr(&add_out));
+
+    let sentence =
+        yunta_engine::retired_permissions_sentence(&yunta_core::RunnerName::from("reviewer"));
+    let doctor_out = yunta_in!(&repo, &home, &["doctor"]);
+    let gaps = yunta_testkit::checks(&stdout(&doctor_out), "pack acme/review-pack");
+    assert!(
+        gaps.contains(&sentence),
+        "doctor names the retired key: {}",
+        stdout(&doctor_out)
+    );
+
+    let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
+    assert!(!check_out.status.success(), "{}", stdout(&check_out));
+    assert!(
+        stderr(&check_out).contains(&sentence),
+        "check refuses the same key: {}",
+        stderr(&check_out)
+    );
+}
+
 #[test]
 fn doctor_is_silent_about_a_pack_with_no_unmet_requires() {
     let root = tempfile::tempdir().unwrap();

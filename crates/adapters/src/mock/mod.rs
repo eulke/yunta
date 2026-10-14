@@ -20,6 +20,7 @@
 
 mod check;
 mod effects;
+mod error;
 mod fixture;
 mod launch;
 mod run_tool;
@@ -27,10 +28,11 @@ mod script;
 mod session;
 
 pub use fixture::{
-    FixtureError, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, RunPaths,
-    SessionScript, ToolExpectation,
+    FixtureError, KillBehavior, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt,
+    RunPaths, SessionScript, ToolExpectation,
 };
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,8 +43,8 @@ use yunta_core::port::{
 };
 use yunta_core::process::subprocess::{Held, LineParser};
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, AgentName, Capabilities, EditSandbox, FenceLevel,
-    ModelName, Result, ScopeGlob, SessionId,
+    AdapterError, AdapterId, AdapterSettings, AgentName, Capabilities, ConfigLayer, EditSandbox,
+    FenceLevel, ModelName, Result, ScopeGlob, SessionId,
 };
 
 use crate::dialect::DialectName;
@@ -50,6 +52,13 @@ use crate::session::typed_settings;
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("mock");
+
+/// The start of every session id the mock opens. A run whose log holds
+/// such an id was driven by the mock.
+pub const MOCK_SESSION_PREFIX: &str = "mock-session-";
+
+/// The name of the file a mock keeps its claims in, when its caller keeps them.
+pub const CLAIMS_FILE: &str = "mock-claims.json";
 
 pub struct MockAdapter {
     fixture: MockFixture,
@@ -59,12 +68,11 @@ pub struct MockAdapter {
     /// What `capabilities()` answers: the fixture's dialect declares them,
     /// and `narrowed` replaces them.
     capabilities: Capabilities,
-    /// One flag per `fixture.sessions` entry — `true` once `spawn()` has
-    /// claimed it. Replaces a bare atomic counter: concurrent task
-    /// dispatch races several `spawn()` calls at once, so "the next
-    /// index" stops meaning "the right script" — see
+    /// What has been claimed and how far sessions are numbered, under one
+    /// lock. Concurrent task dispatch races several `spawn()` calls at once,
+    /// so "the next index" stops meaning "the right script" — see
     /// `SessionScript::match_prompt_contains`.
-    consumed: Mutex<Vec<bool>>,
+    claims: Mutex<session::Claims>,
     /// Every `spawn()`'s `req.skills`, in claim order: the mock's
     /// "native mount" is recording what it was asked to mount, so
     /// engine tests assert the whole resolution chain without a CLI.
@@ -99,9 +107,6 @@ pub struct MockAdapter {
     /// The argv each claimed session's launch plan gives its CLI, in claim
     /// order.
     argvs_seen: Mutex<Vec<Vec<String>>>,
-    /// The next session id's number: every adapter counts from one, so
-    /// a fixture's ids never depend on what else ran in the process.
-    next_session: AtomicU64,
     /// Whether any session of this adapter was asked how its process
     /// ended. A mock has no process, so what this records is the
     /// engine's own rule: the question is put only to a session whose
@@ -121,12 +126,12 @@ impl MockAdapter {
     /// that CLI would be given.
     pub fn with_settings(fixture: MockFixture, settings: AdapterSettings) -> Self {
         let capabilities = fixture.dialect().capabilities();
-        let consumed = Mutex::new(vec![false; fixture.sessions.len()]);
+        let claims = Mutex::new(session::Claims::fresh(fixture.sessions.len()));
         Self {
             fixture,
             settings,
             capabilities,
-            consumed,
+            claims,
             skills_seen: Mutex::new(Vec::new()),
             agents_seen: Mutex::new(Vec::new()),
             models_seen: Mutex::new(Vec::new()),
@@ -135,7 +140,6 @@ impl MockAdapter {
             artifact_dirs_seen: Mutex::new(Vec::new()),
             requests_seen: Mutex::new(Vec::new()),
             argvs_seen: Mutex::new(Vec::new()),
-            next_session: AtomicU64::new(1),
             interrogated: Arc::new(AtomicBool::new(false)),
             probes: AtomicU64::new(0),
         }
@@ -157,54 +161,13 @@ impl MockAdapter {
     /// a test asserts is empty once a run opened every session it
     /// scripted.
     pub fn unconsumed(&self) -> Vec<usize> {
-        read(&self.consumed)
-            .into_iter()
+        let claims = self.claims.lock().unwrap_or_else(|e| e.into_inner());
+        claims
+            .consumed()
+            .iter()
             .enumerate()
-            .filter(|(_, claimed)| !claimed)
-            .map(|(index, _)| index)
+            .filter_map(|(index, claimed)| (!claimed).then_some(index))
             .collect()
-    }
-
-    /// Every session id `resume()` was asked to continue, in call order.
-    pub fn resumes_seen(&self) -> Vec<SessionId> {
-        read(&self.resumes_seen)
-    }
-
-    /// The `agent` of every session spawned so far, in claim order.
-    pub fn agents_seen(&self) -> Vec<Option<AgentName>> {
-        read(&self.agents_seen)
-    }
-
-    /// The `model` of every session spawned so far, in claim order.
-    pub fn models_seen(&self) -> Vec<Option<ModelName>> {
-        read(&self.models_seen)
-    }
-
-    /// The `skills` of every session spawned so far, in claim order.
-    pub fn skills_seen(&self) -> Vec<Vec<PathBuf>> {
-        read(&self.skills_seen)
-    }
-
-    /// The `run_tools_endpoint` of every session so far, in claim order.
-    pub fn endpoints_seen(&self) -> Vec<Option<RunToolsEndpoint>> {
-        read(&self.endpoints_seen)
-    }
-
-    /// The `artifact_dir` of every session so far, in claim order — what a
-    /// test reads to see which sessions were granted the run's artifact
-    /// directory and which never needed it.
-    pub fn artifact_dirs_seen(&self) -> Vec<Option<PathBuf>> {
-        read(&self.artifact_dirs_seen)
-    }
-
-    /// The whole request of every session opened so far, in claim order.
-    pub fn requests_seen(&self) -> Vec<SessionRequest> {
-        read(&self.requests_seen)
-    }
-
-    /// The argv of every claimed session's launch plan, in claim order.
-    pub fn argvs_seen(&self) -> Vec<Vec<String>> {
-        read(&self.argvs_seen)
     }
 
     /// One adapter from a fixture that names no run directory — every
@@ -303,7 +266,10 @@ impl MockAdapter {
         // consumes no script and writes nothing.
         let plan = self.plan(&req, resume_as.as_ref())?;
         self.record_mount(&req);
-        let index = self.claim(&req)?;
+        // The claim and the id of the session it opens are recorded together,
+        // before the launch is installed or written, so a ledger that cannot be
+        // written fails the spawn with nothing to undo.
+        let (index, session_id) = self.claim(&req, resume_as)?;
         let Some(script) = self.fixture.sessions.get(index) else {
             return Err(AdapterError::Adapter {
                 adapter: ID.clone(),
@@ -319,7 +285,7 @@ impl MockAdapter {
         if !self.asks_per_write() {
             self.apply_effects(script, &req)?;
         }
-        let played = self.played(script, &req, dialect, reader, resume_as)?;
+        let played = self.played(script, &req, dialect, reader, session_id);
         Ok(session::start(played, held, Arc::clone(&self.interrogated)))
     }
 
@@ -337,12 +303,12 @@ impl MockAdapter {
         req: &SessionRequest,
         dialect: DialectName,
         reader: Box<dyn LineParser>,
-        resume_as: Option<SessionId>,
-    ) -> Result<script::Script> {
+        session_id: SessionId,
+    ) -> script::Script {
         let rail = req.rail.clone();
-        Ok(script::Script {
+        script::Script {
             dialect,
-            session_id: self.session_id(resume_as)?,
+            session_id,
             model: script.model.clone(),
             reader,
             naming: self.capabilities.tool_naming,
@@ -373,7 +339,8 @@ impl MockAdapter {
             outcome: script.outcome.clone(),
             run_tools_endpoint: req.run_tools_endpoint.clone(),
             lists_tools: self.fixture.lists_tools,
-        })
+            kill: script.kill,
+        }
     }
 
     /// Records what this session was asked to mount, in claim order.
@@ -389,14 +356,19 @@ impl MockAdapter {
         record(&self.requests_seen, req.clone());
     }
 
-    /// The index of the script this request claims, marked consumed so no
-    /// other session gets it.
-    fn claim(&self, req: &SessionRequest) -> Result<usize> {
-        let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
-        let index = match self.named(&consumed, &req.prompt)? {
+    /// The index of the script this request claims, and the id of the session
+    /// that plays it. Both are recorded in one change, so no other session gets
+    /// the script and no id is handed out that the ledger does not hold.
+    fn claim(
+        &self,
+        req: &SessionRequest,
+        resume_as: Option<SessionId>,
+    ) -> Result<(usize, SessionId)> {
+        let mut claims = self.claims.lock().unwrap_or_else(|e| e.into_inner());
+        let index = match self.named(claims.consumed(), &req.prompt)? {
             Some(index) => index,
             None => self
-                .unnamed(&consumed)
+                .unnamed(claims.consumed())
                 .ok_or_else(|| AdapterError::Adapter {
                     adapter: ID.clone(),
                     message: format!(
@@ -407,10 +379,8 @@ impl MockAdapter {
                     ),
                 })?,
         };
-        if let Some(slot) = consumed.get_mut(index) {
-            *slot = true;
-        }
-        Ok(index)
+        let session_id = claims.claim(index, resume_as)?;
+        Ok((index, session_id))
     }
 
     /// The unconsumed script that named this request by a substring of
@@ -465,22 +435,24 @@ impl MockAdapter {
             })
             .map(|(i, _)| i)
     }
+}
 
-    /// The id the session reports: the one being resumed, or the next of
-    /// this adapter's own.
-    fn session_id(&self, resume_as: Option<SessionId>) -> Result<SessionId> {
-        match resume_as {
-            Some(session_id) => Ok(session_id),
-            None => SessionId::try_from(format!(
-                "mock-session-{}",
-                self.next_session.fetch_add(1, Ordering::Relaxed)
-            ))
-            .map_err(|error| AdapterError::Adapter {
-                adapter: ID.clone(),
-                message: error.to_string(),
-            }),
+/// The mock standing in for every adapter the config names, so the
+/// same workflow resolves the same runners with no LLM behind them.
+pub fn registry(
+    config: &ConfigLayer,
+    mock: Arc<MockAdapter>,
+) -> HashMap<AdapterId, Arc<dyn Adapter>> {
+    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+    adapters.insert(ID.clone(), mock.clone());
+    if let Some(runners) = &config.runners {
+        for candidate in runners.values().flatten() {
+            adapters
+                .entry(candidate.adapter.clone())
+                .or_insert_with(|| mock.clone());
         }
     }
+    adapters
 }
 
 /// Appends to one of the mock's records of what it was asked.

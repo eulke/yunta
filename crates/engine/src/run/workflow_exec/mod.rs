@@ -1,17 +1,17 @@
 //! `kind: workflow` — composition as **linked runs**: each
 //! sub-workflow is a complete run (own run_id, manifest, event log and
-//! run.dir), never an inline expansion. The parent freezes only the
-//! child's *name and inputs*; the child resolves and freezes its own
-//! workflow file at birth, so history pins the child's manifest through
-//! the recorded `child_run_id` — reproducing an old parent never
+//! run.dir), never an inline expansion. The parent's birth freezes the
+//! child's workflow text and prompts with the rest of its inputs, and the
+//! child is born from that frozen copy; history pins the child's manifest
+//! through the recorded `child_run_id` — reproducing an old parent never
 //! re-resolves `name@current`.
 //!
 //! Mechanics this module fixes:
-//! - `use: <name>` resolves via `crate::catalog::resolve_workflow`
-//!   **in the parent run's own working tree**: the repo's versioned
-//!   `.yunta/workflows/<name>.yaml` catalog first, a publisher's
-//!   vendored packs second — the same resolver `list_workflows` and
-//!   `check_workflow_refs` share.
+//! - `use: <name>` is read from the parent run's frozen set, as its
+//!   birth froze it: the repo's versioned `.yunta/workflows/<name>.yaml`
+//!   catalog first, a publisher's vendored packs second — the same
+//!   resolver `list_workflows` and `check_workflow_refs` share. A run
+//!   that predates frozen inputs reads the name from its checkout.
 //! - The child run id comes from the run's injected `IdSource`, like
 //!   every run id; the link to this parent and node is the
 //!   `child_run_created` on the parent's log, never the name.
@@ -52,6 +52,8 @@ use yunta_core::template::render_template;
 
 use child::{drive_child, resume_child, Child};
 use mounts::resolve_mounts;
+
+use crate::frozen::read::{ChildWorkflow, Source};
 
 use super::node_close::{fail, fail_with};
 use super::node_exec::{template_vars, NodeEnd};
@@ -106,6 +108,51 @@ fn check_child(
             .collect::<Vec<_>>()
             .join("; "),
     )
+}
+
+/// Births the child a fresh node starts. A child of a run that froze its
+/// inputs is born from that run's frozen set. A run that predates frozen
+/// inputs has none to hand on: its child is born from the checkout as it
+/// stands, and freezes what it reads as any run born now does.
+async fn birth_child(
+    ctx: &RunCtx<'_>,
+    cancel: &CancellationToken,
+    child: ChildWorkflow<'_>,
+    workflow: &yunta_core::Workflow,
+    config: &yunta_core::ConfigLayer,
+    provided: &std::collections::HashMap<InputName, String>,
+    use_name: &str,
+) -> Result<crate::manifest::FrozenRun, crate::manifest::ManifestError> {
+    match child {
+        ChildWorkflow::Frozen { parent, .. } => {
+            crate::manifest::child_run(
+                workflow,
+                config,
+                ctx.worktree,
+                provided,
+                ctx.supervision(cancel),
+                crate::manifest::ParentRun {
+                    use_name,
+                    frozen: parent,
+                    run_dir: ctx.run_dir,
+                },
+            )
+            .await
+        }
+        ChildWorkflow::Checkout { dir, .. } => {
+            let user_knowledge = ctx.ambient.and_then(yunta_core::user_knowledge_dir);
+            crate::manifest::build_manifest(
+                workflow,
+                config,
+                &dir,
+                ctx.worktree,
+                provided,
+                ctx.supervision(cancel),
+                user_knowledge.as_deref(),
+            )
+            .await
+        }
+    }
 }
 
 /// What a `kind: workflow` node declares: which workflow to run, what
@@ -166,35 +213,15 @@ pub(super) async fn execute_workflow(
         }
     }
 
-    // Fresh birth: resolve the CURRENT catalog file from the parent's
-    // own tree (each child resolves and freezes its own workflow at
-    // birth) — repo catalog first, a publisher's vendored packs second.
-    let resolved = match crate::catalog::resolve_workflow(ctx.worktree, use_name) {
-        Ok(resolved) => resolved,
-        Err(e) => {
-            return fail(
-                ctx,
-                node,
-                format!("child workflow `use: {use_name}` cannot be resolved: {e}"),
-            )
-            .await;
-        }
+    // Fresh birth: the child's text is the one this run reads for its
+    // child — the copy its parent froze at birth, or the checkout's file
+    // for a run that predates frozen inputs.
+    let source = Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient);
+    let child = match source.workflow(use_name).await {
+        Ok(child) => child,
+        Err(e) => return super::session_policy::close_frozen(ctx, node, e).await,
     };
-    let text = match tokio::fs::read_to_string(&resolved.path).await {
-        Ok(text) => text,
-        Err(e) => {
-            return fail(
-                ctx,
-                node,
-                format!(
-                    "child workflow `{}` cannot be read: {e}",
-                    resolved.path.display()
-                ),
-            )
-            .await;
-        }
-    };
-    let child_workflow = match yunta_core::workflow::read::read(&text, &resolved.path) {
+    let child_workflow = match yunta_core::workflow::read::read(child.text(), Path::new(use_name)) {
         Ok(workflow) => workflow,
         Err(report) => {
             return fail(ctx, node, report.to_string()).await;
@@ -265,28 +292,23 @@ pub(super) async fn execute_workflow(
         }
     }
 
-    // A pack-sourced child's own `prompt: {file: ...}` resolves relative
-    // to the pack's own directory, not the repo's `.yunta/workflows/` —
-    // whichever directory `resolved.path` actually came from.
-    let workflows_dir = resolved
-        .path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.worktree.join(".yunta/workflows"));
+    let birth = birth_child(
+        ctx,
+        cancel,
+        child,
+        &child_workflow,
+        &child_config,
+        &provided,
+        use_name,
+    )
+    .await;
     let crate::manifest::FrozenRun {
         manifest: mut child_manifest,
         documents,
-    } = match crate::manifest::build_manifest(
-        &child_workflow,
-        &child_config,
-        &workflows_dir,
-        ctx.worktree,
-        &provided,
-        ctx.supervision(cancel),
-    )
-    .await
-    {
-        Ok(frozen) => frozen,
+        blobs,
+    } = match birth {
+        // A child runs on the adapter its parent was asked to run on.
+        Ok(child) => child.with_adapter(ctx.manifest.adapter.clone()),
         // A freeze the token cut ends the node the way a birth cut does
         // below: a stop is not a failed child.
         Err(e) if e.cancelled() => return crate::run::node_exec::cancelled_end(ctx, node).await,
@@ -302,8 +324,6 @@ pub(super) async fn execute_workflow(
     // One word all the way down: what the node declares is what the
     // child's manifest freezes, with nothing in between to translate.
     child_manifest.isolation = isolation;
-    // A child runs on the adapter its parent was asked to run on.
-    child_manifest.adapter = ctx.manifest.adapter.clone();
     let runs = runs_root(ctx);
     let trees = worktrees_root(ctx);
     child_manifest.paths = match yunta_core::FrozenPaths::new(runs.clone(), trees.clone()) {
@@ -405,6 +425,7 @@ pub(super) async fn execute_workflow(
             baseline: crate::run::baseline::inherited(ctx.run_id, state).as_ref(),
             environment: crate::process::execution_environment(ctx.ambient),
             redactor: &redactor,
+            blobs: &blobs,
         },
         ctx.storage,
         ctx.supervision(cancel),
@@ -416,6 +437,16 @@ pub(super) async fn execute_workflow(
         // it says so to the node that asked for it, which ends cut
         // like any other, and the loop's next turn pauses the run.
         Err(RunError::Cancelled) => return crate::run::node_exec::cancelled_end(ctx, node).await,
+        // The child's frozen inputs could not be written: the node fails with
+        // that, as a birth that cannot read its workflow does.
+        Err(RunError::Frozen(e)) => {
+            return fail(
+                ctx,
+                node,
+                format!("child workflow `{use_name}` cannot be born: {e}"),
+            )
+            .await;
+        }
         Err(other) => return Err(other),
     };
 

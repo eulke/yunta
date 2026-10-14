@@ -39,7 +39,7 @@ fn a_role_missing_from_runners_is_flagged() {
     let manifest = manifest(
         vec![RequiredRunner {
             name: "reviewer".into(),
-            permissions: None,
+            retired_permissions: None,
         }],
         vec![],
         vec![],
@@ -57,7 +57,7 @@ fn a_role_with_zero_candidates_is_also_flagged() {
     let manifest = manifest(
         vec![RequiredRunner {
             name: "reviewer".into(),
-            permissions: None,
+            retired_permissions: None,
         }],
         vec![],
         vec![],
@@ -76,7 +76,7 @@ fn a_role_with_at_least_one_candidate_resolves() {
     let manifest = manifest(
         vec![RequiredRunner {
             name: "reviewer".into(),
-            permissions: None,
+            retired_permissions: None,
         }],
         vec![],
         vec![],
@@ -164,7 +164,7 @@ fn a_gap_is_refused_for_each_thing_the_run_would_lack() {
     let manifest = manifest(
         vec![RequiredRunner {
             name: RunnerName::from("reviewer"),
-            permissions: None,
+            retired_permissions: None,
         }],
         vec!["internal-docs"],
         vec!["gh", "cargo"],
@@ -186,4 +186,48 @@ fn a_gap_is_refused_for_each_thing_the_run_would_lack() {
         &ConfigLayer::default(),
     );
     assert!(satisfied.unmet(&|_| true).is_empty());
+}
+
+/// A pack that still writes `permissions` under a required runner parses,
+/// and the gap records that runner: the refusal names the runner and the key.
+#[test]
+fn a_required_runner_permissions_key_is_refused_by_name() {
+    let pack: PackManifest = yunta_core::yaml::parse(
+        r#"name: review-pack
+publisher: acme
+version: 1.0.0
+requires:
+  runners:
+    - { name: reviewer, permissions: read-only }
+declares:
+  permissions: read-only
+"#,
+    )
+    .expect("a pack that still names the key parses");
+    let config = ConfigLayer {
+        runners: Some(BTreeMap::from([(
+            "reviewer".into(),
+            vec![RunnerCandidate {
+                adapter: "claude-code".into(),
+                model: "sonnet".into(),
+                agent: None,
+                effort: None,
+            }],
+        )])),
+        ..Default::default()
+    };
+
+    let gap = check_pack_requires(&pack, &config);
+    assert_eq!(gap.retired_permissions, vec![RunnerName::from("reviewer")]);
+    assert!(gap.missing_runners.is_empty());
+    assert!(!gap.is_satisfied());
+
+    let refused: Vec<String> = gap
+        .unmet(&|_| true)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert!(refused[0].contains("runner `reviewer`"), "{refused:?}");
+    assert!(refused[0].contains("`permissions`"), "{refused:?}");
 }

@@ -3206,7 +3206,7 @@
       ]
     },
     "Failure": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], one carrying\n`frozen_input:` as [`Failure::FrozenInput`], one carrying\n`session_not_stopped:` as [`Failure::SessionNotStopped`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "anyOf": [
         {
           "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
@@ -3421,6 +3421,30 @@
           },
           "required": [
             "child_run"
+          ]
+        },
+        {
+          "description": "A frozen input no longer matches the hash the run was born with.",
+          "type": "object",
+          "properties": {
+            "frozen_input": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "frozen_input"
+          ]
+        },
+        {
+          "description": "The engine cannot end a session it asked to stop; its process group may still run.",
+          "type": "object",
+          "properties": {
+            "session_not_stopped": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_not_stopped"
           ]
         },
         {
@@ -4228,7 +4252,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `owed:` as\n[`Failure::ScopeOwed`], one carrying `unset:` as [`Failure::Unset`],\none carrying `unchanged:` as [`Failure::Unchanged`], one carrying\n`denied_paths:` as [`Failure::PathsDenied`], one carrying\n`unpassable:` as [`Failure::PlanUnpassable`], one carrying\n`session_refused:` as [`Failure::SessionRefused`], one carrying\n`limit:` as [`Failure::Limit`], one carrying `stopped:` as\n[`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],\none carrying `child_run:` as [`Failure::ChildFailed`], one carrying\n`frozen_input:` as [`Failure::FrozenInput`], one carrying\n`session_not_stopped:` as [`Failure::SessionNotStopped`], and a log\nwritten before failures were data carries `outcome:` alone and reads\nback as [`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "commit": {
@@ -4486,6 +4510,30 @@
           },
           "required": [
             "child_run"
+          ]
+        },
+        {
+          "description": "A frozen input no longer matches the hash the run was born with.",
+          "type": "object",
+          "properties": {
+            "frozen_input": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "frozen_input"
+          ]
+        },
+        {
+          "description": "The engine cannot end a session it asked to stop; its process group may still run.",
+          "type": "object",
+          "properties": {
+            "session_not_stopped": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_not_stopped"
           ]
         },
         {
@@ -6896,6 +6944,11 @@
           "description": "The config the run froze at birth lacks what this needs; a new run under a config that declares it is the way out.",
           "type": "string",
           "const": "frozen_config"
+        },
+        {
+          "description": "A file the run froze at birth no longer holds the bytes it froze: the\nrun reads its copy, so a new run is the way out.",
+          "type": "string",
+          "const": "frozen_input"
         },
         {
           "description": "The project's permissions deny the work.",

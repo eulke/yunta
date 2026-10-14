@@ -22,15 +22,20 @@ use crate::worktree::{land, rebase_onto, Rebase, Unit};
 use super::depart::PendingDeparture;
 use super::dispatch::{commit_task_work, left_work};
 use super::escalate::PendingEscalation;
+use super::unstopped::{end_on_unstopped, WalkStop};
 use super::LoopState;
 use crate::run::{RunCtx, RunError};
 use yunta_core::events::{NodeEvent, TaskEvent};
 
-/// What integrating one batch produced: a cancellation that ends the node,
-/// or what is owed a person once the batch is on the log — the scope
-/// requests escalated, and the departures from the plan declared.
+/// What integrating one batch produced: how the node ends, when the walk
+/// stops it at a cancellation or at a session the engine could not stop, or
+/// what is owed a person once the batch is on the log — the scope requests
+/// escalated, and the departures from the plan declared.
 pub(super) enum BatchIntegration {
     Cancelled(NodeEnd),
+    /// The node failed with a session the engine could not stop, among the
+    /// dispatches from the walk's stop on.
+    Ended(NodeEnd),
     Done {
         escalations: Vec<PendingEscalation>,
         departures: Vec<PendingDeparture>,
@@ -42,9 +47,12 @@ pub(super) enum BatchIntegration {
 /// could not record itself — its attempts' fence breaches, scope expansion
 /// requests and withdrawals; every check is already on the log, written the
 /// moment it ran — rebases and fast-forwards a `Done` task onto the run's current
-/// tree, and marks each task's new status. A cancelled dispatch ends the
-/// whole node. Any `Escalate`d scope-expansion request is collected for the
-/// caller to resolve once the whole batch is on the log.
+/// tree, and marks each task's new status. A session the engine could not
+/// stop, among the dispatches from the walk's stop on, fails the node: the
+/// tasks before the stop are integrated, and the tasks from the stop on keep
+/// their status for a later wake. A cancelled dispatch ends the whole node.
+/// Any `Escalate`d scope-expansion request is collected for the caller to
+/// resolve once the whole batch is on the log.
 pub(super) async fn integrate_batch(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -57,7 +65,8 @@ pub(super) async fn integrate_batch(
     // What each task owes a person about departures from the plan: every
     // one its sessions declared is on the log by the time they ended.
     let owed = ctx.run_view().await?.state.tasks;
-    for dispatch in dispatches {
+    let mut batch = dispatches.into_iter();
+    while let Some(dispatch) = batch.next() {
         // The checkout stays held until this task is integrated or set
         // aside below, and is given back then.
         let super::dispatch::Dispatched {
@@ -65,7 +74,12 @@ pub(super) async fn integrate_batch(
             unit,
             lease,
             mut report,
-        } = dispatch?;
+        } = match dispatch {
+            Ok(dispatched) => dispatched,
+            Err(error) => {
+                return end_on_unstopped(ctx, node, state, WalkStop::Failed(error), batch).await
+            }
+        };
         if let Some(cause) = super::depart::owed_first(&owed, &report) {
             report.outcome = TaskOutcome::Blocked { cause };
         }
@@ -117,12 +131,10 @@ pub(super) async fn integrate_batch(
 
         // A cancelled dispatch ends the whole loop node without a verdict —
         // the task stays `running` in the log (orphaned), which is exactly
-        // what makes a later resume re-execute it, and the node's own fate
-        // follows the same root-vs-sibling rule every other kind applies.
+        // what makes a later resume re-execute it — unless a session still to
+        // come could not be stopped, which fails the node instead.
         if matches!(report.outcome, TaskOutcome::Interrupted) {
-            return Ok(BatchIntegration::Cancelled(
-                crate::run::node_exec::cancelled_end(ctx, node).await?,
-            ));
+            return end_on_unstopped(ctx, node, state, WalkStop::Interrupted, batch).await;
         }
         let blocked_cause = match report.outcome {
             TaskOutcome::Blocked { cause } => {

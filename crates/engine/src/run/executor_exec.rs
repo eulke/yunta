@@ -5,16 +5,18 @@
 //! comments carry the concrete contract it adds on top, and naming those
 //! fields is open work: their names are not fixed.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{NodeOutcome, TokenUsage};
-use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
+use yunta_core::{ExecutorKind, ExecutorName, Node};
 
 use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
+use crate::frozen::read;
+use crate::frozen::Source;
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 
 /// The stdin JSON shape (`with:`, the run's own paths, declared env).
@@ -50,12 +52,37 @@ struct ExecutorOutput {
     summary: Option<String>,
 }
 
-fn resolve_path(worktree: &Path, registration: &ExecutorRegistration) -> std::path::PathBuf {
-    if registration.path.is_absolute() {
-        registration.path.clone()
-    } else {
-        worktree.join(&registration.path)
+/// The path `executor` runs from: the copy the run froze at birth, verified
+/// against its hash before it runs. A refusal closes the node, and so does a
+/// command the permission rules deny. The rules judge the path the config
+/// declares, which is the name the person wrote them against; the copy is
+/// what runs.
+async fn executor_path(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    executor: &ExecutorName,
+    declared: &Path,
+) -> Result<Result<PathBuf, NodeEnd>, RunError> {
+    let path = match Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient)
+        .executor(executor)
+        .await
+    {
+        Ok(path) => path,
+        Err(error) => {
+            return Ok(Err(
+                super::session_policy::close_frozen(ctx, node, error).await?
+            ))
+        }
+    };
+    // Executors are among the four command surfaces the permission model
+    // covers; an executor's "command" is the binary path its config declares.
+    if let Some(rule) = crate::permissions::command_violation(
+        &declared.display().to_string(),
+        ctx.manifest.config.permissions.as_ref(),
+    ) {
+        return Ok(Err(fail(ctx, node, rule).await?));
     }
+    Ok(Ok(path))
 }
 
 pub(super) async fn execute_executor(
@@ -66,13 +93,7 @@ pub(super) async fn execute_executor(
     timeout_seconds: Option<u64>,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let Some(registration) = ctx
-        .manifest
-        .config
-        .skills
-        .as_ref()
-        .and_then(|skills| skills.executors.iter().find(|e| e.name == *executor))
-    else {
+    let Some(registration) = read::registration(&ctx.manifest.config, executor) else {
         return super::check_exec::unset(
             ctx,
             node,
@@ -87,16 +108,11 @@ pub(super) async fn execute_executor(
     // breaks this call site at compile time instead of silently running
     // it as a binary.
     let ExecutorKind::Binary = registration.kind;
-    let path = resolve_path(ctx.worktree, registration);
-
-    // Executors are among the four command surfaces the permission model
-    // covers; an executor's "command" is its resolved binary path.
-    if let Some(rule) = crate::permissions::command_violation(
-        &path.display().to_string(),
-        ctx.manifest.config.permissions.as_ref(),
-    ) {
-        return fail(ctx, node, rule).await;
-    }
+    let declared = read::executor_path(ctx.worktree, registration);
+    let path = match executor_path(ctx, node, executor, &declared).await? {
+        Ok(path) => path,
+        Err(end) => return Ok(end),
+    };
 
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
         Ok(bytes) => bytes,

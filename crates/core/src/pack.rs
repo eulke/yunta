@@ -5,13 +5,13 @@
 //! chart or a Terraform module has to its runtime.
 //!
 //! Normative split this type exists to enforce: a pack **requires**
-//! runners by name (with the permissions each needs) and **declares** a
-//! permissions ceiling it promises never to exceed — never a binding, a
-//! concrete model or a secret. The installing team resolves those names
-//! against its own `runners:`; `declares` is validated as a hard
-//! ceiling by `check`, not just documented here. This module only
-//! parses the manifest — resolving `requires` against local config and
-//! enforcing `declares` are the engine's own, separate jobs.
+//! runners by name and **declares** a permissions ceiling it promises
+//! never to exceed — never a binding, a concrete model or a secret. The
+//! installing team resolves those names against its own `runners:`;
+//! `declares` is validated as a hard ceiling by `check`, not just
+//! documented here. This module only parses the manifest — resolving
+//! `requires` against local config and enforcing `declares` are the
+//! engine's own, separate jobs.
 
 use std::collections::BTreeMap;
 
@@ -80,16 +80,16 @@ pub struct PackRequires {
     pub programs: Vec<String>,
 }
 
-/// One entry in `requires.runners` — a runner name plus the ceiling of
-/// permissions the pack asks that runner be resolvable with.
-/// `permissions` absent means the pack doesn't care what profile the
-/// runner resolves under, only that the name itself is defined.
+/// One entry in `requires.runners`: a runner name the installer's own
+/// `runners:` must define with a candidate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequiredRunner {
     pub name: RunnerName,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permissions: Option<NodePermissions>,
+    /// Parsed only so `check` refuses the key by name; no profile enforces it.
+    #[serde(default, rename = "permissions", skip_serializing)]
+    #[schemars(skip)]
+    pub retired_permissions: Option<serde_json::Value>,
 }
 
 /// The pack's own permissions **ceiling**: `check` rejects any `prompt` or `loop`
@@ -189,7 +189,7 @@ pub enum PackManifestError {
 
 /// Whether `path` stays inside the directory it is relative to: not
 /// absolute, and no `..` component anywhere.
-pub(crate) fn stays_inside(path: &str) -> bool {
+pub fn stays_inside(path: &str) -> bool {
     let path = std::path::Path::new(path);
     !path.is_absolute()
         && !path

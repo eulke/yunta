@@ -173,6 +173,9 @@ async fn assemble(
         Err(ContextResolveError::Cancelled { .. }) => {
             Ok(Step::Ended(cancelled_end(ctx, node).await?))
         }
+        Err(ContextResolveError::Frozen { source, .. }) => Ok(Step::Ended(
+            crate::run::session_policy::close_frozen(ctx, node, source).await?,
+        )),
         Err(error) => Ok(Step::Ended(fail(ctx, node, error.to_string()).await?)),
     }
 }

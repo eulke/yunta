@@ -1,0 +1,31 @@
+# A schema 4 run manifest, as that binary wrote it: the run was born on
+# codex, and the adapter is written as its bare id.
+schema_version: 4
+yunta_version: "0.0.5"
+workflow:
+  name: ship
+  nodes:
+    - { id: only, kind: bash, run: "true" }
+config:
+  runners:
+    executor:
+      - { adapter: codex, model: gpt-5-codex }
+inputs: {}
+prompts: {}
+base_branch: main
+base_commit: "7c20ea6903fd23594b7fccbf49a135eabf2970bc"
+isolation: worktree
+max_parallel_nodes: 2
+workflow_hash: "da7f739f627198465eeab537a6f7a435dc4a0c332f9e4a8462293eb3f4ab7ee0"
+config_hash: "b79606fb3afea5bd1609ed40b622142f1c98125abcfe89a76a661b0e8e343910"
+paths:
+  runs_root: /home/dev/.yunta/runs
+  worktrees_root: /home/dev/.yunta/worktrees
+pack:
+  publisher: acme
+  name: review-pack
+  version: "1.2.0"
+  commit: "1e533969543b7691604a8b5896b4d8280c7b9c4f"
+project:
+  git_common_dir: /home/dev/code/yunta/.git
+adapter: codex

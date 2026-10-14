@@ -240,45 +240,58 @@ fn check_installed_pack_requires(
         }
         for (_, manifest) in packs.installed {
             let gap = yunta_engine::check_pack_requires(&manifest, config);
-            let pack = format!("pack {}", gap.pack);
-            for runner in &gap.missing_runners {
-                checks.push(
-                    Found::Problem,
-                    pack.as_str(),
-                    format!(
-                        "requires runner `{runner}`, which `runners:` does not define, or \
-                         defines with zero candidates"
-                    ),
-                );
-                steps.extend([
-                    format!("declare runner `{runner}` in .yunta/config.yaml:"),
-                    "    runners:".to_string(),
-                    format!("      {runner}:"),
-                    format!(
-                        "        - {{ adapter: {}, model: <model> }}",
-                        super::first_built_adapter()
-                    ),
-                ]);
-            }
-            for server in &gap.missing_mcp_servers {
-                checks.push(
-                    Found::Problem,
-                    pack.as_str(),
-                    format!("requires mcp_server `{server}`, not defined under `mcp_servers:`"),
-                );
-            }
-            for program in gap
-                .required_programs
-                .iter()
-                .filter(|program| !super::refusals::command_on_path(program))
-            {
-                checks.push(
-                    Found::Problem,
-                    pack.as_str(),
-                    format!("requires program `{program}`, not found on PATH"),
-                );
-            }
+            check_gap(&gap, checks, steps);
         }
+    }
+}
+
+/// The rows an installed pack's unmet `requires:` make, and the steps that
+/// declare each runner it lacks.
+fn check_gap(gap: &yunta_engine::PackRequiresGap, checks: &mut Checklist, steps: &mut Vec<String>) {
+    let pack = format!("pack {}", gap.pack);
+    for runner in &gap.missing_runners {
+        checks.push(
+            Found::Problem,
+            pack.as_str(),
+            format!(
+                "requires runner `{runner}`, which `runners:` does not define, or \
+                 defines with zero candidates"
+            ),
+        );
+        steps.extend([
+            format!("declare runner `{runner}` in .yunta/config.yaml:"),
+            "    runners:".to_string(),
+            format!("      {runner}:"),
+            format!(
+                "        - {{ adapter: {}, model: <model> }}",
+                super::first_built_adapter()
+            ),
+        ]);
+    }
+    for runner in &gap.retired_permissions {
+        checks.push(
+            Found::Problem,
+            pack.as_str(),
+            yunta_engine::retired_permissions_sentence(runner),
+        );
+    }
+    for server in &gap.missing_mcp_servers {
+        checks.push(
+            Found::Problem,
+            pack.as_str(),
+            format!("requires mcp_server `{server}`, not defined under `mcp_servers:`"),
+        );
+    }
+    for program in gap
+        .required_programs
+        .iter()
+        .filter(|program| !super::refusals::command_on_path(program))
+    {
+        checks.push(
+            Found::Problem,
+            pack.as_str(),
+            format!("requires program `{program}`, not found on PATH"),
+        );
     }
 }
 

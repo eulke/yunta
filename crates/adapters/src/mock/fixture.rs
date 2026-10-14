@@ -26,6 +26,8 @@ use yunta_core::{ModelName, RunTool};
 use super::check;
 use crate::dialect::DialectName;
 
+pub use super::error::FixtureError;
+
 /// A parsed fixture: the CLI it stands for and one script per expected
 /// `spawn()`, in order.
 #[derive(Debug, Clone)]
@@ -67,35 +69,6 @@ pub struct RunPaths<'a> {
     /// `{{run.staging}}/grill/<name>`, which is exactly the directory that
     /// session is granted.
     pub staging: &'a Path,
-}
-
-/// Why a fixture did not become a script.
-#[derive(Debug, thiserror::Error)]
-pub enum FixtureError {
-    /// The YAML names a variable these paths do not define, or leaves a
-    /// `{{` unclosed.
-    #[error("the fixture's run paths could not be resolved")]
-    Paths(#[from] yunta_core::template::TemplateError),
-    /// The rendered YAML is not a fixture. The document's own
-    /// diagnostic is the message: it already names the key, the path
-    /// and what it expected, which is what the person who wrote the
-    /// fixture needs.
-    #[error(transparent)]
-    Shape(#[from] yunta_core::yaml::YamlError),
-    /// A declared cause the outcome's message does not read as, under the
-    /// CLI the fixture stands for.
-    #[error("the outcome declares the cause {declared}, but its message classifies as {actual}")]
-    Cause {
-        declared: &'static str,
-        actual: &'static str,
-    },
-    /// A `tool_use` names a run tool by its protocol name, which the CLI
-    /// does not call it by.
-    #[error(
-        "a tool_use names the run tool `{tool}` by its protocol name: this CLI calls it \
-         `{called}`, so write that"
-    )]
-    ProtocolRunTool { tool: &'static str, called: String },
 }
 
 impl MockFixture {
@@ -253,6 +226,9 @@ pub struct SessionScript {
     /// it stops without asking.
     #[serde(default)]
     pub before_stop: Option<MockStop>,
+    /// Scripted `kill` behavior; absent, `kill` ends the session as usual.
+    #[serde(default)]
+    pub kill: Option<KillBehavior>,
 }
 
 /// A session that asks before it stops, and what it does the first time
@@ -435,8 +411,8 @@ pub enum MockOutcome {
     /// The stream ends with no terminal event at all — a real crash.
     Crash,
     /// The stream never produces another item on its own; `kill` ends
-    /// it, and `interrupt` ends it or not as `on_interrupt` says (still
-    /// with no terminal event, as a forced kill leaves a real session).
+    /// it unless refused, and `interrupt` ends it or not as `on_interrupt`
+    /// says (still with no terminal event, as a forced kill leaves a real session).
     Hang {
         #[serde(default)]
         on_interrupt: OnInterrupt,
@@ -487,4 +463,12 @@ pub enum OnInterrupt {
     /// Keeps hanging; only `kill` ends it — the case the engine's
     /// interrupt-then-kill escalation exists for.
     Ignore,
+}
+
+/// Scripted answer to `kill` while the script still plays: `Refuse` fails it
+/// and leaves the session running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KillBehavior {
+    Refuse,
 }

@@ -36,9 +36,6 @@
 mod case;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use yunta_adapters::{MockAdapter, MockFixture, RunPaths, MOCK_ID};
 
 use crate::error::{CliError, Outcome};
 use crate::render::{Mark, INDENT};
@@ -125,47 +122,6 @@ pub(crate) fn discover_case_paths(root: &Path) -> Option<Vec<PathBuf>> {
         .collect();
     case_paths.sort();
     Some(case_paths)
-}
-
-/// Reads a mock fixture and parses it against the run's own
-/// directories — for `yunta test` and for `yunta run --adapter mock
-/// --fixture` alike.
-pub(crate) fn load_mock_fixture(
-    fixture_path: &Path,
-    run_dir: &Path,
-    worktree: &Path,
-) -> Result<Arc<MockAdapter>, CliError> {
-    let text = std::fs::read_to_string(fixture_path)
-        .map_err(|e| CliError::io("read fixture", fixture_path.display(), e))?;
-    let paths = RunPaths {
-        run_dir,
-        worktree,
-        staging: &yunta_engine::run_dir::staging_root(run_dir),
-    };
-    MockFixture::parse(&text, &paths)
-        .map(|fixture| Arc::new(MockAdapter::new(fixture)))
-        .map_err(|source| CliError::FixtureRefused {
-            path: fixture_path.to_path_buf(),
-            source,
-        })
-}
-
-/// The mock standing in for every adapter the config names, so the
-/// same workflow resolves the same runners with no LLM behind them.
-pub(crate) fn mock_adapters(
-    config: &yunta_core::ConfigLayer,
-    mock: Arc<MockAdapter>,
-) -> super::Adapters {
-    let mut adapters = super::Adapters::new();
-    adapters.insert(MOCK_ID.clone(), mock.clone());
-    if let Some(runners) = &config.runners {
-        for candidate in runners.values().flatten() {
-            adapters
-                .entry(candidate.adapter.clone())
-                .or_insert_with(|| mock.clone());
-        }
-    }
-    adapters
 }
 
 /// A checkout of its own for a run that must not touch the project: a

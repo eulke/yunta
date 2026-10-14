@@ -154,13 +154,23 @@ async fn dispatch(
     )
     .await
     .map_err(|error| match error {
-        DispatchError::Adapter(source) => TaskCycleError::Spawn {
+        DispatchError::Adapter(source) | DispatchError::Release(source) => TaskCycleError::Spawn {
             task: params.task.id.clone(),
             source,
         },
         DispatchError::Audit(source) => TaskCycleError::Audit {
             task: params.task.id.clone(),
             source,
+        },
+        DispatchError::NotStopped {
+            detail,
+            release,
+            tokens,
+        } => TaskCycleError::NotStopped {
+            task: params.task.id.clone(),
+            detail,
+            release,
+            tokens,
         },
     })
 }

@@ -18,6 +18,7 @@
 //! closed channel is work nobody asked for.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,7 +32,7 @@ use yunta_core::{ModelName, RunTool, SessionId, ToolNaming};
 
 use super::effects::{ask_hook, Asked};
 use super::run_tool::{call_run_tool, list_run_tools, RunToolCallError};
-use super::{MockOutcome, MockStep, OnInterrupt, ToolExpectation, ID};
+use super::{KillBehavior, MockOutcome, MockStep, OnInterrupt, ToolExpectation, ID};
 use crate::dialect::DialectName;
 
 /// One session's script, cut loose from the fixture it was claimed from.
@@ -57,6 +58,9 @@ pub(super) struct Script {
     pub(super) run_tools_endpoint: Option<RunToolsEndpoint>,
     /// Whether the session lists its run tools before anything else.
     pub(super) lists_tools: bool,
+    /// The scripted `kill` behavior, read by the session that starts this
+    /// player; the player itself never reads it.
+    pub(super) kill: Option<KillBehavior>,
 }
 
 /// What a session that asks before it stops does when it is sent back.
@@ -137,9 +141,20 @@ struct Stream {
     reader: Box<dyn LineParser>,
     guard: StreamGuard,
     events: mpsc::UnboundedSender<AgentEvent>,
+    /// Cleared when the player ends, before `events` is dropped: see `Drop`.
+    playing: Arc<AtomicBool>,
     /// The usage steps played so far. A CLI that reports usage at the end of
     /// its turn carries their sum on the line that closes the session.
     usage: Vec<MockStep>,
+}
+
+impl Drop for Stream {
+    /// Clears the playing flag before the stream's sender is dropped with the
+    /// fields, so a reader that finds the stream ended finds the session no
+    /// longer playing.
+    fn drop(&mut self) {
+        self.playing.store(false, Ordering::SeqCst);
+    }
 }
 
 impl Stream {
@@ -299,9 +314,21 @@ async fn opening(
     true
 }
 
+/// The steps that run before the session opens, and the rest, in script order.
+fn before_opening(steps: Vec<MockStep>) -> (Vec<MockStep>, Vec<MockStep>) {
+    steps
+        .into_iter()
+        .partition(|step| matches!(step, MockStep::BeforeOpen { .. }))
+}
+
 /// Plays `script` into `events` until it runs out, a stop arrives, or the
-/// engine stops listening.
-pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEvent>, stops: Stops) {
+/// engine stops listening. `playing` is cleared as it ends.
+pub(super) async fn play(
+    script: Script,
+    events: mpsc::UnboundedSender<AgentEvent>,
+    stops: Stops,
+    playing: Arc<AtomicBool>,
+) {
     let Script {
         dialect,
         session_id,
@@ -315,6 +342,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         before_stop,
         steps,
         outcome,
+        kill: _,
     } = script;
     let mut stream = Stream {
         dialect,
@@ -324,11 +352,10 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         reader,
         guard: StreamGuard::default(),
         events,
+        playing,
         usage: Vec::new(),
     };
-    let (before_open, steps): (Vec<MockStep>, Vec<MockStep>) = steps
-        .into_iter()
-        .partition(|step| matches!(step, MockStep::BeforeOpen { .. }));
+    let (before_open, steps) = before_opening(steps);
     if !opening(
         &mut stream,
         &stops,

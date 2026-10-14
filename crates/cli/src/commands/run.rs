@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, Workflow};
+use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, RunAdapter, Workflow};
 use yunta_engine::{FrozenRun, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
@@ -26,7 +26,7 @@ mod mode;
 pub(crate) use detach::start_detached;
 
 use super::drive::Prepared;
-use super::Adapters;
+use super::registry::{read_fixture, servable};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
@@ -53,25 +53,6 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<InputName, String>, String> {
         }
     }
     Ok(inputs)
-}
-
-/// `--adapter <name>` names a real adapter every session runs on; it
-/// must be one `real_adapters` constructed from the config. `mock` is
-/// handled before this: it needs a fixture, never a real binary.
-fn validate_adapter_flag(name: &AdapterId, adapters: &Adapters) -> Result<(), String> {
-    if !adapters.contains_key(name) {
-        return Err(format!(
-            "unknown adapter `{name}` — this binary can run: {}",
-            if adapters.is_empty() {
-                "(none configured — `runners:` names no adapter this build supports)".to_string()
-            } else {
-                let mut names: Vec<&str> = adapters.keys().map(AdapterId::as_str).collect();
-                names.sort();
-                names.join(", ")
-            }
-        ));
-    }
-    Ok(())
 }
 
 /// Every run in storage that has events and has neither closed nor broken:
@@ -172,60 +153,46 @@ fn mock_fixture<'a>(
 }
 
 /// Everything a run settles before it exists: the workflow resolved and
-/// checked, git able to commit its work, every adapter it names present
-/// and healthy, and the manifest frozen, with the real adapter `--adapter`
-/// names — so what this refuses costs nothing, and what it returns is
+/// checked, git able to commit its work, the manifest frozen with the
+/// adapter it runs on pinned into it, and every adapter it names present
+/// and healthy — so what this refuses costs nothing, and what it returns is
 /// the very run the caller is about to create.
 ///
-/// Both shapes of a run come through here, which is what makes them
-/// refuse the same workflow in the same words. A mock fixture skips the
-/// adapter step whole: a scripted session needs no binary, so none is
-/// built or probed for it, and the caller gets an empty registry to
-/// fill from the fixture once the run has a directory to read it into.
+/// The pin is what `--adapter` names: a real adapter by its id, or a mock
+/// fixture's text, read here so the run keeps it. Both shapes of a run come
+/// through here, which is what makes them refuse the same workflow in the
+/// same words. What the adapters step refuses is [`servable`]'s.
+///
+/// `ambient` is the environment the run is born in: the user knowledge it
+/// freezes is read from there, the way its sessions read it at their nodes.
 pub(super) async fn runnable(
     ctx: &Context,
     workflow_path: &Path,
     raw_inputs: &[String],
     adapter: Option<&AdapterId>,
     mock_fixture: Option<&Path>,
-) -> Result<(FrozenRun, Adapters), CliError> {
+    ambient: &yunta_core::Env,
+) -> Result<FrozenRun, CliError> {
     let (workflow_path, workflow) = super::verdict::resolve_runnable(ctx, workflow_path).await?;
     super::committer::refuse_without_committer(ctx).await?;
-    let adapters = match mock_fixture {
-        Some(_) => HashMap::new(),
-        None => {
-            super::forge::refuse_unreachable_forge(
-                &ctx.project.config,
-                &workflow,
-                &yunta_core::ProcessSecrets,
-            )?;
-            runnable_adapters(ctx, &workflow, adapter).await?
-        }
-    };
-    let mut frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs).await?;
-    frozen.manifest.adapter = adapter.filter(|id| **id != MOCK_ID).cloned();
-    Ok((frozen, adapters))
-}
-
-/// The real adapters this workflow can run on, refused before a worktree
-/// or a token is spent if one is missing, unnamed or unhealthy.
-///
-/// Every path that is about to execute a workflow on real binaries goes
-/// through here — the one that drives the run itself and the one that
-/// hands it to a detached child — so a workflow no adapter can run is
-/// refused in the same words whichever of them the caller asked for.
-async fn runnable_adapters(
-    ctx: &Context,
-    workflow: &Workflow,
-    adapter: Option<&AdapterId>,
-) -> Result<Adapters, CliError> {
-    let adapters = super::real_adapters(&ctx.project.config);
-    super::refuse_unrunnable(workflow, &adapters)?;
-    if let Some(name) = adapter {
-        validate_adapter_flag(name, &adapters).map_err(CliError::msg)?;
+    if mock_fixture.is_none() {
+        super::forge::refuse_unreachable_forge(
+            &ctx.project.config,
+            &workflow,
+            &yunta_core::ProcessSecrets,
+        )?;
     }
-    super::probe_or_refuse(&adapters).await?;
-    Ok(adapters)
+    let pinned = match mock_fixture {
+        Some(path) => Some(RunAdapter::Mock {
+            fixture: read_fixture(path).await?,
+        }),
+        None => adapter.map(|id| RunAdapter::Named(id.clone())),
+    };
+    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs, ambient)
+        .await?
+        .with_adapter(pinned);
+    servable(&frozen.manifest).await?;
+    Ok(frozen)
 }
 
 /// What an invocation says about a run before it creates it: what this
@@ -358,8 +325,8 @@ async fn estimate(
     (estimation, budget_warning)
 }
 
-/// Freezes the run: its manifest, the documents its `inputs:` named,
-/// and its state roots, which
+/// Freezes the run: its manifest, every input its nodes read, the
+/// documents its `inputs:` named, and its state roots, which
 /// [`FrozenPaths::new`](yunta_core::FrozenPaths::new) requires to be
 /// absolute — `resume`/`status`/`gc` read these back from any directory,
 /// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
@@ -369,9 +336,12 @@ async fn build_frozen_manifest(
     workflow: &Workflow,
     workflow_path: &Path,
     raw_inputs: &[String],
+    ambient: &yunta_core::Env,
 ) -> Result<FrozenRun, CliError> {
     let provided_inputs = parse_inputs(raw_inputs).map_err(CliError::msg)?;
     let workflow_dir = workflow_path.parent().unwrap_or(Path::new("."));
+    // The user layer's knowledge, where the environment keeps it.
+    let user_knowledge = yunta_core::user_knowledge_dir(ambient);
     let mut frozen = yunta_engine::build_manifest(
         workflow,
         &ctx.project.config,
@@ -379,6 +349,7 @@ async fn build_frozen_manifest(
         &ctx.cwd,
         &provided_inputs,
         ctx.supervision(),
+        user_knowledge.as_deref(),
     )
     .await?;
     frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
@@ -475,6 +446,7 @@ pub(super) async fn create_run_from(
             // The run is born holding every document its `inputs:`
             // named, accepted right after `run_created`.
             artifacts: &frozen.documents,
+            blobs: &frozen.blobs,
             // A run a caller starts is the root of its lineage: it
             // measures on its first wake, if its config names a suite.
             baseline: None,

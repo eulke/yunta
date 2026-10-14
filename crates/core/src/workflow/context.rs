@@ -306,6 +306,17 @@ impl std::fmt::Display for KnowledgeLayer {
     }
 }
 
+impl KnowledgeLayer {
+    /// Every layer, from the most general to the most local: a later layer
+    /// overwrites an earlier one by filename, so `repo` wins over `user`,
+    /// which wins over `org`. Every reader of the layers walks this list.
+    pub const PRECEDENCE: [KnowledgeLayer; 3] = [
+        KnowledgeLayer::Org,
+        KnowledgeLayer::User,
+        KnowledgeLayer::Repo,
+    ];
+}
+
 /// `knowledge: { layers: [...] }` — empty/absent `layers` means
 /// every layer the resolver can see.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
@@ -313,6 +324,17 @@ impl std::fmt::Display for KnowledgeLayer {
 pub struct KnowledgeParams {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<KnowledgeLayer>,
+}
+
+impl KnowledgeParams {
+    /// The layers a request reads, in precedence order: the ones it names,
+    /// or every layer when it names none.
+    pub fn layers_read(&self) -> Vec<KnowledgeLayer> {
+        KnowledgeLayer::PRECEDENCE
+            .into_iter()
+            .filter(|layer| self.layers.is_empty() || self.layers.contains(layer))
+            .collect()
+    }
 }
 
 /// `node-output: { node: ... }` — captured stdout/stderr of a

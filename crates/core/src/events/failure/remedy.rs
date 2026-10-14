@@ -46,6 +46,9 @@ pub enum Precondition {
 pub enum Stuck {
     /// The config the run froze at birth lacks what this needs; a new run under a config that declares it is the way out.
     FrozenConfig,
+    /// A file the run froze at birth no longer holds the bytes it froze: the
+    /// run reads its copy, so a new run is the way out.
+    FrozenInput,
     /// The project's permissions deny the work.
     ProjectDenies,
     /// The scope needs a grant this run will not give.
@@ -89,6 +92,7 @@ impl Failure {
     pub fn remedies(&self, facts: &Facts) -> Outlook {
         match self {
             Failure::Unset { .. } => Outlook::Stuck(Stuck::FrozenConfig),
+            Failure::FrozenInput { .. } => Outlook::Stuck(Stuck::FrozenInput),
             Failure::PathsDenied { .. } => Outlook::Stuck(Stuck::ProjectDenies),
             Failure::ScopeOwed { .. } => owed_scope_outlook(facts),
             Failure::SessionRefused { session_refused } => {
@@ -123,6 +127,7 @@ impl Failure {
             } else {
                 Precondition::OutsideTreeChanged
             }),
+            Failure::SessionNotStopped { .. } => retry(Precondition::OutsideTreeChanged),
             Failure::ChildFailed {
                 child_failure: Some(child),
                 ..

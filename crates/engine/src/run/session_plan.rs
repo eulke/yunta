@@ -19,6 +19,7 @@ use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
 use yunta_core::{Confinement, ConfinementInput, Node, Task, Unbuildable};
 
+use crate::frozen::Source;
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
 use crate::run_tools::{RunToolsSession, TaskAccess};
@@ -120,32 +121,30 @@ fn declares_edit_scope(node: &Node) -> bool {
         || node.permissions == Some(yunta_core::NodePermissions::ReadOnly)
 }
 
-/// The skill directories this node's sessions mount. Names are resolved
-/// by the engine and a name that resolves to nothing fails the node;
-/// mounting is the adapter's, and an adapter without the capability
-/// degrades with an event rather than failing — a skill is added
-/// instruction, never correctness.
+/// The skill directories this node's sessions mount. The names are the
+/// node's own plus the config's `skills.always`, and each one resolves
+/// through the run's frozen set, so a skill edited mid-run mounts as it was
+/// at birth. A name the run did not freeze, or whose frozen file no longer
+/// matches its hash, fails the node; mounting is the adapter's, and an
+/// adapter without the capability degrades with an event rather than
+/// failing — a skill is added instruction, never correctness.
 async fn mount_skills(
     ctx: &crate::run::RunCtx<'_>,
     node: &Node,
     adapter: &dyn Adapter,
 ) -> Result<Result<Vec<PathBuf>, NodeEnd>, crate::run::RunError> {
-    let skills = match crate::skills::resolve_skills(
-        &ctx.manifest.config,
-        &ctx.manifest.workflow,
-        node,
-        ctx.worktree,
-    ) {
-        Ok(skills) => skills,
-        Err(error) => {
-            return Ok(Err(crate::run::node_close::fail(
-                ctx,
-                node,
-                error.to_string(),
-            )
-            .await?))
+    let source = Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient);
+    let mut skills = Vec::new();
+    for name in crate::skills::skill_names(&ctx.manifest.config, &ctx.manifest.workflow, node) {
+        match source.skill_dir(&name).await {
+            Ok(dir) => skills.push(dir),
+            Err(error) => {
+                return Ok(Err(
+                    super::session_policy::close_frozen(ctx, node, error).await?
+                ))
+            }
         }
-    };
+    }
     // A node that mounts none asked for nothing, so nothing is missing.
     if skills.is_empty() {
         return Ok(Ok(skills));

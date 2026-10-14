@@ -1,11 +1,17 @@
 //! What a node's sessions may do beside writing their scope: the agent
 //! they work as, and whose configuration of the agent's CLI they load.
 //! Each is the node's own word, else the workflow's, else a default.
+//!
+//! What a node reads from the run's frozen inputs is read through
+//! [`Source`], and a refusal of one closes the node the same way wherever
+//! it is read: see [`close_frozen`].
 
 use yunta_core::agent::AgentDefinition;
+use yunta_core::events::{Failure, TokenUsage};
 use yunta_core::Node;
 
 use super::node_exec::NodeEnd;
+use crate::frozen::{FrozenError, Source};
 
 /// Whose CLI configuration `node`'s sessions load: its own word, else the
 /// workflow's `node_defaults`, else the person's own.
@@ -21,9 +27,9 @@ pub(super) fn cli_config(ctx: &crate::run::RunCtx<'_>, node: &Node) -> yunta_cor
         .unwrap_or_default()
 }
 
-/// The definition of the agent the node runs as, if it names one. A name
-/// that resolves to no definition fails the node before any session
-/// spends a token on it.
+/// The definition of the agent the node runs as, if it names one, as the
+/// run froze it at birth. A name that resolves to no definition fails the
+/// node before any session spends a token on it.
 pub(super) async fn agent(
     ctx: &crate::run::RunCtx<'_>,
     node: &Node,
@@ -32,13 +38,48 @@ pub(super) async fn agent(
     let Some(name) = &chosen.agent else {
         return Ok(Ok(None));
     };
-    match crate::agents::resolve_agent(name, ctx.worktree).await {
+    match Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient)
+        .agent(name)
+        .await
+    {
         Ok(agent) => Ok(Ok(Some(agent))),
-        Err(error) => Ok(Err(crate::run::node_close::fail(
-            ctx,
-            node,
-            error.to_string(),
-        )
-        .await?)),
+        Err(error) => Ok(Err(close_frozen(ctx, node, error).await?)),
     }
+}
+
+/// Closes `node` with a refusal of one of the run's frozen inputs. Each
+/// refusal comes from one place:
+///
+/// - `Missing` and `Mismatch` come from a frozen set: a name the set does not
+///   hold, an object the run's store does not hold, a copy that is gone or
+///   whose files differ from the set, or bytes that no longer hash to the
+///   value the run was born with. Both close the node as `FrozenInput`,
+///   naming the input.
+/// - `Unresolved` comes from a checkout read, which a run without a frozen
+///   set makes, and from a frozen agent whose bytes do not read as a
+///   definition.
+/// - `UnreadableKey` comes from a frozen set that holds a knowledge key no
+///   layer reads: an entry this binary cannot place, not a changed input.
+/// - `Escapes` comes only from the freeze at birth, which no node read
+///   reaches.
+/// - `Io` comes from either.
+///
+/// Every refusal other than `Missing` and `Mismatch` keeps the sentence it
+/// carries.
+pub(super) async fn close_frozen(
+    ctx: &crate::run::RunCtx<'_>,
+    node: &Node,
+    error: FrozenError,
+) -> Result<NodeEnd, crate::run::RunError> {
+    let failure = match &error {
+        FrozenError::Mismatch { input } | FrozenError::Missing { input } => Failure::FrozenInput {
+            frozen_input: input.clone(),
+        },
+        FrozenError::Unresolved(_)
+        | FrozenError::UnreadableKey { .. }
+        | FrozenError::Escapes { .. }
+        | FrozenError::Prompt { .. }
+        | FrozenError::Io { .. } => Failure::message(error.to_string()),
+    };
+    super::node_close::fail_with(ctx, node, failure, TokenUsage::default()).await
 }

@@ -175,6 +175,8 @@ mod tests {
             pack: None,
             project: None,
             adapter: None,
+            frozen: None,
+            provenance_gaps: Vec::new(),
         }
     }
 

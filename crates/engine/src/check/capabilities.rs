@@ -124,7 +124,7 @@ fn check_network_under_read_only(
     declared: &dyn Fn(&AdapterId) -> Option<AdapterFacts>,
     errors: &mut Vec<CheckError>,
 ) {
-    if node.network != Some(true) || !opens_session(node) {
+    if node.network != Some(true) || !node.opens_session() {
         return;
     }
     let profile = node
@@ -152,7 +152,7 @@ fn check_stop_refusals(
     declared: &dyn Fn(&AdapterId) -> Option<AdapterFacts>,
     errors: &mut Vec<CheckError>,
 ) {
-    if opens_session(node) {
+    if node.opens_session() {
         refuse_if_none_can(
             node,
             adapters,
@@ -206,11 +206,7 @@ pub(crate) fn candidate_adapters(node: &Node, config: &ConfigLayer) -> Vec<Adapt
     let names: Vec<&RunnerName> = if !node.runners.is_empty() {
         node.runners.iter().collect()
     } else {
-        node.runner
-            .as_ref()
-            .or(config.defaults.as_ref().and_then(|d| d.runner.as_ref()))
-            .into_iter()
-            .collect()
+        config.runner_role(node).into_iter().collect()
     };
     let Some(runners) = config.runners.as_ref() else {
         return Vec::new();
@@ -221,12 +217,6 @@ pub(crate) fn candidate_adapters(node: &Node, config: &ConfigLayer) -> Vec<Adapt
         .flatten()
         .map(|candidate| candidate.adapter.clone())
         .collect()
-}
-
-/// Whether `node` opens the agent session that an adapter's sandbox and
-/// stop govern: a prompt, or a loop with a session for each task.
-pub(crate) fn opens_session(node: &Node) -> bool {
-    matches!(node.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. })
 }
 
 /// The candidates `declared` knows, each with its facts, in declaration
@@ -273,7 +263,7 @@ pub fn check_token_cap_warnings(
     }
     workflow
         .iter_nodes()
-        .filter(|node| opens_session(node))
+        .filter(|node| node.opens_session())
         .filter(|node| {
             all_known_hold(&candidate_adapters(node, config), declared, |facts| {
                 !facts.capabilities.declares(Capability::MidSessionTokenCap)

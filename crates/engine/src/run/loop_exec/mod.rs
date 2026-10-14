@@ -14,6 +14,7 @@ mod escalate;
 mod integrate;
 mod reopen;
 mod respecify;
+mod unstopped;
 
 use yunta_core::events::{
     loop_overrun_failure, EngineFact, EventPayload, Failure, LoopIterationPayload, NodeOutcome,
@@ -212,7 +213,7 @@ pub(super) async fn execute_loop(
 
         let (pending, departures) =
             match integrate_batch(ctx, node, dispatches, cancel, &mut state).await? {
-                BatchIntegration::Cancelled(end) => return Ok(end),
+                BatchIntegration::Cancelled(end) | BatchIntegration::Ended(end) => return Ok(end),
                 BatchIntegration::Done {
                     escalations,
                     departures,

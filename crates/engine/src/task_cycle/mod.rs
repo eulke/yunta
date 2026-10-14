@@ -32,7 +32,7 @@ use std::sync::Arc;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Phase, TaskLedger};
+use yunta_core::events::{Phase, TaskLedger, TokenUsage};
 use yunta_core::expansion::Decision;
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::protected::Protected;
@@ -52,6 +52,7 @@ pub(crate) use criteria::{
     could_not_run, exit_code_of, pre_check_unless_cut, probe, probe_command, unanswered_words,
 };
 pub use criteria::{post_check, pre_check, PostCheck};
+pub(crate) use dispatch::not_stopped_failure;
 pub use dispatch::DispatchError;
 pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
 pub use held::HeldGate;
@@ -365,7 +366,7 @@ async fn cycle(
         }
     };
 
-    let mut attempts = Vec::new();
+    let mut attempts: Vec<AttemptRecord> = Vec::new();
     // What the engine grants during an attempt holds for every attempt
     // after it: the one it is granted for is the next.
     let mut granted: Vec<ScopeGlob> = params.already_granted_paths.to_vec();
@@ -378,7 +379,12 @@ async fn cycle(
             resume: continuing.as_ref(),
             ..params
         };
-        let (staged, step) = run_one_attempt(&attempt_params, recorder, attempt).await?;
+        // An attempt that cannot stop its session reports the spend of the
+        // attempts before it too: the node that ran this cycle pays for them.
+        let earlier: TokenUsage = attempts.iter().map(|record| record.tokens).sum();
+        let (staged, step) = run_one_attempt(&attempt_params, recorder, attempt)
+            .await
+            .map_err(|error| error.with_earlier_spend(earlier))?;
         last_staged = staged;
         match step {
             AttemptStep::Stop {

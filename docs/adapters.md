@@ -29,6 +29,14 @@ A role can list more than one candidate — the engine picks the first whose
 adapter is healthy, so a role degrades gracefully across a team with mixed
 tooling instead of hard-failing.
 
+`yunta run --adapter <id>` pins the run to one adapter: each role resolves to
+its candidate on that adapter, and the log records the candidates it passes
+over. The pin is frozen with the run, so a resume, a detached child, a
+successor and a child workflow all take the same one. A role with no candidate
+on the pinned adapter refuses the run before it is created, naming the node and
+the role. An adapter this binary does not build refuses it the same way, and the
+refusal lists the adapters the config names that this binary builds.
+
 A candidate can say how long its model reasons with `effort:` — `low`,
 `medium`, `high` or `xhigh`, the levels both CLIs accept — and a node can say
 its own, which wins. `claude-code` receives it as `--effort` and `codex` as
@@ -65,8 +73,16 @@ people; the body is the instructions. The model is the runner's, because a
 model belongs to one provider, and the tools are the permission profile's —
 a definition that names either is refused. `claude-code` hands the
 instructions to the CLI with `--append-system-prompt-file`, and `codex` with
-`-c developer_instructions=…`. A node whose agent resolves to no definition
-fails before its session opens, naming where it looked.
+`-c developer_instructions=…`, on its command line, where `ps` lists them to
+anyone who can list the machine's processes, so keep secrets out of a
+definition. An agent that resolves to no definition refuses the run before it
+is created, naming where it looked.
+
+A run freezes each definition it uses when it is created. Yunta reads the
+definition from the working tree the run is created in, committed or not: under
+`isolation: worktree` the run's own checkout may lack an uncommitted definition,
+and the run still gets it. Every session that follows gets the text the run was
+born with, even if the file changes while the run is parked or running.
 
 To move an agent from `.claude/agents/<name>.md`, copy it to
 `.yunta/agents/<name>.md` and drop every front matter key but `name` and
@@ -211,6 +227,17 @@ After a suspension, no session opens until the host has been awake for two
 minutes, so a session is not lost to a laptop that wakes briefly and sleeps
 again.
 
+A session the engine ends before its own end, on a cancel or at its budget, is
+interrupted and then killed, with its whole process group. If the adapter's
+`kill` fails, the engine cannot tell the session stopped, and its process group
+may still run. The node then fails with `session_not_stopped` and runs no close:
+nothing of its tree is judged, landed or committed, because the session may
+still be writing it. The failure records the tokens the session reported, and a
+run cancelled from outside records it too. The group stays in the run's
+`scratch/engine.json` for as long as it runs, past the engine that kept it:
+`yunta close` settles it once that engine is gone, and `yunta cancel` signals it
+while the run is still open.
+
 ## `mock`: not a test helper, a first-class adapter
 
 `mock` reproduces an agent session from a YAML fixture — a scripted sequence
@@ -226,6 +253,26 @@ under `.yunta/tests/`) always uses it — see the [workflow
 guide](guide.md#authoring-patterns) for writing workflows, and
 [packs](packs.md#testing-a-pack-before-sharing-it) for using it to test a
 pack you're authoring.
+
+A mock run keeps its fixture. `yunta run --adapter mock --fixture <path>` reads
+the fixture when the run is created and freezes its text with the run, so
+`yunta resume` plays the rest of the run on that fixture and never opens a real
+CLI. A mock run written before runs froze their adapter does not resume:
+`yunta resume` refuses it, naming the mock, before it takes the run's checkout
+and before it opens a session. Such a run that paused before its first session
+has no mock session on its log to tell it apart, so it resumes like a run
+without `--adapter`, on the CLIs its config names.
+
+The mock keeps its claims in the run's `mock-claims.json`: the scripts its
+sessions have taken, and the number the next fresh session id takes. A resumed
+run takes only the scripts its earlier sessions did not, and each session it
+opens takes the next fresh id. A session continued from an earlier one keeps
+that one's id.
+
+A fixture's session can script `kill: refuse`. Its `kill` then fails, and the
+session keeps running for as long as the script still plays; once the script
+has ended, `kill` answers as it does for any session. That is how a session the
+engine cannot stop is reproduced without a real CLI.
 
 ## `yunta doctor`
 

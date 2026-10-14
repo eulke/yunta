@@ -152,6 +152,14 @@ impl Node {
             }
     }
 
+    /// Whether this node opens the agent session that an adapter's sandbox
+    /// and stop govern: a prompt, or a loop with a session for each task.
+    /// The one copy of the predicate, asked by `check`, the freeze and the
+    /// startup refusal alike.
+    pub fn opens_session(&self) -> bool {
+        matches!(self.kind, NodeKind::Prompt { .. } | NodeKind::Loop { .. })
+    }
+
     /// Whether this node hands a `questions` document over and waits on
     /// its answers.
     ///

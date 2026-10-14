@@ -15,6 +15,9 @@ use yunta_core::Capabilities;
 #[path = "run_sessions/confinement.rs"]
 mod confinement;
 
+#[path = "run_sessions/frozen.rs"]
+mod frozen;
+
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(
@@ -130,20 +133,22 @@ sessions:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
+    // A run mounts each skill from the copy it froze at birth, in its own
+    // directory, not from the checkout.
+    let frozen = bench.run_dir().join("frozen/skills");
     let seen = bench.mock().skills_seen();
     assert_eq!(seen.len(), 1);
     assert_eq!(
         seen[0],
-        vec![
-            bench.worktree.join(".yunta/skills/conventions"),
-            bench.worktree.join(".yunta/skills/grill"),
-        ],
+        vec![frozen.join("conventions"), frozen.join("grill")],
         "skills.always mounts first, then the node's own list"
     );
 }
 
+/// A skill the run cannot resolve refuses the run at birth, and the refusal
+/// names the skill and the directory it looked in.
 #[tokio::test]
-async fn a_missing_skill_name_fails_the_node_with_where_it_looked() {
+async fn a_missing_skill_name_refuses_the_run_at_birth() {
     let bench = Bench::new();
     install_skill(&bench.worktree, "conventions");
     // `grill` is never installed.
@@ -152,27 +157,19 @@ dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let RunReport { terminal, state } = bench
-        .run_with_config(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
-        .await;
-    match &terminal {
-        RunTerminal::Paused { reason } => {
-            let headline = format!(
-                "skill `grill` not found under `{}` — add the directory, fix `skills.paths` in the config, or install the pack that declares it",
-                bench.worktree.join(".yunta/skills").display()
-            );
-            assert!(node_failed(reason, "work", &headline), "{reason:?}");
-        }
-        other => panic!("a missing skill must fail the node, got {other:?}"),
-    }
-    assert!(matches!(
-        state.nodes.state("work"),
-        Some(NodeState::Failed { .. })
-    ));
+    let error = bench
+        .try_create(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await
+        .expect_err("a skill that resolves to nothing refuses the run");
+
+    let said = error.to_string();
+    let looked = bench.worktree.join(".yunta/skills").display().to_string();
+    assert!(said.contains("grill") && said.contains(&looked), "{said}");
     assert!(
-        bench.mock().skills_seen().is_empty(),
-        "no session was spawned"
+        !bench.run_dir().exists(),
+        "a refused birth creates no run directory"
     );
+    assert!(bench.events().is_empty(), "no session was spawned");
 }
 
 #[tokio::test]
@@ -577,6 +574,8 @@ sessions:
   - outcome: { type: completed, summary: "audited" }
 "#;
     install_agent(&bench.worktree, "security-auditor");
+    // The candidate's own agent is resolved when the run is born, too.
+    install_agent(&bench.worktree, "benito");
     let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -637,27 +636,26 @@ sessions:
     assert_eq!(recorded, asked);
 }
 
-/// An agent the run cannot resolve to a definition fails its node before
-/// any session spends a token on it, saying where it looked.
+/// An agent the run cannot resolve to a definition refuses the run at
+/// birth, before any session spends a token on it, saying where it looked.
 #[tokio::test]
-async fn an_agent_without_a_definition_fails_its_node_before_any_session() {
+async fn an_agent_without_a_definition_refuses_the_run_at_birth() {
     let bench = Bench::new();
     let workflow = "name: w\nnodes:\n  - { id: audit, kind: prompt, runner: executor, agent: nobody, prompt: \"Audit.\" }\n";
     let fixture =
         "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n";
 
-    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
+    let error = bench
+        .try_create(workflow, fixture, yunta_testkit::MOCK_CONFIG)
+        .await
+        .expect_err("an agent that resolves to nothing refuses the run");
 
+    assert!(error.to_string().contains(".yunta/agents"), "{error}");
     assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "{terminal:?}"
+        !bench.run_dir().exists(),
+        "a refused birth creates no run directory"
     );
-    let Some(NodeState::Failed { failure, .. }) = state.nodes.state("audit") else {
-        panic!("`audit` fails: {state:?}");
-    };
-    let sentence = yunta_render::failure::sentence(failure);
-    assert!(sentence.contains(".yunta/agents"), "{sentence}");
-    assert!(bench.mock().requests_seen().is_empty(), "no session opened");
+    assert!(bench.events().is_empty(), "no session was opened");
 }
 
 #[tokio::test]

@@ -5,15 +5,13 @@
 //! or `yunta resume` process makes it: nothing carries across a wake
 //! but the log.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, Workflow};
+use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{
-    build_manifest, create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction,
-    NoInteraction, RunEnv, RunReport,
+    create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction, NoInteraction,
+    RunEnv, RunReport,
 };
 
 use super::{Bench, Driven, KnownSecrets, MOCK_CONFIG};
@@ -224,9 +222,7 @@ impl Bench {
         {
             let mut driven = self.driven.lock().expect("the bench's own lock");
             let driven = driven.as_mut().expect("a run to wake");
-            driven
-                .adapters
-                .insert("mock".into(), mock.clone() as Arc<dyn Adapter>);
+            driven.adapters = yunta_adapters::registry(&driven.manifest.config, mock.clone());
             driven.mock = mock;
         }
         self.wake_with_all(human_interaction, no_secrets()).await
@@ -296,7 +292,7 @@ impl Bench {
     ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
         let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
         let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
-        let frozen = self.freeze(&workflow, &config).await;
+        let frozen = self.freeze(&workflow, &config).await?;
         // A `type: document` input is born as an artifact, so the run a
         // bench creates holds what its `inputs:` named alongside
         // whatever the test hands it.
@@ -316,6 +312,7 @@ impl Bench {
                 worktree: &tree,
                 promoted_from: None,
                 artifacts: &artifacts,
+                blobs: &frozen.blobs,
                 // A run a caller starts is the root of its lineage: it
                 // measures on its first wake, if its config names a
                 // suite.
@@ -329,8 +326,7 @@ impl Bench {
         .await?;
 
         let mock = self.mock_from(fixture_yaml, &run_dir, &tree);
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), mock.clone() as Arc<dyn Adapter>);
+        let adapters = yunta_adapters::registry(&config, mock.clone());
         *self.driven.lock().expect("the bench's own lock") = Some(Driven {
             manifest,
             run_dir: run_dir.clone(),
@@ -465,28 +461,6 @@ impl Bench {
         self.wake_through(human_interaction, secrets)
             .await
             .expect("execute run")
-    }
-
-    /// What `(workflow, config)` freezes to against this bench's world:
-    /// the manifest the run carries, and the documents its `inputs:`
-    /// named.
-    pub(super) async fn freeze(
-        &self,
-        workflow: &Workflow,
-        config: &ConfigLayer,
-    ) -> yunta_engine::FrozenRun {
-        let mut frozen = build_manifest(
-            workflow,
-            config,
-            self.workflow_dir.as_deref().unwrap_or(&self.worktree),
-            &self.worktree,
-            &self.inputs,
-            self.supervision(),
-        )
-        .await
-        .expect("build manifest");
-        frozen.manifest.adapter = self.adapter.clone();
-        frozen
     }
 }
 

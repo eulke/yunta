@@ -49,7 +49,9 @@ pub use sentences::{loop_overrun_failure, PAST_THE_CAP};
 /// `session_refused:` as [`Failure::SessionRefused`], one carrying
 /// `limit:` as [`Failure::Limit`], one carrying `stopped:` as
 /// [`Failure::TasksStopped`], one carrying `red:` as [`Failure::Red`],
-/// one carrying `child_run:` as [`Failure::ChildFailed`], and a log
+/// one carrying `child_run:` as [`Failure::ChildFailed`], one carrying
+/// `frozen_input:` as [`Failure::FrozenInput`], one carrying
+/// `session_not_stopped:` as [`Failure::SessionNotStopped`], and a log
 /// written before failures were data carries `outcome:` alone and reads
 /// back as [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -118,6 +120,10 @@ pub enum Failure {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         child_failure: Option<Box<Failure>>,
     },
+    /// A frozen input no longer matches the hash the run was born with.
+    FrozenInput { frozen_input: String },
+    /// The engine cannot end a session it asked to stop; its process group may still run.
+    SessionNotStopped { session_not_stopped: String },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
 }
@@ -239,6 +245,8 @@ impl Failure {
             | Failure::TasksStopped { .. }
             | Failure::Red { .. }
             | Failure::ChildFailed { .. }
+            | Failure::FrozenInput { .. }
+            | Failure::SessionNotStopped { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -268,6 +276,8 @@ impl Failure {
             | Failure::Limit { .. }
             | Failure::TasksStopped { .. }
             | Failure::ChildFailed { .. }
+            | Failure::FrozenInput { .. }
+            | Failure::SessionNotStopped { .. }
             | Failure::Message { .. } => None,
         }
     }
@@ -311,6 +321,8 @@ impl Failure {
             | Failure::TasksStopped { .. }
             | Failure::Red { .. }
             | Failure::ChildFailed { .. }
+            | Failure::FrozenInput { .. }
+            | Failure::SessionNotStopped { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -334,6 +346,8 @@ impl Failure {
             | Failure::TasksStopped { .. }
             | Failure::Red { .. }
             | Failure::ChildFailed { .. }
+            | Failure::FrozenInput { .. }
+            | Failure::SessionNotStopped { .. }
             | Failure::Message { .. } => false,
         }
     }
@@ -387,6 +401,8 @@ impl Failure {
             | Failure::TasksStopped { .. }
             | Failure::Red { .. }
             | Failure::ChildFailed { .. }
+            | Failure::FrozenInput { .. }
+            | Failure::SessionNotStopped { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
@@ -395,6 +411,7 @@ impl Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reserved::ReservedOption;
 
     #[test]
     fn a_regression_hands_over_the_tail_it_printed() {
@@ -419,5 +436,43 @@ mod tests {
             },
         };
         assert!(failure.tail().is_empty());
+    }
+
+    #[test]
+    fn a_frozen_input_that_changed_is_stuck_on_its_own_frozen_input() {
+        let failure = Failure::FrozenInput {
+            frozen_input: "agents/reviewer.md".to_string(),
+        };
+        assert_eq!(
+            failure.remedies(&facts_at_failure()),
+            Outlook::Stuck(Stuck::FrozenInput)
+        );
+    }
+
+    #[test]
+    fn a_session_that_could_not_stop_offers_a_retry_that_waits_for_the_outside() {
+        let failure = Failure::SessionNotStopped {
+            session_not_stopped: "kill refused".to_string(),
+        };
+        assert_eq!(
+            failure.remedies(&facts_at_failure()),
+            Outlook::Choose(vec![Remedy {
+                option: ReservedOption::Retry,
+                precondition: Some(Precondition::OutsideTreeChanged),
+            }])
+        );
+    }
+
+    /// The facts a node failed with. Neither failure's outlook reads them,
+    /// so any facts serve the two tests above.
+    fn facts_at_failure() -> Facts {
+        Facts {
+            failed_at: "2026-01-01T00:00:00Z"
+                .parse()
+                .expect("a fixed timestamp parses"),
+            continuable: false,
+            may_grant: false,
+            tree_moved: false,
+        }
     }
 }

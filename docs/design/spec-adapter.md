@@ -218,8 +218,11 @@ pub trait AgentSession: Send {
     async fn interrupt(&mut self) -> Result<()>;
 
     /// Terminación forzosa de TODO el árbol de procesos de la
-    /// sesión (process group / job object). Nunca deja zombies:
-    /// es la garantía sobre la que se construye `yunta cancel`.
+    /// sesión (process group / job object). Si responde Ok, no queda
+    /// nada del árbol corriendo: es la garantía sobre la que se
+    /// construye `yunta cancel`. Un error significa que el engine no
+    /// puede saber que la sesión paró, y que su process group puede
+    /// seguir corriendo.
     async fn kill(&mut self) -> Result<()>;
 
     /// Da al proceso de la sesión hasta `grace` para salir solo después de un
@@ -339,10 +342,12 @@ telemetría, no evidencia.
 
 ## 5. Degradación
 
-El engine resuelve capacidad requerida vs declarada **en dos momentos**:
+El engine resuelve capacidad requerida vs declarada **en tres momentos**:
 estáticamente en `yunta check` (un workflow que exige `permissions: read_only` con
-un adapter sin `permission_profiles` es error de validación, no sorpresa en runtime)
-y dinámicamente al despachar cada nodo. La degradación dinámica emite un evento
+un adapter sin `permission_profiles` es error de validación, no sorpresa en runtime),
+al retomar un run que usa CLIs reales, donde `yunta resume` aplica las mismas reglas
+a los adapters que arma, antes de tomar el checkout, y dinámicamente al despachar cada
+nodo. La degradación dinámica emite un evento
 `capability_degraded` con la capacidad, el adapter y la política aplicada:
 
 | Capacidad ausente | Política |
@@ -350,12 +355,12 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `resume_session` | `on_interrupt: resume_session` degrada a `restart_node` · warning |
 | `fence` | scope solo post-check + warning, una vez por run |
 | `permission_profiles` | nodo `read_only` → error en check; `edit`/`full` corren con permisos del CLI |
-| `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado. Un `agent:` sin definición falla el nodo antes de abrir la sesión |
+| `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado. Un `agent:` sin definición rechaza el run antes de crearlo |
 | `usage_reporting` | presupuesto de tokens no exigible → solo timeout; warning por run |
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
 | `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
 | `network_isolation` | `network: false` del nodo queda registrado para política y auditoría, no exigido · `capability_degraded`. Con esta capacidad, el CLI cierra la red que la confinación de la sesión pide cerrar; un nodo `read-only` no la tiene nunca |
-| `stop_refusals` | `yunta check` rechaza un nodo que abre sesión (un `prompt` o un `loop`) cuando ningún candidato de su runner la declara; no hay degradación |
+| `stop_refusals` | `yunta check` rechaza un nodo que abre sesión (un `prompt` o un `loop`) cuando ningún candidato de su runner la declara, y `yunta resume` rechaza por la misma regla un run cuyo adapter ya no la declara; no hay degradación |
 | `mid_session_token_cap` | el tope `budget.max_tokens` se verifica en cada línea del stream; sin la capacidad, la sesión se cierra al `Completed` como excedida de presupuesto si su total lo supera · `capability_degraded` con la política `cap_at_session_end`. `yunta check` avisa cuando `limits.max_tokens_per_run` está puesto y ningún candidato la declara |
 | `run_tools` montado y sin efecto | el listener de la sesión sabe si su CLI listó o llamó alguna de sus tools —los dos CLIs las listan antes de su primer turno—; el adapter no informa cuántas trae. Un listener que no abrió emite `capability_degraded` con la política `no_run_tools` al abrir la sesión, antes de gastarla. Una sesión que cerró sin listar ni llamar ninguna emite la misma degradación al cerrar |
 
@@ -467,7 +472,8 @@ como en `claude-code`: un enlace por skill bajo `.agents/skills/` del directorio
 sesión, donde el CLI descubre las de un proyecto, declarado como staging y retirado al
 cerrar. `custom_agents`: las instrucciones del agente llegan como
 `-c developer_instructions=…`, que Codex suma a las suyas; el modelo es el del runner,
-no el de un perfil de Codex (D253). La
+no el de un perfil de Codex (D253). Las instrucciones viajan en su argv:
+`ps` las muestra a quien pueda listar los procesos de la máquina. La
 red de los comandos la abre el pedido solo cuando la sesión escribe su worktree
 (`permissions.yunta-session.network.enabled`); bajo `read-only`, o `edit` con sandbox
 `read-only`, no hay red. `check` rechaza `network: true` en un nodo que abre una
@@ -496,8 +502,17 @@ ejercitar una capacidad ausente sin un CLI que la niegue. Cada efecto pasa por e
 adapters reales: un fixture ejercita la regla, nunca una segunda implementación de
 ella. Es lo que permite testear el engine completo (ciclo de tareas, degradación,
 cancelación, resume, paralelismo) en CI sin ningún LLM, y validar workflows nuevos
-sin gastar presupuesto (`yunta run --adapter mock`). El binario no lo construye para
-una corrida real: los fixtures entran por `yunta test`.
+sin gastar presupuesto (`yunta run --adapter mock --fixture <path>`). El binario no
+lo construye para una corrida real: los fixtures entran por `yunta test` y por
+`--fixture`. Un run mock lleva el texto de su fixture en el manifest, leído al crearlo,
+y `yunta resume` lo retoma sobre ese fixture; un run mock de antes de que el manifest
+guardara su adapter no retoma: `yunta resume` lo rechaza. Los claims del mock —los
+guiones que tomó cada sesión y el número que toma la siguiente sesión nueva— quedan en
+`mock-claims.json`, en el directorio del run: un resume toma solo los guiones que sus
+sesiones anteriores no tomaron, cada sesión nueva recibe el siguiente id, y una sesión
+que el engine continúa conserva el suyo. Un guion puede declarar `kill: refuse`: su
+`kill` falla y la sesión sigue corriendo mientras el mock siga jugando el guion; terminado
+el guion, `kill` responde como en cualquier otra sesión.
 
 ## 7. Invariantes
 
@@ -508,8 +523,10 @@ una corrida real: los fixtures entran por `yunta test`.
 - **A2.** Las capacidades son constantes tras la construcción del adapter y el
   engine nunca pide lo no declarado.
 - **A3.** Toda sesión emite `SessionOpened` primero y exactamente un evento terminal.
-- **A4.** `kill` extermina el árbol de procesos completo; ningún camino de código
-  deja procesos huérfanos.
+- **A4.** `kill` extermina el árbol de procesos completo o responde con un error;
+  ningún camino de código deja procesos huérfanos sin que el engine lo sepa. Un
+  `kill` con error deja el nodo con `session_not_stopped`, y su grupo registrado en
+  `engine.json` mientras siga corriendo (Contrato §8.9).
 - **A5.** Los eventos de adapter nunca contienen secretos ni contenido completo;
   solo digests y resúmenes.
 - **A6.** La ausencia de capacidad produce error en check o degradación con evento,

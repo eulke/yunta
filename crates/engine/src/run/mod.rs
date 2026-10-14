@@ -274,6 +274,8 @@ pub enum RunError {
     /// accepted.
     #[error(transparent)]
     Object(#[from] crate::artifacts::ObjectError),
+    #[error(transparent)]
+    Frozen(#[from] crate::frozen::FrozenError),
 }
 
 /// A git the caller's token stopped is not a failure of anything: it is

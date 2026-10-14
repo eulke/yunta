@@ -25,13 +25,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{AdapterId, CommandName, McpServerName, RunnerName, SharedDirVar};
-use crate::workflow::OnInterrupt;
+use crate::workflow::{Node, OnInterrupt};
 use env::expand_path;
 use merge::merge;
 
 pub use env::{
-    user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource, ShortSecret,
-    MIN_SECRET_CHARS, REDACTED,
+    user_knowledge_dir, user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor,
+    SecretSource, ShortSecret, MIN_SECRET_CHARS, REDACTED,
 };
 pub use keys::ConfigKey;
 pub use permissions::{
@@ -233,6 +233,16 @@ impl ConfigLayer {
     /// precedence; `permissions` inverts this).
     pub fn merge_layers(layers: impl IntoIterator<Item = ConfigLayer>) -> ConfigLayer {
         layers.into_iter().fold(ConfigLayer::default(), merge)
+    }
+
+    /// The runner a node that takes a session resolves: its own `runner:`,
+    /// else `defaults.runner`. The one place that fallback lives, so the
+    /// freeze, `check`, the startup refusal and the node's own resolution
+    /// name the same runner.
+    pub fn runner_role<'a>(&'a self, node: &'a Node) -> Option<&'a RunnerName> {
+        node.runner
+            .as_ref()
+            .or_else(|| self.defaults.as_ref()?.runner.as_ref())
     }
 
     /// `defaults.isolation`, with the schema's own default (`worktree`)

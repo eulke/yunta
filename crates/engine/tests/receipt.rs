@@ -459,6 +459,15 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     );
 }
 
+/// A child the workflow names is frozen with the run, so it has to exist for
+/// the run to be born; the receipts here read only the failure they name.
+fn with_producer_child(bench: &Bench) {
+    yunta_testkit::write(
+        &bench.worktree.join(".yunta/workflows/producer.yaml"),
+        "name: producer\nnodes:\n  - { id: make, kind: bash, run: \"true\" }\n",
+    );
+}
+
 /// The receipt a run of `workflow_yaml` earns when its one node failed
 /// on `failure` and the run ended.
 ///
@@ -468,6 +477,7 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
 /// `node_failed`, and that is exactly what the log carries.
 async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
     let bench = Bench::new();
+    with_producer_child(&bench);
     let manifest = bench.manifest_for(workflow_yaml, CONFIG).await;
 
     // A node fails only while it runs, so the log starts it first: a

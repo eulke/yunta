@@ -144,9 +144,9 @@ fn paused_failure(board: &Board<'_>, node: &Node, failure: &Failure, outlook: Ou
 }
 
 /// Whether a re-route can change how `failure` ends. A limit that resets
-/// meets the same limit on the correction's attempt, a frozen config reads
-/// the same to every attempt, and a plan that repeats the declaration its
-/// correction already answered is the same plan.
+/// meets the same limit on the correction's attempt, a frozen config or
+/// frozen input reads the same to every attempt, and a plan that repeats the
+/// declaration its correction already answered is the same plan.
 fn correction_can_change(failure: &Failure, outlook: &Outlook) -> bool {
     let repeats_a_plan = matches!(
         failure,
@@ -154,5 +154,9 @@ fn correction_can_change(failure: &Failure, outlook: &Outlook) -> bool {
             if matches!(unchanged.failure.as_ref(), Failure::PlanUnpassable { .. })
     );
     let waits = matches!(outlook, Outlook::WaitUntil { .. });
-    !repeats_a_plan && !waits && !matches!(outlook, Outlook::Stuck(Stuck::FrozenConfig))
+    let frozen = matches!(
+        outlook,
+        Outlook::Stuck(Stuck::FrozenConfig | Stuck::FrozenInput)
+    );
+    !repeats_a_plan && !waits && !frozen
 }

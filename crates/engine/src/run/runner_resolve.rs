@@ -2,7 +2,7 @@
 //! its per-run tools, and recording what the adapter cannot enforce.
 
 use yunta_core::events::{EventPayload, RunnerResolvedPayload};
-use yunta_core::{AdapterId, AgentName, Node};
+use yunta_core::{AdapterId, AgentName, Node, RunAdapter};
 
 use crate::runner::resolve_runner;
 
@@ -18,22 +18,18 @@ pub(super) async fn resolve_node_runner(
     node: &Node,
 ) -> Result<Step<yunta_core::RunnerCandidate>, RunError> {
     // A node without `runner:` falls back to `defaults.runner`.
-    let default_runner = ctx
-        .manifest
-        .config
-        .defaults
-        .as_ref()
-        .and_then(|defaults| defaults.runner.as_ref());
-    let Some(role) = node.runner.as_ref().or(default_runner) else {
+    let Some(role) = ctx.manifest.config.runner_role(node) else {
         let end = super::check_exec::unset(ctx, node, yunta_core::ConfigKey::Runner).await?;
         return Ok(Step::Ended(end));
     };
 
+    // A run pinned to an adapter takes only the candidates on it; a run on
+    // the mock pins none and takes the first available candidate.
     match resolve_runner(
         role,
         &ctx.manifest.config,
         &|adapter| ctx.adapters.contains_key(adapter),
-        ctx.manifest.adapter.as_ref(),
+        ctx.manifest.adapter.as_ref().and_then(RunAdapter::pinned),
     ) {
         Ok(resolved) => {
             let mut chosen = resolved.chosen.clone();

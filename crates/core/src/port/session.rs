@@ -405,7 +405,8 @@ pub trait AgentSession: Send {
     async fn interrupt(&mut self) -> Result<()>;
 
     /// Forceful termination of the whole session process tree — never
-    /// leaves anything running.
+    /// leaves anything running. An error means the engine cannot tell the
+    /// session stopped, and its process group may still run.
     async fn kill(&mut self) -> Result<()>;
 
     /// Gives the session's process up to `grace` to exit on its own after

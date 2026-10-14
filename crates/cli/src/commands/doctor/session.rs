@@ -176,10 +176,16 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
     let ctx = probe_context(ctx, &sandbox, candidate);
 
     let storage = ctx.async_storage().await?;
-    let (frozen, adapters) =
-        crate::commands::run::runnable(&ctx, &workflow, &[], None, None).await?;
+    let frozen = crate::commands::run::runnable(&ctx, &workflow, &[], None, None, &ctx.env).await?;
     let manifest = frozen.manifest.clone();
     let prepared = crate::commands::run::create_run_from(&ctx, &storage, &frozen, None).await?;
+    let adapters = crate::commands::registry::adapters_for(
+        &manifest,
+        &crate::commands::registry::ScriptedPaths {
+            run_dir: &prepared.run_dir,
+            worktree: &prepared.worktree,
+        },
+    )?;
     let report = crate::commands::drive::execute(crate::commands::drive::Executing {
         run_id: &prepared.run_id,
         manifest: &manifest,

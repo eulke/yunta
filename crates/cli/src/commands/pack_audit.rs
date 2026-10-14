@@ -57,10 +57,7 @@ fn inventory(report: &PackAudit) -> Doc<'static> {
         .requires
         .runners
         .iter()
-        .map(|r| match &r.permissions {
-            Some(p) => format!("{} ({})", r.name, p.as_str()),
-            None => r.name.to_string(),
-        })
+        .map(|r| r.name.to_string())
         .collect();
     let declares = Fields::new()
         .push_if("permissions", m.declares.permissions.as_str())

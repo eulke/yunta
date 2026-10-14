@@ -193,17 +193,18 @@ nodes:
         let adapters = crate::commands::Adapters::new();
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
-        let manifest = build_manifest(
+        let frozen = build_manifest(
             &workflow,
             &project.config,
             &cwd,
             &cwd,
             &HashMap::new(),
             ctx.supervision(),
+            None,
         )
         .await
-        .unwrap()
-        .manifest;
+        .unwrap();
+        let manifest = frozen.manifest.clone();
 
         let run_id = RunId::from("run-parent");
         let worktree = project.worktrees_root.join(run_id.as_str());
@@ -226,6 +227,7 @@ nodes:
                 worktree: &worktree,
                 promoted_from: None,
                 artifacts: &[],
+                blobs: &frozen.blobs,
                 baseline: None,
                 environment: None,
                 redactor: &yunta_core::Redactor::default(),

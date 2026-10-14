@@ -56,7 +56,7 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
     } = detaching;
     // No fixture ever reaches here: a detached child resolves the
     // adapters `runners:` names and reads none.
-    let (frozen, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
+    let frozen = runnable(ctx, workflow_path, raw_inputs, adapter, None, &ctx.env).await?;
     let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await?;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     if json {
@@ -100,7 +100,7 @@ pub(crate) async fn start_detached(
     adapter: Option<&AdapterId>,
     mode: Option<&ModeName>,
 ) -> Result<Started, CliError> {
-    let (frozen, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
+    let frozen = runnable(ctx, workflow_path, raw_inputs, adapter, None, &ctx.env).await?;
     // Quiet, because stdout here *is* the control plane's JSON-RPC
     // stream: the distribution line the estimation prints for a person
     // would land in the middle of a response. What it has to say

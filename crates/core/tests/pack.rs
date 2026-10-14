@@ -25,12 +25,9 @@ fn the_reference_pack_parses_and_round_trips() {
 
     assert_eq!(pack.requires.runners.len(), 2);
     assert_eq!(pack.requires.runners[0].name, "reviewer");
-    assert_eq!(
-        pack.requires.runners[0].permissions,
-        Some(NodePermissions::ReadOnly)
-    );
+    assert!(pack.requires.runners[0].retired_permissions.is_some());
     assert_eq!(pack.requires.runners[1].name, "mechanical");
-    assert_eq!(pack.requires.runners[1].permissions, None);
+    assert!(pack.requires.runners[1].retired_permissions.is_none());
     assert_eq!(pack.requires.mcp_servers, vec!["internal-docs"]);
     assert_eq!(pack.requires.programs, vec!["gh", "cargo"]);
 
@@ -47,10 +44,12 @@ fn the_reference_pack_parses_and_round_trips() {
     assert_eq!(pack.contents.docs, vec!["README.md"]);
 
     // Round-trip at the serde-tree level: what parses serializes back to
-    // the same value.
+    // the same value, except the retired key, which is never written back.
     let reserialized = yunta_core::yaml::to_string(&pack).unwrap();
     let reparsed: PackManifest = yunta_core::yaml::parse(&reserialized).unwrap();
-    assert_eq!(pack, reparsed);
+    let mut expected = pack.clone();
+    expected.requires.runners[0].retired_permissions = None;
+    assert_eq!(expected, reparsed);
 }
 
 #[test]

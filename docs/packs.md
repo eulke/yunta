@@ -2,12 +2,13 @@
 
 A pack is a distributable, versioned bundle of workflows, skills, knowledge
 and docs — never something that extends the engine itself, only content it
-already knows how to run. A pack **declares** the roles it needs (a role name
-plus a permissions ceiling, e.g. `reviewer` at `read-only`) and its own
-permissions ceiling (`declares:` in `pack.yaml`) — never a concrete adapter,
-model or secret; the installing team resolves those roles against its own
-`runners:`, so the same pack runs unedited on a team that's all Claude Code
-and one that's all Codex.
+already knows how to run. A pack **declares** the roles it needs (a role name,
+e.g. `reviewer`) and its own permissions ceiling (`declares:` in `pack.yaml`) —
+never a concrete adapter, model or secret; the installing team resolves those
+roles against its own `runners:`, so the same pack runs unedited on a team
+that's all Claude Code and one that's all Codex. A role carries no permissions
+of its own: `yunta check` refuses a `permissions:` key under `requires.runners`
+by name, because no permission profile exists to hold it.
 
 Nothing in the [workflow guide](guide.md) requires a pack — packs are a
 distribution mechanism for sharing workflows and knowledge across projects,
@@ -197,8 +198,8 @@ Field by field:
   declarative YAML and prompts, auditable by reading) — a non-empty list makes
   `add`/`update` require confirmation on the installing side by default.
 - **`requires`** — the floor the installing team's config must provide:
-  `runners` (the runner names your workflows use in `runner:`, optionally
-  with the permission profile you expect them resolvable at), `mcp_servers` (names
+  `runners` (the runner names your workflows use in `runner:`; a `permissions`
+  key on one is refused by `yunta check`), `mcp_servers` (names
   your workflows reference under `context: { mcp: ... }`), `programs`
   (binaries your `bash`/hook steps start themselves and assume are on
   `PATH`). A capability the installing project provides — its lint, its
@@ -211,7 +212,9 @@ Field by field:
   in `agent:` — see [adapters](adapters.md#agents)), `knowledge` (a pack can be
   knowledge-only — an empty `workflows`/`skills` with a non-empty `knowledge`
   is a legitimate pack, e.g. an org-wide style guide with nothing to run),
-  `docs`.
+  `docs`. A prompt file a workflow names is read relative to that workflow's
+  directory. In a pack, a path that climbs out of the pack, in `contents` or in
+  a prompt file, or is absolute, refuses the run at birth, naming the path.
 
 ### What to keep out
 

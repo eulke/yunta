@@ -33,12 +33,15 @@ if [ -n "$CODEX_STUB_LINGER" ]; then
   trap 'exit 0' INT
 fi
 
+# Each record is written beside its file and moved into place, so a test
+# that reads it while the stub runs meets the old record or the new one,
+# never a file truncated and not yet rewritten.
 if [ -n "$CODEX_STUB_ARGS_FILE" ]; then
-  printf '%s\n' "$@" > "$CODEX_STUB_ARGS_FILE"
+  printf '%s\n' "$@" > "$CODEX_STUB_ARGS_FILE.$$" && mv "$CODEX_STUB_ARGS_FILE.$$" "$CODEX_STUB_ARGS_FILE"
 fi
 
 if [ -n "$CODEX_STUB_ENV_FILE" ]; then
-  env > "$CODEX_STUB_ENV_FILE"
+  env > "$CODEX_STUB_ENV_FILE.$$" && mv "$CODEX_STUB_ENV_FILE.$$" "$CODEX_STUB_ENV_FILE"
 fi
 
 if [ -n "$CODEX_STUB_STDIN_FILE" ]; then

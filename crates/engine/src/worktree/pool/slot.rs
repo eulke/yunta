@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use yunta_core::process::signal::Liveness;
 
 use super::super::WorktreeError;
 use super::Lease;
@@ -230,11 +229,9 @@ fn agents_still_work(home: &Path, number: u32) -> bool {
 /// still answers.
 fn groups_at_work(run_dir: &Path) -> bool {
     match process_registry::read_registry(run_dir) {
-        process_registry::Registry::Read(registry) => registry
-            .doc
-            .process_groups
-            .iter()
-            .any(|group| yunta_core::process::signal::liveness(*group) == Liveness::Alive),
+        process_registry::Registry::Read(registry) => {
+            !process_registry::running_groups(&registry.doc.process_groups).is_empty()
+        }
         _ => false,
     }
 }

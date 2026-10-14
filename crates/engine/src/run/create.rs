@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::durable::{self, Durability};
 use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
 use yunta_core::{
-    CommitSha, InputName, Manifest, ModeName, NodeId, Redactor, RunId, SecretSource, TaskId,
+    CommitSha, ContentHash, InputName, Manifest, ModeName, NodeId, Redactor, RunId, SecretSource,
+    TaskId,
 };
 use yunta_storage::AsyncStorage;
 
@@ -104,6 +105,10 @@ pub struct CreateRunParams<'a> {
     /// What the run's log redacts with, resolved by the caller through
     /// [`run_redactor`] before it takes anything a refused run would leave.
     pub redactor: &'a Redactor,
+    /// The bytes of the frozen inputs `manifest` names by hash. They are
+    /// written as objects, and the frozen skills and executors materialized
+    /// beside them, before `manifest.yaml` exists.
+    pub blobs: &'a [(ContentHash, Vec<u8>)],
 }
 
 /// The redactor a run of `manifest` works with: every secret its config
@@ -154,6 +159,7 @@ pub async fn create_run(
         baseline,
         environment,
         redactor,
+        blobs,
     } = params;
     if *mode != ModeName::default() {
         match &manifest.workflow.modes {
@@ -216,6 +222,10 @@ pub async fn create_run(
                 source,
             })?;
     }
+
+    // The frozen inputs are on disk before the manifest names them: a run
+    // whose `manifest.yaml` exists can read everything it consumes.
+    crate::frozen::store::write_at_birth(&run_dir, blobs, manifest.frozen.as_ref()).await?;
 
     let manifest_path = crate::run_dir::manifest_path(&run_dir);
     let bytes = yunta_core::persisted::PersistedDoc::of(manifest.clone())

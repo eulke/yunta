@@ -14,9 +14,13 @@ use yunta_core::{AdapterId, Node, PromptSource};
 
 use crate::run_dir::Opening;
 use crate::run_tools::RunToolsSession;
-use crate::task_cycle::{dispatch_session, DispatchOutcome, Dispatched, SessionSetup};
+use crate::task_cycle::{
+    dispatch_session, not_stopped_failure, DispatchError, DispatchOutcome, Dispatched, SessionSetup,
+};
 
-use super::node_close::{close_node, fail_with_staged, fail_with_tokens_staged, Close};
+use super::node_close::{
+    close_node, fail_unstopped, fail_with_staged, fail_with_tokens_staged, Close,
+};
 use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_profile, NodeEnd};
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::session_plan::{OpenSessionError, OpenedSession};
@@ -172,7 +176,10 @@ pub(super) async fn execute_prompt(
         Err(end) => return Ok(end),
     };
     let (dispatched, staged) =
-        dispatch_node_session(ctx, node, adapter.as_ref(), opened, cancel).await?;
+        match dispatch_node_session(ctx, node, adapter.as_ref(), opened, cancel).await? {
+            Step::Value(session) => session,
+            Step::Ended(end) => return Ok(end),
+        };
     close_on_outcome(ctx, node, adapter.as_ref(), dispatched, &staged).await
 }
 
@@ -223,21 +230,22 @@ async fn open_node_session(
 
 /// The one session of an attempt, dispatched: how it resumes, what it is told,
 /// the staging it writes into, and the drive to its outcome. Returns what the
-/// session ended on and the files its adapter staged for itself.
+/// session ended on and the files its adapter staged for itself, or the node's
+/// end when the session could not be stopped.
 async fn dispatch_node_session(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_core::port::Adapter,
     opened: OpenedSession,
     cancel: &CancellationToken,
-) -> Result<(Dispatched, Vec<PathBuf>), RunError> {
+) -> Result<Step<(Dispatched, Vec<PathBuf>)>, RunError> {
     let OpenedSession { request, run_tools } = opened;
     let continuing = ctx.unit.and_then(|mine| mine.continues);
     let resume_session = resume_and_stage(ctx, node, adapter, continuing).await?;
     let staged = adapter.staged_paths(&request);
     let (request, brief) =
         attempt_request(ctx, node, request, run_tools.as_ref(), continuing).await?;
-    let dispatched = dispatch_session(
+    let dispatched = match dispatch_session(
         adapter,
         request,
         cancel,
@@ -250,13 +258,10 @@ async fn dispatch_node_session(
         ),
     )
     .await
-    .map_err(|error| match error {
-        crate::task_cycle::DispatchError::Adapter(source) => RunError::Spawn {
-            node: node.id.clone(),
-            source,
-        },
-        crate::task_cycle::DispatchError::Audit(source) => RunError::Storage(source),
-    })?;
+    {
+        Ok(dispatched) => dispatched,
+        Err(error) => return Ok(Step::Ended(dispatch_failed(ctx, node, error).await?)),
+    };
     crate::task_cycle::record_unlisted_tools(
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         adapter.id(),
@@ -265,7 +270,32 @@ async fn dispatch_node_session(
     )
     .await
     .map_err(RunError::Storage)?;
-    Ok((dispatched, staged))
+    Ok(Step::Value((dispatched, staged)))
+}
+
+/// The end of a dispatch that failed. A session the engine could not stop ends
+/// the node with that fact and with what the session spent, not with a run
+/// error; every other failure is the run's.
+async fn dispatch_failed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    error: DispatchError,
+) -> Result<NodeEnd, RunError> {
+    match error {
+        DispatchError::NotStopped {
+            detail,
+            release,
+            tokens,
+        } => {
+            let failure = not_stopped_failure(&detail, release.as_deref());
+            fail_unstopped(ctx, node, failure, tokens).await
+        }
+        DispatchError::Adapter(source) | DispatchError::Release(source) => Err(RunError::Spawn {
+            node: node.id.clone(),
+            source,
+        }),
+        DispatchError::Audit(source) => Err(RunError::Storage(source)),
+    }
 }
 
 /// The session an attempt picks back up, if it picks one up, and the staging

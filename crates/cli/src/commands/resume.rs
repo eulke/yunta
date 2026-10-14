@@ -11,28 +11,26 @@
 //! flags: two commands that execute the same thing have no business
 //! reporting it differently.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use yunta_core::events::PauseReason;
-use yunta_core::{AdapterId, Manifest, RunId};
+use yunta_adapters::MOCK_SESSION_PREFIX;
+use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
+use yunta_core::{Manifest, RunId};
 use yunta_engine::RunState;
 
+use super::registry::{adapters_for, servable, ScriptedPaths, ServableError};
 use crate::commands::drive::{drive, Driving, Prepared};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::state::RunWord;
 
 /// A run this invocation is about to pick up, as its own frozen manifest
-/// describes it: where its state lives, what it runs on, and the tree it
-/// works in.
+/// describes it: where its state lives and the tree it works in.
 struct Parked {
     run_dir: PathBuf,
     manifest: Manifest,
     worktree: PathBuf,
-    adapters: HashMap<AdapterId, Arc<dyn yunta_core::port::Adapter>>,
 }
 
 /// Opens the run `run_id` names, refusing one this project cannot reach
@@ -41,7 +39,9 @@ struct Parked {
 ///
 /// Everything comes from the manifest the run froze, never the project's
 /// current config: a run never re-reads config after it is created, and
-/// the worktree it works in is the one its own frozen roots name.
+/// the worktree it works in is the one its own frozen roots name. The
+/// refusals come before the reset wait, so a run that cannot resume here
+/// is refused at once rather than after a wait.
 ///
 /// `None` when a person interrupted that wait: the run stays parked and
 /// nothing was taken. `announce` says whether the wait is said on the
@@ -54,8 +54,10 @@ async fn parked(ctx: &Context, run_id: &RunId, announce: bool) -> Result<Option<
     // Resolved before any checkout is taken, so a refused resume takes no
     // checkout and writes nothing; the wake resolves the same redactor again.
     yunta_engine::run_redactor(&manifest, &yunta_core::ProcessSecrets)?;
-    let adapters = super::real_adapters(&manifest.config);
-    super::refuse_unrunnable(&manifest.workflow, &adapters)?;
+    if predates_frozen_adapter(&manifest, &open.events) {
+        return Err(ServableError::MockBeforeFrozenAdapter.into());
+    }
+    servable(&manifest).await?;
     if !waited_out_reset(ctx, &state, run_id, announce).await {
         return Ok(None);
     }
@@ -67,8 +69,20 @@ async fn parked(ctx: &Context, run_id: &RunId, announce: bool) -> Result<Option<
         run_dir,
         manifest,
         worktree,
-        adapters,
     }))
+}
+
+/// A manifest with no adapter whose log holds a session the mock opened
+/// predates frozen adapters: its fixture was never kept.
+fn predates_frozen_adapter(manifest: &Manifest, events: &[StoredEvent]) -> bool {
+    manifest.adapter.is_none()
+        && events.iter().any(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Session(SessionEvent::Opened(opened)))
+                    if opened.session_id.as_str().starts_with(MOCK_SESSION_PREFIX)
+            )
+        })
 }
 
 /// The checkout the run works in on this wake: the one its log names
@@ -138,11 +152,17 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
         run_dir,
         manifest,
         worktree,
-        adapters,
     }) = parked(&ctx, run_id, !quiet && !json).await?
     else {
         return Ok(crate::render::RunExit::Interrupted.outcome());
     };
+    let adapters = adapters_for(
+        &manifest,
+        &ScriptedPaths {
+            run_dir: &run_dir,
+            worktree: &worktree,
+        },
+    )?;
     let storage = ctx.async_storage().await?;
     if !json {
         super::started(run_id, "resuming", quiet);

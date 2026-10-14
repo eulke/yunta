@@ -115,6 +115,12 @@ pub fn user_state_root(env: &Env) -> Option<PathBuf> {
     env.home.as_ref().map(|home| home.join(".yunta"))
 }
 
+/// The user layer's knowledge: `knowledge/` under the state root the
+/// environment names. `None` when no state root is known.
+pub fn user_knowledge_dir(env: &Env) -> Option<PathBuf> {
+    user_state_root(env).map(|root| root.join("knowledge"))
+}
+
 /// A path in a config layer that starts with `~` and cannot be
 /// expanded: there is no home directory to expand it against, or the
 /// form is one this schema does not read (`~user/...`).
@@ -135,7 +141,7 @@ pub enum HomeExpansionError {
 
 #[cfg(test)]
 mod env_tests {
-    use super::{user_state_root, Env};
+    use super::{user_knowledge_dir, user_state_root, Env};
     use std::path::PathBuf;
 
     #[test]
@@ -160,6 +166,36 @@ mod env_tests {
     #[test]
     fn neither_known_is_none() {
         assert_eq!(user_state_root(&Env::default()), None);
+    }
+
+    #[test]
+    fn knowledge_lives_under_the_yunta_home_state_root() {
+        let env = Env {
+            home: Some(PathBuf::from("/home/u")),
+            yunta_home: Some(PathBuf::from("/scratch/state")),
+            ..Default::default()
+        };
+        assert_eq!(
+            user_knowledge_dir(&env),
+            Some(PathBuf::from("/scratch/state/knowledge"))
+        );
+    }
+
+    #[test]
+    fn knowledge_falls_back_to_dot_yunta_under_home() {
+        let env = Env {
+            home: Some(PathBuf::from("/home/u")),
+            ..Default::default()
+        };
+        assert_eq!(
+            user_knowledge_dir(&env),
+            Some(PathBuf::from("/home/u/.yunta/knowledge"))
+        );
+    }
+
+    #[test]
+    fn knowledge_is_none_when_neither_is_known() {
+        assert_eq!(user_knowledge_dir(&Env::default()), None);
     }
 }
 

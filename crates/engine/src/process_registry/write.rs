@@ -10,7 +10,7 @@ use yunta_core::persisted::Persisted;
 use yunta_core::port::RunToolsEndpoint;
 use yunta_core::Pid;
 
-use super::{registry_path, Asked, EngineProcessFile};
+use super::{read_registry, registry_path, running_groups, Asked, EngineProcessFile, Registry};
 
 /// Handle the run's imperative shell holds for the registry file.
 pub struct ProcessRegistry {
@@ -20,18 +20,23 @@ pub struct ProcessRegistry {
 
 impl ProcessRegistry {
     /// Writes the initial file for this invocation. An earlier
-    /// invocation's file (crash leftovers) is simply overwritten — the
-    /// new engine owns the run now.
+    /// invocation's file is replaced — the new engine owns the run now —
+    /// but the groups it still names and that still run stay registered:
+    /// they are the run's processes, and this engine answers for them.
     pub fn create(
         run_dir: &Path,
         engine_pid: Pid,
         started_at: DateTime<Utc>,
     ) -> std::io::Result<ProcessRegistry> {
+        let process_groups = match read_registry(run_dir) {
+            Registry::Read(earlier) => running_groups(&earlier.doc.process_groups),
+            Registry::Absent | Registry::Corrupt(_) => Vec::new(),
+        };
         let state = EngineProcessFile {
             schema_version: <EngineProcessFile as Persisted>::SCHEMA_VERSION,
             engine_pid,
             started_at,
-            process_groups: Vec::new(),
+            process_groups,
             asking: None,
         };
         let registry = ProcessRegistry {
@@ -80,14 +85,25 @@ impl ProcessRegistry {
     ///
     /// The run reached a terminal: there is nothing left for an outside
     /// process to signal, and a credential nobody can use is a
-    /// credential nobody should still be able to read.
+    /// credential nobody should still be able to read. The exception is a
+    /// group the engine kept, because it could not stop it, that still
+    /// runs: the file stays, naming only that group, and the question this
+    /// engine asked a person is gone with it.
     pub fn clear(&self) {
         // blocking: the terminal's last act, on the thread that reached
         // it, after the log is closed and nothing is left to schedule.
-        if let Err(e) = std::fs::remove_file(&self.path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(error = %e, "failed to delete engine.json at run terminal");
+        let kept = {
+            let mut state = lock(&self.state);
+            state.asking = None;
+            state.process_groups = running_groups(&state.process_groups);
+            !state.process_groups.is_empty()
+        };
+        if kept {
+            if let Err(e) = self.commit(|_| {}) {
+                tracing::warn!(error = %e, "failed to keep a running process group in engine.json at run terminal");
             }
+        } else {
+            delete_registry(&self.path);
         }
         if let Some(scratch) = self.path.parent() {
             delete_credentials_under(scratch);
@@ -105,6 +121,16 @@ impl ProcessRegistry {
             .map_err(std::io::Error::other)?;
         // blocking: one small file, replaced whole while the lock is held.
         durable::replace(&self.path, &json, Durability::Atomic)
+    }
+}
+
+/// Deletes the registry file, where nothing is left for it to name.
+fn delete_registry(path: &Path) {
+    // blocking: see `ProcessRegistry::clear`.
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(error = %e, "failed to delete engine.json at run terminal");
+        }
     }
 }
 
@@ -146,11 +172,24 @@ fn delete_credentials_under(scratch: &Path) {
 pub struct PgidRegistration<'a> {
     registry: &'a ProcessRegistry,
     pgid: Pid,
+    /// Set by [`PgidRegistration::keep`], which leaves the group registered.
+    kept: bool,
+}
+
+impl PgidRegistration<'_> {
+    /// Leaves the group registered after this guard is gone. The engine could
+    /// not stop the group, so it may still run: the registry keeps it past the
+    /// engine's exit while it runs, and a separate `yunta close` still finds it.
+    pub fn keep(mut self) {
+        self.kept = true;
+    }
 }
 
 impl Drop for PgidRegistration<'_> {
     fn drop(&mut self) {
-        self.registry.remove(self.pgid);
+        if !self.kept {
+            self.registry.remove(self.pgid);
+        }
     }
 }
 
@@ -164,15 +203,20 @@ pub fn register<'a>(
     match (registry, pgid) {
         (Some(registry), Some(pgid)) => {
             registry.add(pgid);
-            Some(PgidRegistration { registry, pgid })
+            Some(PgidRegistration {
+                registry,
+                pgid,
+                kept: false,
+            })
         }
         _ => None,
     }
 }
 
 /// The file dies with the invocation that wrote it: every `execute_run`
-/// exit — terminal, pause, or error — drops the registry and deletes
-/// the file. A crash (SIGKILL) skips this, on purpose: the leftover
+/// exit — terminal, pause, or error — drops the registry and deletes the
+/// file, except for the kept groups that still run (see `clear`). A crash
+/// (SIGKILL) skips this, on purpose: the leftover
 /// file with its recorded pgids is exactly what a post-crash
 /// `yunta cancel` cleans up from.
 impl Drop for ProcessRegistry {
@@ -185,4 +229,87 @@ fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EnginePro
     state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::process_registry::{read_registry, registry_path, Registry};
+
+    /// A registry created the way a run creates its own: the scratch
+    /// directory first, then the file.
+    fn registry_in(run_dir: &Path) -> ProcessRegistry {
+        std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
+        let started = DateTime::from_timestamp(1_700_000_000, 0).expect("a timestamp");
+        ProcessRegistry::create(run_dir, Pid::try_from(1u32).expect("a pid"), started).unwrap()
+    }
+
+    /// The groups the registry file holds, as a reader of the file sees them.
+    fn groups_on_disk(run_dir: &Path) -> Vec<Pid> {
+        let Registry::Read(registry) = read_registry(run_dir) else {
+            panic!("the registry file does not read")
+        };
+        registry.doc.process_groups.clone()
+    }
+
+    #[test]
+    fn a_kept_registration_leaves_its_group_registered_once_its_guard_is_gone() {
+        let run = tempfile::tempdir().unwrap();
+        let registry = registry_in(run.path());
+        let group = Pid::try_from(77u32).expect("a pid");
+        register(Some(&registry), Some(group))
+            .expect("a registration")
+            .keep();
+        assert_eq!(groups_on_disk(run.path()), vec![group]);
+    }
+
+    #[test]
+    fn a_dropped_registration_removes_its_group_from_the_registry() {
+        let run = tempfile::tempdir().unwrap();
+        let registry = registry_in(run.path());
+        let group = Pid::try_from(77u32).expect("a pid");
+        drop(register(Some(&registry), Some(group)));
+        assert!(groups_on_disk(run.path()).is_empty());
+    }
+
+    #[test]
+    fn a_kept_group_that_still_runs_outlives_the_engine_that_kept_it() {
+        let run = tempfile::tempdir().unwrap();
+        let registry = registry_in(run.path());
+        // This test process is running, so it stands in for a group the
+        // engine could not stop.
+        let group = Pid::current();
+        register(Some(&registry), Some(group))
+            .expect("a registration")
+            .keep();
+        drop(registry);
+        assert_eq!(groups_on_disk(run.path()), vec![group]);
+    }
+
+    #[test]
+    fn a_kept_group_that_has_exited_leaves_no_registry_behind() {
+        let run = tempfile::tempdir().unwrap();
+        let registry = registry_in(run.path());
+        // No process has this id: the group is gone before the engine exits.
+        let group = Pid::try_from(2_000_000_000u32).expect("a pid");
+        register(Some(&registry), Some(group))
+            .expect("a registration")
+            .keep();
+        drop(registry);
+        assert!(!registry_path(run.path()).exists());
+    }
+
+    #[test]
+    fn a_later_invocation_keeps_the_running_groups_an_earlier_one_kept() {
+        let run = tempfile::tempdir().unwrap();
+        let earlier = registry_in(run.path());
+        let group = Pid::current();
+        register(Some(&earlier), Some(group))
+            .expect("a registration")
+            .keep();
+        drop(earlier);
+        let later = registry_in(run.path());
+        assert_eq!(groups_on_disk(run.path()), vec![group]);
+        drop(later);
+    }
 }

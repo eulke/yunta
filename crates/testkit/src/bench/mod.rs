@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use yunta_adapters::MockAdapter;
 use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, Capabilities, Clock, RunId};
+use yunta_core::{AdapterId, Capabilities, Clock, RunAdapter, RunId};
 use yunta_engine::{BirthArtifact, RunObserver};
 use yunta_storage::Storage;
 use yunta_testkit_core::{FixedClock, SeqIdSource};
@@ -58,8 +58,9 @@ pub struct Bench {
     /// it with one the test can trip.
     cancel: tokio_util::sync::CancellationToken,
     mode: yunta_core::ModeName,
-    /// The adapter the run is started on (`yunta run --adapter`).
-    adapter: Option<AdapterId>,
+    /// The adapter the run is started on (`yunta run --adapter`), which
+    /// the run's manifest carries.
+    adapter: Option<RunAdapter>,
     /// What the invocation hands the workflow's `inputs:`.
     inputs: HashMap<yunta_core::InputName, String>,
     /// Where a `prompt: { file: … }` resolves from and where a pack's
@@ -204,9 +205,10 @@ impl Bench {
         self
     }
 
-    /// Starts the run on `adapter`, as `yunta run --adapter` does.
+    /// Starts the run on `adapter`, as `yunta run --adapter` does: the
+    /// manifest pins every runner to that adapter's candidates.
     pub fn with_adapter(mut self, adapter: &str) -> Self {
-        self.adapter = Some(AdapterId::from(adapter));
+        self.adapter = Some(RunAdapter::Named(AdapterId::from(adapter)));
         self
     }
 
@@ -334,6 +336,41 @@ impl Bench {
                 .as_ref()
                 .expect("a run has to happen before the bench can be asked about it"),
         )
+    }
+
+    /// What `(workflow, config)` freezes to against this bench's world:
+    /// the manifest the run carries, and the documents its `inputs:`
+    /// named. A refusal to freeze, an input or a child the run cannot
+    /// freeze, answers the error the birth returns; any other failure to
+    /// build a manifest is a broken bench, and panics.
+    pub(super) async fn freeze(
+        &self,
+        workflow: &yunta_core::Workflow,
+        config: &yunta_core::ConfigLayer,
+    ) -> Result<yunta_engine::FrozenRun, yunta_engine::RunError> {
+        // The user layer is read from the user state root the bench was
+        // given, as the CLI reads it from its environment.
+        let user_knowledge = self
+            .ambient
+            .as_ref()
+            .and_then(yunta_core::user_knowledge_dir);
+        let built = yunta_engine::build_manifest(
+            workflow,
+            config,
+            self.workflow_dir.as_deref().unwrap_or(&self.worktree),
+            &self.worktree,
+            &self.inputs,
+            self.supervision(),
+            user_knowledge.as_deref(),
+        )
+        .await;
+        match built {
+            Ok(frozen) => Ok(frozen.with_adapter(self.adapter.clone())),
+            Err(yunta_engine::ManifestError::Frozen(refused)) => {
+                Err(yunta_engine::RunError::Frozen(refused))
+            }
+            Err(other) => panic!("build manifest: {other:?}"),
+        }
     }
 }
 

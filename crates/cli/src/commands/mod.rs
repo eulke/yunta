@@ -21,6 +21,7 @@ pub(crate) mod promote;
 pub mod rail;
 pub mod receipt;
 pub(crate) mod refusals;
+pub(crate) mod registry;
 pub mod resolve_gate;
 pub mod resume;
 pub mod run;

@@ -5,7 +5,10 @@
 //! just the top process. Scratch, deliberately: it is ephemeral process
 //! state, not an artifact and not event-log truth; it is written when
 //! `execute_run` starts, updated as sessions/hooks/executors spawn and
-//! close, and deleted at every terminal.
+//! close, and deleted at every terminal. A terminal keeps one thing: a
+//! process group the engine could not stop, while that group still runs.
+//! The file then names only those groups, so `yunta cancel` and `yunta
+//! close` can signal them and the checkout pool keeps their checkout.
 //!
 //! Registration is best-effort bookkeeping around processes that are
 //! already owned and killed by the in-process paths: a failed write
@@ -106,6 +109,16 @@ pub fn read_registry(run_dir: &Path) -> Registry {
         Ok(registry) => Registry::Read(Box::new(registry)),
         Err(error) => Registry::Corrupt(error),
     }
+}
+
+/// The groups among `groups` whose process still answers. What a registry
+/// keeps of a group once the engine that registered it is gone.
+pub(crate) fn running_groups(groups: &[Pid]) -> Vec<Pid> {
+    groups
+        .iter()
+        .copied()
+        .filter(|group| yunta_core::process::signal::liveness(*group) == Liveness::Alive)
+        .collect()
 }
 
 impl EngineProcessFile {
@@ -291,8 +304,10 @@ mod tests {
         for round in 0..200u32 {
             let registry =
                 ProcessRegistry::create(run.path(), Pid::try_from(1u32).unwrap(), started).unwrap();
+            // Ids no process holds: a registry keeps the groups that still run
+            // past its engine, so these are the ones that stay out of the next round.
             let groups: Vec<Pid> = (1..=16u32)
-                .map(|n| Pid::try_from(round * 16 + n).unwrap())
+                .map(|n| Pid::try_from(2_000_000_000 + round * 16 + n).unwrap())
                 .collect();
             std::thread::scope(|scope| {
                 for &group in &groups {

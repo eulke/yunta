@@ -135,7 +135,10 @@ impl Bench {
     ) -> yunta_core::Manifest {
         let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
         let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
-        self.freeze(&workflow, &config).await.manifest
+        self.freeze(&workflow, &config)
+            .await
+            .expect("the workflow freezes against this bench")
+            .manifest
     }
 
     /// Every finding `node` posted on this run's log, in log order.

@@ -191,21 +191,11 @@
       "minLength": 1
     },
     "RequiredRunner": {
-      "description": "One entry in `requires.runners` — a runner name plus the ceiling of\npermissions the pack asks that runner be resolvable with.\n`permissions` absent means the pack doesn't care what profile the\nrunner resolves under, only that the name itself is defined.",
+      "description": "One entry in `requires.runners`: a runner name the installer's own\n`runners:` must define with a candidate.",
       "type": "object",
       "properties": {
         "name": {
           "$ref": "#/$defs/RunnerName"
-        },
-        "permissions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/NodePermissions"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "additionalProperties": false,

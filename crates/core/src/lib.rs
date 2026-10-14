@@ -70,13 +70,14 @@ pub mod yaml;
 pub use capabilities::{Capabilities, Capability, FenceLevel, ToolNaming};
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    network_asked, permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
-    CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
-    DiskShare, Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig,
-    HomeExpansionError, Isolation, LimitsConfig, McpServerConfig, NetworkPermissions,
-    PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig, PoolConfig, PricingEntry,
-    ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor, RunnerCandidate, SecretSource,
-    ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS, REDACTED,
+    network_asked, permission_layer_conflicts, user_knowledge_dir, user_state_root,
+    AdapterSettings, BaselineConfig, CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig,
+    DefaultOnFailure, DefaultsConfig, DiskShare, Env, ExecutorKind, ExecutorRegistration,
+    ForgeConfig, GitHubForgeConfig, HomeExpansionError, Isolation, LimitsConfig, McpServerConfig,
+    NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
+    PoolConfig, PricingEntry, ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor,
+    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS,
+    REDACTED,
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use diagnostic::{
@@ -102,12 +103,13 @@ pub use ids::{
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use manifest::{
-    content_hash, FrozenPaths, Manifest, PackProvenance, ProjectIdentity, RelativeRootError,
+    content_hash, Frozen, FrozenPaths, FrozenWorkflow, Manifest, PackProvenance, ProjectIdentity,
+    ProvenanceGap, RelativeRootError, RunAdapter,
 };
 pub use nonempty::{Empty, NonEmpty};
 pub use pack::{
-    PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackManifestError,
-    PackRequires, RequiredRunner,
+    stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
+    PackManifestError, PackRequires, RequiredRunner,
 };
 pub use policy::{ScopeCeiling, ScopeExpansionMode};
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};

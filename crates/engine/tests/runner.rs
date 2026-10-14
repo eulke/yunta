@@ -1,6 +1,6 @@
 //! Resolving a runner to the candidate that runs it: the first available
-//! one in declared order, an `--adapter` override ahead of that order,
-//! and the agent the chosen candidate carries.
+//! one in declared order, a pinned adapter (`--adapter`) ahead of that
+//! order, and the agent the chosen candidate carries.
 //!
 //! A candidate passed over is recorded with the reason it was passed
 //! over, and a runner with nothing available is an error naming
@@ -105,14 +105,9 @@ fn an_adapter_override_with_no_candidate_on_it_is_an_error_naming_what_was_tried
     )
     .unwrap_err();
     match err {
-        RunnerError::OverrideHasNoCandidate {
-            runner,
-            adapter,
-            candidates,
-        } => {
+        RunnerError::NoCandidateAvailable { runner, tried } => {
             assert_eq!(runner, "reviewer");
-            assert_eq!(adapter, "codex");
-            assert_eq!(candidates, ["claude-code"]);
+            assert_eq!(tried, ["claude-code"]);
         }
         other => panic!("unexpected: {other:?}"),
     }

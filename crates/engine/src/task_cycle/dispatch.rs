@@ -14,27 +14,78 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventPayload, ServiceReachablePayload, ServiceUnreachablePayload, SessionEvent, TokenUsage,
+    EventPayload, Failure, ServiceReachablePayload, ServiceUnreachablePayload, SessionEvent,
+    TokenUsage,
 };
-use yunta_core::port::{Adapter, SessionRequest};
+use yunta_core::port::{Adapter, AgentSession, SessionRequest};
 use yunta_core::{AdapterError, Capability};
 use yunta_storage::StorageError;
 
-use super::session::{stream_session, SessionObserver};
-use super::stream::emit_audit;
+use super::session::{end_running, stream_session, SessionObserver};
+use super::stream::{emit_audit, read_stream, Terms, Totals};
 use super::DispatchOutcome;
 use crate::run_tools::Arrivals;
 
-/// How [`dispatch_session`] failed: the adapter refused, or a session
-/// audit event could not be appended. The two have different owners —
-/// the adapter boundary versus the run's own storage — so callers route
-/// each to its own node/run failure.
+/// How [`dispatch_session`] failed: the adapter refused, a session it ended
+/// could not be taken back, the engine could not stop a session it asked to
+/// stop, or a session audit event could not be appended. The owners differ —
+/// the adapter boundary, the session's own teardown, and the run's own
+/// storage — so callers route each to its own node/run failure.
 #[derive(Debug, Error)]
 pub enum DispatchError {
     #[error(transparent)]
     Adapter(#[from] AdapterError),
     #[error("failed to append a session audit event")]
     Audit(#[source] StorageError),
+    /// The session ended, and taking back what it set up failed.
+    #[error("failed to take back what the session set up")]
+    Release(#[source] AdapterError),
+    /// The engine asked the session to stop and could not stop it. `release`
+    /// is set when taking back what it set up failed as well, and `tokens` is
+    /// what the session reported before the stop failed. The release error is
+    /// boxed: it is the one large part of this variant, and `DispatchError`
+    /// travels through every session's result.
+    #[error("the engine could not stop the session: {detail}")]
+    NotStopped {
+        detail: String,
+        release: Option<Box<AdapterError>>,
+        tokens: TokenUsage,
+    },
+}
+
+impl DispatchError {
+    /// The same error, with `earlier` added to what a stopped session
+    /// reported: a session picked back up after a lost service spent in
+    /// both stretches.
+    fn with_earlier_spend(self, earlier: TokenUsage) -> Self {
+        match self {
+            DispatchError::NotStopped {
+                detail,
+                release,
+                tokens,
+            } => DispatchError::NotStopped {
+                detail,
+                release,
+                tokens: earlier + tokens,
+            },
+            other => other,
+        }
+    }
+}
+
+/// The failure a node records when its session could not be stopped: the
+/// kill's error, and the release's when that failed as well. Re-exported next
+/// to `DispatchError`.
+pub(crate) fn not_stopped_failure(detail: &str, release: Option<&AdapterError>) -> Failure {
+    let session_not_stopped = match release {
+        Some(release) => {
+            format!("{detail}; taking back what the session set up failed too: {release}")
+        }
+        None => detail.to_string(),
+    };
+    Failure::SessionNotStopped {
+        session_not_stopped,
+    }
 }
 
 /// What one session left behind: how it ended, what it spent, how much of
@@ -116,20 +167,57 @@ pub(crate) async fn dispatch_session(
             }
             Back::Never => break,
         }
-        let opening = Opening {
-            task: opening.task,
-            resume: Some(Resume {
-                session: &session,
-                fresh_prompt: Some(&request.prompt),
-            }),
-            arrivals: opening.arrivals,
-        };
+        let opening = resumed(opening, &session, &request);
         working = Instant::now() - worked;
-        let (next, again_cut) = stream_session(adapter, again, cancel, audit, opening).await?;
+        let (next, again_cut) = stream_session(adapter, again, cancel, audit, opening)
+            .await
+            .map_err(|error| error.with_earlier_spend(dispatched.tokens))?;
         dispatched = joined(dispatched, next);
         cut_off = again_cut;
     }
     Ok(dispatched)
+}
+
+/// How a session picked back up after a lost service is opened: on the
+/// conversation it continues, with the request's brief for a fresh one.
+fn resumed<'a>(
+    opening: Opening<'a>,
+    session: &'a yunta_core::SessionId,
+    request: &'a SessionRequest,
+) -> Opening<'a> {
+    Opening {
+        task: opening.task,
+        resume: Some(Resume {
+            session,
+            fresh_prompt: Some(&request.prompt),
+        }),
+        arrivals: opening.arrivals,
+    }
+}
+
+/// Reads a session to its terminal outcome, and ends it when the read was cut
+/// short by a cancel or a budget. A session the engine cannot stop fails with
+/// what it reported, which `totals` holds.
+pub(super) async fn read_and_end(
+    session: &mut dyn AgentSession,
+    cancel: &CancellationToken,
+    terms: &Terms<'_>,
+    opening: Opening<'_>,
+    continues: Option<&yunta_core::SessionId>,
+    totals: &mut Totals,
+) -> Result<(Option<DispatchOutcome>, bool), DispatchError> {
+    let (terminal, cancelled) =
+        read_stream(session, cancel, terms, opening, continues, totals).await?;
+    if cancelled || matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
+        end_running(session)
+            .await
+            .map_err(|source| DispatchError::NotStopped {
+                detail: source.to_string(),
+                release: None,
+                tokens: totals.tokens,
+            })?;
+    }
+    Ok((terminal, cancelled))
 }
 
 /// `request` with the budget a session that already spent `tokens` over

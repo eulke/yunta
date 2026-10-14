@@ -14,6 +14,9 @@ use yunta_testkit::{
     yunta_at, yunta_in, Checkout, CliChild, ProcessGroupCleanup,
 };
 
+#[path = "run_flow/frozen.rs"]
+mod frozen;
+
 fn claude_code_stub() -> PathBuf {
     yunta_testkit_core::stubs::claude_code()
 }

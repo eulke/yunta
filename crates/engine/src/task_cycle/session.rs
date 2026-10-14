@@ -12,8 +12,8 @@ use yunta_core::port::{Adapter, AgentSession, SessionRequest};
 use yunta_core::protected::Protected;
 use yunta_storage::StorageError;
 
-use super::dispatch::{DispatchError, Dispatched, Opening, Resume};
-use super::stream::{counts_tokens_mid_session, emit_audit, read_stream, Terms, Totals};
+use super::dispatch::{read_and_end, DispatchError, Dispatched, Opening, Resume};
+use super::stream::{counts_tokens_mid_session, emit_audit, Terms, Totals};
 use super::DispatchOutcome;
 
 /// Everything about *how* one node's sessions open, resolved
@@ -323,15 +323,21 @@ pub(super) async fn stream_session(
     record_cap_at_session_end(&terms).await?;
     let (mut session, continues) = spawn_or_resume(adapter, request, audit, opening.resume).await?;
     // On the map for a separate `yunta cancel` while it lives.
-    let _pgid_registration = crate::process_registry::register(
+    let registration = crate::process_registry::register(
         audit.and_then(|(observer, _)| observer.process_registry()),
         session.pgid(),
     );
-    drain(&mut *session, cancel, &terms, opening, continues).await
+    let drained = drain(&mut *session, cancel, &terms, opening, continues).await;
+    // A group the engine could not stop may still run, so it stays on the map.
+    if let (Some(registration), Err(DispatchError::NotStopped { .. })) = (registration, &drained) {
+        registration.keep();
+    }
+    drained
 }
 
 /// Reads an opened session to its terminal outcome, ends it when the read was
 /// cut short, and says what it spent and whether it ended on a lost service.
+/// The session is released whatever the read and the end did.
 async fn drain(
     session: &mut dyn AgentSession,
     cancel: &CancellationToken,
@@ -340,20 +346,28 @@ async fn drain(
     continues: Option<&yunta_core::SessionId>,
 ) -> Result<(Dispatched, bool), DispatchError> {
     let mut totals = Totals::default();
-    let (terminal, cancelled) =
-        read_stream(session, cancel, terms, opening, continues, &mut totals).await?;
-    if cancelled || matches!(terminal, Some(DispatchOutcome::BudgetExceeded { .. })) {
-        end_running(session).await;
-    }
-    session.release().await?;
-    let Totals {
-        tokens,
-        opened,
-        cut_off,
-        fence,
-        confinement,
-    } = totals;
-    let sessions: Vec<yunta_core::SessionId> = opened.into_iter().collect();
+    // The read, and the end of a read cut short, give one result; the session
+    // is released whatever that result is.
+    let ended = read_and_end(session, cancel, terms, opening, continues, &mut totals).await;
+    let released = session.release().await;
+    let (terminal, cancelled) = match (ended, released) {
+        (Ok(read), Ok(())) => read,
+        (Ok(_), Err(release)) => return Err(DispatchError::Release(release)),
+        (Err(DispatchError::NotStopped { detail, tokens, .. }), Err(release)) => {
+            return Err(DispatchError::NotStopped {
+                detail,
+                release: Some(Box::new(release)),
+                tokens,
+            })
+        }
+        (Err(error), Ok(())) => return Err(error),
+        // The error that ended the session is the one reported; a release
+        // that failed after it is only logged.
+        (Err(error), Err(release)) => {
+            tracing::debug!(%release, "a session's release failed after the session ended");
+            return Err(error);
+        }
+    };
     let outcome = match (cancelled, terminal) {
         (true, _) => DispatchOutcome::Cancelled,
         (false, Some(outcome)) => outcome,
@@ -366,12 +380,12 @@ async fn drain(
     };
     let dispatched = Dispatched {
         outcome,
-        tokens,
-        fence,
-        confinement,
-        sessions,
+        tokens: totals.tokens,
+        fence: totals.fence,
+        confinement: totals.confinement,
+        sessions: totals.opened.into_iter().collect(),
     };
-    Ok((dispatched, cut_off))
+    Ok((dispatched, totals.cut_off))
 }
 
 /// Waits until the host has stayed awake long enough to open a session on,
@@ -456,14 +470,13 @@ async fn spawn_or_resume<'a>(
 }
 
 /// Ends a session the read stopped short of its own end, by a cancel or a
-/// budget: ordered termination first, then forceful.
-async fn end_running(session: &mut dyn AgentSession) {
+/// budget: ordered termination first, then forceful. Fails when the kill does.
+pub(super) async fn end_running(session: &mut dyn AgentSession) -> yunta_core::Result<()> {
     // Never leave anything running: ordered termination first,
     // then forceful — mock has nothing to distinguish them, but a
     // real adapter's session may still close cleanly on interrupt.
     // best-effort: a session that refuses the interrupt is ended by the kill below.
     let _ = session.interrupt().await;
     session.allow_exit(INTERRUPT_GRACE_PERIOD).await;
-    // best-effort: a session that already ended has nothing left for the kill to end.
-    let _ = session.kill().await;
+    session.kill().await
 }

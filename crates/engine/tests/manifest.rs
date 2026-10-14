@@ -54,6 +54,7 @@ async fn the_same_inputs_always_produce_the_same_manifest_hash() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -65,6 +66,7 @@ async fn the_same_inputs_always_produce_the_same_manifest_hash() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -100,6 +102,7 @@ nodes:
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -123,6 +126,7 @@ nodes:
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -143,6 +147,7 @@ async fn an_inline_prompt_freezes_nothing_from_disk() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -174,16 +179,17 @@ nodes:
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap_err();
-    match err {
-        ManifestError::PromptFile { node, path, .. } => {
-            assert_eq!(node.as_str(), "plan");
-            assert!(path.ends_with("prompts/missing.md"));
-        }
-        other => panic!("expected PromptFile, got {other}"),
-    }
+    // The freeze refuses the prompt by naming the node and the file it could not read.
+    assert!(matches!(err, ManifestError::Frozen(_)), "{err}");
+    let message = err.to_string();
+    assert!(
+        message.contains("node `plan`") && message.contains("prompts/missing.md"),
+        "{message}"
+    );
 }
 
 #[tokio::test]
@@ -201,6 +207,7 @@ async fn base_commit_is_the_repository_head() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -221,6 +228,7 @@ async fn a_non_git_directory_is_a_typed_error_not_a_panic() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap_err();
@@ -240,6 +248,7 @@ async fn each_content_hash_reacts_only_to_its_own_content() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -259,6 +268,7 @@ runners:
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -282,6 +292,7 @@ async fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -307,6 +318,7 @@ async fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -329,6 +341,7 @@ async fn an_explicit_none_isolation_freezes_as_none() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -350,6 +363,7 @@ async fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -372,6 +386,7 @@ async fn an_explicit_max_parallel_nodes_freezes_that_value() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -407,6 +422,7 @@ async fn a_required_input_with_no_value_refuses_before_any_worktree_work() {
         dir.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap_err();
@@ -429,6 +445,7 @@ async fn a_provided_input_value_freezes_into_the_manifest() {
         dir.path(),
         &provided,
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -478,6 +495,7 @@ nodes:
         dir.path(),
         &std::collections::HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -596,6 +614,7 @@ async fn frozen_manifest() -> yunta_core::Manifest {
         repo.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -616,6 +635,7 @@ async fn a_manifest_records_the_repository_it_was_frozen_in() {
         repo.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()

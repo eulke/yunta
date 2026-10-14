@@ -98,8 +98,8 @@ autenticada.
 2. **`agent:` a nivel nodo**: un nodo con `agent: <nombre>` y su
    definición en `.yunta/agents/<nombre>.md` → la sesión corre con
    `--append-system-prompt-file` (en `codex`, `-c developer_instructions`)
-   y responde según sus instrucciones; un nombre sin definición falla el
-   nodo antes de abrir la sesión, diciendo dónde la buscó.
+   y responde según sus instrucciones; un nombre sin definición rechaza el
+   run antes de crearlo, diciendo dónde la buscó.
 3. **`resume_session`**: mismo caso que A.4 pero con
    claude-code: matar el engine a mitad de sesión, `on_interrupt:
    resume_session`, `yunta resume` → `claude --resume <session_id>`

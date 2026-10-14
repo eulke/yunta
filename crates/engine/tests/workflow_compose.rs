@@ -16,11 +16,14 @@ use yunta_core::events::{
     ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
 };
 use yunta_core::events::{ChildEvent, FindingEvent, PauseReason, RunEvent, TaskEvent};
-use yunta_core::{AdapterId, ContentHash, Manifest, NodeId, RunId, Workflow};
+use yunta_core::{AdapterId, ContentHash, Manifest, NodeId, RunAdapter, RunId, Workflow};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{
     baselines, git, on_a_deep_stack, write, ApproveEverything, Bench, ScriptedInteraction,
 };
+
+#[path = "workflow_compose/frozen.rs"]
+mod frozen;
 
 /// Every `(child_run_id, child_workflow_hash)` a parent recorded, in
 /// log order.
@@ -187,7 +190,7 @@ async fn a_child_runs_on_the_adapter_its_parent_was_started_on() {
     let (child_id, _) = &children_created(&bench.events())[0];
     assert_eq!(
         manifest_of(&bench.runs_root, child_id).adapter,
-        Some(AdapterId::from("mock"))
+        Some(RunAdapter::Named(AdapterId::from("mock")))
     );
 }
 
@@ -568,28 +571,27 @@ limits:
 }
 
 #[tokio::test]
-async fn a_missing_child_workflow_fails_the_node_naming_the_path() {
-    let bench = Bench::with_run_id("run-missing");
-    let parent = r#"
-name: parent
-nodes:
-  - id: feat
-    kind: workflow
-    use: nope
-"#;
-    let RunReport { terminal, state } = bench.run(parent, EMPTY_FIXTURE).await;
-    assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.state("feat") {
-        Some(NodeState::Failed { failure, .. }) => {
-            let outcome = yunta_render::failure::sentence(failure);
-            assert!(
-                outcome.contains(".yunta/workflows/nope.yaml"),
-                "the diagnostic must name the resolved path: {outcome}"
-            );
-        }
-        other => panic!("expected feat failed, got {other:?}"),
-    }
-    assert!(children_created(&bench.events()).is_empty());
+async fn a_missing_child_workflow_refuses_the_parent_at_birth_naming_it() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let parent: Workflow = yunta_core::yaml::parse(
+        "name: parent\nnodes:\n  - id: feat\n    kind: workflow\n    use: nope\n",
+    )
+    .unwrap();
+    let refused = yunta_engine::build_manifest(
+        &parent,
+        &yunta_core::ConfigLayer::default(),
+        repo.path(),
+        repo.path(),
+        &std::collections::HashMap::new(),
+        owner.supervision(),
+        None,
+    )
+    .await
+    .expect_err("a child name that resolves to nothing refuses the run at birth");
+    let said = yunta_core::describe(&refused);
+    assert!(said.contains("nope"), "the refusal names the child: {said}");
 }
 
 // --- a promoted child chains into its successor -----------------------

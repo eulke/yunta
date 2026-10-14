@@ -126,6 +126,12 @@ pub fn sentence(failure: &Failure) -> String {
             child_run,
             child_failure,
         } => child_sentence(child_run, child_failure.as_deref()),
+        Failure::FrozenInput { frozen_input } => format!(
+            "the frozen input `{frozen_input}` no longer matches what the run was born with"
+        ),
+        Failure::SessionNotStopped {
+            session_not_stopped,
+        } => format!("the engine could not stop the session: {session_not_stopped}"),
     }
 }
 

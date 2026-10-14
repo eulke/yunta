@@ -191,7 +191,8 @@ fn every_failure_variant_reads_back_as_itself() {
     }
 }
 
-/// One sample of each failure that predates the typed causes.
+/// One sample of each failure that predates the typed causes, and of the
+/// two that a session or a frozen input raises.
 fn plain_failure_samples() -> Vec<Failure> {
     vec![
         Failure::message("exit 1"),
@@ -215,6 +216,12 @@ fn plain_failure_samples() -> Vec<Failure> {
                 cmd: "false".to_string(),
                 why: "false exits 1".to_string(),
             }],
+        },
+        Failure::SessionNotStopped {
+            session_not_stopped: "kill refused".into(),
+        },
+        Failure::FrozenInput {
+            frozen_input: "agents/reviewer.md".into(),
         },
     ]
 }

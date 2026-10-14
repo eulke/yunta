@@ -281,6 +281,19 @@ impl SubprocessSession {
             })
     }
 
+    /// Closes the group for `kill`. A group whose members were not seen
+    /// empty is not closed, so the cleanup's error is the answer: the fallback
+    /// signal is sent once more, and its own failure only adds a warning.
+    async fn close_group(&self) -> Result<()> {
+        let Err(cleanup) = self.force_kill_group().await else {
+            return Ok(());
+        };
+        if let Err(error) = self.kill_group_now() {
+            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal after group cleanup failed");
+        }
+        Err(cleanup)
+    }
+
     /// The readers hold the pipes; dropping them before the wait means
     /// no process can sit on a full pipe nobody reads from.
     ///
@@ -353,35 +366,29 @@ impl AgentSession for SubprocessSession {
     }
 
     async fn kill(&mut self) -> Result<()> {
-        let cleanup = self.force_kill_group().await;
-        if cleanup.is_err() {
-            if let Err(error) = self.kill_group_now() {
-                tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal after group cleanup failed");
-            }
-        }
+        let group = self.close_group().await;
         if let Err(error) = self.child.start_kill() {
             tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal to the session leader failed");
         }
-        let pipes = self.finish_readers(true).await;
-        let wait = self.child.wait().await;
-        match wait {
+        if let Err(error) = self.finish_readers(true).await {
+            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "a reader of the killed session's output failed");
+        }
+        match self.child.wait().await {
             Ok(status) => {
                 self.reaped = true;
                 tracing::debug!(adapter = %self.adapter, pgid = %self.pgid, %status, "session killed");
+                group
             }
             Err(e) => {
                 tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to collect the killed session's exit");
-                cleanup?;
-                pipes?;
-                return Err(AdapterError::AdapterIo {
+                group?;
+                Err(AdapterError::AdapterIo {
                     adapter: self.adapter.clone(),
                     action: "collect the killed session's exit".to_string(),
                     source: e,
-                });
+                })
             }
         }
-        cleanup?;
-        pipes
     }
 
     fn pgid(&self) -> Option<Pid> {

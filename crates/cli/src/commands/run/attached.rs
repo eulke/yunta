@@ -10,7 +10,7 @@ use yunta_storage::AsyncStorage;
 
 use super::{create_run_from, preflight, runnable};
 use crate::commands::drive::{drive, Driving};
-use crate::commands::test::{load_mock_fixture, mock_adapters};
+use crate::commands::registry::{adapters_for, ScriptedPaths};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 
@@ -48,8 +48,15 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         json,
     } = attaching;
 
-    let (frozen, real_adapters) =
-        runnable(ctx, workflow_path, raw_inputs, adapter, mock_fixture).await?;
+    let frozen = runnable(
+        ctx,
+        workflow_path,
+        raw_inputs,
+        adapter,
+        mock_fixture,
+        &ctx.env,
+    )
+    .await?;
     let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await?;
 
     let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
@@ -60,13 +67,13 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         super::super::started(&prepared.run_id, "created", quiet);
     }
 
-    let adapters = match mock_fixture {
-        Some(path) => {
-            let mock = load_mock_fixture(path, &prepared.run_dir, &prepared.worktree)?;
-            mock_adapters(&ctx.project.config, mock)
-        }
-        None => real_adapters,
-    };
+    let adapters = adapters_for(
+        &manifest,
+        &ScriptedPaths {
+            run_dir: &prepared.run_dir,
+            worktree: &prepared.worktree,
+        },
+    )?;
     drive(Driving {
         ctx,
         storage,

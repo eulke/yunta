@@ -42,6 +42,7 @@ mod catalog;
 mod check;
 mod events_export;
 mod findings;
+mod frozen;
 pub mod git;
 mod history;
 mod human_interaction;
@@ -117,7 +118,7 @@ pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,
 };
-pub use pack_requires::{check_pack_requires, PackRequiresGap};
+pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{
     engine_liveness, engine_prompt, read_registry, registry_path, Asked, EngineLiveness,

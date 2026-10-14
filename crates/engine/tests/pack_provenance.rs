@@ -26,6 +26,7 @@ async fn a_repo_origin_workflow_freezes_no_pack_provenance() {
         repo.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -55,6 +56,7 @@ async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
         repo.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -65,6 +67,11 @@ async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
     assert_eq!(provenance.name, "review-pack");
     assert_eq!(provenance.version, "1.2.3");
     assert!(provenance.commit.is_none(), "no yunta.lock entry exists");
+    assert!(
+        manifest.provenance_gaps.is_empty(),
+        "a repository with no lock is not a gap: {:?}",
+        manifest.provenance_gaps
+    );
 }
 
 #[tokio::test]
@@ -94,6 +101,7 @@ async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists()
         repo.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
@@ -116,7 +124,8 @@ async fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_fail
     init_repo(repo.path());
     // The directory exists (so origin_of reports Pack) but pack.yaml
     // itself doesn't — a self-inconsistent local state this function
-    // has no better answer for than omitting provenance.
+    // has no better answer for than omitting provenance, and it names
+    // the file it could not read.
     let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
     std::fs::create_dir_all(&pack_dir).unwrap();
 
@@ -128,10 +137,66 @@ async fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_fail
         repo.path(),
         &HashMap::new(),
         owner.supervision(),
+        None,
     )
     .await
     .unwrap()
     .manifest;
 
     assert!(manifest.pack.is_none());
+    assert!(
+        manifest
+            .provenance_gaps
+            .iter()
+            .any(|gap| gap.file.ends_with("review-pack/pack.yaml")),
+        "the gap names the pack file: {:?}",
+        manifest.provenance_gaps
+    );
+}
+
+#[tokio::test]
+async fn a_pack_whose_lock_cannot_be_read_keeps_its_provenance_and_names_the_lock() {
+    let owner = Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
+    write(
+        &pack_dir.join("pack.yaml"),
+        "name: review-pack\npublisher: acme\nversion: 1.2.3\ndeclares:\n  \
+         permissions: read-only\ncontents:\n  workflows: [review.yaml]\n",
+    );
+    write(&pack_dir.join("review.yaml"), LEAF);
+    write(
+        &repo.path().join(".yunta/yunta.lock"),
+        "packs: [not a mapping\n",
+    );
+
+    let workflow = yunta_core::yaml::parse(LEAF).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &ConfigLayer::default(),
+        &pack_dir,
+        repo.path(),
+        &HashMap::new(),
+        owner.supervision(),
+        None,
+    )
+    .await
+    .unwrap()
+    .manifest;
+
+    let provenance = manifest
+        .pack
+        .expect("the pack manifest reads, so the pack is known");
+    assert_eq!(provenance.version, "1.2.3");
+    assert!(provenance.commit.is_none(), "the lock names no commit");
+    assert_eq!(
+        manifest.provenance_gaps.len(),
+        1,
+        "{:?}",
+        manifest.provenance_gaps
+    );
+    assert!(manifest.provenance_gaps[0]
+        .file
+        .ends_with(".yunta/yunta.lock"));
 }

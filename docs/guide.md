@@ -495,13 +495,16 @@ Documents Yunta reads and validates:
 
 `knowledge: { layers: [repo, user, org] }` resolves with local precedence: on a
 filename conflict, repo beats user beats org. Omit `layers` to pull every layer.
+The layers are read when the run is created and frozen with it, so a knowledge
+file edited while the run is parked or running reaches no session that follows.
 The `org` layer is knowledge distributed as packs — the union of every installed
-pack whose `pack.yaml` declares `contents.knowledge`, read straight from the
-vendored `.yunta/packs/`. Between org packs there is no precedence: two installed
-packs shipping the same filename is a resolution-time error naming both — shadow
-the file with the repo's own copy, or remove one of the packs. An org layer with
-no knowledge packs installed simply contributes nothing, same as a user layer
-with an empty `~/.yunta/knowledge/`.
+pack whose `pack.yaml` declares `contents.knowledge`, read from the vendored
+`.yunta/packs/`. Between org packs there is no precedence: two installed packs
+shipping the same filename is an error naming both — shadow the file with the
+repo's own copy, or remove one of the packs. A knowledge path that leaves its
+pack is refused when the run is created, naming the path. An org layer with no
+knowledge packs installed simply contributes nothing, same as a user layer with
+an empty `~/.yunta/knowledge/`.
 
 ## Hooks
 

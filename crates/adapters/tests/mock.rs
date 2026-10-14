@@ -36,6 +36,9 @@ mod outcomes;
 #[path = "mock/confinement.rs"]
 mod confinement;
 
+#[path = "mock/continuity.rs"]
+mod continuity;
+
 #[tokio::test]
 async fn a_successful_session_opens_then_completes() {
     let dir = tempfile::tempdir().unwrap();

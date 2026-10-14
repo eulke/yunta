@@ -1,6 +1,7 @@
 //! Why a task's cycle could not go on: what failed, and for which task.
 
 use thiserror::Error;
+use yunta_core::events::TokenUsage;
 use yunta_core::{AdapterError, TaskId};
 use yunta_storage::StorageError;
 
@@ -22,6 +23,16 @@ pub enum TaskCycleError {
         task: TaskId,
         #[source]
         source: AdapterError,
+    },
+    /// The engine asked the task's session to stop and could not stop it;
+    /// `tokens` is what the session reported before the stop failed.
+    #[error("the engine could not stop task `{task}`'s session: {detail}")]
+    NotStopped {
+        task: TaskId,
+        detail: String,
+        /// Boxed, as in `DispatchError::NotStopped`: the largest part of the variant.
+        release: Option<Box<AdapterError>>,
+        tokens: TokenUsage,
     },
     #[error("failed to append a session audit event for task `{task}`")]
     Audit {
@@ -81,4 +92,82 @@ pub enum TaskCycleError {
     TreeIndex(#[source] std::io::Error),
     #[error("failed to read what the working tree holds for memoization")]
     TreeContent(#[source] Box<crate::worktree::WorktreeError>),
+}
+
+impl TaskCycleError {
+    /// The same error, with `earlier` added to the spend its stopped session
+    /// reported: the attempts before the one that could not stop its session
+    /// spent tokens that the node which ran the cycle still owes.
+    pub(super) fn with_earlier_spend(self, earlier: TokenUsage) -> Self {
+        match self {
+            TaskCycleError::NotStopped {
+                task,
+                detail,
+                release,
+                tokens,
+            } => TaskCycleError::NotStopped {
+                task,
+                detail,
+                release,
+                tokens: earlier + tokens,
+            },
+            other => other,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_that_fails_after_earlier_attempts_carries_their_spend() {
+        let spent = TokenUsage {
+            input: 10,
+            output: 4,
+            cached: None,
+        };
+        let earlier = TokenUsage {
+            input: 3,
+            output: 1,
+            cached: None,
+        };
+        let stopped = TaskCycleError::NotStopped {
+            task: TaskId::from_static("write-tests"),
+            detail: "kill was refused".to_string(),
+            release: None,
+            tokens: spent,
+        };
+        match stopped.with_earlier_spend(earlier) {
+            TaskCycleError::NotStopped { tokens, .. } => assert_eq!(
+                tokens,
+                TokenUsage {
+                    input: 13,
+                    output: 5,
+                    cached: None,
+                }
+            ),
+            other => panic!("the stop stays a stop: {other}"),
+        }
+    }
+
+    #[test]
+    fn an_error_that_is_not_a_stop_passes_through_unchanged() {
+        let unchanged = TaskCycleError::Spawn {
+            task: TaskId::from_static("write-tests"),
+            source: AdapterError::Adapter {
+                adapter: yunta_core::AdapterId::from_static("mock"),
+                message: "refused".to_string(),
+            },
+        };
+        let earlier = TokenUsage {
+            input: 3,
+            output: 1,
+            cached: None,
+        };
+        assert!(matches!(
+            unchanged.with_earlier_spend(earlier),
+            TaskCycleError::Spawn { .. }
+        ));
+    }
 }

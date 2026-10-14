@@ -17,7 +17,8 @@ use yunta_core::events::PauseReason;
 use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
-use super::{copy_dir_all, init_git, load_mock_fixture, mock_adapters, sandboxed_checkout};
+use super::{copy_dir_all, init_git, sandboxed_checkout};
+use crate::commands::registry::{adapters_and_script, ScriptedPaths};
 use crate::commands::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
@@ -199,20 +200,28 @@ pub(crate) async fn run_case(
         .iter()
         .map(|(name, value)| format!("{name}={value}"))
         .collect();
-    let (frozen, _) = crate::commands::run::runnable(
+    // A case is hermetic at birth too: its manifest freezes no user
+    // knowledge, as its sessions read none.
+    let frozen = crate::commands::run::runnable(
         &ctx,
         Path::new(case.workflow.as_str()),
         &raw_inputs,
         None,
         Some(&fixture_path),
+        &yunta_core::Env::default(),
     )
     .await?;
     let manifest = frozen.manifest.clone();
     let prepared =
         crate::commands::run::create_run_from(&ctx, &storage, &frozen, case.mode.as_ref()).await?;
 
-    let mock = load_mock_fixture(&fixture_path, &prepared.run_dir, &prepared.worktree)?;
-    let adapters = mock_adapters(&ctx.project.config, Arc::clone(&mock));
+    let (adapters, script) = adapters_and_script(
+        &manifest,
+        &ScriptedPaths {
+            run_dir: &prepared.run_dir,
+            worktree: &prepared.worktree,
+        },
+    )?;
     let forge = stand_in_forge(&manifest.config);
     let forge = forge
         .as_ref()
@@ -260,7 +269,7 @@ pub(crate) async fn run_case(
     // a run nobody made: the case fails, always, and names which
     // scripts went unclaimed. There is no expectation to opt into —
     // the fixture is the case's own account of what the run does.
-    let unclaimed = mock.unconsumed();
+    let unclaimed = script.map(|mock| mock.unconsumed()).unwrap_or_default();
     if !unclaimed.is_empty() {
         problems.push(format!(
             "fixture `{}`: {} nothing opened — {}",

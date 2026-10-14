@@ -27,17 +27,6 @@ pub enum RunnerError {
         runner: RunnerName,
         tried: Vec<AdapterId>,
     },
-
-    #[error(
-        "runner `{runner}` has no candidate on `--adapter {adapter}` — its candidates are on: \
-         {}; add one on `{adapter}` to `runners.{runner}`, or drop the flag",
-        list(candidates)
-    )]
-    OverrideHasNoCandidate {
-        runner: RunnerName,
-        adapter: AdapterId,
-        candidates: Vec<AdapterId>,
-    },
 }
 
 fn list(adapters: &[AdapterId]) -> String {
@@ -52,16 +41,17 @@ pub use yunta_core::events::ResolvedRunner;
 
 /// Picks the first candidate of `runner` whose adapter `available`
 /// accepts. Pure: availability is injected, so tests and the CLI shell
-/// decide what "available" means without this logic changing. With an
-/// `adapter_override` (`yunta run --adapter <id>`), only candidates on
-/// that adapter qualify; every other candidate is discarded with the
-/// override as its reason, so the log says why declaration order did
-/// not decide.
+/// decide what "available" means without this logic changing. With a
+/// `pinned` adapter (the run's own, when it pins one), only candidates on
+/// that adapter qualify; every other candidate is discarded as
+/// `NotPinned`, so the log says why declaration order did not decide. When
+/// no candidate is on the pin, every candidate is discarded and the result
+/// is `NoCandidateAvailable`, naming what was tried.
 pub fn resolve_runner(
     runner: &RunnerName,
     config: &ConfigLayer,
     available: &dyn Fn(&AdapterId) -> bool,
-    adapter_override: Option<&AdapterId>,
+    pinned: Option<&AdapterId>,
 ) -> Result<ResolvedRunner, RunnerError> {
     let candidates = config
         .runners
@@ -73,7 +63,7 @@ pub fn resolve_runner(
 
     let mut discarded = Vec::new();
     for candidate in candidates {
-        if let Some(wanted) = adapter_override {
+        if let Some(wanted) = pinned {
             if candidate.adapter != *wanted {
                 discarded.push(DiscardedCandidate {
                     candidate: candidate.clone(),
@@ -98,15 +88,8 @@ pub fn resolve_runner(
     }
 
     let adapters: Vec<AdapterId> = candidates.iter().map(|c| c.adapter.clone()).collect();
-    match adapter_override {
-        Some(wanted) if !adapters.contains(wanted) => Err(RunnerError::OverrideHasNoCandidate {
-            runner: runner.clone(),
-            adapter: wanted.clone(),
-            candidates: adapters,
-        }),
-        _ => Err(RunnerError::NoCandidateAvailable {
-            runner: runner.clone(),
-            tried: adapters,
-        }),
-    }
+    Err(RunnerError::NoCandidateAvailable {
+        runner: runner.clone(),
+        tried: adapters,
+    })
 }

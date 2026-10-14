@@ -1,6 +1,6 @@
 //! See [`super`]. One family of workflow-check rules.
 
-use super::capabilities::{all_known_hold, candidate_adapters, opens_session};
+use super::capabilities::{all_known_hold, candidate_adapters};
 use super::*;
 use yunta_core::events::ArtifactId;
 use yunta_core::port::PermissionProfile;
@@ -74,7 +74,7 @@ pub(crate) fn check_network(
 ) {
     let project = config.network_permissions();
     for node in workflow.iter_nodes() {
-        if !opens_session(node) || yunta_core::network_asked(node.network, project) {
+        if !node.opens_session() || yunta_core::network_asked(node.network, project) {
             continue;
         }
         let profile = node.permissions.map_or(

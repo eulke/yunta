@@ -278,7 +278,7 @@ pub(super) async fn finish_node_staged(
     // finished: it fails, and nothing denied was committed.
     if !closed.refused.is_empty() {
         let failure = refused_failure(&closed.refused);
-        return emit_failed(ctx, node, failure, tokens, closed).await;
+        return emit_failed(ctx, node, closed.failed(failure, tokens)).await;
     }
     ctx.emit(
         Some(&node.id),
@@ -320,6 +320,22 @@ struct Closed {
     commit: Option<yunta_core::CommitSha>,
     tree: yunta_core::TreeId,
     refused: Vec<Trespass>,
+}
+
+impl Closed {
+    /// The `node_failed` payload this close leaves for `failure`: the tree it
+    /// settled, the commit it made, and the paths it refused.
+    fn failed(self, failure: Failure, tokens: TokenUsage) -> NodeFailedPayload {
+        let refused: Vec<PathBuf> = self
+            .refused
+            .iter()
+            .map(|trespass| trespass.path.clone())
+            .collect();
+        NodeFailedPayload::new(failure, tokens)
+            .leaving(self.tree)
+            .committed(self.commit)
+            .refusing(refused)
+    }
 }
 
 /// The failure a close that refused work leaves: each refused path, with
@@ -403,7 +419,22 @@ pub(super) async fn fail_with_staged(
     staged: &[PathBuf],
 ) -> Result<NodeEnd, RunError> {
     let closed = Box::pin(closed(ctx, node, Landing::Failed, staged)).await?;
-    emit_failed(ctx, node, failure, tokens, closed).await
+    emit_failed(ctx, node, closed.failed(failure, tokens)).await
+}
+
+/// Fails a node whose session the engine asked to stop and could not stop,
+/// with that failure and what the session spent. It runs no close: the session
+/// may still be writing its checkout, so nothing is captured, committed or
+/// judged there, and no git runs. Without git there is nothing a cancelled
+/// run's token can cancel, so the failure reaches the log whether or not the
+/// run was cancelled.
+pub(super) async fn fail_unstopped(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    failure: Failure,
+    tokens: TokenUsage,
+) -> Result<NodeEnd, RunError> {
+    emit_failed(ctx, node, NodeFailedPayload::new(failure, tokens)).await
 }
 
 /// The one place `node_failed` is written. The failure reaches the log as
@@ -413,23 +444,11 @@ pub(super) async fn fail_with_staged(
 async fn emit_failed(
     ctx: &RunCtx<'_>,
     node: &Node,
-    failure: Failure,
-    tokens: TokenUsage,
-    closed: Closed,
+    failed: NodeFailedPayload,
 ) -> Result<NodeEnd, RunError> {
-    let refused: Vec<PathBuf> = closed
-        .refused
-        .iter()
-        .map(|trespass| trespass.path.clone())
-        .collect();
     ctx.emit(
         Some(&node.id),
-        EventPayload::Node(NodeEvent::Failed(
-            NodeFailedPayload::new(failure, tokens)
-                .leaving(closed.tree)
-                .committed(closed.commit)
-                .refusing(refused),
-        )),
+        EventPayload::Node(NodeEvent::Failed(failed)),
     )
     .await?;
     Ok(NodeEnd::Failed)

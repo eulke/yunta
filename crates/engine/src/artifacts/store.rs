@@ -71,12 +71,24 @@ impl<'a> ObjectStore<'a> {
     /// whole, so nobody meets half an object, and the object is synced to
     /// disk before the hash is answered.
     pub async fn put(&self, bytes: &[u8]) -> std::io::Result<ContentHash> {
+        self.put_with(bytes, Durability::Synced).await
+    }
+
+    /// [`put`](Self::put), with the durability the caller's object needs:
+    /// an object a reader verifies against its name, whose loss the reader
+    /// would report rather than read past, may skip the sync that `put`
+    /// pays for each object.
+    pub async fn put_with(
+        &self,
+        bytes: &[u8],
+        durability: Durability,
+    ) -> std::io::Result<ContentHash> {
         let hash = sha256_hex(bytes);
         let path = self.path_of(&hash);
         tokio::fs::create_dir_all(path.parent().unwrap_or(self.run_dir)).await?;
         // blocking: one object, written whole under its name. `Ok(false)`:
         // the name is taken, and a name is the hash of the bytes it holds.
-        durable::create_new(&path, bytes, Durability::Synced)?;
+        durable::create_new(&path, bytes, durability)?;
         Ok(hash)
     }
 

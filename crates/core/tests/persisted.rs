@@ -37,6 +37,8 @@ fn manifest() -> yunta_core::Manifest {
         pack: None,
         project: None,
         adapter: None,
+        frozen: None,
+        provenance_gaps: Vec::new(),
     }
 }
 
@@ -207,4 +209,30 @@ fn a_frozen_fanout_manifest_round_trips_without_reordering_modes() {
         .collect();
     assert_eq!(ids, ["review@first", "review@second"]);
     assert_eq!(read.doc.workflow, manifest.workflow);
+}
+
+/// A schema 4 manifest names its adapter as a bare id; it reads as the
+/// named adapter, not as a mock.
+#[test]
+fn a_schema_four_manifest_reads_its_named_adapter_as_named() {
+    let text = include_str!("fixtures/manifest_v4_codex.yaml");
+    let read: PersistedDoc<yunta_core::Manifest> =
+        PersistedDoc::read(text.as_bytes()).expect("a schema 4 manifest reads");
+    assert_eq!(read.schema_version, 4);
+    let codex = yunta_core::AdapterId::from("codex");
+    assert_eq!(read.doc.adapter, Some(yunta_core::RunAdapter::Named(codex)));
+}
+
+/// The hash of the schema 4 manifest in `fixtures/manifest_v4_codex.yaml`,
+/// read as a manifest. A manifest's hash is its identity: a change that moved
+/// it would move the hash of every run already written.
+const GOLDEN_MANIFEST_HASH: &str =
+    "91467248d1cb41373b208aeb463e8914a39eb5ace23278523fb1025658998373";
+
+#[test]
+fn a_non_mock_manifest_keeps_its_hash() {
+    let text = include_str!("fixtures/manifest_v4_codex.yaml");
+    let read: PersistedDoc<yunta_core::Manifest> =
+        PersistedDoc::read(text.as_bytes()).expect("a schema 4 manifest reads");
+    assert_eq!(read.doc.manifest_hash().as_str(), GOLDEN_MANIFEST_HASH);
 }

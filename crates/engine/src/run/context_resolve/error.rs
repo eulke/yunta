@@ -23,6 +23,15 @@ pub(super) enum ContextResolveError {
         #[source]
         source: std::io::Error,
     },
+    /// A knowledge file of the run's frozen set that the run cannot read as it
+    /// was born with: its bytes changed, or the run's store lacks them.
+    #[error("context `{source_id}` on node `{node}`: {source}")]
+    Frozen {
+        node: NodeId,
+        source_id: String,
+        #[source]
+        source: crate::frozen::FrozenError,
+    },
     /// A `files:` entry naming a path the node's tree does not hold —
     /// said in the terms of where the file has to be for the next attempt
     /// to find it, not of the checkout this attempt happened to read.

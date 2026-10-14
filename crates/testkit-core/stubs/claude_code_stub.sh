@@ -43,12 +43,15 @@ elif [ -n "$CLAUDE_STUB_LINGER" ]; then
   trap 'exit 0' INT
 fi
 
+# Each record is written beside its file and moved into place, so a test
+# that reads it while the stub runs meets the old record or the new one,
+# never a file truncated and not yet rewritten.
 if [ -n "$CLAUDE_STUB_ENV_FILE" ]; then
-  env > "$CLAUDE_STUB_ENV_FILE"
+  env > "$CLAUDE_STUB_ENV_FILE.$$" && mv "$CLAUDE_STUB_ENV_FILE.$$" "$CLAUDE_STUB_ENV_FILE"
 fi
 
 if [ -n "$CLAUDE_STUB_ARGS_FILE" ]; then
-  printf '%s\n' "$@" > "$CLAUDE_STUB_ARGS_FILE"
+  printf '%s\n' "$@" > "$CLAUDE_STUB_ARGS_FILE.$$" && mv "$CLAUDE_STUB_ARGS_FILE.$$" "$CLAUDE_STUB_ARGS_FILE"
 fi
 
 if [ -n "$CLAUDE_STUB_STDIN_FILE" ]; then

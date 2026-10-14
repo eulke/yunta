@@ -22,6 +22,9 @@ pub struct PackRequiresGap {
     /// `RunnerHasNoCandidates` distinguish for a workflow's own
     /// `runner:` field.
     pub missing_runners: Vec<RunnerName>,
+    /// Runner names whose `requires.runners` entry still sets `permissions`:
+    /// no profile enforces that key any more, so the pack must drop it.
+    pub retired_permissions: Vec<RunnerName>,
     /// `requires.mcp_servers` names absent from `mcp_servers:`.
     pub missing_mcp_servers: Vec<McpServerName>,
     /// `requires.programs` — passed through untouched; presence on
@@ -31,7 +34,9 @@ pub struct PackRequiresGap {
 
 impl PackRequiresGap {
     pub fn is_satisfied(&self) -> bool {
-        self.missing_runners.is_empty() && self.missing_mcp_servers.is_empty()
+        self.missing_runners.is_empty()
+            && self.retired_permissions.is_empty()
+            && self.missing_mcp_servers.is_empty()
     }
 
     /// Everything this gap leaves a run of the pack's workflows without,
@@ -43,6 +48,10 @@ impl PackRequiresGap {
                 "runner `{runner}`, which `runners:` does not define with a candidate — define it"
             )
         });
+        let retired = self
+            .retired_permissions
+            .iter()
+            .map(retired_permissions_sentence);
         let servers = self.missing_mcp_servers.iter().map(|server| {
             format!("MCP server `{server}`, which `mcp_servers:` does not define — define it")
         });
@@ -54,6 +63,7 @@ impl PackRequiresGap {
                 format!("program `{program}`, which is not on this machine's `PATH` — install it")
             });
         runners
+            .chain(retired)
             .chain(servers)
             .chain(programs)
             .map(|requirement| crate::CheckError::PackRequirementUnmet {
@@ -62,6 +72,12 @@ impl PackRequiresGap {
             })
             .collect()
     }
+}
+
+/// What a required runner that still sets `permissions` is refused with: no
+/// profile enforces that key, so the pack drops it.
+pub fn retired_permissions_sentence(runner: &RunnerName) -> String {
+    format!("runner `{runner}` with `permissions`, which no profile enforces — remove the key")
 }
 
 pub fn check_pack_requires(manifest: &PackManifest, config: &ConfigLayer) -> PackRequiresGap {
@@ -76,6 +92,14 @@ pub fn check_pack_requires(manifest: &PackManifest, config: &ConfigLayer) -> Pac
                 .and_then(|runners| runners.get(&required.name))
                 .is_none_or(|candidates| candidates.is_empty())
         })
+        .map(|required| required.name.clone())
+        .collect();
+
+    let retired_permissions = manifest
+        .requires
+        .runners
+        .iter()
+        .filter(|required| required.retired_permissions.is_some())
         .map(|required| required.name.clone())
         .collect();
 
@@ -95,6 +119,7 @@ pub fn check_pack_requires(manifest: &PackManifest, config: &ConfigLayer) -> Pac
     PackRequiresGap {
         pack: manifest.reference(),
         missing_runners,
+        retired_permissions,
         missing_mcp_servers,
         required_programs: manifest.requires.programs.clone(),
     }

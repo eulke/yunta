@@ -132,6 +132,12 @@ pub async fn create_promotion_successor(
         crate::replay::RunView::of(storage.events_for_run(predecessor_id.clone()).await?);
     let inherited =
         read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor.events).await?;
+    // The successor keeps the predecessor's frozen inputs, so it copies their
+    // objects from the predecessor's run directory.
+    let blobs = match &manifest.frozen {
+        Some(frozen) => crate::frozen::store::inherit(predecessor_run_dir, frozen).await?,
+        None => Vec::new(),
+    };
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -148,6 +154,7 @@ pub async fn create_promotion_successor(
             baseline: crate::run::baseline::inherited(predecessor_id, &predecessor.state).as_ref(),
             environment,
             redactor: &redactor,
+            blobs: &blobs,
         },
         storage,
         supervision,

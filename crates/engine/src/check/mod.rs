@@ -241,7 +241,7 @@ fn check_node_bindings(workflow: &Workflow, config: &ConfigLayer, errors: &mut V
             }
         }
 
-        if !node.context.is_empty() && !capabilities::opens_session(node) {
+        if !node.context.is_empty() && !node.opens_session() {
             errors.push(CheckError::ContextOnUnsupportedNode {
                 node: node.id.clone(),
             });

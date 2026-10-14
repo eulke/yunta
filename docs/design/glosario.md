@@ -401,10 +401,11 @@ _Evitar_: cancelación, descarte.
 
 **Falla de nodo**:
 Por qué un nodo no cerró, como dato tipado y no como frase: la causa de un
-comando, de una sesión rechazada, de un límite, de las tareas que paró un loop o
-de los artifacts declarados que no cerraron. Es lo que persiste `node_failed`. Las
-palabras las escribe cada superficie al leerla, y los remedios que ofrece se
-deducen de la falla y del log. El engine solo enuncia una oración en
+comando, de una sesión rechazada, de un límite, de las tareas que paró un loop, de
+los artifacts declarados que no cerraron, de una sesión que el engine no pudo parar
+o de un archivo congelado que ya no coincide con su hash. Es lo que persiste
+`node_failed`. Las palabras las escribe cada superficie al leerla, y los remedios
+que ofrece se deducen de la falla y del log. El engine solo enuncia una oración en
 `Failure::Message`, para una falla sin datos propios; esa oración se guarda y se
 lee tal cual (D133).
 _Evitar_: outcome, mensaje de error, motivo.

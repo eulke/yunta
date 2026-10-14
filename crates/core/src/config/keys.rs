@@ -55,9 +55,7 @@ impl ConfigKey {
             NodeKind::Executor { executor, .. } => needed.push(ConfigKey::Executor {
                 executor: executor.clone(),
             }),
-            NodeKind::Prompt { .. } | NodeKind::Loop { .. }
-                if node.runner.is_none() && node.runners.is_empty() =>
-            {
+            _ if node.opens_session() && node.runner.is_none() && node.runners.is_empty() => {
                 needed.push(ConfigKey::Runner);
             }
             NodeKind::PullRequest { .. } => {

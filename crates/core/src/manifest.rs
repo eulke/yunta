@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::hash::{sha256_hex, CommitSha, ContentHash};
-use crate::ids::InputName;
+use crate::ids::{AgentName, ExecutorName, InputName, SkillName};
 use crate::{AdapterId, ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
@@ -111,6 +111,65 @@ pub struct ProjectIdentity {
     pub git_common_dir: std::path::PathBuf,
 }
 
+/// Frozen with the run: `Named` pins every runner to its candidate on that
+/// adapter; `Mock` carries the fixture text read at creation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum RunAdapter {
+    Named(AdapterId),
+    Mock { fixture: String },
+}
+
+impl RunAdapter {
+    /// What runner resolution is pinned to; `None` for mock.
+    pub fn pinned(&self) -> Option<&AdapterId> {
+        match self {
+            Self::Named(id) => Some(id),
+            Self::Mock { .. } => None,
+        }
+    }
+}
+
+/// Every input a run's nodes interpret, by content hash in the run's store.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Frozen {
+    /// Each agent a node or a runner names, by the hash of its definition.
+    pub agents: BTreeMap<AgentName, ContentHash>,
+    /// Each skill's files, by their paths within the skill.
+    pub skills: BTreeMap<SkillName, BTreeMap<PathBuf, ContentHash>>,
+    /// Each executor a node runs, by the hash of its files.
+    pub executors: BTreeMap<ExecutorName, ContentHash>,
+    /// Every child reached through `use:`, transitively; packs included.
+    pub workflows: BTreeMap<String, FrozenWorkflow>,
+    /// Keyed `<layer>:<relative path>`.
+    pub knowledge: BTreeMap<String, ContentHash>,
+}
+
+/// A child workflow as its parent's run was born with it: its text, the
+/// prompts it reads, and the pack it came from as the parent's birth read
+/// it, so the child is born with the provenance its parent froze.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FrozenWorkflow {
+    pub text: String,
+    pub prompts: BTreeMap<NodeId, String>,
+    /// `None` for a child from the repo, and for a pack whose own manifest
+    /// could not be read when the parent was born (its gap says why).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<PackProvenance>,
+    /// The pack files whose provenance could not be read when the parent
+    /// was born; empty when every file was read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance_gaps: Vec<ProvenanceGap>,
+}
+
+/// A pack file whose provenance could not be read when the run was born,
+/// with the reason it could not be read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProvenanceGap {
+    pub file: String,
+    pub detail: String,
+}
+
 /// Everything a run needs frozen at creation time. The
 /// engine never re-reads workflow, config or prompt files during a run —
 /// resume interprets the run with exactly what it was born with.
@@ -159,22 +218,32 @@ pub struct Manifest {
     /// git could not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectIdentity>,
-    /// The adapter every session of the run runs on (`yunta run
-    /// --adapter`): each runner resolves to its candidate on it and
-    /// passes over the rest. Frozen with the run, so whatever invocation
-    /// drives it — a detached child, a resume after a pause, a
+    /// The adapter the run was born on (`yunta run --adapter`). `Named`
+    /// pins each runner to its candidate on that adapter and passes over
+    /// the rest; `Mock` carries the fixture the sessions are scripted from,
+    /// read when the run was created. Frozen with the run, so whatever
+    /// invocation drives it — a detached child, a resume after a pause, a
     /// successor, a child workflow — resolves the same way. `None`: each
     /// runner takes its first available candidate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter: Option<AdapterId>,
+    pub adapter: Option<RunAdapter>,
+    /// What the run's nodes interpret, frozen when the run was born. `None`
+    /// on a manifest written before runs froze their inputs: its nodes read
+    /// the checkout, as they always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen: Option<Frozen>,
+    /// Pack files whose provenance could not be read when the run was born:
+    /// empty when every file was read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance_gaps: Vec<ProvenanceGap>,
 }
 
 impl crate::persisted::Persisted for Manifest {
-    /// 4 since `adapter` joined it, 3 since `project` did, 2 since
-    /// `paths` and `pack` did. A manifest stamped lower is read as it is:
-    /// the four fields are optional and a run born without them still
-    /// resumes.
-    const SCHEMA_VERSION: u32 = 4;
+    /// 5 since `frozen` joined it, 4 since `adapter` joined it, 3 since
+    /// `project` did, 2 since `paths` and `pack` did. A manifest stamped
+    /// lower is read as it is: every field a later version added is
+    /// optional, and a run born without one still resumes.
+    const SCHEMA_VERSION: u32 = 5;
     const NAME: &'static str = "run manifest";
 
     /// A manifest frozen while `inherit` was still a word reads as what

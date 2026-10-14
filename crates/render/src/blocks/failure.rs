@@ -84,6 +84,8 @@ impl FailureDetail<'_> {
             | Failure::PlanUnpassable { .. }
             | Failure::SessionRefused { .. }
             | Failure::Limit { .. }
+            | Failure::FrozenInput { .. }
+            | Failure::SessionNotStopped { .. }
             | Failure::ChildFailed {
                 child_failure: None,
                 ..
@@ -385,6 +387,10 @@ pub(crate) fn stuck_words(stuck: &Stuck) -> String {
     match stuck {
         Stuck::FrozenConfig => "this run's config was frozen when it was created, so no attempt \
             of it can go differently — declare what is missing in the config and start a new run"
+            .to_string(),
+        Stuck::FrozenInput => "a file this run froze when it was created has changed since, and \
+            no attempt of it can read the file as it was — start a new run to read it as it \
+            now stands"
             .to_string(),
         Stuck::ProjectDenies => "the project's permissions refuse it, so no attempt goes \
             differently: change what they refuse, or the permissions themselves"

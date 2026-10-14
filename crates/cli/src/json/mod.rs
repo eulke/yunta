@@ -461,17 +461,18 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                         artifacts.iter().map(ArtifactProblems::from).collect(),
                     );
                 }
-                // A failure stated in one sentence names no document,
-                // and neither does a session that died or refused, a
-                // limit, stopped tasks, a red check, a child's failure,
-                // anything about scope, an unset config key, a check
-                // refused on a tree nothing changed or a criterion no
-                // work can pass: the node's own entry carries each of
-                // them whole.
+                // A failure stated in one sentence names no document, and
+                // neither does a session that died, refused or could not be
+                // stopped, a limit, stopped tasks, a red check, a child's
+                // failure, anything about scope, an unset config key, a
+                // frozen input that changed, a check refused on a tree
+                // nothing changed or a criterion no work can pass: the
+                // node's own entry carries each of them whole.
                 Failure::Message { .. }
                 | Failure::Exited { .. }
                 | Failure::SessionDied { .. }
                 | Failure::SessionRefused { .. }
+                | Failure::SessionNotStopped { .. }
                 | Failure::Limit { .. }
                 | Failure::TasksStopped { .. }
                 | Failure::Red { .. }
@@ -481,6 +482,7 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                 | Failure::ScopeRequested { .. }
                 | Failure::ScopeOwed { .. }
                 | Failure::Unset { .. }
+                | Failure::FrozenInput { .. }
                 | Failure::Unchanged { .. }
                 | Failure::PlanUnpassable { .. } => {
                     latest.remove(node_id.as_str());
