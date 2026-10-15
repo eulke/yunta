@@ -45,9 +45,12 @@ pub struct EngineProcessFile {
     /// cancel` sends SIGINT here while it's alive, so the engine's own
     /// interrupt→kill path does the exterminating).
     pub engine_pid: Pid,
-    /// When this engine started, as its own injected clock read it —
+    /// When this engine started, as the host's process table reads it —
     /// what tells a live pid apart from a number the host handed to
-    /// something else after a crash.
+    /// something else after a crash. Read there and not from the run's
+    /// clock, because [`EngineProcessFile::liveness`] compares it
+    /// against that same table — the reason the lock reads it there
+    /// too.
     pub started_at: DateTime<Utc>,
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
@@ -215,6 +218,7 @@ pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
 mod tests {
     use super::*;
     use crate::lock::OwnerProbe;
+    use yunta_testkit_core::AtClock;
 
     /// A host whose process table holds one process, started at a fixed
     /// instant, under every pid.
@@ -232,12 +236,44 @@ mod tests {
         }
     }
 
+    /// A host that cannot say when a pid started: the clock is then the
+    /// only reading, so a record says what the test chose.
+    const SILENT: Host = Host {
+        alive: Liveness::Unknown,
+        started: None,
+    };
+
     /// A registry the way a crashed engine leaves one: written, and never
     /// cleared.
     fn left_behind(run_dir: &Path, started_at: DateTime<Utc>) {
         let pid = Pid::try_from(4321u32).expect("a pid");
         std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
-        std::mem::forget(ProcessRegistry::create(run_dir, pid, started_at).expect("registry"));
+        std::mem::forget(
+            ProcessRegistry::create(run_dir, pid, &SILENT, &AtClock(started_at)).expect("registry"),
+        );
+    }
+
+    /// The registry states when its engine started as the process table
+    /// reads it, not as the run's clock does: a reader compares the record
+    /// against that table, so an engine whose clock is frozen still reads
+    /// as the live engine it is.
+    #[test]
+    fn a_registry_under_a_frozen_clock_names_its_live_engine() {
+        let run = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
+        let frozen = DateTime::from_timestamp(1_600_000_000, 0).unwrap();
+        let host = Host {
+            alive: Liveness::Alive,
+            started: Some(DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+        };
+        let _registry = ProcessRegistry::create(
+            run.path(),
+            Pid::try_from(1u32).unwrap(),
+            &host,
+            &AtClock(frozen),
+        )
+        .unwrap();
+        assert_eq!(engine_liveness(run.path(), &host), EngineLiveness::Alive);
     }
 
     #[test]
@@ -304,8 +340,13 @@ mod tests {
         // `create` writes under `scratch/`, which a run creates and a bare directory does not have.
         std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
         for round in 0..200u32 {
-            let registry =
-                ProcessRegistry::create(run.path(), Pid::try_from(1u32).unwrap(), started).unwrap();
+            let registry = ProcessRegistry::create(
+                run.path(),
+                Pid::try_from(1u32).unwrap(),
+                &SILENT,
+                &AtClock(started),
+            )
+            .unwrap();
             // Ids no process holds: a registry keeps the groups that still run
             // past its engine, so these are the ones that stay out of the next round.
             let groups: Vec<Pid> = (1..=16u32)
@@ -339,8 +380,13 @@ mod tests {
         let run = tempfile::tempdir().unwrap();
         let started = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         std::fs::create_dir_all(registry_path(run.path()).parent().unwrap()).unwrap();
-        let _registry =
-            ProcessRegistry::create(run.path(), Pid::try_from(1u32).unwrap(), started).unwrap();
+        let _registry = ProcessRegistry::create(
+            run.path(),
+            Pid::try_from(1u32).unwrap(),
+            &SILENT,
+            &AtClock(started),
+        )
+        .unwrap();
         let mode = std::fs::metadata(registry_path(run.path()))
             .unwrap()
             .permissions()

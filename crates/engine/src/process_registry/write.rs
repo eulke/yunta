@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
 use yunta_core::durable::{self, Durability};
 use yunta_core::persisted::Persisted;
 use yunta_core::port::RunToolsEndpoint;
@@ -23,10 +22,15 @@ impl ProcessRegistry {
     /// invocation's file is replaced — the new engine owns the run now —
     /// but the groups it still names and that still run stay registered:
     /// they are the run's processes, and this engine answers for them.
+    ///
+    /// Takes the probe and the clock the lock takes, and for the same
+    /// reason: the start time it records is a claim about a pid that
+    /// another process will check against the host's process table.
     pub fn create(
         run_dir: &Path,
         engine_pid: Pid,
-        started_at: DateTime<Utc>,
+        probe: &dyn crate::lock::OwnerProbe,
+        clock: &dyn yunta_core::Clock,
     ) -> std::io::Result<ProcessRegistry> {
         let process_groups = match read_registry(run_dir) {
             Registry::Read(earlier) => running_groups(&earlier.doc.process_groups),
@@ -35,7 +39,7 @@ impl ProcessRegistry {
         let state = EngineProcessFile {
             schema_version: <EngineProcessFile as Persisted>::SCHEMA_VERSION,
             engine_pid,
-            started_at,
+            started_at: crate::lock::taken_at(engine_pid, probe, clock),
             process_groups,
             asking: None,
         };
@@ -235,13 +239,34 @@ fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EnginePro
 mod tests {
     use super::*;
     use crate::process_registry::{read_registry, registry_path, Registry};
+    use chrono::{DateTime, Utc};
+    use yunta_core::process::signal::Liveness;
+
+    /// A host that cannot say when a pid started: the clock is then the only
+    /// reading, so the record says what the test chose.
+    struct Silent;
+
+    impl crate::lock::OwnerProbe for Silent {
+        fn liveness(&self, _pid: Pid) -> Liveness {
+            Liveness::Unknown
+        }
+        fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+            None
+        }
+    }
 
     /// A registry created the way a run creates its own: the scratch
     /// directory first, then the file.
     fn registry_in(run_dir: &Path) -> ProcessRegistry {
         std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
         let started = DateTime::from_timestamp(1_700_000_000, 0).expect("a timestamp");
-        ProcessRegistry::create(run_dir, Pid::try_from(1u32).expect("a pid"), started).unwrap()
+        ProcessRegistry::create(
+            run_dir,
+            Pid::try_from(1u32).expect("a pid"),
+            &Silent,
+            &yunta_testkit_core::AtClock(started),
+        )
+        .unwrap()
     }
 
     /// The groups the registry file holds, as a reader of the file sees them.

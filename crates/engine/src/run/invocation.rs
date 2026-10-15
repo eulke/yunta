@@ -101,7 +101,12 @@ fn open_registry(
     Option<Arc<crate::process_registry::ProcessRegistry>>,
     Option<std::io::Error>,
 ) {
-    match crate::process_registry::ProcessRegistry::create(run_dir, Pid::current(), clock.now()) {
+    match crate::process_registry::ProcessRegistry::create(
+        run_dir,
+        Pid::current(),
+        &crate::lock::SystemProbe,
+        clock,
+    ) {
         Ok(registry) => (Some(Arc::new(registry)), None),
         Err(e) => (None, Some(e)),
     }
