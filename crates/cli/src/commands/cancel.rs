@@ -13,7 +13,9 @@
 //! 2. **Engine dead, pgids registered** (a crash) — kill the orphaned
 //!    groups directly, record `run_paused { reason: "cancelled after
 //!    crash" }`, delete the leftover registry.
-//! 3. **No registry** — nothing to signal; report what the log says.
+//! 3. **No registry yet** — a run its creator has just handed to an engine
+//!    moves before that engine registers: wait for the registration, then
+//!    case 1. With no engine registering, report what the log says.
 
 use std::time::Duration;
 
@@ -23,7 +25,6 @@ use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal
 use yunta_core::text::counted;
 use yunta_core::{describe, Pid, RunId};
 use yunta_engine::pace::Pace;
-use yunta_engine::NodeState;
 
 use crate::commands::advice;
 use crate::commands::close::give_back;
@@ -42,8 +43,10 @@ use crate::render::Look;
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How often `cancel` re-reads the log while it waits for the engine to
-/// record its terminal after the SIGINT.
+/// register, and to record its terminal after the SIGINT.
 const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
+
+mod registered;
 
 pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -80,7 +83,8 @@ async fn stop_engine(
     // Resolved before anything is signalled or written: a short declared
     // secret leaves the run as it is.
     let redactor = yunta_engine::run_redactor(&open.manifest.doc, &yunta_core::ProcessSecrets)?;
-    let Some(registry) = engine_registry(open, run_id, state)? else {
+    let Some(registry) = registered::engine_registry(ctx, storage, open, run_id, state).await?
+    else {
         return Ok(CancelState::NothingRunning);
     };
     if registry.liveness(&yunta_engine::lock::SystemProbe) == Liveness::Alive {
@@ -94,46 +98,6 @@ async fn stop_engine(
         engine_pid: registry.engine_pid,
         killed: registry.process_groups.len(),
     })
-}
-
-/// The engine registry a cancel signals through. `None` when the run has
-/// no channel at all and no node in progress, so there is nothing to
-/// signal; an error when a node is in progress with no channel to reach it.
-fn engine_registry(
-    open: &Opened,
-    run_id: &RunId,
-    state: &yunta_engine::RunState,
-) -> Result<Option<yunta_engine::EngineProcessFile>, CliError> {
-    let called = run_id.handle();
-    match yunta_engine::read_registry(&open.run_dir) {
-        yunta_engine::Registry::Read(registry) => Ok(Some(registry.doc)),
-        // A registry that will not read is not a registry that was
-        // never written: the person is told which of the two it is,
-        // because only one of them is a broken file on their disk.
-        yunta_engine::Registry::Corrupt(error) => Err(CliError::msg(format!(
-            "run {called}: its `engine.json` is there and this binary cannot read it \
-             ({}) — `{}` recovers the run once its process has stopped.",
-            describe(&error),
-            advice::resume(run_id.handle())
-        ))),
-        // Case 3 — no channel. Legacy fallback behavior, now the
-        // exception rather than the rule.
-        yunta_engine::Registry::Absent => {
-            let has_live_node = state
-                .nodes
-                .values()
-                .any(|record| matches!(record.state, Some(NodeState::Running { .. })));
-            match has_live_node {
-                false => Ok(None),
-                true => Err(CliError::msg(format!(
-                    "run {called} has a node in progress but no `engine.json` to signal \
-                     through — the engine that ran it predates this build, or its scratch \
-                     directory is gone. `{}` recovers the run once its process has stopped.",
-                    advice::resume(run_id.handle())
-                ))),
-            }
-        }
-    }
 }
 
 /// Signals the live engine with SIGINT and waits for it to stop the run.

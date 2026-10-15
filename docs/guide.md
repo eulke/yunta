@@ -399,6 +399,12 @@ tree with the task's own commit.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no
 shape to demand.
 
+A departure is answered where the person is: on the question the loop asks, or,
+when no terminal was there to ask it and the loop ended owing it, from that failure's
+menu (`yunta status`, `yunta resolve-gate`). Sending it back asks the same thing on
+both, what the session should do instead, and the session that departed picks its
+work back up with those words.
+
 A criterion no work of the plan can pass is not a departure. The task's session declares
 it with `yunta_declare_deviation` and `kind: unpassable`, naming the criterion and why, and
 the task stays blocked without another session. Once the loop has nothing else to run, its

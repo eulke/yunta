@@ -17,6 +17,9 @@ use yunta_testkit::{
 #[path = "run_flow/frozen.rs"]
 mod frozen;
 
+#[path = "run_flow/detached_cancel.rs"]
+mod detached_cancel;
+
 fn claude_code_stub() -> PathBuf {
     yunta_testkit_core::stubs::claude_code()
 }

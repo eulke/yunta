@@ -933,6 +933,15 @@ pub async fn answer_parked(
     bench: &Bench,
     option: &str,
 ) -> Result<(), yunta_engine::ResolveGateError> {
+    answer_parked_saying(bench, option, None).await
+}
+
+/// [`answer_parked`], with the words the person gives with the option.
+pub async fn answer_parked_saying(
+    bench: &Bench,
+    option: &str,
+    said: Option<&str>,
+) -> Result<(), yunta_engine::ResolveGateError> {
     let manifest = bench.manifest();
     let redactor = yunta_engine::run_redactor(&manifest, &*yunta_testkit::no_secrets())
         .expect("the bench's config names no secret too short to keep out of a log");
@@ -945,7 +954,7 @@ pub async fn answer_parked(
         yunta_core::events::HumanChoice {
             option: option.into(),
             by: "mcp".into(),
-            free_text: None,
+            free_text: said.map(str::to_string),
         },
         &redactor,
     )

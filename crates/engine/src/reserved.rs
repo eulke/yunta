@@ -43,14 +43,25 @@ pub(crate) mod offers {
 
     /// The option a failure's menu offers for `option`, with no words of
     /// its own: the surface that draws the menu writes them from the
-    /// failure, and from the node the menu is about.
+    /// failure, and from the node the menu is about. What it asks the
+    /// person is the option's own, the same on every menu that offers it.
     pub(crate) fn failure_option(option: ReservedOption) -> GateOption {
         GateOption {
             id: option.id(),
             label: None,
             tradeoff: None,
-            asks: None,
+            asks: asks(option),
         }
+    }
+
+    /// What `option` asks the person who picks it. A send-back asks what
+    /// the session that departed should do instead: the person's words are
+    /// what it picks its work back up with, and without them the lap would
+    /// change nothing. The departure's own question and the failure a loop
+    /// ends owing it on both offer it, so both ask it alike, and an answer
+    /// one takes is an answer the other takes.
+    fn asks(option: ReservedOption) -> Option<String> {
+        matches!(option, ReservedOption::SendBack).then(|| "what should it do instead?".to_string())
     }
 
     /// Accept a departure from the plan. Its words come from the
@@ -59,14 +70,10 @@ pub(crate) mod offers {
         failure_option(ReservedOption::Accept)
     }
 
-    /// Send a departure back to the session that made it. That session asks
-    /// what should change: the person's words are what it picks its work
-    /// back up with, and without them the lap would change nothing.
+    /// Send a departure back to the session that made it, asking what it
+    /// should do instead.
     pub(crate) fn send_back() -> GateOption {
-        GateOption {
-            asks: Some("what should it do instead?".to_string()),
-            ..failure_option(ReservedOption::SendBack)
-        }
+        failure_option(ReservedOption::SendBack)
     }
 
     /// Stop, on any escalation. It says `pauses` because that is what it

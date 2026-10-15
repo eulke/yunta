@@ -4,6 +4,8 @@
 # no-real-LLM rule.
 #
 # - `--version`: replies like the real CLI and exits.
+# - $CLAUDE_STUB_VERSION_DELAY, if set: the seconds `--version` takes to
+#   answer — a CLI slow to start, which holds an engine at its adapter probe.
 # - $CLAUDE_STUB_STDIN_FILE, if set: everything read from stdin — the prompt.
 # - $CLAUDE_STUB_ARGS_FILE, if set: every argv entry, one per line — lets
 #   tests assert the exact CLI invocation the adapter built (permission
@@ -59,6 +61,9 @@ if [ -n "$CLAUDE_STUB_STDIN_FILE" ]; then
 fi
 
 if [ "$1" = "--version" ]; then
+  if [ -n "$CLAUDE_STUB_VERSION_DELAY" ]; then
+    sleep "$CLAUDE_STUB_VERSION_DELAY"
+  fi
   echo "2.1.296 (Claude Code)"
   exit 0
 fi
