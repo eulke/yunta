@@ -394,9 +394,10 @@ async fn unmet_report(
     last_check: Option<yunta_core::Seq>,
 ) -> Result<TaskCycleReport, TaskCycleError> {
     // What the last attempt left is what a person deciding about the task
-    // needs to read: which criteria still fail, and what strayed. A request
-    // still owed a person's decision is that decision, and it leaves the
-    // checkout with the cycle.
+    // needs to read: which criteria still fail, and what strayed, or the
+    // session's own refusal when its conversation outgrew the context window
+    // a second time. A request still owed a person's decision is that
+    // decision, and it leaves the checkout with the cycle.
     let owed = attempts.last().is_some_and(AttemptRecord::escalated);
     let cause = match owed {
         true => {
@@ -408,7 +409,10 @@ async fn unmet_report(
                 })?;
             TaskCause::ScopeDecisionOwed
         }
-        false => unmet_cause(&attempts),
+        false => attempts
+            .last()
+            .and_then(|last| attempt::failure_stop(params.adapter.id(), &last.dispatch))
+            .unwrap_or_else(|| unmet_cause(&attempts)),
     };
     Ok(TaskCycleReport {
         task_id: params.task.id.clone(),

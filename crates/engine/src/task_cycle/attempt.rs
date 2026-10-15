@@ -7,7 +7,7 @@ use yunta_core::ScopeGlob;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     AccountLimit, CriterionResult, CriterionUnpassablePayload, FailureCause, LimitSource, Phase,
-    SessionDeath, SessionRefusal, TaskCause,
+    RefusalCause, SessionDeath, SessionRefusal, TaskCause,
 };
 use yunta_core::expansion::Decision;
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
@@ -273,31 +273,17 @@ async fn step_of(
         let cause = TaskCause::CriterionUnpassable { declared };
         return Ok(stop(last_staged, record, TaskOutcome::Blocked { cause }));
     }
-    // A criterion that never answered is the environment's, not the
-    // work's: the next session would change the tree, never whether the
-    // engine can run the command. The cycle stops here and says which.
-    let unrunnable: Vec<CriterionResult> = record
-        .post_results
-        .iter()
-        .filter(|result| could_not_run(result.exit_code).is_some())
-        .cloned()
-        .collect();
-    if !unrunnable.is_empty() {
-        let cause = TaskCause::Unrunnable { runs: unrunnable };
-        return stop_unclosed(params.unit, params.task, last_staged, record, cause).await;
-    }
-    // A session that died says so instead of leaving the tail to report
-    // criteria that were never run.
-    if let Some(died) = session_death {
-        let cause = TaskCause::SessionDied(died);
-        return stop_unclosed(params.unit, params.task, last_staged, record, cause).await;
-    }
-    // A session that refused the request, or whose account reached its
-    // limit, ends the cycle here, with the criteria judged above: the
-    // engine never trusts the session's own verdict, and no other session
-    // is opened on the same request.
-    if let Some(cause) = failure_stop(params.adapter.id(), &record.dispatch) {
-        return stop_unclosed(params.unit, params.task, last_staged, record, cause).await;
+    match unclosed_cause(params.adapter.id(), &record, session_death) {
+        // A session whose conversation outgrew the context window leaves its
+        // work to the cycle, which owes it one fresh session (`fresh_session_owed`).
+        Some(TaskCause::SessionRefused(SessionRefusal {
+            cause: RefusalCause::ContextExhausted,
+            ..
+        })) => return Ok((last_staged, AttemptStep::Unmet(record))),
+        Some(cause) => {
+            return stop_unclosed(params.unit, params.task, last_staged, record, cause).await
+        }
+        None => {}
     }
     // A grant the engine made itself is the one thing that changes what
     // the next session can do: the fence refused the write in this one.
@@ -312,6 +298,36 @@ async fn step_of(
             false => AttemptStep::Unmet(record),
         },
     ))
+}
+
+/// The cause an attempt that did not close stops the cycle on, if one does.
+fn unclosed_cause(
+    adapter: &AdapterId,
+    record: &AttemptRecord,
+    session_death: Option<SessionDeath>,
+) -> Option<TaskCause> {
+    // A criterion that never answered is the environment's, not the
+    // work's: the next session would change the tree, never whether the
+    // engine can run the command. The cycle stops here and says which.
+    let unrunnable: Vec<CriterionResult> = record
+        .post_results
+        .iter()
+        .filter(|result| could_not_run(result.exit_code).is_some())
+        .cloned()
+        .collect();
+    if !unrunnable.is_empty() {
+        return Some(TaskCause::Unrunnable { runs: unrunnable });
+    }
+    // A session that died says so instead of leaving the tail to report
+    // criteria that were never run.
+    if let Some(died) = session_death {
+        return Some(TaskCause::SessionDied(died));
+    }
+    // A session that refused the request, or whose account reached its
+    // limit, ends the cycle here, with the criteria judged above: the
+    // engine never trusts the session's own verdict, and no other session
+    // is opened on the same request.
+    failure_stop(adapter, &record.dispatch)
 }
 
 /// The death of a session that ended without reporting anything: it left no
@@ -330,7 +346,7 @@ fn session_death_of(dispatch: &DispatchOutcome, adapter: &AdapterId) -> Option<S
 /// The cause a session that ended in a failure stops the cycle with: its
 /// refusal, or its account's limit, with the message the adapter gave. `None`
 /// for every other end.
-fn failure_stop(adapter: &AdapterId, dispatch: &DispatchOutcome) -> Option<TaskCause> {
+pub(super) fn failure_stop(adapter: &AdapterId, dispatch: &DispatchOutcome) -> Option<TaskCause> {
     let DispatchOutcome::Failed { error, cause } = dispatch else {
         return None;
     };

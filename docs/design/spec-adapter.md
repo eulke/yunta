@@ -282,9 +282,10 @@ pub enum AgentEvent {
     /// debajo. `cause` es lo que el CLI dijo que rechazó la sesión: `Limit`
     /// cuando la cuenta llegó a su límite (con `resets_at` cuando el CLI dio
     /// la hora), y `Refused` con la causa de la negativa: `Final` cuando nada
-    /// la nombra, `Authentication`, `InvalidModel` o `Unreachable`. Solo
-    /// `Unreachable` vuelve a intentarse sola; de las demás decide el engine,
-    /// a partir de la falla que registra.
+    /// la nombra, `Authentication`, `InvalidModel`, `Unreachable` o
+    /// `ContextExhausted`. Solo `Unreachable` vuelve a intentarse sola, en la
+    /// misma sesión; tras `ContextExhausted` el trabajo pasa a una sesión
+    /// nueva; de las demás decide el engine, a partir de la falla que registra.
     Failed { error: AgentError, cause: FailureCause },
 }
 ```

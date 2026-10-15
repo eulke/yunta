@@ -485,8 +485,12 @@ de lectura de §3.1 del Contrato aplicada a este campo.
 
 **Una negativa, un límite, una parada o un check en rojo dicen su causa.** `session_refused`
 nombra la sesión que rechazó la petición, con su `adapter`, su `message` y una `cause`
-de cuatro: final, de autenticación, de modelo inválido o de transporte. Solo la de
-transporte la reintenta el engine por sí mismo. `limit` es el límite de una cuenta: el
+de cinco: final, de autenticación, de modelo inválido, de transporte o de contexto
+agotado (`context_exhausted`: el CLI no pudo mantener la conversación de la sesión
+dentro de la ventana de contexto del modelo). Solo la de transporte la reintenta el
+engine por sí mismo; una sesión cuyo contexto se agotó le pasa su trabajo a una
+sesión nueva, una vez por ciclo de la tarea, y la falla llega aquí cuando esa
+también lo agota. `limit` es el límite de una cuenta: el
 de una sesión, con su `adapter`, o el del forge, y su `resets_at` cuando la CLI o el
 forge dijeron la hora. Con hora, el run queda en `run_paused` con `awaiting_reset`
 hasta ese momento; sin ella, la decisión va a una persona. `stopped` lista, en orden de

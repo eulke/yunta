@@ -57,6 +57,10 @@ pub(crate) fn refusal_sentence(refusal: &SessionRefusal) -> String {
             "session `{}` refused the request (the service could not be reached)",
             refusal.adapter
         ),
+        RefusalCause::ContextExhausted => format!(
+            "session `{}` could not go on (its conversation outgrew the model's context window)",
+            refusal.adapter
+        ),
     };
     text::detailed(said, &refusal.message)
 }

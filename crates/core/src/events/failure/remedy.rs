@@ -232,14 +232,16 @@ fn owed_scope_outlook(facts: &Facts) -> Outlook {
 }
 
 /// What a refusal leaves open: a credential, a model or the service can be
-/// fixed, and a final refusal stays final.
+/// fixed, and a final refusal stays final. A context the CLI could not hold
+/// reaches a person only once a fresh session overflowed it as well, and
+/// then no retry of the same work fits it either.
 fn cause_outlook(cause: &RefusalCause, _facts: &Facts) -> Outlook {
     match cause {
         RefusalCause::Authentication => retry(Precondition::CredentialFixed),
         RefusalCause::InvalidModel => retry(Precondition::ModelAvailable),
         // The automatic wait for the service has ended, so a person decides when to try again.
         RefusalCause::Unreachable => retry(Precondition::ServiceReachable),
-        RefusalCause::Final => Outlook::Stuck(Stuck::Final),
+        RefusalCause::Final | RefusalCause::ContextExhausted => Outlook::Stuck(Stuck::Final),
     }
 }
 

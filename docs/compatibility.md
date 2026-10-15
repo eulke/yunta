@@ -224,8 +224,10 @@ to take a sentence apart to recover them.
 
 The later failure shapes have keys of their own too. `session_refused:` is a session
 that refused the request, with its adapter, its message and a cause: final,
-authentication, invalid model, or transport, and only the transport one is
-re-attempted by the engine on its own. `limit:` is an account's limit, of a
+authentication, invalid model, transport, or a context the CLI could not hold
+(`context_exhausted`). Only the transport one is re-attempted by the engine on
+its own; a session whose context ran out hands its work to one fresh session, and
+the failure comes here when that one runs out as well. `limit:` is an account's limit, of a
 session or of the forge. When the CLI or the forge named the time it resets, the
 run waits for that time (`run_paused` with `awaiting_reset`) and resumes on its
 own; when it named none, a person decides. `stopped:` lists the tasks of a loop

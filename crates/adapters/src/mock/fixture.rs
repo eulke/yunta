@@ -463,6 +463,7 @@ fn word(cause: FailureCause) -> &'static str {
         FailureCause::Refused(RefusalCause::Authentication) => "authentication",
         FailureCause::Refused(RefusalCause::InvalidModel) => "invalid_model",
         FailureCause::Refused(RefusalCause::Unreachable) => "unreachable",
+        FailureCause::Refused(RefusalCause::ContextExhausted) => "context_exhausted",
     }
 }
 

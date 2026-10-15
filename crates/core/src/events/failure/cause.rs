@@ -31,6 +31,11 @@ pub enum RefusalCause {
     InvalidModel,
     /// Transport markers only; the one cause the engine re-attempts by itself.
     Unreachable,
+    /// The CLI could not keep the session's conversation within the model's
+    /// context window. This session cannot go on, though its work can: the
+    /// engine hands it to one fresh session, which carries none of that
+    /// conversation.
+    ContextExhausted,
 }
 
 /// A refusal kept whole: the adapter's message and its cause.

@@ -1,7 +1,9 @@
 //! A task's failed attempt, as the cycle reports it: a red attempt blocks the
 //! task without another session, a blocked task says what its red criterion
-//! printed last, a non-retryable failure ends the cycle, and a crashed or dead
-//! session is recorded and its task names what ended it.
+//! printed last, a non-retryable failure ends the cycle, a session whose
+//! conversation outgrew the context window hands its work to one fresh
+//! session, and a crashed or dead session is recorded and its task names what
+//! ended it.
 
 use super::*;
 
@@ -236,4 +238,97 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
         1,
         "and stops there: the next attempt would open the same session"
     );
+}
+
+/// What Claude Code prints when a session's conversation no longer fits the
+/// model's context window.
+const THRASHING: &str = "Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row.";
+
+/// A task that needs two files: a session writes the first and then cannot
+/// go on, and what writes the second is what the test is about.
+fn two_files() -> Task {
+    task(
+        "too-long",
+        &["a.txt", "b.txt"],
+        vec![cmd("test -f a.txt && test -f b.txt")],
+    )
+}
+
+/// A session whose conversation outgrew the context window cannot go on,
+/// though its work can: the cycle hands what it left in the checkout to a
+/// fresh session, with no person, and that session closes the task.
+#[tokio::test]
+async fn a_session_whose_conversation_outgrew_the_context_hands_its_work_to_a_fresh_session() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    let adapter = scripted(&format!(
+        r#"
+dialect: claude-code
+sessions:
+  - effects:
+      - {{ path: a.txt, content: "a" }}
+    outcome: {{ type: failed, message: "{THRASHING}" }}
+  - effects:
+      - {{ path: b.txt, content: "b" }}
+    outcome: {{ type: completed, summary: "finished the work the first one left" }}
+"#
+    ));
+
+    let report = run_once(
+        &owner,
+        &unit,
+        run.path(),
+        &two_files(),
+        &adapter,
+        Budget::default(),
+    )
+    .await;
+
+    assert_eq!(report.outcome, TaskOutcome::Done);
+    assert_eq!(report.attempts.len(), 2);
+    assert!(
+        adapter.resumes_seen().is_empty(),
+        "the second session carries none of the first one's conversation"
+    );
+}
+
+/// The fresh session is owed once: one that outgrows the context as well
+/// stops the task on that refusal, for a person to decide.
+#[tokio::test]
+async fn a_fresh_session_that_outgrows_the_context_too_stops_the_task_on_it() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    // Scripts one session more than the cycle owes, so a cycle that opened it
+    // would close the task.
+    let adapter = scripted(&format!(
+        r#"
+dialect: claude-code
+sessions:
+  - outcome: {{ type: failed, message: "{THRASHING}" }}
+  - outcome: {{ type: failed, message: "{THRASHING}" }}
+  - effects:
+      - {{ path: a.txt, content: "a" }}
+      - {{ path: b.txt, content: "b" }}
+    outcome: {{ type: completed, summary: "one session too many" }}
+"#
+    ));
+
+    let report = run_once(
+        &owner,
+        &unit,
+        run.path(),
+        &two_files(),
+        &adapter,
+        Budget::default(),
+    )
+    .await;
+
+    assert_eq!(report.attempts.len(), 2);
+    let TaskOutcome::Blocked {
+        cause: TaskCause::SessionRefused(refusal),
+    } = &report.outcome
+    else {
+        panic!("the task stops on the refusal: {:?}", report.outcome);
+    };
+    assert_eq!(refusal.cause, RefusalCause::ContextExhausted);
 }

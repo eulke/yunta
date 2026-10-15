@@ -7,8 +7,8 @@
 //! reads are written by the run tools, so no prose about them lives here.
 
 use yunta_core::events::{
-    CriterionResult, Failure, FailureCause, SessionExit, Surprise, TaskCause, TokenUsage,
-    Unanswered,
+    CriterionResult, Failure, FailureCause, RefusalCause, SessionExit, Surprise, TaskCause,
+    TokenUsage, Unanswered,
 };
 use yunta_core::expansion::Decision;
 use yunta_core::port::AgentError;
@@ -191,14 +191,32 @@ impl AttemptRecord {
                 .is_some_and(|o| !matches!(o.decision, Decision::Escalate { .. }))
     }
 
-    /// Whether a fresh session takes the task on after this attempt, which
-    /// left its request pending under a red criterion: one may close the task
-    /// without what it asked for, and the request is then withdrawn. One does,
-    /// once per cycle. When `earlier` already left a request pending, a person
-    /// decides it, and no further session spends the run while they do.
+    /// Whether a fresh session takes the task on after this attempt. One
+    /// that left its request pending under a red criterion is owed one: it
+    /// may close the task without what it asked for, and the request is then
+    /// withdrawn. One whose conversation the CLI could not hold is owed one
+    /// too: its work stays in the checkout, and what did not fit is the
+    /// conversation, which a fresh session does not carry. Each, once per
+    /// cycle: when `earlier` already owed one for the same reason, a person
+    /// decides, and no further session spends the run while they do.
     pub(super) fn fresh_session_owed(&self, earlier: &[AttemptRecord]) -> bool {
         let red = self.post_check.iter().any(|run| run.exit_code != 0);
-        self.escalated() && red && !earlier.iter().any(AttemptRecord::escalated)
+        let asked = self.escalated() && red && !earlier.iter().any(AttemptRecord::escalated);
+        let overflowed =
+            self.context_exhausted() && !earlier.iter().any(AttemptRecord::context_exhausted);
+        asked || overflowed
+    }
+
+    /// Whether this attempt's session ended because the CLI could not keep
+    /// its conversation within the model's context window.
+    pub(super) fn context_exhausted(&self) -> bool {
+        matches!(
+            &self.dispatch,
+            DispatchOutcome::Failed {
+                cause: FailureCause::Refused(RefusalCause::ContextExhausted),
+                ..
+            }
+        )
     }
 }
 

@@ -7738,6 +7738,11 @@
           "description": "Transport markers only; the one cause the engine re-attempts by itself.",
           "type": "string",
           "const": "unreachable"
+        },
+        {
+          "description": "The CLI could not keep the session's conversation within the model's\ncontext window. This session cannot go on, though its work can: the\nengine hands it to one fresh session, which carries none of that\nconversation.",
+          "type": "string",
+          "const": "context_exhausted"
         }
       ]
     },

@@ -56,6 +56,11 @@ const MODEL_MARKERS: &[&str] = &[
     "404",
 ];
 
+/// What the CLIs print when a session's conversation no longer fits the
+/// model's context window: Claude Code's compaction giving up, and the error
+/// Codex names for the window a turn exceeded.
+const CONTEXT_MARKERS: &[&str] = &["autocompact is thrashing", "context window exceeded"];
+
 /// The refusal a CLI's failure message names, by marker. A message no class
 /// names is a final refusal: its session is not re-attempted on its own.
 pub fn classify(message: &str) -> FailureCause {
@@ -71,6 +76,8 @@ pub fn classify(message: &str) -> FailureCause {
         RefusalCause::Authentication
     } else if has_word(&text, "model") && hit(&text, MODEL_MARKERS) {
         RefusalCause::InvalidModel
+    } else if hit(&text, CONTEXT_MARKERS) {
+        RefusalCause::ContextExhausted
     } else {
         RefusalCause::Final
     };
@@ -103,6 +110,23 @@ mod tests {
             classify("You've hit your usage limit. Try again later."),
             FailureCause::Refused(RefusalCause::Final)
         );
+    }
+
+    #[test]
+    fn a_conversation_the_context_window_cannot_hold_is_its_own_cause() {
+        for message in [
+            "Autocompact is thrashing: the context refilled to the limit within 3 turns of the \
+             previous compact, 3 times in a row. A file being read or a tool output is likely too \
+             large for the context window. Try reading in smaller chunks, or use /clear to start \
+             fresh.",
+            "stream error: context window exceeded",
+        ] {
+            assert_eq!(
+                classify(message),
+                FailureCause::Refused(RefusalCause::ContextExhausted),
+                "{message}"
+            );
+        }
     }
 
     #[test]
