@@ -100,6 +100,9 @@ pub struct Confinement {
     pub network: bool,
     /// Written by no session of the run; the sandbox denies its literal trees.
     pub protected: Arc<Protected>,
+    /// The git directory the run's repository keeps its register in: no
+    /// session writes it, wherever it lies, so a commit is the engine's.
+    pub git_register: Option<PathBuf>,
 }
 
 /// `$TMPDIR` and `/tmp`, writable in every session.
@@ -127,6 +130,8 @@ pub struct ConfinementInput<'a> {
     pub artifact_dir: Option<&'a Path>,
     pub shared_dirs: &'a [PathBuf],
     pub protected: Arc<Protected>,
+    /// The run's git register, when the run knows its repository.
+    pub git_register: Option<&'a Path>,
 }
 
 impl Confinement {
@@ -142,6 +147,7 @@ impl Confinement {
             artifact_dir,
             shared_dirs,
             protected,
+            git_register,
         } = input;
         let commands = Commands::of(profile, edit);
         let worktree = Worktree::of(profile, edit, scoped);
@@ -163,6 +169,7 @@ impl Confinement {
             roots,
             network,
             protected,
+            git_register: git_register.map(Path::to_path_buf),
         })
     }
 
@@ -187,16 +194,21 @@ impl Confinement {
         Coverage::of(Fenced::Exact, commands)
     }
 
-    /// Whether a command's write reaches `target`, judged by directory as a sandbox judges it.
+    /// Whether a command's write reaches `target`, judged by directory as a
+    /// sandbox judges it: a denied tree wins over every grant, the temporary
+    /// directories' included.
     pub fn command_may_write(&self, cwd: &Path, target: &Path) -> bool {
         if self.commands == Commands::Unconfined {
             return true;
         }
-        let protected = self
+        if self
             .protected_trees(cwd)
             .iter()
-            .any(|tree| target.starts_with(tree));
-        (self.writes_worktree() && target.starts_with(cwd) && !protected)
+            .any(|tree| target.starts_with(tree))
+        {
+            return false;
+        }
+        (self.writes_worktree() && target.starts_with(cwd))
             || self
                 .roots
                 .iter()
@@ -204,18 +216,29 @@ impl Confinement {
                 .any(|dir| target.starts_with(dir))
     }
 
-    /// The trees under `cwd` the sandbox denies: the directory of every
-    /// protected glob that selects every path under one. A protected file, a
-    /// pattern that selects part of a directory and a pattern that names no
-    /// directory are judged by the rail and the close instead, since denying
-    /// their directory would deny paths nothing protects.
+    /// The trees the sandbox denies: under `cwd`, the directory of every
+    /// protected glob that selects every path under one; and the run's git
+    /// register wherever it lies, which a temporary directory's grant would
+    /// cover otherwise. A protected file, a pattern that selects part of a
+    /// directory and a pattern that names no directory are judged by the
+    /// rail and the close instead, since denying their directory would deny
+    /// paths nothing protects.
     pub fn protected_trees(&self, cwd: &Path) -> Vec<PathBuf> {
-        self.protected
+        let mut trees: Vec<PathBuf> = self
+            .protected
             .every()
             .iter()
             .filter_map(ScopeGlob::whole_tree)
             .map(|tree| cwd.join(tree))
-            .collect()
+            .collect();
+        if let Some(register) = self
+            .git_register
+            .as_ref()
+            .filter(|register| !trees.contains(register))
+        {
+            trees.push(register.clone());
+        }
+        trees
     }
 }
 
@@ -244,6 +267,7 @@ mod tests {
             artifact_dir: None,
             shared_dirs,
             protected: Arc::new(Protected::default()),
+            git_register: None,
         })
     }
 
@@ -349,6 +373,7 @@ mod tests {
             artifact_dir: None,
             shared_dirs: &[],
             protected: Arc::new(protected),
+            git_register: None,
         })
         .expect("a writing session is buildable");
         let trees = confinement.protected_trees(&cwd);
@@ -408,5 +433,42 @@ mod tests {
             Worktree::of(PermissionProfile::Full, EditSandbox::ReadOnly, false),
             Worktree::All
         );
+    }
+
+    /// A writing session over a checkout under the temporary directory, with
+    /// the agent config tree protected and the run's register beside it.
+    fn under_temp() -> (PathBuf, PathBuf, Confinement) {
+        let temp = std::env::temp_dir();
+        let cwd = temp.join("pool/slot-1");
+        let register = temp.join("repo/.git");
+        let protected = Protected::new(&[], &[]).expect("the fixed set builds");
+        let confinement = Confinement::of(ConfinementInput {
+            profile: PermissionProfile::Edit,
+            edit: EditSandbox::WorkspaceWrite,
+            scoped: false,
+            network: false,
+            checkout: &cwd,
+            artifact_dir: None,
+            shared_dirs: &[],
+            protected: Arc::new(protected),
+            git_register: Some(&register),
+        })
+        .expect("a writing session is buildable");
+        (cwd, register, confinement)
+    }
+
+    #[test]
+    fn the_runs_git_register_is_written_by_no_command_even_under_temp() {
+        let (cwd, register, confinement) = under_temp();
+        assert!(confinement.protected_trees(&cwd).contains(&register));
+        assert!(!confinement.command_may_write(&cwd, &register.join("refs/heads/main")));
+        assert!(confinement.command_may_write(&cwd, &std::env::temp_dir().join("scratch.txt")));
+    }
+
+    #[test]
+    fn a_protected_tree_of_a_checkout_under_temp_is_written_by_no_command() {
+        let (cwd, _, confinement) = under_temp();
+        assert!(!confinement.command_may_write(&cwd, &cwd.join(".claude/settings.json")));
+        assert!(confinement.command_may_write(&cwd, &cwd.join("src/a.rs")));
     }
 }

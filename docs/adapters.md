@@ -109,7 +109,9 @@ Every session also loads its person's own configuration of the CLI — settings,
 extensions, MCP servers, hooks — unless its node says `cli_config: isolated`, which
 leaves it with only what the run mounts (`--setting-sources ""` and
 `--strict-mcp-config` for `claude-code`, `--ignore-user-config` and `--ignore-rules`
-for `codex`). The trees a CLI loads that configuration from inside a checkout —
+for `codex`). A tool of an MCP server the session loads that way writes without
+asking the rail, and the files it writes are not formatted as they are written: the
+close judges them like any other write. The trees a CLI loads that configuration from inside a checkout —
 `.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/**` for
 `codex` — are never written by any session of any run. The instruction files,
 `AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. The
@@ -123,7 +125,10 @@ directory, such as `config/secrets.yaml`, is looked for inside that directory ev
 when the project ignores it; a pattern that names no directory is not looked for
 inside a directory the project ignores whole, such as a build output or a
 dependency tree, since what lies there belongs to the build or the dependency. A
-run never commits what git ignores.
+run never commits what git ignores. No session's commands write the run's git
+register, the repository's common git directory, wherever it lies — under a temporary
+directory too, which the sandbox otherwise leaves writable — so every commit on a run's
+branch is the engine's, with its trailers.
 
 A refusal reaches the model with the reason and the way out — ask for more
 scope, or report the need as a finding — and reaches the log as
@@ -167,8 +172,9 @@ why; it records no `rail_failed`, because no engine is listening to record it. A
 failure the engine hears of is recorded as `rail_failed` with one closed cause:
 `decode` for a call that does not read, `unauthorized` for a call without the
 session's token, `timeout` for an answer that misses its window,
-`judgement_failed` for a stop whose judgement cannot run, `formatter_failed` for a
-formatter that does not start, `no_fence` for a write in a session with no fence
+`judgement_failed` for a stop whose judgement cannot run (a judgement the
+session's own stop cuts short did not fail, so it records nothing),
+`formatter_failed` for a formatter that does not start, `no_fence` for a write in a session with no fence
 to judge it by, and `listener_died` when a listener stops serving. A 400 and a 401
 are each recorded once per listener.
 
@@ -282,6 +288,14 @@ A fixture's session can script `kill: refuse`. Its `kill` then fails, and the
 session keeps running for as long as the script still plays; once the script
 has ended, `kill` answers as it does for any session. That is how a session the
 engine cannot stop is reproduced without a real CLI.
+
+A fixture's session can end on the account's limit:
+`outcome: { type: limited, resets_at: <Unix seconds> }`. It closes the way its
+dialect's CLI closes such a session. Under `claude-code` that is the rejected
+rate-limit window naming the reset, then the refused result. Under `codex` it
+is the usage-limit failure, which names no reset, so a `codex` fixture that
+names one is refused when it is read. That is how a run that waits for the
+account's reset is reproduced without a real CLI.
 
 ## `yunta doctor`
 

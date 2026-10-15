@@ -104,14 +104,7 @@ struct Variant<'a> {
 
 fn variants(workflow: &Workflow) -> Vec<Variant<'_>> {
     let keeps = |included: Option<&HashSet<NodeId>>| {
-        workflow
-            .iter_nodes_with_group()
-            .filter(|(node, group)| {
-                let top = group.map_or(&node.id, |group| &group.id);
-                included.is_none_or(|set| set.contains(top))
-            })
-            .map(|(node, _)| node)
-            .collect::<Vec<_>>()
+        workflow.iter_nodes_under(included).collect::<Vec<_>>()
     };
     let Some(modes) = &workflow.modes else {
         return vec![Variant {

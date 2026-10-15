@@ -189,6 +189,9 @@ pub struct NodeRecord {
     /// per-session close event, so a session is open exactly while the
     /// attempt that opened it has not reached a terminal.
     pub sessions: Vec<OpenSession>,
+    /// The models this node's sessions ran on, as their CLIs reported them,
+    /// each once, in the order the log first names it.
+    pub models: Vec<crate::ids::ModelName>,
     /// Every write this node's sessions had refused, oldest first.
     pub refused: Vec<RefusedWrite>,
     /// Every stop this node's sessions were sent back from, oldest first.

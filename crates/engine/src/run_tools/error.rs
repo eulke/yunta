@@ -163,10 +163,26 @@ impl RunToolError {
         }
     }
 
+    /// Whether a stop cut this call short: the run's, its task's, or its
+    /// session's own, which stops what the session's calls run. Nothing
+    /// about such a call failed or was refused.
+    pub(super) fn cancelled(&self) -> bool {
+        match self {
+            RunToolError::Cancelled => true,
+            RunToolError::Check { source } => source.cancelled(),
+            RunToolError::Criterion { source } => source.cancelled(),
+            RunToolError::Record { source } => matches!(source, crate::run::RunError::Cancelled),
+            _ => false,
+        }
+    }
+
     /// Why this call was refused, in the closed word the log keeps. A call
-    /// the run stopped was refused by nothing, so it has no word.
+    /// a stop cut short was refused by nothing, so it has no word.
     pub(super) fn refusal(&self) -> Option<yunta_core::events::RunToolRefusal> {
         use yunta_core::events::RunToolRefusal as R;
+        if self.cancelled() {
+            return None;
+        }
         let refusal = match self {
             RunToolError::Cancelled => return None,
             RunToolError::CriterionConflict { .. } => R::RequestPending,
@@ -217,5 +233,40 @@ impl From<yunta_storage::StorageError> for RunToolError {
             },
             source => RunToolError::Storage { source },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::{Cause, GitError, Invocation, Stopped};
+    use crate::task_cycle::TaskCycleError;
+    use yunta_core::events::RunToolRefusal;
+
+    /// A check whose git ended with `cause`.
+    fn check_whose_git(cause: Cause) -> RunToolError {
+        RunToolError::Check {
+            source: TaskCycleError::Git(GitError {
+                invocation: Invocation {
+                    dir: std::path::PathBuf::from("/checkout"),
+                    args: vec!["write-tree".to_string()],
+                },
+                cause,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_check_a_stop_cut_short_has_no_refusal_and_one_that_failed_does() {
+        let stopped = check_whose_git(Cause::Stopped(Stopped::Cancelled));
+        assert!(stopped.cancelled());
+        assert_eq!(stopped.refusal(), None);
+
+        let failed = check_whose_git(Cause::Exit {
+            code: Some(128),
+            stderr: "fatal: not a git repository".to_string(),
+        });
+        assert!(!failed.cancelled());
+        assert_eq!(failed.refusal(), Some(RunToolRefusal::EngineFailed));
     }
 }

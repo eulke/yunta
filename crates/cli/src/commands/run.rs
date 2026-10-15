@@ -174,6 +174,7 @@ pub(super) async fn runnable(
     raw_inputs: &[String],
     adapter: Option<&AdapterId>,
     mock_fixture: Option<&Path>,
+    mode: Option<&ModeName>,
     ambient: &yunta_core::Env,
 ) -> Result<FrozenRun, CliError> {
     let (workflow_path, workflow) = super::verdict::resolve_runnable(ctx, workflow_path).await?;
@@ -194,7 +195,7 @@ pub(super) async fn runnable(
     let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs, ambient)
         .await?
         .with_adapter(pinned);
-    servable(&frozen.manifest).await?;
+    servable(&frozen.manifest, &resolve_mode(&frozen.manifest, mode)).await?;
     Ok(frozen)
 }
 

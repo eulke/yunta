@@ -6,7 +6,8 @@
 //! its task leaves unanswered when the task closes is withdrawn instead:
 //! nobody decides it, and the loop owes nothing.
 
-use yunta_core::events::{EventPayload, Failure, ScopeEvent, SessionEvent, TaskStatus};
+use yunta_core::events::{EventPayload, Failure, ScopeEvent, SessionEvent, TaskEvent, TaskStatus};
+use yunta_core::SessionId;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
 
@@ -250,4 +251,53 @@ async fn a_pending_request_opens_one_fresh_session_and_then_waits_for_a_person()
         })
         .count();
     assert_eq!(opened, 2, "the session that asked, and one fresh session");
+}
+
+/// The id of the last session the log opened for `task`.
+fn last_opened(bench: &Bench, task: &str) -> Option<SessionId> {
+    bench
+        .events()
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Session(SessionEvent::Opened(opened)))
+                if opened
+                    .task_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == task) =>
+            {
+                Some(opened.session_id.clone())
+            }
+            _ => None,
+        })
+}
+
+/// A person's grant from the failure the loop ended owing sends the task
+/// back to the session it worked in last, with the work it left: the
+/// answer is the one thing that changed for that session.
+#[tokio::test]
+async fn an_owed_grant_resumes_the_session_the_task_worked_in_last() {
+    let bench = Bench::new();
+    let (workflow, fixture) = asking(&[&needing_both("task-h", "h")]);
+    bench.run(&workflow, &fixture).await;
+    let asked = last_opened(&bench, "task-h");
+    assert!(
+        asked.is_some(),
+        "the task opened a session before the pause"
+    );
+
+    bench.wake_answering(&chosen("grant")).await;
+
+    let resumed = bench
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(changed)))
+                if changed.task_id.as_str() == "task-h" && changed.resumes.is_some() =>
+            {
+                changed.resumes.clone()
+            }
+            _ => None,
+        });
+    assert_eq!(resumed, asked);
 }

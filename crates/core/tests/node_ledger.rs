@@ -281,3 +281,25 @@ fn a_rail_summary_with_no_open_session_changes_nothing() {
     let record = ledger.get(&NodeId::from_static("compare")).unwrap();
     assert!(record.sessions.is_empty());
 }
+
+#[test]
+fn a_node_keeps_each_model_its_sessions_reported_once() {
+    let SessionEvent::Opened(mut first) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    first.model = Some("opened-model".parse().unwrap());
+    let mut again = first.clone();
+    again.session_id = "sess-2".into();
+    let ledger = heard(&[SessionEvent::Opened(first), SessionEvent::Opened(again)]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    let models: Vec<String> = record.models.iter().map(ToString::to_string).collect();
+    assert_eq!(models, ["opened-model"]);
+}
+
+#[test]
+fn a_node_keeps_the_model_the_rail_heard_for_a_session_that_opened_without_one() {
+    let ledger = heard(&[opened_without_model(), sampled_session("rail_summary")]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    let models: Vec<String> = record.models.iter().map(ToString::to_string).collect();
+    assert_eq!(models, ["mock-model"]);
+}

@@ -29,6 +29,10 @@ pub enum FixtureError {
          `{called}`, so write that"
     )]
     ProtocolRunTool { tool: &'static str, called: String },
+    /// A limit's reset under a CLI that prints none: the session cannot
+    /// report what its CLI never says.
+    #[error("the outcome names a limit's reset, which this CLI never prints")]
+    UnprintedReset,
     /// The claims file a mock keeps for its run is not one this fixture can
     /// continue: it cannot be read, it is not a ledger, or it claims a script
     /// the fixture does not hold.

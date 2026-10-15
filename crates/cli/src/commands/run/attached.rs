@@ -57,6 +57,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         raw_inputs,
         adapter,
         mock_fixture,
+        mode,
         &ctx.env,
     )
     .await?;

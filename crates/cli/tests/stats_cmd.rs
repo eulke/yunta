@@ -264,3 +264,47 @@ fn history_sees_a_run_under_the_default_state_root() {
         "the runs under the default root are still this workflow's history: {text}"
     );
 }
+
+/// `stats` names the model each node's sessions ran on, as the session
+/// reported it: the model the run asked for is never what it shows.
+#[test]
+fn stats_names_the_model_a_nodes_session_reported() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: mock, model: requested-model }\ndefaults:\n  runner: executor\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: modeled\nnodes:\n  - { id: ask, kind: prompt, prompt: \"Say done.\" }\n",
+    );
+    write(
+        &repo.join("fixture.yaml"),
+        "dialect: claude-code\nsessions:\n  - model: reported-model\n    outcome: { type: completed, summary: done }\n",
+    );
+    let run = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml"
+        ]
+    );
+    assert!(run.status.success(), "stderr: {}", stderr(&run));
+    let run_id = run_id_from(&run);
+    let stats = yunta_in!(&repo, &home, &["stats", &run_id, "--json"]);
+    let doc: serde_json::Value = serde_json::from_slice(&stats.stdout).expect("one document");
+    assert_eq!(
+        doc["nodes"][0]["models"],
+        serde_json::json!(["reported-model"]),
+        "{doc}"
+    );
+}

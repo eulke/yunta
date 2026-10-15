@@ -507,7 +507,9 @@ spent: `submissions` (`{accepted, refused}`) counts every document offered,
 log carries, and `findings_standing` counts the findings that stand now — the
 fold over the whole log, where an update replaces and a withdrawal removes. Each
 node row carries its own `submissions` and `findings`, zeroed for a node the log
-carries none from. `stats --workflow X --json` for a workflow with no history prints the
+carries none from, and `models`: the models its sessions ran on, as each CLI
+reported them, never the model the run asked for. `stats --workflow X --json` for a
+workflow with no history prints the
 same document with `runs` empty and `estimation` and `verification_findings` null, where
 the human view says there are no runs.
 

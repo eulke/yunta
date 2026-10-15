@@ -15,12 +15,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use yunta_core::events::Failure;
 use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
 use yunta_core::{Confinement, ConfinementInput, Node, Unbuildable};
 
-use crate::frozen::{FrozenError, Source};
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
 use crate::run_tools::{RunToolsSession, TaskAccess};
@@ -28,6 +26,7 @@ use crate::task_cycle::{SessionObserver, SessionSetup};
 use held_to::HeldTo;
 
 mod held_to;
+mod skills;
 
 /// Everything a node resolves once for every session it opens: which
 /// skills mount, whether its sessions may hold the run's tools, the
@@ -42,7 +41,7 @@ pub(crate) async fn resolve_setup(
     chosen: &yunta_core::RunnerCandidate,
 ) -> Result<Result<SessionSetup, NodeEnd>, crate::run::RunError> {
     let adapter = &ctx.adapters[&chosen.adapter];
-    let skills = match mount_skills(ctx, node, adapter.as_ref()).await? {
+    let skills = match skills::mount_skills(ctx, node, adapter.as_ref()).await? {
         Ok(skills) => skills,
         Err(end) => return Ok(Err(end)),
     };
@@ -58,6 +57,11 @@ pub(crate) async fn resolve_setup(
     let node_scope = super::node_scope::session_access(ctx, node).await?;
     Ok(Ok(SessionSetup {
         protected: ctx.protected(),
+        git_register: ctx
+            .manifest
+            .project
+            .as_ref()
+            .map(|project| project.git_common_dir.clone()),
         shared_dirs: ctx
             .manifest
             .config
@@ -120,64 +124,6 @@ fn declares_edit_scope(node: &Node) -> bool {
     node.scope.is_declared()
         || matches!(node.kind, yunta_core::NodeKind::Loop { .. })
         || node.permissions == Some(yunta_core::NodePermissions::ReadOnly)
-}
-
-/// The skill directories this node's sessions mount. The names are the
-/// node's own plus the config's `skills.always`, and each one resolves
-/// through the run's frozen set, so a skill edited mid-run mounts as it was
-/// at birth. A name the run did not freeze, or whose frozen file no longer
-/// matches its hash, fails the node; mounting is the adapter's, and an
-/// adapter without the capability degrades with an event rather than
-/// failing — a skill is added instruction, never correctness.
-async fn mount_skills(
-    ctx: &crate::run::RunCtx<'_>,
-    node: &Node,
-    adapter: &dyn Adapter,
-) -> Result<Result<Vec<PathBuf>, NodeEnd>, crate::run::RunError> {
-    let source = Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient);
-    let mut skills = Vec::new();
-    for name in crate::skills::skill_names(&ctx.manifest.config, &ctx.manifest.workflow, node) {
-        match source.skill_dir(&name).await {
-            Ok(dir) => skills.push(dir),
-            // A name that resolves to no directory is a skill the run does not hold.
-            Err(FrozenError::Unresolved(_)) => {
-                let searched = searched_roots(ctx, &name);
-                let failure = Failure::SkillMissing {
-                    missing_skill: name,
-                    searched,
-                };
-                return Ok(Err(super::node_close::fail(ctx, node, failure).await?));
-            }
-            Err(error) => {
-                return Ok(Err(
-                    super::session_policy::close_frozen(ctx, node, error).await?
-                ))
-            }
-        }
-    }
-    // A node that mounts none asked for nothing, so nothing is missing.
-    if skills.is_empty() {
-        return Ok(Ok(skills));
-    }
-    Ok(Ok(
-        match crate::run::capability::require(ctx, adapter, yunta_core::Capability::Skills, node)
-            .await?
-        {
-            crate::run::capability::Decision::Granted => skills,
-            crate::run::capability::Decision::Degraded => Vec::new(),
-            crate::run::capability::Decision::Refused(error) => return Err(error),
-        },
-    ))
-}
-
-/// The directories a skill name that resolves to nothing was searched under.
-/// The checkout is the only source whose lookup fails this way, and it
-/// searches the roots its config names, the same way again.
-fn searched_roots(ctx: &crate::run::RunCtx<'_>, name: &yunta_core::SkillName) -> Vec<PathBuf> {
-    match crate::skills::locate(&ctx.manifest.config, ctx.worktree, name) {
-        Err(crate::skills::SkillsError::NotFound { searched, .. }) => searched,
-        Ok(_) => Vec::new(),
-    }
 }
 
 /// Whether this node's sessions may hold the run's tools, and what they
@@ -414,6 +360,7 @@ fn confine(
         artifact_dir: setup.artifact_dir.as_deref(),
         shared_dirs: &setup.shared_dirs,
         protected: Arc::new(held_to.protected(setup)),
+        git_register: setup.git_register.as_deref(),
     })
     .map_err(OpenSessionError::Confinement)
 }

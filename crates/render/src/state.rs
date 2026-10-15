@@ -25,16 +25,20 @@ pub enum StateWord {
     Finished,
     Failed,
     Running,
+    /// Its attempt is open while its run is paused: nothing runs it, and
+    /// the run's resume starts it again.
+    Paused,
     Waiting,
     Skipped,
     NeverRan,
 }
 
 /// Every word, in the order a reader meets them.
-pub const ALL_WORDS: [StateWord; 6] = [
+pub const ALL_WORDS: [StateWord; 7] = [
     StateWord::Finished,
     StateWord::Failed,
     StateWord::Running,
+    StateWord::Paused,
     StateWord::Waiting,
     StateWord::Skipped,
     StateWord::NeverRan,
@@ -81,6 +85,7 @@ impl StateWord {
             Self::Finished => "finished",
             Self::Failed => "failed",
             Self::Running => "running",
+            Self::Paused => "paused",
             Self::Waiting => "waiting",
             Self::Skipped => "skipped",
             Self::NeverRan => "never ran",
@@ -93,6 +98,7 @@ impl StateWord {
             Self::Finished => Mark::Done,
             Self::Failed => Mark::Failed,
             Self::Running => Mark::Running,
+            Self::Paused => Mark::Pending,
             Self::Waiting => Mark::NeedsYou,
             Self::Skipped => Mark::Skipped,
             Self::NeverRan => Mark::Pending,
@@ -181,6 +187,14 @@ impl NodeDisplay {
         Self {
             word: StateWord::Skipped,
             modifier: detail(&format!("not in this run: {because}")),
+        }
+    }
+
+    /// A node whose attempt `attempt` was open when its run paused.
+    pub fn paused(attempt: u32) -> Self {
+        Self {
+            word: StateWord::Paused,
+            modifier: Some(format!("attempt {attempt}")),
         }
     }
 

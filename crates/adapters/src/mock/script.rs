@@ -457,13 +457,15 @@ async fn stepped(steps: Vec<MockStep>, stream: &mut Stream, stops: &Stops) -> bo
     true
 }
 
-/// How a session that played its whole script ends. A completed or failed
-/// session closes with the line its CLI closes with, read back the way the
-/// engine reads that CLI, so the outcome and its cause come from the reader
-/// a real session's come from.
+/// How a session that played its whole script ends. A completed, failed or
+/// limited session closes with the lines its CLI closes with, read back the
+/// way the engine reads that CLI, so the outcome and its cause come from the
+/// reader a real session's come from.
 async fn end(outcome: MockOutcome, stream: &mut Stream, stops: &Stops) {
     match &outcome {
-        MockOutcome::Completed { .. } | MockOutcome::Failed { .. } => {
+        MockOutcome::Completed { .. }
+        | MockOutcome::Failed { .. }
+        | MockOutcome::Limited { .. } => {
             let lines = stream.dialect.render_close(&outcome, &stream.usage);
             stream.read(lines);
         }

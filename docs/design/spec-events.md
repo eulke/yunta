@@ -844,7 +844,9 @@ The payload contains no arguments, tool response, or free-form error text.
 
 Una llamada que este binario rechazó, registrada por el servidor que la rechazó:
 el log dice por qué falló una llamada sin la prosa con que se le respondió a la
-sesión (D238).
+sesión (D238). Una llamada que cortó una parada —la del run, la de su tarea o la
+de su sesión, que detiene lo que corren sus llamadas— no la rechazó nadie: no
+deja este evento.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
@@ -914,7 +916,8 @@ ella se corta, con `exit_code` -2 y `timed_out`.
 **Fuente:** una llamada del riel que el engine oyó y no pudo juzgar o responder a
 tiempo, con su causa cerrada (D266). Auditoría: no mueve estado. Un hook que no
 alcanza a ningún engine no la deja: no hay engine que la registre, y la negativa
-del hook lleva la causa.
+del hook lleva la causa. Un juicio de parada que cortó la parada de la sesión
+tampoco: no falló, y la sesión para.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|

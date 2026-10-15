@@ -4,7 +4,7 @@
 
 use yunta_core::events::{
     Decider, Escalation, EventPayload, Fact, Failure, GateEvent, GateResolvedPayload, HumanChoice,
-    OwedScope, ProposedCheck, ScopeWait, TaskEvent, TaskStatus, TaskStatusChangedPayload,
+    OwedScope, ProposedCheck, ScopeWait, TaskEvent,
 };
 use yunta_core::expansion::{Decision, Precheck, Waiting};
 use yunta_core::{Node, NonEmpty, ScopeGlob, Seq};
@@ -149,21 +149,11 @@ async fn reopen(
     resolved_seq: Seq,
 ) -> Result<(), RunError> {
     let state = ctx.run_view().await?.state;
-    let record = state.tasks.get(&pending.task_id);
-    let reopened = match (
-        record.and_then(|record| record.left_work.as_ref()),
-        record.and_then(|record| record.last_session.clone()),
-    ) {
-        (Some((_, work)), Some(session)) => TaskStatusChangedPayload::resuming(
-            pending.task_id.clone(),
-            resolved_seq,
-            work.clone(),
-            session,
-        ),
-        _ => {
-            TaskStatusChangedPayload::to(pending.task_id.clone(), TaskStatus::Pending, resolved_seq)
-        }
-    };
+    let reopened = super::reopen::after_answer(
+        state.tasks.get(&pending.task_id),
+        pending.task_id.clone(),
+        resolved_seq,
+    );
     ctx.emit(
         Some(&node.id),
         EventPayload::Tasks(TaskEvent::StatusChanged(reopened)),

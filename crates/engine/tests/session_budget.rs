@@ -56,3 +56,38 @@ async fn a_session_s_share_of_the_cap_counts_what_an_open_attempt_reported() {
     // whole; the second has what the first left.
     assert_eq!(shares, [Some(500), Some(1000), Some(600)]);
 }
+
+/// A `parallel` group of one prompt node, the run's only work.
+const GROUPED: &str = r#"
+name: grouped
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: inner, kind: prompt, runner: executor, prompt: "Do the work." }
+"#;
+
+/// A run in a mode shares the cap among the nodes the mode reaches, the
+/// children of a group it includes among them, as a run without modes does.
+#[tokio::test]
+async fn a_mode_shares_the_cap_with_the_children_of_a_group_it_includes() {
+    let session =
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n";
+    let moded = format!("{GROUPED}modes:\n  only: {{ include: [group] }}\n");
+    let mut shares = Vec::new();
+    for (workflow, bench) in [
+        (GROUPED.to_string(), Bench::new()),
+        (moded, Bench::new().in_mode("only")),
+    ] {
+        bench.run_with_config(&workflow, session, CAPPED).await;
+        let seen: Vec<Option<u64>> = bench
+            .mock()
+            .requests_seen()
+            .into_iter()
+            .map(|request| request.budget.max_tokens)
+            .collect();
+        shares.push(seen);
+    }
+    // The group and its child are both owed the cap: half of it each.
+    assert_eq!(shares, [vec![Some(500)], vec![Some(500)]]);
+}

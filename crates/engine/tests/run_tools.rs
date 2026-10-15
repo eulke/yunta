@@ -34,6 +34,9 @@ mod task_reads;
 #[path = "run_tools/rail_calls.rs"]
 mod rail_calls;
 
+#[path = "run_tools/session_end.rs"]
+mod session_end;
+
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: coordinated
 nodes:

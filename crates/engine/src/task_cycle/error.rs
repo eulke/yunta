@@ -99,6 +99,22 @@ pub enum TaskCycleError {
 }
 
 impl TaskCycleError {
+    /// Whether the token stopped a git or a checkout this error carries:
+    /// the run, the task or the session stopped, so nobody waits for the
+    /// cycle any more and there is no failure to report, only a stop to
+    /// honour.
+    pub fn cancelled(&self) -> bool {
+        match self {
+            TaskCycleError::Git(git) => git.cancelled(),
+            TaskCycleError::ScopeCheck(scope) => scope.cancelled(),
+            TaskCycleError::ScopeExpansion { source, .. } => source.cancelled(),
+            TaskCycleError::Carry { source, .. }
+            | TaskCycleError::Spec { source, .. }
+            | TaskCycleError::TreeContent(source) => source.cancelled(),
+            _ => false,
+        }
+    }
+
     /// The same error, with `earlier` added to the spend its stopped session
     /// reported: the attempts before the one that could not stop its session
     /// spent tokens that the node which ran the cycle still owes.

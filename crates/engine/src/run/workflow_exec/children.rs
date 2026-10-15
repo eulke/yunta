@@ -9,7 +9,6 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{ChildEvent, ChildRefusal, ChildRunCreatedPayload, EventPayload, Failure};
 use yunta_core::{
     ConfigLayer, ContentHash, InputName, Isolation, Manifest, ModeName, Node, Redactor, RunId,
-    Workflow,
 };
 
 use crate::frozen::read::ChildWorkflow;
@@ -63,7 +62,7 @@ pub(super) async fn birth(
     admitted: Admitted<'_>,
     state: &RunState,
 ) -> Result<Step<Born>, RunError> {
-    let mode = child_mode(&admitted.workflow);
+    let mode = admitted.workflow.first_mode();
     let frozen = match freeze(ctx, node, cancel, call.use_name, admitted, state).await? {
         Step::Proceed(frozen) => frozen,
         Step::Ended(end) => return Ok(Step::Ended(end)),
@@ -314,17 +313,6 @@ async fn link_and_create(
         }
         Err(other) => Err(other),
     }
-}
-
-/// The mode a child starts at. Same mode convention as the CLI: a child
-/// declaring `modes:` starts at the floor (first declared — promotion only ever
-/// escalates forward); one without runs everything.
-fn child_mode(workflow: &Workflow) -> ModeName {
-    workflow
-        .modes
-        .as_ref()
-        .and_then(|modes| modes.keys().next().cloned())
-        .unwrap_or_default()
 }
 
 /// Births the child a fresh node starts. A child of a run that froze its

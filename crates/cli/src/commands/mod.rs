@@ -99,7 +99,7 @@ pub(crate) async fn spawn_detached_resume(
     let log_path = run_dir
         .join(yunta_engine::run_dir::SCRATCH_DIR)
         .join("detached.log");
-    let log = tokio::fs::File::create(&log_path).await?.into_std().await;
+    let log = detached_log(&log_path).await?;
     let log_err = log.try_clone()?;
     let mut child_cmd = tokio::process::Command::new(crate::context::own_binary());
     child_cmd
@@ -124,6 +124,18 @@ pub(crate) async fn spawn_detached_resume(
         let _ = child.wait().await;
     });
     Ok(pid)
+}
+
+/// The detached log at `path`, opened to add to it: a run that pauses on a
+/// reset again hands itself to a later link of the same chain, and each
+/// link's log follows the one before it instead of erasing it.
+async fn detached_log(path: &Path) -> std::io::Result<std::fs::File> {
+    let file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    Ok(file.into_std().await)
 }
 
 /// The instant a run paused on a limit's reset resumes at, or `None` for
@@ -255,15 +267,14 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> Adapters {
     .collect()
 }
 
-/// Refuses early when `workflow` needs agent sessions no available
-/// adapter can provide: an error in check, never emulation at runtime.
-pub(crate) fn refuse_unrunnable(workflow: &Workflow, adapters: &Adapters) -> Result<(), CliError> {
-    let needs_sessions = workflow.nodes.iter().any(|node| {
-        matches!(
-            node.kind,
-            yunta_core::NodeKind::Prompt { .. } | yunta_core::NodeKind::Loop { .. }
-        )
-    });
+/// Refuses early when one of `nodes`, the nodes a run reaches, needs an
+/// agent session and no available adapter can provide one: an error in
+/// check, never emulation at runtime.
+pub(crate) fn refuse_unrunnable(
+    nodes: &[&yunta_core::Node],
+    adapters: &Adapters,
+) -> Result<(), CliError> {
+    let needs_sessions = nodes.iter().any(|node| node.opens_session());
     if needs_sessions && adapters.is_empty() {
         return Err(CliError::msg(format!(
             "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
@@ -411,6 +422,22 @@ mod tests {
     use super::*;
     use yunta_core::describe;
 
+    #[tokio::test]
+    async fn a_later_link_of_a_detached_chain_adds_to_the_log() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("detached.log");
+        for line in ["first link\n", "second link\n"] {
+            detached_log(&path)
+                .await
+                .unwrap()
+                .write_all(line.as_bytes())
+                .unwrap();
+        }
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written, "first link\nsecond link\n");
+    }
+
     /// Every sentence that tells a person which adapters exist reads
     /// from the one place they are declared. Before this, three of them
     /// spelled the pair out, so a third adapter would have landed with
@@ -424,14 +451,13 @@ mod tests {
             "a binary with no adapter can run no session"
         );
 
-        let refusal = refuse_unrunnable(
-            &yunta_core::yaml::parse::<Workflow>(
-                "name: w\nnodes:\n  - id: a\n    kind: prompt\n    runner: r\n    prompt: p\n",
-            )
-            .expect("the workflow parses"),
-            &Adapters::new(),
+        let workflow = yunta_core::yaml::parse::<Workflow>(
+            "name: w\nnodes:\n  - id: a\n    kind: prompt\n    runner: r\n    prompt: p\n",
         )
-        .expect_err("a prompt node with no adapter is unrunnable");
+        .expect("the workflow parses");
+        let refusal =
+            refuse_unrunnable(&workflow.iter_nodes().collect::<Vec<_>>(), &Adapters::new())
+                .expect_err("a prompt node with no adapter is unrunnable");
 
         let text = describe(&refusal);
         for adapter in &built {

@@ -67,6 +67,9 @@ pub struct Counter {
     /// the failure is being worked on. Always zero for tasks.
     pub correcting: usize,
     pub running: usize,
+    /// Open while the run is paused: a resume starts it again. Always zero
+    /// for tasks.
+    pub paused: usize,
     /// Parked on something outside the work itself: a node on a person
     /// (a published gate, unanswered questions), a task on the
     /// dependencies it declares.
@@ -233,6 +236,7 @@ fn flow_counter(nodes: &[NodeFrame], mode: &ModeName) -> Counter {
                 continue;
             }
             NodeStanding::ToGo => counter.to_go += 1,
+            NodeStanding::Paused { .. } => counter.paused += 1,
             NodeStanding::Reached(NodeState::Finished { .. }) => counter.done += 1,
             NodeStanding::Reached(NodeState::Failed { .. }) if node.correcting => {
                 counter.correcting += 1

@@ -75,8 +75,30 @@ pub(crate) fn close(outcome: &MockOutcome) -> Vec<String> {
             "result": message,
         })
         .to_string()],
+        MockOutcome::Limited { resets_at } => limited(*resets_at),
         MockOutcome::Crash | MockOutcome::Hang { .. } => Vec::new(),
     }
+}
+
+/// The lines the CLI ends a session the account's limit stopped with: the
+/// rejected window and its reset, when it names one, then the failed result
+/// the refused request left.
+fn limited(resets_at: Option<i64>) -> Vec<String> {
+    let rejected = resets_at.map(|at| {
+        json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "rejected", "resetsAt": at },
+        })
+        .to_string()
+    });
+    let result = json!({
+        "type": "result",
+        "is_error": true,
+        "result": "API Error: Server is temporarily limiting requests (not your usage limit)",
+        "api_error_status": 429,
+    })
+    .to_string();
+    rejected.into_iter().chain([result]).collect()
 }
 
 /// The init line a session opens with: the id the session is known by, and

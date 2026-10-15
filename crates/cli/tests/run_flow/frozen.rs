@@ -1,7 +1,8 @@
 //! What a run refuses before it exists or a resume takes anything: a pinned
-//! adapter a runner lacks, a pack path that leaves its pack, and a mock run
-//! that predates frozen adapters. A paused mock run goes on with the fixture
-//! it was born with, and the log shows it.
+//! adapter a runner it reaches lacks, a pack path that leaves its pack, and
+//! a mock run that predates frozen adapters; and what it is not refused for,
+//! a node or an adapter it never reaches. A paused mock run goes on with the
+//! fixture it was born with, and the log shows it.
 
 use std::collections::HashSet;
 
@@ -158,6 +159,96 @@ fn a_pinned_adapter_missing_from_a_runner_is_refused_before_the_run_exists() {
                 .unwrap()
                 .next()
                 .is_none()
+    );
+}
+
+/// A pin is held only to the nodes the run's mode reaches: a node the mode
+/// leaves out opens no session, so its runner needs no candidate on the pin.
+/// A mode that reaches the node is still refused, naming it.
+#[test]
+fn a_pinned_adapter_is_held_only_to_the_nodes_the_runs_mode_reaches() {
+    let (_root, repo, home) = override_repo();
+    write(
+        &repo.join("wf.yaml"),
+        "name: pinned\nmodes:\n  quick: { include: [a] }\n  full: { include: all }\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n  - { id: b, kind: prompt, runner: codex_only, prompt: \"x\", depends_on: [a] }\n",
+    );
+    let quick = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "wf.yaml",
+            "--mode",
+            "quick",
+            "--adapter",
+            "claude-code"
+        ]
+    );
+    assert!(
+        quick.status.success(),
+        "{}{}",
+        stdout(&quick),
+        stderr(&quick)
+    );
+    let full = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "wf.yaml",
+            "--mode",
+            "full",
+            "--adapter",
+            "claude-code"
+        ]
+    );
+    let said = format!("{}{}", stdout(&full), stderr(&full));
+    assert!(
+        !full.status.success() && said.contains("node `b` runs on runner `codex_only`"),
+        "{said}"
+    );
+}
+
+/// A run whose nodes open no session probes no adapter, so a binary an
+/// adapter of its config lacks refuses it neither unpinned nor pinned.
+#[test]
+fn a_run_that_opens_no_session_is_not_refused_for_an_adapter_it_never_reaches() {
+    let (_root, repo, home) = plain_repo();
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: claude-code, model: m }\n    - { adapter: codex, model: m }\nadapters:\n  claude-code:\n    binary: /nonexistent/claude\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "config"]);
+    write(
+        &repo.join("wf.yaml"),
+        "name: shell\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
+    );
+    for args in [
+        &["run", "wf.yaml"][..],
+        &["run", "wf.yaml", "--adapter", "codex"][..],
+    ] {
+        let run = yunta_in!(&repo, &home, args);
+        assert!(
+            run.status.success(),
+            "{args:?}: {}{}",
+            stdout(&run),
+            stderr(&run)
+        );
+    }
+}
+
+/// A run pinned to an adapter probes that adapter alone: the other one its
+/// runner lists is never started, not even to ask its version.
+#[test]
+fn a_pinned_run_probes_only_the_adapter_it_is_pinned_to() {
+    let over = Override::new();
+    let run = over.yunta(&["run", "wf.yaml", "--adapter", "claude-code"]);
+    assert!(run.status.success(), "{}{}", stdout(&run), stderr(&run));
+    assert!(
+        !over.codex_args.exists(),
+        "the codex stub was started: {}",
+        std::fs::read_to_string(&over.codex_args).unwrap_or_default()
     );
 }
 

@@ -59,11 +59,7 @@ pub async fn check_context_files(
     supervision: Supervision<'_>,
 ) -> Result<ContextFilesCheck, GitError> {
     let mut read = Vec::new();
-    for node in workflow
-        .nodes
-        .iter()
-        .filter(|node| mode_nodes.is_none_or(|set| set.contains(&node.id)))
-    {
+    for node in workflow.iter_nodes_under(mode_nodes) {
         literal_files(node, &mut read);
     }
     let mut found = ContextFilesCheck::default();
@@ -202,10 +198,9 @@ fn within_scope(node: &Node, path: &str) -> bool {
     yunta_core::scope_globset(globs).map_or(true, |set| set.is_match(path))
 }
 
-/// `(node, path)` for every literal, required `files:` entry of `node`
-/// and of the children a `parallel` group runs, each pair once. An
-/// optional entry is left out: its author already said the node goes on
-/// without it.
+/// `(node, path)` for every literal, required `files:` entry of `node`,
+/// each pair once. An optional entry is left out: its author already said
+/// the node goes on without it.
 fn literal_files(node: &Node, read: &mut Vec<(NodeId, String)>) {
     for source in &node.context {
         let ContextSpec::Files { files } = source else {
@@ -217,11 +212,6 @@ fn literal_files(node: &Node, read: &mut Vec<(NodeId, String)>) {
             if literal && !read.contains(&entry) {
                 read.push(entry);
             }
-        }
-    }
-    if let NodeKind::Parallel { nodes, .. } = &node.kind {
-        for child in nodes {
-            literal_files(child, read);
         }
     }
 }

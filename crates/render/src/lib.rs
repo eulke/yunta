@@ -78,6 +78,7 @@ mod tests {
     mod documents;
     mod failure;
     mod failure_families;
+    mod grant;
     mod inputs;
     mod retry;
 }

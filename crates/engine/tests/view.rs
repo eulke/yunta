@@ -251,12 +251,13 @@ fn run_finished(terminal_state: TerminalState) -> EventPayload {
 
 /// Every bucket of `counter`, so a movement between two of them is read
 /// as a whole rather than one field at a time.
-fn buckets(counter: &Counter) -> [usize; 6] {
+fn buckets(counter: &Counter) -> [usize; 7] {
     [
         counter.done,
         counter.failed,
         counter.correcting,
         counter.running,
+        counter.paused,
         counter.waiting,
         counter.to_go,
     ]
@@ -346,8 +347,8 @@ fn a_node_that_reroutes_and_runs_again_moves_between_buckets_without_shrinking_t
     // own.
     let before = frame(&workflow, &events[..8], 100).flow;
     let after = frame(&workflow, &events, 100).flow;
-    assert_eq!(buckets(&before), [2, 0, 1, 0, 0, 0]);
-    assert_eq!(buckets(&after), [2, 0, 0, 1, 0, 0]);
+    assert_eq!(buckets(&before), [2, 0, 1, 0, 0, 0, 0]);
+    assert_eq!(buckets(&after), [2, 0, 0, 1, 0, 0, 0]);
     assert_eq!(after.total, before.total);
     assert_eq!(after.skipped, 0);
     assert_eq!(after.skipped_by, None);
@@ -380,27 +381,27 @@ fn a_failed_node_rerouted_to_its_fix_counts_as_correcting_until_it_runs_again() 
 
     assert_eq!(
         build(5),
-        ([1, 1, 0, 0, 0, 1], false),
+        ([1, 1, 0, 0, 0, 0, 1], false),
         "failed, and nothing sent it anywhere yet"
     );
     assert_eq!(
         build(6),
-        ([1, 0, 1, 0, 0, 1], true),
+        ([1, 0, 1, 0, 0, 0, 1], true),
         "sent to its fix: the failure is being worked on"
     );
     assert_eq!(
         build(7),
-        ([1, 0, 1, 1, 0, 0], true),
+        ([1, 0, 1, 1, 0, 0, 0], true),
         "still being corrected while its fix runs"
     );
     assert_eq!(
         build(8),
-        ([2, 0, 1, 0, 0, 0], true),
+        ([2, 0, 1, 0, 0, 0, 0], true),
         "its fix is done and it has not run again yet"
     );
     assert_eq!(
         build(9),
-        ([2, 0, 0, 1, 0, 0], false),
+        ([2, 0, 0, 1, 0, 0, 0], false),
         "running again, the correction is over"
     );
 }
@@ -466,7 +467,7 @@ fn tasks_are_absent_until_a_ledger_registers_one() {
     let tasks = frame(&workflow, &events, 100)
         .tasks
         .expect("the ledger registered two tasks");
-    assert_eq!(buckets(&tasks), [1, 0, 0, 0, 0, 1]);
+    assert_eq!(buckets(&tasks), [1, 0, 0, 0, 0, 0, 1]);
     assert_eq!(tasks.total, 2);
     assert_eq!(tasks.skipped, 0);
     assert_eq!(tasks.skipped_by, None);
@@ -487,10 +488,10 @@ fn a_task_that_returns_to_ready_moves_back_into_to_go_and_the_total_holds() {
     let running = frame(&workflow, &events[..4], 100)
         .tasks
         .expect("registered");
-    assert_eq!(buckets(&running), [0, 0, 0, 1, 0, 0]);
+    assert_eq!(buckets(&running), [0, 0, 0, 1, 0, 0, 0]);
 
     let back = frame(&workflow, &events, 100).tasks.expect("registered");
-    assert_eq!(buckets(&back), [0, 0, 0, 0, 0, 1]);
+    assert_eq!(buckets(&back), [0, 0, 0, 0, 0, 0, 1]);
     assert_eq!(back.total, running.total);
 }
 
@@ -510,7 +511,7 @@ fn a_task_held_by_its_dependencies_is_waiting_and_a_failed_one_is_failed() {
     let tasks = frame(&workflow, &events, 100).tasks.expect("registered");
     assert_eq!(
         buckets(&tasks),
-        [0, 1, 0, 0, 1, 1],
+        [0, 1, 0, 0, 0, 1, 1],
         "a task parked on its dependencies is waiting, not running"
     );
     assert_eq!(tasks.total, 3);
@@ -1031,7 +1032,7 @@ nodes:
         open.flow.total, 1,
         "the parent counts its own nodes; a child's graph is the child's"
     );
-    assert_eq!(buckets(&open.flow), [0, 0, 0, 1, 0, 0]);
+    assert_eq!(buckets(&open.flow), [0, 0, 0, 1, 0, 0, 0]);
 
     let closed = frame(&workflow, &events, 100);
     assert_eq!(closed.children.len(), 1, "the link is closed, not doubled");
@@ -1156,7 +1157,7 @@ nodes:
             }
         }
     );
-    assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 1, 0]);
+    assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 0, 1, 0]);
 }
 
 #[test]
@@ -1219,7 +1220,7 @@ fn a_broken_log_reports_its_diagnostic_and_keeps_what_replay_derived() {
     }
     assert_eq!(
         buckets(&frame.flow),
-        [1, 0, 0, 0, 0, 2],
+        [1, 0, 0, 0, 0, 0, 2],
         "what replay derived before the break is still reported"
     );
     let plan = frame.nodes.first().expect("declared");
@@ -1257,4 +1258,32 @@ fn a_run_closed_with_no_evidence_behind_it_reports_none_instead_of_inventing_one
         RunPhase::Promoted { to: None },
         "only the successor's own `run_created` names the mode"
     );
+}
+
+/// A run that paused while a node's attempt was open shows that node
+/// paused, not running: nothing runs it, and the run's resume starts it
+/// again.
+#[test]
+fn a_node_open_when_its_run_paused_reads_paused() {
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("plan"), started(1)),
+        (
+            2,
+            None,
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                &PauseReason::Recorded {
+                    sentence: "a person stopped it".to_string(),
+                },
+            ))),
+        ),
+    ]);
+    let frame = frame(&chain(), &events, 10);
+    let plan = frame
+        .nodes
+        .iter()
+        .find(|node| node.id == "plan")
+        .expect("declared");
+    assert_eq!(plan.state, NodeStanding::Paused { attempt: 1 });
+    assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 1, 0, 2]);
 }

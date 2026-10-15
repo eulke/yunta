@@ -14,7 +14,7 @@ use yunta_storage::StorageError;
 
 use super::dispatch::{read_and_end, DispatchError, Dispatched, Opening, Resume};
 use super::stream::{counts_tokens_mid_session, emit_audit, record_rail_summary, Terms, Totals};
-use super::DispatchOutcome;
+use super::{DispatchOutcome, RunToolsNeed};
 
 /// Everything about *how* one node's sessions open, resolved
 /// once by the engine and threaded through the cycle: the mounted
@@ -26,6 +26,9 @@ pub struct SessionSetup {
     /// What no session of the run may write, whatever its scope allows:
     /// the run's protected set. Every session's fence refuses it.
     pub protected: Arc<Protected>,
+    /// The git directory the run's repository keeps its register in, which
+    /// no session writes. `None` when the run does not know its repository.
+    pub git_register: Option<PathBuf>,
     /// The directories every session of the run shares, which a session
     /// that may write keeps writable beside its checkout.
     pub shared_dirs: Vec<PathBuf>,
@@ -101,49 +104,6 @@ pub struct SessionSetup {
     pub node_scope: Option<Arc<crate::run_tools::NodeScopeAccess>>,
 }
 
-/// Why a node cannot proceed without the run tools.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunToolsNeed {
-    /// The node is in a `coordination: blackboard` group.
-    Blackboard,
-    /// The node declares an interpreted artifact a session hands over
-    /// through the tools.
-    TypedArtifact(yunta_core::ArtifactKind),
-    /// The node is a loop: its task sessions read their task and check
-    /// their work through the tools, and nowhere else.
-    Task,
-}
-
-impl RunToolsNeed {
-    /// The reason `node` owes, if any — one answer for `check`, which
-    /// refuses a workflow no candidate adapter can serve, and for the
-    /// run, which refuses the session its adapter cannot: a member of a
-    /// blackboard group first, being the older reason, then a document it
-    /// declares, then the loop it is.
-    pub(crate) fn of(
-        node: &yunta_core::Node,
-        blackboard_member: bool,
-        declared: &[yunta_core::ArtifactSpec],
-    ) -> Option<Self> {
-        if blackboard_member {
-            return Some(RunToolsNeed::Blackboard);
-        }
-        if let Some(kind) = declared.iter().find_map(yunta_core::ArtifactSpec::kind) {
-            return Some(RunToolsNeed::TypedArtifact(kind));
-        }
-        matches!(node.kind, yunta_core::NodeKind::Loop { .. }).then_some(RunToolsNeed::Task)
-    }
-
-    /// The declaration that asks for them, as the workflow spells it.
-    pub(crate) fn declaration(&self) -> String {
-        match self {
-            RunToolsNeed::Blackboard => "coordination: blackboard".to_string(),
-            RunToolsNeed::TypedArtifact(kind) => format!("artifacts.produces: [{kind}]"),
-            RunToolsNeed::Task => "kind: loop".to_string(),
-        }
-    }
-}
-
 impl SessionSetup {
     /// A setup that carries nothing but the run it belongs to, the node
     /// its sessions are of and the runner they run on: no skills, no
@@ -162,6 +122,7 @@ impl SessionSetup {
     ) -> Self {
         Self {
             protected: Arc::new(Protected::default()),
+            git_register: None,
             shared_dirs: Vec::new(),
             plan: None,
             spec: None,

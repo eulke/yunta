@@ -332,22 +332,9 @@ impl From<TaskCycleError> for RunError {
     fn from(error: TaskCycleError) -> Self {
         match error {
             TaskCycleError::Git(git) => RunError::from(git),
-            error if cancelled_within(&error) => RunError::Cancelled,
+            error if error.cancelled() => RunError::Cancelled,
             error => RunError::TaskCycle(error),
         }
-    }
-}
-
-/// Whether the token stopped a git or a checkout that a task cycle's error
-/// carries.
-fn cancelled_within(error: &TaskCycleError) -> bool {
-    match error {
-        TaskCycleError::ScopeCheck(scope) => scope.cancelled(),
-        TaskCycleError::ScopeExpansion { source, .. } => source.cancelled(),
-        TaskCycleError::Carry { source, .. }
-        | TaskCycleError::Spec { source, .. }
-        | TaskCycleError::TreeContent(source) => source.cancelled(),
-        _ => false,
     }
 }
 

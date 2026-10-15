@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, Precondition, Stuck};
+use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, OwedScope, Precondition, Stuck};
 use yunta_core::protected::Protection;
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{listed_globs, ModeName};
@@ -217,6 +217,8 @@ pub(crate) fn remedy_words(
         ReservedOption::Grant => Some(grant_words(menu)),
         ReservedOption::Deny => Some(deny_words()),
         ReservedOption::ContinueWork => Some(continue_words(menu.attempt)),
+        ReservedOption::Accept => Some(departed_words(menu.attempt, true)),
+        ReservedOption::SendBack => Some(departed_words(menu.attempt, false)),
         _ => None,
     }
 }
@@ -305,8 +307,12 @@ fn and_list(clauses: &[String]) -> String {
 }
 
 /// The words of a grant: the paths it adds to the node's scope, and the
-/// attempt it starts.
+/// attempt it starts. A loop that ended owing its tasks' requests widens
+/// each task by its own request instead.
 fn grant_words(menu: &FailureMenu) -> (String, Option<String>) {
+    if let Failure::ScopeOwed { owed } = &menu.failure {
+        return owed_grant_words(owed, menu.attempt);
+    }
     (
         format!(
             "Allow the node to also write {} and run it again (attempt {})",
@@ -321,6 +327,31 @@ fn grant_words(menu: &FailureMenu) -> (String, Option<String>) {
     )
 }
 
+/// The words of granting what a loop's tasks asked for: one task by name
+/// with the paths it asked to write, several by their count.
+fn owed_grant_words(owed: &[OwedScope], attempt: u32) -> (String, Option<String>) {
+    let label = match owed {
+        [one] => format!(
+            "Allow task `{}` to also write {} and run it again (attempt {attempt})",
+            one.task_id,
+            listed_globs(&one.paths)
+        ),
+        _ => format!(
+            "Allow each of {} tasks to also write what it asked for and run them again (attempt \
+             {attempt})",
+            owed.len()
+        ),
+    };
+    (
+        label,
+        Some(
+            "Widens each task's scope by its own request for the rest of this run; the task \
+             picks its work back up, judged against the wider scope"
+                .to_string(),
+        ),
+    )
+}
+
 /// The paths a grant would add: what the failure says its work wrote
 /// outside the scope, or what its session asked for.
 fn wanted(failure: &Failure) -> String {
@@ -329,6 +360,26 @@ fn wanted(failure: &Failure) -> String {
         Failure::ScopeViolated { outside_scope } => words::paths_listed(outside_scope),
         Failure::Unchanged { unchanged } => wanted(&unchanged.failure),
         _ => String::new(),
+    }
+}
+
+/// The words of answering the departures a loop's tasks declared, from the
+/// failure the loop ended owing them on: accepting them, or sending their
+/// tasks back to the plan.
+fn departed_words(attempt: u32, accepted: bool) -> (String, Option<String>) {
+    match accepted {
+        true => (
+            format!("Accept the departures and run it again (attempt {attempt})"),
+            Some(
+                "Each task that departed closes on its work as it stands, if its criteria \
+                 pass; the rest of the plan builds on what it did instead"
+                    .to_string(),
+            ),
+        ),
+        false => (
+            format!("Send the departing tasks back and run it again (attempt {attempt})"),
+            Some("Each one's session picks the work back up, held to the plan".to_string()),
+        ),
     }
 }
 

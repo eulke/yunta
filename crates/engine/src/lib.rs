@@ -113,7 +113,7 @@ pub use live::{
     last_event_age, open_sessions, recent_tool_calls, running_since, OpenSession, ToolCall,
 };
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
-pub use modes::{dependencies_in_mode, included_nodes, mode_included_nodes};
+pub use modes::{dependencies_in_mode, included_nodes, mode_included_nodes, reached_nodes};
 pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,

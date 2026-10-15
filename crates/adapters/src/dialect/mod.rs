@@ -137,6 +137,16 @@ impl DialectName {
         }
     }
 
+    /// Whether this CLI names the reset of a limit that stopped a session:
+    /// Claude Code carries it on its rate-limit event, and Codex prints none
+    /// in any form.
+    pub(crate) fn prints_a_reset(self) -> bool {
+        match self {
+            Self::ClaudeCode => true,
+            Self::Codex => false,
+        }
+    }
+
     /// The `adapter_settings` keys this CLI reads.
     pub(crate) fn known_settings(self) -> &'static [&'static str] {
         match self {

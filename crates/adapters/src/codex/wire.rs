@@ -53,6 +53,12 @@ pub(crate) fn close(outcome: &MockOutcome, usage: &[MockStep]) -> Vec<String> {
             "error": { "message": message },
         })
         .to_string()],
+        // Codex names no reset: the fixture's check refuses one.
+        MockOutcome::Limited { .. } => vec![json!({
+            "type": "turn.failed",
+            "error": { "message": "You've hit your usage limit. Try again later." },
+        })
+        .to_string()],
         MockOutcome::Crash | MockOutcome::Hang { .. } => Vec::new(),
     }
 }

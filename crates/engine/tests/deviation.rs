@@ -4,6 +4,8 @@
 //! planner is routed to rewrite the plan.
 
 mod common;
+#[path = "deviation/surfaces.rs"]
+mod surfaces;
 
 use common::*;
 use yunta_core::events::{

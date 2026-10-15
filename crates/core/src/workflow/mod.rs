@@ -22,7 +22,7 @@ mod parse;
 mod place;
 mod scope;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -123,6 +123,31 @@ impl Workflow {
         NodeGroupIter {
             stack: self.nodes.iter().rev().map(|node| (node, None)).collect(),
         }
+    }
+
+    /// [`iter_nodes`](Self::iter_nodes) over the top-level nodes `tops`
+    /// names, each with every node nested in it; every node when `tops` is
+    /// `None`. A mode names top-level nodes, so this is the walk of what a
+    /// run in a mode reaches.
+    pub fn iter_nodes_under(&self, tops: Option<&HashSet<NodeId>>) -> NodeIter<'_> {
+        NodeIter {
+            stack: self
+                .nodes
+                .iter()
+                .rev()
+                .filter(|node| tops.is_none_or(|ids| ids.contains(&node.id)))
+                .collect(),
+        }
+    }
+
+    /// The mode a run starts at when nothing names one: the first declared,
+    /// because promotion only ever moves forward. A workflow without
+    /// `modes:` runs every node, under the default name.
+    pub fn first_mode(&self) -> ModeName {
+        self.modes
+            .as_ref()
+            .and_then(|modes| modes.keys().next().cloned())
+            .unwrap_or_default()
     }
 
     /// Which rounds of `node`'s questions stop a run in `mode`: what the

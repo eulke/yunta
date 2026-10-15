@@ -182,16 +182,15 @@ pub async fn current_escalation(
 
 /// The node a parked run waits on a decision from, if any — without
 /// reading what its gate shows: whether a run needs someone, not what it
-/// asks them.
+/// asks them. It names a node exactly when [`current_escalation`] builds
+/// that node's menu, so no surface offers a choice the menu does not hold.
 pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> {
     let mode_name = state.run.mode().clone();
     // Which node waits does not depend on what the set protects, and no
     // document is read here, so the empty set decides the same node.
     match current_decision(manifest, state, &mode_name, Arc::default())? {
-        Decision::GateExhaustedReroutes { node, .. }
-        | Decision::EscalateFailure { node, .. }
-        | Decision::ResolveInternalGate { node } => Some(node),
-        _ => None,
+        Decision::ResolveInternalGate { node } => Some(node),
+        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node),
     }
 }
 

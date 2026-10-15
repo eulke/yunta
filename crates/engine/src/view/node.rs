@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{ArtifactId, TaskStatus, TokenUsage};
+use yunta_core::events::{ArtifactId, RunPhaseRaw, TaskStatus, TokenUsage};
 use yunta_core::{Node, NodeId, TaskId};
 
 use crate::live::{last_event_age, open_sessions, recent_tool_calls, OpenSession, ToolCall};
@@ -104,6 +104,9 @@ pub enum NodeStanding {
     LeftOut(yunta_core::Because),
     /// Included, and the log has not started it.
     ToGo,
+    /// Its attempt `attempt` is open while the run is paused: nothing runs
+    /// it, and the run's resume starts it again.
+    Paused { attempt: u32 },
     /// What replay derives from the log, with the node's outcome, its
     /// failure, or the gate it waits on.
     Reached(NodeState),
@@ -206,6 +209,11 @@ impl Reading<'_> {
             return NodeStanding::LeftOut(left.because.clone());
         }
         match self.state.nodes.state(&node.id) {
+            Some(NodeState::Running { attempt })
+                if *self.state.run.phase() == RunPhaseRaw::Paused =>
+            {
+                NodeStanding::Paused { attempt: *attempt }
+            }
             Some(derived) => NodeStanding::Reached(derived.clone()),
             None => NodeStanding::ToGo,
         }

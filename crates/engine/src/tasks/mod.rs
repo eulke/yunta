@@ -30,7 +30,7 @@ pub(crate) use respecified::respecifications_owed;
 pub use review::review as plan_review;
 
 /// Whether this run shows `producer`'s tasks document to a person: a gate
-/// among the nodes the run includes names it. The mode is the one
+/// among the nodes the run reaches names it. The mode is the one
 /// the log says the run was born in, whatever the workflow calls it; a
 /// workflow with no modes includes every node.
 ///
@@ -41,22 +41,16 @@ pub(crate) fn plan_reviewed(
     state: &RunState,
     producer: &NodeId,
 ) -> bool {
-    let included = crate::modes::included_nodes(workflow, state.run.mode(), state.run.left_out());
-    let kept = workflow
-        .nodes
-        .iter()
-        .filter(|node| included.as_ref().is_none_or(|ids| ids.contains(&node.id)));
-    yunta_core::workflow::reads::shown_by_a_gate(kept, producer)
+    let reached = crate::modes::reached_nodes(workflow, state.run.mode(), state.run.left_out());
+    yunta_core::workflow::reads::shown_by_a_gate(reached, producer)
 }
 
 /// Whether this run writes a spec for its plan: a node among the ones
-/// its mode includes produces one. Where it does, the spec writes each
+/// the run reaches produces one. Where it does, the spec writes each
 /// task's tests, and a plan that writes its own is refused.
 pub(crate) fn plan_specified(workflow: &yunta_core::Workflow, state: &RunState) -> bool {
-    let included = crate::modes::included_nodes(workflow, state.run.mode(), state.run.left_out());
-    workflow
-        .iter_nodes()
-        .filter(|node| included.as_ref().is_none_or(|ids| ids.contains(&node.id)))
+    crate::modes::reached_nodes(workflow, state.run.mode(), state.run.left_out())
+        .into_iter()
         .filter_map(|node| node.artifacts.as_ref())
         .any(|artifacts| {
             artifacts

@@ -77,6 +77,37 @@ async fn a_read_only_claude_session_writes_temp_and_nothing_of_the_checkout() {
         .contains(&serde_json::json!(dir.path())));
 }
 
+/// The run's git register is denied to the session's commands wherever it
+/// lies, so a register under a temporary directory, which the sandbox lets
+/// commands write, still takes no commit but the engine's.
+#[tokio::test]
+async fn the_runs_git_register_is_denied_to_the_commands_even_under_temp() {
+    let dir = tempfile::tempdir().unwrap();
+    let register = std::env::temp_dir().join("repo/.git");
+    let mut req = request(dir.path().to_path_buf());
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
+    req.confinement.git_register = Some(register.clone());
+    let args = argv_for(dir.path(), req).await;
+    let at = args
+        .iter()
+        .position(|arg| arg == "--settings")
+        .expect("handed its settings")
+        + 1;
+    let settings: serde_json::Value = serde_json::from_str(&args[at]).unwrap();
+    let denied = settings["sandbox"]["filesystem"]["denyWrite"]
+        .as_array()
+        .expect("the settings deny some trees")
+        .clone();
+    assert!(denied.contains(&serde_json::json!(register)), "{denied:?}");
+}
+
 /// Commands write the temporary directories, and an edit session's commands
 /// write its checkout as well. So a read-only session's coverage names temp
 /// and not its checkout, an edit session's names its checkout and temp, and

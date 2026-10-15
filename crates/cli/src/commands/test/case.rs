@@ -230,6 +230,7 @@ async fn create_case_run(
         &raw_inputs,
         None,
         Some(fixture_path),
+        case.mode.as_ref(),
         &yunta_core::Env::default(),
     )
     .await?;

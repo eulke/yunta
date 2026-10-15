@@ -143,6 +143,50 @@ async fn a_read_only_codex_session_keeps_network_closed_and_temp_writable() {
     );
 }
 
+/// The run's git register is a `read` entry of the session's profile
+/// wherever it lies: a nested entry wins over the temporary directories'
+/// grant, so a register under them takes no commit but the engine's.
+#[tokio::test]
+async fn the_runs_git_register_is_read_only_to_the_commands_even_under_temp() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+    let register = std::env::temp_dir().join("repo/.git");
+    let mut req = request(dir.path().to_path_buf());
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
+    req.confinement.git_register = Some(register.clone());
+    req.env.plain.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string(),
+    );
+    req.env.plain.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let _ = drain(adapter().spawn(req).await.unwrap()).await;
+
+    let args = tokio::fs::read_to_string(&args_file).await.unwrap();
+    let entry = args
+        .split(&format!("\"{}\"", register.display()))
+        .nth(1)
+        .unwrap_or_else(|| panic!("the register has an entry: {args}"));
+    assert!(
+        entry
+            .trim_start()
+            .trim_start_matches('=')
+            .trim_start()
+            .starts_with("\"read\""),
+        "{args}"
+    );
+}
+
 /// A read-only sandbox from the settings leaves the commands of an edit
 /// session no checkout: they write their artifact directory and the
 /// temporary ones, and the session reports exactly those roots.

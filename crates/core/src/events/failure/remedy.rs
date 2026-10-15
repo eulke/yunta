@@ -293,9 +293,19 @@ fn stopped_outlook(stopped: &[TaskStop], facts: &Facts) -> Outlook {
 /// What one task's stop leaves open, read from its cause and the facts.
 fn stop_outlook(cause: &TaskCause, facts: &Facts) -> Outlook {
     match cause {
-        TaskCause::DeviationOwed { .. } | TaskCause::ScopeDecisionOwed => {
-            Outlook::Stuck(Stuck::Owed)
-        }
+        // A departure is a person's to answer, from the failure as from its
+        // question: accept it, or send its task back to the plan.
+        TaskCause::DeviationOwed { .. } => Outlook::Choose(vec![
+            Remedy {
+                option: ReservedOption::Accept,
+                precondition: None,
+            },
+            Remedy {
+                option: ReservedOption::SendBack,
+                precondition: None,
+            },
+        ]),
+        TaskCause::ScopeDecisionOwed => Outlook::Stuck(Stuck::Owed),
         TaskCause::PreCheck { found } => pre_check_outlook(found, facts),
         TaskCause::CriterionUnpassable { .. } => Outlook::Stuck(Stuck::CriteriaWrong),
         TaskCause::CommandDenied { .. } => Outlook::Stuck(Stuck::ProjectDenies),

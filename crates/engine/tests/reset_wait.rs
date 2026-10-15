@@ -1,17 +1,24 @@
 //! A limit with a reset is a scheduled resume: the run pauses awaiting the
-//! reset its forge named, and a wake resumes the node once the clock has
-//! reached that reset. The engine does not wait for the reset itself, so a
-//! wake before it pauses again at the same instant.
+//! reset its forge or its session named, and a wake resumes the node once the
+//! clock has reached that reset. The engine does not wait for the reset
+//! itself, so a wake before it pauses again at the same instant. A task the
+//! account's limit stopped picks its work back up in the session the limit
+//! cut, with no person.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{EventPayload, NodeEvent, PauseReason};
+use yunta_core::events::{
+    EventPayload, NodeEvent, PauseReason, SessionEvent, TaskEvent, TaskStatus,
+};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{bare_origin, Bench, MOCK_CONFIG};
 use yunta_testkit_core::{fixed_now, HostClock};
+
+mod common;
+use common::{concurrency_workflow, plan_session};
 
 /// The forge the run's pull requests go through: a GitHub repository the mock forge stands in for.
 const FORGE: &str = "forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n";
@@ -134,4 +141,84 @@ async fn a_wake_at_the_reset_runs_the_node_again() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(started(&bench, "pr"), 2, "the node ran again at the reset");
     assert_eq!(state.pull_requests().len(), 1);
+}
+
+/// A task that needs two files: its first session writes one before the
+/// account's limit stops it, and the session it picks its work back up in
+/// writes the other.
+const TWO_FILES: &str = "tasks:\n  - id: task-h\n    title: \"Write both files\"\n    scope: [\"a.txt\", \"b.txt\"]\n    criteria:\n      - cmd: \"test -f a.txt && test -f b.txt\"\n";
+
+/// The reset the account's limit names: a minute past the bench clock's
+/// origin.
+fn session_reset() -> DateTime<Utc> {
+    fixed_now() + chrono::Duration::seconds(60)
+}
+
+/// The planner hands over [`TWO_FILES`]; the task's first session writes
+/// `a.txt` and is stopped by the account's limit, which names
+/// [`session_reset`]; the next session writes `b.txt`.
+fn limited_task_fixture() -> String {
+    let mut fixture = plan_session(TWO_FILES);
+    fixture.push_str(&format!(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n    outcome: {{ type: limited, resets_at: {} }}\n",
+        session_reset().timestamp()
+    ));
+    fixture.push_str(
+        "  - effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-h }\n",
+    );
+    fixture
+}
+
+/// The session `task-h` opened first: the one the account's limit stopped.
+fn first_task_session(bench: &Bench) -> Option<yunta_core::SessionId> {
+    bench
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Session(SessionEvent::Opened(opened)))
+                if opened
+                    .task_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == "task-h") =>
+            {
+                Some(opened.session_id.clone())
+            }
+            _ => None,
+        })
+}
+
+/// A wake at the reset the account's limit named sends the task back to the
+/// session the limit cut, with the work it left, and the loop finishes with
+/// no person: the reset is the one thing that changed for it.
+#[tokio::test]
+async fn a_task_the_accounts_limit_stopped_picks_its_work_back_up_at_the_reset() {
+    let host = Arc::new(HostClock::default());
+    let bench = Bench::new().with_clock(host.clone());
+    let RunReport { terminal, .. } = bench
+        .run(&concurrency_workflow(1), &limited_task_fixture())
+        .await;
+    assert_eq!(
+        awaiting_reset(&terminal),
+        ("implement".to_string(), session_reset())
+    );
+    let limited = first_task_session(&bench);
+
+    host.advance(Duration::from_secs(60));
+    let RunReport { terminal, state } = bench.wake().await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("task-h"), Some(TaskStatus::Done));
+    let resumed = bench
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(changed)))
+                if changed.task_id.as_str() == "task-h" && changed.resumes.is_some() =>
+            {
+                changed.resumes.clone()
+            }
+            _ => None,
+        });
+    assert!(limited.is_some(), "the limited session opened");
+    assert_eq!(resumed, limited);
 }

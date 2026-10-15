@@ -46,6 +46,7 @@ fn level(counter: &Counter, sep: char) -> String {
         (counter.failed, "failed"),
         (counter.correcting, "correcting"),
         (counter.running, "running"),
+        (counter.paused, "paused"),
         (counter.waiting, "waiting"),
     ] {
         if count > 0 {

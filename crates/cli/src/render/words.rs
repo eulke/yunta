@@ -128,6 +128,7 @@ pub(crate) fn standing(standing: &NodeStanding) -> NodeDisplay {
         NodeStanding::Skipped => NodeDisplay::skipped(),
         NodeStanding::LeftOut(because) => NodeDisplay::left_out(&because.to_string()),
         NodeStanding::ToGo => NodeDisplay::of(None),
+        NodeStanding::Paused { attempt } => NodeDisplay::paused(*attempt),
         NodeStanding::Reached(state) => NodeDisplay::of(Some(state)),
     }
 }

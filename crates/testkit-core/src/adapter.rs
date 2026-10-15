@@ -39,6 +39,7 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         artifact_dir: None,
         shared_dirs: &[],
         protected: Arc::new(Protected::default()),
+        git_register: None,
     })
     .expect("an edit session with its network open is buildable");
     SessionRequest {
@@ -89,6 +90,7 @@ pub fn confine(
         artifact_dir: req.artifact_dir.as_deref(),
         shared_dirs: &[],
         protected: Arc::new(Protected::default()),
+        git_register: None,
     })?;
     Ok(())
 }

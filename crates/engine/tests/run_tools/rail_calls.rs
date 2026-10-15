@@ -6,7 +6,7 @@ use super::*;
 
 /// One raw request to a rail route, as a hook's CLI sends it: the body goes
 /// under `endpoint`'s token, and the whole response comes back.
-fn post_rail(endpoint: &RailEndpoint, path: &str, body: &str) -> String {
+pub(super) fn post_rail(endpoint: &RailEndpoint, path: &str, body: &str) -> String {
     let authority = endpoint
         .url
         .trim_start_matches("http://")
@@ -69,6 +69,7 @@ async fn a_call_is_judged_and_recorded_under_the_session_that_owns_its_listener(
         artifact_dir: None,
         shared_dirs: &[],
         protected: Arc::new(Protected::default()),
+        git_register: None,
     })
     .expect("a session over its attempt directory is buildable");
     let fence = Fence {

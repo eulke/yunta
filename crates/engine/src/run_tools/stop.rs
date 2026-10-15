@@ -47,6 +47,8 @@ impl SessionTools {
             .await
         {
             Ok(judgement) => judgement,
+            // The session is stopping: the judgement did not fail, a stop cut it.
+            Err(error) if error.cancelled() => return StopAnswer::Proceed,
             Err(_) => return self.unjudged(session).await,
         };
         let state = judgement.state();

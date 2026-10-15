@@ -26,6 +26,7 @@ mod recorded;
 mod session;
 mod spec;
 mod stream;
+mod tools_need;
 mod tree;
 
 use std::path::PathBuf;
@@ -60,8 +61,9 @@ pub(crate) use judge::{
     judge, scope_in_force, Documents, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work,
 };
 pub use memo::{Memo, Memoized};
-pub use session::{KeepsOutput, RunToolsNeed, SessionObserver, SessionSetup};
+pub use session::{KeepsOutput, SessionObserver, SessionSetup};
 pub(crate) use stream::record_unlisted_tools;
+pub use tools_need::RunToolsNeed;
 pub(crate) use tree::content_of;
 
 pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};

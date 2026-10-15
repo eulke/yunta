@@ -37,6 +37,7 @@ fn confined(
         artifact_dir,
         shared_dirs,
         protected: Arc::new(protected),
+        git_register: None,
     })
     .expect("a session over the worktree is buildable")
 }

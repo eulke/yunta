@@ -23,6 +23,9 @@ impl NodeRecord {
             confinement: p.confinement.clone(),
             opened_at: at,
         });
+        if let Some(model) = &p.model {
+            self.ran_on(model);
+        }
     }
 
     /// The model the rail heard for an open session that opened without
@@ -32,8 +35,19 @@ impl NodeRecord {
             .sessions
             .iter_mut()
             .find(|open| open.session_id == p.session_id);
-        if let Some(open) = open.filter(|open| open.model.is_none()) {
-            open.model = p.model.clone();
+        let Some(open) = open.filter(|open| open.model.is_none()) else {
+            return;
+        };
+        open.model = p.model.clone();
+        if let Some(model) = &p.model {
+            self.ran_on(model);
+        }
+    }
+
+    /// A model one of this node's sessions reported, kept once.
+    fn ran_on(&mut self, model: &crate::ids::ModelName) {
+        if !self.models.contains(model) {
+            self.models.push(model.clone());
         }
     }
 

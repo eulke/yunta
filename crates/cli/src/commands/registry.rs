@@ -4,13 +4,14 @@
 //! a test case and a promotion successor each take the registry their
 //! manifest names, so a run behaves the same whichever of them drives it.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_adapters::{FixtureError, MockAdapter, MockFixture, RunPaths};
 use yunta_core::{
-    AdapterId, Clock, Manifest, ModeName, MountSpec, Node, NodeId, NodeKind, Redactor, RunAdapter,
-    RunId, RunnerName, Workflow,
+    AdapterId, Clock, ConfigLayer, Manifest, ModeName, MountSpec, Node, NodeId, NodeKind, Redactor,
+    RunAdapter, RunId, RunnerName, Workflow,
 };
 use yunta_engine::{CreateRunParams, FrozenRun, RunEnv, RunError, RunReport};
 use yunta_storage::AsyncStorage;
@@ -83,15 +84,15 @@ impl From<ServableError> for CliError {
     }
 }
 
-/// Refuses what this binary cannot serve, before a run exists or a token is
-/// spent. Walks every node the run reaches (fan-out and `parallel` children
-/// included, and each frozen `use:` child's). NotPinned stays a node-time
-/// cause.
-pub(crate) async fn servable(manifest: &Manifest) -> Result<(), CliError> {
+/// Refuses what this binary cannot serve for a run in `mode`, before a run
+/// exists or a token is spent. It judges only what the run reaches (its
+/// `Reach`) and probes only the adapters those nodes' sessions resolve
+/// to. NotPinned stays a node-time cause.
+pub(crate) async fn servable(manifest: &Manifest, mode: &ModeName) -> Result<(), CliError> {
     let pin = manifest.adapter.as_ref().and_then(RunAdapter::pinned);
     let children = frozen_children(manifest)?;
-    let nodes = reached_nodes(manifest, &children);
-    refuse_unlisted_pins(manifest, &nodes, pin)?;
+    let reach = reach(manifest, mode, &children);
+    refuse_unlisted_pins(manifest, &reach.nodes, pin)?;
     // A mock run's sessions are scripted: no real adapter is built, named or
     // probed for it.
     if !matches!(manifest.adapter, Some(RunAdapter::Mock { .. })) {
@@ -105,9 +106,9 @@ pub(crate) async fn servable(manifest: &Manifest) -> Result<(), CliError> {
             }
             .into());
         }
-        super::refuse_unrunnable(&manifest.workflow, &adapters)?;
-        refuse_unchecked(manifest, &children, &nodes)?;
-        super::probe_or_refuse(&adapters).await?;
+        super::refuse_unrunnable(&reach.nodes, &adapters)?;
+        refuse_unchecked(manifest, &reach)?;
+        super::probe_or_refuse(&reached_adapters(manifest, &reach.nodes, pin, adapters)).await?;
     }
     Ok(())
 }
@@ -168,28 +169,78 @@ fn frozen_children(manifest: &Manifest) -> Result<Vec<(&str, Workflow)>, CliErro
         .collect()
 }
 
-/// The nodes the run reaches: the workflow's own, then each frozen child's.
-fn reached_nodes<'a>(manifest: &'a Manifest, children: &'a [(&str, Workflow)]) -> Vec<&'a Node> {
-    manifest
-        .workflow
-        .iter_nodes()
-        .chain(children.iter().flat_map(|(_, child)| child.iter_nodes()))
-        .collect()
+/// What a run reaches: the nodes its mode includes, `parallel` children
+/// included, and each frozen `use:` child one of those nodes runs, with the
+/// nodes of the child's own first mode.
+struct Reach<'a> {
+    nodes: Vec<&'a Node>,
+    children: Vec<&'a (&'a str, Workflow)>,
 }
 
-/// What `check` says of the root and of each frozen child, judged against the
-/// adapters this binary builds: the capability rules the run's declarations
-/// must still meet. A child is judged with the mounts its `use:` nodes carry
-/// in, as its own birth judges it.
-fn refuse_unchecked(
+/// What a run in `mode` reaches. A child that only a node outside the mode
+/// runs is never reached, so nothing of it is judged.
+fn reach<'a>(
+    manifest: &'a Manifest,
+    mode: &ModeName,
+    children: &'a [(&'a str, Workflow)],
+) -> Reach<'a> {
+    let mut reach = Reach {
+        nodes: in_mode(&manifest.workflow, mode, &manifest.config),
+        children: Vec::new(),
+    };
+    while let Some(child) = children.iter().find(|(name, _)| {
+        !reach.children.iter().any(|seen| seen.0 == *name) && uses(&reach.nodes, name)
+    }) {
+        reach
+            .nodes
+            .extend(in_mode(&child.1, &child.1.first_mode(), &manifest.config));
+        reach.children.push(child);
+    }
+    reach
+}
+
+/// The nodes `workflow` reaches in `mode`, less what `config` leaves out.
+fn in_mode<'a>(workflow: &'a Workflow, mode: &ModeName, config: &ConfigLayer) -> Vec<&'a Node> {
+    yunta_engine::reached_nodes(workflow, mode, &yunta_core::left_out(workflow, config))
+}
+
+/// Whether one of `nodes` runs the frozen child its `use:` calls `name`.
+fn uses(nodes: &[&Node], name: &str) -> bool {
+    nodes.iter().any(
+        |node| matches!(&node.kind, NodeKind::Workflow { r#use, .. } if r#use.as_str() == name),
+    )
+}
+
+/// The adapters the sessions of `nodes` resolve to, as runner resolution
+/// picks them at the node: the pinned one, or a runner's first candidate this
+/// binary builds. A node that opens no session reaches none.
+fn reached_adapters(
     manifest: &Manifest,
-    children: &[(&str, Workflow)],
     nodes: &[&Node],
-) -> Result<(), CliError> {
+    pin: Option<&AdapterId>,
+    mut adapters: Adapters,
+) -> Adapters {
+    let built = |adapter: &AdapterId| adapters.contains_key(adapter);
+    let reached: HashSet<AdapterId> = nodes
+        .iter()
+        .filter(|node| node.opens_session())
+        .filter_map(|node| manifest.config.runner_role(node))
+        .filter_map(|role| yunta_engine::resolve_runner(role, &manifest.config, &built, pin).ok())
+        .map(|resolved| resolved.chosen.adapter)
+        .collect();
+    adapters.retain(|id, _| reached.contains(id));
+    adapters
+}
+
+/// What `check` says of the root and of each frozen child the run reaches,
+/// judged against the adapters this binary builds: the capability rules the
+/// run's declarations must still meet. A child is judged with the mounts its
+/// `use:` nodes carry in, as its own birth judges it.
+fn refuse_unchecked(manifest: &Manifest, reach: &Reach<'_>) -> Result<(), CliError> {
     let declared = super::declared_facts(&manifest.config);
     let mut errors = yunta_engine::check(&manifest.workflow, &manifest.config, &declared);
-    for (name, child) in children {
-        let mounts = mounts_into(name, nodes);
+    for (name, child) in &reach.children {
+        let mounts = mounts_into(name, &reach.nodes);
         errors.extend(yunta_engine::check_mounted(
             child,
             &manifest.config,

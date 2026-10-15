@@ -1,8 +1,9 @@
 //! What a run's mode does to the workflow graph: which top-level nodes it
-//! schedules, and what each of them waits on once the excluded nodes drop
-//! out. Both derivations are pure and shared by the scheduler, the
-//! escalation paths and `status`, so every reader of a moded run sees the
-//! same graph.
+//! schedules, which nodes it reaches, and what each scheduled node waits on
+//! once the excluded nodes drop out. The derivations are pure and shared by
+//! the scheduler, the escalation paths, `status` and the refusals a run
+//! meets before it starts, so every reader of a moded run sees the same
+//! graph.
 
 use std::collections::{HashMap, HashSet};
 
@@ -26,6 +27,17 @@ pub fn included_nodes(
         included.remove(&gone.node);
     }
     Some(included)
+}
+
+/// Every node a run in `mode_name` reaches: the top-level nodes its mode
+/// includes, less what it left out, each with every node nested in it.
+pub fn reached_nodes<'a>(
+    workflow: &'a Workflow,
+    mode_name: &ModeName,
+    left_out: &[LeftOut],
+) -> Vec<&'a Node> {
+    let included = included_nodes(workflow, mode_name, left_out);
+    workflow.iter_nodes_under(included.as_ref()).collect()
 }
 
 /// The top-level node ids `mode_name` makes schedulable, or `None` when
@@ -146,6 +158,30 @@ nodes:
             !deps.contains_key(&NodeId::from("extra")),
             "an excluded node has no entry of its own"
         );
+    }
+
+    #[test]
+    fn a_mode_reaches_the_children_of_a_group_it_includes_and_nothing_it_leaves_out() {
+        let workflow: Workflow = yunta_core::yaml::parse(
+            r#"
+name: grouped
+modes:
+  alpha: { include: [group] }
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: left, kind: bash, run: "true" }
+      - { id: right, kind: bash, run: "true" }
+  - { id: after, kind: bash, run: "true", depends_on: [group] }
+"#,
+        )
+        .unwrap();
+        let reached: Vec<&str> = reached_nodes(&workflow, &"alpha".into(), &[])
+            .into_iter()
+            .map(|node| node.id.as_str())
+            .collect();
+        assert_eq!(reached, ["group", "left", "right"]);
     }
 
     #[test]

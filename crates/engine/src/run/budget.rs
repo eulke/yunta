@@ -14,7 +14,7 @@
 use yunta_core::events::{
     Escalation, EscalationError, EventPayload, Fact, GateResolvedPayload, PauseReason,
 };
-use yunta_core::{Node, NonEmpty};
+use yunta_core::NonEmpty;
 
 use super::{RunCtx, RunError};
 use crate::reserved::offers;
@@ -201,25 +201,21 @@ impl RunCtx<'_> {
         })
     }
 
-    /// How many of the nodes this run's mode includes are short of a
-    /// terminal — what the remaining cap is shared among.
+    /// How many of the nodes this run reaches are short of a terminal —
+    /// what the remaining cap is shared among.
     fn nodes_still_owed(&self, state: &crate::replay::RunState) -> usize {
-        let included = crate::modes::included_nodes(
+        crate::modes::reached_nodes(
             &self.manifest.workflow,
             state.run.mode(),
             state.run.left_out(),
-        );
-        let in_mode = |node: &&Node| included.as_ref().is_none_or(|set| set.contains(&node.id));
-        self.manifest
-            .workflow
-            .iter_nodes()
-            .filter(in_mode)
-            .filter(|node| {
-                !matches!(
-                    state.nodes.state(&node.id),
-                    Some(crate::replay::NodeState::Finished { .. })
-                )
-            })
-            .count()
+        )
+        .into_iter()
+        .filter(|node| {
+            !matches!(
+                state.nodes.state(&node.id),
+                Some(crate::replay::NodeState::Finished { .. })
+            )
+        })
+        .count()
     }
 }

@@ -67,7 +67,7 @@ async fn parked(
     if predates_frozen_adapter(&manifest, &open.events) {
         return Err(ServableError::MockBeforeFrozenAdapter.into());
     }
-    servable(&manifest).await?;
+    servable(&manifest, state.run.mode()).await?;
     if !waited_out_reset(ctx, &state, run_id, output, look).await {
         return Ok(None);
     }
@@ -124,12 +124,27 @@ async fn still_or_again(
 /// taken from it. An interrupt ends the wait first and returns `false`: the
 /// run stays parked, and nothing was taken. A past instant returns at once.
 async fn waited_until(at: DateTime<Utc>, interrupt: &tokio_util::sync::CancellationToken) -> bool {
-    let remaining = crate::context::time_until(at);
-    tokio::select! {
-        () = yunta_engine::process::wait_for_deadline(Some(
-            tokio::time::Instant::now() + remaining,
-        )) => true,
-        () = interrupt.cancelled() => false,
+    waited_out(|| crate::context::time_until(at), interrupt).await
+}
+
+/// Sleeps until `left` reads nothing left, asking it again after each sleep:
+/// a timer runs on the monotonic clock, which drifts from the wall clock
+/// `left` reads over a long wait, so one sleep can end before the instant.
+async fn waited_out(
+    left: impl Fn() -> std::time::Duration,
+    interrupt: &tokio_util::sync::CancellationToken,
+) -> bool {
+    loop {
+        let remaining = left();
+        if remaining.is_zero() {
+            return true;
+        }
+        tokio::select! {
+            () = yunta_engine::process::wait_for_deadline(Some(
+                tokio::time::Instant::now() + remaining,
+            )) => {}
+            () = interrupt.cancelled() => return false,
+        }
     }
 }
 
@@ -224,6 +239,26 @@ mod tests {
         // A reset no test run reaches: the wait can only end by the interrupt.
         let ahead = Utc.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).unwrap();
         assert!(!waited_until(ahead, &interrupt).await);
+    }
+
+    #[tokio::test]
+    async fn a_wait_whose_sleep_ends_before_the_wall_clock_sleeps_again() {
+        // The wall clock reads a moment left after the first sleep, as it does
+        // when the timer ran ahead of it, and nothing left after the next.
+        let asked = std::cell::Cell::new(0);
+        let left = || {
+            asked.set(asked.get() + 1);
+            match asked.get() {
+                1 | 2 => std::time::Duration::from_millis(1),
+                _ => std::time::Duration::ZERO,
+            }
+        };
+        assert!(waited_out(left, &CancellationToken::new()).await);
+        assert_eq!(
+            asked.get(),
+            3,
+            "the wait asks the wall clock until it has come"
+        );
     }
 
     #[tokio::test]

@@ -42,6 +42,7 @@ pub(super) async fn execute_loop(
         LoopReady::Ended(end) => return Ok(end),
     };
     reopen::after_retry(ctx, node, &prep.tasks).await?;
+    reopen::after_reset(ctx, node, &prep.tasks).await?;
 
     let mut state = LoopState {
         tokens: TokenUsage::default(),

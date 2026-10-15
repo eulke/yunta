@@ -19,6 +19,8 @@ struct NodeStatJson {
     active_secs: f64,
     blocked_secs: f64,
     blocked_fraction: Option<f64>,
+    /// The models the node's sessions ran on, as their CLIs reported them.
+    models: Vec<String>,
     /// What this node handed over, by what the engine answered. A node
     /// that submitted nothing carries zeroes rather than nothing: it
     /// was asked and did not deliver, which is a number, not an absence.
@@ -42,6 +44,7 @@ impl NodeStatJson {
             active_secs: n.active.as_secs_f64(),
             blocked_secs: n.blocked.as_secs_f64(),
             blocked_fraction: n.blocked_fraction(),
+            models: n.models.iter().map(ToString::to_string).collect(),
             submissions: stats
                 .submissions_by_node
                 .get(&n.node_id)

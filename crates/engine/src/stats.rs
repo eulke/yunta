@@ -48,7 +48,7 @@ use chrono::{DateTime, Utc};
 use yunta_core::events::{Spend, StoredEvent, Suspensions, TokenUsage};
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
-use yunta_core::{Node, NodeId, RunnerName, Workflow};
+use yunta_core::{ModelName, Node, NodeId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, TimeSpent, UnknownKindCount};
 
@@ -85,6 +85,9 @@ pub struct NodeStat {
     /// `node_started` — see this module's own doc comment on why this is
     /// best-effort, not a scheduler replay.
     pub blocked: Duration,
+    /// The models the node's sessions ran on, as their CLIs reported them,
+    /// never the model the run asked for.
+    pub models: Vec<ModelName>,
 }
 
 impl NodeStat {
@@ -373,6 +376,7 @@ fn node_stat(
             .zip(record.working_since)
             .map(|(now, since)| asleep.awake_between(since, now)),
         blocked: ready.map_or(Duration::ZERO, |ready| asleep.awake_between(ready, started)),
+        models: record.models.clone(),
     })
 }
 

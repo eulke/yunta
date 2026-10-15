@@ -408,6 +408,13 @@ pub enum MockOutcome {
         #[serde(default)]
         cause: Option<DeclaredCause>,
     },
+    /// The account's limit ends the session, as its CLI reports one.
+    /// `resets_at` is the reset the CLI names, in Unix seconds as its
+    /// stream carries it; a CLI that never prints one takes none.
+    Limited {
+        #[serde(default)]
+        resets_at: Option<i64>,
+    },
     /// The stream ends with no terminal event at all — a real crash.
     Crash,
     /// The stream never produces another item on its own; `kill` ends
@@ -421,8 +428,14 @@ pub enum MockOutcome {
 
 impl MockOutcome {
     /// Refuses a declared cause that the message does not read as under
-    /// `dialect`, the CLI the fixture stands for.
+    /// `dialect`, the CLI the fixture stands for, and a limit's reset that
+    /// CLI never prints.
     pub(crate) fn check(&self, dialect: DialectName) -> Result<(), FixtureError> {
+        if let MockOutcome::Limited { resets_at: Some(_) } = self {
+            if !dialect.prints_a_reset() {
+                return Err(FixtureError::UnprintedReset);
+            }
+        }
         let MockOutcome::Failed {
             message,
             cause: Some(declared),

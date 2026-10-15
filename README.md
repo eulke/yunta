@@ -208,7 +208,9 @@ any point and resuming safe.
 
 Each node moves through `pending → ready → running → finished | failed | skipped |
 waiting`. `waiting` is a node paused on a gate — a human decision point — with nothing
-running underneath it; it survives the engine restarting just like any other state.
+running underneath it; it survives the engine restarting just like any other state. A
+node whose run paused while its attempt was open reads `paused`: nothing runs it, and
+the run's resume starts it again.
 A failed node either ends the run or, if it declared `on_failure.goto`, re-routes to a
 correction node and tries again, up to `max_reroutes` before escalating to a gate
 instead of looping forever.

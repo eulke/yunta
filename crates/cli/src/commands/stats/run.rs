@@ -243,7 +243,7 @@ fn node_line(
         .map(|fraction| Ratio(fraction).reads(glyphs.times()))
         .unwrap_or_else(|| "n/a".to_string());
     let mark = display.word.mark();
-    Line::new()
+    let row = Line::new()
         .plain(INDENT)
         .push(Tone::of(mark), glyphs.mark(mark).to_string())
         .plain(format!(
@@ -253,7 +253,12 @@ fn node_line(
             spaced(bar(total, max_tokens, cells, glyphs)),
             Tokens(total).column(),
             duration(node.wall_clock()),
-        ))
+        ));
+    let models: Vec<String> = node.models.iter().map(ToString::to_string).collect();
+    match models.is_empty() {
+        true => row,
+        false => row.push(Tone::Muted, format!("  {}", models.join(", "))),
+    }
 }
 
 #[cfg(test)]
@@ -446,6 +451,7 @@ mod tests {
             active: Duration::from_secs(secs),
             open_attempt: None,
             blocked: Duration::from_secs(secs / 4),
+            models: Vec::new(),
         };
         let spend = settled(PAGE_USAGE);
         let run = RunStats {
