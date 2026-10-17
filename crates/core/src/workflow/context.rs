@@ -1,12 +1,12 @@
 //! `context:` entries — the sources a node reads before it runs, each
 //! discriminated by the key it is written under.
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::parse::{keyed_entry, nested, take};
+use super::parse::{describe, keyed_entry, nested, take};
 use super::ArtifactRefId;
-use crate::ids::NodeId;
-use crate::yaml::Mapping;
+use crate::ids::{McpServerName, NodeId};
+use crate::yaml::{Mapping, Value};
 
 /// One `context:` entry: a builtin `ContextSource` plus its own
 /// parameters, discriminated by its own field name, exactly matching
@@ -17,7 +17,7 @@ use crate::yaml::Mapping;
 #[serde(untagged)]
 pub enum ContextSpec {
     Files {
-        files: Vec<String>,
+        files: Vec<ContextFile>,
     },
     Command {
         command: String,
@@ -95,6 +95,103 @@ impl<'de> Deserialize<'de> for ContextSpec {
     }
 }
 
+/// One path a `files:` source reads: the bare path when the node
+/// cannot do without the file, or `{ path, optional: true }` when it can.
+/// A missing required file fails the node; a missing optional one is
+/// marked in the session's context and recorded on `context_assembled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextFile {
+    pub path: String,
+    pub optional: bool,
+}
+
+impl ContextFile {
+    /// A path the node requires — what a bare string declares.
+    pub fn required(path: impl Into<String>) -> Self {
+        ContextFile {
+            path: path.into(),
+            optional: false,
+        }
+    }
+}
+
+impl Serialize for ContextFile {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        // A required path is the bare string it always was, so a
+        // manifest that declares nothing optional hashes as it always
+        // did, and every run frozen before this shape existed reads back.
+        if !self.optional {
+            return serializer.serialize_str(&self.path);
+        }
+        let mut entry = serializer.serialize_map(Some(2))?;
+        entry.serialize_entry("path", &self.path)?;
+        entry.serialize_entry("optional", &true)?;
+        entry.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ContextFile {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        const KEYS: &[&str] = &["path", "optional"];
+        let mut mapping = match Value::deserialize(deserializer)? {
+            Value::String(path) => return Ok(ContextFile::required(path)),
+            Value::Mapping(mapping) => mapping,
+            other => {
+                return Err(D::Error::custom(format!(
+                    "a `files:` entry is a path or `{{ path, optional }}`, not {}",
+                    describe(&other)
+                )))
+            }
+        };
+        let path: Option<String> = take::<D, _>(&mut mapping, "path")?;
+        let optional: Option<bool> = take::<D, _>(&mut mapping, "optional")?;
+        if let Some((key, _)) = mapping.into_iter().next() {
+            let key = key.as_str().unwrap_or("?");
+            return Err(D::Error::custom(format!(
+                "unknown key `{key}` for a `files:` entry; one of {}{}",
+                super::parse::list(KEYS),
+                crate::text::did_you_mean(key, KEYS.iter().copied())
+            )));
+        }
+        let path = path.ok_or_else(|| {
+            D::Error::custom("a `files:` entry written as a mapping names its `path`")
+        })?;
+        Ok(ContextFile {
+            path,
+            optional: optional.unwrap_or(false),
+        })
+    }
+}
+
+impl schemars::JsonSchema for ContextFile {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ContextFile".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A path a `files:` source reads: the bare path when the node requires \
+                            the file, or `{ path, optional: true }` when it can do without it.",
+            "anyOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "minLength": 1 },
+                        "optional": { "type": "boolean" }
+                    },
+                    "required": ["path"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
 /// `mcp: { server: ..., query: ... }` — `server` names an
 /// entry in the merged config's `mcp_servers:`; `query` is free-form text
 /// (the reference example passes `{{inputs.idea}}` verbatim) sent
@@ -104,7 +201,7 @@ impl<'de> Deserialize<'de> for ContextSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct McpQueryParams {
-    pub server: String,
+    pub server: McpServerName,
     pub query: String,
 }
 
@@ -153,13 +250,18 @@ pub struct RunEventsParams {
 
 /// The `run-events` filters the resolver knows. Absent (`None`) means
 /// the whole log; `Failed` narrows it to `node_failed` events, `Findings`
-/// to `finding_posted` events (what a corrective node reads to act on
-/// what an earlier node found).
+/// to what happened to findings — posted, updated, withdrawn, answered —
+/// (what a corrective node reads to act on what an earlier node found),
+/// `Deviations` to the departures from the
+/// plan task sessions declared and the answers people gave them (what a
+/// node that holds the work to the plan reads to tell an accepted
+/// departure from one nobody declared).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunEventsFilter {
     Failed,
     Findings,
+    Deviations,
 }
 
 impl RunEventsFilter {
@@ -168,6 +270,7 @@ impl RunEventsFilter {
         match self {
             RunEventsFilter::Failed => "failed",
             RunEventsFilter::Findings => "findings",
+            RunEventsFilter::Deviations => "deviations",
         }
     }
 }
@@ -203,6 +306,17 @@ impl std::fmt::Display for KnowledgeLayer {
     }
 }
 
+impl KnowledgeLayer {
+    /// Every layer, from the most general to the most local: a later layer
+    /// overwrites an earlier one by filename, so `repo` wins over `user`,
+    /// which wins over `org`. Every reader of the layers walks this list.
+    pub const PRECEDENCE: [KnowledgeLayer; 3] = [
+        KnowledgeLayer::Org,
+        KnowledgeLayer::User,
+        KnowledgeLayer::Repo,
+    ];
+}
+
 /// `knowledge: { layers: [...] }` — empty/absent `layers` means
 /// every layer the resolver can see.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
@@ -210,6 +324,17 @@ impl std::fmt::Display for KnowledgeLayer {
 pub struct KnowledgeParams {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<KnowledgeLayer>,
+}
+
+impl KnowledgeParams {
+    /// The layers a request reads, in precedence order: the ones it names,
+    /// or every layer when it names none.
+    pub fn layers_read(&self) -> Vec<KnowledgeLayer> {
+        KnowledgeLayer::PRECEDENCE
+            .into_iter()
+            .filter(|layer| self.layers.is_empty() || self.layers.contains(layer))
+            .collect()
+    }
 }
 
 /// `node-output: { node: ... }` — captured stdout/stderr of a
@@ -224,18 +349,20 @@ pub struct NodeOutputParams {
 /// the adapter's session profile. The names come
 /// straight from the reference schema's own spelling.
 /// `scope_expansion:` — governs how a loop's tasks may
-/// grow past their own declared scope. `within` is a hard ceiling
-/// ("never outside this") checked in `rules` mode; `max_per_run` caps
-/// how many expansions this run may grant before exhaustion escalates
-/// ("ten grants in a row are not re-scoping, they are a badly-cut
-/// plan") — absent means uncapped.
+/// grow past their own declared scope. `mode` decides what a request may
+/// get; `max_per_run` caps how many expansions the engine may grant in one
+/// run before exhaustion escalates ("ten grants in a row are not
+/// re-scoping, they are a badly-cut plan") — absent means uncapped.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansion {
     #[serde(default)]
     pub mode: crate::policy::ScopeExpansionMode,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub within: Vec<String>,
+    /// The retired `within:` key: read so `check` can say where the ceiling
+    /// moved, never written.
+    #[serde(default, rename = "within", skip_serializing)]
+    #[schemars(skip)]
+    pub retired_within: Option<serde::de::IgnoredAny>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_per_run: Option<u32>,
 }

@@ -1,129 +1,13 @@
-//! The `Adapter`/`AgentSession` traits.
+//! What every adapter in this crate shares: reading its own settings,
+//! handing a prompt to a CLI that already runs, naming what a tool
+//! acted on without repeating the thing itself, and the replies a hook
+//! leaves for the CLI that runs it.
 //!
-//! `SessionRequest` drops `context: ResolvedContext` — the engine
-//! inlines/references context in the prompt — and
-//! `run_tools_endpoint: Option<Endpoint>` isn't wired for MCP yet.
-//! `skills` is present. Everything else in
-//! the spec's `SessionRequest` is here, even where nothing populates a
-//! field yet (`env`, `budget`, `adapter_settings`) — those are simple
-//! struct fields, not machinery to build, so there is no reason to defer
-//! them the way whole subsystems get deferred.
+//! The port these adapters implement is `yunta_core::port`.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::Duration;
-
-use async_trait::async_trait;
-use futures::stream::BoxStream;
-use thiserror::Error;
-use yunta_core::{
-    AdapterError, AdapterId, AgentName, Capabilities, Capability, ModelName, Pid, Result, Secret,
-    SessionId,
-};
-
-/// A node's declared write scope, passed through to an adapter with
-/// `edit_hooks` so it can block edits outside it as they happen.
-pub type Glob = String;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PermissionProfile {
-    ReadOnly,
-    Edit,
-    Full,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Budget {
-    pub max_tokens: Option<u64>,
-    pub max_turns: Option<u32>,
-    pub timeout: Option<Duration>,
-}
-
-/// A session request the engine hands to an adapter to open.
-#[derive(Debug, Clone)]
-pub struct SessionRequest {
-    /// Already rendered by the engine — templates resolved.
-    pub prompt: String,
-    /// The run's worktree.
-    pub cwd: PathBuf,
-    pub model: Option<ModelName>,
-    /// Portable named-agent selection; only populated if
-    /// `capabilities().custom_agents`.
-    pub agent: Option<AgentName>,
-    pub permissions: PermissionProfile,
-    /// Secrets arrive here, already resolved from the manifest — never
-    /// any other way — and stay wrapped until the child process is
-    /// spawned.
-    pub env: HashMap<String, Secret<String>>,
-    /// Globs the node/task declares, if the adapter has `edit_hooks`. An
-    /// adapter without that capability ignores this field rather than
-    /// failing — the engine already degraded and warned.
-    pub edit_constraints: Option<Vec<Glob>>,
-    pub budget: Budget,
-    /// Adapter-specific settings with no portable expression — model,
-    /// agent and permissions are typed fields above precisely so this
-    /// stays for what genuinely has nowhere else to go.
-    pub adapter_settings: serde_json::Map<String, serde_json::Value>,
-    /// Skill directories to expose to the agent — absolute paths the
-    /// engine already resolved; the adapter mounts them by its native
-    /// mechanism, and only when it declared `capabilities().skills`
-    /// (the engine never populates this otherwise, since a capability
-    /// must never claim more than is actually built).
-    pub skills: Vec<std::path::PathBuf>,
-    /// The per-run MCP endpoint for THIS session: a loopback HTTP
-    /// listener the engine started just before this spawn, dead when
-    /// the session ends — a resume always carries fresh credentials,
-    /// never a reused pair. The adapter translates it to its CLI's
-    /// native external-MCP mechanism (same pattern as
-    /// `agent:`/`edit_hooks`); only populated when it declared
-    /// `capabilities().run_tools` (same rule: never claim more than is
-    /// actually built).
-    pub run_tools_endpoint: Option<RunToolsEndpoint>,
-    /// The one directory outside `cwd` this session may write, and where
-    /// the files this node declares belong. It is never inside `cwd`:
-    /// the worktree is the work, the run directory is the record. It
-    /// belongs to this node alone, so a file written here is never a
-    /// file another node produced. An adapter whose CLI confines writes
-    /// to the working directory has to widen it to this path, or a node
-    /// that declares a file can never produce one. `None` whenever the
-    /// node has no file of its own to write — every document the engine
-    /// itself writes from what the session hands over — and a session
-    /// then reaches nothing outside its worktree.
-    pub artifact_dir: Option<PathBuf>,
-    /// This session's own scratch directory, for scaffolding it needs on
-    /// disk — an MCP config file, say. It sits outside `cwd` because the
-    /// worktree's diff is what the engine's scope check reads, and a
-    /// file the adapter dropped there would read as the agent's work.
-    ///
-    /// It belongs to this session alone: sessions of one run that can be
-    /// alive at the same moment each get their own, so an adapter may
-    /// name a file inside it for what the file is rather than having to
-    /// make the name unique. The engine creates the path; an adapter
-    /// creates the directory when it has something to put there. `None`
-    /// leaves an adapter that needs one to degrade explicitly.
-    pub scratch_dir: Option<PathBuf>,
-}
-
-/// Where a session's per-run MCP server listens: a loopback URL plus
-/// the single-use bearer token that scopes every call to `(run_id,
-/// node_id, attempt)` by construction — no tool ever takes a run id as
-/// a caller argument. The token is secret material: it must never
-/// reach the event log — the engine's own audit events carry the URL
-/// at most, never this pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunToolsEndpoint {
-    pub url: String,
-    pub token: Secret<String>,
-}
-
-impl RunToolsEndpoint {
-    /// The name a CLI's own configuration gives this server. Every
-    /// adapter uses the one name: a CLI prefixes the tools it mounts
-    /// with it, so this is also what an allow-rule names to admit all
-    /// of them without any adapter knowing which tools the engine
-    /// mounted.
-    pub const SERVER_NAME: &'static str = "yunta";
-}
+use yunta_core::port::HookReply;
+use yunta_core::rail::answer::{FormatAnswer, StopAnswer, WriteAnswer};
+use yunta_core::{AdapterError, AdapterId, Result};
 
 /// Reads an adapter's `adapter_settings` map into its typed settings:
 /// every key must be one of `known`, and the typed struct reads the
@@ -148,158 +32,109 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
     })
 }
 
-/// Hands `prompt` to a just-spawned CLI on its stdin and closes the
-/// pipe, so the CLI sees end-of-input and the prompt never appears in
-/// an argument list. Called once the CLI's output is being read, so a
-/// CLI that talks before it listens cannot deadlock the exchange. A CLI
-/// that exits before reading closes the pipe on its side; that is the
-/// session's own ending, reported by its stream, never a failure of the
-/// write.
-pub async fn write_prompt(
-    mut stdin: tokio::process::ChildStdin,
-    prompt: &str,
-    adapter: &'static AdapterId,
-) -> Result<()> {
-    use tokio::io::AsyncWriteExt;
-
-    let io_error = |action: &str, source: std::io::Error| AdapterError::AdapterIo {
-        adapter: adapter.clone(),
-        action: action.to_string(),
-        source,
-    };
-    match stdin.write_all(prompt.as_bytes()).await {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
-        Err(e) => return Err(io_error("write the prompt to the subprocess's stdin", e)),
-    }
-    match stdin.shutdown().await {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-        Err(e) => Err(io_error("close the subprocess's stdin", e)),
+/// The reply that lets a hook's CLI go on: nothing printed on either
+/// stream, and exit 0.
+fn goes_on() -> HookReply {
+    HookReply {
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        exit: 0,
     }
 }
 
-/// Health check result (`probe()` — binary present, version compatible,
-/// auth valid).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProbeReport {
-    /// The adapter can open sessions; `version` is what its CLI
-    /// reported, when it reports one.
-    Healthy { version: Option<String> },
-    /// The adapter cannot open sessions, and why.
-    Unhealthy { diagnostic: String },
-}
-
-/// What the agent itself reported it did — telemetry, never a verdict;
-/// the engine's own criteria run regardless. One field for now, widened
-/// when a real adapter has more worth reporting.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentOutcome {
-    pub summary: String,
-}
-
-/// A session's failure, kept intentionally minimal until a real adapter
-/// shows what richer information is actually available to report.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{message}")]
-pub struct AgentError {
-    pub message: String,
-}
-
-/// Events a session's stream carries.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AgentEvent {
-    /// Mandatory first event of every session. `model` is the one the
-    /// CLI reported, absent when it reports none — never the one the
-    /// request asked for.
-    SessionOpened {
-        session_id: SessionId,
-        model: Option<ModelName>,
-    },
-    /// How many of the run tools this session actually holds, as its
-    /// CLI reported them. An adapter emits it only when its CLI names
-    /// the session's tool set: silence means the adapter cannot tell,
-    /// never that the count is zero, so a reader degrades only on a
-    /// count it was actually given.
-    RunToolsMounted {
-        count: usize,
-    },
-    ToolUse {
-        name: String,
-        target_digest: String,
-    },
-    Usage {
-        input_tokens: u64,
-        output_tokens: u64,
-        cached_input_tokens: Option<u64>,
-    },
-    Note {
-        text: String,
-    },
-    Completed {
-        result: AgentOutcome,
-    },
-    Failed {
-        error: AgentError,
-        retryable: bool,
-    },
-}
-
-/// Converts a session request into a stream of typed events — nothing
-/// more. `id()`/`capabilities()` are sync: capabilities are fixed at
-/// construction and never require I/O to report.
-#[async_trait]
-pub trait Adapter: Send + Sync {
-    fn id(&self) -> &'static AdapterId;
-
-    fn capabilities(&self) -> Capabilities;
-
-    async fn probe(&self) -> Result<ProbeReport>;
-
-    /// The worktree-relative paths a session opened for `req` writes
-    /// for the adapter's own mechanics — a mount, a settings file —
-    /// never the agent's work. The engine's scope check leaves exactly
-    /// these out. Default: nothing.
-    fn staged_paths(&self, _req: &SessionRequest) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
-
-    /// Default: unsupported. Only called if `capabilities().resume_session`.
-    async fn resume(
-        &self,
-        _session: &SessionId,
-        _req: SessionRequest,
-    ) -> Result<Box<dyn AgentSession>> {
-        Err(AdapterError::Unsupported {
-            adapter: self.id().clone(),
-            what: Capability::ResumeSession,
-        })
+/// What a hook after a write answers to tell the model something about
+/// it: the context both CLIs add to what the model reads next.
+pub(crate) fn told_after_write(context: &str) -> HookReply {
+    let said = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": context,
+        }
+    });
+    HookReply {
+        stdout: said.to_string().into_bytes(),
+        stderr: Vec::new(),
+        exit: 0,
     }
 }
 
-#[async_trait]
-pub trait AgentSession: Send {
-    /// Terminates with exactly one `Completed` or `Failed` — or ends
-    /// without either, which is a crash: the engine, not the adapter,
-    /// synthesizes `Failed { retryable: true }` for that case.
-    fn events(&mut self) -> BoxStream<'_, AgentEvent>;
+/// What a stop hook answers to keep a session working: the decision both
+/// CLIs read on stdout, with the reason the model is shown.
+pub(crate) fn kept_working(reason: &str) -> HookReply {
+    let said = serde_json::json!({ "decision": "block", "reason": reason });
+    HookReply {
+        stdout: said.to_string().into_bytes(),
+        stderr: Vec::new(),
+        exit: 0,
+    }
+}
 
-    /// Ordered termination (Esc/SIGINT-equivalent) — the agent may still
-    /// close cleanly.
-    async fn interrupt(&mut self) -> Result<()>;
+/// What a write hook answers to the engine's verdict on a write: nothing
+/// when the write may go on, and the refusal's text on stderr with exit 2
+/// when it may not, which both CLIs read as a denial.
+pub(crate) fn before_write_reply(answer: &WriteAnswer) -> HookReply {
+    match answer {
+        WriteAnswer::Proceed => goes_on(),
+        WriteAnswer::Refuse { reason } => HookReply {
+            stdout: Vec::new(),
+            stderr: String::from(reason.clone()).into_bytes(),
+            exit: 2,
+        },
+    }
+}
 
-    /// Forceful termination of the whole session process tree — never
-    /// leaves anything running.
-    async fn kill(&mut self) -> Result<()>;
+/// What an after-write hook answers to the notes the engine made of a
+/// write: nothing when it has none, and otherwise each note's text, told
+/// to the model as one context.
+pub(crate) fn after_write_reply(answer: &FormatAnswer) -> HookReply {
+    match answer {
+        FormatAnswer::Proceed => goes_on(),
+        FormatAnswer::Tell { notes } => {
+            let texts: Vec<String> = notes.iter().map(ToString::to_string).collect();
+            told_after_write(&texts.join("\n\n"))
+        }
+    }
+}
 
-    /// The OS process-group id of the session's subprocess tree, when
-    /// the adapter runs one — what the engine registers in
-    /// `run.dir/scratch/engine.json` so a *separate* process (`yunta
-    /// cancel` after a crash) can still exterminate the tree.
-    /// `None` for sessions with no subprocess of their own (mock).
-    fn pgid(&self) -> Option<Pid> {
-        None
+/// What a stop hook answers to the engine's judgement of a stop: nothing
+/// when the stop may go on, and the reason that keeps the session working
+/// when it may not.
+pub(crate) fn before_stop_reply(answer: &StopAnswer) -> HookReply {
+    match answer {
+        StopAnswer::Proceed => goes_on(),
+        StopAnswer::Refuse { reason } => kept_working(reason),
+    }
+}
+
+/// `part` as one word of a POSIX shell command line: as written when it
+/// holds nothing the shell would read, and in single quotes otherwise,
+/// where nothing is expanded — a binary under a path with a `$`, a space
+/// or a quote runs as itself. A CLI runs a hook's command through a
+/// shell, so every word of one goes through here.
+pub(crate) fn sh_quoted(part: &str) -> String {
+    let plain = !part.is_empty()
+        && part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_./=:-@%+,".contains(c));
+    match plain {
+        true => part.to_string(),
+        false => format!("'{}'", part.replace('\'', r"'\''")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sh_quoted;
+
+    #[test]
+    fn a_hook_command_survives_a_path_the_shell_would_expand() {
+        let path = "/Users/a b/$HOME/it's/yunta";
+        let quoted = sh_quoted(path);
+        let echoed = std::process::Command::new("sh")
+            .args(["-c", &format!("printf %s {quoted}")])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(echoed.stdout).unwrap(), path);
+        assert_eq!(sh_quoted("/usr/local/bin/yunta"), "/usr/local/bin/yunta");
     }
 }

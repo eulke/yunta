@@ -53,8 +53,8 @@ adapters. See [adapters](adapters.md) for configuring this and for what
 
 ## The engine tells agents what it expects
 
-Three artifact kinds are parsed and validated rather than just stored:
-`tasks`, `findings` and `questions`. They are strict — a key that is not
+Four artifact kinds are parsed and validated rather than just stored:
+`tasks`, `spec`, `findings` and `questions`. They are strict — a key that is not
 in the schema is refused — which only works because the schema is published to
 whoever has to write one, never assumed.
 
@@ -65,13 +65,15 @@ the same way it looks up anything else. Nobody has to relay a format by hand.
 
 A session hands a document over rather than writing a file. The engine gives it a
 tool per interpreted kind the node declares — `yunta_submit_tasks`,
-`yunta_submit_questions` — whose one argument is that published schema, so the
+`yunta_submit_spec`, `yunta_submit_questions` — whose one argument is that published schema, so the
 model fills in an object instead of transcribing a format. There is nothing else
 to name: a node produces at most one document of each kind, so the kind the node
 declared is the whole identity. Findings are finer-grained
 still: each one is reported on its own with `yunta_post_finding`, corrected with
 `yunta_update_finding` and taken back with `yunta_withdraw_finding`, and the engine
 derives the node's findings document at its close from everything that still stands.
+Another node answers one with `yunta_answer_finding` — fixed, or declined, and why —
+and the answer stands beside it.
 
 The answer comes back in the same call. An acceptance says what the engine
 understood and takes the document into the run — the canonical bytes under
@@ -97,12 +99,20 @@ must provide — it never assumes a concrete adapter, model or secret. See
 ## Where a run's state can pause, and how it resumes
 
 A node can end in one of `finished | failed | skipped | waiting`. `waiting` means
-a `gate` is asking a person for a decision — nothing is running underneath
-it, and it survives the engine restarting exactly like any other state.
-`yunta resolve-gate` (or the MCP `resolve_gate` tool) answers it from a
-completely separate process; the run picks the decision up on its own next
-resume. Nothing about a run depends on the process that started it, or hit
-the gate, staying alive.
+a person's answer is what the node is missing: a `gate` asking for a decision,
+or a node that handed its questions over and is waiting on them. Nothing is
+running underneath either, and both survive the engine restarting exactly like
+any other state.
+A node that fails with no `on_failure` re-route pauses the run on a decision
+too (under the default `defaults.on_failure: pause`): run it again or stop. At
+a terminal the run asks right away, so you can fix the cause and choose
+`retry` without leaving it; otherwise `yunta resolve-gate <run> retry`
+answers later. A plain `yunta resume` never retries a failed node on its own.
+`yunta resolve-gate` (or the MCP `resolve_gate` tool) answers a decision from
+a completely separate process, and the MCP `answer_questions` tool answers a
+node's questions the same way; either lands on the log and a detached resume
+carries the run on from there. Nothing about a run depends on the process that
+started it, or hit the wait, staying alive.
 
 ## Where to go next
 

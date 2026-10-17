@@ -36,7 +36,7 @@ fn an_unknown_key_is_named_with_the_keys_that_are_valid_there() {
         yaml::parse::<Doc>("items:\n  - name: a\n    count: 1\n    colour: red\n").unwrap_err();
     assert_eq!(
         err.to_string(),
-        "`items[0].colour`: items[0]: unknown field `colour`, expected `name` or `count` at line 4 column 5"
+        "`items[0].colour`: unknown field `colour`, expected `name` or `count` at line 4 column 5"
     );
 }
 

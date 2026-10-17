@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use super::permissions::merge_permissions;
 use super::{
-    AdapterSettings, ConfigLayer, DefaultsConfig, LimitsConfig, PathsConfig, ProjectConfig,
-    StorageConfig,
+    AdapterSettings, ConfigLayer, DefaultsConfig, LimitsConfig, PathsConfig, PoolConfig,
+    ProjectConfig, StorageConfig,
 };
 
 pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
@@ -37,6 +37,18 @@ pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLaye
         // Per-model, same as `mcp_servers`: a repo layer overriding one
         // model's price doesn't discard the rest a user/org layer priced.
         pricing: merge_maps(base.pricing, more_specific.pricing, |_base, more| more),
+        // Per-command: a repo naming its own `lint` keeps the `test` a
+        // user or org layer declared.
+        commands: merge_maps(base.commands, more_specific.commands, |_base, more| more),
+        // A list read in order: the most specific layer's rules replace
+        // the whole list, as `runners`' candidates do.
+        format: more_specific.format.or(base.format),
+        // Per-variable, same as `commands`.
+        shared_dirs: merge_maps(
+            base.shared_dirs,
+            more_specific.shared_dirs,
+            |_base, more| more,
+        ),
         // Whole-group replace, same as `baseline`/`coverage`: one forge
         // per repo in practice, nothing internal to merge field-by-field.
         forge: more_specific.forge.or(base.forge),
@@ -173,6 +185,13 @@ fn merge_storage_config(base: StorageConfig, more_specific: StorageConfig) -> St
     StorageConfig {
         path: more_specific.path.or(base.path),
         retention_days: more_specific.retention_days.or(base.retention_days),
+        pool: match (base.pool, more_specific.pool) {
+            (Some(base), Some(more_specific)) => Some(PoolConfig {
+                budget: more_specific.budget.or(base.budget),
+                keep_free: more_specific.keep_free.or(base.keep_free),
+            }),
+            (base, more_specific) => more_specific.or(base),
+        },
     }
 }
 

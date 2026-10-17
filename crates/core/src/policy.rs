@@ -40,3 +40,30 @@ impl ScopeExpansionMode {
         }
     }
 }
+
+/// The most permissive `scope_expansion.mode` a permissions layer allows a
+/// node to declare: a node may declare any mode at least as strict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct ScopeCeiling(pub ScopeExpansionMode);
+
+impl ScopeCeiling {
+    /// Whether a node's declared mode stays within this ceiling.
+    pub fn allows(self, mode: ScopeExpansionMode) -> bool {
+        mode.strictness() >= self.0.strictness()
+    }
+
+    /// The strictest of two ceilings, as the layered merge keeps it.
+    pub fn stricter(self, other: Self) -> Self {
+        if self.0.strictness() >= other.0.strictness() {
+            self
+        } else {
+            other
+        }
+    }
+
+    /// Whether a person may widen a node's scope: every ceiling but `deny` allows it.
+    pub fn lets_a_person_grant(self) -> bool {
+        self.0 != ScopeExpansionMode::Deny
+    }
+}

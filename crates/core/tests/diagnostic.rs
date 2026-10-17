@@ -1,14 +1,14 @@
 //! A diagnostic names what is wrong in the vocabulary of the document,
-//! and a report renders every one of them the way `spec-ledger.md` §4
-//! fixes it. Nothing a deserializer says about its own internals
+//! and a report renders every one of them the way the problems block is
+//! rendered. Nothing a deserializer says about its own internals
 //! reaches either rendering.
 
 use yunta_core::diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode,
-    Subject,
+    ArtifactFailure, Diagnostic, DiagnosticCode, DocumentRef, Fault, FileProblem, Named, Problem,
+    Report, RuleCode, Subject,
 };
 use yunta_core::events::{ArtifactId, Failure};
-use yunta_core::{ArtifactKind, NodeId, RunId, TaskId};
+use yunta_core::{ArtifactKind, FindingFault, NodeId, RunId, TaskFault, TaskId};
 
 fn plan() -> DocumentRef {
     DocumentRef::new(ArtifactKind::Tasks, "artifacts/plan.yaml")
@@ -18,8 +18,8 @@ fn task(id: &str, index: usize) -> Subject {
     Subject::Task(Named::new(TaskId::from(id), index))
 }
 
-fn broke(code: RuleCode, detail: &str) -> Diagnostic {
-    Diagnostic::new(task("t1", 0), Problem::rule(code, detail))
+fn broke(fault: impl Into<Fault>) -> Diagnostic {
+    Diagnostic::new(task("t1", 0), Problem::broke(fault))
 }
 
 #[test]
@@ -75,29 +75,21 @@ fn a_criterion_carries_its_task_s_position_as_one_value_with_its_id() {
 fn a_report_for_a_person_lists_every_violation_on_its_own_line() {
     let report = Report::new(
         plan(),
-        vec![
-            broke(
-                RuleCode::EmptyScope,
-                "`scope` is empty; every task must declare at least one glob",
-            ),
-            broke(
-                RuleCode::NoCriteria,
-                "no criteria declared; every task needs at least one",
-            ),
-        ],
+        vec![broke(TaskFault::EmptyScope), broke(TaskFault::NoCriteria)],
     );
 
     assert_eq!(
         report.to_string(),
         "artifacts/plan.yaml: 2 errors\n  \
-         task `t1`: `scope` is empty; every task must declare at least one glob\n  \
-         task `t1`: no criteria declared; every task needs at least one"
+         task `t1`: `scope` is empty; every task declares at least one glob, the only paths it \
+         may touch\n  \
+         task `t1`: no criteria declared; every task needs at least one command that verifies it"
     );
 }
 
 #[test]
 fn one_violation_is_reported_in_the_singular() {
-    let report = Report::new(plan(), vec![broke(RuleCode::NoCriteria, "no criteria")]);
+    let report = Report::new(plan(), vec![broke(TaskFault::NoCriteria)]);
     assert!(report
         .to_string()
         .starts_with("artifacts/plan.yaml: 1 error\n"));
@@ -105,11 +97,11 @@ fn one_violation_is_reported_in_the_singular() {
 
 #[test]
 fn a_diagnostic_survives_the_event_log_as_data() {
-    let diagnostic = broke(RuleCode::EmptyScope, "`scope` is empty");
+    let diagnostic = broke(TaskFault::EmptyScope);
     let json = serde_json::to_string(&diagnostic).expect("a diagnostic serializes");
     let back: Diagnostic = serde_json::from_str(&json).expect("and reads back identical");
     assert_eq!(back, diagnostic);
-    assert_eq!(back.code(), "empty-scope");
+    assert_eq!(back.code().as_str(), "empty-scope");
 }
 
 #[test]
@@ -117,12 +109,15 @@ fn every_diagnostic_has_a_stable_code_for_counting() {
     let cases = [
         (Problem::parse("tasks[0].id", "invalid type"), "parse"),
         (
-            Problem::rule(RuleCode::DependencyCycle, ""),
+            Problem::broke(TaskFault::DependencyCycle { cycle: Vec::new() }),
             "dependency-cycle",
         ),
     ];
     for (problem, expected) in cases {
-        assert_eq!(Diagnostic::new(Subject::Document, problem).code(), expected);
+        assert_eq!(
+            Diagnostic::new(Subject::Document, problem).code().as_str(),
+            expected
+        );
     }
 }
 
@@ -136,10 +131,8 @@ fn a_file_that_was_never_written_is_a_different_failure_from_one_written_wrong()
             node: NodeId::from("plan"),
         },
     );
-    let malformed = ArtifactFailure::Content(Report::new(
-        plan(),
-        vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-    ));
+    let malformed =
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)]));
 
     assert!(
         missing.report().is_none(),
@@ -158,15 +151,12 @@ fn a_file_that_was_never_written_is_a_different_failure_from_one_written_wrong()
 fn a_failure_keeps_the_document_every_problem_came_from() {
     let findings = DocumentRef::new(ArtifactKind::Findings, "artifacts/findings.yaml");
     let failure = Failure::artifacts(vec![
-        ArtifactFailure::Content(Report::new(
-            plan(),
-            vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-        )),
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)])),
         ArtifactFailure::Content(Report::new(
             findings,
             vec![Diagnostic::new(
                 Subject::Finding(Named::new(None, 0)),
-                Problem::rule(RuleCode::EmptyDetail, "`detail` is empty"),
+                Problem::broke(FindingFault::EmptyDetail),
             )],
         )),
     ]);
@@ -176,7 +166,11 @@ fn a_failure_keeps_the_document_every_problem_came_from() {
         .map(|report| {
             (
                 report.document.path.as_str(),
-                report.diagnostics.iter().map(Diagnostic::code).collect(),
+                report
+                    .diagnostics
+                    .iter()
+                    .map(|d| d.code().as_str())
+                    .collect(),
             )
         })
         .collect();
@@ -191,7 +185,7 @@ fn a_failure_keeps_the_document_every_problem_came_from() {
 }
 
 #[test]
-fn a_failure_renders_one_block_per_failing_document() {
+fn a_failure_keeps_one_entry_per_failing_document() {
     let failure = Failure::artifacts(vec![
         ArtifactFailure::file(
             "artifacts/notes.md",
@@ -199,24 +193,29 @@ fn a_failure_renders_one_block_per_failing_document() {
                 node: NodeId::from("plan"),
             },
         ),
-        ArtifactFailure::Content(Report::new(
-            plan(),
-            vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-        )),
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)])),
     ]);
     assert_eq!(
-        failure.to_string(),
-        "artifacts/notes.md: 1 error\n  \
-         the document was declared by node `plan` and never produced\n\
-         artifacts/plan.yaml: 1 error\n  \
-         task `t1`: no criteria declared"
+        failure.failures().count(),
+        2,
+        "each declared document that did not close is one entry"
+    );
+    assert_eq!(
+        failure.reports().count(),
+        1,
+        "only the document that was read carries a report"
     );
 }
 
 #[test]
-fn a_failure_stated_in_one_sentence_renders_as_that_sentence() {
-    let failure = Failure::message("the runner exited with status 2");
-    assert_eq!(failure.to_string(), "the runner exited with status 2");
+fn a_failure_stated_in_one_sentence_has_no_document_behind_it() {
+    let failure = Failure::Message {
+        outcome: "the runner exited with status 2".into(),
+    };
+    assert!(
+        matches!(&failure, Failure::Message { outcome } if outcome == "the runner exited with status 2"),
+        "{failure:?}"
+    );
     assert_eq!(failure.reports().count(), 0);
 }
 
@@ -226,7 +225,12 @@ fn a_log_written_before_failures_were_data_still_reads() {
     // message, and nothing about the older line has to be rewritten.
     let older: Failure =
         serde_json::from_str(r#"{"outcome":"the runner exited with status 2"}"#).expect("reads");
-    assert_eq!(older, Failure::message("the runner exited with status 2"));
+    assert_eq!(
+        older,
+        Failure::Message {
+            outcome: "the runner exited with status 2".into(),
+        }
+    );
 }
 
 #[test]
@@ -237,7 +241,7 @@ fn a_document_nobody_handed_over_is_a_failure_of_the_artifact_itself() {
     };
 
     assert_eq!(
-        undelivered.code(),
+        undelivered.code().map(DiagnosticCode::as_str),
         Some("artifact-undelivered"),
         "a receipt counts it under its own stable name"
     );
@@ -272,17 +276,11 @@ fn an_undelivered_document_reads_back_with_its_tag_the_node_and_the_identity() {
 }
 
 #[test]
-fn a_document_a_node_never_handed_over_renders_as_the_node_that_owes_it() {
+fn a_document_a_node_never_handed_over_is_one_failed_artifact_of_that_node() {
     let failure = Failure::artifacts(vec![ArtifactFailure::Undelivered {
         node: NodeId::from("plan"),
         artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
     }]);
-    assert_eq!(
-        failure.to_string(),
-        "node `plan`: 1 error\n  \
-         handed over no tasks document — produce it before the node ends, \
-         or stop declaring it here"
-    );
     assert_eq!(
         failure.failures().count(),
         1,
@@ -300,7 +298,7 @@ fn an_artifact_no_run_holds_is_a_failure_of_the_artifact_itself() {
     };
 
     assert_eq!(
-        unheld.code(),
+        unheld.code().map(DiagnosticCode::as_str),
         Some("artifact-unheld"),
         "a receipt counts it under its own stable name"
     );
@@ -333,21 +331,68 @@ fn an_unheld_artifact_reads_back_with_its_tag_and_the_run_it_was_missing_from() 
 }
 
 #[test]
-fn an_artifact_another_run_owes_renders_as_the_run_that_does_not_hold_it() {
+fn an_artifact_another_run_owes_is_one_failed_artifact_of_that_run() {
     let failure = Failure::artifacts(vec![ArtifactFailure::Unheld {
         run: RunId::from("run-child-1"),
         producer: None,
         artifact: ArtifactId::of("report.md", None),
     }]);
     assert_eq!(
-        failure.to_string(),
-        "run `run-child-1`: 1 error\n  \
-         holds no artifact `report.md` — produce it there, or stop declaring it here"
-    );
-    assert_eq!(
         failure.failures().count(),
         1,
         "it is one declared artifact that did not close"
     );
     assert_eq!(failure.reports().count(), 0, "no document was read");
+}
+
+/// Where `report`'s diagnostics are placed, in order.
+fn placed(report: &Report) -> Vec<Option<(usize, usize)>> {
+    report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.at.map(|at| (at.line, at.col)))
+        .collect()
+}
+
+#[test]
+fn a_diagnostic_read_from_text_carries_its_location() {
+    // Parsed, then broken: a dependency on a node nobody declares is
+    // placed on the name in the list that names it.
+    let workflow = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    run: \"true\"\n  - id: fix\n    kind: bash\n    run: \"true\"\n    depends_on: [lnt]\n";
+    let report = yunta_core::workflow::read::read(workflow, std::path::Path::new("w.yaml"))
+        .expect_err("`lnt` is declared nowhere");
+    assert_eq!(placed(&report), [Some((9, 18))], "{report}");
+
+    // Not parsed at all: placed where the parser stopped.
+    let unread = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    rn: x\n";
+    let report = yunta_core::workflow::read::read(unread, std::path::Path::new("w.yaml"))
+        .expect_err("`rn` is no key of a bash node");
+    assert!(
+        placed(&report)[0].is_some_and(|(line, _)| line == 3 || line == 5),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_tasks_document_places_a_broken_rule_at_the_task_it_names() {
+    let tasks = "tasks:\n  - id: t1\n    title: one\n    scope: [src/]\n    criteria:\n      - { cmd: \"true\" }\n  - id: t1\n    title: two\n    scope: [src/]\n    criteria:\n      - { cmd: \"true\" }\n";
+    let report = yunta_core::shape::read::<yunta_core::TasksFile>(tasks.as_bytes(), "plan.yaml")
+        .expect_err("two tasks carry one id");
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| diagnostic.code()
+            == DiagnosticCode::Rule(RuleCode::DuplicateId)
+            && diagnostic.at.is_some_and(|at| at.line == 7)),
+        "the second `t1` is the one at fault: {report:?}"
+    );
+}
+
+#[test]
+fn a_document_handed_over_as_a_value_has_no_place_to_point_to() {
+    let submitted = serde_json::json!({ "tasks": [{ "id": "t1" }] });
+    let report = yunta_core::shape::accept::<yunta_core::TasksFile>(submitted, "plan.yaml")
+        .expect_err("a task needs its fields");
+    assert!(report
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.at.is_none()));
 }

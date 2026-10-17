@@ -11,6 +11,9 @@
 //! export) is what has to carry compatibility for it — this module
 //! only ever writes the current in-memory shape.
 
+use std::path::{Path, PathBuf};
+
+use yunta_core::durable::{self, Durability};
 use yunta_core::events::StoredEvent;
 use yunta_core::Seq;
 
@@ -18,6 +21,12 @@ use yunta_core::Seq;
 pub enum EventsExportError {
     #[error("failed to serialize event at seq {seq} for events.jsonl: {detail}")]
     Serialize { seq: Seq, detail: String },
+    #[error("failed to write `{path}`")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Renders `events`, in the order given, as JSON Lines — pure, no IO. The
@@ -34,4 +43,15 @@ pub fn render_events_jsonl(events: &[StoredEvent]) -> Result<String, EventsExpor
         out.push('\n');
     }
     Ok(out)
+}
+
+/// Rewrites `run_dir/events.jsonl` from `events`: the only writer of that
+/// file. The file is replaced whole, so a reader meets the previous log or
+/// the new one, never a prefix of either.
+pub fn write_jsonl(run_dir: &Path, events: &[StoredEvent]) -> Result<(), EventsExportError> {
+    let path = run_dir.join("events.jsonl");
+    let jsonl = render_events_jsonl(events)?;
+    // blocking: the whole log is one file, replaced in one rename.
+    durable::replace(&path, jsonl.as_bytes(), Durability::Atomic)
+        .map_err(|source| EventsExportError::Write { path, source })
 }

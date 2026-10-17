@@ -9,6 +9,7 @@ description = "Repository tooling: `cargo xtask schema` writes and checks the ge
 
 [dependencies]
 yunta-core.workspace = true
+regex.workspace = true
 serde_json.workspace = true
 
 [lints]

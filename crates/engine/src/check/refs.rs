@@ -1,6 +1,7 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use crate::catalog::{resolve_workflow, CatalogError, ResolvedWorkflow, WorkflowOrigin};
 
 /// Walks the composition reference graph as the repo's
 /// catalog stands **today** — every `use:` resolves, no cycles, and
@@ -8,24 +9,96 @@ use super::*;
 /// point from [`check`], deliberately: `check` never reads files (its
 /// own doc-comment rule), while this walk exists precisely to read the
 /// catalog — the CLI calls both.
+///
+/// Every workflow the composition reaches is also checked as the run
+/// that composes it would check it at birth — against the same config,
+/// holding what its node mounts — so a child that would be refused
+/// halfway through the parent's run is refused before the parent spends
+/// anything.
 pub fn check_workflow_refs(
     workflow: &Workflow,
     config: &ConfigLayer,
     repo_root: &std::path::Path,
     workflow_origin: &crate::catalog::WorkflowOrigin,
-) -> Vec<CheckError> {
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
+) -> RefsCheck {
     let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
+    let mut compares = comparisons(workflow, &path);
     walk_workflow_refs(
         workflow,
-        repo_root,
+        Walk {
+            repo_root,
+            config,
+            declared,
+            max_depth,
+        },
         workflow_origin,
-        max_depth,
         &mut path,
         &mut errors,
+        &mut compares,
     );
-    errors
+    let mut warnings = Vec::new();
+    // Only the walk can answer either: `check` reads no files, so it
+    // cannot know whether a workflow this one composes compares. The
+    // lineage measures once, before its first node, only when the config
+    // names a suite and something reads the measurement — so a comparison
+    // under a config that names none has nothing to compare against,
+    // wherever it sits, and a suite is wasted only on a workflow that
+    // composes others none of which compares, with no loop of its own.
+    let measured_for_nothing = crate::run::baseline::reads_the_baseline(workflow)
+        && !workflow
+            .iter_nodes()
+            .any(|node| matches!(node.kind, yunta_core::NodeKind::Loop { .. }));
+    match &config.baseline {
+        Some(baseline) if compares.is_empty() && measured_for_nothing => {
+            warnings.push(Caution::BaselineNeverCompared {
+                suite: baseline.suite.clone(),
+            });
+        }
+        None if !compares.is_empty() => {
+            errors.push(CheckError::BaselineWithoutSuite {
+                sites: compares.join(", "),
+            });
+        }
+        _ => {}
+    }
+    RefsCheck { errors, warnings }
+}
+
+/// What the walk carries down unchanged to every level.
+#[derive(Clone, Copy)]
+pub(crate) struct Walk<'a> {
+    repo_root: &'a std::path::Path,
+    config: &'a ConfigLayer,
+    declared: &'a dyn Fn(&yunta_core::AdapterId) -> Option<AdapterFacts>,
+    max_depth: u32,
+}
+
+/// What the composition walk found: the errors that refuse the run, and
+/// the warnings only a reader of the composed files can raise.
+pub struct RefsCheck {
+    pub errors: Vec<CheckError>,
+    pub warnings: Vec<Caution>,
+}
+
+/// Every node of `workflow` that compares against the baseline, named
+/// with the composition `path` that reaches it.
+fn comparisons(workflow: &Workflow, path: &[String]) -> Vec<String> {
+    workflow
+        .iter_nodes()
+        .filter(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Check(yunta_core::CheckBuiltin::BaselineCompare)
+            )
+        })
+        .map(|node| match path {
+            [] => format!("node `{}`", node.id),
+            _ => format!("node `{}` of `{}`", node.id, path.join(" -> ")),
+        })
+        .collect()
 }
 
 /// Every `(node, use-name)` reference, `parallel` children included.
@@ -39,110 +112,221 @@ pub(crate) fn workflow_uses(workflow: &Workflow) -> Vec<(NodeId, String)> {
         .collect()
 }
 
+/// Follows every `use:` of `workflow`, depth first, recording what refuses
+/// each one and the compositions the walk reaches.
 pub(crate) fn walk_workflow_refs(
     workflow: &Workflow,
-    repo_root: &std::path::Path,
-    current_origin: &crate::catalog::WorkflowOrigin,
-    max_depth: u32,
+    walk: Walk<'_>,
+    current_origin: &WorkflowOrigin,
     path: &mut Vec<String>,
     errors: &mut Vec<CheckError>,
+    compares: &mut Vec<String>,
 ) {
-    use crate::catalog::{resolve_workflow, CatalogError, WorkflowOrigin};
-
     for (node, name) in workflow_uses(workflow) {
-        if path.contains(&name) {
-            let chain = path
-                .iter()
-                .cloned()
-                .chain(std::iter::once(name.clone()))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            errors.push(CheckError::WorkflowRefCycle { chain });
+        if let Some(refusal) = nesting_refusal(path, &name, walk.max_depth) {
+            errors.push(CheckError::Composition(refusal));
             continue;
         }
-        let depth = path.len() as u32 + 1;
-        if depth > max_depth {
-            let chain = path
-                .iter()
-                .cloned()
-                .chain(std::iter::once(name.clone()))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            errors.push(CheckError::WorkflowRefTooDeep {
-                chain,
-                depth,
-                max: max_depth,
-            });
-            continue;
-        }
-        let resolved = match resolve_workflow(repo_root, &name) {
+        let resolved = match resolve_reference(walk.repo_root, current_origin, &node, &name) {
             Ok(resolved) => resolved,
-            Err(e @ CatalogError::Ambiguous { .. }) => {
-                errors.push(CheckError::AmbiguousWorkflowRef {
-                    node,
-                    name,
-                    detail: e.to_string(),
-                });
-                continue;
-            }
-            Err(e) => {
-                errors.push(CheckError::WorkflowRefMissing {
-                    node,
-                    name,
-                    detail: e.to_string(),
-                });
+            Err(refusal) => {
+                errors.push(CheckError::Composition(refusal));
                 continue;
             }
         };
-
-        // Composing from inside a pack may only reach other
-        // workflows in that *same* pack — never back out to the repo,
-        // never sideways into a different pack (no transitive pack
-        // dependencies).
-        if let WorkflowOrigin::Pack {
-            publisher,
-            pack_name,
-        } = current_origin
-        {
-            let same_pack = matches!(
-                &resolved.origin,
-                WorkflowOrigin::Pack { publisher: p2, pack_name: n2 }
-                    if p2 == publisher && n2 == pack_name
-            );
-            if !same_pack {
-                errors.push(CheckError::CrossPackWorkflowRef {
-                    node,
-                    name,
-                    from_pack: format!("{publisher}/{pack_name}"),
-                });
-                continue;
-            }
-        }
-
-        let text = match std::fs::read_to_string(&resolved.path) {
-            Ok(text) => text,
-            Err(_) => {
-                errors.push(CheckError::WorkflowRefMissing {
-                    node,
-                    name,
-                    detail: format!("`{}` doesn't exist", resolved.path.display()),
-                });
-                continue;
-            }
-        };
-        let child: Workflow = match yunta_core::yaml::parse(&text) {
+        let child = match read_reference(&resolved, &node, &name) {
             Ok(child) => child,
-            Err(e) => {
-                errors.push(CheckError::WorkflowRefUnparseable {
-                    path: resolved.path,
-                    detail: e.to_string(),
-                });
+            Err(refusal) => {
+                errors.push(CheckError::Composition(refusal));
                 continue;
             }
         };
-        errors.extend(check_declares_ceiling(&child, &resolved.origin, repo_root));
+        errors.extend(check_declares_ceiling(
+            &child,
+            &resolved.origin,
+            walk.repo_root,
+        ));
+        let problems = crate::check::check_mounted(
+            &child,
+            walk.config,
+            walk.declared,
+            mounts_of(workflow, &node),
+        );
+        if !problems.is_empty() {
+            errors.push(CheckError::Composition(Composition::Fails {
+                node: node.clone(),
+                name: name.clone(),
+                problems,
+            }));
+        }
         path.push(name);
-        walk_workflow_refs(&child, repo_root, &resolved.origin, max_depth, path, errors);
+        compares.extend(comparisons(&child, path));
+        walk_workflow_refs(&child, walk, &resolved.origin, path, errors, compares);
         path.pop();
     }
+}
+
+/// What refuses a `use:` that closes a cycle with the composition `path`, or
+/// nests deeper than `max_depth` allows.
+fn nesting_refusal(path: &[String], name: &str, max_depth: u32) -> Option<Composition> {
+    let chain = || {
+        path.iter()
+            .cloned()
+            .chain(std::iter::once(name.to_string()))
+            .collect::<Vec<_>>()
+            .join(" -> ")
+    };
+    if path.iter().any(|step| step == name) {
+        return Some(Composition::Cycle { chain: chain() });
+    }
+    let depth = path.len() as u32 + 1;
+    (depth > max_depth).then(|| Composition::TooDeep {
+        chain: chain(),
+        depth,
+        max: max_depth,
+    })
+}
+
+/// Resolves the `use:` `name` of `node` from inside `current`: the refusal
+/// when the name is ambiguous or names no workflow, or names a workflow of
+/// another pack.
+fn resolve_reference(
+    repo_root: &std::path::Path,
+    current: &WorkflowOrigin,
+    node: &NodeId,
+    name: &str,
+) -> Result<ResolvedWorkflow, Composition> {
+    let resolved = resolve_workflow(repo_root, name).map_err(|error| {
+        let detail = error.to_string();
+        match error {
+            CatalogError::Ambiguous { .. } => Composition::Ambiguous {
+                node: node.clone(),
+                name: name.to_string(),
+                detail,
+            },
+            _ => Composition::Missing {
+                node: node.clone(),
+                name: name.to_string(),
+                detail,
+            },
+        }
+    })?;
+    // Composing from inside a pack may only reach other
+    // workflows in that *same* pack — never back out to the repo,
+    // never sideways into a different pack (no transitive pack
+    // dependencies).
+    if let WorkflowOrigin::Pack {
+        publisher,
+        pack_name,
+    } = current
+    {
+        let same_pack = matches!(
+            &resolved.origin,
+            WorkflowOrigin::Pack { publisher: p2, pack_name: n2 }
+                if p2 == publisher && n2 == pack_name
+        );
+        if !same_pack {
+            return Err(Composition::CrossPack {
+                node: node.clone(),
+                name: name.to_string(),
+                from_pack: format!("{publisher}/{pack_name}"),
+            });
+        }
+    }
+    Ok(resolved)
+}
+
+/// Reads and parses the file a resolved `use:` names: the refusal when the
+/// file is gone or does not parse.
+fn read_reference(
+    resolved: &ResolvedWorkflow,
+    node: &NodeId,
+    name: &str,
+) -> Result<Workflow, Composition> {
+    let text = std::fs::read_to_string(&resolved.path).map_err(|_| Composition::Missing {
+        node: node.clone(),
+        name: name.to_string(),
+        detail: format!("`{}` doesn't exist", resolved.path.display()),
+    })?;
+    yunta_core::workflow::read::read(&text, &resolved.path).map_err(|report| {
+        Composition::Unparseable {
+            path: resolved.path.clone(),
+            detail: report.to_string(),
+        }
+    })
+}
+
+/// What the `kind: workflow` node `id` of `workflow` mounts into its child.
+fn mounts_of<'a>(workflow: &'a Workflow, id: &NodeId) -> &'a [yunta_core::MountSpec] {
+    workflow
+        .iter_nodes()
+        .find_map(|node| match &node.kind {
+            NodeKind::Workflow { mounts, .. } if node.id == *id => Some(mounts.as_slice()),
+            _ => None,
+        })
+        .unwrap_or(&[])
+}
+
+/// What refuses a `use:` reference: one that does not resolve, or
+/// resolves to a workflow its birth would refuse, or composes into a
+/// cycle or past the depth a run allows.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Composition {
+    /// A composition reference that can't resolve today — the
+    /// same broken-reference class as `BrokenReference`, across
+    /// files. Advisory about the *current* catalog by design: the child
+    /// freezes its own file at birth, so a run only ever meets the file
+    /// as it is then.
+    #[error("composition_missing")]
+    Missing {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    /// Two packs installed under the same publisher each declare a
+    /// workflow with the same file basename — the flat
+    /// `publisher/workflow` namespace can't tell them apart.
+    #[error("composition_ambiguous")]
+    Ambiguous {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    /// Cross-pack references aren't supported — a workflow
+    /// that lives inside a pack may only `use:` other workflows from
+    /// that same pack, never the repo's own catalog or a different
+    /// pack (no transitive pack dependencies).
+    #[error("composition_cross_pack")]
+    CrossPack {
+        node: NodeId,
+        name: String,
+        from_pack: String,
+    },
+
+    #[error("composition_unparseable")]
+    Unparseable {
+        path: std::path::PathBuf,
+        detail: String,
+    },
+
+    /// A workflow this one composes that its birth would refuse, found
+    /// before the run that would compose it spends anything.
+    #[error("composition_fails")]
+    Fails {
+        node: NodeId,
+        name: String,
+        problems: Vec<CheckError>,
+    },
+
+    /// The graph of references between workflows must be acyclic.
+    #[error("composition_cycle")]
+    Cycle { chain: String },
+
+    /// The configurable maximum nesting depth, checked statically over
+    /// the reference graph (the runtime guard at child birth enforces
+    /// the same limit over what actually loads).
+    #[error("composition_too_deep")]
+    TooDeep { chain: String, depth: u32, max: u32 },
 }

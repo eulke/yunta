@@ -1,0 +1,7 @@
+  Read the idea and its brief → Plan the change task by
+    task → Write the tests for the plan → Approve the plan
+    and its tests
+  Approve the plan and its tests → Build the store task
+  Approve the plan and its tests → Build the command task
+  Approve the plan and its tests → Build the docs task
+  Approve the plan and its tests → Build the release task

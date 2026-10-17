@@ -1,17 +1,7 @@
 # Contributing to Yunta
 
-Yunta is a deterministic workflow engine: state is derived by replaying an
-append-only event log, and a workflow's own `criteria` are the only thing that
-marks work done. The same principle governs how the project itself is built.
-`CLAUDE.md` is the reference of judgment for anyone working in this
-repository, human or agent; read it first. Everything below is logistics.
-
-## Before you start
-
-For anything beyond a small, obviously-scoped fix, open an issue first
-describing the problem and the approach. Design decisions live in
-`docs/design/adrs.md`; a change that touches one starts as a proposal in
-`docs/design/adr/` and is settled there before any code.
+[AGENTS.md](AGENTS.md) contains shared engineering principles. This page
+lists local commands and contribution logistics.
 
 ## Building and testing
 
@@ -22,21 +12,27 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
 cargo xtask schema                     # regenerates crates/core/schemas/ after a change to a document type
+cargo run -p xtask -- smells --check   # the measured smell counts have not risen
 ```
 
-The toolchain is pinned in `rust-toolchain.toml`; rustup installs it on the
-first build.
+A golden test compares a surface's whole output with a file under the crate's
+`goldens/`, one per case and environment, escapes written as `␛`. When a change
+means to change what a surface prints, write the new files and review them in
+the diff:
 
-CI runs the same checks plus `cargo deny check`, `cargo xtask schema --check`
-(the committed schemas must be what the types emit), an isolated `cargo check`
-per crate and the self-tests of every pack under `packs/`.
+```bash
+YUNTA_BLESS=1 cargo test -p yunta -p yunta-render golden
+git diff -- crates/cli/goldens crates/render/goldens
+```
+
+The toolchain is pinned in `rust-toolchain.toml`. See
+`.github/workflows/ci.yml` for the current CI checks.
 
 ## Pull requests
 
-One topic per pull request, conventional commit messages, and a description
-that says what changes and, when the diff does not make it obvious, why. A pull
-request is done when every check in CI is green and every point of
-`CLAUDE.md`'s definition of done holds.
+Keep a pull request focused on one topic. Explain what changed, why, and what
+evidence supports it. Use conventional commit messages and resolve CI
+failures before merging.
 
 ## Reporting a security issue
 

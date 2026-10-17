@@ -4,6 +4,7 @@
 //! the rule. IO-free by design; the imperative call sites live in
 //! `node_exec`/`task_cycle`/`executor_exec`.
 
+use yunta_core::events::{DeniedBy, DeniedCommand};
 use yunta_core::{CommandPermissions, PermissionsConfig};
 use yunta_engine::command_violation;
 
@@ -20,10 +21,14 @@ fn perms(deny: &[&str], allow: &[&str]) -> PermissionsConfig {
 #[test]
 fn a_denied_prefix_pattern_blocks_the_command_and_names_the_rule() {
     let violation = command_violation("sudo rm -rf /", Some(&perms(&["sudo *"], &[])));
-    let rule = violation.expect("sudo must be blocked");
     assert_eq!(
-        rule,
-        "command `sudo rm -rf /` matches denied pattern `sudo *` (permissions.commands.deny)"
+        violation,
+        Some(DeniedCommand {
+            command: "sudo rm -rf /".into(),
+            by: DeniedBy::Deny {
+                pattern: "sudo *".into(),
+            },
+        })
     );
 }
 
@@ -58,10 +63,12 @@ fn a_non_empty_allow_list_is_a_strict_allowlist() {
     let strict = perms(&[], &["cargo *", "git *"]);
     assert_eq!(command_violation("cargo build", Some(&strict)), None);
     let violation = command_violation("npm install", Some(&strict));
-    assert!(
-        violation
-            .expect("npm is outside the allowlist")
-            .contains("allowlist"),
+    assert_eq!(
+        violation,
+        Some(DeniedCommand {
+            command: "npm install".into(),
+            by: DeniedBy::Allow,
+        }),
         "the diagnostic must say why"
     );
 }

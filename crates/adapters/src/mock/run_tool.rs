@@ -8,7 +8,9 @@
 //! digest: the audit stream carries evidence that a call happened and
 //! what it answered, never the content itself.
 
-use crate::RunToolsEndpoint;
+use std::time::Duration;
+
+use yunta_core::port::RunToolsEndpoint;
 
 /// Why the mock's own MCP call failed — the session fails with it.
 #[derive(Debug, thiserror::Error)]
@@ -33,25 +35,81 @@ pub(super) enum RunToolCallError {
     },
     #[error("run_tool `{tool}` returned an error: {text}")]
     Refused { tool: String, text: String },
+    /// The call did not answer within the call timeout the CLI would give it.
+    #[error("run_tool `{tool}` did not answer within {}ms", .within.as_millis())]
+    TimedOut { tool: String, within: Duration },
 }
 
-/// The mock's own MCP client leg: one `tools/call` against the
-/// session's per-run endpoint, exactly as a real CLI would place it.
-/// Returns a short digest of the response for the audit stream
-/// (`ToolUse.target_digest` — never full content), or the error that
-/// fails the session.
+/// What a CLI does with a per-run server before its first turn: connect and
+/// list the tools, within the CLI's own call timeout. A listing that fails
+/// is a server the session does not hold, which the engine reads from its
+/// own listener.
+pub(super) async fn list_run_tools(endpoint: &RunToolsEndpoint, within: Duration) {
+    if tokio::time::timeout(within, listing(endpoint))
+        .await
+        .is_err()
+    {
+        tracing::debug!("a mock session's run-tool listing ran past its timeout");
+    }
+}
+
+/// The listing itself: connect, list the tools, and close.
+async fn listing(endpoint: &RunToolsEndpoint) {
+    use rmcp::ServiceExt;
+
+    let config =
+        rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
+            endpoint.url.clone(),
+        )
+        .auth_header(endpoint.token.expose().clone());
+    let transport = rmcp::transport::StreamableHttpClientTransport::with_client(
+        reqwest::Client::default(),
+        config,
+    );
+    let Ok(client) = ().serve(transport).await else {
+        return;
+    };
+    if client.list_all_tools().await.is_err() {
+        tracing::debug!("a mock session could not list its run tools");
+    }
+    if client.cancel().await.is_err() {
+        tracing::debug!("a mock session's tool client did not close");
+    }
+}
+
+/// The mock's own MCP client leg: one `tools/call` against the session's
+/// per-run endpoint, exactly as a real CLI would place it, within the CLI's
+/// own call timeout. Returns a short digest of the response for the audit
+/// stream (`ToolUse.target` — never full content), or the error that fails
+/// the session.
 pub(super) async fn call_run_tool(
     endpoint: Option<&RunToolsEndpoint>,
     tool: &str,
     arguments: serde_json::Map<String, serde_json::Value>,
+    within: Duration,
 ) -> std::result::Result<String, RunToolCallError> {
-    use rmcp::ServiceExt;
-
     let Some(endpoint) = endpoint else {
         return Err(RunToolCallError::NoEndpoint {
             tool: tool.to_string(),
         });
     };
+    match tokio::time::timeout(within, exchange(endpoint, tool, arguments)).await {
+        Ok(result) => result,
+        Err(_) => Err(RunToolCallError::TimedOut {
+            tool: tool.to_string(),
+            within,
+        }),
+    }
+}
+
+/// One call from start to finish: connect, `tools/call`, and close.
+async fn exchange(
+    endpoint: &RunToolsEndpoint,
+    tool: &str,
+    arguments: serde_json::Map<String, serde_json::Value>,
+) -> std::result::Result<String, RunToolCallError> {
+    use rmcp::ServiceExt;
+
     let config =
         rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
             endpoint.url.clone(),
@@ -73,11 +131,21 @@ pub(super) async fn call_run_tool(
         params = params.with_arguments(arguments);
     }
     let result = client.call_tool(params).await;
-    let _ = client.cancel().await;
+    if client.cancel().await.is_err() {
+        tracing::debug!("a mock session's tool client did not close");
+    }
     let result = result.map_err(|source| RunToolCallError::Call {
         tool: tool.to_string(),
         source: Box::new(source),
     })?;
+    answer(tool, result)
+}
+
+/// The digest of a call's answer, or the refusal the engine answered with.
+fn answer(
+    tool: &str,
+    result: rmcp::model::CallToolResult,
+) -> std::result::Result<String, RunToolCallError> {
     let text: String = result
         .content
         .iter()

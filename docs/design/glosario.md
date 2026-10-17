@@ -5,10 +5,6 @@ palabra que se usa y las que se evitan. Un término entra acá cuando el corpus
 ya lo apoya en más de un lugar: definirlo tarde es lo que deja que dos partes
 del sistema entiendan cosas distintas por la misma palabra.
 
-Las reglas de escritura y la tabla de sustituciones de vocabulario
-(`adapter` en lugar de `driver`, `runner:` en lugar de `role:`) viven en
-[`CLAUDE.md`](../../CLAUDE.md) y no se repiten acá.
-
 ## La frontera de autoría
 
 **YAML de autor**:
@@ -133,6 +129,145 @@ derivación, la herencia entre nodos, la destilación y las estadísticas — co
 eventos por hallazgo, un segundo pliegue es una segunda respuesta.
 _Evitar_: findings vigentes, lista final.
 
+## Lo que el log deriva
+
+**Frame**:
+Dónde está cada cosa del run ahora mismo, derivado del log: qué nodos trabajan,
+en qué estado quedó cada uno, cuántas tareas cerraron, qué hijos nacieron. Es
+una foto, y se vuelve a sacar entera cada vez que algo cambia.
+_Evitar_: snapshot, estado de la UI, progreso.
+
+**Standing** (`NodeStanding`):
+Dónde está parado cada nodo que el workflow declara, en una sola respuesta para
+los tres casos que el DAG congelado y el log producen juntos: afuera, porque el
+modo del run lo deja fuera y no corre; incluido y sin empezar; o alcanzado, con
+el estado que el log derivó para él. El estado de un nodo responde solo por los
+nodos que el log tocó; el standing responde por todos, así que ninguna
+superficie tiene que leer una ausencia para saber si un nodo no corre o todavía
+no arrancó.
+_Evitar_: estado del nodo, pendiente, nodo sin estado.
+
+**Needs you**:
+La palabra de un run detenido en una persona —una decisión, una pregunta, un
+presupuesto, un scope—, en todas las superficies y en el JSON; su marca, `◆`, es
+la única que dice "una persona", y no marca nada más. Sale con código 3.
+_Evitar_: paused, parked (como palabra de superficie).
+
+**Waiting**:
+La palabra de un run pausado hasta que se reinicia el límite de una cuenta, con esa
+hora en su pausa (`awaiting_reset`). Nadie tiene nada que contestar: el run se reanuda
+solo a esa hora, así que no es una parada de persona y nunca sale con código 3. Sale
+con código 5, en todas las superficies y en el JSON.
+_Evitar_: needs you (para un límite que se reinicia), parked.
+
+**Pausa** (`PauseReason`):
+Por qué un run se detuvo y espera: un presupuesto agotado, una escalación, nodos
+huérfanos cuyo resultado es incierto, o un límite de cuenta que espera la hora de su
+reset, sin una persona. Es un hecho tipado que guarda `run_paused`; la
+frase que lee una persona la produce cada superficie al leerlo, igual que el texto de
+una falla de nodo. Un log escrito antes guarda la frase, y se lee tal cual.
+_Evitar_: frase de pausa, motivo de pausa.
+
+**Reported**:
+La palabra de un run que terminó sosteniendo findings bloqueantes: el trabajo
+está hecho y nadie lo aceptó. Sale con código 4.
+
+**Correcting**:
+Un nodo que falló y fue mandado a corregir —por su propio `on_failure`, o porque
+una persona eligió reintentarlo— en un run que sigue abierto: su falla se está
+trabajando y no se cuenta como una falla en pie. Deja de estarlo cuando vuelve a
+correr, o cuando el run cierra sin haber vuelto a él.
+_Evitar_: reintentando, en reparación.
+
+**Stalled**:
+Un run cuyo log dice que avanza y cuyo engine ya no existe: el registro del run
+(`scratch/engine.json`) nombra un proceso que terminó, o un pid que el host le dio
+después a otro proceso. Es una lectura, no un evento; sin registro no se afirma,
+porque un run que pasa de un proceso a otro tampoco tiene uno por un instante.
+_Evitar_: colgado, huérfano, zombie.
+
+**Palabras de una tarea**:
+`pending`, `ready`, `running`, `done`, `blocked` y `failed`: dónde está una tarea
+del ledger, el mismo token que escribe el log, en todas las superficies, en el
+JSON y en lo que lee un agente. Es otro vocabulario que el de un nodo a propósito:
+una tarea está `done` cuando sus criterios pasan y su trabajo se integró, y un
+nodo está `finished` cuando corrió; un loop `finished` puede dejar tareas
+`blocked`.
+_Evitar_: finished (para una tarea), completed.
+
+**Handle**:
+Cómo una persona llama a un run: los últimos seis caracteres de su id, la parte
+al azar de un ULID. Toda línea que lee una persona lo nombra así, y todo comando
+que recibe un run lo acepta junto con el id entero, cualquier parte que lo
+empiece o lo termine, `last` y `needs`. Un documento para un programa y el plano
+de control nombran el id entero.
+_Evitar_: alias, id corto, apodo.
+
+**Crónica**:
+Qué pasó, en orden, derivada del mismo log y con los mismos tipos que el frame:
+un **momento** por evento. Lo que el frame dice que un nodo *es*, un momento
+dice que *se volvió*. Es pura y monótona en el log — la crónica de un prefijo
+es un prefijo de la crónica — así que un lector que sigue el run en vivo ve lo
+mismo, en el mismo orden, que uno que lo lee terminado.
+_Evitar_: historial, feed de eventos, timeline.
+
+**Momento**:
+Una cosa que pasó, ubicada: cuándo, a qué nodo, y qué. Se lee contra el estado
+*de ese instante*, nunca contra el del final — el tiempo que un intento trabajó
+y los hijos que arrastró son los que tenía ahí. Un nodo que cierra dos veces son
+dos momentos.
+_Evitar_: línea, entrada del log, evento — un evento es lo persistido; un
+momento es cómo se lee.
+
+**Gasto** (`Spend`):
+Lo asentado más lo que está en vuelo: la cifra que leen todas las superficies. Es una
+sola cifra por run (`Spend::so_far`): el cierre, `status`, la última fila de la
+región en vivo, `stats` y los JSON la leen en la misma forma, también mientras una
+sesión está abierta.
+_Evitar_: consumo, uso, cifra de tokens.
+
+**Gasto asentado** (`Spend::settled`):
+Lo que un run ya dio por gastado: el terminal de cada nodo que cerró, la ronda de
+preguntas que asentó el uso de su sesión y el gasto de los hijos que cerraron. Lo
+asentado no vuelve a estar en vuelo. Un run cerrado graba su gasto total: lo que
+quedó en vuelo al cerrar pasa a ser gasto grabado.
+_Evitar_: gasto confirmado, gasto final.
+
+**En vuelo** (`Spend::in_flight`):
+El uso que una sesión abierta ya reportó y que ningún terminal ni ronda asentó. Se
+suma a lo asentado en la única cifra de gasto del run (`Spend::so_far`), así que un
+nodo que espera a una persona muestra lo que ya gastó.
+_Evitar_: gasto pendiente, gasto parcial, uso abierto.
+
+**Tramo de tiempo** (`Timeline`):
+Un trozo del reloj del run entre dos eventos. Cada tramo es el tiempo de una sola
+cosa, la que estaba abierta a lo largo de él: un nodo trabajando, una persona
+preguntada, un chequeo, un servicio caído, un run detenido. Si nada estaba abierto,
+es del motor entre un paso y el siguiente. Un tramo que el host pasó dormido no
+cae en ningún balde.
+_Evitar_: intervalo, lapso, periodo.
+
+## Gates
+
+**Escalación** (`Escalation`):
+Lo que un gate publica cuando detiene el run: la afirmación de quien escala, el
+menú que dice de qué trata —uno solo, con los datos de los que se escriben sus
+palabras— y un menú de opciones que no puede estar vacío. Es la única forma en que
+nace un `gate_waiting`. El log guarda datos y no palabras: los hechos contra los que
+se audita la escalación los escribe render desde el menú, así que una afirmación no
+puede repetir un hecho del registro, porque no hay registro en palabras que repetir.
+Un menú vacío —una escalación que rechaza toda respuesta que recibe— es imposible
+por tipo.
+_Evitar_: pregunta del gate, pedido de ayuda, pausa.
+
+**Tradeoff** (`render::offers`):
+Qué cuesta tomar una opción del menú. Render lo escribe desde los datos de la opción
+y de su escalación, y se muestra como la línea debajo de su etiqueta, así que quien
+decide lee el costo donde elige. Toda opción que amplía el trabajo dice contra qué lo
+cambia, y elegirla autoriza esa ampliación (D50). En el log solo aparece en un log
+anterior, que lo guardó con la opción.
+_Evitar_: nota de la opción, advertencia, consecuencia.
+
 ## Documentos y su lectura
 
 **Documento**:
@@ -157,12 +292,146 @@ conjunto cerrado, y se cuenta junto con la kind del documento que la violó
 (D135).
 _Evitar_: constraint, chequeo semántico, validación extra.
 
+## El cerco
+
+**Confinación** (`Confinement`):
+Lo que una sesión puede escribir y alcanzar, resuelto una vez al abrirla: su
+perfil (`read-only`, `edit` o `full`), el sandbox de `edit` (`workspace-write`,
+`read-only` o `danger-full-access`) y su red. Sus comandos escriben el worktree
+según el perfil y el sandbox de `edit`, las raíces del run y el directorio
+temporal (`$TMPDIR` y `/tmp`), que toda sesión puede escribir. El directorio de
+artefactos lo escriben todas las sesiones, y los directorios compartidos, las que
+no son `read-only`. La red la fija el `network:` del nodo o, si no lo dice, el del
+proyecto, y por defecto queda abierta; solo la tiene una sesión que escribe su
+worktree. Una sesión que no lo escribe —un nodo `read-only`, o `edit` con sandbox
+`read-only`— no la tiene nunca, y una sesión sin confinar exige red abierta. Cada
+adapter la aplica exacta o la rechaza, y el log la guarda en
+`agent_session_opened.confinement`, con sus campos `profile`, `commands`,
+`worktree` y `network`: lo que la sesión pudo hacer, no lo que hizo.
+_Evitar_: sandbox (es la forma que toma en un CLI), permisos de sesión.
+
+**Cerco** (`Fence`):
+Lo que una sesión puede escribir bajo el worktree con sus herramientas: los
+globs —el scope declarado más las ampliaciones ya concedidas— que el riel juzga
+escritura por escritura. Las raíces del run y los árboles protegidos enteros
+(`dir/**`) los juzga la confinación. Un archivo protegido, un patrón que cubre
+parte de un directorio y uno que no nombra directorio los juzgan el riel y el
+cierre: denegar su directorio negaría paths que nadie protege. Viaja siempre (D172).
+_Evitar_: edit_constraints, restricciones de edición, permisos de escritura.
+
+**Nivel** (`FenceLevel`):
+Lo que un adapter sabe construir del cerco: nada, un juicio por llamada de
+herramienta, o un sandbox de filesystem. Es del adapter, constante, y viaja en
+`capabilities.fence`. Un transporte distinto —hook, extensión, programa
+delegado— no es un nivel distinto.
+_Evitar_: edit_hooks, modo de enforcement.
+
+**Cobertura** (`Coverage`):
+Cuánto de una sesión concreta cercó lo que su adapter construyó: exacta,
+ensanchada a raíces (con el directorio temporal de los comandos), o solo
+herramientas. Se calcula de lo construido, nunca se declara, y viaja en
+`agent_session_opened.fence`.
+_Evitar_: nivel de la sesión, enforcement efectivo.
+
+**Canal**:
+Por dónde una sesión escribe: las herramientas de archivo del CLI, o todo lo
+demás —shell, MCP, tareas delegadas—. La cobertura de una sesión es la del
+canal más débil.
+
+**Cercado** (`Fenced`):
+Lo que un canal tiene: cerco exacto, o raíces.
+
+**Juez** (`Fence::judge`):
+La función pura que decide si un path está dentro del cerco. No toca disco:
+resuelve `.` y `..` lexicalmente contra el worktree y responde. Es una sola
+para todo el workspace: el engine la pregunta por cada escritura que el riel
+de una sesión le consulta, y el mock por los efectos de un fixture sin riel
+(D249).
+_Evitar_: validador de scope, checker.
+
+**Riel** (`RailCommand`, `/rail`):
+Lo que el CLI de una sesión le pregunta al engine mientras trabaja — antes de
+escribir y antes de terminar. El hook es este binario, su subcomando `rail`, el
+adapter cuyo codec lee la llamada y el momento (`before-write`,
+`after-write`, `before-stop`); la respuesta la da el engine por el listener de
+esa sesión, con el mismo token que sus herramientas, y deja en el log lo que
+juzgó o hizo (D249, D254, D255). `before-stop` juzga el trabajo con el mismo
+juicio que el cierre del intento, en seco: si el cierre no lo tomaría, la
+sesión vuelve a él.
+_Evitar_: fence hook, FenceHook, yunta fence.
+
+**Falla del riel** (`rail_failed`):
+Una llamada del riel que el engine oyó y no pudo juzgar ni responder a tiempo.
+Lleva una causa cerrada (`decode`, `unauthorized`, `timeout`, `judgement_failed`,
+`formatter_failed`, `no_fence` o `listener_died`) y, cuando se conocen, la sesión
+y el momento de la llamada. Un hook que no alcanza a ningún engine no deja falla:
+la negativa lleva la causa (D266).
+
+**Reporte del riel** (`/rail/report`):
+La llamada con que un hook le dice al engine una falla que el engine no vio, con
+su causa cerrada. Se envía una vez por falla, y no vuelve a preguntar: es un
+reporte, no un reintento (D266).
+
+**Resumen de tiempos del riel** (`rail_summary`):
+El evento que cierra cada sesión con riel. Guarda, por momento, un histograma de
+cuánto tardó cada respuesta, que se suma con los de otras sesiones, y el primer
+modelo que oyó el riel. `yunta stats` lee de él el p50 y el p95 de cada momento
+(D266).
+
+**Codec** (`RailCodec`):
+La traducción entre el riel y el hook de un CLI: qué pregunta la llamada que
+llegó por stdin, y en qué forma ese CLI lee la respuesta. Un adapter escribe
+solo el codec; lo que se responde es del engine.
+
+**Rechazo** (`write_refused`):
+El hecho de que una escritura fue rechazada antes de ocurrir. Su texto para el
+modelo nace una sola vez, empieza por un marcador fijo y dice la salida: pedir
+ampliación, o reportar un finding.
+_Evitar_: bloqueo, edición bloqueada.
+
+**Parada devuelta** (`stop_refused`):
+La sesión quiso terminar con trabajo que su cierre no tomaría, y el engine la
+devolvió a él diciendo qué falta. Lo juzga el mismo juicio que el cierre, una
+vez por estado del trabajo (D254). No la devuelve un pedido de ampliación que
+el cierre puede conceder o escalar: lo decide el cierre.
+_Evitar_: stop bloqueado, reintento.
+
+**Negativa inmediata**:
+La negativa de un pedido de ampliación de una tarea que el engine contesta en la
+llamada, con su razón, porque el proyecto lo decide con el pedido solo y ningún
+trabajo lo cambia: el modo `deny` o una ruta que ninguna persona puede conceder.
+Su respuesta empieza con `request denied`, y el log registra el pedido y la
+negativa en ese momento (`scope_expansion_requested` y `scope_expansion_denied`).
+Las negativas que dependen del trabajo —un criterio que ya pasa, el tope de
+archivos, un pedido `rules` sin criterio, que una salida en rojo todavía puede
+conceder— se deciden al cerrar.
+_Evitar_: rechazo diferido, denegación al cierre.
+
+**Sujeto de una concesión**:
+Lo que una decisión de alcance amplía o deniega: una tarea, o el nodo al que pertenece
+la sesión. Una concesión sin tarea ni nodo no se escribe. Una denegación de nodo no
+nombra tarea, porque su sujeto es el nodo del evento; y un hecho de sesión sin nodo
+corta el replay, porque no tiene a quién atribuirse.
+_Evitar_: destino de la concesión, alcance del run.
+
+**Retiro** (`scope_expansion_withdrawn`):
+Lo que una tarea deja al cerrar: el pedido de ampliación que nadie contestó
+cuando el cierre llegó. No es una concesión ni una denegación: no escribe
+finding, no cuenta para `max_per_run` y nadie lo decide. Una tarea que no cierra
+no retira su pedido: lo escala una persona.
+_Evitar_: cancelación, descarte.
+
 ## Fallas
 
 **Falla de nodo**:
-Por qué un nodo no cerró, como dato y no como frase: o una falla que el engine
-enuncia en una oración, o los artifacts declarados que no cerraron. Es lo que
-persiste `node_failed`; el texto lo produce cada superficie al leerlo (D133).
+Por qué un nodo no cerró, como dato tipado y no como frase: la causa de un
+comando, de una sesión rechazada, de un límite, de las tareas que paró un loop, de
+los artifacts declarados que no cerraron, de una sesión que el engine no pudo parar
+o de un archivo congelado que ya no coincide con su hash. Es lo que persiste
+`node_failed`. Las palabras las escribe cada superficie al leerla, y los remedios
+que ofrece se deducen de la falla y del log. El engine solo enuncia una oración en
+`Failure::Message`, para una falla sin datos propios; esa oración se guarda y se
+lee tal cual (D133).
 _Evitar_: outcome, mensaje de error, motivo.
 
 **Falla de artifact**:
@@ -196,7 +465,7 @@ _Evitar_: span, línea y columna, ruta del parser (`tasks[0].criteria[1]`).
 **Bloque de problemas**:
 El formato único con el que un reporte se muestra a una persona: un
 encabezado que nombra qué se leyó y cuántos problemas tiene, y una línea
-indentada por problema (spec-ledger §4). Vive en un solo lugar, que no sabe
+indentada por problema (spec-tasks §4). Vive en un solo lugar, que no sabe
 nada de diagnósticos, y de ahí salen también los errores del CLI.
 _Evitar_: formateo por superficie, redacción por lector.
 
@@ -215,7 +484,9 @@ la aplican (D143).
 
 **Exigencia** (`demand`) — lo que una regla pide, en el vocabulario de quien escribe
 el documento. Es la lectura *previa* de la regla: viaja en el contrato antes de que
-se escriba nada. La lectura *posterior* es el diagnóstico, con el valor concreto.
+se escriba nada. La lectura *posterior* es el diagnóstico, con el valor concreto. No
+confundir con la **línea de exigencia**, que es la fila donde una superficie dice si
+el run necesita a alguien.
 
 **Contrato** — lo que una puerta le entrega a quien tiene que escribir un documento:
 el ejemplo publicado más las exigencias de todas sus reglas. `shape::contract(kind)`
@@ -234,3 +505,39 @@ run ya tiene. Llama a las mismas dos funciones que el cierre, así que su respue
 la del nodo no pueden diferir —incluido «nadie lo entregó»— (D146, D156, D157). Es
 consultiva: el cierre sigue siendo el único juez.
 
+## La frontera y la superficie
+
+**Puerto** (`yunta_core::port`):
+Lo que el engine llama y lo que le responde: el puerto de sesión, el CLI de
+agente que un adapter maneja, y el puerto de forja, el pull request sobre el
+que se decide un gate externo. Los dos viven en core, así que el engine depende
+de la interfaz y nunca de una implementación de ella, y el compilador sostiene
+esa frontera (D165).
+_Evitar_: interfaz del adapter, capa de integración, puerto de red.
+
+**Política de degradación** (`Policy`, `PolicyApplied`):
+Lo que una sesión dejó de tener cuando faltó una capacidad de su adapter: uno de siete
+nombres de un conjunto cerrado (`post_check_only`, `no_token_budget`, `no_skills`,
+`no_run_tools`, `network_open`, `fresh_session`, `cap_at_session_end`), que
+`capability_degraded` guarda como dato. La frase que lo explica la produce el crate
+`render`. Un log escrito antes guarda un texto: si no es el nombre de una política, se
+lee tal cual.
+_Evitar_: policy_applied, frase de degradación.
+
+**Descarte de runner** (`RunnerRejection`):
+Por qué un candidato del runner no se usó: el run fijó otro adapter con `--adapter`, el
+adapter del candidato no está disponible aquí, o es la frase que guardó un log escrito
+antes. `runner_resolved` lo guarda en cada candidato descartado, como dato tipado.
+_Evitar_: rechazo del runner, candidato fallido.
+
+**Línea de exigencia** (`view::demand_line`):
+La línea que contesta "¿este run me necesita?": o no necesita a nadie, o algo
+lo necesita y ahí está el comando que lo mueve, con aquello sobre lo que está
+parado. Se produce en toda fase, incluso las que no necesitan a nadie, porque
+una línea que aparece solo cuando hay algo que decir vuelve ambigua su
+ausencia; el comando va adelante, así que una fila cortada al ancho de la
+terminal pierde el sujeto y nunca lo que hay que correr. Las mismas frases
+llegan al bloque que cierra el run, a `yunta status`, al JSON y al diagnóstico
+del comando que no pudo terminar su trabajo. No confundir con **Exigencia**,
+que es lo que una regla le pide a quien escribe un documento.
+_Evitar_: barra de estado, sugerencia, mensaje de la vista.

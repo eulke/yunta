@@ -1,8 +1,17 @@
+//! Resolving a runner to the candidate that runs it: the first available
+//! one in declared order, a pinned adapter (`--adapter`) ahead of that
+//! order, and the agent the chosen candidate carries.
+//!
+//! A candidate passed over is recorded with the reason it was passed
+//! over, and a runner with nothing available is an error naming
+//! everything that was tried.
+
+use yunta_core::events::RunnerRejection;
 use yunta_core::ConfigLayer;
 use yunta_engine::{resolve_runner, RunnerError};
 
 fn config(yaml: &str) -> ConfigLayer {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 const CONFIG: &str = r#"
@@ -33,7 +42,7 @@ fn an_unavailable_adapter_is_discarded_with_a_reason_not_skipped_silently() {
     assert_eq!(resolved.chosen.adapter, "codex");
     assert_eq!(resolved.discarded.len(), 1);
     assert_eq!(resolved.discarded[0].candidate.adapter, "claude-code");
-    assert!(!resolved.discarded[0].reason.is_empty());
+    assert_eq!(resolved.discarded[0].reason, RunnerRejection::Unavailable);
 }
 
 #[test]
@@ -76,10 +85,12 @@ fn an_adapter_override_wins_over_declaration_order_and_records_the_discards() {
     assert_eq!(resolved.chosen.adapter, "codex");
     assert_eq!(resolved.discarded.len(), 1);
     assert_eq!(resolved.discarded[0].candidate.adapter, "claude-code");
-    assert!(
-        resolved.discarded[0].reason.contains("--adapter"),
-        "the reason names the override: {}",
-        resolved.discarded[0].reason
+    assert_eq!(
+        resolved.discarded[0].reason,
+        RunnerRejection::NotPinned {
+            pinned: override_id,
+        },
+        "the reason names the override"
     );
 }
 
@@ -94,14 +105,9 @@ fn an_adapter_override_with_no_candidate_on_it_is_an_error_naming_what_was_tried
     )
     .unwrap_err();
     match err {
-        RunnerError::OverrideHasNoCandidate {
-            runner,
-            adapter,
-            candidates,
-        } => {
+        RunnerError::NoCandidateAvailable { runner, tried } => {
             assert_eq!(runner, "reviewer");
-            assert_eq!(adapter, "codex");
-            assert_eq!(candidates, ["claude-code"]);
+            assert_eq!(tried, ["claude-code"]);
         }
         other => panic!("unexpected: {other:?}"),
     }

@@ -6,233 +6,108 @@
 //! frozen manifest through its `child_run_id` — never re-resolving the
 //! workflow name.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{ArtifactId, EventPayload, TerminalState};
-use yunta_core::{
-    AdapterId, ConfigLayer, IdSource, Manifest, NodeId, RunId, SeqIdSource, Workflow,
-};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{git, init_repo, ApproveEverything, FixedClock};
+use tokio_util::sync::CancellationToken;
 
-const CONFIG: &str = r#"
+use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::events::{
+    ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
+};
+use yunta_core::events::{ChildEvent, FindingEvent, PauseReason, RunEvent, TaskEvent};
+use yunta_core::{AdapterId, ContentHash, Manifest, NodeId, RunAdapter, RunId, Workflow};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::{
+    baselines, git, on_a_deep_stack, write, ApproveEverything, Bench, ScriptedInteraction,
+};
+
+#[path = "workflow_compose/frozen.rs"]
+mod frozen;
+
+/// Every `(child_run_id, child_workflow_hash)` a parent recorded, in
+/// log order.
+fn children_created(events: &[StoredEvent]) -> Vec<(RunId, ContentHash)> {
+    events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Children(ChildEvent::Created(p))) => {
+                Some((p.child_run_id.clone(), p.child_workflow_hash.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `(node_id, child_run_id)` a parent recorded, in log order —
+/// which node each child was born from.
+fn children_by_node(events: &[StoredEvent]) -> Vec<(String, RunId)> {
+    events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Children(ChildEvent::Created(p))) => Some((
+                e.node_id
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+                p.child_run_id.clone(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `(child_run_id, terminal_state)` a parent recorded, in log
+/// order.
+fn children_finished(events: &[StoredEvent]) -> Vec<(RunId, TerminalState)> {
+    events
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Children(ChildEvent::Finished(p))) => {
+                Some((p.child_run_id.clone(), p.terminal_state))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The manifest a run froze at birth, read from its run directory.
+fn manifest_of(runs_root: &Path, run_id: &RunId) -> Manifest {
+    let path = runs_root.join(run_id.as_str()).join("manifest.yaml");
+    yunta_core::yaml::parse(&std::fs::read_to_string(&path).unwrap()).unwrap()
+}
+
+/// What `file` holds on run `run`'s own branch — where a child's work
+/// stays once its checkout went back to the project's pool.
+async fn on_its_branch(bench: &Bench, run: &RunId, file: &str) -> Option<String> {
+    let named = format!("yunta/run/{run}:{file}");
+    yunta_engine::git::read(&bench.worktree, &["show", &named], bench.supervision())
+        .await
+        .ok()
+}
+
+const EMPTY_FIXTURE: &str = "dialect: claude-code\nsessions: []\n";
+
+/// The `runners:` every mock-backed run resolves against, plus a suite
+/// for the lineage to measure.
+const CONFIG_WITH_BASELINE: &str = "\
 runners:
+  planner:
+    - { adapter: mock, model: mock-model }
   executor:
     - { adapter: mock, model: mock-model }
-"#;
-
-/// A bench whose worktree carries a committed `.yunta/workflows/`
-/// catalog — what `use:` resolves against at child birth.
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: PathBuf,
-    runs_root: PathBuf,
-    storage: Storage,
-    /// The ids of every child and successor born in this bench, in
-    /// minting order: `minted-1`, `minted-2`, …
-    ids: SeqIdSource,
-}
-
-impl Bench {
-    fn new(catalog: &[(&str, &str)]) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let workflows = worktree.join(".yunta/workflows");
-        std::fs::create_dir_all(&workflows).unwrap();
-        for (name, yaml) in catalog {
-            std::fs::write(workflows.join(format!("{name}.yaml")), yaml).unwrap();
-        }
-        git(&worktree, &["add", "."]);
-        git(
-            &worktree,
-            &["commit", "-q", "--allow-empty", "-m", "catalog"],
-        );
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        Bench {
-            _root: root,
-            worktree,
-            runs_root,
-            storage,
-            ids: SeqIdSource::new("minted"),
-        }
-    }
-
-    fn recommit_catalog(&self, name: &str, yaml: &str) {
-        std::fs::write(
-            self.worktree
-                .join(".yunta/workflows")
-                .join(format!("{name}.yaml")),
-            yaml,
-        )
-        .unwrap();
-        git(&self.worktree, &["add", "."]);
-        git(&self.worktree, &["commit", "-q", "-m", "update catalog"]);
-    }
-
-    async fn run(
-        &self,
-        run_id: &RunId,
-        parent_yaml: &str,
-        config_yaml: &str,
-        inputs: &HashMap<String, String>,
-        fixture_yaml: &str,
-        human_interaction: &dyn yunta_engine::HumanInteraction,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        let manifest = self.create(run_id, parent_yaml, config_yaml, inputs).await;
-        self.execute(run_id, &manifest, fixture_yaml, human_interaction)
-            .await
-    }
-
-    async fn create(
-        &self,
-        run_id: &RunId,
-        parent_yaml: &str,
-        config_yaml: &str,
-        inputs: &HashMap<String, String>,
-    ) -> Manifest {
-        let workflow: Workflow = serde_norway::from_str(parent_yaml).unwrap();
-        let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
-        let manifest = build_manifest(&workflow, &config, &self.worktree, &self.worktree, inputs)
-            .unwrap()
-            .manifest;
-        create_run(
-            CreateRunParams {
-                run_id,
-                manifest: &manifest,
-                runs_root: &self.runs_root,
-                mode: &"default".into(),
-                worktree: &self.worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-        manifest
-    }
-
-    async fn execute(
-        &self,
-        run_id: &RunId,
-        manifest: &Manifest,
-        fixture_yaml: &str,
-        human_interaction: &dyn yunta_engine::HumanInteraction,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        self.execute_with(run_id, manifest, fixture_yaml, human_interaction, &self.ids)
-            .await
-    }
-
-    async fn execute_with(
-        &self,
-        run_id: &RunId,
-        manifest: &Manifest,
-        fixture_yaml: &str,
-        human_interaction: &dyn yunta_engine::HumanInteraction,
-        ids: &dyn IdSource,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
-        let run_dir = self.runs_root.join(run_id.as_str());
-        let report = execute_run(RunEnv {
-            run_id,
-            manifest,
-            run_dir: &run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-        })
-        .await
-        .unwrap();
-        (report.terminal, report.state)
-    }
-
-    /// Every `(child_run_id, child_workflow_hash)` the parent recorded,
-    /// in log order.
-    fn children_created(&self, run_id: &RunId) -> Vec<(RunId, yunta_core::ContentHash)> {
-        self.storage
-            .events_for_run(run_id)
-            .unwrap()
-            .into_iter()
-            .filter_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunCreated(p)) => {
-                    Some((p.child_run_id.clone(), p.child_workflow_hash.clone()))
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Every `(node_id, child_run_id)` the parent recorded, in log
-    /// order — which node each child was born from.
-    fn children_by_node(&self, run_id: &RunId) -> Vec<(String, RunId)> {
-        self.storage
-            .events_for_run(run_id)
-            .unwrap()
-            .into_iter()
-            .filter_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunCreated(p)) => Some((
-                    e.node_id
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
-                    p.child_run_id.clone(),
-                )),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn children_finished(&self, run_id: &RunId) -> Vec<(RunId, TerminalState)> {
-        self.storage
-            .events_for_run(run_id)
-            .unwrap()
-            .into_iter()
-            .filter_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunFinished(p)) => {
-                    Some((p.child_run_id.clone(), p.terminal_state))
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn child_manifest(&self, child_id: &RunId) -> Manifest {
-        let path = self.runs_root.join(child_id.as_str()).join("manifest.yaml");
-        serde_norway::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-}
-
-const EMPTY_FIXTURE: &str = "sessions: []\n";
+baseline:
+  suite: \"cat marker.txt\"
+";
 
 // --- The child is a complete, linked run -------------------------------------
 
 #[tokio::test]
 async fn a_workflow_node_runs_its_child_as_a_complete_linked_run() {
-    let bench = Bench::new(&[(
-        "child-wf",
-        r#"
+    let bench = Bench::with_run_id("run-parent-1")
+        .with_workflow(
+            "child-wf",
+            r#"
 name: child-wf
 inputs:
   idea: { type: string, required: true }
@@ -241,7 +116,8 @@ nodes:
     kind: bash
     run: "echo {{inputs.idea}} > out.txt"
 "#,
-    )]);
+        )
+        .with_inputs(&[("thing", "hola")]);
     let parent = r#"
 name: parent
 inputs:
@@ -252,31 +128,21 @@ nodes:
     use: child-wf
     inputs: { idea: "{{inputs.thing}}" }
 "#;
-    let run_id = RunId::from("run-parent-1");
-    let inputs = HashMap::from([("thing".to_string(), "hola".to_string())]);
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &inputs,
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, EMPTY_FIXTURE).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
 
     // The parent's log carries the link pair.
-    let created = bench.children_created(&run_id);
+    let parent_events = bench.events();
+    let created = children_created(&parent_events);
     assert_eq!(created.len(), 1);
     let (child_id, recorded_hash) = &created[0];
     assert_eq!(
-        bench.children_finished(&run_id),
+        children_finished(&parent_events),
         vec![(child_id.clone(), TerminalState::Done)]
     );
 
@@ -285,12 +151,12 @@ nodes:
     let child_events = bench.storage.events_for_run(child_id).unwrap();
     assert!(matches!(
         child_events.first().and_then(|e| e.payload()),
-        Some(EventPayload::RunCreated(_))
+        Some(EventPayload::Run(RunEvent::Created(_)))
     ));
     assert!(child_events
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_)))));
-    let child_manifest = bench.child_manifest(child_id);
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Finished(_))))));
+    let child_manifest = manifest_of(&bench.runs_root, child_id);
     assert_eq!(child_manifest.workflow.name, "child-wf");
     assert_eq!(&child_manifest.workflow_hash, recorded_hash);
     assert_eq!(
@@ -300,29 +166,48 @@ nodes:
     assert_eq!(child_manifest.isolation, yunta_core::Isolation::Worktree);
 
     // The child worked in its own tree, branched off the parent's HEAD.
-    let child_tree = bench._root.path().join("worktrees").join(child_id.as_str());
     assert_eq!(
-        std::fs::read_to_string(child_tree.join("out.txt"))
-            .unwrap()
-            .trim(),
-        "hola"
+        on_its_branch(&bench, child_id, "out.txt")
+            .await
+            .as_deref()
+            .map(str::trim),
+        Some("hola")
     );
     // The parent's own tree never saw the child's write.
     assert!(!bench.worktree.join("out.txt").exists());
 }
 
 #[tokio::test]
-async fn child_and_successor_run_ids_are_ulids_from_the_id_source() {
-    let bench = Bench::new(&[(
+async fn a_child_runs_on_the_adapter_its_parent_was_started_on() {
+    let bench = Bench::new().with_adapter("mock").with_workflow(
         "child-wf",
-        r#"
+        "name: child-wf\nnodes:\n  - id: work\n    kind: bash\n    run: \"true\"\n",
+    );
+    let parent = "name: parent\nnodes:\n  - id: feat\n    kind: workflow\n    use: child-wf\n";
+    let RunReport { terminal, .. } = bench.run(parent, EMPTY_FIXTURE).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let (child_id, _) = &children_created(&bench.events())[0];
+    assert_eq!(
+        manifest_of(&bench.runs_root, child_id).adapter,
+        Some(RunAdapter::Named(AdapterId::from("mock")))
+    );
+}
+
+#[tokio::test]
+async fn child_and_successor_run_ids_are_ulids_from_the_id_source() {
+    let bench = Bench::with_run_id("run-parent-ulid")
+        .with_workflow(
+            "child-wf",
+            r#"
 name: child-wf
 nodes:
   - id: work
     kind: bash
     run: "true"
 "#,
-    )]);
+        )
+        .with_id_source(Arc::new(yunta_core::SystemIdSource));
     let parent = r#"
 name: parent
 nodes:
@@ -330,22 +215,12 @@ nodes:
     kind: workflow
     use: child-wf
 "#;
-    let run_id = RunId::from("run-parent-ulid");
-    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new()).await;
-    let (terminal, _) = bench
-        .execute_with(
-            &run_id,
-            &manifest,
-            EMPTY_FIXTURE,
-            &NoInteraction,
-            &yunta_core::SystemIdSource,
-        )
-        .await;
+    let RunReport { terminal, .. } = bench.run(parent, EMPTY_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // The link is the log's, not the name's: the child id is a fresh
     // ULID, and nothing in it is derived from the parent or the node.
-    let created = bench.children_created(&run_id);
+    let created = children_created(&bench.events());
     assert_eq!(created.len(), 1);
     let child_id = created[0].0.as_str();
     assert_eq!(child_id.len(), 26, "{child_id}");
@@ -360,7 +235,7 @@ nodes:
 
 #[tokio::test]
 async fn child_usage_aggregates_into_the_parent_total() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-parent-tokens").with_workflow(
         "spender",
         r#"
 name: spender
@@ -370,7 +245,7 @@ nodes:
     runner: executor
     prompt: "Do the thing."
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -379,22 +254,13 @@ nodes:
     use: spender
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - steps:
       - { type: usage, input_tokens: 100, output_tokens: 20 }
     outcome: { type: completed, summary: "done" }
 "#;
-    let run_id = RunId::from("run-parent-tokens");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            fixture,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     // The children's Usage aggregates upward — each chain member's
@@ -402,9 +268,9 @@ sessions:
     // the parent's derived total (what `limits.max_tokens_per_run`
     // compares against) includes it exactly once. The node's own close
     // deliberately carries none — it would double-count.
-    assert_eq!(state.total_tokens.input, 100);
-    assert_eq!(state.total_tokens.output, 20);
-    match state.nodes.get("feat") {
+    assert_eq!(state.spend().so_far().input, 100);
+    assert_eq!(state.spend().so_far().output, 20);
+    match state.nodes.state("feat") {
         Some(NodeState::Finished { tokens, .. }) => {
             assert_eq!(
                 tokens.input, 0,
@@ -414,11 +280,11 @@ sessions:
         }
         other => panic!("expected feat finished, got {other:?}"),
     }
-    let events = bench.storage.events_for_run(&run_id).unwrap();
+    let events = bench.events();
     let recorded = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(EventPayload::ChildRunFinished(p)) => Some(p.tokens),
+            Some(EventPayload::Children(ChildEvent::Finished(p))) => Some(p.tokens),
             _ => None,
         })
         .expect("child_run_finished must carry the child's spend");
@@ -430,7 +296,7 @@ sessions:
 
 #[tokio::test]
 async fn a_paused_child_pauses_the_parent_and_resume_reaches_it_recursively() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-parent-resume").with_workflow(
         "gated",
         r#"
 name: gated
@@ -443,8 +309,8 @@ nodes:
     depends_on: [approve]
     run: "echo done > child-out.txt"
 "#,
-    )]);
-    // `isolation: inherit`: the child works in the parent's own tree, so
+    );
+    // `isolation: none`: the child works in the parent's own tree, so
     // the child's write is visible right there after the close.
     let parent = r#"
 name: parent
@@ -452,56 +318,45 @@ nodes:
   - id: feat
     kind: workflow
     use: gated
-    isolation: inherit
+    isolation: none
 "#;
-    let run_id = RunId::from("run-parent-resume");
-    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new()).await;
     // No interaction surface: the child's internal gate has nobody to
     // ask, so the child pauses waiting — and the parent pauses with it,
     // since a parent run spends most of its life waiting on its children.
-    let (terminal, _) = bench
-        .execute(&run_id, &manifest, EMPTY_FIXTURE, &NoInteraction)
-        .await;
+    let RunReport { terminal, .. } = bench.run(parent, EMPTY_FIXTURE).await;
 
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the parent to pause on its paused child, got {terminal:?}");
     };
     // The child paused on its own log; the parent's node stays open (no
     // child_run_finished) so resume knows to go back in.
-    let created = bench.children_created(&run_id);
+    let created = children_created(&bench.events());
     assert_eq!(created.len(), 1);
-    assert!(bench.children_finished(&run_id).is_empty());
+    assert!(children_finished(&bench.events()).is_empty());
     let child_id = created[0].0.clone();
     assert!(
-        reason.contains(child_id.as_str()),
-        "the pause reason must name the child run: {reason}"
+        matches!(&reason, PauseReason::ChildPaused { run, .. } if run == &child_id),
+        "the pause reason must name the child run: {reason:?}"
     );
     assert!(bench
         .storage
         .events_for_run(&child_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunPaused(_)))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Paused(_))))));
 
     // Resume the parent with a surface that answers: the SAME child run
     // resumes (no second child_run_created), its gate resolves, and
     // everything closes.
-    let (terminal, state) = bench
-        .execute(
-            &run_id,
-            &manifest,
-            EMPTY_FIXTURE,
-            &ApproveEverything::new("test"),
-        )
-        .await;
+    let RunReport { terminal, state } = bench.wake_answering(&ApproveEverything::new("test")).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
-    assert_eq!(bench.children_created(&run_id).len(), 1);
+    assert_eq!(children_created(&bench.events()).len(), 1);
     assert_eq!(
-        bench.children_finished(&run_id),
+        children_finished(&bench.events()),
         vec![(child_id.clone(), TerminalState::Done)]
     );
     assert!(bench
@@ -509,7 +364,7 @@ nodes:
         .events_for_run(&child_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunResumed(_)))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Resumed(_))))));
     assert_eq!(
         std::fs::read_to_string(bench.worktree.join("child-out.txt"))
             .unwrap()
@@ -536,7 +391,6 @@ nodes:
     kind: bash
     run: "echo v2 > v2.txt"
 "#;
-    let bench = Bench::new(&[("evolving", CHILD_V1)]);
     let parent = r#"
 name: parent
 nodes:
@@ -545,36 +399,19 @@ nodes:
     use: evolving
 "#;
 
-    let first = RunId::from("run-parent-v1");
-    let (terminal, _) = bench
-        .run(
-            &first,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let first = Bench::with_run_id("run-parent-v1").with_workflow("evolving", CHILD_V1);
+    let RunReport { terminal, .. } = first.run(parent, EMPTY_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    let (first_child, v1_hash) = bench.children_created(&first)[0].clone();
+    let (first_child, v1_hash) = children_created(&first.events())[0].clone();
 
     // The child workflow evolves between parent executions (a long
     // process picks up improvements)...
-    bench.recommit_catalog("evolving", CHILD_V2);
-    let second = RunId::from("run-parent-v2");
-    let (terminal, _) = bench
-        .run(
-            &second,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let second = first
+        .beside("run-parent-v2")
+        .with_workflow("evolving", CHILD_V2);
+    let RunReport { terminal, .. } = second.run(parent, EMPTY_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    let (_, v2_hash) = bench.children_created(&second)[0].clone();
+    let (_, v2_hash) = children_created(&second.events())[0].clone();
 
     // ...so the second child froze the new file...
     assert_ne!(
@@ -586,9 +423,9 @@ nodes:
     // child_run_id reaches the child's own frozen manifest, which still
     // hashes to v1 — reproducing the old parent never resolves
     // `evolving@current`.
-    let pinned = bench.child_manifest(&first_child);
+    let pinned = manifest_of(&first.runs_root, &first_child);
     assert_eq!(pinned.workflow_hash, v1_hash);
-    let v1_workflow: Workflow = serde_norway::from_str(CHILD_V1).unwrap();
+    let v1_workflow: Workflow = yunta_core::yaml::parse(CHILD_V1).unwrap();
     assert_eq!(pinned.workflow.nodes[0], v1_workflow.nodes[0]);
 }
 
@@ -623,12 +460,16 @@ nodes:
         "inputs:\n  idea: { type: string, required: true }",
     );
     let qa_review = prompt_child("qa-review", "");
-    let bench = Bench::new(&[
-        ("design-review", design_review.as_str()),
-        ("build-feature", build_feature.as_str()),
-        ("qa-review", qa_review.as_str()),
-    ]);
-    std::fs::write(bench.worktree.join("rfc.md"), "the rfc").unwrap();
+    let bench = Bench::with_run_id("run-release")
+        .with_workflow("design-review", &design_review)
+        .with_workflow("build-feature", &build_feature)
+        .with_workflow("qa-review", &qa_review)
+        .with_inputs(&[
+            ("rfc", "rfc.md"),
+            ("feat_a", "feature a"),
+            ("feat_b", "feature b"),
+        ]);
+    write(&bench.worktree.join("rfc.md"), "the rfc");
     git(&bench.worktree, &["add", "."]);
     git(&bench.worktree, &["commit", "-q", "-m", "rfc"]);
 
@@ -636,27 +477,15 @@ nodes:
     // feat-a/feat-b race in parallel, so fixture order between them is
     // not deterministic).
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "worked" }
   - outcome: { type: completed, summary: "worked" }
   - outcome: { type: completed, summary: "worked" }
   - outcome: { type: completed, summary: "worked" }
 "#;
-    let run_id = RunId::from("run-release");
-    let inputs = HashMap::from([
-        ("rfc".to_string(), "rfc.md".to_string()),
-        ("feat_a".to_string(), "feature a".to_string()),
-        ("feat_b".to_string(), "feature b".to_string()),
-    ]);
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            &release_cycle,
-            CONFIG,
-            &inputs,
-            fixture,
-            &ApproveEverything::new("test"),
-        )
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(&release_cycle, fixture, &ApproveEverything::new("test"))
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -670,13 +499,14 @@ sessions:
         "ship",
     ] {
         assert!(
-            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
     // One child per `kind: workflow` node, each with an id of its own.
-    let created = bench.children_by_node(&run_id);
+    let parent_events = bench.events();
+    let created = children_by_node(&parent_events);
     let mut nodes: Vec<&str> = created.iter().map(|(node, _)| node.as_str()).collect();
     nodes.sort();
     assert_eq!(nodes, vec!["design", "feat-a", "feat-b", "qa"]);
@@ -684,7 +514,7 @@ sessions:
     child_ids.sort();
     child_ids.dedup();
     assert_eq!(child_ids.len(), 4, "every child has an id of its own");
-    let finished = bench.children_finished(&run_id);
+    let finished = children_finished(&parent_events);
     assert_eq!(finished.len(), 4);
     assert!(finished
         .iter()
@@ -695,8 +525,8 @@ sessions:
 
 #[tokio::test]
 async fn workflow_nesting_depth_is_capped_at_runtime() {
-    let bench = Bench::new(&[
-        (
+    let bench = Bench::with_run_id("run-deep")
+        .with_workflow(
             "mid",
             r#"
 name: mid
@@ -705,8 +535,8 @@ nodes:
     kind: workflow
     use: leaf
 "#,
-        ),
-        (
+        )
+        .with_workflow(
             "leaf",
             r#"
 name: leaf
@@ -715,8 +545,7 @@ nodes:
     kind: bash
     run: "true"
 "#,
-        ),
-    ]);
+        );
     let parent = r#"
 name: parent
 nodes:
@@ -731,88 +560,51 @@ runners:
 limits:
   max_workflow_depth: 1
 "#;
-    let run_id = RunId::from("run-deep");
-    let (terminal, _) = bench
-        .run(
-            &run_id,
-            parent,
-            config,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, .. } = bench.run_with_config(parent, EMPTY_FIXTURE, config).await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the over-deep composition to pause, got {terminal:?}");
     };
     assert!(
-        reason.contains("max_workflow_depth"),
-        "the pause must name the limit: {reason}"
+        yunta_render::pause::sentence(&reason).contains("max_workflow_depth"),
+        "the pause must name the limit: {reason:?}"
     );
 }
 
 #[tokio::test]
-async fn a_missing_child_workflow_fails_the_node_naming_the_path() {
-    let bench = Bench::new(&[]);
-    let parent = r#"
-name: parent
-nodes:
-  - id: feat
-    kind: workflow
-    use: nope
-"#;
-    let run_id = RunId::from("run-missing");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
-    assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("feat") {
-        Some(NodeState::Failed { failure, .. }) => {
-            let outcome = failure.to_string();
-            assert!(
-                outcome.contains(".yunta/workflows/nope.yaml"),
-                "the diagnostic must name the resolved path: {outcome}"
-            );
-        }
-        other => panic!("expected feat failed, got {other:?}"),
-    }
-    assert!(bench.children_created(&run_id).is_empty());
+async fn a_missing_child_workflow_refuses_the_parent_at_birth_naming_it() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let parent: Workflow = yunta_core::yaml::parse(
+        "name: parent\nnodes:\n  - id: feat\n    kind: workflow\n    use: nope\n",
+    )
+    .unwrap();
+    let refused = yunta_engine::build_manifest(
+        &parent,
+        &yunta_core::ConfigLayer::default(),
+        repo.path(),
+        repo.path(),
+        &std::collections::HashMap::new(),
+        owner.supervision(),
+        None,
+    )
+    .await
+    .expect_err("a child name that resolves to nothing refuses the run at birth");
+    let said = yunta_core::describe(&refused);
+    assert!(said.contains("nope"), "the refusal names the child: {said}");
 }
 
 // --- a promoted child chains into its successor -----------------------
 
-struct AlwaysPromote;
-
-#[async_trait::async_trait]
-impl yunta_engine::HumanInteraction for AlwaysPromote {
-    async fn resolve(
-        &self,
-        _escalation: &yunta_core::events::GateWaitingPayload,
-    ) -> Option<yunta_core::events::HumanChoice> {
-        Some(yunta_core::events::HumanChoice {
-            option: "promote".into(),
-            by: "test".into(),
-            free_text: None,
-        })
-    }
-}
-
 #[tokio::test]
 async fn a_promoted_child_chains_into_its_successor_automatically() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-parent-chain").with_workflow(
         "promotable",
         r#"
 name: promotable
 modes:
-  quick: { include: [lint, fix-lint] }
-  full:  { include: [ship] }
+  alpha: { include: [lint, fix-lint] }
+  beta:  { include: [ship] }
 nodes:
   - id: lint
     kind: bash
@@ -825,7 +617,7 @@ nodes:
     kind: bash
     run: "echo shipped > shipped.txt"
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -833,30 +625,26 @@ nodes:
     kind: workflow
     use: promotable
 "#;
-    // The child starts in `quick` (the floor), exhausts its re-route,
+    // The child starts in `alpha` (the floor), exhausts its re-route,
     // and the scripted human promotes — the parent must then create and
-    // drive the successor child (`full`) instead of failing the node.
-    let run_id = RunId::from("run-parent-chain");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
+    // drive the successor child (`beta`) instead of failing the node.
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(
             parent,
-            CONFIG,
-            &HashMap::new(),
             EMPTY_FIXTURE,
-            &AlwaysPromote,
+            &ScriptedInteraction::choose("promote"),
         )
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
 
     // Both chain members are linked children of the same node, in
     // order, each with an id of its own.
-    let created = bench.children_created(&run_id);
+    let created = children_created(&bench.events());
     let ids: Vec<RunId> = created.iter().map(|(id, _)| id.clone()).collect();
     assert_eq!(
         ids.len(),
@@ -864,7 +652,7 @@ nodes:
         "the successor must be a new linked child, recorded on the parent log"
     );
     assert_ne!(ids[0], ids[1]);
-    let finished = bench.children_finished(&run_id);
+    let finished = children_finished(&bench.events());
     assert_eq!(
         finished,
         vec![
@@ -881,28 +669,25 @@ nodes:
         .unwrap()
         .into_iter()
         .find_map(|e| match e.payload() {
-            Some(EventPayload::RunCreated(p)) => Some(p.clone()),
+            Some(EventPayload::Run(RunEvent::Created(p))) => Some(p.clone()),
             _ => None,
         })
         .unwrap();
     assert_eq!(successor_created.promoted_from, Some(ids[0].clone()));
-    assert_eq!(successor_created.mode, "full");
+    assert_eq!(successor_created.mode, "beta");
 
-    // And the successor really did the `full` work, in its own tree.
-    let successor_tree = bench
-        ._root
-        .path()
-        .join("worktrees")
-        .join(successor.as_str());
-    assert!(successor_tree.join("shipped.txt").exists());
+    // And the successor really did the `beta` work, in its own tree.
+    assert!(on_its_branch(&bench, &successor, "shipped.txt")
+        .await
+        .is_some());
 }
 
 // --- cross-run artifact mounts -----------------------------------
 
 #[tokio::test]
 async fn mounts_copy_parent_and_sibling_artifacts_into_the_child_at_birth() {
-    let bench = Bench::new(&[
-        (
+    let bench = Bench::with_run_id("run-mounts")
+        .with_workflow(
             "producer",
             r#"
 name: producer
@@ -912,8 +697,8 @@ nodes:
     run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#,
-        ),
-        (
+        )
+        .with_workflow(
             "consumer",
             r#"
 name: consumer
@@ -922,8 +707,7 @@ nodes:
     kind: bash
     run: "true"
 "#,
-        ),
-    ]);
+        );
     let parent = r#"
 name: parent
 nodes:
@@ -941,10 +725,15 @@ nodes:
       - artifact: { node: prod, name: report.md }
       - artifact: { node: plan, name: plan.yaml, as: brief.md }
 "#;
-    let run_id = RunId::from("run-mounts");
-    let manifest = bench.create(&run_id, parent, CONFIG, &HashMap::new()).await;
+    let RunReport { terminal, state } = bench.run(parent, EMPTY_FIXTURE).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.state("cons"),
+        Some(NodeState::Finished { .. })
+    ));
 
     // Each mount implies depends_on — visible in the frozen graph.
+    let manifest = bench.manifest();
     let cons = manifest
         .workflow
         .nodes
@@ -954,20 +743,10 @@ nodes:
     assert!(cons.depends_on.contains(&"prod".into()));
     assert!(cons.depends_on.contains(&"plan".into()));
 
-    let (terminal, state) = bench
-        .execute(&run_id, &manifest, EMPTY_FIXTURE, &NoInteraction)
-        .await;
-    assert_eq!(terminal, RunTerminal::Finished);
-    assert!(matches!(
-        state.nodes.get("cons"),
-        Some(NodeState::Finished { .. })
-    ));
-
     // The copies landed in the child's own run.dir at birth: the
     // sibling's artifact through the recorded link, the parent's own
     // under its `as:` rename.
-    let cons_id = bench
-        .children_by_node(&run_id)
+    let cons_id = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "cons")
         .map(|(_, id)| id)
@@ -992,7 +771,7 @@ nodes:
     assert!(
         matches!(
             child_events.first().and_then(|e| e.payload()),
-            Some(EventPayload::RunCreated(_))
+            Some(EventPayload::Run(RunEvent::Created(_)))
         ),
         "the child exists in its log before anything is said about it"
     );
@@ -1012,20 +791,19 @@ nodes:
     );
     // The parent's own artifact comes from the parent's log; the
     // sibling's comes from the child run that produced it.
-    let from_parent = yunta_core::events::ArtifactOrigin::Inherited {
-        run: run_id.clone(),
+    let from_parent = yunta_core::events::RecordedOrigin::Inherited {
+        run: bench.run_id.clone(),
         producer: Some("plan".into()),
     };
     assert_eq!(mounted[1].origin, from_parent);
-    let prod_id = bench
-        .children_by_node(&run_id)
+    let prod_id = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "prod")
         .map(|(_, id)| id)
         .expect("the prod child is linked on the parent's log");
     assert_eq!(
         mounted[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: prod_id,
             producer: Some("work".into()),
         }
@@ -1034,7 +812,7 @@ nodes:
 
 #[tokio::test]
 async fn a_mount_whose_source_was_never_produced_fails_the_node_before_the_child_exists() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-mount-missing").with_workflow(
         "consumer",
         r#"
 name: consumer
@@ -1043,7 +821,7 @@ nodes:
     kind: bash
     run: "true"
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -1056,38 +834,33 @@ nodes:
     mounts:
       - artifact: { node: plan, name: plan.yaml }
 "#;
-    let run_id = RunId::from("run-mount-missing");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, EMPTY_FIXTURE).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("cons") {
+    match state.nodes.state("cons") {
         Some(NodeState::Failed { failure, .. }) => {
             // A source the run does not hold is a declared artifact that
             // did not close, so it reaches every surface as one entry
             // with its own code — never a sentence to be taken apart.
             let entries: Vec<&ArtifactFailure> = failure.failures().collect();
-            assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
-            assert_eq!(entries[0].code(), Some("artifact-unheld"));
+            assert_eq!(entries.len(), 1, "one artifact did not close: {failure:?}");
+            assert_eq!(
+                entries[0]
+                    .code()
+                    .map(yunta_core::diagnostic::DiagnosticCode::as_str),
+                Some("artifact-unheld")
+            );
             assert!(
                 matches!(
                     entries[0],
                     ArtifactFailure::Unheld { run, producer, artifact }
-                        if *run == run_id
+                        if *run == bench.run_id
                             && producer.as_ref() == Some(&NodeId::from("plan"))
                             && *artifact == ArtifactId::of("plan.yaml", None)
                 ),
                 "the entry names the run asked, the node and the artifact: {:?}",
                 entries[0]
             );
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(
                 outcome.contains("plan.yaml") && outcome.contains("plan"),
                 "the diagnostic must name the artifact and its source node: {outcome}"
@@ -1096,12 +869,12 @@ nodes:
         other => panic!("expected cons failed, got {other:?}"),
     }
     // The failure happened before the link: no dangling child run.
-    assert!(bench.children_created(&run_id).is_empty());
+    assert!(children_created(&bench.events()).is_empty());
 }
 
 #[tokio::test]
 async fn a_child_consumes_a_mounted_artifact_through_context_without_naming_a_node() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-mount-context").with_workflow(
         "consumer",
         r#"
 name: consumer
@@ -1113,7 +886,7 @@ nodes:
     context:
       - artifact: { name: brief.md }
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -1128,26 +901,17 @@ nodes:
       - artifact: { node: plan, name: plan.yaml, as: brief.md }
 "#;
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "read it" }
 "#;
-    let run_id = RunId::from("run-mount-context");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            fixture,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, fixture).await;
     // The node-less artifact source resolved against the child's own
     // run.dir — a missing file would have failed the child's node, so a
     // clean finish is the proof the mount fed the context.
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("cons"),
+        state.nodes.state("cons"),
         Some(NodeState::Finished { .. })
     ));
 }
@@ -1157,7 +921,7 @@ async fn a_mount_carries_the_bytes_the_log_names_even_with_no_view_left() {
     // A mount resolves through the source run's log and its object
     // store, so a view somebody deleted between the producer and the
     // mount changes nothing the child receives.
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-mount-from-log").with_workflow(
         "consumer",
         r#"
 name: consumer
@@ -1166,11 +930,10 @@ nodes:
     kind: bash
     run: "true"
 "#,
-    )]);
+    );
     // The view belongs to the engine, so the node that deletes it names
     // it by its absolute path rather than through a template no workflow
     // has for it.
-    let run_id = RunId::from("run-mount-from-log");
     let parent = format!(
         r#"
 name: parent
@@ -1190,26 +953,12 @@ nodes:
     mounts:
       - artifact: {{ node: plan, name: plan.yaml, as: brief.md }}
 "#,
-        view = bench
-            .runs_root
-            .join(run_id.as_str())
-            .join(yunta_core::ARTIFACTS_DIR)
-            .display()
+        view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
     );
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            &parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(&parent, EMPTY_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
-    let cons_id = bench
-        .children_by_node(&run_id)
+    let cons_id = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "cons")
         .map(|(_, id)| id)
@@ -1219,14 +968,13 @@ nodes:
     assert_eq!(mounted.len(), 1, "{mounted:?}");
     assert_eq!(
         mounted[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
-            run: run_id.clone(),
+        yunta_core::events::RecordedOrigin::Inherited {
+            run: bench.run_id.clone(),
             producer: Some("plan".into()),
         },
         "the mount carries where it came from and who produced it there"
     );
-    let parent_events = bench.storage.events_for_run(&run_id).unwrap();
-    let parent_held = yunta_testkit::accepted(&parent_events);
+    let parent_held = bench.accepted();
     assert_eq!(
         mounted[0].content_hash, parent_held[0].content_hash,
         "the child holds exactly the bytes the parent's log names"
@@ -1237,7 +985,7 @@ nodes:
 
 #[tokio::test]
 async fn a_workflow_node_acquires_the_artifact_its_child_produced() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-acquire").with_workflow(
         "producer",
         r#"
 name: producer
@@ -1247,7 +995,7 @@ nodes:
     run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -1256,40 +1004,29 @@ nodes:
     use: producer
     artifacts: { produces: [report.md] }
 "#;
-    let run_id = RunId::from("run-acquire");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, EMPTY_FIXTURE).await;
 
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert!(
-        matches!(state.nodes.get("feat"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("feat"), Some(NodeState::Finished { .. })),
         "a node whose declared artifact its child produced finishes: {:?}",
-        state.nodes.get("feat")
+        state.nodes.state("feat")
     );
 
-    let child_id = bench
-        .children_by_node(&run_id)
+    let child_id = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "feat")
         .map(|(_, id)| id)
         .expect("the child is linked on the parent's log");
 
     // The parent holds it as its node's own, stating where it came from.
-    let parent_held = yunta_testkit::accepted(&bench.storage.events_for_run(&run_id).unwrap());
+    let parent_held = bench.accepted();
     assert_eq!(parent_held.len(), 1, "{parent_held:?}");
     assert_eq!(parent_held[0].producer, Some("feat".into()));
     assert_eq!(parent_held[0].artifact.to_string(), "report.md");
     assert_eq!(
         parent_held[0].origin,
-        yunta_core::events::ArtifactOrigin::Inherited {
+        yunta_core::events::RecordedOrigin::Inherited {
             run: child_id.clone(),
             producer: Some("work".into()),
         },
@@ -1303,20 +1040,13 @@ nodes:
         parent_held[0].content_hash, child_held[0].content_hash,
         "the parent holds exactly the bytes the child's log names"
     );
-    let object = bench
-        .runs_root
-        .join(run_id.as_str())
-        .join("objects")
-        .join(parent_held[0].content_hash.as_str());
-    assert_eq!(
-        std::fs::read_to_string(&object).unwrap().trim(),
-        "the-report"
-    );
+    let object = bench.object(&parent_held[0].content_hash).unwrap();
+    assert_eq!(String::from_utf8(object).unwrap().trim(), "the-report");
 }
 
 #[tokio::test]
 async fn a_workflow_node_declaring_what_its_child_never_produced_fails_naming_both() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-acquire-missing").with_workflow(
         "producer",
         r#"
 name: producer
@@ -1325,7 +1055,7 @@ nodes:
     kind: bash
     run: "true"
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -1334,34 +1064,28 @@ nodes:
     use: producer
     artifacts: { produces: [report.md] }
 "#;
-    let run_id = RunId::from("run-acquire-missing");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            EMPTY_FIXTURE,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, EMPTY_FIXTURE).await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
-    let child_id = bench
-        .children_by_node(&run_id)
+    let child_id = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "feat")
         .map(|(_, id)| id)
         .expect("the child is linked on the parent's log");
-    match state.nodes.get("feat") {
+    match state.nodes.state("feat") {
         Some(NodeState::Failed { failure, .. }) => {
             // The child run holding none of what this node declares is
             // exactly one declared artifact that did not close: the
             // failure carries it as an entry, with the run it was
             // missing from.
             let entries: Vec<&ArtifactFailure> = failure.failures().collect();
-            assert_eq!(entries.len(), 1, "one artifact did not close: {failure}");
-            assert_eq!(entries[0].code(), Some("artifact-unheld"));
+            assert_eq!(entries.len(), 1, "one artifact did not close: {failure:?}");
+            assert_eq!(
+                entries[0]
+                    .code()
+                    .map(yunta_core::diagnostic::DiagnosticCode::as_str),
+                Some("artifact-unheld")
+            );
             assert!(
                 matches!(
                     entries[0],
@@ -1373,7 +1097,7 @@ nodes:
                 "the entry names the child run and the artifact: {:?}",
                 entries[0]
             );
-            let outcome = failure.to_string();
+            let outcome = yunta_render::failure::sentence(failure);
             assert!(
                 outcome.contains("report.md") && outcome.contains(child_id.as_str()),
                 "the diagnostic must name the artifact and the child run: {outcome}"
@@ -1384,14 +1108,14 @@ nodes:
     // Nothing entered the parent: an artifact it could not acquire is
     // not a fact of the run.
     assert!(
-        yunta_testkit::accepted(&bench.storage.events_for_run(&run_id).unwrap()).is_empty(),
+        bench.accepted().is_empty(),
         "the parent holds nothing it never acquired"
     );
 }
 
 #[tokio::test]
 async fn the_findings_of_a_child_run_stand_as_the_workflow_nodes_own() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-acquire-findings").with_workflow(
         "reviewer",
         r#"
 name: reviewer
@@ -1402,7 +1126,7 @@ nodes:
     prompt: "Review it."
     artifacts: { produces: [findings] }
 "#,
-    )]);
+    );
     let parent = r#"
 name: parent
 nodes:
@@ -1412,7 +1136,7 @@ nodes:
     artifacts: { produces: [findings] }
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -1425,29 +1149,18 @@ sessions:
           detail: "Resizing before the first paint reaches a null surface."
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let run_id = RunId::from("run-acquire-findings");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            fixture,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert!(matches!(
-        state.nodes.get("feat"),
+        state.nodes.state("feat"),
         Some(NodeState::Finished { .. })
     ));
 
     // The child states the finding twice — once as the posting its
     // session made, once inside the findings document the engine derived
     // from it — and the parent learns it from the document alone.
-    let child_id = bench
-        .children_by_node(&run_id)
+    let child_id = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "feat")
         .map(|(_, id)| id)
@@ -1456,22 +1169,25 @@ sessions:
     assert_eq!(
         child_events
             .iter()
-            .filter(|e| matches!(e.payload(), Some(EventPayload::FindingPosted(_))))
+            .filter(|e| matches!(
+                e.payload(),
+                Some(EventPayload::Findings(FindingEvent::Posted(_)))
+            ))
             .count(),
         1
     );
 
     // The child's findings are on the PARENT's log, as that node's own.
-    let parent_events = bench.storage.events_for_run(&run_id).unwrap();
+    let parent_events = bench.events();
     assert_eq!(
-        yunta_testkit::accepted(&parent_events).len(),
+        bench.accepted().len(),
         1,
         "one acquisition, whatever the child said about it"
     );
     let posted: Vec<(Option<String>, String)> = parent_events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::FindingPosted(p)) => Some((
+            Some(EventPayload::Findings(FindingEvent::Posted(p))) => Some((
                 e.node_id.as_ref().map(ToString::to_string),
                 p.finding.id.to_string(),
             )),
@@ -1513,6 +1229,7 @@ const WRITES_ONE_TASK: &str = r#"
 /// The one executor session the loop dispatches for `T001`: it writes
 /// what the task's criterion checks for.
 const DOES_ONE_TASK: &str = r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "T001"
     effects:
@@ -1521,28 +1238,24 @@ sessions:
 "#;
 
 /// Every `(task_id, status)` a run's log records, in order.
-fn task_statuses(bench: &Bench, run_id: &RunId) -> Vec<(String, yunta_core::events::TaskStatus)> {
-    bench
-        .storage
-        .events_for_run(run_id)
-        .unwrap()
-        .into_iter()
+fn task_statuses(events: &[StoredEvent]) -> Vec<(String, yunta_core::events::TaskStatus)> {
+    events
+        .iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::TaskStatusChanged(p)) => Some((p.task_id.to_string(), p.new_status)),
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) => {
+                Some((p.task_id.to_string(), p.new_status))
+            }
             _ => None,
         })
         .collect()
 }
 
 /// Every `(node_id, task_id)` a run's log registers, in order.
-fn task_registrations(bench: &Bench, run_id: &RunId) -> Vec<(Option<String>, String)> {
-    bench
-        .storage
-        .events_for_run(run_id)
-        .unwrap()
-        .into_iter()
+fn task_registrations(events: &[StoredEvent]) -> Vec<(Option<String>, String)> {
+    events
+        .iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::TaskRegistered(p)) => Some((
+            Some(EventPayload::Tasks(TaskEvent::Registered(p))) => Some((
                 e.node_id.as_ref().map(ToString::to_string),
                 p.task_id.to_string(),
             )),
@@ -1553,7 +1266,7 @@ fn task_registrations(bench: &Bench, run_id: &RunId) -> Vec<(Option<String>, Str
 
 #[tokio::test]
 async fn a_child_born_with_a_mounted_tasks_document_registers_its_tasks_at_birth() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-mounted-tasks").with_workflow(
         "implement-them",
         r#"
 name: implement-them
@@ -1564,7 +1277,7 @@ nodes:
     until: all_tasks_complete
     prompt: "Read your task from the tasks document and implement it."
 "#,
-    )]);
+    );
     let parent = format!(
         r#"
 name: parent
@@ -1578,44 +1291,33 @@ nodes:
 "#
     );
 
-    let run_id = RunId::from("run-mounted-tasks");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            &parent,
-            CONFIG,
-            &HashMap::new(),
-            DOES_ONE_TASK,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(&parent, DOES_ONE_TASK).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("do"),
+        state.nodes.state("do"),
         Some(NodeState::Finished { .. })
     ));
 
-    let child = bench
-        .children_by_node(&run_id)
+    let child = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "do")
         .map(|(_, id)| id)
         .expect("the child is linked on the parent's log");
     assert_eq!(
-        task_registrations(&bench, &child),
+        task_registrations(&bench.storage.events_for_run(&child).unwrap()),
         vec![(None, "T001".to_string())],
         "a mounted document's tasks are the child's from birth, with no node behind them"
     );
     let child_state = yunta_engine::derive(&bench.storage.events_for_run(&child).unwrap());
     assert_eq!(
-        child_state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        child_state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 }
 
 #[tokio::test]
 async fn a_parent_does_not_hold_done_what_its_child_did_in_a_tree_of_its_own() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-acquires-tasks").with_workflow(
         "plan-and-do",
         &format!(
             r#"
@@ -1630,7 +1332,7 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
 "#
         ),
-    )]);
+    );
     // The default isolation gives the child a tree of its own, and
     // nothing merges it back: the child's commits live on the child's
     // branch, so the parent's tree does not have the work `done` names.
@@ -1643,39 +1345,29 @@ nodes:
     artifacts: { produces: [tasks] }
 "#;
 
-    let run_id = RunId::from("run-acquires-tasks");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            DOES_ONE_TASK,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, DOES_ONE_TASK).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
-        task_registrations(&bench, &run_id),
+        task_registrations(&bench.events()),
         vec![(Some("feat".to_string()), "T001".to_string())],
         "the parent registers them under the node that acquired the document"
     );
     assert_eq!(
-        task_statuses(&bench, &run_id),
+        task_statuses(&bench.events()),
         vec![],
         "a done whose commit the parent's tree does not have follows no registration"
     );
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Pending),
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Pending),
         "the parent holds the task open: the work is in a tree it never took"
     );
 }
 
 #[tokio::test]
 async fn a_parent_sharing_its_tree_with_its_child_holds_its_child_s_work_done() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-shares-its-tree").with_workflow(
         "plan-and-do",
         &format!(
             r#"
@@ -1690,7 +1382,7 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
 "#
         ),
-    )]);
+    );
     // `inherit` puts the child's integration commits in the parent's own
     // tree, which is what makes the child's `done` answerable here.
     let parent = r#"
@@ -1699,38 +1391,28 @@ nodes:
   - id: feat
     kind: workflow
     use: plan-and-do
-    isolation: inherit
+    isolation: none
     artifacts: { produces: [tasks] }
 "#;
 
-    let run_id = RunId::from("run-shares-its-tree");
-    let (terminal, state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            DOES_ONE_TASK,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, state } = bench.run(parent, DOES_ONE_TASK).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done),
         "what the child finished in this very tree is finished here"
     );
     assert_eq!(
-        task_statuses(&bench, &run_id),
+        task_statuses(&bench.events()),
         vec![("T001".to_string(), yunta_core::events::TaskStatus::Done)],
     );
 }
 
 #[tokio::test]
 async fn a_sibling_mounting_a_finished_child_s_tasks_starts_them_over() {
-    let bench = Bench::new(&[
-        (
+    let bench = Bench::with_run_id("run-fan-out-tasks")
+        .with_workflow(
             "plan-and-do",
             &format!(
                 r#"
@@ -1745,8 +1427,8 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
 "#
             ),
-        ),
-        (
+        )
+        .with_workflow(
             "hold-them",
             r#"
 name: hold-them
@@ -1755,8 +1437,7 @@ nodes:
     kind: bash
     run: "true"
 "#,
-        ),
-    ]);
+        );
     // A fan-out: one child plans and implements in its own tree, a
     // sibling mounts the document it left. The sibling's tree branches
     // from the parent's, which never took the first child's branch, so
@@ -1777,52 +1458,42 @@ nodes:
       - artifact: { node: feat, kind: tasks }
 "#;
 
-    let run_id = RunId::from("run-fan-out-tasks");
-    let (terminal, _state) = bench
-        .run(
-            &run_id,
-            parent,
-            CONFIG,
-            &HashMap::new(),
-            DOES_ONE_TASK,
-            &NoInteraction,
-        )
-        .await;
+    let RunReport { terminal, .. } = bench.run(parent, DOES_ONE_TASK).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let sibling = bench
-        .children_by_node(&run_id)
+    let sibling = children_by_node(&bench.events())
         .into_iter()
         .find(|(node, _)| node == "audit")
         .map(|(_, id)| id)
         .expect("the sibling is linked on the parent's log");
+    let sibling_events = bench.storage.events_for_run(&sibling).unwrap();
     assert_eq!(
-        task_registrations(&bench, &sibling),
+        task_registrations(&sibling_events),
         vec![(None, "T001".to_string())],
         "the mounted document's tasks are the sibling's from birth"
     );
     assert_eq!(
-        task_statuses(&bench, &sibling),
+        task_statuses(&sibling_events),
         vec![],
         "and none of them crosses: the sibling's tree has no commit the document's done names"
     );
-    let state = yunta_engine::derive(&bench.storage.events_for_run(&sibling).unwrap());
+    let state = yunta_engine::derive(&sibling_events);
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Pending),
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Pending),
         "the sibling has the task to do, not behind it"
     );
 }
 
 #[tokio::test]
 async fn a_promoted_child_s_successor_does_not_redo_what_its_predecessor_finished() {
-    let bench = Bench::new(&[(
+    let bench = Bench::with_run_id("run-promoted-tasks").with_workflow(
         "promotable-tasks",
         r#"
 name: promotable-tasks
 modes:
-  quick: { include: [implement, lint, fix-lint] }
-  full:  { include: [implement, ship] }
+  alpha: { include: [implement, lint, fix-lint] }
+  beta:  { include: [implement, ship] }
 nodes:
   - id: implement
     kind: loop
@@ -1842,7 +1513,7 @@ nodes:
     depends_on: [implement]
     run: "echo shipped > shipped.txt"
 "#,
-    )]);
+    );
     let parent = format!(
         r#"
 name: parent
@@ -1856,27 +1527,22 @@ nodes:
 "#
     );
 
-    let run_id = RunId::from("run-promoted-tasks");
-    let (terminal, _state) = bench
-        .run(
-            &run_id,
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(
             &parent,
-            CONFIG,
-            &HashMap::new(),
             DOES_ONE_TASK,
-            &AlwaysPromote,
+            &ScriptedInteraction::choose("promote"),
         )
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let ids: Vec<RunId> = bench
-        .children_created(&run_id)
+    let ids: Vec<RunId> = children_created(&bench.events())
         .into_iter()
         .map(|(id, _)| id)
         .collect();
     assert_eq!(ids.len(), 2, "the promotion chains into a second child");
     assert_eq!(
-        bench.children_finished(&run_id),
+        children_finished(&bench.events()),
         vec![
             (ids[0].clone(), TerminalState::Promoted),
             (ids[1].clone(), TerminalState::Done),
@@ -1885,18 +1551,377 @@ nodes:
 
     let successor = &ids[1];
     assert_eq!(
-        task_statuses(&bench, successor),
+        task_statuses(&bench.storage.events_for_run(successor).unwrap()),
         vec![("T001".to_string(), yunta_core::events::TaskStatus::Done)],
         "the successor is born with the work done, and never dispatches it again"
     );
     assert!(
-        bench
-            ._root
-            .path()
-            .join("worktrees")
-            .join(successor.as_str())
-            .join("shipped.txt")
-            .exists(),
+        on_its_branch(&bench, successor, "shipped.txt")
+            .await
+            .is_some(),
         "the successor's own mode ran past the loop it had nothing left to do"
     );
+}
+
+/// A lineage measures once. What a child compares against is what worked
+/// before the invocation started — including, therefore, whatever its
+/// parent has already done to the tree.
+#[tokio::test]
+async fn a_child_is_born_holding_the_roots_measurement() {
+    let bench = Bench::with_run_id("run-parent-baseline").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let parent_events = bench.events();
+    let parent_measured = baselines(&parent_events);
+    assert_eq!(parent_measured.len(), 1, "the root measures once");
+    assert_eq!(parent_measured[0].origin, BaselineOrigin::Measured);
+
+    let (child_id, _) = children_created(&parent_events)[0].clone();
+    let child_held = baselines(&bench.storage.events_for_run(&child_id).unwrap());
+    assert_eq!(
+        child_held.len(),
+        1,
+        "the child holds the measurement and takes none of its own"
+    );
+    assert_eq!(
+        child_held[0].origin,
+        BaselineOrigin::Inherited {
+            run: "run-parent-baseline".into()
+        },
+        "the origin names the run that measured"
+    );
+    assert_eq!(child_held[0].hash, parent_measured[0].hash);
+    assert_eq!(child_held[0].command, parent_measured[0].command);
+}
+
+/// What the root measured of a command `baseline.held` names is the
+/// child's too: it measures nothing of its own, and holds its tasks to
+/// what the root found green.
+#[tokio::test]
+async fn a_child_is_born_holding_what_the_root_measured_of_each_held_command() {
+    let bench = Bench::with_run_id("run-parent-held").with_workflow(
+        "child-wf",
+        "name: child-wf\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n",
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let parent = "name: parent\nnodes:\n  - { id: feat, kind: workflow, use: child-wf }\n";
+    let config = format!(
+        "{CONFIG_WITH_BASELINE}  held: [lint]\ncommands:\n  lint: \"test -f marker.txt\"\n"
+    );
+
+    let RunReport { terminal, .. } = bench.run_with_config(parent, EMPTY_FIXTURE, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let held = |events: &[yunta_core::events::StoredEvent]| {
+        events
+            .iter()
+            .filter_map(|event| match event.payload() {
+                Some(yunta_core::events::EventPayload::Run(
+                    yunta_core::events::RunEvent::BaselineHeld(held),
+                )) => Some((held.name.to_string(), held.origin.clone(), held.passed())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        held(&bench.events()),
+        vec![("lint".to_string(), BaselineOrigin::Measured, true)]
+    );
+    let (child_id, _) = children_created(&bench.events())[0].clone();
+    assert_eq!(
+        held(&bench.storage.events_for_run(&child_id).unwrap()),
+        vec![(
+            "lint".to_string(),
+            BaselineOrigin::Inherited {
+                run: "run-parent-held".into()
+            },
+            true
+        )]
+    );
+}
+
+/// A run born holding a measurement has not been woken: its first wake
+/// is a first wake, not a resume of a history it does not have.
+#[tokio::test]
+async fn a_child_born_holding_a_baseline_is_not_resumed_on_its_first_wake() {
+    let bench = Bench::with_run_id("run-parent-notresumed").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+    bench
+        .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+        .await;
+
+    let (child_id, _) = children_created(&bench.events())[0].clone();
+    let child_events = bench.storage.events_for_run(&child_id).unwrap();
+    assert!(
+        child_events.iter().all(|event| !matches!(
+            event.payload(),
+            Some(EventPayload::Run(RunEvent::Resumed(_)))
+        )),
+        "a birth writes what the run was born holding, and none of it is a wake: {child_events:#?}"
+    );
+}
+
+/// The root is the root, however deep the lineage goes: a grandchild
+/// names the run that measured, never the parent it was handed down
+/// through.
+#[test]
+fn a_grandchild_names_the_root_and_not_its_parent() {
+    on_a_deep_stack(|| async {
+        let bench = Bench::with_run_id("run-root-baseline")
+            .with_workflow(
+                "middle-wf",
+                r#"
+name: middle-wf
+nodes:
+  - id: inner
+    kind: workflow
+    use: leaf-wf
+"#,
+            )
+            .with_workflow(
+                "leaf-wf",
+                r#"
+name: leaf-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+            );
+        tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+            .await
+            .unwrap();
+        let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: middle-wf
+"#;
+
+        bench
+            .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+            .await;
+
+        let (middle_id, _) = children_created(&bench.events())[0].clone();
+        let middle_events = bench.storage.events_for_run(&middle_id).unwrap();
+        let (leaf_id, _) = children_created(&middle_events)[0].clone();
+        let leaf_held = baselines(&bench.storage.events_for_run(&leaf_id).unwrap());
+
+        assert_eq!(
+            leaf_held[0].origin,
+            BaselineOrigin::Inherited {
+                run: "run-root-baseline".into()
+            },
+            "the root measured; the middle run only handed it down"
+        );
+    });
+}
+
+/// The point of a lineage-wide measurement: a child's comparison sees
+/// what its parent broke, because both ask the same question.
+#[tokio::test]
+async fn a_childs_baseline_compare_sees_a_regression_its_parent_made() {
+    let bench = Bench::with_run_id("run-parent-regression").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+"#,
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    // The parent breaks what the suite reads, in the tree its child
+    // shares, before the child is born.
+    let parent = r#"
+name: parent
+nodes:
+  - id: break
+    kind: bash
+    run: "rm marker.txt"
+  - id: feat
+    kind: workflow
+    use: child-wf
+    isolation: none
+    depends_on: [break]
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+        .await;
+
+    let (child_id, _) = children_created(&bench.events())[0].clone();
+    let child_events = bench.storage.events_for_run(&child_id).unwrap();
+    let failed = child_events.iter().any(|event| {
+        matches!(
+            event.payload(),
+            Some(EventPayload::Node(NodeEvent::Failed(_)))
+        )
+    });
+    assert!(
+        failed,
+        "the child compares against what worked before the invocation, so its parent's \
+         breakage is a regression it sees: {child_events:#?}"
+    );
+    assert_ne!(terminal, RunTerminal::Finished);
+}
+
+/// The suite is the root's to run: a lineage pays for it once, however
+/// many runs it is made of.
+#[tokio::test]
+async fn a_lineage_measures_once() {
+    let bench = Bench::with_run_id("run-lineage-once").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    );
+    let suite_runs = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("suite-runs");
+    let config = format!(
+        "{}baseline:\n  suite: \"echo . >> {}\"\n",
+        yunta_testkit::MOCK_CONFIG,
+        suite_runs.display()
+    );
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+
+    let RunReport { terminal, .. } = bench.run_with_config(parent, EMPTY_FIXTURE, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the root ran the suite");
+    assert_eq!(
+        ran.lines().count(),
+        1,
+        "the root measured; the child was born holding what it measured"
+    );
+}
+
+/// A child's birth prepares a tree, and preparing a tree is git. When
+/// the invocation is stopped while that git runs, the node is cut rather
+/// than failed: the parent pauses as cancelled, and the child never
+/// reaches `run_created`.
+#[tokio::test]
+async fn a_parent_whose_child_birth_is_interrupted_pauses_as_cancelled_by_user() {
+    let token = CancellationToken::new();
+    let stubs = tempfile::tempdir().expect("a directory for the stub");
+    let held = stubs.path().join("worktree-add.pid");
+    let vars = yunta_testkit::stubs::git_holding(stubs.path(), "worktree add", &held, None);
+
+    let bench = Bench::with_run_id("run-birth-interrupted")
+        .with_cancel(token.clone())
+        .with_subprocess_vars(vars)
+        .with_workflow(
+            "child-wf",
+            r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+        );
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+
+    let interrupt = tokio::spawn(cancel_once_held(held, token));
+    let RunReport { terminal, .. } = bench.run(parent, EMPTY_FIXTURE).await;
+    interrupt.await.expect("the waiter finishes with the run");
+
+    let RunTerminal::Paused { reason } = terminal else {
+        panic!("an interrupted birth pauses the parent, got {terminal:?}");
+    };
+    assert_eq!(reason, PauseReason::Cancelled);
+    let linked = children_created(&bench.events());
+    assert!(
+        linked.is_empty()
+            || bench
+                .storage
+                .events_for_run(&linked[0].0)
+                .unwrap()
+                .is_empty(),
+        "the child the parent linked never reached `run_created`: {:#?}",
+        bench.events()
+    );
+}
+
+/// Fires `token` once the stub git has published its pid at `held`: the
+/// synchronization is the stub's own record, so the cancellation lands
+/// on a git that is provably running.
+async fn cancel_once_held(held: std::path::PathBuf, token: CancellationToken) {
+    yunta_testkit::wait_until_async(
+        || {
+            let held = held.clone();
+            async move { held.exists() }
+        },
+        || "the child's birth never reached `git worktree add`".to_string(),
+    )
+    .await;
+    token.cancel();
 }

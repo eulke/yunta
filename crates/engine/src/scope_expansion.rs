@@ -1,50 +1,41 @@
-//! Scope expansion: the agent proposes, the engine disposes. Between
-//! "esto no me corresponde" (a finding) and "esto excede el modo" (a
-//! promotion), a task may need a small, adjacent fix outside its own
-//! declared scope — it never widens its own scope by itself; it
-//! requests, and this module decides.
+//! Scope expansion: the agent proposes, the engine disposes. A task may
+//! need a small, adjacent change outside its declared scope. It never
+//! widens its own scope: it requests, and the engine decides.
 //!
-//! The model is fixed (three modes, a single request object, the
-//! engine's own pre-check of the proposed criterion, a per-run cap
-//! whose exhaustion escalates), and rests on two mechanics:
-//!
-//! - **Transport**: how the agent's request reaches the engine at all.
-//!   No MCP tool surface exists anywhere in this codebase yet (`skills`/
-//!   `mcp_servers` config is out of scope). This module reuses the exact
-//!   pattern already established for `kind: findings`: a
-//!   structured file the agent writes, the engine reads once the session
-//!   ends — here, a single well-known path inside the task's own
-//!   isolated worktree (`SCOPE_EXPANSION_REQUEST_FILE`), since a request
-//!   is one object per task attempt, not a list.
-//! - **"Bounded size"** (no number given in the wording it comes from):
-//!   bounded by file count rather than changed lines — simpler and
-//!   robust across a mix of tracked and untracked files, still faithful
-//!   to "a small, adjacent fix". The ceiling is
+//! - **Transport**: the session calls `yunta_request_scope_expansion`,
+//!   which writes the request to [`SCOPE_EXPANSION_REQUEST_FILE`] in the
+//!   task's own worktree (`write_request`). The engine reads it when a
+//!   decision needs it ([`read_request`]) and removes it once decided
+//!   ([`consume_request`]). One file per attempt holds one criterion's requests.
+//! - **Decision**: `yunta_core::expansion` decides every request, and
+//!   every refused write that a red criterion locates. This module
+//!   gathers the facts that decision reads and applies it through
+//!   `expand`, counting the engine's grants in a [`GrantWindow`].
+//! - **Bounded size**: a `rules` grant is bounded by file count rather
+//!   than changed lines, so it stays a small, adjacent fix. The bound is
 //!   `limits.max_expansion_files`.
 //!
-//! A third boundary, a consequence of how pausing is wired
-//! (`loop_exec.rs`): a task whose own criteria succeed on its *declared*
-//! scope alone, despite leaving an `Escalate`d request behind (`ask`
-//! mode, or an exhausted `max_per_run`), still pauses the run once — but
-//! that pause is a one-time notification, not durable state. Nothing
-//! blocks the task itself (it really did finish, on its own scope, and
-//! integrates normally), so a resume after that pause does not re-pause
-//! on the same unresolved request. The request stays visible forever in
-//! the event log as its own audit trail regardless — a
-//! `ScopeExpansionRequested` with no matching `Granted`/`Denied`
-//! (Escalate has no event kind of its own) is exactly what "still owed a
-//! decision" looks like on replay — but nothing here re-surfaces it
-//! automatically past that first pause. Explicit, not silent: documented
-//! here rather than hidden behind an unexamined resume path.
+//! An escalated request waits for a person's answer, and the task blocks
+//! until then.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
+use yunta_core::events::STOPPED_EXIT_CODE;
+use yunta_core::expansion::{
+    touched_under, Ask, Bounds, Candidate, Decision, Denial, Precheck, Proposal, Screen,
+};
 use yunta_core::ProposedCriterionEntry;
-use yunta_core::ScopeExpansionMode;
+use yunta_core::ScopeGlob;
 
-use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
+use crate::git::GitError;
+use crate::process::{spawn_governed, Capture, GovernedCommand, Supervision};
+
+mod request;
+
+pub use request::{consume_request, read_request};
+pub(crate) use request::{write_request, Recorded, RequestError};
 
 /// The well-known path, relative to a task's own isolated worktree, an
 /// agent writes to request an expansion — mirrors `findings.yaml`'s role
@@ -59,12 +50,6 @@ pub enum ScopeExpansionError {
     Read { path: String, detail: String },
     #[error("`{path}` does not parse as a scope expansion request: {detail}")]
     Malformed { path: String, detail: String },
-    #[error("invalid glob `{glob}` in scope expansion request or `within`")]
-    InvalidGlob {
-        glob: String,
-        #[source]
-        source: globset::Error,
-    },
     #[error("failed to run proposed criterion `{cmd}`")]
     Process {
         cmd: String,
@@ -77,266 +62,372 @@ pub enum ScopeExpansionError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`git {command}` exited with status {status}: {stderr}")]
-    GitFailed {
-        command: String,
-        status: i32,
-        stderr: String,
-    },
+    /// git could not say what the task's tree holds: it failed, or the
+    /// token stopped it.
+    #[error(transparent)]
+    Git(#[from] GitError),
 }
 
-/// The request object required to be identical across all three
-/// modes: paths, reason, and a verifiable criterion the agent proposes.
+impl ScopeExpansionError {
+    /// Whether the token stopped the git this evaluation asked.
+    pub fn cancelled(&self) -> bool {
+        matches!(self, ScopeExpansionError::Git(git) if git.cancelled())
+    }
+}
+
+/// The request object: paths, reason, and a verifiable criterion the agent
+/// proposes or cites as its evidence.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionRequest {
-    pub paths: Vec<String>,
+    pub paths: Vec<ScopeGlob>,
     pub reason: String,
     #[serde(default)]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
+    /// One of the task's own criteria, red on the session's work, whose
+    /// output locates every path asked for — `path:line` — in place of a
+    /// proposed criterion: what lets the engine grant the request itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
 }
 
-/// Reads and parses the task's own request file, if the agent wrote one
-/// this attempt. `None` — no file — is the ordinary case, not an error.
-///
-/// Deletes the file once read: it is a signal to the engine, not part of
-/// the task's own deliverable diff, and the same worktree it lives in is
-/// exactly what `scope_check` diffs against declared scope right
-/// after this runs — left in place, an untracked control file would be
-/// flagged a scope violation on every single request, expansion mechanics
-/// aside. Consumption also gives "one request per attempt" its only real
-/// enforcement: a second `load_request` against the same worktree sees
-/// nothing left to read.
-pub fn load_request(
-    task_worktree: &Path,
-) -> Result<Option<ScopeExpansionRequest>, ScopeExpansionError> {
-    let path = task_worktree.join(SCOPE_EXPANSION_REQUEST_FILE);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = std::fs::read(&path).map_err(|source| ScopeExpansionError::Read {
-        path: path.display().to_string(),
-        detail: source.to_string(),
-    })?;
-    let request =
-        yunta_core::yaml::parse_bytes(&bytes).map_err(|e| ScopeExpansionError::Malformed {
-            path: path.display().to_string(),
-            detail: e.to_string(),
-        })?;
-    std::fs::remove_file(&path).map_err(|source| ScopeExpansionError::Io {
-        action: format!(
-            "remove consumed scope expansion request `{}`",
-            path.display()
-        ),
-        source,
-    })?;
-    Ok(Some(request))
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Decision {
-    Granted,
-    Denied(String),
-    /// `ask` mode, or the run's `max_per_run` cap already exhausted —
-    /// neither is a verdict this pure evaluation renders on its own: the
-    /// caller (`loop_exec`) builds the escalation object and
-    /// puts it to `HumanInteraction`; only when no live surface answers
-    /// does the run pause instead of guessing — degradation is always
-    /// explicit, never silent.
-    Escalate,
-}
-
-/// One attempt's whole expansion story — the request it found, the
-/// proposed criterion's own pre-check result, and what got decided.
-/// Carried on `AttemptRecord` so the caller can emit every event this
-/// requires and convert a denial into a finding without re-deriving
-/// any of it.
+/// One attempt's expansion story: what the session asked, the pre-check of
+/// its criterion, and what was decided. A located refusal has no request,
+/// so `asked` is `None`. The caller turns the outcome into events and a
+/// finding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeExpansionOutcome {
-    pub request: ScopeExpansionRequest,
-    pub precheck_exit: Option<i32>,
+    /// The request the session made, as it made it. `None` when a red
+    /// output located a refused write, which the session did not ask for.
+    pub asked: Option<ScopeExpansionRequest>,
+    /// The pre-check of the request's own criterion, run by the caller.
+    pub precheck: Option<Precheck>,
     pub decision: Decision,
+    /// The engine's grants in this run once this decision is made: the
+    /// count `max_per_run` holds, which a grant raises.
+    pub count: u32,
 }
 
-/// The run's expansion-grant accounting under concurrency: the
-/// expensive evaluation (proposed-criterion pre-check, rule matching,
-/// diffs) runs fully concurrent outside any lock; only the cap window —
-/// read the count, decide against `max_per_run`, commit the grant — is
-/// atomic, so `max_per_run` holds *exactly* even when a whole batch
-/// requests at once. One ledger per batch, seeded from the log (grants
-/// from prior batches are already events by the time a batch starts —
-/// integration is serial and completes first).
-pub struct GrantLedger {
-    granted: tokio::sync::Mutex<u32>,
+/// The engine's grants in one run, counted by one window per batch. Each
+/// request of a batch decides against the count one at a time, so
+/// `max_per_run` holds exactly when several members ask at once.
+pub struct GrantWindow {
+    engine_grants: tokio::sync::Mutex<u32>,
 }
 
-impl GrantLedger {
-    pub fn new(granted_so_far: u32) -> Self {
+impl GrantWindow {
+    /// A window that starts from the grants the log already holds for the
+    /// run, which earlier batches made.
+    pub fn seeded(engine_grants: u32) -> Self {
         Self {
-            granted: tokio::sync::Mutex::new(granted_so_far),
+            engine_grants: tokio::sync::Mutex::new(engine_grants),
         }
     }
 
-    /// The atomic window: a provisional `Granted` commits (or turns
-    /// into `Escalate` if the cap is already spent); any other decision
-    /// passes through untouched — but an exhausted cap escalates
-    /// regardless of what the mode would have said, same precedence a
-    /// simple sequential check would apply.
-    async fn commit(&self, cap: Option<u32>, provisional: Decision) -> Decision {
-        let mut granted = self.granted.lock().await;
-        if let Some(cap) = cap {
-            if *granted >= cap {
-                return Decision::Escalate;
-            }
-        }
-        if provisional == Decision::Granted {
+    /// The engine's grants this window counts so far.
+    pub async fn granted(&self) -> u32 {
+        *self.engine_grants.lock().await
+    }
+
+    /// Decides `candidate` against the count, which a grant raises. The
+    /// decision comes with the count it leaves, so events number decisions
+    /// in the order they were made.
+    pub(crate) async fn settle(
+        &self,
+        candidate: Candidate,
+        touched: usize,
+        bounds: &Bounds<'_>,
+    ) -> (Decision, u32) {
+        let mut granted = self.engine_grants.lock().await;
+        let decision = yunta_core::expansion::settle(candidate, touched, *granted, bounds);
+        if matches!(decision, Decision::Grant { .. }) {
             *granted += 1;
         }
-        provisional
+        (decision, *granted)
     }
 }
 
-/// Decides one request: the proposed criterion's own pre-check
-/// runs first, in every mode — a criterion that already passes is
-/// trivial and rejected without consulting anyone, the same "pre-check
-/// en rojo" logic already applies to task criteria. Then the mode
-/// evaluates (still outside any lock), and the cap's atomic window
-/// (`GrantLedger::commit`) has the last word.
-// The mode, the `within` ceiling, the per-run cap and the file bound are
-// one scope-expansion policy, passed positionally here until the shared
-// escalation surface bundles them.
-#[allow(clippy::too_many_arguments)]
-pub async fn evaluate(
-    mode: ScopeExpansionMode,
-    within: &[String],
-    max_per_run: Option<u32>,
-    max_expansion_files: usize,
-    grants: &GrantLedger,
-    request: &ScopeExpansionRequest,
-    task_worktree: &Path,
+/// Decides one request, or one located refusal. Core's `screen` settles
+/// what needs no diff: protection, the pre-check, the mode and the batch.
+/// A candidate it leaves open is bounded by the files this attempt touched
+/// when its mode bounds it, and then settled against `window`. The caller
+/// has already run any proposed criterion, which `ask` carries.
+pub(crate) async fn expand(
+    ask: Ask<'_>,
+    bounds: &Bounds<'_>,
+    window: &GrantWindow,
+    worktree: &Path,
     supervision: Supervision<'_>,
-) -> Result<(Option<i32>, Decision), ScopeExpansionError> {
-    let precheck_exit = match &request.proposed_criterion {
-        Some(criterion) => Some(run_criterion(task_worktree, &criterion.cmd, supervision).await?),
-        None => None,
-    };
-    if precheck_exit == Some(0) {
-        return Ok((
-            precheck_exit,
-            Decision::Denied(
-                "proposed criterion already passes — nothing to expand for".to_string(),
-            ),
-        ));
+) -> Result<(Decision, u32), ScopeExpansionError> {
+    match yunta_core::expansion::screen(&ask, bounds) {
+        Screen::Settled(decision) => Ok((decision, window.granted().await)),
+        Screen::Candidate(candidate) => {
+            let touched = match candidate.bounded {
+                true => touched_under(&candidate, &diff_paths(worktree, supervision).await?),
+                false => 0,
+            };
+            Ok(window.settle(candidate, touched, bounds).await)
+        }
     }
-
-    let provisional = match mode {
-        ScopeExpansionMode::Deny => {
-            Decision::Denied("scope_expansion mode is deny (the default)".to_string())
-        }
-        ScopeExpansionMode::Ask => Decision::Escalate,
-        ScopeExpansionMode::Rules => {
-            evaluate_rules(within, request, task_worktree, max_expansion_files).await?
-        }
-    };
-    Ok((precheck_exit, grants.commit(max_per_run, provisional).await))
 }
 
-async fn evaluate_rules(
-    within: &[String],
+/// The refusal `request` meets before its criterion runs and before any work
+/// is read: one no work changes, which the protection or the mode settles.
+/// The call that asks answers it, and the judgement gives the same, so a
+/// request meets one answer however it reached the engine. `None` leaves the
+/// request to the judgement of the work.
+pub(crate) fn standing_refusal(
     request: &ScopeExpansionRequest,
-    task_worktree: &Path,
-    max_expansion_files: usize,
-) -> Result<Decision, ScopeExpansionError> {
-    let ceiling = build_globset(within)?;
-    let requested = build_globset(&request.paths)?;
-
-    if !request
-        .paths
-        .iter()
-        .all(|path| ceiling.is_match(Path::new(path)))
-    {
-        return Ok(Decision::Denied(format!(
-            "requested path(s) fall outside the declared `within` ceiling: {:?}",
-            request.paths
-        )));
+    bounds: &Bounds<'_>,
+) -> Option<Denial> {
+    let proposal = request
+        .proposed_criterion
+        .as_ref()
+        .map(|criterion| Proposal {
+            cmd: &criterion.cmd,
+            precheck: Precheck::NotRun,
+        });
+    let ask = Ask::Requested {
+        paths: &request.paths,
+        reason: &request.reason,
+        proposal,
+    };
+    match yunta_core::expansion::screen(&ask, bounds) {
+        Screen::Settled(Decision::Deny(denial)) if denial.stands() => Some(denial),
+        _ => None,
     }
-
-    if request.proposed_criterion.is_none() {
-        return Ok(Decision::Denied(
-            "rules mode requires a proposed_criterion".to_string(),
-        ));
-    }
-
-    let touched = diff_paths(task_worktree).await?;
-    let matched: Vec<_> = touched
-        .iter()
-        .filter(|path| requested.is_match(path))
-        .collect();
-    if matched.len() > max_expansion_files {
-        return Ok(Decision::Denied(format!(
-            "diff at the requested paths touches {} file(s), over the {max_expansion_files}-file bound",
-            matched.len()
-        )));
-    }
-
-    Ok(Decision::Granted)
 }
 
-fn build_globset(patterns: &[String]) -> Result<globset::GlobSet, ScopeExpansionError> {
-    yunta_core::scope_globset(patterns)
-        .map_err(|(glob, source)| ScopeExpansionError::InvalidGlob { glob, source })
-}
-
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionError> {
-    crate::git::output(cwd, args)
-        .await
-        .map_err(|e| match e.source {
-            Some(source) => ScopeExpansionError::Io {
-                action: format!("run `git {}`", e.args),
-                source,
-            },
-            None => ScopeExpansionError::GitFailed {
-                command: e.args,
-                status: e.code.unwrap_or(-1),
-                stderr: e.stderr,
-            },
-        })
-}
-
-async fn diff_paths(cwd: &Path) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
-    let mut paths: Vec<std::path::PathBuf> = run_git(cwd, &["diff", "--name-only", "HEAD"])
-        .await?
-        .lines()
-        .map(std::path::PathBuf::from)
-        .collect();
-    paths.extend(
-        run_git(cwd, &["ls-files", "--others", "--exclude-standard"])
+async fn diff_paths(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
+    let mut paths: Vec<std::path::PathBuf> =
+        crate::git::read(cwd, &["diff", "--name-only", "HEAD"], supervision)
             .await?
             .lines()
-            .map(std::path::PathBuf::from),
+            .map(std::path::PathBuf::from)
+            .collect();
+    paths.extend(
+        crate::git::read(
+            cwd,
+            &["ls-files", "--others", "--exclude-standard"],
+            supervision,
+        )
+        .await?
+        .lines()
+        .map(std::path::PathBuf::from),
     );
     paths.sort();
     paths.dedup();
     Ok(paths)
 }
 
-async fn run_criterion(
+/// Runs a proposed criterion on `cwd` and reads its exit as a pre-check: 0
+/// passes, a command the engine stopped before it answered could not run,
+/// and any other exit is red. Only the exit is kept, so what the command
+/// prints is dropped rather than reaching the terminal.
+pub(crate) async fn run_criterion(
     cwd: &Path,
     cmd: &str,
     supervision: Supervision<'_>,
-) -> Result<i32, ScopeExpansionError> {
+) -> Result<Precheck, ScopeExpansionError> {
     let command = GovernedCommand::shell(cwd, cmd)
-        .stdout(Capture::Inherit)
-        .stderr(Capture::Inherit);
-    Ok(
-        match spawn_governed(command, supervision)
-            .await
-            .map_err(|source| ScopeExpansionError::Process {
-                cmd: cmd.to_string(),
-                source,
-            })? {
-            Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
-        },
-    )
+        .stdout(Capture::Discard)
+        .stderr(Capture::Discard);
+    let outcome = spawn_governed(command, supervision)
+        .await
+        .map_err(|source| ScopeExpansionError::Process {
+            cmd: cmd.to_string(),
+            source,
+        })?;
+    let exit_code = outcome.exit_code();
+    Ok(match exit_code {
+        0 => Precheck::Passes,
+        // The engine stopped it before it answered, so it could not run.
+        STOPPED_EXIT_CODE => Precheck::CouldNotRun,
+        exit => Precheck::Red { exit },
+    })
+}
+
+/// `target` relative to the checkout, when it lies in it.
+pub(crate) fn relative(worktree: &Path, target: &str) -> Option<String> {
+    let path = Path::new(target);
+    if path.is_relative() {
+        return Some(target.to_string());
+    }
+    roots(worktree)
+        .iter()
+        .find_map(|root| path.strip_prefix(root).ok())
+        .map(|inside| inside.to_string_lossy().into_owned())
+}
+
+/// The checkout's path as a session or a command may spell it: as the
+/// run named it, and as the filesystem resolves it.
+fn roots(worktree: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![worktree.to_path_buf()];
+    roots.extend(worktree.canonicalize().ok().filter(|real| real != worktree));
+    roots
+}
+
+/// `text` with the checkout's own path taken out, so a location reads
+/// relative to it whichever way a command printed it.
+pub(crate) fn relative_text(text: String, worktree: &Path) -> String {
+    roots(worktree).iter().fold(text, |text, root| {
+        text.replace(&format!("{}/", root.display()), "")
+    })
+}
+
+/// Whether `text` locates `path`: names it whole — not as the tail of
+/// another path, not by its stem — with a line number right after it, as
+/// `path:12`.
+pub(crate) fn locates(text: &str, path: &str) -> bool {
+    text.match_indices(path).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = &text[at + path.len()..];
+        let whole = before.is_none_or(|c| !(c.is_alphanumeric() || "_./-".contains(c)));
+        let line = after
+            .strip_prefix(':')
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+        whole && line
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_util::sync::CancellationToken;
+    use yunta_core::events::Decider;
+    use yunta_core::expansion::{Denial, Proposal};
+    use yunta_core::protected::Protected;
+    use yunta_core::ScopeExpansionMode;
+
+    use super::*;
+
+    const CALLER: &str = "crates/testkit/src/bench/driving.rs";
+
+    /// A checkout of one commit, with `files` written untracked on top of it.
+    fn checkout(files: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(dir.path());
+        for file in files {
+            std::fs::write(dir.path().join(file), "x").unwrap();
+        }
+        dir
+    }
+
+    /// The bounds of a `rules` node with no cap and no batch beside it.
+    fn rules(protected: &Protected) -> Bounds<'_> {
+        Bounds {
+            mode: ScopeExpansionMode::Rules,
+            max_files: 5,
+            max_per_run: None,
+            protected,
+            beside: &[],
+        }
+    }
+
+    /// A request for `paths` under `rules` whose proposed criterion is red.
+    fn red_request(paths: &[ScopeGlob]) -> Ask<'_> {
+        Ask::Requested {
+            paths,
+            reason: "small adjacent fix",
+            proposal: Some(Proposal {
+                cmd: "test -f nonexistent-marker",
+                precheck: Precheck::Red { exit: 1 },
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn rules_mode_grants_a_small_in_bounds_request_with_a_red_criterion() {
+        let dir = checkout(&["src.rs"]);
+        let cancel = CancellationToken::new();
+        let supervision = Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock);
+        let protected = Protected::default();
+        let paths = [ScopeGlob::from("src.rs")];
+        let (decision, count) = expand(
+            red_request(&paths),
+            &rules(&protected),
+            &GrantWindow::seeded(0),
+            dir.path(),
+            supervision,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(
+                decision,
+                Decision::Grant {
+                    by: Decider::Rule,
+                    ..
+                }
+            ),
+            "{decision:?}"
+        );
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn rules_mode_denies_a_request_touching_too_many_files() {
+        let names: Vec<String> = (0..10).map(|n| format!("f{n}.rs")).collect();
+        let dir = checkout(&names.iter().map(String::as_str).collect::<Vec<_>>());
+        let cancel = CancellationToken::new();
+        let supervision = Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock);
+        let protected = Protected::default();
+        let paths = [ScopeGlob::from("f*.rs")];
+        let (decision, count) = expand(
+            red_request(&paths),
+            &rules(&protected),
+            &GrantWindow::seeded(0),
+            dir.path(),
+            supervision,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            decision,
+            Decision::Deny(Denial::TooManyFiles {
+                touched: 10,
+                bound: 5
+            })
+        );
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn a_criterion_reads_its_exit_as_its_precheck() {
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = CancellationToken::new();
+        let supervision = Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock);
+        let passes = run_criterion(dir.path(), "true", supervision).await;
+        assert_eq!(passes.unwrap(), Precheck::Passes);
+        let red = run_criterion(dir.path(), "exit 3", supervision).await;
+        assert_eq!(red.unwrap(), Precheck::Red { exit: 3 });
+    }
+
+    #[test]
+    fn a_location_names_the_whole_path_and_a_line() {
+        assert!(locates(
+            "error[E0061]\n  --> crates/testkit/src/bench/driving.rs:378:9",
+            CALLER
+        ));
+        assert!(locates(
+            "at (crates/testkit/src/bench/driving.rs:12)",
+            CALLER
+        ));
+    }
+
+    #[test]
+    fn stem_only_mention_is_not_evidence() {
+        assert!(!locates("driving.rs:378", CALLER));
+        assert!(!locates(
+            "see crates/testkit/src/bench/driving.rs for details",
+            CALLER
+        ));
+        assert!(!locates(
+            "other/crates/testkit/src/bench/driving.rs:3",
+            CALLER
+        ));
+        assert!(!locates("driving:3 failed", CALLER));
+    }
 }

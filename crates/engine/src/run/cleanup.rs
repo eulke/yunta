@@ -1,0 +1,169 @@
+//! What a run gives back as it ends. Every run, whatever its end, gives its
+//! checkouts back to the project's pool — its units', with the branches
+//! whose work its tree holds, and its own, unless a successor carries on
+//! in it. A run that finished asking to be cleaned up
+//! (`on_finish.cleanup: worktree`) also lets its own branch go. None of it
+//! ever un-finishes the run the log already closed. A node's checkout, given
+//! back as its attempt ends, is kept instead while a session the engine could
+//! not stop still runs in it.
+
+use yunta_core::events::{Cleaned, Failure, FindingCause, FindingSeverity};
+use yunta_core::{Location, Node, NodeKind, RelativePath};
+
+use super::node_exec::NodeEnd;
+use super::{RunCtx, RunError};
+use crate::replay::NodeState;
+
+/// Gives the checkouts the run's units hold back to the project's pool.
+/// One that cannot be given back stays its unit's until `gc` collects the
+/// run: a warning, never an un-finished run. A run whose workflow opens no
+/// unit — no loop, no audited node — has none to give back.
+pub(super) async fn units(ctx: &RunCtx<'_>) {
+    let opens_units = ctx.manifest.workflow.iter_nodes().any(|node| {
+        matches!(node.kind, yunta_core::NodeKind::Loop { .. }) || crate::scope::audits(node)
+    });
+    if !opens_units {
+        return;
+    }
+    let released = crate::worktree::release_unit_checkouts(
+        &ctx.pool,
+        ctx.worktree,
+        ctx.run_dir,
+        ctx.run_id,
+        ctx.root_supervision(),
+    );
+    if let Err(error) = released.await {
+        tracing::warn!(%error, "the checkouts the run's units held were not all given back");
+    }
+}
+
+/// Gives the checkout the run worked in back to the project's pool, when
+/// it worked in one of its own. One that cannot be given back stays the
+/// run's until `gc` collects it: a warning, never an un-finished run.
+pub(super) async fn run(ctx: &RunCtx<'_>) {
+    if ctx.manifest.isolation != yunta_core::Isolation::Worktree {
+        return;
+    }
+    let released = crate::worktree::release_run_checkout(
+        &ctx.pool,
+        ctx.worktree,
+        ctx.run_id,
+        ctx.root_supervision(),
+    );
+    if let Err(error) = released.await {
+        tracing::warn!(%error, "the checkout the run worked in was not given back");
+    }
+}
+
+/// Whether the attempt that ended with `ended` left a session the engine
+/// could not stop in the checkout `lease` holds, and a process group its run
+/// registered still runs there: then the checkout is kept, not given back.
+/// Only a prompt node's session runs in the checkout its own attempt holds;
+/// a loop's sessions run in the checkouts of its tasks, which each task's
+/// dispatch holds. An attempt that finished reads nothing; a failed one reads
+/// the registry, and the log only once a group of the run still runs.
+pub(super) async fn unstopped_session_runs(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    ended: &Result<NodeEnd, RunError>,
+    lease: &crate::worktree::Lease,
+) -> Result<bool, RunError> {
+    if !matches!(ended, Ok(NodeEnd::Failed)) || !matches!(node.kind, NodeKind::Prompt { .. }) {
+        return Ok(false);
+    }
+    if !lease.groups_running().await {
+        return Ok(false);
+    }
+    let view = ctx.run_view().await?;
+    Ok(matches!(
+        view.state.nodes.state(&node.id),
+        Some(NodeState::Failed {
+            failure: Failure::SessionNotStopped { .. },
+            ..
+        })
+    ))
+}
+
+/// Lets the run's own branch go when its workflow asks for it and the run
+/// worked in a tree of its own: a checkout of the project's pool goes back
+/// to it, and one a run made before its project kept checkouts is taken
+/// away.
+pub(super) async fn worktrees(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+    let wants_cleanup = ctx.manifest.workflow.on_finish.iter().any(|step| {
+        matches!(
+            step,
+            yunta_core::OnFinishStep::Cleanup {
+                cleanup: yunta_core::CleanupTarget::Worktree
+            }
+        )
+    });
+    if wants_cleanup && ctx.manifest.isolation == yunta_core::Isolation::Worktree {
+        if ctx.pool.keeps(ctx.worktree, ctx.root_supervision()).await {
+            return let_branch_go(ctx).await;
+        }
+        match crate::worktree::cleanup_worktree(
+            ctx.worktree,
+            &crate::worktree::run_branch(ctx.run_id),
+            ctx.root_supervision(),
+        )
+        .await
+        {
+            Ok(crate::worktree::WorktreeCleanup::Removed) => {}
+            Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {
+                ctx.engine_finding(
+                    None,
+                    "cleanup-not-a-worktree",
+                    FindingSeverity::Minor,
+                    Location::work(RelativePath::here(), None),
+                    FindingCause::CleanupSkipped,
+                )
+                .await?;
+            }
+            Err(e) => {
+                ctx.engine_finding(
+                    None,
+                    "cleanup-failed",
+                    FindingSeverity::Minor,
+                    Location::work(RelativePath::here(), None),
+                    FindingCause::CleanupFailed {
+                        what: Cleaned::Worktree,
+                        report: e.to_string(),
+                    },
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Deletes the run's branch once its checkout went back to the pool with
+/// no branch: deleted only when its work is in what that checkout holds.
+async fn let_branch_go(ctx: &RunCtx<'_>) -> Result<(), RunError> {
+    let branch = crate::worktree::run_branch(ctx.run_id);
+    let args = ["branch", "-d", branch.as_str()];
+    let deleted = crate::git::change(
+        ctx.worktree,
+        crate::git::Effect::Metadata,
+        &args,
+        ctx.root_supervision(),
+    )
+    .await;
+    if let Err(e) = deleted {
+        if e.cancelled() {
+            return Err(e.into());
+        }
+        ctx.engine_finding(
+            None,
+            "cleanup-failed",
+            FindingSeverity::Minor,
+            Location::work(RelativePath::here(), None),
+            FindingCause::CleanupFailed {
+                what: Cleaned::Branch,
+                report: e.to_string(),
+            },
+        )
+        .await?;
+    }
+    Ok(())
+}

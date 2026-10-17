@@ -1,28 +1,31 @@
 //! `kind: executor` — the extension point when neither
 //! `bash` nor `check`'s closed builtin list is enough: external code, a
-//! JSON contract over stdio. The spec fixes the high-level shape (JSON
+//! JSON contract over stdio. The high-level shape is fixed (JSON
 //! in, JSON out, exit code is the verdict); this module's own doc
 //! comments carry the concrete contract it adds on top, and naming those
-//! fields in the spec is registered debt A-12 in
-//! `docs/design/deuda-consciente.md`.
+//! fields is open work: their names are not fixed.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::TokenUsage;
-use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
+use yunta_core::events::{
+    DeniedRule, EngineError, EngineFact, EngineStep, Failure, NodeOutcome, Timed, TokenUsage,
+};
+use yunta_core::{ExecutorKind, ExecutorName, Node};
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
+use crate::frozen::read;
+use crate::frozen::Source;
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
 
 /// The stdin JSON shape (`with:`, the run's own paths, declared env).
 /// `run` mirrors the `{{run.dir}}`/`{{run.worktree}}` template variables
 /// every other node already exposes (`node_exec::template_vars`), rather
 /// than inventing different names for the same two paths. `env` is
-/// always present but empty for now — no per-node `env:`
+/// always present and empty — no per-node `env:`
 /// declaration exists on `kind: executor` yet (same "not designed yet"
 /// treatment `isolation: container` gets elsewhere), so there is nothing
 /// to declare, but the key stays so an executor never has to branch on
@@ -51,12 +54,40 @@ struct ExecutorOutput {
     summary: Option<String>,
 }
 
-fn resolve_path(worktree: &Path, registration: &ExecutorRegistration) -> std::path::PathBuf {
-    if registration.path.is_absolute() {
-        registration.path.clone()
-    } else {
-        worktree.join(&registration.path)
+/// The path `executor` runs from: the copy the run froze at birth, verified
+/// against its hash before it runs. A refusal closes the node, and so does a
+/// command the permission rules deny. The rules judge the path the config
+/// declares, which is the name the person wrote them against; the copy is
+/// what runs.
+async fn executor_path(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    executor: &ExecutorName,
+    declared: &Path,
+) -> Result<Result<PathBuf, NodeEnd>, RunError> {
+    let path = match Source::of(ctx.manifest, ctx.run_dir, ctx.worktree, ctx.ambient)
+        .executor(executor)
+        .await
+    {
+        Ok(path) => path,
+        Err(error) => {
+            return Ok(Err(
+                super::session_policy::close_frozen(ctx, node, error).await?
+            ))
+        }
+    };
+    // Executors are among the four command surfaces the permission model
+    // covers; an executor's "command" is the binary path its config declares.
+    if let Some(denied) = crate::permissions::command_violation(
+        &declared.display().to_string(),
+        ctx.manifest.config.permissions.as_ref(),
+    ) {
+        let failure = Failure::CommandDenied {
+            denied_rule: DeniedRule::Command(denied),
+        };
+        return Ok(Err(fail(ctx, node, failure).await?));
     }
+    Ok(Ok(path))
 }
 
 pub(super) async fn execute_executor(
@@ -67,47 +98,37 @@ pub(super) async fn execute_executor(
     timeout_seconds: Option<u64>,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let Some(registration) = ctx
-        .manifest
-        .config
-        .skills
-        .as_ref()
-        .and_then(|skills| skills.executors.iter().find(|e| e.name == *executor))
-    else {
-        return fail(
+    let Some(registration) = read::registration(&ctx.manifest.config, executor) else {
+        return super::check_exec::unset(
             ctx,
             node,
-            format!("executor `{executor}` needs a matching entry under `skills.executors`"),
-            false,
+            yunta_core::ConfigKey::Executor {
+                executor: executor.clone(),
+            },
         )
         .await;
     };
-    // The only variant today (`ExecutorKind::Binary`) — matched
-    // explicitly rather than ignored so a future `wasm` variant
+    // The only variant (`ExecutorKind::Binary`) — matched explicitly
+    // rather than ignored, so a second variant such as `wasm`
     // breaks this call site at compile time instead of silently running
     // it as a binary.
     let ExecutorKind::Binary = registration.kind;
-    let path = resolve_path(ctx.worktree, registration);
-
-    // Executors are among the four command surfaces the permission model
-    // covers; an executor's "command" is its resolved binary path.
-    if let Some(rule) = crate::permissions::command_violation(
-        &path.display().to_string(),
-        ctx.manifest.config.permissions.as_ref(),
-    ) {
-        return fail(ctx, node, rule, false).await;
-    }
+    let declared = read::executor_path(ctx.worktree, registration);
+    let path = match executor_path(ctx, node, executor, &declared).await? {
+        Ok(path) => path,
+        Err(end) => return Ok(end),
+    };
 
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
         Ok(bytes) => bytes,
         Err(source) => {
-            return fail(
-                ctx,
-                node,
-                format!("failed to serialize executor `{executor}`'s stdin: {source}"),
-                false,
-            )
-            .await;
+            let engine_error = EngineError::Step {
+                step: EngineStep::ExecutorStdin {
+                    executor: executor.clone(),
+                },
+                report: Some(source.to_string()),
+            };
+            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
     };
 
@@ -118,51 +139,55 @@ pub(super) async fn execute_executor(
     if let Some(seconds) = timeout_seconds {
         command = command.timeout(Duration::from_secs(seconds));
     }
-    let (status, stdout_bytes, stderr_bytes) =
-        match spawn_governed(command, ctx.supervision(cancel)).await? {
-            Outcome::Exited {
-                status,
-                stdout,
-                stderr,
-            } => (status, stdout, stderr),
-            Outcome::Cancelled { .. } => return super::node_exec::cancelled_end(ctx, node).await,
-            Outcome::TimedOut { .. } => {
-                return fail(
-                    ctx,
-                    node,
-                    format!(
-                        "executor `{executor}` exceeded its {}s timeout",
-                        timeout_seconds.unwrap_or_default()
-                    ),
-                    false,
-                )
-                .await;
-            }
-        };
+    let outcome = spawn_governed(command, ctx.supervision(cancel)).await?;
+    let (status, stdout_bytes) = match &outcome {
+        Outcome::Exited { status, stdout, .. } => (status, stdout),
+        Outcome::Cancelled { .. } => return super::node_exec::cancelled_end(ctx, node).await,
+        Outcome::TimedOut { .. } => {
+            // The command's bound, kept in milliseconds as the log holds it.
+            let timeout = Duration::from_secs(timeout_seconds.unwrap_or_default());
+            let failure = Failure::TimedOut {
+                after_ms: yunta_core::units::whole_millis(timeout),
+                timed: Timed::Executor {
+                    executor: executor.clone(),
+                },
+            };
+            return fail(ctx, node, failure).await;
+        }
+    };
 
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
-        let summary = serde_json::from_slice::<ExecutorOutput>(&stdout_bytes)
-            .ok()
-            .and_then(|output| output.summary)
-            .unwrap_or_else(|| format!("executor `{executor}` exited 0"));
-        close_node(ctx, node, Close::new(summary, TokenUsage::default())).await
+        let node_outcome = exited_ok(executor, stdout_bytes);
+        close_node(ctx, node, Close::new(node_outcome, TokenUsage::default())).await
     } else {
-        let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
-        fail(
+        // An executor that signals only through its exit code — a probe
+        // that writes nothing — is reported as that code alone.
+        let origin = yunta_core::events::CommandOrigin::Executor {
+            executor: executor.to_string(),
+        };
+        let failure = super::command_exited(
             ctx,
-            node,
-            format!("executor `{executor}` exited {exit_code}: {stderr_tail}"),
-            false,
+            &outcome,
+            exit_code,
+            Some(origin),
+            &format!("executor `{executor}`"),
         )
-        .await
+        .await?;
+        fail_with(ctx, node, failure, TokenUsage::default()).await
+    }
+}
+
+/// The outcome of an executor that exited 0: the summary its output carries,
+/// or, when it carries none, the fact that it exited.
+fn exited_ok(executor: &ExecutorName, stdout: &[u8]) -> NodeOutcome {
+    let summary = serde_json::from_slice::<ExecutorOutput>(stdout)
+        .ok()
+        .and_then(|output| output.summary);
+    match summary {
+        Some(summary) => NodeOutcome::Summary(summary),
+        None => NodeOutcome::Fact(EngineFact::ExecutorExited {
+            executor: executor.clone(),
+        }),
     }
 }

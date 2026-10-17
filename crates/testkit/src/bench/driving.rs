@@ -1,0 +1,471 @@
+//! Driving a run on a [`Bench`]: creating it, and every wake that
+//! executes it.
+//!
+//! A wake is one `execute_run` call, exactly as a separate `yunta run`
+//! or `yunta resume` process makes it: nothing carries across a wake
+//! but the log.
+
+use std::sync::Arc;
+
+use yunta_adapters::{MockAdapter, MockFixture, RunPaths};
+use yunta_core::{ConfigLayer, Workflow};
+use yunta_engine::{
+    create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction, NoInteraction,
+    RunEnv, RunReport,
+};
+
+use super::{Bench, Driven, KnownSecrets, MOCK_CONFIG};
+
+impl Bench {
+    /// Runs `(workflow, fixture)` against the default [`MOCK_CONFIG`] with
+    /// no human present (a gate degrades to pause).
+    pub async fn run(&self, workflow_yaml: &str, fixture_yaml: &str) -> RunReport {
+        self.run_full(workflow_yaml, fixture_yaml, MOCK_CONFIG, &NoInteraction)
+            .await
+    }
+
+    /// Runs with a caller-chosen config layer — for a test that needs
+    /// `baseline:`/`coverage:`/`limits:` alongside the usual `runners:`.
+    pub async fn run_with_config(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+    ) -> RunReport {
+        self.run_full(workflow_yaml, fixture_yaml, config_yaml, &NoInteraction)
+            .await
+    }
+
+    /// Runs with the secrets a test hands it, instead of reaching the
+    /// process environment: the values are the test's to choose, so what
+    /// happens to them is the test's to assert.
+    pub async fn run_with_secrets(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        secrets: &[(&str, &str)],
+    ) -> RunReport {
+        let known: std::collections::HashMap<String, String> = secrets
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        self.run_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            &NoInteraction,
+            Arc::new(KnownSecrets(known)),
+        )
+        .await
+    }
+
+    /// Runs with a caller-chosen interaction surface — for a test that
+    /// scripts a gate's resolution instead of degrading to pause.
+    pub async fn run_with_interaction(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        human_interaction: &dyn HumanInteraction,
+    ) -> RunReport {
+        self.run_full(workflow_yaml, fixture_yaml, MOCK_CONFIG, human_interaction)
+            .await
+    }
+
+    /// The fully parameterized run every other `run*` helper delegates to.
+    pub async fn run_full(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        human_interaction: &dyn HumanInteraction,
+    ) -> RunReport {
+        self.run_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            human_interaction,
+            no_secrets(),
+        )
+        .await
+    }
+
+    /// The one body every `run…` helper ends in: the run is created,
+    /// then woken once — the two steps a `yunta run` takes.
+    async fn run_with(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        human_interaction: &dyn HumanInteraction,
+        secrets: Arc<dyn yunta_core::SecretSource>,
+    ) -> RunReport {
+        self.try_create_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            || {},
+            secrets.clone(),
+        )
+        .await
+        .expect("create run");
+        self.wake_with_all(human_interaction, secrets).await
+    }
+
+    /// Runs `(workflow, fixture)` and answers with the refusal instead
+    /// of panicking on it — for a test about what a run's own creation
+    /// or execution says no to.
+    pub async fn try_run(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+    ) -> Result<RunReport, yunta_engine::RunError> {
+        self.try_create(workflow_yaml, fixture_yaml, MOCK_CONFIG)
+            .await?;
+        self.wake_through(&NoInteraction, no_secrets()).await
+    }
+
+    /// Creates the run and stops there, answering with its directory or
+    /// with the refusal its birth earned — for a test about what a run
+    /// is born holding, before anything executes.
+    pub async fn birth(
+        &self,
+        workflow_yaml: &str,
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        self.try_create(
+            workflow_yaml,
+            "dialect: claude-code\nsessions: []\n",
+            MOCK_CONFIG,
+        )
+        .await
+    }
+
+    /// Executes the run this bench already created, keeping the refusal
+    /// a wake earns.
+    pub async fn try_wake(&self) -> Result<RunReport, yunta_engine::RunError> {
+        self.wake_through(&NoInteraction, no_secrets()).await
+    }
+
+    /// The same, with a human answering what the run asks.
+    pub async fn try_wake_answering(
+        &self,
+        human_interaction: &dyn HumanInteraction,
+    ) -> Result<RunReport, yunta_engine::RunError> {
+        self.wake_through(human_interaction, no_secrets()).await
+    }
+
+    /// Runs `(workflow, fixture)` with `sabotage` handed the run
+    /// directory between the run's creation and its first wake — the
+    /// window a machine loses a file in, and the only place a test can
+    /// open it.
+    pub async fn run_sabotaged(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        sabotage: impl FnOnce(&std::path::Path),
+    ) -> RunReport {
+        self.run_sabotaged_answering(workflow_yaml, fixture_yaml, &NoInteraction, sabotage)
+            .await
+    }
+
+    /// The same, with a human answering what the run asks.
+    pub async fn run_sabotaged_answering(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        human_interaction: &dyn HumanInteraction,
+        sabotage: impl FnOnce(&std::path::Path),
+    ) -> RunReport {
+        let run_dir = self.create(workflow_yaml, fixture_yaml, MOCK_CONFIG).await;
+        sabotage(&run_dir);
+        self.wake_with_all(human_interaction, no_secrets()).await
+    }
+
+    /// The same, keeping the refusal the sabotaged wake earns.
+    pub async fn try_run_sabotaged(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        sabotage: impl FnOnce(&std::path::Path),
+    ) -> Result<RunReport, yunta_engine::RunError> {
+        let run_dir = self
+            .try_create(workflow_yaml, fixture_yaml, MOCK_CONFIG)
+            .await?;
+        sabotage(&run_dir);
+        self.wake_through(&NoInteraction, no_secrets()).await
+    }
+
+    /// Executes the run this bench already created, again.
+    ///
+    /// A fresh call, exactly like the separate `yunta resume` process
+    /// that makes one: nothing carries across a wake but the log.
+    pub async fn wake(&self) -> RunReport {
+        self.wake_with_all(&NoInteraction, no_secrets()).await
+    }
+
+    /// The same wake, its sessions answering from a fresh fixture —
+    /// what a separate resume process does, since it builds its own
+    /// adapter from the fixture it was given.
+    pub async fn wake_on_fixture(&self, fixture_yaml: &str) -> RunReport {
+        self.wake_on_fixture_answering(fixture_yaml, &NoInteraction)
+            .await
+    }
+
+    /// The same, with a human answering what the run asks.
+    pub async fn wake_on_fixture_answering(
+        &self,
+        fixture_yaml: &str,
+        human_interaction: &dyn HumanInteraction,
+    ) -> RunReport {
+        let (run_dir, tree) = self.driven(|driven| (driven.run_dir.clone(), driven.tree.clone()));
+        let mock = self.mock_from(fixture_yaml, &run_dir, &tree);
+        {
+            let mut driven = self.driven.lock().expect("the bench's own lock");
+            let driven = driven.as_mut().expect("a run to wake");
+            driven.adapters = yunta_adapters::registry(&driven.manifest.config, mock.clone());
+            driven.mock = mock;
+        }
+        self.wake_with_all(human_interaction, no_secrets()).await
+    }
+
+    /// The same wake, with a human answering — what resolves a gate
+    /// instead of letting it degrade to a pause.
+    pub async fn wake_answering(&self, human_interaction: &dyn HumanInteraction) -> RunReport {
+        self.wake_with_all(human_interaction, no_secrets()).await
+    }
+
+    /// Creates the run and records what waking it takes, answering with
+    /// its run directory.
+    pub async fn create(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+    ) -> std::path::PathBuf {
+        self.try_create(workflow_yaml, fixture_yaml, config_yaml)
+            .await
+            .expect("create run")
+    }
+
+    /// The same, answering with the refusal a creation earns.
+    pub async fn try_create(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        self.try_create_after(workflow_yaml, fixture_yaml, config_yaml, || {})
+            .await
+    }
+
+    /// Creates the run with `between` run after the manifest is frozen
+    /// and before the birth writes anything — where a test states what
+    /// must be true of the world by the time the run is actually born,
+    /// and not a moment earlier.
+    pub async fn try_create_after(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        between: impl FnOnce(),
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        self.try_create_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            between,
+            no_secrets(),
+        )
+        .await
+    }
+
+    /// The same creation, with the birth's redactor resolved from `secrets`:
+    /// a secret `secrets` binds stays out of the birth event, and one too
+    /// short to redact refuses the run before it takes a checkout.
+    async fn try_create_with(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        between: impl FnOnce(),
+        secrets: Arc<dyn yunta_core::SecretSource>,
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
+        let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
+        let frozen = self.freeze(&workflow, &config).await?;
+        // A `type: document` input is born as an artifact, so the run a
+        // bench creates holds what its `inputs:` named alongside
+        // whatever the test hands it.
+        let artifacts: Vec<BirthArtifact> =
+            self.birth.iter().cloned().chain(frozen.documents).collect();
+        let manifest = frozen.manifest;
+        between();
+        let redactor = yunta_engine::run_redactor(&manifest, secrets.as_ref())?;
+        let tree = self.tree_for(&manifest).await?;
+
+        let run_dir = create_run(
+            CreateRunParams {
+                run_id: &self.run_id,
+                manifest: &manifest,
+                runs_root: &self.runs_root,
+                mode: &self.mode,
+                worktree: &tree,
+                promoted_from: None,
+                artifacts: &artifacts,
+                blobs: &frozen.blobs,
+                // A run a caller starts is the root of its lineage: it
+                // measures on its first wake, if its config names a
+                // suite.
+                baseline: None,
+                environment: yunta_engine::process::execution_environment(self.ambient.as_ref()),
+                redactor: &redactor,
+            },
+            &self.storage.async_handle(),
+            self.supervision(),
+        )
+        .await?;
+
+        let mock = self.mock_from(fixture_yaml, &run_dir, &tree);
+        let adapters = yunta_adapters::registry(&config, mock.clone());
+        *self.driven.lock().expect("the bench's own lock") = Some(Driven {
+            manifest,
+            run_dir: run_dir.clone(),
+            tree,
+            adapters,
+            mock,
+        });
+        Ok(run_dir)
+    }
+
+    /// The checkout a run of `manifest` is born in: the bench's worktree,
+    /// or for a pooled bench one of the project's pool, taken on the run's
+    /// own branch.
+    async fn tree_for(
+        &self,
+        manifest: &yunta_core::Manifest,
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        if !self.pooled {
+            return Ok(self.worktree.clone());
+        }
+        let (checkout, _held) = self
+            .pool_handle(manifest)
+            .open_run(
+                &self.run_id,
+                &manifest.base_commit,
+                yunta_engine::Birth::of(&manifest.workflow),
+                self.supervision(),
+            )
+            .await?;
+        Ok(checkout)
+    }
+
+    /// The project's pool as the run of `manifest` reaches it.
+    fn pool_handle(&self, manifest: &yunta_core::Manifest) -> Arc<yunta_engine::CheckoutPool> {
+        let run_dir = self.run_dir();
+        yunta_engine::CheckoutPool::of_run(
+            &yunta_engine::run_dir::worktrees_root(manifest, &run_dir),
+            &self.worktree,
+            &run_dir,
+            manifest,
+            self.clock.clone(),
+        )
+    }
+
+    /// The mock a fixture scripts, against the directories the run owns.
+    fn mock_from(
+        &self,
+        fixture_yaml: &str,
+        run_dir: &std::path::Path,
+        tree: &std::path::Path,
+    ) -> Arc<MockAdapter> {
+        let fixture = MockFixture::parse(
+            fixture_yaml,
+            &RunPaths {
+                run_dir,
+                worktree: tree,
+                staging: &yunta_engine::run_dir::staging_root(run_dir),
+            },
+        )
+        .expect("parse mock fixture");
+        let mock = MockAdapter::new(fixture);
+        Arc::new(match self.capabilities {
+            Some(capabilities) => mock.narrowed(capabilities),
+            None => mock,
+        })
+    }
+
+    /// The rail command a bench run carries. The bench runs no binary: a mock
+    /// session plans its hook from this name and never runs it. Its writes are
+    /// asked of the engine's rail, as in any run.
+    fn bench_rail_command() -> yunta_core::rail::RailCommand {
+        yunta_core::rail::RailCommand::new(std::path::PathBuf::from("yunta"))
+    }
+
+    /// The one `execute_run` this harness makes, its refusal kept.
+    async fn wake_through(
+        &self,
+        human_interaction: &dyn HumanInteraction,
+        secrets: Arc<dyn yunta_core::SecretSource>,
+    ) -> Result<RunReport, yunta_engine::RunError> {
+        let (manifest, run_dir, adapters, named) = self.driven(|driven| {
+            (
+                driven.manifest.clone(),
+                driven.run_dir.clone(),
+                driven.adapters.clone(),
+                driven.tree.clone(),
+            )
+        });
+        let tree = match self.pooled {
+            true => {
+                let pool = self.pool_handle(&manifest);
+                pool.wake_checkout(&self.run_id, &named, self.supervision())
+                    .await?
+            }
+            false => named,
+        };
+        if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
+            driven.tree = tree.clone();
+        }
+        let report = execute_run(RunEnv {
+            run_id: &self.run_id,
+            manifest: &manifest,
+            run_dir: &run_dir,
+            worktree: &tree,
+            adapters: &adapters,
+            storage: &self.storage.async_handle(),
+            clock: self.clock.clone(),
+            ids: self.ids.as_ref(),
+            human_interaction,
+            forge: self.forge.as_deref(),
+            cancel: &self.cancel,
+            ambient: self.ambient.as_ref(),
+            secrets,
+            rail_command: Some(Self::bench_rail_command()),
+            observer: self.observer.clone(),
+        })
+        .await?;
+        // A run may move into a checkout that already built where it
+        // stands: the next wake takes it there.
+        if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
+            driven.tree = report.tree(&tree);
+        }
+        Ok(report)
+    }
+
+    /// The same wake, panicking on a refusal no test is about.
+    async fn wake_with_all(
+        &self,
+        human_interaction: &dyn HumanInteraction,
+        secrets: Arc<dyn yunta_core::SecretSource>,
+    ) -> RunReport {
+        self.wake_through(human_interaction, secrets)
+            .await
+            .expect("execute run")
+    }
+}
+
+/// The source of a run that no test gives secrets. It binds nothing, so a
+/// declared secret stays unset rather than reading the process's own value.
+pub fn no_secrets() -> Arc<dyn yunta_core::SecretSource> {
+    Arc::new(KnownSecrets::default())
+}

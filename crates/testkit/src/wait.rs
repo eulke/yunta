@@ -68,3 +68,13 @@ where
     )
     .await;
 }
+
+/// Runs `action` once `delay` has passed, on a thread of its own. The delay
+/// is the input under test, such as a cancellation or a byte that arrives
+/// late; it is never a guess at how long something takes.
+pub fn after(delay: Duration, action: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        action();
+    });
+}

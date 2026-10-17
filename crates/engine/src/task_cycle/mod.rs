@@ -8,168 +8,67 @@
 //! session reported — an agent that claims success with red criteria
 //! still leaves the task not-done.
 
+mod answer;
 mod attempt;
+mod before;
+mod carry;
 mod criteria;
+mod dispatch;
+mod error;
+mod evidence;
+mod held;
+mod judge;
+mod memo;
+mod open;
+mod outcome;
+mod record;
+mod recorded;
 mod session;
+mod spec;
+mod stream;
+mod tools_need;
+mod tree;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
+use yunta_core::ScopeGlob;
 
-use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Budget, PermissionProfile};
-use yunta_core::events::TokenUsage;
-use yunta_core::{AdapterError, Task, TaskId};
-use yunta_storage::StorageError;
+use yunta_core::events::{TaskLedger, TokenUsage};
+use yunta_core::expansion::Decision;
+use yunta_core::port::{Adapter, Budget, PermissionProfile};
+use yunta_core::protected::Protected;
+use yunta_core::Task;
+
+pub use outcome::{
+    surprises, AttemptRecord, CriterionRun, DispatchOutcome, TaskCycleReport, TaskOutcome,
+};
+pub use yunta_core::events::{Surprise, TaskCause};
 
 use crate::process::Supervision;
-use crate::scope::{ScopeCheckError, ScopeCheckResult};
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
+use before::{before_attempts, cut_report, denied, Begin};
+pub(crate) use record::recorded;
+use record::Recorder;
 
-pub use criteria::{post_check, pre_check, Memo};
-pub(crate) use session::dispatch_session;
-pub use session::{DispatchError, SessionObserver, SessionSetup};
+pub(crate) use criteria::{could_not_run, probe, probe_command};
+pub use criteria::{post_check, pre_check, PostCheck};
+pub(crate) use dispatch::not_stopped_failure;
+pub use dispatch::DispatchError;
+pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
+pub use held::HeldGate;
+pub(crate) use judge::{
+    judge, scope_in_force, Documents, JudgeEnv, Judgement, Refusals, Settle, Sitting, Work,
+};
+pub use memo::{Memo, Memoized};
+pub use session::{KeepsOutput, SessionObserver, SessionSetup};
+pub(crate) use stream::record_unlisted_tools;
+pub use tools_need::RunToolsNeed;
+pub(crate) use tree::content_of;
 
-#[derive(Debug, Error)]
-pub enum TaskCycleError {
-    #[error("failed to run criterion `{cmd}` for task `{task}`")]
-    Criterion {
-        task: TaskId,
-        cmd: String,
-        #[source]
-        source: crate::process::SpawnError,
-    },
-    #[error("adapter failed to spawn a session for task `{task}`")]
-    Spawn {
-        task: TaskId,
-        #[source]
-        source: AdapterError,
-    },
-    #[error("failed to append a session audit event for task `{task}`")]
-    Audit {
-        task: TaskId,
-        #[source]
-        source: StorageError,
-    },
-    #[error(transparent)]
-    ScopeCheck(#[from] ScopeCheckError),
-    #[error("failed to evaluate task `{task}`'s scope expansion request: {source}")]
-    ScopeExpansion {
-        task: TaskId,
-        #[source]
-        source: crate::scope_expansion::ScopeExpansionError,
-    },
-    #[error("failed to compute the working tree's hash for memoization: git {args} in `{cwd}`: {detail}")]
-    TreeHash {
-        args: String,
-        cwd: std::path::PathBuf,
-        detail: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CriterionRun {
-    pub cmd: String,
-    pub exit_code: i32,
-    pub is_guard: bool,
-    /// Whether this result came from the memoization cache instead of
-    /// an actual execution — `criteria_checked` records it so recibo/replay
-    /// show what ran versus what was reused, nothing verified in silence.
-    pub reused: bool,
-    /// Wall-clock milliseconds the execution took — what the
-    /// learned ordering feeds on. `None` when `reused` (nothing ran).
-    pub duration_ms: Option<u64>,
-}
-
-/// The pre-check's verdict: "esta fase valida al
-/// validador" — a non-guard criterion that already passes, or a guard
-/// that's already red, means the criteria themselves are wrong, not that
-/// the (not-yet-started) work is wrong.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreCheckOutcome {
-    Red,
-    TrivialCriterion { cmd: String },
-    BrokenGuard { cmd: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DispatchOutcome {
-    Completed {
-        summary: String,
-    },
-    Failed {
-        message: String,
-        retryable: bool,
-    },
-    /// No terminal event at all — the engine synthesizes this, the
-    /// adapter never emits it.
-    Crashed,
-    /// The dispatch's own `CancellationToken` fired — a
-    /// `join: any` sibling won, or the user cancelled the run. The
-    /// session was cut (interrupt→kill); the *caller* decides what the
-    /// cancellation means, because only it knows which token fired.
-    Cancelled,
-    /// The engine cut the session via `interrupt` → `kill`:
-    /// the token count from `Usage` events or the wall-clock timeout
-    /// demanded it, independent of whether the adapter itself honored
-    /// `SessionRequest.budget`.
-    BudgetExceeded {
-        reason: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AttemptRecord {
-    pub attempt: u32,
-    pub dispatch: DispatchOutcome,
-    /// Tokens this attempt's session consumed, from its `Usage` events.
-    pub tokens: TokenUsage,
-    pub post_check: Vec<CriterionRun>,
-    pub scope: ScopeCheckResult,
-    pub succeeded: bool,
-    /// The agent's own expansion request this attempt, if
-    /// it wrote one, and what the engine decided — `None` when no request
-    /// file was found, the ordinary case. The caller (`loop_exec.rs`) owns
-    /// emitting `scope_expansion_requested`/`granted`/`denied` and the
-    /// finding conversion from this; `run_task` only decides and
-    /// widens `scope` for this attempt's own check when granted.
-    pub scope_expansion: Option<crate::scope_expansion::ScopeExpansionOutcome>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TaskOutcome {
-    Done,
-    Blocked {
-        reason: String,
-    },
-    /// The cycle's cancellation token fired mid-attempt — the
-    /// session was cut (interrupt→kill) and the cycle stopped without a
-    /// verdict. What that means for the task's status is the caller's
-    /// call, not this cycle's.
-    Interrupted,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TaskCycleReport {
-    pub task_id: TaskId,
-    pub pre_check: Vec<CriterionRun>,
-    pub attempts: Vec<AttemptRecord>,
-    pub outcome: TaskOutcome,
-    /// `true` when any attempt's scope-expansion request escalated (
-    /// `ask` mode, or `max_per_run` already exhausted) — neither is a
-    /// verdict `run_task` can render alone, so the cycle stops retrying
-    /// and the caller (`loop_exec.rs`) puts the decision to
-    /// `HumanInteraction` — pausing only when no live surface answers —
-    /// rather than burning further sessions while one is owed.
-    pub needs_human_decision: bool,
-    /// What the adapter declared it wrote into the task's worktree for
-    /// its own mechanics during the last attempt — what the scope
-    /// check at integration leaves out, exactly as the cycle's own
-    /// check did.
-    pub staged: Vec<PathBuf>,
-}
-
-/// Default retry cap ("cap configurable, default 2").
-pub const DEFAULT_MAX_RETRIES: u32 = 2;
+pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};
+pub use error::TaskCycleError;
+pub(crate) use spec::files as spec_files;
 
 /// The permission/scope policy a task cycle enforces:
 /// `permissions` is the merged model every criterion command is checked
@@ -181,8 +80,8 @@ pub const DEFAULT_MAX_RETRIES: u32 = 2;
 /// ladder, forwarded to every session this cycle opens. `scope_expansion`
 /// carries the loop node's own settings (absent means the schema's
 /// own default, `deny`); `grants` is the batch's shared
-/// [`crate::scope_expansion::GrantLedger`] — `max_per_run` is
-/// run-scoped, not task-scoped, and the ledger's atomic cap window is
+/// [`crate::scope_expansion::GrantWindow`] — `max_per_run` is
+/// run-scoped, not task-scoped, and the window's atomic cap check is
 /// what makes the count exact when several batch members request at
 /// once. `already_granted_paths` are the paths every *prior*
 /// `scope_expansion_granted` on the log authorized for this task — a
@@ -196,8 +95,13 @@ pub struct ScopeGovernance<'a> {
     /// the caller — a `rules`-mode request touching more files than this
     /// is denied.
     pub max_expansion_files: usize,
-    pub grants: &'a crate::scope_expansion::GrantLedger,
-    pub already_granted_paths: &'a [String],
+    pub grants: &'a crate::scope_expansion::GrantWindow,
+    pub already_granted_paths: &'a [ScopeGlob],
+    /// What the other tasks of the batch may write: a path the evidence
+    /// locates there is a person's to grant, never the engine's.
+    pub beside: &'a [ScopeGlob],
+    /// What no session may write, lifted by what a person granted this task.
+    pub protected: Arc<Protected>,
 }
 
 /// The resources and retry policy one task's attempts run under —
@@ -206,17 +110,45 @@ pub struct ScopeGovernance<'a> {
 /// watching and how it stops).
 pub struct AttemptEnv<'a> {
     pub adapter: &'a dyn Adapter,
-    pub cwd: &'a Path,
-    pub max_retries: u32,
+    /// The loop node these task sessions belong to. A task session is
+    /// the node's session: it runs on the node's runner and writes the
+    /// node's declared files.
+    pub node: &'a yunta_core::Node,
+    /// The tree this task works in and the tree it started from. Every
+    /// attempt runs in the same checkout and is judged against the same
+    /// starting point, which is what makes one attempt answerable for
+    /// what an earlier one of its own left behind.
+    pub unit: &'a crate::worktree::Unit,
     pub budget: Budget,
     pub memo: &'a Memo,
-    /// Where every criterion's process registers for the run.
-    pub registry: Option<&'a crate::process_registry::ProcessRegistry>,
+    /// The run's tasks, as its log leaves them — what the pre-check
+    /// reads to run the cheap criteria before the expensive ones,
+    /// derived from the same log every wake derives its state from.
+    pub history: &'a TaskLedger,
+    /// What every subprocess of the cycle is born under: the run's
+    /// registry, the node's token, the run's `subprocess_vars` and the
+    /// run's clock. It reaches the spawn by parameter, so a criterion
+    /// runs under the same governance as the session before it.
+    pub supervision: Supervision<'a>,
+    /// The work a person chose to have this cycle continue from: what
+    /// the task's last attempt left, put back into this unit and judged
+    /// before any session opens. `None` for a cycle that starts from the
+    /// unit's own tree.
+    pub carry: Option<&'a yunta_core::CommitSha>,
+    /// The session this cycle picks back up after the answer to the scope
+    /// it asked for, instead of opening its first session fresh. `None`
+    /// for a cycle that starts a conversation of its own.
+    pub resume: Option<Continuing>,
 }
 
-/// Runs a task through the full cycle: pre-check once, then
-/// dispatch → post-check → scope-check per attempt, retrying with a
-/// fresh session up to `max_retries` times before `Blocked`.
+/// Runs a task through the full cycle: pre-check once, then dispatch →
+/// post-check → scope-check. An attempt that leaves the task unsettled
+/// starts another session only when the engine granted the scope the session
+/// asked for, or when the session left a request pending under a red criterion
+/// on the first attempt or on a tree its previous attempt did not leave. Any
+/// other unsettled end is `Blocked`: a session on the same tree would have
+/// nothing new to act on. A criterion the session declared impossible ends
+/// the cycle at once, before any retry.
 ///
 /// Never trusts the session's own outcome: `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
@@ -237,22 +169,34 @@ pub async fn run_task(
     cancel: &CancellationToken,
     setup: &SessionSetup,
 ) -> Result<TaskCycleReport, TaskCycleError> {
-    // What the adapter declares it stages, per attempt; nothing before
-    // a session opens.
-    let mut last_staged: Vec<PathBuf> = Vec::new();
+    let mut report = cycle(task, instruction, env, governance, audit, cancel, setup).await?;
+    // The files its tests live in are in its unit's tree and are not its
+    // work, so integration leaves them out of its audit.
+    report.staged.extend(spec::paths(spec::files(setup, task)));
+    Ok(report)
+}
+
+/// The cycle [`run_task`] reports on.
+async fn cycle(
+    task: &Task,
+    instruction: &str,
+    env: AttemptEnv<'_>,
+    governance: ScopeGovernance<'_>,
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    cancel: &CancellationToken,
+    setup: &SessionSetup,
+) -> Result<TaskCycleReport, TaskCycleError> {
     let AttemptEnv {
         adapter,
-        cwd,
-        max_retries,
+        node,
+        unit,
         budget,
         memo,
-        registry,
+        history,
+        supervision,
+        carry,
+        resume,
     } = env;
-    let supervision = Supervision {
-        registry,
-        cancel: Some(cancel),
-        env: &[],
-    };
     let ScopeGovernance {
         permissions,
         profile,
@@ -260,51 +204,50 @@ pub async fn run_task(
         max_expansion_files,
         grants,
         already_granted_paths,
+        beside,
+        protected,
     } = governance;
-    for criterion in &task.criteria {
-        if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
-            return Ok(TaskCycleReport {
-                task_id: task.id.clone(),
-                staged: last_staged.clone(),
-                pre_check: Vec::new(),
-                attempts: Vec::new(),
-                outcome: TaskOutcome::Blocked { reason: rule },
-                needs_human_decision: false,
-            });
-        }
-    }
-
-    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, supervision).await?;
-
-    // The pre-check validates the criteria before any work: a non-guard that
-    // already passes, or a guard already red, means the criteria are wrong,
-    // not the task. Only `Red` — nothing prejudged — proceeds to the
-    // attempts; every other verdict blocks the task naming what to fix.
-    let blocked_before_work = match pre_outcome {
-        PreCheckOutcome::Red => None,
-        PreCheckOutcome::TrivialCriterion { cmd } => Some(format!(
-            "criterion `{cmd}` already passes before any work — the criteria need fixing, not the task"
-        )),
-        PreCheckOutcome::BrokenGuard { cmd } => {
-            Some(format!("guard `{cmd}` is already red before any work started"))
-        }
+    // Every check reaches the log the moment it runs. A cycle records a
+    // pre-check even when it ran no criterion — denied, or cut before it
+    // began — because the status change that closes the cycle cites it.
+    let recorder = Recorder {
+        audit,
+        task: &task.id,
     };
-    if let Some(reason) = blocked_before_work {
-        return Ok(TaskCycleReport {
-            task_id: task.id.clone(),
-            staged: last_staged.clone(),
-            pre_check: pre_runs,
-            attempts: Vec::new(),
-            outcome: TaskOutcome::Blocked { reason },
-            needs_human_decision: false,
-        });
+    if let Some(report) = denied(task, permissions, recorder).await? {
+        return Ok(report);
+    }
+    // A cycle whose token already fired has nothing to verify: every
+    // subprocess the pre-check would run is governed by that same token,
+    // so it would only produce "killed before it could answer" for the
+    // caller to read as a verdict. A `join: any` sibling winning between
+    // the batch starting and this task's first check is exactly that
+    // case: the task was cut, not judged.
+    if supervision.cancel.is_cancelled() {
+        return cut_report(task, recorder).await;
     }
 
+    let start = spec::Start {
+        task,
+        unit,
+        setup,
+        fresh: carry.is_none() && resume.is_none(),
+        carried: carry.is_some(),
+    };
+    let Some(laid) = spec::laid(start, memo, history, supervision).await? else {
+        return cut_report(task, recorder).await;
+    };
+    let spec::Laid {
+        unit: overlaid,
+        guarded,
+    } = laid;
+    let unit = &overlaid;
     let params = AttemptParams {
         task,
         instruction,
         adapter,
-        cwd,
+        node,
+        unit,
         budget,
         memo,
         profile,
@@ -312,14 +255,49 @@ pub async fn run_task(
         max_expansion_files,
         grants,
         already_granted_paths,
+        beside,
+        protected: &protected,
+        resume: None,
         audit,
         cancel,
         setup,
         supervision,
     };
-    let mut attempts = Vec::new();
-    for attempt in 1..=(max_retries + 1) {
-        let (staged, step) = run_one_attempt(&params, attempt).await?;
+    let (pre_runs, last_check) =
+        match before_attempts(task, &params, recorder, history, guarded, carry, &resume).await? {
+            Begin::Attempts {
+                pre_runs,
+                last_check,
+            } => (pre_runs, last_check),
+            Begin::Ended(report) => return Ok(report),
+        };
+    run_attempts(params, recorder, resume, pre_runs, last_check).await
+}
+
+/// Runs attempts until one ends the cycle, or until an attempt leaves its task
+/// unmet with no fresh session owed. Each attempt's grant holds for the attempts
+/// after it, and the session the next attempt picks back up is the one the last
+/// attempt left, or the one an engine grant widened.
+async fn run_attempts(
+    params: AttemptParams<'_>,
+    recorder: Recorder<'_>,
+    resume: Option<Continuing>,
+    pre_runs: Vec<CriterionRun>,
+    mut last_check: Option<yunta_core::Seq>,
+) -> Result<TaskCycleReport, TaskCycleError> {
+    let mut attempts: Vec<AttemptRecord> = Vec::new();
+    // What the adapter declares it stages, per attempt; nothing before
+    // a session opens.
+    let mut last_staged: Vec<PathBuf> = Vec::new();
+    // What the engine grants during an attempt holds for every attempt
+    // after it: the one it is granted for is the next.
+    let mut granted: Vec<ScopeGlob> = params.already_granted_paths.to_vec();
+    // The session the next attempt picks back up: the one this cycle was
+    // reopened to continue, then the one an engine grant widened.
+    let mut continuing = resume;
+    for attempt in 1.. {
+        let attempt_params = attempt_of(&params, &granted, continuing.as_ref());
+        let (staged, step) = run_attempt(&attempt_params, recorder, attempt, &attempts).await?;
         last_staged = staged;
         match step {
             AttemptStep::Stop {
@@ -327,31 +305,144 @@ pub async fn run_task(
                 outcome,
                 needs_human_decision,
             } => {
+                last_check = record.recorded.or(last_check);
                 attempts.push(record);
                 return Ok(TaskCycleReport {
-                    task_id: task.id.clone(),
+                    task_id: params.task.id.clone(),
                     staged: last_staged,
                     pre_check: pre_runs,
                     attempts,
                     outcome,
                     needs_human_decision,
+                    last_check,
                 });
             }
-            AttemptStep::Again(record) => attempts.push(record),
+            AttemptStep::Again(record) => {
+                last_check = record.recorded.or(last_check);
+                continuing = regranted(&record, &mut granted);
+                attempts.push(record);
+            }
+            AttemptStep::Unmet(record) => {
+                last_check = record.recorded.or(last_check);
+                if unmet_ends_cycle(record, &mut attempts) {
+                    break;
+                }
+                // The pending request stays on the checkout for the session
+                // that follows, which starts fresh and carries no grant.
+                continuing = None;
+            }
         }
     }
+    unmet_report(&params, last_staged, pre_runs, attempts, last_check).await
+}
 
-    Ok(TaskCycleReport {
-        task_id: task.id.clone(),
-        staged: last_staged.clone(),
-        pre_check: pre_runs,
-        attempts,
-        needs_human_decision: false,
-        outcome: TaskOutcome::Blocked {
-            reason: format!(
-                "criteria still red or scope violated after {} attempt(s)",
-                max_retries + 1
-            ),
-        },
+/// The params of one attempt: the cycle's own, with the grants and the session it continues.
+fn attempt_of<'a>(
+    params: &AttemptParams<'a>,
+    granted: &'a [ScopeGlob],
+    resume: Option<&'a Continuing>,
+) -> AttemptParams<'a> {
+    AttemptParams {
+        already_granted_paths: granted,
+        resume,
+        ..*params
+    }
+}
+
+/// Runs one attempt; one that cannot stop its session reports the spend of the attempts it follows.
+async fn run_attempt(
+    params: &AttemptParams<'_>,
+    recorder: Recorder<'_>,
+    attempt: u32,
+    attempts: &[AttemptRecord],
+) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
+    // The node that ran this cycle pays for them.
+    let earlier: TokenUsage = attempts.iter().map(|record| record.tokens).sum();
+    run_one_attempt(params, recorder, attempt)
+        .await
+        .map_err(|error| error.with_earlier_spend(earlier))
+}
+
+/// Records an unmet attempt; `true` when no fresh session is owed to it, so the cycle ends.
+fn unmet_ends_cycle(record: AttemptRecord, attempts: &mut Vec<AttemptRecord>) -> bool {
+    let fresh = record.fresh_session_owed(attempts);
+    attempts.push(record);
+    !fresh
+}
+
+/// The grant an attempt's engine decision made: it holds for the attempts after
+/// this one, and the session the next attempt picks back up is answered with it.
+/// `None` when the attempt left no session.
+fn regranted(record: &AttemptRecord, granted: &mut Vec<ScopeGlob>) -> Option<Continuing> {
+    let widened = match record.scope_expansion.as_ref().map(|o| &o.decision) {
+        Some(Decision::Grant { paths, .. }) => paths.clone(),
+        _ => Vec::new(),
+    };
+    granted.extend(widened.iter().cloned());
+    record.session.clone().map(|session| Continuing {
+        session,
+        answer: Answer::Scope(yunta_core::events::ScopeAnswer::Granted(widened)),
     })
+}
+
+/// The report of a cycle whose attempts ended unmet.
+async fn unmet_report(
+    params: &AttemptParams<'_>,
+    staged: Vec<PathBuf>,
+    pre_check: Vec<CriterionRun>,
+    attempts: Vec<AttemptRecord>,
+    last_check: Option<yunta_core::Seq>,
+) -> Result<TaskCycleReport, TaskCycleError> {
+    // What the last attempt left is what a person deciding about the task
+    // needs to read: which criteria still fail, and what strayed, or the
+    // session's own refusal when its conversation outgrew the context window
+    // a second time. A request still owed a person's decision is that
+    // decision, and it leaves the checkout with the cycle.
+    let owed = attempts.last().is_some_and(AttemptRecord::escalated);
+    let cause = match owed {
+        true => {
+            crate::scope_expansion::consume_request(params.unit.worktree.as_path())
+                .await
+                .map_err(|source| TaskCycleError::ScopeExpansion {
+                    task: params.task.id.clone(),
+                    source,
+                })?;
+            TaskCause::ScopeDecisionOwed
+        }
+        false => attempts
+            .last()
+            .and_then(|last| attempt::failure_stop(params.adapter.id(), &last.dispatch))
+            .unwrap_or_else(|| unmet_cause(&attempts)),
+    };
+    Ok(TaskCycleReport {
+        task_id: params.task.id.clone(),
+        staged,
+        pre_check,
+        attempts,
+        needs_human_decision: owed,
+        outcome: TaskOutcome::Blocked { cause },
+        last_check,
+    })
+}
+
+/// What the last attempt left: the criteria still red, and the paths it
+/// changed outside the scope.
+fn unmet_cause(attempts: &[AttemptRecord]) -> TaskCause {
+    let last = attempts.last();
+    TaskCause::Unmet {
+        attempts: attempts.len() as u32,
+        red: last
+            .map(|attempt| {
+                attempt
+                    .post_results
+                    .iter()
+                    .filter(|result| result.exit_code != 0)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default(),
+        outside: last
+            .map(|attempt| attempt.scope.violations.clone())
+            .unwrap_or_default(),
+    }
 }

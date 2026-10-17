@@ -1,12 +1,44 @@
 //! What a run's mode does to the workflow graph: which top-level nodes it
-//! schedules, and what each of them waits on once the excluded nodes drop
-//! out. Both derivations are pure and shared by the scheduler, the
-//! escalation paths and `status`, so every reader of a moded run sees the
-//! same graph.
+//! schedules, which nodes it reaches, and what each scheduled node waits on
+//! once the excluded nodes drop out. The derivations are pure and shared by
+//! the scheduler, the escalation paths, `status` and the refusals a run
+//! meets before it starts, so every reader of a moded run sees the same
+//! graph.
 
 use std::collections::{HashMap, HashSet};
 
-use yunta_core::{ModeInclude, ModeName, Node, NodeId, Workflow};
+use yunta_core::{LeftOut, ModeInclude, ModeName, Node, NodeId, Workflow};
+
+/// The top-level node ids a run schedules: what its mode includes, less
+/// what it left out because its config lacks what they need. `None` when
+/// nothing narrows the graph at all.
+pub fn included_nodes(
+    workflow: &Workflow,
+    mode_name: &ModeName,
+    left_out: &[LeftOut],
+) -> Option<HashSet<NodeId>> {
+    let by_mode = mode_included_nodes(workflow, mode_name);
+    if left_out.is_empty() {
+        return by_mode;
+    }
+    let every = || workflow.nodes.iter().map(|node| node.id.clone()).collect();
+    let mut included: HashSet<NodeId> = by_mode.unwrap_or_else(every);
+    for gone in left_out {
+        included.remove(&gone.node);
+    }
+    Some(included)
+}
+
+/// Every node a run in `mode_name` reaches: the top-level nodes its mode
+/// includes, less what it left out, each with every node nested in it.
+pub fn reached_nodes<'a>(
+    workflow: &'a Workflow,
+    mode_name: &ModeName,
+    left_out: &[LeftOut],
+) -> Vec<&'a Node> {
+    let included = included_nodes(workflow, mode_name, left_out);
+    workflow.iter_nodes_under(included.as_ref()).collect()
+}
 
 /// The top-level node ids `mode_name` makes schedulable, or `None` when
 /// nothing narrows the graph — no `modes:` declared at all, or the
@@ -95,8 +127,8 @@ mod tests {
             r#"
 name: chain
 modes:
-  quick: { include: [start, ship, audit] }
-  full:  { include: all }
+  alpha: { include: [start, ship, audit] }
+  beta:  { include: all }
 nodes:
   - { id: start, kind: bash, run: "true" }
   - { id: review, kind: bash, run: "true", depends_on: [start] }
@@ -115,7 +147,7 @@ nodes:
     #[test]
     fn an_excluded_dependency_is_replaced_by_its_own_included_dependencies_transitively() {
         let workflow = workflow();
-        let included = mode_included_nodes(&workflow, &"quick".into());
+        let included = mode_included_nodes(&workflow, &"alpha".into());
         let deps = dependencies_in_mode(&workflow, included.as_ref());
         // `ship` -> `extra` (excluded) -> `review` (excluded) -> `start`, plus
         // `extra`'s own direct `start`, which collapses into one entry.
@@ -126,6 +158,30 @@ nodes:
             !deps.contains_key(&NodeId::from("extra")),
             "an excluded node has no entry of its own"
         );
+    }
+
+    #[test]
+    fn a_mode_reaches_the_children_of_a_group_it_includes_and_nothing_it_leaves_out() {
+        let workflow: Workflow = yunta_core::yaml::parse(
+            r#"
+name: grouped
+modes:
+  alpha: { include: [group] }
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: left, kind: bash, run: "true" }
+      - { id: right, kind: bash, run: "true" }
+  - { id: after, kind: bash, run: "true", depends_on: [group] }
+"#,
+        )
+        .unwrap();
+        let reached: Vec<&str> = reached_nodes(&workflow, &"alpha".into(), &[])
+            .into_iter()
+            .map(|node| node.id.as_str())
+            .collect();
+        assert_eq!(reached, ["group", "left", "right"]);
     }
 
     #[test]

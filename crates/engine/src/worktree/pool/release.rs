@@ -1,0 +1,290 @@
+//! How checkouts go back to their project's pool: a run's units' and its
+//! own when it ends, and the ones a project no longer uses when it
+//! collects what is old — and how legacy unit branches are taken in.
+
+use std::path::{Path, PathBuf};
+
+use super::super::WorktreeError;
+use super::{slot, CheckoutPool};
+use crate::git::{self, Effect};
+use crate::lock::Contention;
+use crate::process::Supervision;
+use crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
+
+/// Gives back every checkout the units of `run_id` were kept in, as the run
+/// ends: a clean one is kept for nobody, and the refs whose work is in
+/// `into` — the run's tree as it closes — go. A blocked task's ref stays,
+/// holding what it left, until the run is collected; a checkout with
+/// something uncommitted in it stays its unit's.
+///
+/// What a run made before its project kept checkouts is taken in first: its
+/// units' branches become their refs. The checkouts it kept under its own
+/// directory are not removed here; `gc` takes away the clean ones of a run
+/// nothing drives.
+pub async fn release_unit_checkouts(
+    pool: &CheckoutPool,
+    into: &Path,
+    _run_dir: &Path,
+    run_id: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    adopt_unit_branches(pool, into, Some(run_id), supervision).await?;
+    pool.free_units_of(into, run_id, supervision).await
+}
+
+/// Gives back the checkout run `run_id` worked in, as the run ends: it
+/// lets go of the run's branch where it stands, unless something in it is
+/// uncommitted — somebody's. The branch stays: it holds what the run did.
+/// A checkout outside the pool, one a run made before its project kept
+/// checkouts, stays where it is. A checkout a process group still runs in
+/// is kept instead, since a session the engine could not stop may still
+/// write there, and its branch stays with it.
+pub async fn release_run_checkout(
+    pool: &CheckoutPool,
+    tree: &Path,
+    run_id: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let home = pool.home(supervision).await?;
+    let Some((number, tree)) = slot::number_of(&home, tree).await else {
+        return Ok(());
+    };
+    let held = slot::hold(&home, number, Contention::Refuse, None, supervision).await?;
+    let Some(lease) = held else {
+        return Ok(());
+    };
+    if lease.groups_running().await {
+        lease.keep();
+        return Ok(());
+    }
+    let branch = super::super::run_branch(run_id);
+    let status = git::tree_state(&tree, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    let lets_go = status.clean && status.branch.as_deref() == Some(branch.as_str());
+    if lets_go {
+        git::change(
+            &tree,
+            Effect::Metadata,
+            &["switch", "--detach", "-q"],
+            supervision,
+        )
+        .await?;
+    }
+    pool.give_back(lease, supervision).await?;
+    Ok(())
+}
+
+/// Whether `tree` is still where run `run_id` works: a checkout on the
+/// run's own branch, or on a branch of a person's — one who switched it
+/// while the run was parked — and never on another run's or unit's.
+pub async fn still_the_runs(
+    tree: &Path,
+    run_id: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    let status = git::tree_state(tree, &[], supervision).await?;
+    let on = status.branch.as_deref().unwrap_or_default();
+    Ok(on == super::super::run_branch(run_id)
+        || !(on.is_empty() || on.starts_with(&format!("{}/", super::super::RUN_BRANCHES)))
+            && !super::super::is_legacy_unit_branch(on))
+}
+
+/// Hands the checkout a run worked in to the run that carries on from it:
+/// the successor's branch is cut where the predecessor's tree stands, in
+/// the same checkout, so nothing it built has to be built again.
+pub async fn hand_over_run_checkout(
+    tree: &Path,
+    successor: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let branch = super::super::run_branch(successor);
+    git::change(
+        tree,
+        Effect::Metadata,
+        &["switch", "-q", "-c", &branch],
+        supervision,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Lets go of everything the units of `run_id` kept, landed or not: the
+/// run is being collected, and nothing will continue its work. Its units'
+/// legacy unit branches go too.
+pub async fn forget_run_units(
+    pool: &CheckoutPool,
+    repo: &Path,
+    run_id: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    adopt_unit_branches(pool, repo, Some(run_id), supervision).await?;
+    pool.forget_units_of(repo, run_id, supervision).await
+}
+
+/// Takes in the legacy unit branches — `run`'s, or every run's — as the
+/// refs units keep their work by: each branch's commit is kept by its
+/// unit's ref, a clean checkout of the pool on it lets it go and is kept
+/// for that unit, and the branch goes. A branch checked out where
+/// something is uncommitted, held by a live process, or checked out
+/// outside the pool, stays. Answers the branches taken in.
+pub async fn adopt_unit_branches(
+    pool: &CheckoutPool,
+    repo: &Path,
+    run: Option<&yunta_core::RunId>,
+    supervision: Supervision<'_>,
+) -> Result<Vec<String>, WorktreeError> {
+    let branches = legacy_branches(repo, run, supervision).await?;
+    if branches.is_empty() {
+        return Ok(Vec::new());
+    }
+    let home = pool.home(supervision).await?;
+    let mut taken = Vec::new();
+    for (branch, checked_out) in branches {
+        let Some(unit) = super::super::UnitRef::of_legacy(&branch) else {
+            continue;
+        };
+        if let Some(path) = &checked_out {
+            if !let_go(pool, &home, path, &unit, supervision).await? {
+                continue;
+            }
+        }
+        let tip = format!("refs/heads/{branch}");
+        git::change(
+            repo,
+            Effect::Refs,
+            &["update-ref", unit.name(), &tip],
+            supervision,
+        )
+        .await?;
+        git::change(
+            repo,
+            Effect::Metadata,
+            &["branch", "-D", &branch],
+            supervision,
+        )
+        .await?;
+        taken.push(branch);
+    }
+    Ok(taken)
+}
+
+/// The legacy unit branches a pass of `gc` would take in, taking none:
+/// each one checked out nowhere, or in a clean checkout of the pool —
+/// unless a process holds that checkout when the pass runs.
+pub async fn adoptable_unit_branches(
+    pool: &CheckoutPool,
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<String>, WorktreeError> {
+    let home = pool.home(supervision).await?;
+    let mut adoptable = Vec::new();
+    for (branch, checked_out) in legacy_branches(repo, None, supervision).await? {
+        if super::super::UnitRef::of_legacy(&branch).is_none() {
+            continue;
+        }
+        let free = match &checked_out {
+            None => true,
+            Some(path) => free_pool_checkout(pool, &home, path, supervision).await?,
+        };
+        if free {
+            adoptable.push(branch);
+        }
+    }
+    Ok(adoptable)
+}
+
+/// Whether `path` is a checkout of the pool that no process holds and
+/// nothing in which is uncommitted. The hold is taken for the check and let
+/// go after it.
+async fn free_pool_checkout(
+    pool: &CheckoutPool,
+    home: &Path,
+    path: &Path,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    if !pool.owns(path, supervision).await? {
+        return Ok(false);
+    }
+    let Some((number, path)) = slot::number_of(home, path).await else {
+        return Ok(false);
+    };
+    let held = slot::hold(home, number, Contention::Refuse, None, supervision).await?;
+    let Some(_lease) = held else {
+        return Ok(false);
+    };
+    let status = git::tree_state(&path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    Ok(status.clean)
+}
+
+/// The legacy unit branches — `run`'s, or every run's — each with the
+/// checkout it is checked out in, if any.
+async fn legacy_branches(
+    repo: &Path,
+    run: Option<&yunta_core::RunId>,
+    supervision: Supervision<'_>,
+) -> Result<Vec<(String, Option<PathBuf>)>, WorktreeError> {
+    let prefix = match run {
+        Some(run) => super::super::legacy_unit_branches_of(run),
+        None => format!("{}/", super::super::LEGACY_UNIT_BRANCHES),
+    };
+    let names = format!("refs/heads/{prefix}");
+    let listed = git::read(
+        repo,
+        &["for-each-ref", "--format=%(refname:short)", &names],
+        supervision,
+    )
+    .await?;
+    let branches: Vec<&str> = listed.lines().filter(|line| !line.is_empty()).collect();
+    if branches.is_empty() {
+        return Ok(Vec::new());
+    }
+    let listing = git::read(repo, &["worktree", "list", "--porcelain"], supervision).await?;
+    let mut checked_out = std::collections::HashMap::new();
+    for listed in super::super::checkouts(&listing) {
+        if let Some(branch) = listed.branch {
+            let short = branch.trim_start_matches("refs/heads/").to_string();
+            checked_out.insert(short, listed.path);
+        }
+    }
+    Ok(branches
+        .into_iter()
+        .map(|branch| (branch.to_string(), checked_out.remove(branch)))
+        .collect())
+}
+
+/// Lets the checkout at `path` go of the branch it is on, kept for `unit`
+/// from here — when it is one of the pool's, nobody holds it, and nothing
+/// in it is uncommitted. Answers whether it did.
+async fn let_go(
+    pool: &CheckoutPool,
+    home: &Path,
+    path: &Path,
+    unit: &super::super::UnitRef,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    let Some((number, path)) = slot::number_of(home, path).await else {
+        return Ok(false);
+    };
+    let held = slot::hold(
+        home,
+        number,
+        Contention::Refuse,
+        pool.holder.as_deref(),
+        supervision,
+    );
+    let Some(lease) = held.await? else {
+        return Ok(false);
+    };
+    let status = git::tree_state(&path, &[SCOPE_EXPANSION_REQUEST_FILE], supervision).await?;
+    if !status.clean {
+        return Ok(false);
+    }
+    git::change(
+        &path,
+        Effect::Metadata,
+        &["switch", "--detach", "-q"],
+        supervision,
+    )
+    .await?;
+    lease.keep_for(Some(unit)).await;
+    Ok(true)
+}

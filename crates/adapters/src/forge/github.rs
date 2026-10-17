@@ -9,19 +9,25 @@
 //! `pulls/.../comments`), and `crates/adapters/tests/forge_github.rs`
 //! drives this client against a local stub that answers in that shape.
 //! What no test here can tell is whether the live API still answers
-//! that way; that is the manual smoke test's job.
+//! that way; a check run by hand against the real forge covers it, and
+//! cargo test runs the stubs only.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use yunta_core::commit_message::CommitMessage;
 
-use base64::Engine;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use yunta_core::step::Spell;
 use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
 
-use super::{
-    Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
+use yunta_core::port::{
+    Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
+    ReviewComment,
 };
+
+mod commit;
+mod poll;
 
 const API_VERSION: &str = "2022-11-28";
 
@@ -42,6 +48,7 @@ pub struct GitHubForge {
     repo: GitHubRepo,
     token: Secret<String>,
     base_url: String,
+    pub(super) spell: Spell,
 }
 
 /// How a [`GitHubForge`] is built: the public API and the default
@@ -52,6 +59,7 @@ pub struct GitHubForgeBuilder {
     token: Secret<String>,
     base_url: String,
     timeout: Duration,
+    spell: Spell,
 }
 
 impl GitHubForgeBuilder {
@@ -73,33 +81,36 @@ impl GitHubForgeBuilder {
             .build()
             .map_err(|source| ForgeError::Transport {
                 action: "build the HTTP client",
-                source,
+                source: Box::new(source),
             })?;
         Ok(GitHubForge {
             client,
             repo: self.repo,
             token: self.token,
             base_url: self.base_url.trim_end_matches('/').to_string(),
+            spell: self.spell,
         })
     }
 }
 
 impl GitHubForge {
-    pub fn configure(repo: GitHubRepo, token: Secret<String>) -> GitHubForgeBuilder {
+    /// A builder for a forge that writes its next steps with `spell`.
+    pub fn configure(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> GitHubForgeBuilder {
         GitHubForgeBuilder {
             repo,
             token,
             base_url: "https://api.github.com".to_string(),
             timeout: REQUEST_TIMEOUT,
+            spell,
         }
     }
 
     /// Against the public API, with the default patience.
-    pub fn new(repo: GitHubRepo, token: Secret<String>) -> Result<Self, ForgeError> {
-        Self::configure(repo, token).build()
+    pub fn new(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> Result<Self, ForgeError> {
+        Self::configure(repo, token, spell).build()
     }
 
-    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+    pub(super) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         self.client
             .request(method, format!("{}{path}", self.base_url))
             .bearer_auth(self.token.expose())
@@ -109,7 +120,7 @@ impl GitHubForge {
     }
 
     /// `/repos/{owner}/{name}{rest}`.
-    fn repo_path(&self, rest: &str) -> String {
+    pub(super) fn repo_path(&self, rest: &str) -> String {
         format!("/repos/{}/{}{rest}", self.repo.owner(), self.repo.name())
     }
 
@@ -123,12 +134,15 @@ impl GitHubForge {
         let response = request
             .send()
             .await
-            .map_err(|source| ForgeError::Transport { action, source })?;
+            .map_err(|source| ForgeError::Transport {
+                action,
+                source: Box::new(source),
+            })?;
         answer(action, response).await
     }
 
     /// The answer's body as `T`.
-    async fn read<T: DeserializeOwned>(
+    pub(super) async fn read<T: DeserializeOwned>(
         &self,
         action: &'static str,
         request: reqwest::RequestBuilder,
@@ -137,7 +151,10 @@ impl GitHubForge {
             .await?
             .json()
             .await
-            .map_err(|source| ForgeError::Response { action, source })
+            .map_err(|source| ForgeError::Response {
+                action,
+                source: Box::new(source),
+            })
     }
 
     /// Every item of a paginated list, read page after page.
@@ -166,108 +183,14 @@ impl GitHubForge {
         Ok(items)
     }
 
-    async fn base_branch_sha(&self, base_branch: &str) -> Result<String, ForgeError> {
-        #[derive(Deserialize)]
-        struct RefObject {
-            object: RefSha,
-        }
-        #[derive(Deserialize)]
-        struct RefSha {
-            sha: String,
-        }
-        let parsed: RefObject = self
-            .read(
-                "resolve the base branch",
-                self.request(
-                    reqwest::Method::GET,
-                    &self.repo_path(&format!("/git/ref/heads/{base_branch}")),
-                ),
-            )
-            .await?;
-        Ok(parsed.object.sha)
-    }
-
-    /// Idempotent: GitHub answers 422 when the ref already exists, which
-    /// is exactly the "already published, `resume` is calling this
-    /// again" case — not an error here.
-    async fn ensure_branch(&self, branch: &str, base_sha: &str) -> Result<(), ForgeError> {
-        let request = self
-            .request(reqwest::Method::POST, &self.repo_path("/git/refs"))
-            .json(&serde_json::json!({
-                "ref": format!("refs/heads/{branch}"),
-                "sha": base_sha,
-            }));
-        match self.send("create the branch", request).await {
-            Ok(_) | Err(ForgeError::Http { status: 422, .. }) => Ok(()),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// GitHub's Contents API needs the existing blob's `sha` to update a
-    /// file that's already there (409 without it) but must omit it to
-    /// create a new one — so this looks the file up first. Only a 404
-    /// means "no such file"; any other refusal is reported as it is.
-    async fn existing_file_sha(
-        &self,
-        path: &str,
-        branch: &str,
-    ) -> Result<Option<String>, ForgeError> {
-        #[derive(Deserialize)]
-        struct ContentsMeta {
-            sha: String,
-        }
-        let action = "read an artifact's current version";
-        let request = self.request(
-            reqwest::Method::GET,
-            &self.repo_path(&format!("/contents/{path}?ref={branch}")),
-        );
-        match self.send(action, request).await {
-            Ok(response) => {
-                let meta: ContentsMeta = response
-                    .json()
-                    .await
-                    .map_err(|source| ForgeError::Response { action, source })?;
-                Ok(Some(meta.sha))
-            }
-            Err(ForgeError::Http { status: 404, .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    async fn commit_artifact(
-        &self,
-        path: &str,
-        content: &[u8],
-        branch: &str,
-        message: &str,
-    ) -> Result<(), ForgeError> {
-        let existing_sha = self.existing_file_sha(path, branch).await?;
-        let mut body = serde_json::json!({
-            "message": message,
-            "content": base64::engine::general_purpose::STANDARD.encode(content),
-            "branch": branch,
-        });
-        if let (Some(sha), Some(object)) = (existing_sha, body.as_object_mut()) {
-            object.insert("sha".to_string(), serde_json::Value::String(sha));
-        }
-        let request = self
-            .request(
-                reqwest::Method::PUT,
-                &self.repo_path(&format!("/contents/{path}")),
-            )
-            .json(&body);
-        self.send("commit an artifact", request).await?;
-        Ok(())
-    }
-
     /// The open pull request on `branch` carrying this run's marker —
     /// the one a resumed gate keeps using. A PR someone closed or
     /// merged is never picked up again.
-    async fn find_open_pr(
+    pub(super) async fn find_open_pr(
         &self,
         branch: &str,
         run_id: &str,
-    ) -> Result<Option<PublishedGate>, ForgeError> {
+    ) -> Result<Option<PullRequestRef>, ForgeError> {
         #[derive(Deserialize)]
         struct PrSummary {
             number: u64,
@@ -287,15 +210,14 @@ impl GitHubForge {
                 ),
             )
             .await?;
-        let marker = run_marker(run_id);
         Ok(prs
             .into_iter()
             .find(|pr| {
                 pr.body
                     .as_deref()
-                    .is_some_and(|body| body.contains(&marker))
+                    .is_some_and(|body| super::marked(body, run_id))
             })
-            .map(|pr| PublishedGate {
+            .map(|pr| PullRequestRef {
                 url: pr.html_url,
                 number: pr.number,
             }))
@@ -327,11 +249,6 @@ impl GitHubForge {
             })
             .collect())
     }
-}
-
-/// The line in a PR body that ties it to its run.
-fn run_marker(run_id: &str) -> String {
-    format!("run_id: `{run_id}`")
 }
 
 /// A success as it is; a rate limit as [`ForgeError::RateLimited`];
@@ -393,144 +310,52 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 
 #[async_trait::async_trait]
 impl Forge for GitHubForge {
-    async fn publish(&self, req: &PublishRequest) -> Result<PublishedGate, ForgeError> {
-        if let Some(existing) = self.find_open_pr(&req.branch, &req.run_id).await? {
-            return Ok(existing);
+    async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
+        let run_id = req.run_id.as_str();
+        let existing = self.find_open_pr(&req.branch, run_id).await?;
+        if existing.is_none() {
+            let base_sha = self.base_branch_sha(&req.base_branch).await?;
+            self.ensure_branch(&req.branch, &base_sha).await?;
         }
-
-        let base_sha = self.base_branch_sha(&req.base_branch).await?;
-        self.ensure_branch(&req.branch, &base_sha).await?;
-        for (path, content) in &req.artifacts {
-            self.commit_artifact(
-                path,
-                content,
-                &req.branch,
-                &format!("yunta: publish gate artifacts for run {}", req.run_id),
-            )
-            .await?;
+        // Every lap commits what it decides on, so a pull request reused
+        // after a request for changes shows the correction.
+        let message = CommitMessage::new(
+            format!("publish what gate `{}` decides on", req.decision.node),
+            &req.run_id,
+        )
+        .node(&req.decision.node)
+        .text();
+        for (path, content) in super::gate_files(req, &*self.spell) {
+            self.commit_artifact(&path, &content, &req.branch, &message)
+                .await?;
         }
-
-        #[derive(Deserialize)]
-        struct CreatedPr {
-            number: u64,
-            html_url: String,
+        match existing {
+            Some(existing) => Ok(existing),
+            None => {
+                self.create_pr(
+                    &super::gate_title(req),
+                    &req.branch,
+                    &req.base_branch,
+                    &super::gate_body(req, &*self.spell),
+                )
+                .await
+            }
         }
-        let request = self
-            .request(reqwest::Method::POST, &self.repo_path("/pulls"))
-            .json(&serde_json::json!({
-                "title": format!("yunta: {}", req.summary),
-                "head": req.branch,
-                "base": req.base_branch,
-                "body": format!(
-                    "{}\n\n---\n{}\n\n_Opened by Yunta — approve or request \
-                     changes like any other PR review._",
-                    req.summary,
-                    run_marker(&req.run_id)
-                ),
-            }));
-        let created: CreatedPr = self.read("open the pull request", request).await?;
-        Ok(PublishedGate {
-            url: created.html_url,
-            number: created.number,
-        })
     }
 
-    async fn poll(&self, gate: &PublishedGate) -> Result<PolledGate, ForgeError> {
-        #[derive(Deserialize)]
-        struct PrDetail {
-            state: String,
-            #[serde(default)]
-            merged: bool,
-            merged_by: Option<User>,
-            merge_commit_sha: Option<String>,
-            head: PrHead,
-        }
-        #[derive(Deserialize)]
-        struct PrHead {
-            sha: String,
-        }
-        #[derive(Deserialize)]
-        struct User {
-            login: String,
-        }
-        let detail: PrDetail = self
-            .read(
-                "read the pull request",
-                self.request(
-                    reqwest::Method::GET,
-                    &self.repo_path(&format!("/pulls/{}", gate.number)),
-                ),
-            )
-            .await?;
+    async fn open_pull_request(
+        &self,
+        req: &PullRequestRequest,
+    ) -> Result<PullRequestRef, ForgeError> {
+        self.open(req).await
+    }
 
-        let head_sha = parse_sha("read the pull request", &detail.head.sha)?;
-        if detail.state != "open" {
-            let review = if detail.merged {
-                ReviewOutcome::Merged {
-                    by: match detail.merged_by {
-                        Some(user) => parse_responder("read the pull request", &user.login)?,
-                        None => Responder::from_static("(unknown)"),
-                    },
-                    merge_sha: match detail.merge_commit_sha {
-                        Some(sha) => parse_sha("read the pull request", &sha)?,
-                        None => head_sha.clone(),
-                    },
-                }
-            } else {
-                ReviewOutcome::Closed
-            };
-            return Ok(PolledGate { head_sha, review });
-        }
+    async fn probe(&self) -> Result<ForgeProbe, ForgeError> {
+        self.repository().await
+    }
 
-        #[derive(Deserialize)]
-        struct Review {
-            state: String,
-            user: User,
-            commit_id: Option<String>,
-        }
-        let reviews: Vec<Review> = self
-            .read_pages(
-                "read the reviews",
-                &self.repo_path(&format!("/pulls/{}/reviews", gate.number)),
-            )
-            .await?;
-
-        // Last decisive review wins (APPROVED/CHANGES_REQUESTED) —
-        // COMMENTED/DISMISSED aren't decisions this maps to anything.
-        // GitHub returns reviews in submission order, oldest first.
-        let last_decision = reviews
-            .into_iter()
-            .rfind(|r| r.state == "APPROVED" || r.state == "CHANGES_REQUESTED");
-
-        let review = match last_decision {
-            None => ReviewOutcome::Pending,
-            Some(r) => match r.commit_id.as_deref().map(str::parse::<CommitSha>) {
-                Some(Ok(reviewed_sha)) if r.state == "APPROVED" => ReviewOutcome::Approved {
-                    by: parse_responder("read the pull request reviews", &r.user.login)?,
-                    reviewed_sha,
-                },
-                Some(Ok(reviewed_sha)) => {
-                    let comments = self.review_comments(gate.number).await?;
-                    ReviewOutcome::ChangesRequested {
-                        by: parse_responder("read the pull request reviews", &r.user.login)?,
-                        reviewed_sha,
-                        comments,
-                    }
-                }
-                // A review that names no commit covers no code: it decides
-                // nothing, so the gate keeps waiting and the log says why.
-                _ => {
-                    tracing::warn!(
-                        review_state = %r.state,
-                        commit_id = ?r.commit_id,
-                        "a review without a commit id is not a decision; the gate keeps waiting"
-                    );
-                    ReviewOutcome::Pending
-                }
-            },
-        };
-
-        Ok(PolledGate { head_sha, review })
+    async fn poll(&self, gate: &PullRequestRef) -> Result<PolledGate, ForgeError> {
+        self.poll_gate(gate).await
     }
 }
 

@@ -36,10 +36,10 @@ fn a_never_triggered_reroute_surfaces_in_both_check_and_stats() {
         check.status.success(),
         "advisory findings must never fail check"
     );
+    let said = stdout(&check);
     assert!(
-        stderr(&check).contains("never fired"),
-        "got: {}",
-        stderr(&check)
+        said.find("never fired") > said.find("OK"),
+        "the advice follows check's verdict: {said}"
     );
     assert!(
         stdout(&check).contains("OK"),
@@ -84,8 +84,8 @@ fn fewer_than_three_runs_surfaces_no_findings_at_all() {
     let check = yunta_in!(&repo, &home, &["check", "wf.yaml"]);
     assert!(check.status.success());
     assert!(
-        !stderr(&check).contains("verification performance"),
+        !stdout(&check).contains("how its checks performed"),
         "got: {}",
-        stderr(&check)
+        stdout(&check)
     );
 }

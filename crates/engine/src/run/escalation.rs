@@ -1,140 +1,138 @@
-//! The escalation object, built once and shared. Two
-//! constructors — one per gate shape — used by both
-//! the live pause path (`run/mod.rs`'s `GateExhaustedReroutes` arm and
-//! `gate_exec::resolve_internal_gate`, which await a `HumanInteraction`
-//! with the built object synchronously) and [`current_escalation`]
+//! The escalation object, built once and shared. Three
+//! constructors — one per shape with a menu — used by both
+//! the live pause path (`run/exec.rs`'s `GateExhaustedReroutes` and
+//! `EscalateFailure` arms and `gate_exec::resolve_internal_gate`, which
+//! await a `HumanInteraction` with the built object synchronously) and [`current_escalation`]
 //! (which rebuilds the identical object for a run already paused, no
 //! live process involved) — one construction site each, not two copies
 //! that could drift apart.
 
+use std::sync::Arc;
+
 use yunta_core::events::{
-    EventDraft, EventPayload, GateOption, GateResolvedPayload, GateWaitingPayload, HumanChoice,
-    StoredEvent,
+    Asks, Claim, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu, GateOption,
+    GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal, Remedy, Withheld,
 };
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, RunId, Seq, Workflow};
+use yunta_core::protected::Protected;
+use yunta_core::reserved::ReservedOption;
+use yunta_core::{
+    Manifest, ModeName, NodeId, NonEmpty, OptionId, Redactor, RunId, Seq, TaskId, Workflow,
+};
 
-use super::schedule::{self, ScheduleStep};
-use crate::reserved::ReservedOption;
+use super::schedule::{self, Decision};
+use super::{RunCtx, RunError};
+use crate::replay::RunState;
+use crate::run_log::RunLog;
+use yunta_core::events::GateEvent;
 
-/// Whether an event is the run-level `run_paused` marker — the one predicate
-/// the resolve-gate path reads a parked run's log by.
-fn is_run_paused(event: &StoredEvent) -> bool {
-    matches!(event.payload(), Some(EventPayload::RunPaused(_)))
-}
-
-/// The escalation object for a node whose re-routes are exhausted:
-/// retry once more, abort, or — when `modes:` has somewhere later to go
-/// — promote.
+/// The escalation object for a node whose re-routes are exhausted: retry once
+/// more, abort, or — when `modes:` has somewhere later to go — promote. The
+/// menu carries the failure that exhausted the re-routes and the re-route it
+/// closes; a surface writes the words of each option from that menu.
 pub(crate) fn build_reroute_escalation(
     workflow: &Workflow,
     mode_name: &ModeName,
     node: &NodeId,
     goto: &NodeId,
     max_reroutes: u32,
-    cause: &str,
-) -> GateWaitingPayload {
+    cause: &Failure,
+) -> Escalation {
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
-    let mut options = vec![
-        GateOption {
-            id: ReservedOption::Retry.id(),
-            label: format!("Re-route to `{goto}` once more"),
-            tradeoff: format!(
-                "Uses one extra correction attempt beyond the declared max_reroutes \
-                 ({max_reroutes}); escalates again if `{goto}` doesn't fix it"
-            ),
-        },
-        GateOption {
-            id: ReservedOption::Abort.id(),
-            label: "Abort the run".to_string(),
-            tradeoff: "Stops here; nothing further executes".to_string(),
-        },
-    ];
-    if let Some(next_mode) = &suggested_mode {
-        options.push(GateOption {
-            id: ReservedOption::Promote.id(),
-            label: format!("Promote to mode `{next_mode}`"),
-            tradeoff: format!(
-                "Closes this run (`run_finished: promoted`) and starts a successor in \
-                 `{next_mode}`, inheriting this run's artifacts — there's no \
-                 mechanism to demote back to `{mode_name}`"
-            ),
-        });
+    let mut rest = vec![GateOption::reserved(ReservedOption::Abort)];
+    if suggested_mode.is_some() {
+        rest.push(GateOption::reserved(ReservedOption::Promote));
     }
-    GateWaitingPayload {
-        summary: format!(
-            "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` are \
-             exhausted: {cause}"
-        ),
-        evidence: cause.to_string(),
-        options,
-        external_ref: None,
-    }
+    let menu = FailureMenu {
+        attempt: max_reroutes + 1,
+        failure: cause.clone(),
+        remedies: Vec::new(),
+        stuck: None,
+        reroute: Some(ExhaustedReroute {
+            goto: goto.clone(),
+            max_reroutes,
+            next_mode: suggested_mode,
+        }),
+    };
+    // The cause travels in the menu, and the re-route it closes with it, so
+    // the claim names only the node.
+    Escalation::new(
+        Claim::NodeFailed { node: node.clone() },
+        Menu::Failure(Box::new(menu)),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Retry), rest)),
+    )
 }
 
-/// The escalation object for an unresolved internal gate (`kind: gate`,
-/// `external: None`): its declared options (default: a single
-/// `approve`), each with a tradeoff derived from its own `on:` mapping,
-/// plus the engine's own `abort` unless the author already claimed
-/// that id.
-pub(crate) fn build_internal_gate_escalation(
+/// The escalation object for a node that failed with no re-route of its own
+/// while the run's `defaults.on_failure` is `pause`: its options are each
+/// reserved option its remedies name, once, and abort.
+///
+/// Nothing re-routes such a failure, so a person who fixes its cause — a file
+/// the node reads, a variable a source needs — has no other way to hand the
+/// node back: a resume alone finds it failed and pauses again. The outlook
+/// decides what a way back is: a remedy only where the input it waits for can
+/// change, and no remedy at all, with the reason, where none can.
+pub(crate) fn build_failure_escalation(
     node: &NodeId,
-    assignee: &str,
-    message: Option<&str>,
-    options: &[OptionId],
-    on: &indexmap::IndexMap<OptionId, NodeId>,
-) -> GateWaitingPayload {
-    let declared: Vec<OptionId> = if options.is_empty() {
-        vec![ReservedOption::Approve.id()]
-    } else {
-        options.to_vec()
+    failure: &Failure,
+    next: u32,
+    outlook: &Outlook,
+) -> Escalation {
+    let remedies: &[Remedy] = match outlook {
+        Outlook::Choose(remedies) => remedies,
+        _ => &[],
     };
-    let mut gate_options: Vec<GateOption> = declared
-        .iter()
-        .map(|id| GateOption {
-            id: id.clone(),
-            label: id.to_string(),
-            tradeoff: match on.get(id) {
-                Some(target) => {
-                    format!("re-routes to `{target}` and asks again once it completes")
-                }
-                None => "resolves this gate; the flow continues".to_string(),
-            },
-        })
-        .collect();
-    let engine_abort = !declared
-        .iter()
-        .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
-    if engine_abort {
-        gate_options.push(GateOption {
-            id: ReservedOption::Abort.id(),
-            label: "Abort the run".to_string(),
-            tradeoff: "Pauses here; nothing further executes".to_string(),
-        });
+    let stuck = match outlook {
+        Outlook::Stuck(stuck) => Some(stuck.clone()),
+        _ => None,
+    };
+    // Abort comes last and the list is never empty: each option goes in front
+    // of the options built so far, so the options read in the order the
+    // remedies name them.
+    let mut options = NonEmpty::from((GateOption::reserved(ReservedOption::Abort), Vec::new()));
+    for option in named_options(remedies).into_iter().rev() {
+        options = options.preceded_by(GateOption::reserved(option));
     }
-    GateWaitingPayload {
-        summary: message
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("gate `{node}` needs a decision")),
-        evidence: format!("assignee: {assignee}"),
-        options: gate_options,
-        external_ref: None,
+    // The summary stays the node's name: the failure's facts travel in the menu.
+    let menu = FailureMenu {
+        attempt: next,
+        failure: failure.clone(),
+        remedies: remedies.to_vec(),
+        stuck,
+        reroute: None,
+    };
+    Escalation::new(
+        Claim::NodeFailed { node: node.clone() },
+        Menu::Failure(Box::new(menu)),
+        options,
+    )
+}
+
+/// The reserved options the remedies name, each once and in the order the
+/// remedies first name it. Abort is left out: every menu ends with it, once.
+fn named_options(remedies: &[Remedy]) -> Vec<ReservedOption> {
+    let mut named: Vec<ReservedOption> = Vec::new();
+    for remedy in remedies {
+        if remedy.option != ReservedOption::Abort && !named.contains(&remedy.option) {
+            named.push(remedy.option);
+        }
     }
+    named
 }
 
 /// Reconstructs the escalation object a paused run is
 /// currently waiting on, purely from the manifest and its own log — no
 /// live process required. This is what lets `resolve_gate` (a `yunta
 /// mcp` tool call, running in a process that never paused this run)
-/// know what it's answering: `schedule::next_step` is pure, so calling
-/// it again on the same log deterministically reaches the same
-/// `GateExhaustedReroutes`/`ResolveInternalGate` step the paused
-/// invocation saw — same inputs, same escalation, even though nothing
+/// know what it's answering: `schedule::decide` is pure, so asking it
+/// again about the same state deterministically reaches the same
+/// `GateExhaustedReroutes`/`EscalateFailure`/`ResolveInternalGate` step
+/// the paused invocation saw — same inputs, same escalation, even though nothing
 /// was ever logged for the "no live surface" case (the one who escalates
 /// does the work of building the decision — that's a computation, not
 /// a persisted fact, until a human actually answers).
 ///
-/// `None` covers every pause this function's two cases don't: a plain
-/// failure with no `on_failure`, a budget cap, a cancellation, an
+/// `None` covers every pause this function's three cases don't: a failed
+/// gate node, a budget cap, a cancellation, an
 /// external gate degraded to console for lack of a forge (deliberately
 /// out of scope here — whether a forge is reachable depends on the
 /// calling machine's own environment, not on the log, so it isn't a
@@ -145,13 +143,62 @@ pub(crate) fn build_internal_gate_escalation(
 /// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
 /// against the right node, the same one the live pause path would have
 /// used.
-pub fn current_escalation(
+///
+/// A gate's menu is built from the documents it shows, read from
+/// `run_dir` as the run holds them — the same reading the live prompt
+/// makes, so the menu a later process rebuilds is the one a person was
+/// put.
+pub async fn current_escalation(
     manifest: &Manifest,
-    events: &[StoredEvent],
-) -> Option<(NodeId, GateWaitingPayload)> {
-    let mode_name = current_mode_name(events)?;
-    match current_step(manifest, events)? {
-        ScheduleStep::GateExhaustedReroutes {
+    run_dir: &std::path::Path,
+    state: &RunState,
+) -> Result<Option<(NodeId, Escalation)>, RunError> {
+    let mode_name = state.run.mode().clone();
+    // The set the wake decides with, read from the state: a grant this menu
+    // offers is one the wake does not refuse.
+    let protected = Arc::new(super::protected::of_state(manifest, run_dir, state).await?);
+    let Some(decision) = current_decision(manifest, state, &mode_name, protected) else {
+        return Ok(None);
+    };
+    if let Decision::ResolveInternalGate { node } = &decision {
+        let Ok(node) = super::find_node(&manifest.workflow, node) else {
+            return Ok(None);
+        };
+        let Some(gate) = super::internal_gate::InternalGate::of(node) else {
+            return Ok(None);
+        };
+        return Ok(gate
+            .asked(&manifest.workflow, run_dir, state)
+            .await?
+            .ok()
+            .map(|escalation| (node.id.clone(), escalation)));
+    }
+    Ok(menu_of(manifest, &mode_name, decision))
+}
+
+/// The node a parked run waits on a decision from, if any — without
+/// reading what its gate shows: whether a run needs someone, not what it
+/// asks them. It names a node exactly when [`current_escalation`] builds
+/// that node's menu, so no surface offers a choice the menu does not hold.
+pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> {
+    let mode_name = state.run.mode().clone();
+    // Which node waits does not depend on what the set protects, and no
+    // document is read here, so the empty set decides the same node.
+    match current_decision(manifest, state, &mode_name, Arc::default())? {
+        Decision::ResolveInternalGate { node } => Some(node),
+        decision => menu_of(manifest, &mode_name, decision).map(|(node, _)| node),
+    }
+}
+
+/// The menu of a decision that reads no document: a node's re-routes
+/// exhausted, or a failure to decide on.
+fn menu_of(
+    manifest: &Manifest,
+    mode_name: &ModeName,
+    decision: Decision,
+) -> Option<(NodeId, Escalation)> {
+    match decision {
+        Decision::GateExhaustedReroutes {
             node,
             goto,
             max_reroutes,
@@ -159,7 +206,7 @@ pub fn current_escalation(
         } => {
             let escalation = build_reroute_escalation(
                 &manifest.workflow,
-                &mode_name,
+                mode_name,
                 &node,
                 &goto,
                 max_reroutes,
@@ -167,50 +214,36 @@ pub fn current_escalation(
             );
             Some((node, escalation))
         }
-        ScheduleStep::ResolveInternalGate { node } => {
-            let node = super::find_node(&manifest.workflow, &node).ok()?;
-            let NodeKind::Gate {
-                assignee,
-                message,
-                options,
-                on,
-                external: None,
-            } = &node.kind
-            else {
-                return None;
-            };
-            let escalation =
-                build_internal_gate_escalation(&node.id, assignee, message.as_deref(), options, on);
-            Some((node.id.clone(), escalation))
+        Decision::EscalateFailure {
+            node,
+            failure,
+            next_attempt,
+            outlook,
+        } => {
+            let escalation = build_failure_escalation(&node, &failure, next_attempt, &outlook);
+            Some((node, escalation))
         }
-        _ => None,
-    }
-}
-
-fn current_mode_name(events: &[StoredEvent]) -> Option<ModeName> {
-    match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::RunCreated(p)) => Some(p.mode.clone()),
         _ => None,
     }
 }
 
 /// The raw scheduler decision behind [`current_escalation`] — `None`
-/// for every step that isn't one of the two gate shapes.
-fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleStep> {
-    let mode_name = current_mode_name(events)?;
-    let mode_nodes = crate::modes::mode_included_nodes(&manifest.workflow, &mode_name);
-    let step = schedule::next_step(
+/// for every decision that isn't one of the three shapes with a menu.
+fn current_decision(
+    manifest: &Manifest,
+    state: &RunState,
+    mode_name: &ModeName,
+    protected: Arc<Protected>,
+) -> Option<Decision> {
+    let decision = schedule::decide(
         &manifest.workflow,
-        events,
-        manifest.max_parallel_nodes,
-        manifest.config.resolved_on_interrupt(),
-        manifest.config.resolved_on_failure(),
-        mode_nodes.as_ref(),
+        state,
+        &schedule::Policy::of(manifest, mode_name, &state.run, protected),
     );
-    match step {
-        ScheduleStep::GateExhaustedReroutes { .. } | ScheduleStep::ResolveInternalGate { .. } => {
-            Some(step)
-        }
+    match decision {
+        Decision::GateExhaustedReroutes { .. }
+        | Decision::EscalateFailure { .. }
+        | Decision::ResolveInternalGate { .. } => Some(decision),
         _ => None,
     }
 }
@@ -226,51 +259,48 @@ fn current_step(manifest: &Manifest, events: &[StoredEvent]) -> Option<ScheduleS
 /// distill+successor needs) and internal gates alike, with zero
 /// duplicated consequence logic that could drift.
 ///
-/// Preconditions: the run must be parked (its last event is
+/// Preconditions: the run must be parked (the last event it replays is
 /// `run_paused` — refuses `NotPaused` otherwise, which also removes any
 /// race with a live process about to ask the same question), and the
 /// chosen option must be on the reconstructed escalation's own menu.
 pub async fn resolve_gate(
     manifest: &Manifest,
+    run_dir: &std::path::Path,
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     clock: &dyn yunta_core::Clock,
     choice: HumanChoice,
+    redactor: &Redactor,
 ) -> Result<(), ResolveGateError> {
-    let events = storage.events_for_run(run_id.clone()).await?;
-    if !events.last().is_some_and(is_run_paused) {
+    let state = crate::replay::RunView::of(storage.events_for_run(run_id.clone()).await?).state;
+    if !state.tail_paused() {
         return Err(ResolveGateError::NotPaused);
     }
-    let Some((node, escalation)) = current_escalation(manifest, &events) else {
+    let Some((node, escalation)) = current_escalation(manifest, run_dir, &state)
+        .await
+        .map_err(Box::new)?
+    else {
         return Err(ResolveGateError::NothingToResolve);
     };
-    if !escalation.offers(&choice.option) {
-        return Err(ResolveGateError::UnknownOption {
-            chosen: choice.option,
-            declared: escalation.menu(),
-        });
-    }
+    escalation
+        .accepts(&choice)
+        .map_err(|refused| match refused {
+            Refusal::OffMenu { chosen, offered } => ResolveGateError::UnknownOption {
+                chosen,
+                declared: offered,
+            },
+            Refusal::Unsaid { chosen, asks } => ResolveGateError::Unsaid { chosen, asks },
+            Refusal::Withheld { withheld } => ResolveGateError::Withheld {
+                chosen: withheld.option.clone(),
+                withheld,
+            },
+        })?;
     let resolution = GateResolvedPayload::Chosen(choice);
-    storage
-        .append(
-            EventDraft {
-                run_id: run_id.clone(),
-                node_id: Some(node.clone()),
-                payload: EventPayload::GateWaiting(escalation),
-            },
-            clock.now(),
-        )
-        .await?;
-    storage
-        .append(
-            EventDraft {
-                run_id: run_id.clone(),
-                node_id: Some(node),
-                payload: EventPayload::GateResolved(resolution),
-            },
-            clock.now(),
-        )
-        .await?;
+    let log = RunLog::new(storage, run_id, clock, redactor);
+    let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
+    log.record(Some(&node), waiting).await?;
+    let resolved = EventPayload::Gates(GateEvent::Resolved(resolution));
+    log.record(Some(&node), resolved).await?;
     Ok(())
 }
 
@@ -283,59 +313,102 @@ pub async fn resolve_gate(
 /// a live-path pair (its consequence — a node event, or the abort's own
 /// `run_paused` — always lands right after); never a consumed abort (a
 /// fresh `run_paused` follows it, so a later manual resume asks again,
-/// today's exact semantics); never a decision from before a newer
+/// the semantics `resume` relies on); never a decision from before a newer
 /// failure. The decision also has to be a human's choice of an option
 /// `escalation`'s re-derived menu still offers; anything else (an
-/// option the menu dropped, a shape no surface produces) means ask
-/// normally, never guess.
+/// option the menu dropped, a shape no surface produces) means ask normally.
+///
+/// The window is [`RunState::pre_seeded`]'s to decide — it reads the
+/// three ledgers that say whether anything consumed the decision — and
+/// this adds the one thing that is not a fact of the log: whether the
+/// menu the run would ask with now still has that option on it. A
+/// mismatch means the escalation changed under the answer, and the run
+/// asks again.
 pub(crate) fn pre_seeded_resolution(
-    events: &[StoredEvent],
+    state: &RunState,
     node: &NodeId,
     escalation: &GateWaitingPayload,
-) -> Option<HumanChoice> {
-    let mut latest: Option<(Seq, GateResolvedPayload)> = None;
-    let mut blocker: Option<Seq> = None;
-    for event in events {
-        match event.payload() {
-            Some(EventPayload::GateResolved(p)) if event.node_id.as_ref() == Some(node) => {
-                latest = Some((event.seq, p.clone()));
-            }
-            Some(
-                EventPayload::NodeFailed(_)
-                | EventPayload::NodeRerouted(_)
-                | EventPayload::NodeFinished(_),
-            ) if event.node_id.as_ref() == Some(node) => {
-                blocker = blocker.max(Some(event.seq));
-            }
-            _ if is_run_paused(event) => blocker = blocker.max(Some(event.seq)),
-            _ => {}
+) -> Option<(HumanChoice, Seq)> {
+    match state.pre_seeded(node)? {
+        (GateResolvedPayload::Chosen(choice), at) if escalation.accepts(choice).is_ok() => {
+            Some((choice.clone(), at))
         }
+        _ => None,
     }
-    latest
-        .filter(|(seq, _)| Some(*seq) > blocker)
-        .and_then(|(_, resolution)| match resolution {
-            GateResolvedPayload::Chosen(choice) if escalation.offers(&choice.option) => {
-                Some(choice)
-            }
-            _ => None,
-        })
 }
 
+/// The answer `escalation` about `node` came to, and where the log holds it —
+/// or `None` when nobody answered. `task` is the task the question is about,
+/// when one is.
+///
+/// A decision `resolve_gate` pre-seeded onto the log while this run was
+/// parked is consumed here, never re-asked, and its escalation pair is
+/// already recorded so it is never re-emitted. The option is re-validated
+/// against the re-derived menu: a mismatch means ask normally. A decision
+/// made here is recorded as the same pair, after the answer, so a crash
+/// never leaves a question standing that nobody is asking.
+pub(super) async fn decided(
+    ctx: &RunCtx<'_>,
+    state: &RunState,
+    node: &NodeId,
+    task: Option<&TaskId>,
+    escalation: &Escalation,
+) -> Result<Option<(HumanChoice, Seq)>, RunError> {
+    if let Some(answer) = pre_seeded_resolution(state, node, escalation) {
+        return Ok(Some(answer));
+    }
+    let Some(choice) = ctx.ask_human(Some(node), task, escalation).await? else {
+        return Ok(None);
+    };
+    ctx.emit(
+        Some(node),
+        EventPayload::Gates(GateEvent::Waiting(Box::new(
+            escalation.clone().into_payload(),
+        ))),
+    )
+    .await?;
+    let resolved = ctx
+        .emit(
+            Some(node),
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                choice.clone(),
+            ))),
+        )
+        .await?;
+    Ok(Some((choice, resolved)))
+}
+
+/// Why a run's decision cannot be answered. Each variant's display is its
+/// code; the words a reader sees are the caller's to write.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveGateError {
-    #[error(
-        "this run isn't parked at a pause — a live process may still be driving it (or it \
-         already finished); check `yunta status` and try again once it's paused"
-    )]
+    /// The run is not stopped at a pause: a live process may drive it,
+    /// or it already finished.
+    #[error("not_paused")]
     NotPaused,
-    #[error(
-        "this run isn't currently waiting on a decision `resolve_gate` can answer — it's \
-         paused for a reason with no menu of options (a plain failure, a budget cap, an \
-         external gate with no forge)"
-    )]
+    /// The run is paused for a reason with no menu of options to answer.
+    #[error("nothing_to_resolve")]
     NothingToResolve,
-    #[error("option `{chosen}` isn't valid here — declared options: {declared}")]
+    /// The chosen option is not on the menu; `declared` lists the options it holds.
+    #[error("unknown_option")]
     UnknownOption { chosen: OptionId, declared: String },
-    #[error(transparent)]
+    /// The option sends the run back to a session, and the words it asks for
+    /// are the one thing that session would get.
+    #[error("unsaid")]
+    Unsaid { chosen: OptionId, asks: Asks },
+    /// The gate does not offer the option, and `withheld` says why.
+    #[error("withheld")]
+    Withheld {
+        chosen: OptionId,
+        withheld: Withheld,
+    },
+    #[error("storage")]
     Storage(#[from] yunta_storage::StorageError),
+    /// What the gate shows could not be read, so its menu cannot be
+    /// rebuilt as a person would be shown it.
+    #[error("documents")]
+    Documents(#[from] Box<RunError>),
 }
+
+#[cfg(test)]
+mod tests;

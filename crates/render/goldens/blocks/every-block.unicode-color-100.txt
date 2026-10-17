@@ -1,0 +1,23 @@
+␛[1mrun 7E5PH4␛[0m: ␛[1;35m◆␛[0m ␛[1;35mneeds you on a decision␛[0m
+  ␛[31m✗␛[0m ␛[31mfailed   ␛[0m lint      ␛[2mexit 101␛[0m
+  ␛[2m·␛[0m ␛[2mnever ran␛[0m fix-lint
+  ␛[33m▲␛[0m 1  cli-global  ␛[33mno test runs its spec␛[0m  Global and project flags for every pack command
+    2  docs        1 spec test            The guide says where a pack installs
+␛[2m  │ ␛[0mline 4
+␛[2m  │ ␛[0mline 5
+␛[2m  │ ␛[0mline 6
+␛[2m  │ ␛[0mline 7
+␛[2m  │ ␛[0mline 8
+␛[2m  │ ␛[0merror[E0425]: cannot find value `undefined_variable_name` in this scope, reported at src/lib.rs…
+  ␛[2m3 lines above␛[0m␛[2m · ␛[0m␛[2mwhole output: ␛[0m~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c
+  ␛[1mretry␛[0m — runs `fix-lint` once more
+    ␛[2mone more correction attempt beyond `max_reroutes`␛[0m
+    ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
+  ␛[1madjust␛[0m
+    ␛[2mthe run goes on with what you say␛[0m
+    ␛[2masks: what to change␛[0m
+    ␛[1myunta resolve-gate 7E5PH4 adjust --text "<answer>"␛[0m
+  ␛[2mprogress    ␛[0m nodes 1/2 · 1 failed
+  ␛[2mtokens      ␛[0m 20.2k spent · 3 past runs, median 18k tokens
+  ␛[1myunta status 7E5PH4␛[0m   ␛[2mwhere it stands␛[0m
+  ␛[1myunta close 7E5PH4 ␛[0m   ␛[2mcloses it for good␛[0m

@@ -3,11 +3,13 @@
 //! Shape is the frontier before this one: by the time a
 //! [`QuestionsFile`] exists, every key is known and `answer_type` is one
 //! of the three. What is left is the rule that spans the document — an
-//! id used twice — and the two a type cannot express: text that is
-//! blank, and a `choice` with nothing to choose from.
+//! id used twice — and the three a type cannot express: text that is
+//! blank, a `choice` with nothing to choose from, and an optional
+//! question that does not say what it assumes.
 
 use std::collections::HashSet;
 
+use super::QuestionFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{AnswerType, QuestionId, QuestionsFile};
 
@@ -27,12 +29,17 @@ pub(super) const RULES: &[Rule] = &[
         demand: "a question whose `answer_type` is `choice` lists the answers it allows in \
                  `values`",
     },
+    Rule {
+        code: RuleCode::UnstatedAssumption,
+        demand: "a question with `required: false` says in `assumes` what the work takes as \
+                 the answer when nobody gives one",
+    },
 ];
 
-fn broke(index: usize, id: &QuestionId, code: RuleCode, detail: &str) -> Diagnostic {
+fn broke(index: usize, id: &QuestionId, fault: QuestionFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Question(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }
 
@@ -44,27 +51,20 @@ pub(super) fn check(file: &QuestionsFile) -> Vec<Diagnostic> {
 
     for (index, question) in file.questions.iter().enumerate() {
         if !known_ids.insert(&question.id) {
-            broken.push(broke(
-                index,
-                &question.id,
-                RuleCode::DuplicateId,
-                "a second question already carries this id; every id is declared once",
-            ));
+            broken.push(broke(index, &question.id, QuestionFault::DuplicateQuestion));
         }
         if question.text.trim().is_empty() {
-            broken.push(broke(
-                index,
-                &question.id,
-                RuleCode::EmptyText,
-                "`text` is empty; a person has to be able to read the question",
-            ));
+            broken.push(broke(index, &question.id, QuestionFault::EmptyText));
         }
         if question.answer_type == AnswerType::Choice && question.values.is_empty() {
+            broken.push(broke(index, &question.id, QuestionFault::MissingValues));
+        }
+        let assumed = question.assumes.as_deref().map(str::trim);
+        if !question.required && assumed.is_none_or(str::is_empty) {
             broken.push(broke(
                 index,
                 &question.id,
-                RuleCode::MissingValues,
-                "`answer_type` is `choice` but `values` is empty; list the answers allowed",
+                QuestionFault::UnstatedAssumption,
             ));
         }
     }

@@ -1,23 +1,23 @@
+//! The workflows, fixtures, configs and scenarios more than one engine
+//! test needs, in the one place they are written.
+//!
+//! Every test binary that declares `mod common` compiles the whole
+//! module and uses a part of it, so what another binary needs reads as
+//! dead here.
 #![allow(dead_code)]
-#![allow(unused_imports)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{git, init_repo, Bench, FixedClock, ScriptedInteraction, MOCK_CONFIG};
+use yunta_adapters::MockAdapter;
+use yunta_core::events::{Failure, FindingEvent, NodeEvent, SessionEvent};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-pub static IDS: SeqIdSource = SeqIdSource::new("minted");
+pub mod menu;
+
+pub mod spec;
 
 // --- kind: questions ------------------------------------
 
@@ -36,7 +36,7 @@ nodes:
 /// questions — one `choice`, one optional `text` — over through
 /// `yunta_submit_questions`, and the engine writes `questions.yaml`.
 pub const QUESTIONS_FIXTURE: &str = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -53,10 +53,11 @@ sessions:
                 text: "Any notes?"
                 answer_type: text
                 required: false
+                assumes: "no notes"
     outcome: { type: completed, summary: "asked" }
 "#;
 
-// --- kind: questions → superficie interactiva ------------
+// --- kind: questions → interactive surface ---------------
 
 /// A test surface that answers questions from a script — `resolve`
 /// deliberately returns `None` so these tests prove `ask` alone drives
@@ -75,8 +76,8 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
     }
     async fn ask(
         &self,
+        _node: &yunta_core::NodeId,
         _questions: &yunta_core::QuestionsFile,
-        _interactive: bool,
     ) -> Option<yunta_engine::QuestionsReply> {
         Some(yunta_engine::QuestionsReply {
             answers: self.answers.clone(),
@@ -103,11 +104,14 @@ pub fn max_open_nodes(events: &[yunta_core::events::StoredEvent]) -> usize {
     let mut max = 0i32;
     for event in events {
         match event.payload() {
-            Some(EventPayload::NodeStarted(_)) => {
+            Some(EventPayload::Node(NodeEvent::Started(_))) => {
                 open += 1;
                 max = max.max(open);
             }
-            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)) => open -= 1,
+            Some(
+                EventPayload::Node(NodeEvent::Finished(_))
+                | EventPayload::Node(NodeEvent::Failed(_)),
+            ) => open -= 1,
             _ => {}
         }
     }
@@ -192,7 +196,7 @@ pub fn tasks_session(tasks: &str, summary: &str) -> String {
 /// Executor sessions a test appends land after it, in dispatch order.
 pub fn plan_session(tasks: &str) -> String {
     format!(
-        "capabilities: {{ run_tools: true }}\nsessions:\n{}",
+        "dialect: claude-code\nsessions:\n{}",
         tasks_session(tasks, "planned")
     )
 }
@@ -213,20 +217,12 @@ pub fn review_session(findings: &[(&str, &str, &str, &str, &str)]) -> String {
         })
         .collect();
     format!(
-        "capabilities: {{ run_tools: true }}\nsessions:\n  - steps:\n{steps}\
+        "dialect: claude-code\nsessions:\n  - steps:\n{steps}\
          \x20   outcome: {{ type: completed, summary: \"reviewed\" }}\n"
     )
 }
 
 // --- concurrency: N in loop nodes -----------------------
-
-pub const CONCURRENCY_CONFIG: &str = r#"
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
 
 /// An 8-independent-task document: no `depends_on` between any of them, each
 /// with its own disjoint scope (`out-N.txt`) so `tasks::register`
@@ -237,9 +233,10 @@ pub fn task_yaml(id: &str, title: &str, scope: &str, criterion: &str) -> String 
     )
 }
 
-pub fn eight_independent_tasks() -> String {
+/// A tasks document of `count` tasks, each writing a file of its own.
+pub fn independent_tasks(count: usize) -> String {
     let mut yaml = String::from("tasks:\n");
-    for n in 1..=8 {
+    for n in 1..=count {
         yaml.push_str(&format!(
             "  - id: task-{n}\n    title: \"Write out-{n}\"\n    scope: [\"out-{n}.txt\"]\n    criteria:\n      - cmd: \"test -f out-{n}.txt\"\n"
         ));
@@ -250,7 +247,7 @@ pub fn eight_independent_tasks() -> String {
 pub fn concurrency_workflow(concurrency: u32) -> String {
     format!(
         r#"
-name: eight-tasks
+name: independent-tasks
 nodes:
   - id: plan
     kind: prompt
@@ -269,13 +266,13 @@ nodes:
     )
 }
 
-/// One mock session per task of [`eight_independent_tasks`],
+/// One mock session per task of [`independent_tasks`],
 /// matched by its own id (never by call order — concurrent dispatch
 /// races several `spawn()` calls at once), behind the planner's own
 /// session.
-pub fn eight_tasks_fixture() -> String {
-    let mut yaml = plan_session(&eight_independent_tasks());
-    for n in 1..=8 {
+pub fn independent_tasks_fixture(count: usize) -> String {
+    let mut yaml = plan_session(&independent_tasks(count));
+    for n in 1..=count {
         yaml.push_str(&format!(
             "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: out-{n}.txt, content: \"{n}\" }}\n    outcome: {{ type: completed, summary: \"did task-{n}\" }}\n"
         ));
@@ -283,38 +280,11 @@ pub fn eight_tasks_fixture() -> String {
     yaml
 }
 
-/// Commit subjects on `worktree`'s current branch, oldest first, excluding
-/// the `init_repo` seed commit.
-pub fn commit_subjects(worktree: &std::path::Path) -> Vec<String> {
-    let output = std::process::Command::new("git")
-        .args(["log", "--format=%s", "--reverse"])
-        .current_dir(worktree)
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| *line != "initial")
-        .map(str::to_string)
-        .collect()
-}
-
 // --- scope_expansion ------------------------------------
 
-/// A loop node declaring `scope_expansion:` — `within` is only rendered
-/// when the caller passes something, so `rules`-mode tests can still omit
-/// it when a test wants an empty ceiling.
-pub fn scope_expansion_workflow(mode: &str, within: &[&str], max_per_run: Option<u32>) -> String {
-    let within_line = if within.is_empty() {
-        String::new()
-    } else {
-        let items = within
-            .iter()
-            .map(|w| format!("\"{w}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("      within: [{items}]\n")
-    };
+/// A loop node declaring `scope_expansion:` with the given mode and, when
+/// the caller passes one, a cap on the grants the engine makes per run.
+pub fn scope_expansion_workflow(mode: &str, max_per_run: Option<u32>) -> String {
     let cap_line = max_per_run
         .map(|n| format!("      max_per_run: {n}\n"))
         .unwrap_or_default();
@@ -336,14 +306,13 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: {mode}
-{within_line}{cap_line}"#
+{cap_line}"#
     )
 }
 
 /// The same loop shape with no `scope_expansion:` key at all — the
 /// default (an absent block behaves exactly like `mode: deny` with no
-/// `within`/`max_per_run`) — proving that default is really live, not
-/// just documented.
+/// `max_per_run`) — proving that default is really live, not just documented.
 pub fn no_scope_expansion_workflow() -> String {
     r#"
 name: scope-expansion-default
@@ -370,22 +339,38 @@ pub fn findings_posted(
     events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
+            Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
+                Some(&p.finding)
+            }
             _ => None,
         })
         .collect()
 }
 
-// --- escalación de scope expansion → gate real ---------
+// --- scope expansion escalation → real gate ------------
 
-/// One `ask`-mode attempt that writes a.txt (in scope), b.txt (outside)
-/// and the request file asking for b.txt.
+/// The step by which a session asks the engine for scope through its request
+/// tool, with `arguments` as the request object the tool takes.
+pub fn request_step(arguments: serde_json::Value) -> String {
+    let step = serde_json::json!({
+        "type": "run_tool",
+        "tool": "yunta_request_scope_expansion",
+        "arguments": arguments,
+    });
+    format!("    steps: [{step}]\n")
+}
+
+/// One `ask`-mode attempt that writes a.txt (in scope) and b.txt (outside,
+/// which the rail refuses), then asks the engine for b.txt through its
+/// request tool.
 pub fn requesting_session(task_id: &str) -> String {
-    let request_yaml = "paths:\n  - b.txt\nreason: \"adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
     format!(
-        "  - match_prompt_contains: {task_id:?}\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
-        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-        request_yaml,
+        "  - match_prompt_contains: {task_id:?}\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: b.txt, content: \"b\" }}\n{}    outcome: {{ type: completed, summary: asked }}\n",
+        request_step(serde_json::json!({
+            "paths": ["b.txt"],
+            "reason": "adjacent fix in b.txt",
+            "proposed_criterion": { "cmd": "test -f nonexistent-marker" },
+        })),
     )
 }
 
@@ -408,11 +393,10 @@ pub fn context_sources(
     events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
-            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
-                if n.as_str() == node =>
-            {
-                Some(p.sources.clone())
-            }
+            (
+                Some(n),
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))),
+            ) if n.as_str() == node => Some(p.sources.clone()),
             _ => None,
         })
         .unwrap_or_else(|| panic!("no context_assembled event found for node `{node}`"))
@@ -437,7 +421,7 @@ pub fn assert_materialized(
     );
 }
 
-// --- ensamblado estable-primero --------------------------------
+// --- stable-first assembly -------------------------------------
 
 pub fn stable_first_workflow(volatile_command_output: &str) -> String {
     format!(
@@ -455,23 +439,25 @@ pub async fn run_stable_first(
 ) {
     std::fs::write(bench.worktree.join("stable.txt"), "STABLE-CONTENT\n").unwrap();
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"FIXED-BRIEF-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"{volatile_command_output}\"\n    outcome: {{ type: completed, summary: planned }}\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"FIXED-BRIEF-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"{volatile_command_output}\"\n    outcome: {{ type: completed, summary: planned }}\n",
         bench.staging("grill").display(),
     );
     let workflow = stable_first_workflow(volatile_command_output);
 
-    let (terminal, _state) = bench.run(&workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let payload = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
-            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
-                if n.as_str() == "plan" =>
-            {
-                Some(p.clone())
-            }
+            (
+                Some(n),
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))),
+            ) if n.as_str() == "plan" => Some(p.clone()),
             _ => None,
         })
         .expect("context_assembled event for `plan`");
@@ -532,6 +518,7 @@ nodes:
 "#;
 
 pub const HOPELESS_UNTIL_RETRIED_FIXTURE: &str = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "did nothing useful" }
   - effects:
@@ -539,29 +526,41 @@ sessions:
     outcome: { type: completed, summary: "actually fixed it this time" }
 "#;
 
-// --- gate interno genérico (message/options/on) --------
+// --- generic internal gate (message/options/on) --------
 
 /// Resolves gates from a scripted sequence, one per call — `None` once
 /// the script runs out (so an unexpected extra ask degrades to pause
 /// instead of hanging a test).
 pub struct SequencedInteraction {
     choices: std::sync::Mutex<std::collections::VecDeque<yunta_core::events::HumanChoice>>,
+    shown: std::sync::Mutex<Vec<Vec<yunta_engine::ShownDocument>>>,
 }
 
 impl SequencedInteraction {
     pub fn choosing(options: &[&str]) -> Self {
+        Self::answering(options.iter().map(|option| (*option, None)).collect())
+    }
+
+    /// Each option in order, with the words said along with it.
+    pub fn answering(answers: Vec<(&str, Option<&str>)>) -> Self {
         Self {
             choices: std::sync::Mutex::new(
-                options
-                    .iter()
-                    .map(|option| yunta_core::events::HumanChoice {
-                        option: (*option).into(),
+                answers
+                    .into_iter()
+                    .map(|(option, said)| yunta_core::events::HumanChoice {
+                        option: option.into(),
                         by: "lead".into(),
-                        free_text: None,
+                        free_text: said.map(str::to_string),
                     })
                     .collect(),
             ),
+            shown: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// The documents each decision was asked with, oldest first.
+    pub fn shown(&self) -> Vec<Vec<yunta_engine::ShownDocument>> {
+        self.shown.lock().unwrap().clone()
     }
 }
 
@@ -572,6 +571,15 @@ impl yunta_engine::HumanInteraction for SequencedInteraction {
         _escalation: &yunta_core::events::GateWaitingPayload,
     ) -> Option<yunta_core::events::HumanChoice> {
         self.choices.lock().unwrap().pop_front()
+    }
+
+    async fn resolve_in(
+        &self,
+        escalation: &yunta_core::events::GateWaitingPayload,
+        asking: &yunta_engine::Asking<'_>,
+    ) -> Option<yunta_core::events::HumanChoice> {
+        self.shown.lock().unwrap().push(asking.shown.to_vec());
+        self.resolve(escalation).await
     }
 }
 
@@ -586,8 +594,8 @@ nodes:
     depends_on: [plan]
     assignee: lead
     message: "Approve the plan?"
-    options: [aprobar, ajustar]
-    on: { ajustar: plan }
+    options: [proceed, revise]
+    on: { revise: plan }
   - id: ship
     kind: bash
     depends_on: [approve]
@@ -611,7 +619,7 @@ limits:
 "#;
 
 /// A compliant session can never push the run past its cap — its own
-/// equal-share `Budget` (etapa 3) stops it first — so the run-level
+/// equal-share `Budget` stops it first — so the run-level
 /// check's real scenario is an *overshoot*: one usage burst blows both
 /// the session share and the whole run cap at once, the session is
 /// killed, the node fails, and its `on_failure` re-route asks the
@@ -634,6 +642,7 @@ nodes:
 /// nodes); sessions 2 and 3 (the corrective, then `first`'s retry) only
 /// ever run if a human lets the run continue past the cap.
 pub const BUDGET_FIXTURE: &str = r#"
+dialect: claude-code
 sessions:
   - steps:
       - { type: usage, input_tokens: 150, output_tokens: 50 }
@@ -758,63 +767,15 @@ pub fn install_skill(worktree: &std::path::Path, name: &str) {
     std::fs::write(dir.join("SKILL.md"), format!("# {name}\n")).unwrap();
 }
 
-/// Runs one workflow with a hand-held mock so the test can ask it what
-/// skills each spawn carried.
-pub async fn run_with_recording_mock(
-    bench: &Bench,
-    workflow_yaml: &str,
-    fixture_yaml: &str,
-    config_yaml: &str,
-) -> (RunTerminal, yunta_engine::RunState, Arc<MockAdapter>) {
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
+/// Writes the definition of agent `name` where the run resolves it.
+pub fn install_agent(worktree: &std::path::Path, name: &str) {
+    let dir = worktree.join(".yunta/agents");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\nname: {name}\ndescription: An agent for this test.\n---\nWork as {name}.\n"),
     )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
     .unwrap();
-
-    let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), adapter.clone());
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    (report.terminal, report.state, adapter)
 }
 
 // --- on_finish.distill — deterministic knowledge distillation ---------
@@ -837,6 +798,7 @@ on_finish:
 pub fn distill_fixture(bench: &Bench) -> String {
     format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{artifacts}/plan.md", content: "DISTILLED-MARKER: the durable decision\n" }}
@@ -859,12 +821,19 @@ pub struct Orphan<'a> {
     /// What the cut session had already written where a node writes the
     /// files it declares, as `(node, file name, content)`.
     pub staged: &'a [(&'a str, &'a str, &'a str)],
+    /// What the mock declares, when a case needs a narrower CLI than its
+    /// fixture's dialect; `None` keeps the dialect's own declaration.
+    pub capabilities: Option<yunta_core::Capabilities>,
 }
 
 /// Crafts an interrupted run: `run_created` + a `node_started` (and
 /// optionally an open `agent_session_opened`) with no terminal event,
 /// plus whatever the cut session had written — exactly what a
 /// mid-session crash leaves — then resumes it with a recording mock.
+///
+/// The crash is staged in the window a run's creation and its first wake
+/// leave open, which is the only place a log can hold a started node no
+/// execution ever closed.
 pub async fn resume_orphan_with_mock(
     orphan: Orphan<'_>,
 ) -> (
@@ -873,100 +842,63 @@ pub async fn resume_orphan_with_mock(
     Arc<MockAdapter>,
 ) {
     let Orphan {
-        workflow: workflow_yaml,
-        fixture: fixture_yaml,
+        workflow,
+        fixture,
         session: orphan_session,
         staged,
+        capabilities,
     } = orphan;
-    let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let emit = |node: &str, payload: yunta_core::events::EventPayload| {
-        bench
-            .storage
-            .append(
-                &yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some(node.into()),
-                    payload,
-                },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
+    let bench = match capabilities {
+        Some(capabilities) => Bench::new().with_capabilities(capabilities),
+        None => Bench::new(),
     };
-    emit(
-        "work",
-        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
-            attempt: 1,
-        }),
-    );
-    if let Some(session_id) = orphan_session {
-        emit(
-            "work",
-            yunta_core::events::EventPayload::AgentSessionOpened(
-                yunta_core::events::AgentSessionOpenedPayload {
-                    session_id: session_id.into(),
-                    agent: None,
-                    model: Some("mock-model".into()),
-                    capabilities: yunta_core::Capabilities::default(),
-                },
-            ),
-        );
-    }
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, fixture, |run_dir| {
+            let emit = |node: &str, payload: yunta_core::events::EventPayload| {
+                let draft = yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some(node.into()),
+                    payload,
+                )
+                .expect("a draft names its subject");
+                bench
+                    .storage
+                    .append(&draft, &yunta_testkit_core::FixedClock)
+                    .unwrap();
+            };
+            emit(
+                "work",
+                yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            );
+            if let Some(session_id) = orphan_session {
+                emit(
+                    "work",
+                    yunta_core::events::EventPayload::Session(SessionEvent::Opened(
+                        yunta_core::events::AgentSessionOpenedPayload {
+                            session_id: session_id.into(),
+                            agent: None,
+                            effort: None,
+                            model: Some("mock-model".into()),
+                            capabilities: yunta_core::Capabilities::default(),
+                            fence: None,
+                            confinement: None,
+                            task_id: None,
+                            continues: None,
+                        },
+                    )),
+                );
+            }
 
-    for (node, name, content) in staged {
-        let dir = yunta_engine::run_dir::staging(&run_dir, &(*node).into());
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(name), content).unwrap();
-    }
-
-    let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), adapter.clone());
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &bench.runs_root.join(bench.run_id.as_str()),
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    (report.terminal, events, adapter)
+            for (node, name, content) in staged {
+                let dir = yunta_engine::run_dir::staging(run_dir, &(*node).into());
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join(name), content).unwrap();
+            }
+        })
+        .await;
+    (terminal, bench.events(), bench.mock())
 }
 
 pub const RESUME_WORKFLOW: &str = r#"
@@ -978,3 +910,104 @@ nodes:
     on_interrupt: resume_session
     prompt: "Do the thing."
 "#;
+
+// --- a run parked on a decision --------------------------
+
+/// A bench whose run is parked: it drove `(workflow_yaml, fixture_yaml)`
+/// with no human present and stopped on a pause, which is where every
+/// test here starts.
+pub async fn parked(workflow_yaml: &str, fixture_yaml: &str) -> Bench {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench.run(workflow_yaml, fixture_yaml).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "expected the run to pause, got {terminal:?}"
+    );
+    bench
+}
+
+/// Records `option` as the answer to whatever escalation the bench's run
+/// is parked on — the write a separate `yunta mcp` process makes, with
+/// nothing of the run's own process behind it.
+pub async fn answer_parked(
+    bench: &Bench,
+    option: &str,
+) -> Result<(), yunta_engine::ResolveGateError> {
+    answer_parked_saying(bench, option, None).await
+}
+
+/// [`answer_parked`], with the words the person gives with the option.
+pub async fn answer_parked_saying(
+    bench: &Bench,
+    option: &str,
+    said: Option<&str>,
+) -> Result<(), yunta_engine::ResolveGateError> {
+    let manifest = bench.manifest();
+    let redactor = yunta_engine::run_redactor(&manifest, &*yunta_testkit::no_secrets())
+        .expect("the bench's config names no secret too short to keep out of a log");
+    yunta_engine::resolve_gate(
+        &manifest,
+        &bench.run_dir(),
+        &bench.storage.async_handle(),
+        &bench.run_id,
+        &yunta_testkit_core::FixedClock,
+        yunta_core::events::HumanChoice {
+            option: option.into(),
+            by: "mcp".into(),
+            free_text: said.map(str::to_string),
+        },
+        &redactor,
+    )
+    .await
+}
+
+/// How many of the run's events carry a payload `pred` accepts.
+pub fn events_matching(
+    bench: &Bench,
+    pred: impl Fn(&yunta_core::events::EventPayload) -> bool,
+) -> usize {
+    bench
+        .events()
+        .iter()
+        .filter(|e| e.payload().is_some_and(&pred))
+        .count()
+}
+
+/// What the loop node last failed on.
+pub fn loop_failure(bench: &Bench) -> Option<Failure> {
+    bench
+        .events()
+        .iter()
+        .rev()
+        .find_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(failed))) => {
+                Some(failed.failure.clone())
+            }
+            _ => None,
+        })
+}
+
+/// The claim an escalation makes about a node that failed.
+pub fn node_failed(node: &str) -> yunta_core::events::Claim {
+    yunta_core::events::Claim::NodeFailed { node: node.into() }
+}
+
+/// The claim an escalation makes in the words of whoever escalated.
+pub fn written(text: &str) -> yunta_core::events::Claim {
+    yunta_core::events::Claim::Written(text.to_string())
+}
+
+/// The failure a node ends with when its lint command fails.
+pub fn lint_failure() -> Failure {
+    Failure::Message {
+        outcome: "lint failed".into(),
+    }
+}
+
+/// The node an exhausted re-route of a failed node goes to, when its menu names one.
+pub fn reroute_goto(escalation: &yunta_core::events::Escalation) -> Option<String> {
+    let menu = escalation.failure()?;
+    menu.reroute
+        .as_ref()
+        .map(|reroute| reroute.goto.as_str().to_owned())
+}

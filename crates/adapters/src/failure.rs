@@ -1,29 +1,41 @@
-//! What a CLI's failure message says about retrying. The message is
+//! What a CLI's failure message says about the refusal. The message is
 //! the only signal the CLIs give, so the reading is by marker: the
 //! phrases the CLIs and the APIs behind them print for a refused
-//! credential or an unknown model. Anything else is a failure of the
-//! attempt, and a fresh session may do better.
+//! credential, an unknown model, or a service the machine cannot reach.
+//! A message none of those names is a final refusal of its session.
 
-/// Why a session failed, as far as its message tells.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailureKind {
-    /// The credential was refused; another attempt with the same one
-    /// fails the same way.
-    Authentication,
-    /// The model named is not one this account can use; another
-    /// attempt asks for the same model.
-    InvalidModel,
-    /// Anything else: a transport error, a rate limit, a turn that
-    /// ended badly.
-    Other,
+use yunta_core::events::{FailureCause, RefusalCause};
+
+/// Whether `marker` occurs in `text` as whole words: neither edge of the
+/// occurrence touches a letter or a digit, so `401` is not part of `4010`.
+pub(crate) fn has_word(text: &str, marker: &str) -> bool {
+    text.match_indices(marker).any(|(at, _)| {
+        !text[..at]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+            && !text[at + marker.len()..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric)
+    })
 }
 
-impl FailureKind {
-    /// Whether a fresh session with the same request can do better.
-    pub fn retryable(self) -> bool {
-        matches!(self, FailureKind::Other)
-    }
-}
+/// What the CLIs, and the network libraries under them, print when the
+/// service cannot be reached: the machine cannot connect to it, or the
+/// stream that carries its answer breaks before the answer completes.
+/// Both are transport failures, and the only refusal the engine re-attempts
+/// by itself.
+const TRANSPORT_MARKERS: &[&str] = &[
+    "enotfound",
+    "eai_again",
+    "econnrefused",
+    "enetunreach",
+    "etimedout",
+    "can't reach the api server",
+    "stream disconnected before completion",
+    "stream ended unexpectedly",
+];
 
 const AUTHENTICATION_MARKERS: &[&str] = &[
     "invalid api key",
@@ -44,23 +56,78 @@ const MODEL_MARKERS: &[&str] = &[
     "404",
 ];
 
-pub fn classify(message: &str) -> FailureKind {
-    let text = message.to_lowercase().replace('_', " ");
-    if AUTHENTICATION_MARKERS
-        .iter()
-        .any(|marker| text.contains(marker))
-    {
-        FailureKind::Authentication
-    } else if text.contains("model") && MODEL_MARKERS.iter().any(|marker| text.contains(marker)) {
-        FailureKind::InvalidModel
+/// What the CLIs print when a session's conversation no longer fits the
+/// model's context window: Claude Code's compaction giving up, and the error
+/// Codex names for the window a turn exceeded.
+const CONTEXT_MARKERS: &[&str] = &["autocompact is thrashing", "context window exceeded"];
+
+/// The refusal a CLI's failure message names, by marker. A message no class
+/// names is a final refusal: its session is not re-attempted on its own.
+pub fn classify(message: &str) -> FailureCause {
+    let lower = message.to_lowercase();
+    let text = lower.replace('_', " ");
+    let hit =
+        |haystack: &str, markers: &[&str]| markers.iter().any(|marker| has_word(haystack, marker));
+    // The transport markers read the lowercased message with its underscores
+    // kept, so `EAI_AGAIN` is `eai_again`.
+    let refusal = if hit(&lower, TRANSPORT_MARKERS) {
+        RefusalCause::Unreachable
+    } else if hit(&text, AUTHENTICATION_MARKERS) {
+        RefusalCause::Authentication
+    } else if has_word(&text, "model") && hit(&text, MODEL_MARKERS) {
+        RefusalCause::InvalidModel
+    } else if hit(&text, CONTEXT_MARKERS) {
+        RefusalCause::ContextExhausted
     } else {
-        FailureKind::Other
-    }
+        RefusalCause::Final
+    };
+    FailureCause::Refused(refusal)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markers_match_whole_words() {
+        for message in [
+            "connect to port 4010 failed",
+            "the model invalidates the cache",
+            "file not found: src/main.rs",
+        ] {
+            assert_eq!(
+                classify(message),
+                FailureCause::Refused(RefusalCause::Final),
+                "{message}"
+            );
+        }
+        assert_eq!(
+            classify("connect ECONNREFUSED 127.0.0.1:8080"),
+            FailureCause::Refused(RefusalCause::Unreachable)
+        );
+        // Codex's limit phrases are read by its parser only.
+        assert_eq!(
+            classify("You've hit your usage limit. Try again later."),
+            FailureCause::Refused(RefusalCause::Final)
+        );
+    }
+
+    #[test]
+    fn a_conversation_the_context_window_cannot_hold_is_its_own_cause() {
+        for message in [
+            "Autocompact is thrashing: the context refilled to the limit within 3 turns of the \
+             previous compact, 3 times in a row. A file being read or a tool output is likely too \
+             large for the context window. Try reading in smaller chunks, or use /clear to start \
+             fresh.",
+            "stream error: context window exceeded",
+        ] {
+            assert_eq!(
+                classify(message),
+                FailureCause::Refused(RefusalCause::ContextExhausted),
+                "{message}"
+            );
+        }
+    }
 
     #[test]
     fn a_refused_credential_is_never_retried() {
@@ -70,8 +137,11 @@ mod tests {
             "authentication_error: x-api-key header is required",
             "Not logged in",
         ] {
-            assert_eq!(classify(message), FailureKind::Authentication, "{message}");
-            assert!(!classify(message).retryable());
+            assert_eq!(
+                classify(message),
+                FailureCause::Refused(RefusalCause::Authentication),
+                "{message}"
+            );
         }
     }
 
@@ -82,20 +152,30 @@ mod tests {
             "The model `gpt-nope` does not exist",
             "unsupported model: o1-preview",
         ] {
-            assert_eq!(classify(message), FailureKind::InvalidModel, "{message}");
+            assert_eq!(
+                classify(message),
+                FailureCause::Refused(RefusalCause::InvalidModel),
+                "{message}"
+            );
         }
     }
 
     #[test]
-    fn everything_else_is_an_attempt_that_may_do_better_next_time() {
+    fn connectivity_messages_classify_unreachable() {
         for message in [
-            "rate limited",
-            "model response stream ended unexpectedly",
+            "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+            "getaddrinfo EAI_AGAIN api.anthropic.com",
+            "connect ECONNREFUSED 127.0.0.1:8080",
+            "connect ENETUNREACH 2606:4700::6810:1",
+            "request to https://api.openai.com/v1/responses failed: ETIMEDOUT",
             "stream disconnected before completion",
-            "file not found: src/main.rs",
+            "model response stream ended unexpectedly",
         ] {
-            assert_eq!(classify(message), FailureKind::Other, "{message}");
-            assert!(classify(message).retryable());
+            assert_eq!(
+                classify(message),
+                FailureCause::Refused(RefusalCause::Unreachable),
+                "{message}"
+            );
         }
     }
 }

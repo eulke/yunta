@@ -4,7 +4,7 @@
 //! holds at birth (the successor's initial context automatically
 //! includes the predecessor's artifacts, tasks document and findings —
 //! all three are artifacts of that run, so one rule covers them). Lives
-//! in the engine so both drivers of a chain use the identical mechanics: the
+//! in the engine so the two places that drive a chain share one mechanic: the
 //! CLI's `drive_promotions` for top-level runs, and `workflow_exec` for
 //! a `kind: workflow` child that promotes mid-composition.
 //!
@@ -19,12 +19,16 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::events::artifacts::ArtifactRef;
 use yunta_core::events::{ArtifactId, StoredEvent};
-use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
+use yunta_core::{
+    ContentHash, IdSource, Isolation, Manifest, ModeName, Redactor, RunId, SecretSource,
+};
 use yunta_storage::AsyncStorage;
 
-use crate::artifacts::ObjectError;
+use crate::artifacts::HeldError;
 
-use super::{create_run, BirthArtifact, BirthOrigin, CreateRunParams, RunError};
+use super::{
+    create_run, run_redactor, BirthArtifact, BirthBaseline, BirthOrigin, CreateRunParams, RunError,
+};
 
 /// Everything the successor needs to be executed — the caller drives it
 /// through its own `execute_run` (with its own interaction surface,
@@ -55,55 +59,50 @@ pub struct Predecessor<'a> {
 /// Creates (never runs) the successor of `predecessor`, which just
 /// closed `Promoted` toward `suggested_mode`.
 ///
-/// `repo` is the checkout a fresh worktree branches from (the original
-/// `cwd` for a top-level chain; the parent run's own tree for a child's).
-/// Under `Isolation::None` the successor reuses the predecessor's
-/// checkout — the lock (if any) is the caller's and only releases when
-/// the whole chain ends. `storage`, `clock` and `ids` are the caller's
-/// infrastructure and trail, as in [`create_run`].
+/// What the caller brings to a run it creates: where the log goes, the
+/// instant and the ids the log is stamped with, and the supervision every
+/// subprocess that creation spawns is born under.
+///
+/// Grouped because they travel together and none of them is a decision
+/// this function makes: it is handed the caller's infrastructure and
+/// trail, exactly as [`create_run`](crate::create_run) is.
+pub struct CallerInfra<'a> {
+    pub storage: &'a AsyncStorage,
+    pub ids: &'a dyn IdSource,
+    /// The token, the clock and the environment every subprocess this
+    /// creation spawns is born under — the successor's birth reads the
+    /// time by the same clock its git answers to.
+    pub supervision: crate::process::Supervision<'a>,
+    /// What the successor's commands will run with, recorded at its birth.
+    pub environment: Option<yunta_core::events::ExecutionEnvironment>,
+    /// Where the values of the secrets the successor's config names come
+    /// from. Its redactor is resolved from them before its tree is taken.
+    pub secrets: &'a dyn yunta_core::SecretSource,
+}
+
+/// The successor works in the predecessor's own tree: under
+/// `Isolation::Worktree` on a branch of its own cut where that tree stands,
+/// and under `Isolation::None` in the same checkout — the lock (if any) is
+/// the caller's and only releases when the whole chain ends. `storage`, `ids` and `supervision` are the
+/// caller's infrastructure and trail, as in [`create_run`].
 pub async fn create_promotion_successor(
     predecessor: Predecessor<'_>,
-    repo: &Path,
     suggested_mode: &ModeName,
     roots: RunRoots<'_>,
-    storage: &AsyncStorage,
-    clock: &dyn Clock,
-    ids: &dyn IdSource,
+    caller: CallerInfra<'_>,
 ) -> Result<PromotionSuccessor, RunError> {
-    let Predecessor {
-        id: predecessor_id,
-        manifest: predecessor_manifest,
-        worktree: predecessor_worktree,
-        run_dir: predecessor_run_dir,
-    } = predecessor;
-    let successor_id = ids.mint_run_id(clock.now());
+    let CallerInfra {
+        storage,
+        ids,
+        supervision,
+        environment,
+        secrets,
+    } = caller;
+    let successor_id = ids.mint_run_id(supervision.clock.now());
 
-    let mut manifest = predecessor_manifest.clone();
-    // The successor builds on wherever the predecessor's own
-    // work left the tree, not on the original base.
-    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree).await?;
-
-    let worktree = match manifest.isolation {
-        Isolation::Worktree => {
-            let worktree = roots.worktrees.join(successor_id.as_str());
-            crate::worktree::prepare_worktree(
-                repo,
-                &worktree,
-                &manifest.base_commit,
-                &crate::worktree::run_branch(&successor_id),
-                Isolation::Worktree,
-            )
-            .await?;
-            worktree
-        }
-        Isolation::None => predecessor_worktree.to_path_buf(),
-    };
-
-    // What the predecessor's own log says it held, so each inherited
-    // artifact keeps the identity and the producer it had there.
-    let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
-    let inherited =
-        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)?;
+    let (manifest, redactor) = successor_manifest(&predecessor, secrets, supervision).await?;
+    let worktree = successor_tree(&manifest, &predecessor, &successor_id, supervision).await?;
+    let inherited = inherit_from_predecessor(storage, &predecessor, &manifest).await?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -111,11 +110,15 @@ pub async fn create_promotion_successor(
             runs_root: roots.runs,
             mode: suggested_mode,
             worktree: &worktree,
-            promoted_from: Some(predecessor_id),
-            artifacts: &inherited,
+            promoted_from: Some(predecessor.id),
+            artifacts: &inherited.artifacts,
+            baseline: inherited.baseline.as_ref(),
+            environment,
+            redactor: &redactor,
+            blobs: &inherited.blobs,
         },
         storage,
-        clock,
+        supervision,
     )
     .await?;
 
@@ -124,6 +127,81 @@ pub async fn create_promotion_successor(
         manifest,
         run_dir,
         worktree,
+    })
+}
+
+/// The successor's manifest, based where its predecessor's tree stands, and its redactor.
+async fn successor_manifest(
+    predecessor: &Predecessor<'_>,
+    secrets: &dyn SecretSource,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(Manifest, Redactor), RunError> {
+    let mut manifest = predecessor.manifest.clone();
+    // The successor builds on wherever the predecessor's own
+    // work left the tree, not on the original base.
+    manifest.base_commit = crate::worktree::head_commit(predecessor.worktree, supervision).await?;
+    // Resolved ahead of the checkout's handover: a short declared secret
+    // refuses the successor with nothing taken.
+    let redactor = run_redactor(&manifest, secrets)?;
+    Ok((manifest, redactor))
+}
+
+/// The predecessor's checkout as the successor works in it, handed over under worktree isolation.
+async fn successor_tree(
+    manifest: &Manifest,
+    predecessor: &Predecessor<'_>,
+    successor_id: &RunId,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<PathBuf, RunError> {
+    // The successor carries on in the predecessor's own checkout, on a
+    // branch of its own cut where that tree stands: nothing it built has to
+    // be built again.
+    Ok(match manifest.isolation {
+        Isolation::Worktree => {
+            crate::worktree::hand_over_run_checkout(
+                predecessor.worktree,
+                successor_id,
+                supervision,
+            )
+            .await?;
+            predecessor.worktree.to_path_buf()
+        }
+        Isolation::None => predecessor.worktree.to_path_buf(),
+    })
+}
+
+/// What the successor takes from its predecessor at birth.
+struct Inheritance {
+    artifacts: Vec<BirthArtifact>,
+    blobs: Vec<(ContentHash, Vec<u8>)>,
+    baseline: Option<BirthBaseline>,
+}
+
+/// What the predecessor's log, store and lineage carry into the successor at birth.
+async fn inherit_from_predecessor(
+    storage: &AsyncStorage,
+    predecessor: &Predecessor<'_>,
+    manifest: &Manifest,
+) -> Result<Inheritance, RunError> {
+    // What the predecessor's own log says it held, so each inherited
+    // artifact keeps the identity and the producer it had there.
+    let view = crate::replay::RunView::of(storage.events_for_run(predecessor.id.clone()).await?);
+    let artifacts =
+        read_inherited_artifacts(predecessor.run_dir, predecessor.id, &view.events).await?;
+    // The successor keeps the predecessor's frozen inputs, so it copies their
+    // objects from the predecessor's run directory.
+    let blobs = match &manifest.frozen {
+        Some(frozen) => crate::frozen::store::inherit(predecessor.run_dir, frozen).await?,
+        None => Vec::new(),
+    };
+    // A promotion is the invocation carrying on, so the successor compares
+    // against what the lineage measured at its root, never against the tree
+    // its predecessor already worked.
+    let baseline = crate::run::baseline::inherited(predecessor.id, &view.state);
+    Ok(Inheritance {
+        artifacts,
+        blobs,
+        baseline,
     })
 }
 
@@ -137,17 +215,18 @@ pub async fn create_promotion_successor(
 /// for is not an artifact and reaches no successor. Each inherited
 /// artifact keeps the identity and the producer the predecessor held it
 /// under, because the identity is all a run needs to answer for it.
-fn read_inherited_artifacts(
+async fn read_inherited_artifacts(
     from_run_dir: &Path,
     from_run: &RunId,
     from_events: &[StoredEvent],
-) -> Result<Vec<BirthArtifact>, ObjectError> {
+) -> Result<Vec<BirthArtifact>, HeldError> {
     let held = crate::artifacts::RunArtifacts::of(from_run_dir, from_events);
     let mut inherited = Vec::new();
     for artifact in held.ledger().every() {
+        let bytes = held.bytes(artifact).await.map_err(HeldError::from)?;
         inherited.push(birth_artifact(
             artifact.artifact.clone(),
-            held.bytes(artifact)?,
+            bytes,
             from_run,
             artifact,
         ));

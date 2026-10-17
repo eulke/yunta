@@ -11,10 +11,15 @@
 //! whole session. The tools move it inside: a refusal comes back as an
 //! answer, and the session fixes it in the same breath.
 
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, SubmissionOutcome};
-use yunta_core::ArtifactKind;
-use yunta_engine::{NodeState, RunTerminal};
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
+use yunta_core::events::{ArtifactId, EventPayload, Failure, SubmissionOutcome};
+use yunta_core::port::{Policy, PolicyApplied};
+use yunta_core::{ArtifactKind, Capabilities};
+use yunta_engine::{current_escalation, NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
+
+#[path = "submit/undelivered.rs"]
+mod undelivered;
 
 const PLAN_NODE: &str = r#"
 name: plan
@@ -58,7 +63,7 @@ fn submitted(bench: &Bench) -> Vec<(String, bool)> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => Some((
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => Some((
                 p.name.clone(),
                 matches!(p.outcome, SubmissionOutcome::Accepted { .. }),
             )),
@@ -72,7 +77,7 @@ fn refusals(bench: &Bench) -> Vec<yunta_core::diagnostic::Report> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => match &p.outcome {
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => match &p.outcome {
                 SubmissionOutcome::Refused { report } => Some(report.clone()),
                 SubmissionOutcome::Accepted { .. } => None,
             },
@@ -94,7 +99,7 @@ async fn a_session_submits_a_tasks_document_and_the_run_holds_it() {
     let bench = Bench::new();
     let fixture = format!(
         r#"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -107,7 +112,7 @@ sessions:
         tasks_document(&[("alpha", "First"), ("beta", "Second")])
     );
 
-    let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     assert_eq!(submitted(&bench), vec![("tasks.yaml".to_string(), true)]);
@@ -130,7 +135,7 @@ sessions:
             kind: ArtifactKind::Tasks
         }
     );
-    assert_eq!(held.origin, ArtifactOrigin::Submitted);
+    assert_eq!(held.origin, RecordedOrigin::Submitted);
 
     // The bytes are in the store under the hash the event names, and
     // the view under the node that produced it says the same.
@@ -166,7 +171,7 @@ async fn a_node_that_only_submits_is_never_granted_the_artifact_directory() {
     let bench = Bench::new();
     let fixture = format!(
         r#"
-capabilities: {{ run_tools: true }}
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -193,7 +198,7 @@ async fn a_refused_submission_names_every_rule_problem_in_the_same_session() {
     // A dependency on a task nobody declared, and a cycle: two rules of
     // the same document, both reported at once.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -227,7 +232,7 @@ sessions:
     outcome: { type: completed, summary: "planned after a correction" }
 "#;
 
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     // One attempt: a refusal is an answer, not the end of the session.
@@ -244,7 +249,7 @@ sessions:
     let codes: Vec<&str> = report
         .diagnostics
         .iter()
-        .map(|d| d.problem.code())
+        .map(|d| d.problem.code().as_str())
         .collect();
     assert!(
         codes.contains(&"unknown-dependency") && codes.contains(&"dependency-cycle"),
@@ -256,7 +261,7 @@ sessions:
 async fn a_structural_problem_is_reported_with_its_path() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -267,8 +272,7 @@ sessions:
             tasks:
               - id: alpha
                 title: "First"
-                scope: ["src/alpha/**"]
-                manual_review: "yes"
+                scope: "src/alpha/**"
                 criteria:
                   - cmd: "cargo test alpha"
     outcome: { type: completed, summary: "gave up" }
@@ -278,7 +282,7 @@ sessions:
     let report = refusals(&bench).pop().expect("the refusal is on the log");
     let rendered = report.diagnostics[0].to_string();
     assert!(
-        rendered.contains("tasks[0].manual_review"),
+        rendered.contains("tasks[0].scope"),
         "the path locates the value: {rendered}"
     );
 }
@@ -290,7 +294,7 @@ async fn the_same_document_submitted_twice_yields_the_same_hash() {
     // the engine holds is the same document, so the file is the same
     // bytes and the same hash.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -321,7 +325,7 @@ sessions:
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => match &p.outcome {
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => match &p.outcome {
                 SubmissionOutcome::Accepted { content_hash } => Some(content_hash.to_string()),
                 SubmissionOutcome::Refused { .. } => None,
             },
@@ -333,65 +337,10 @@ sessions:
 }
 
 #[tokio::test]
-async fn a_document_never_submitted_fails_the_node_with_no_second_session() {
-    let bench = Bench::new();
-    let fixture = r#"
-capabilities: { run_tools: true }
-sessions:
-  - outcome: { type: completed, summary: "said it was done" }
-"#;
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
-    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
-
-    // One attempt, and no session opened to correct anything: a document
-    // nobody handed over is a node that failed, not a node to re-instruct.
-    assert_eq!(kinds(&bench, "node_started"), 1);
-    assert_eq!(kinds(&bench, "agent_session_opened"), 1);
-
-    let retryable = bench
-        .events()
-        .iter()
-        .rev()
-        .find_map(|event| match event.payload() {
-            Some(EventPayload::NodeFailed(p)) => Some(p.retryable),
-            _ => None,
-        })
-        .expect("the node failed");
-    assert!(!retryable, "there is nothing to attempt again");
-}
-
-#[tokio::test]
-async fn a_typed_artifact_on_an_adapter_without_run_tools_fails_before_dispatch() {
-    let bench = Bench::new();
-    // The capability is absent, so the document has no way in. The node
-    // fails before a session opens rather than after one produced
-    // nothing.
-    let fixture = r#"
-sessions:
-  - outcome: { type: completed, summary: "never reached" }
-"#;
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
-    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
-
-    match state.nodes.get("plan") {
-        Some(NodeState::Failed { failure, .. }) => {
-            let text = failure.to_string();
-            assert!(
-                text.contains("run_tools") && text.contains("tasks"),
-                "the refusal names the capability and the artifact: {text}"
-            );
-        }
-        other => panic!("expected plan failed, got {other:?}"),
-    }
-    assert_eq!(kinds(&bench, "agent_session_opened"), 0);
-    assert_eq!(kinds(&bench, "capability_degraded"), 0);
-}
-
-#[tokio::test]
 async fn a_review_reports_findings_and_the_engine_derives_the_file() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -412,7 +361,7 @@ sessions:
           detail: "The flag it names was renamed two releases ago."
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let bytes = bench.artifact("findings").expect("the run holds it");
@@ -438,7 +387,7 @@ sessions:
             .iter()
             .map(|held| held.origin.clone())
             .collect::<Vec<_>>(),
-        vec![ArtifactOrigin::Derived],
+        vec![RecordedOrigin::Derived],
         "the engine derived the file from what the node posted"
     );
 }
@@ -447,11 +396,11 @@ sessions:
 async fn a_review_that_reports_nothing_closes_with_an_empty_findings_file() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "found nothing" }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let bytes = bench.artifact("findings").expect("the run holds it");
@@ -465,7 +414,7 @@ sessions:
             .iter()
             .map(|held| held.origin.clone())
             .collect::<Vec<_>>(),
-        vec![ArtifactOrigin::Derived],
+        vec![RecordedOrigin::Derived],
         "a review that found nothing still holds its findings artifact"
     );
 }
@@ -474,7 +423,7 @@ sessions:
 async fn a_finding_with_an_unknown_key_is_refused_and_nothing_is_recorded() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -497,7 +446,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(p.report.clone()),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => Some(p.report.clone()),
             _ => None,
         })
         .expect("the refusal is on the log");
@@ -512,7 +461,7 @@ sessions:
 async fn a_finding_id_already_posted_by_the_node_is_refused() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -534,7 +483,7 @@ sessions:
           detail: "d"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_posted"), 1);
@@ -549,7 +498,7 @@ sessions:
 async fn an_updated_finding_replaces_its_state_and_keeps_its_place() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -578,7 +527,7 @@ sessions:
           detail: "d"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -607,7 +556,7 @@ sessions:
 async fn a_withdrawn_finding_leaves_the_file_but_not_the_log() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -633,7 +582,7 @@ sessions:
           reason: "the call it named is gone"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -648,7 +597,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingWithdrawn(p)) => Some(p.reason.clone()),
+            Some(EventPayload::Findings(FindingEvent::Withdrawn(p))) => Some(p.reason.clone()),
             _ => None,
         })
         .expect("the withdrawal is on the log");
@@ -659,7 +608,7 @@ sessions:
 async fn a_withdrawn_id_is_final() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -701,7 +650,7 @@ sessions:
           reason: "again"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_refused"), 3);
@@ -709,7 +658,9 @@ sessions:
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(format!("{:?}", p.operation)),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => {
+                Some(format!("{:?}", p.operation))
+            }
             _ => None,
         })
         .collect();
@@ -725,7 +676,7 @@ sessions:
 async fn a_withdrawal_without_a_reason_is_refused() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -744,18 +695,21 @@ sessions:
           reason: "   "
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let report = bench
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(p.report.clone()),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => Some(p.report.clone()),
             _ => None,
         })
         .expect("the refusal is on the log");
-    assert_eq!(report.diagnostics[0].problem.code(), "empty-reason");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-reason"
+    );
 
     // The finding it named still stands.
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -768,7 +722,7 @@ sessions:
 async fn findings_reported_before_a_session_dies_survive_it() {
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - steps:
       - type: run_tool
@@ -781,7 +735,7 @@ sessions:
           detail: "d"
     outcome: { type: crash }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     // The session never reached an answer, and the finding is still the
@@ -789,26 +743,60 @@ sessions:
     assert_eq!(kinds(&bench, "finding_posted"), 1);
 }
 
+/// A CLI that names none of the tools it holds says nothing when they
+/// never reached it; the engine's own listener does: a session that was
+/// offered the tools and never listed them is degraded the same way.
 #[tokio::test]
-async fn a_session_that_holds_none_of_its_run_tools_is_reported_before_it_is_spent() {
+async fn a_session_that_never_listed_its_run_tools_is_reported() {
+    let degraded = |fixture: &'static str| async move {
+        let bench = Bench::new();
+        let _ = bench.run(PLAN_NODE, fixture).await;
+        bench
+            .events()
+            .iter()
+            .filter(|event| match event.payload() {
+                Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p))) => {
+                    p.capability == yunta_core::Capability::RunTools
+                }
+                _ => false,
+            })
+            .count()
+    };
+    assert_eq!(
+        degraded(
+            "dialect: claude-code\nlists_tools: false\nsessions:\n  - outcome: { type: completed, summary: done }\n"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        degraded(
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n"
+        )
+        .await,
+        0,
+        "a session that listed its tools holds them"
+    );
+}
+
+#[tokio::test]
+async fn a_session_that_holds_none_of_its_run_tools_is_reported_when_its_session_ends() {
     let bench = Bench::new();
     // The server is mounted and the session holds not one of its tools —
     // what a client that refuses the tool list leaves behind. The node
     // can only end owing the document it declares, so the cause is on
-    // the log while the session is still opening, not one failure later.
+    // the log when the session ends, before the node fails.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
+lists_tools: false
 sessions:
-  - steps:
-      - type: run_tools_mounted
-        count: 0
-    outcome: { type: completed, summary: "nothing to submit with" }
+  - outcome: { type: completed, summary: "nothing to submit with" }
 "#;
 
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
     assert!(
-        matches!(state.nodes.get("plan"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("plan"), Some(NodeState::Failed { .. })),
         "the node owes the document it declares: {state:?}"
     );
 
@@ -816,7 +804,7 @@ sessions:
     let degraded = events
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::CapabilityDegraded(p))
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::RunTools =>
             {
                 Some(p.clone())
@@ -824,10 +812,10 @@ sessions:
             _ => None,
         })
         .expect("a session with no run tool of its own is degraded, not silently failed");
-    assert!(
-        degraded.policy_applied.contains("none of its tools"),
-        "the record names what was missing: {}",
-        degraded.policy_applied
+    assert_eq!(
+        degraded.policy,
+        PolicyApplied::Known(Policy::NoRunTools),
+        "the record names what was missing and what ran instead"
     );
 
     let degraded_at = events
@@ -841,5 +829,74 @@ sessions:
     assert!(
         degraded_at < failed_at,
         "the cause is recorded while the session runs, not after it ends"
+    );
+}
+
+/// A session whose listener listed its tools holds them, whatever the CLI
+/// counted: the listener's own answer is the only input to the degradation.
+#[tokio::test]
+async fn a_listed_session_is_not_degraded_by_the_cli_count() {
+    let bench = Bench::new();
+    let _ = bench
+        .run(
+            PLAN_NODE,
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n",
+        )
+        .await;
+    let degraded = bench.events().iter().any(|event| {
+        matches!(
+            event.payload(),
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
+                if p.capability == yunta_core::Capability::RunTools
+        )
+    });
+    assert!(
+        !degraded,
+        "the listener saw its tools; the CLI's count is not an input"
+    );
+}
+
+/// A loop node's declared document has no way in on an adapter that
+/// cannot be a client of the run's tools, and the refusal lands before
+/// the first task session — not after four of them produced nothing.
+///
+/// The gate used to guard prompt nodes only, so the same workflow shape
+/// with `kind: loop` spent a session per task and failed at the close.
+#[tokio::test]
+async fn a_loop_task_on_a_run_tools_less_adapter_is_refused_before_any_session() {
+    let bench = Bench::new().with_capabilities(Capabilities::default());
+    let workflow = r#"
+name: loop-owes-a-document
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+    artifacts:
+      produces: [findings]
+"#;
+    let fixture = r#"
+dialect: claude-code
+sessions:
+  - outcome: { type: completed, summary: "never reached" }
+"#;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
+
+    match state.nodes.state("implement") {
+        Some(NodeState::Failed { failure, .. }) => {
+            let text = yunta_render::failure::sentence(failure);
+            assert!(
+                text.contains("run_tools") && text.contains("findings"),
+                "the refusal names the capability and the artifact: {text}"
+            );
+        }
+        other => panic!("expected implement failed, got {other:?}"),
+    }
+    assert_eq!(
+        kinds(&bench, "agent_session_opened"),
+        0,
+        "not one token is spent on a node that cannot hand over what it owes"
     );
 }

@@ -1,0 +1,97 @@
+//! The capability table: every capability an adapter can declare, and
+//! what the engine does when it doesn't.
+
+use yunta_core::port::{absence_of, Absence, POLICY};
+use yunta_core::{Capabilities, Capability};
+
+/// A capability with no row is a capability whose absence nobody
+/// decided, and a capability with two is two answers to one question.
+#[test]
+fn every_capability_has_exactly_one_absence_policy() {
+    assert_eq!(
+        POLICY.len(),
+        Capability::ALL.len(),
+        "the table names every capability and nothing else"
+    );
+    for capability in Capability::ALL {
+        let rows = POLICY
+            .iter()
+            .filter(|(named, _)| *named == capability)
+            .count();
+        assert_eq!(rows, 1, "`{capability}` appears once in the table");
+    }
+}
+
+/// The lookup answers for every capability, and the answer it gives is
+/// the row the table holds.
+#[test]
+fn the_lookup_answers_with_the_table_for_every_capability() {
+    for capability in Capability::ALL {
+        let row = POLICY
+            .iter()
+            .find_map(|(named, absence)| (*named == capability).then_some(absence))
+            .expect("the table names every capability");
+        assert_eq!(absence_of(capability), row, "`{capability}`");
+    }
+}
+
+/// `Capabilities::declares` covers the same closed set: a capability
+/// that could never be declared is one nothing can ever grant.
+#[test]
+fn every_capability_is_a_field_an_adapter_can_declare() {
+    let none = Capabilities::default();
+    for capability in Capability::ALL {
+        assert!(
+            !none.declares(capability),
+            "an adapter declaring nothing declares no `{capability}`"
+        );
+    }
+}
+
+/// Only what a workflow's own declarations need is refused, and at
+/// `check`: a permission profile, an agent, the run tools a document, a
+/// task or a blackboard reaches the engine through, and a session's stop,
+/// which a node that opens a session needs the CLI to keep going through
+/// after two refused stops. Everything else has a stated fallback, so a
+/// missing capability never stops a run that already started.
+#[test]
+fn the_only_capabilities_a_check_refuses_are_the_ones_a_workflow_declares_a_need_for() {
+    let refused: Vec<Capability> = POLICY
+        .iter()
+        .filter(|(_, absence)| matches!(absence, Absence::FailAtCheck))
+        .map(|(capability, _)| *capability)
+        .collect();
+    assert_eq!(
+        refused,
+        vec![
+            Capability::PermissionProfiles,
+            Capability::CustomAgents,
+            Capability::RunTools,
+            Capability::StopRefusals,
+        ],
+        "a workflow that names a permission profile, an agent, or what only \
+         the run tools carry says so before a run is born; a session whose \
+         CLI does not keep going after two refused stops is refused at check \
+         the same way; everything else degrades"
+    );
+}
+
+/// The closed set has ten capabilities, and the mid-session token cap is
+/// one of them: a capability the set does not name is one nothing checks.
+#[test]
+fn the_closed_set_has_ten_capabilities_and_the_token_cap_is_one() {
+    assert_eq!(Capability::ALL.len(), 10);
+    assert!(Capability::ALL.contains(&Capability::MidSessionTokenCap));
+}
+
+/// An adapter that declares the mid-session token cap is answered so by
+/// `declares`, and no other capability changes with it.
+#[test]
+fn declares_answers_the_mid_session_token_cap_from_its_own_field() {
+    let declared = Capabilities {
+        mid_session_token_cap: true,
+        ..Capabilities::default()
+    };
+    assert!(declared.declares(Capability::MidSessionTokenCap));
+    assert!(!declared.declares(Capability::StopRefusals));
+}

@@ -13,29 +13,37 @@
 //! [`PermissionsConfig`] and [`permission_layer_conflicts`]).
 
 mod env;
+mod keys;
 mod merge;
 mod permissions;
+mod pool;
 mod sections;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, RunnerName};
-use crate::workflow::OnInterrupt;
+use crate::ids::{AdapterId, CommandName, McpServerName, RunnerName, SharedDirVar};
+use crate::workflow::{Node, OnInterrupt};
 use env::expand_path;
 use merge::merge;
 
-pub use env::{user_state_root, Env, HomeExpansionError};
-pub use permissions::{
-    permission_layer_conflicts, CommandPermissions, NetworkPermissions, PackExecutorPolicy,
-    PackPermissions, PermissionsConfig, PublisherPermissions,
+pub use env::{
+    user_knowledge_dir, user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor,
+    SecretSource, ShortSecret, MIN_SECRET_CHARS, REDACTED,
 };
+pub use keys::ConfigKey;
+pub use permissions::{
+    network_asked, permission_layer_conflicts, CommandPermissions, NetworkPermissions,
+    PackExecutorPolicy, PackPermissions, PermissionsConfig, PublisherPermissions,
+};
+pub use pool::{DiskShare, PoolConfig};
 pub use sections::{
-    AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure, DefaultsConfig,
-    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, LimitsConfig,
-    McpServerConfig, PathsConfig, PricingEntry, ProjectConfig, RunnerCandidate, SkillsConfig,
-    StorageConfig,
+    is_default_isolation, AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure,
+    DefaultsConfig, ExecutorKind, ExecutorRegistration, ForgeConfig, FormatRule, GitHubForgeConfig,
+    Isolation, LimitsConfig, McpServerConfig, PathsConfig, PricingEntry, ProjectConfig,
+    RunnerCandidate, SkillsConfig, StorageConfig,
 };
 
 /// One config layer as parsed from a single file (project/user/org), and
@@ -53,7 +61,7 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapters: Option<BTreeMap<AdapterId, AdapterSettings>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_servers: Option<BTreeMap<String, McpServerConfig>>,
+    pub mcp_servers: Option<BTreeMap<McpServerName, McpServerConfig>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -62,6 +70,23 @@ pub struct ConfigLayer {
     pub paths: Option<PathsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<DefaultsConfig>,
+    /// `commands:` — `{name: command}`, what this project runs for each
+    /// capability a workflow names (`run: { command: lint }`). The name
+    /// is the workflow's, the text the project's: a pack asks for "the
+    /// lint" and the project says which tool that is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commands: Option<BTreeMap<CommandName, String>>,
+    /// `format:` — which project command formats which files, run on what
+    /// a session writes the moment it writes it. The first rule whose
+    /// paths match a file formats it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<Vec<FormatRule>>,
+    /// `shared_dirs:` — `{VARIABLE: directory}`, directories every
+    /// command and every session of a run shares: each is exported under
+    /// its variable and stays writable inside every session that may
+    /// write, so a build cache outlives the checkout each task works in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_dirs: Option<BTreeMap<SharedDirVar, PathBuf>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<BaselineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,11 +114,76 @@ pub struct ConfigLayer {
 }
 
 impl ConfigLayer {
+    /// Every `format:` rule, in the order a file is matched against them.
+    pub fn format_rules(&self) -> &[FormatRule] {
+        self.format.as_deref().unwrap_or_default()
+    }
+
+    /// The paths no run may write, as `permissions.paths.deny` declares
+    /// them across every layer.
+    pub fn denied_paths(&self) -> &[crate::ScopeGlob] {
+        self.permissions
+            .as_ref()
+            .and_then(|permissions| permissions.paths.as_ref())
+            .map_or(&[], |paths| paths.deny.as_slice())
+    }
+
+    /// The network permissions this layer declares: the project's default
+    /// and its own `permissions.network`, as `network_asked` reads them.
+    pub fn network_permissions(&self) -> Option<NetworkPermissions> {
+        self.permissions
+            .as_ref()
+            .and_then(|permissions| permissions.network)
+    }
+
+    /// Every secret name this layer declares, each once, at its first place:
+    /// `secrets:` in order, then each MCP server's `auth_env`, then the forge's
+    /// GitHub `token_env`.
+    pub fn secret_names(&self) -> Vec<String> {
+        let declared = self
+            .secrets
+            .iter()
+            .cloned()
+            .chain(
+                self.mcp_servers
+                    .iter()
+                    .flatten()
+                    .filter_map(|(_, server)| server.auth_env.clone()),
+            )
+            .chain(
+                self.forge
+                    .as_ref()
+                    .and_then(|forge| forge.github.as_ref())
+                    .map(|github| github.token_env.clone()),
+            );
+        let mut names: Vec<String> = Vec::new();
+        for name in declared {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// Every shared directory, and the variable it is exported under.
+    pub fn shared_dirs(&self) -> impl Iterator<Item = (&SharedDirVar, &std::path::Path)> {
+        self.shared_dirs
+            .iter()
+            .flatten()
+            .map(|(var, dir)| (var, dir.as_path()))
+    }
+
+    /// The text of the project's command `name`, if it declares one.
+    pub fn command(&self, name: &CommandName) -> Option<&str> {
+        self.commands.as_ref()?.get(name).map(String::as_str)
+    }
+
     /// Expands a leading `~` in every path this layer declares —
     /// `adapters.<id>.binary`, `storage.path`, `paths.runs`,
-    /// `paths.worktrees`, `skills.paths[]` — against `home`, so no
-    /// consumer ever sees a literal `~`. `home: None` makes any such path
-    /// an error naming the field.
+    /// `paths.worktrees`, `skills.paths[]`, `shared_dirs.<VAR>` — against
+    /// `home`, so no consumer ever sees a literal `~`. `home: None` makes
+    /// any such path an error naming the field, and a shared directory
+    /// left relative is one too.
     pub fn expand_home(
         &mut self,
         home: Option<&std::path::Path>,
@@ -111,6 +201,16 @@ impl ConfigLayer {
             .and_then(|storage| storage.path.as_mut())
         {
             expand_path(path, home, "storage.path")?;
+        }
+        for (var, dir) in self.shared_dirs.iter_mut().flatten() {
+            let field = format!("shared_dirs.{var}");
+            expand_path(dir, home, &field)?;
+            if dir.is_relative() {
+                return Err(HomeExpansionError::Relative {
+                    field,
+                    path: dir.display().to_string(),
+                });
+            }
         }
         if let Some(paths) = &mut self.paths {
             if let Some(runs) = &mut paths.runs {
@@ -133,6 +233,16 @@ impl ConfigLayer {
     /// precedence; `permissions` inverts this).
     pub fn merge_layers(layers: impl IntoIterator<Item = ConfigLayer>) -> ConfigLayer {
         layers.into_iter().fold(ConfigLayer::default(), merge)
+    }
+
+    /// The runner a node that takes a session resolves: its own `runner:`,
+    /// else `defaults.runner`. The one place that fallback lives, so the
+    /// freeze, `check`, the startup refusal and the node's own resolution
+    /// name the same runner.
+    pub fn runner_role<'a>(&'a self, node: &'a Node) -> Option<&'a RunnerName> {
+        node.runner
+            .as_ref()
+            .or_else(|| self.defaults.as_ref()?.runner.as_ref())
     }
 
     /// `defaults.isolation`, with the schema's own default (`worktree`)
@@ -178,7 +288,9 @@ impl ConfigLayer {
     }
 
     /// `defaults.timeout_minutes` as a session `Budget.timeout` — no
-    /// hidden default: absent means unlimited, exactly as before.
+    /// hidden default: absent means the session runs without a time bound,
+    /// and the stop judgement's window for such a session is
+    /// [`crate::rail::window::UNSET_WINDOW_SECS`], one hour.
     pub fn resolved_session_timeout(&self) -> Option<std::time::Duration> {
         self.defaults
             .as_ref()

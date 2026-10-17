@@ -1,22 +1,25 @@
 # quick mode: no plan approval and no review. The executor completes the
 # tasks document's one task, lint and the baseline check pass on the crate it
-# bootstrapped, and the run pauses at `ship` — the first human decision
-# this mode keeps — before anything is pushed.
-workflow: build-feature
+# bootstrapped, `conform` finds the work holds to its plan, and the run
+# pauses at `ship` — the first human decision this mode keeps — before
+# anything is pushed.
+workflow: fragua
 mode: quick
 inputs: { idea: "add dark mode" }
 worktree: worktrees/library
 fixture: fixtures/build-feature.yaml
 expect:
-  final_state: paused
+  final_state: needs you
   nodes:
     grill: finished
+    brief: finished
     plan: finished
     implement: finished
     lint: finished
     fix-lint: never ran
     tests: finished
-    review: never ran
+    conform: finished
+    review: skipped
     pr: never ran
   tasks:
     T001: done

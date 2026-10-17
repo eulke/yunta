@@ -1,0 +1,220 @@
+//! A repository that ignores `target/`, and the pool of a run over it:
+//! the world every test of the project's checkouts starts from.
+//!
+//! Every test binary that declares `mod pool_world` compiles the whole
+//! module and uses a part of it, so what another binary needs reads as
+//! dead here.
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use yunta_core::{Clock, CommitSha, Pid, RunId};
+use yunta_engine::{CheckoutPool, EngineProcessFile, Unit, UnitHome, UnitId};
+use yunta_testkit::{git, git_output, init_repo, Owner};
+
+pub const RUN: &str = "01JPOOLEDCHECKOUTS0000000A";
+
+/// A repository that ignores `target/`, and the pool of a run over it.
+pub struct World {
+    pub root: tempfile::TempDir,
+    pub repo: PathBuf,
+    pub run: RunId,
+    pub pool: Arc<CheckoutPool>,
+    pub owner: Owner,
+}
+
+impl World {
+    pub fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo(&repo);
+        ignore_builds(&repo);
+        let pool = World::pool_of(root.path(), &repo, "run");
+        World {
+            root,
+            repo,
+            run: RunId::from(RUN),
+            pool,
+            owner: Owner::new(),
+        }
+    }
+
+    /// The project's pool, as the run whose directory is `run_dir` under
+    /// `root` reaches it.
+    pub fn pool_of(root: &Path, repo: &Path, run_dir: &str) -> Arc<CheckoutPool> {
+        CheckoutPool::new(
+            &root.join("worktrees"),
+            repo,
+            &root.join(run_dir),
+            Arc::new(yunta_testkit_core::FixedClock),
+        )
+    }
+
+    /// The commit `checkout` stands on.
+    pub fn head_of(&self, checkout: &Path) -> CommitSha {
+        git_output(checkout, &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    pub fn head(&self) -> CommitSha {
+        git_output(&self.repo, &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    /// Opens `task`'s first attempt, handing back the hold on its checkout.
+    pub async fn open(&self, task: &str) -> (Unit, yunta_engine::Lease) {
+        self.open_through(&self.pool, &self.run, task, 1).await
+    }
+
+    /// Opens `task`'s first attempt under `supervision`.
+    pub async fn open_supervised(
+        &self,
+        task: &str,
+        supervision: yunta_engine::process::Supervision<'_>,
+    ) -> (Unit, yunta_engine::Lease) {
+        let (run_dir, base) = (self.root.path().join("run"), self.head());
+        let home = UnitHome {
+            repo: &self.repo,
+            run_dir: &run_dir,
+            run_id: &self.run,
+            base: &base,
+        };
+        self.pool
+            .open(home, UnitId::Task(task.into()), 1, supervision)
+            .await
+            .expect("a unit opens in the pool")
+    }
+
+    pub async fn open_through(
+        &self,
+        pool: &Arc<CheckoutPool>,
+        run: &RunId,
+        task: &str,
+        attempt: u32,
+    ) -> (Unit, yunta_engine::Lease) {
+        pool.open(
+            UnitHome {
+                repo: &self.repo,
+                run_dir: &self.root.path().join("run"),
+                run_id: run,
+                base: &self.head(),
+            },
+            UnitId::Task(task.into()),
+            attempt,
+            self.owner.supervision(),
+        )
+        .await
+        .expect("a unit opens in the pool")
+    }
+
+    /// What landing does to a task's checkout, held by `lease`: the refs
+    /// its attempts kept go, and the checkout is kept for nobody.
+    pub async fn land(&self, unit: &Unit, lease: &yunta_engine::Lease) {
+        self.pool
+            .retire(unit, lease, self.owner.supervision())
+            .await
+            .unwrap();
+    }
+
+    /// Gives back `unit`'s checkout, done with it, and waits until the pool
+    /// recorded the build it leaves.
+    pub async fn give_back(&self, unit: &Unit, lease: yunta_engine::Lease) {
+        self.pool
+            .give_back(lease, self.owner.supervision())
+            .await
+            .expect("the checkout is given back");
+        self.wait_for_build(unit).await;
+    }
+
+    /// Gives back `unit`'s checkout as of `at`, and waits until the pool
+    /// recorded the build it leaves.
+    pub async fn give_back_at(&self, unit: &Unit, lease: yunta_engine::Lease, at: &str) {
+        let clock = yunta_testkit_core::AtClock(at.parse().unwrap());
+        let supervision = yunta_engine::process::Supervision {
+            clock: &clock,
+            ..self.owner.supervision()
+        };
+        self.pool
+            .give_back(lease, supervision)
+            .await
+            .expect("the checkout is given back");
+        self.wait_for_build(unit).await;
+    }
+
+    async fn wait_for_build(&self, unit: &Unit) {
+        let name = unit.worktree.file_name().unwrap().to_string_lossy();
+        let built = unit.worktree.with_file_name(format!("{name}.built"));
+        // Counted once the record says how many bytes the build takes.
+        yunta_testkit::wait_until_async(
+            || async {
+                tokio::fs::read_to_string(&built)
+                    .await
+                    .is_ok_and(|record| record.contains("\"bytes\""))
+            },
+            || format!("the pool counts the build of {}", unit.worktree.display()),
+        )
+        .await;
+    }
+
+    /// The checkouts the pool holds on disk, by name.
+    pub async fn slots(&self) -> Vec<String> {
+        let home = self.pool.home(self.owner.supervision()).await.unwrap();
+        checkouts_in(&home)
+    }
+}
+
+/// Writes the registry a crashed engine leaves in `run_dir`: the engine
+/// `engine` is named as the one that ran the work, and `group` as one of
+/// the process groups its agents run in.
+pub fn register_group(run_dir: &Path, engine: u32, group: u32) {
+    let file = EngineProcessFile {
+        schema_version: 1,
+        engine_pid: Pid::try_from(engine).unwrap(),
+        started_at: yunta_testkit_core::FixedClock.now(),
+        process_groups: vec![Pid::try_from(group).unwrap()],
+        asking: None,
+    };
+    std::fs::create_dir_all(run_dir.join(yunta_engine::run_dir::SCRATCH_DIR)).unwrap();
+    let bytes = yunta_core::persisted::PersistedDoc::of(file)
+        .write()
+        .unwrap();
+    std::fs::write(yunta_engine::registry_path(run_dir), bytes).unwrap();
+}
+
+/// Commits a `.gitignore` that ignores `target/` in `repo`.
+pub fn ignore_builds(repo: &Path) {
+    std::fs::write(repo.join(".gitignore"), "target/\n").unwrap();
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-q", "-m", "ignore builds"]);
+}
+
+/// The checkouts under a pool's directory, by name.
+pub fn checkouts_in(home: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(home)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+pub fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap()
+}
+
+pub fn delete(path: &Path) {
+    std::fs::remove_file(path).unwrap();
+}
+
+pub fn write(path: &Path, text: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}

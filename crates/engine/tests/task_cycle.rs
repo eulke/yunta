@@ -1,16 +1,100 @@
-use yunta_adapters::{Budget, MockAdapter, PermissionProfile};
-use yunta_core::Criterion;
-use yunta_core::Task;
-use yunta_engine::process::Supervision;
-use yunta_engine::{
-    run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,
+//! One task from red to done: the pre-check that has to fail, the
+//! attempts, the post-check that has to pass, and everything that ends
+//! the cycle short of done.
+//!
+//! An agent's claim is never the verdict — only a criterion passing is —
+//! and a criterion that was already red, a guard that was already
+//! broken, an edit outside scope, a wall clock or a token budget each
+//! close the cycle on their own terms. A criterion is reused only while
+//! the tree and the config behind it are unchanged.
+
+use yunta_adapters::MockAdapter;
+use yunta_core::events::{
+    CriteriaCheckedPayload, CriterionResult, EventPayload, Failure, NodeEvent, Phase, RefusalCause,
+    TaskLedger, Timed, Unanswered,
 };
-use yunta_testkit::init_repo;
+use yunta_core::port::{Budget, PermissionProfile};
+use yunta_core::Task;
+use yunta_core::{Capabilities, Criterion};
+use yunta_engine::scope_expansion::GrantWindow;
+use yunta_engine::{
+    run_task, surprises, AttemptEnv, CriterionRun, DispatchOutcome, Memo, ScopeGovernance,
+    Surprise, TaskCause, TaskCycleReport, TaskOutcome, Unit, UnitId,
+};
+use yunta_testkit::{init_repo, Owner};
+use yunta_testkit_core::Log;
+
+#[path = "task_cycle/failed_attempts.rs"]
+mod failed_attempts;
+
+#[path = "task_cycle/mid_stream_cap.rs"]
+mod mid_stream_cap;
+
+/// The setup a task session of node `build` runs under: the mock
+/// runner every fixture here answers as, and nothing else.
+/// The setup those task sessions run under, rooted at a run directory
+/// of its own: what a capture writes goes under the run, never inside
+/// the checkout it measures.
+fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
+    yunta_engine::SessionSetup::bare(
+        run_dir.to_path_buf(),
+        yunta_core::NodeId::from_static("build"),
+        yunta_core::RunnerCandidate {
+            adapter: "mock".into(),
+            model: "mock-model".into(),
+            agent: None,
+            effort: None,
+        },
+    )
+}
+
+/// A scripted CLI that answers with no capability at all, as a fixture that
+/// declares none did: its session opens without a hook, and its effects land
+/// as the fixture writes them.
+fn scripted(yaml: &str) -> MockAdapter {
+    MockAdapter::from_yaml(yaml)
+        .unwrap()
+        .narrowed(Capabilities::default())
+}
+
+/// A unit to work in — an initialised checkout and the tree it starts
+/// from — and the run directory beside it, which is where a session's
+/// working files go: the private index a scope audit captures through
+/// among them, and it must not sit in the tree it measures.
+async fn a_unit(owner: &Owner) -> (tempfile::TempDir, tempfile::TempDir, Unit) {
+    let dir = tempfile::tempdir().expect("a checkout");
+    let run = tempfile::tempdir().expect("a run directory");
+    init_repo(dir.path());
+    let from = yunta_engine::head_tree(dir.path(), owner.supervision())
+        .await
+        .expect("the checkout says where it stands");
+    let base = yunta_engine::head_commit(dir.path(), owner.supervision())
+        .await
+        .expect("and which commit that is");
+    let who = UnitId::Task("test-unit".into());
+    let keeps = yunta_engine::UnitRef::of(&yunta_core::RunId::from("run-test"), &who, 1);
+    let unit = Unit {
+        who,
+        worktree: dir.path().to_path_buf(),
+        base,
+        from,
+        keeps,
+    };
+    (dir, run, unit)
+}
+
+/// The node those task sessions belong to: a `loop` node named `build`,
+/// declaring nothing of its own.
+fn build_node() -> yunta_core::Node {
+    yunta_core::yaml::parse("{ id: build, kind: bash, run: \"true\" }")
+        .expect("the node the setup names")
+}
 
 fn cmd(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: None,
+        proves: None,
     }
 }
 
@@ -18,6 +102,100 @@ fn guard(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: Some(yunta_core::events::CriterionType::Guard),
+        proves: None,
+    }
+}
+
+/// A log that priced nothing: every criterion sorts as a command with
+/// no history, so a pre-check meets them in declared order.
+fn unpriced() -> TaskLedger {
+    TaskLedger::default()
+}
+
+/// Runs `t` once, as its first attempt runs, on `adapter` in `unit`'s tree
+/// under `budget`, and returns what the cycle reports.
+async fn run_once(
+    owner: &Owner,
+    unit: &Unit,
+    run: &std::path::Path,
+    t: &Task,
+    adapter: &MockAdapter,
+    budget: Budget,
+) -> TaskCycleReport {
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let grants = GrantWindow::seeded(0);
+    let env = AttemptEnv {
+        node: &build_node(),
+        adapter,
+        unit,
+        budget,
+        memo: &memo,
+        history: &unpriced(),
+        supervision: owner.supervision(),
+        carry: None,
+        resume: None,
+    };
+    let report = run_task(
+        t,
+        "Implement your task.",
+        env,
+        ungoverned(&grants),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run),
+    )
+    .await
+    .unwrap();
+    report
+}
+
+/// The tasks fold a run derives from a log whose one pre-check timed
+/// each command at the durations `entries` names.
+fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
+    let results = entries
+        .iter()
+        .flat_map(|(cmd, durations)| {
+            durations.iter().map(|&duration_ms| CriterionResult {
+                cmd: (*cmd).to_string(),
+                exit_code: 1,
+                r#type: None,
+                reused: false,
+                duration_ms: Some(duration_ms),
+                output: None,
+                tail: Vec::new(),
+                tree: None,
+                head: None,
+                conclusion: None,
+            })
+        })
+        .collect();
+    let events = Log::for_run("run-priced")
+        .node(
+            "build",
+            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+                task_id: "T1".into(),
+                phase: Phase::Pre,
+                results,
+                waiting: Vec::new(),
+            })),
+        )
+        .build();
+    yunta_engine::derive(&events).tasks
+}
+
+/// The governance a cycle test runs under when governance is not what
+/// it is about: no permissions model, the edit rung of the ladder, no
+/// scope expansion, nothing protected, and a window that has granted nothing.
+fn ungoverned(grants: &GrantWindow) -> ScopeGovernance<'_> {
+    ScopeGovernance {
+        permissions: None,
+        profile: PermissionProfile::Edit,
+        scope_expansion: None,
+        max_expansion_files: 5,
+        grants,
+        already_granted_paths: &[],
+        beside: &[],
+        protected: std::sync::Arc::new(yunta_core::protected::Protected::default()),
     }
 }
 
@@ -25,19 +203,22 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
     Task {
         id: id.into(),
         title: "test task".to_string(),
-        scope: scope.iter().map(|s| s.to_string()).collect(),
+        scope: scope.iter().map(|s| (*s).into()).collect(),
         criteria,
         depends_on: vec![],
         notes: None,
-        manual_review: false,
-        justification: None,
+        description: None,
+        changes: Vec::new(),
+        outcome: None,
+        uses: Vec::new(),
+        invariants: Vec::new(),
     }
 }
 
 #[tokio::test]
 async fn a_session_that_makes_the_criterion_pass_reaches_done() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -45,37 +226,32 @@ async fn a_session_that_makes_the_criterion_pass_reaches_done() {
         &["output.txt"],
         vec![cmd("test -f output.txt")],
     );
-    let adapter = MockAdapter::from_yaml(
-        r#"
+    let adapter = scripted(
+        r#"dialect: claude-code
 effects:
   - { path: output.txt, content: "hello\n" }
 outcome: { type: completed, summary: "wrote it" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 2,
+            unit: &unit,
             budget: Budget::default(),
             memo: &memo,
-            registry: None,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -93,8 +269,8 @@ outcome: { type: completed, summary: "wrote it" }
 
 #[tokio::test]
 async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_done() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -105,32 +281,29 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
     // The mock reports Completed but its fixture never writes output.txt —
     // this proves the engine, not the
     // agent's self-report, decides done.
-    let adapter =
-        MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "all done, trust me" }"#)
-            .unwrap();
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "all done, trust me" }"#,
+    );
 
     let report = run_task(
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 0,
+            unit: &unit,
             budget: Budget::default(),
             memo: &memo,
-            registry: None,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -142,36 +315,35 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
 
 #[tokio::test]
 async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // `true` always exits 0 — a non-guard criterion that already passes.
     let t = task("trivial", &["output.txt"], vec![cmd("true")]);
-    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "ok" }"#,
+    );
 
     let report = run_task(
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 2,
+            unit: &unit,
             budget: Budget::default(),
             memo: &memo,
-            registry: None,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -181,9 +353,13 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         "no attempt should have been dispatched"
     );
     match report.outcome {
-        TaskOutcome::Blocked { reason } => assert_eq!(
-            reason,
-            "criterion `true` already passes before any work — the criteria need fixing, not the task"
+        TaskOutcome::Blocked {
+            cause: TaskCause::PreCheck { found },
+        } => assert_eq!(
+            found.as_slice(),
+            &[Surprise::TrivialCriterion {
+                cmd: "true".to_string()
+            }]
         ),
         other => panic!("expected Blocked, got {other:?}"),
     }
@@ -191,102 +367,76 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
 
 #[tokio::test]
 async fn a_broken_guard_blocks_before_any_attempt_runs() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     // `false` always exits 1 — a guard that's already red.
     let t = task(
         "broken-guard",
         &["output.txt"],
         vec![cmd("test -f output.txt"), guard("false")],
     );
-    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 2,
-            budget: Budget::default(),
-            memo: &memo,
-            registry: None,
-        },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
-    )
-    .await
-    .unwrap();
-
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "ok" }"#,
+    );
+    let report = run_once(&owner, &unit, run.path(), &t, &adapter, Budget::default()).await;
     assert!(report.attempts.is_empty());
     match report.outcome {
-        TaskOutcome::Blocked { reason } => {
-            assert_eq!(
-                reason,
-                "guard `false` is already red before any work started"
-            )
-        }
+        TaskOutcome::Blocked {
+            cause: TaskCause::PreCheck { found },
+        } => assert_eq!(
+            found.as_slice(),
+            &[Surprise::BrokenGuard {
+                cmd: "false".to_string(),
+                proves: None,
+            }]
+        ),
         other => panic!("expected Blocked, got {other:?}"),
     }
 }
 
 #[tokio::test]
 async fn an_edit_outside_scope_is_a_violation_even_if_criteria_pass() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    // The criterion only cares about marker.txt (in scope) — but the
-    // fixture also writes elsewhere.txt (outside scope). Criteria go
-    // green; the task must still not succeed.
+    // The criterion reads marker.txt, which is in scope; the fixture also
+    // writes elsewhere.txt. The criteria go green, but the task must not succeed.
+    // This session has no rail, so nothing refuses the edit before the scope
+    // audit judges the diff.
     let t = task(
         "narrow-scope",
         &["marker.txt"],
         vec![cmd("test -f marker.txt")],
     );
-    let adapter = MockAdapter::from_yaml(
-        r#"
+    let adapter = scripted(
+        r#"dialect: claude-code
 effects:
   - { path: marker.txt, content: "in scope\n" }
   - { path: elsewhere.txt, content: "not allowed here\n" }
 outcome: { type: completed, summary: "done" }
 "#,
-    )
-    .unwrap();
+    );
 
     let report = run_task(
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 0,
+            unit: &unit,
             budget: Budget::default(),
             memo: &memo,
-            registry: None,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -300,163 +450,8 @@ outcome: { type: completed, summary: "done" }
 }
 
 #[tokio::test]
-async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    let t = task(
-        "always-red",
-        &["output.txt"],
-        vec![cmd("test -f output.txt")],
-    );
-    // Every retry is a fresh session, so the fixture scripts one
-    // session per expected attempt.
-    let adapter = MockAdapter::from_yaml(
-        r#"
-sessions:
-  - outcome: { type: completed, summary: "attempt 1" }
-  - outcome: { type: completed, summary: "attempt 2" }
-  - outcome: { type: completed, summary: "attempt 3" }
-"#,
-    )
-    .unwrap();
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 2,
-            budget: Budget::default(),
-            memo: &memo,
-            registry: None,
-        },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(report.attempts.len(), 3); // 1 initial + 2 retries
-    assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
-}
-
-#[tokio::test]
-async fn a_non_retryable_failure_ends_the_cycle() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    // Criteria stay red (nothing writes the file) and the session reports a
-    // failure it marks non-retryable — retrying cannot help, so the cycle
-    // stops after the one attempt instead of spending `max_retries` more.
-    let t = task("gives-up", &["output.txt"], vec![cmd("test -f output.txt")]);
-    // Scripts one session per attempt `max_retries` would allow, so the
-    // pre-fix cycle fails on the attempt count, not on running the fixture
-    // dry; the fix leaves the extra sessions unconsumed.
-    let adapter = MockAdapter::from_yaml(
-        r#"
-sessions:
-  - outcome: { type: failed, message: "unrecoverable", retryable: false }
-  - outcome: { type: failed, message: "unrecoverable", retryable: false }
-  - outcome: { type: failed, message: "unrecoverable", retryable: false }
-"#,
-    )
-    .unwrap();
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 2,
-            budget: Budget::default(),
-            memo: &memo,
-            registry: None,
-        },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(
-        report.attempts.len(),
-        1,
-        "no retry after a non-retryable failure"
-    );
-    assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
-    assert!(matches!(
-        report.attempts[0].dispatch,
-        DispatchOutcome::Failed {
-            retryable: false,
-            ..
-        }
-    ));
-}
-
-#[tokio::test]
-async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
-
-    let report = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 0,
-            budget: Budget::default(),
-            memo: &memo,
-            registry: None,
-        },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
-        None,
-        &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(report.attempts[0].dispatch, DispatchOutcome::Crashed);
-    assert!(!report.attempts[0].succeeded);
-}
-
-#[tokio::test]
 async fn pre_check_and_post_check_run_every_criterion() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -466,15 +461,185 @@ async fn pre_check_and_post_check_run_every_criterion() {
         vec![cmd("test -f a.txt"), cmd("test -f b.txt")],
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert_eq!(runs.len(), 2);
-    assert_eq!(outcome, PreCheckOutcome::Red);
+    assert!(surprises(&t, &runs).is_empty());
+}
+
+/// Each answer names the tree it is for — the same for every criterion
+/// of one check — and the commit the checkout stood on only where the
+/// command runs `git`, whose answer can turn on history.
+#[tokio::test]
+async fn a_criterion_s_answer_names_the_tree_it_answered_for() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let t = task(
+        "named",
+        &["a.txt"],
+        vec![cmd("test -f a.txt"), cmd("git status --porcelain")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let [files, history] = checked.runs.as_slice() else {
+        panic!("two runs: {:#?}", checked.runs);
+    };
+    assert!(files.tree.is_some() && files.tree == history.tree);
+    assert_eq!(files.head, None);
+    let head = yunta_testkit::git_output(&repo, &["rev-parse", "HEAD"]);
+    assert_eq!(history.head.as_deref(), Some(head.trim()));
+}
+
+#[tokio::test]
+async fn a_guard_waits_while_a_criterion_of_its_own_task_is_red() {
+    // The guard writes a line outside the repo each time it runs, so the
+    // marker says whether it ran without changing the tree it is judged on.
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let marker = root.path().join("guard-runs.txt");
+    let suite = format!("echo ran >> {}", marker.display());
+    let t = task(
+        "red-own",
+        &["a.txt"],
+        vec![guard(&suite), cmd("test -f a.txt")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let ran: Vec<(&str, i32)> = checked
+        .runs
+        .iter()
+        .map(|run| (run.cmd.as_str(), run.exit_code))
+        .collect();
+    assert_eq!(ran, vec![("test -f a.txt", 1)]);
+    assert_eq!(checked.waiting, vec![suite]);
+    assert!(!checked.passes());
+    assert!(
+        !tokio::fs::try_exists(&marker).await.unwrap(),
+        "the guard never ran"
+    );
+}
+
+/// Guards run in order and stop at the first red one: one red guard
+/// already keeps the task open, and a guard after it would only cost its
+/// run.
+#[tokio::test]
+async fn guards_stop_at_the_first_red_one_and_the_rest_wait() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let second = root.path().join("second");
+    let touch = format!("touch {}", second.display());
+    let t = task(
+        "red-guard",
+        &["a.txt"],
+        vec![cmd("test -f a.txt"), guard("exit 1"), guard(&touch)],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let ran: Vec<(&str, i32)> = checked
+        .runs
+        .iter()
+        .map(|run| (run.cmd.as_str(), run.exit_code))
+        .collect();
+    assert_eq!(ran, vec![("test -f a.txt", 0), ("exit 1", 1)]);
+    assert_eq!(checked.waiting, vec![touch]);
+    assert!(!checked.passes());
+    assert!(!tokio::fs::try_exists(&second).await.unwrap(), "never ran");
+}
+
+/// A red guard answers the check at once, without waiting for the suite
+/// the run is still measuring: whatever it answers, the task stays open.
+#[tokio::test]
+async fn a_red_guard_answers_without_waiting_for_the_suite_being_measured() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let suite = "cargo test --workspace";
+    let t = task(
+        "suite-pending",
+        &["a.txt"],
+        vec![cmd("test -f a.txt"), guard(suite), guard("exit 1")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    memo.held().expect(&[suite.to_string()]);
+
+    let checked = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        yunta_engine::post_check(&t, &repo, &memo, owner.supervision()),
+    )
+    .await
+    .expect("the check answers without the measurement")
+    .unwrap();
+
+    let ran: Vec<&str> = checked.runs.iter().map(|run| run.cmd.as_str()).collect();
+    assert_eq!(ran, vec!["test -f a.txt", "exit 1"]);
+    assert_eq!(checked.waiting, vec![suite.to_string()]);
+}
+
+#[tokio::test]
+async fn a_guard_runs_after_every_criterion_of_its_own_task_passes() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let marker = root.path().join("guard-runs.txt");
+    let suite = format!("echo ran >> {}", marker.display());
+    let t = task(
+        "green-own",
+        &["a.txt"],
+        vec![guard(&suite), cmd("test -f a.txt")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let ran: Vec<(&str, bool, i32)> = checked
+        .runs
+        .iter()
+        .map(|run| (run.cmd.as_str(), run.is_guard, run.exit_code))
+        .collect();
+    assert_eq!(
+        ran,
+        vec![("test -f a.txt", false, 0), (suite.as_str(), true, 0)]
+    );
+    assert!(checked.waiting.is_empty() && checked.passes());
+    let runs = tokio::fs::read_to_string(&marker).await.unwrap();
+    assert_eq!(runs.lines().count(), 1);
 }
 
 #[tokio::test]
 async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the_last_check() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -482,7 +647,7 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     // The execution marker lives outside the repo — a criterion is
     // deterministic/read-only by definition, so this only exists
     // to observe whether the command actually ran without itself
-    // dirtying the tree tree_hash is computed over (that would
+    // dirtying the tree the memo is keyed by (that would
     // self-invalidate the very cache entry it just wrote).
     let marker = root.path().join("executions.txt");
 
@@ -493,12 +658,12 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    let first = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(!first[0].reused, "the first check must actually execute");
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    let second = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(
@@ -516,6 +681,7 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
 
 #[tokio::test]
 async fn a_criterion_re_executes_once_the_tree_changes() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -529,14 +695,14 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     // Dirty the repo's own tree — the next check must see a different
-    // tree_hash (the marker file lives outside it and doesn't count).
+    // content (the marker file lives outside it and doesn't count).
     std::fs::write(repo.join("new-file.txt"), "changed").unwrap();
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    let second = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(
@@ -549,15 +715,96 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 }
 
 #[tokio::test]
-async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+async fn a_criterion_is_reused_once_the_same_content_is_committed() {
+    // What a criterion answers turns on what the tree holds. A close
+    // that commits the work, and an integration that replays it onto an
+    // unchanged base, hold what the session's last check already ran on.
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let marker = root.path().join("executions.txt");
+    let t = task(
+        "memo-commit",
+        &["output.txt"],
+        vec![guard(&format!("echo ran >> {} && true", marker.display()))],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    tokio::fs::write(repo.join("output.txt"), "made")
+        .await
+        .unwrap();
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    yunta_testkit::git(&repo, &["add", "-A"]);
+    yunta_testkit::git(&repo, &["commit", "-q", "-m", "the work"]);
+    let committed = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+
+    assert!(committed[0].reused, "the same content, now committed");
+    assert_eq!(
+        tokio::fs::read_to_string(&marker)
+            .await
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_criterion_that_asks_git_runs_again_once_head_moves() {
+    // A command that reads git can answer differently on the same
+    // content under another commit, so where it stands is part of what
+    // its answer is kept for.
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let marker = root.path().join("heads.txt");
+    let t = task(
+        "memo-git",
+        &["output.txt"],
+        vec![guard(&format!(
+            "git rev-parse HEAD >> {}",
+            marker.display()
+        ))],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    yunta_testkit::git(&repo, &["commit", "-q", "--allow-empty", "-m", "moved"]);
+    let moved = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+
+    assert!(!moved[0].reused, "same content, another commit");
+    assert_eq!(
+        tokio::fs::read_to_string(&marker)
+            .await
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn a_hung_session_is_cut_by_its_timeout() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("timeout", &["output.txt"], vec![cmd("test -f output.txt")]);
-    let adapter = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
+    let adapter = scripted("dialect: claude-code\noutcome: { type: hang }");
     let budget = Budget {
-        timeout: Some(std::time::Duration::from_millis(50)),
+        timeout: Some(std::time::Duration::from_secs(1)),
         ..Default::default()
     };
 
@@ -570,24 +817,20 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             &t,
             "Implement your task.",
             AttemptEnv {
+                node: &build_node(),
                 adapter: &adapter,
-                cwd: dir.path(),
-                max_retries: 0,
+                unit: &unit,
                 budget,
                 memo: &memo,
-                registry: None,
+                history: &unpriced(),
+                supervision: owner.supervision(),
+                carry: None,
+                resume: None,
             },
-            ScopeGovernance {
-                permissions: None,
-                profile: PermissionProfile::Edit,
-                scope_expansion: None,
-                max_expansion_files: 5,
-                grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-                already_granted_paths: &[],
-            },
+            ungoverned(&GrantWindow::seeded(0)),
             None,
             &tokio_util::sync::CancellationToken::new(),
-            &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+            &bare_setup(run.path()),
         ),
     )
     .await
@@ -595,8 +838,8 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     .unwrap();
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => {
-            assert_eq!(reason, "exceeded timeout of 50ms")
+        DispatchOutcome::BudgetExceeded { cause } => {
+            assert_eq!(cause, &session_timeout(1000))
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
@@ -604,8 +847,8 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
 
 #[tokio::test]
 async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -615,15 +858,15 @@ async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
     );
     // Two usage steps totalling 150 tokens, then a completion that
     // dispatch must never see because the budget is 100.
-    let adapter = MockAdapter::from_yaml(
+    let adapter = scripted(
         r#"
+dialect: claude-code
 steps:
   - { type: usage, input_tokens: 60, output_tokens: 20 }
   - { type: usage, input_tokens: 50, output_tokens: 20 }
 outcome: { type: completed, summary: "should never be reached" }
 "#,
-    )
-    .unwrap();
+    );
     let budget = Budget {
         max_tokens: Some(100),
         ..Default::default()
@@ -633,88 +876,132 @@ outcome: { type: completed, summary: "should never be reached" }
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 0,
+            unit: &unit,
             budget,
             memo: &memo,
-            registry: None,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantWindow::seeded(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
 
     match &report.attempts[0].dispatch {
-        DispatchOutcome::BudgetExceeded { reason } => {
-            assert_eq!(reason, "exceeded max_tokens 100 (150 used)")
+        DispatchOutcome::BudgetExceeded { cause } => {
+            assert_eq!(
+                cause,
+                &Failure::TokenBudget {
+                    used: 150,
+                    max: 100
+                }
+            )
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }
 }
 
-// --- learned criterion ordering by historical duration ----------------
+// --- criterion ordering by the duration the log recorded ---------------
 
 #[tokio::test]
-async fn pre_check_orders_criteria_by_learned_median_duration() {
+async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    // The duration is the subject under test here: one criterion genuinely
-    // takes longer to run than the other, so the learned median has a real
-    // difference to sort by.
-    let slow = "sleep 0.2; test -f never.txt";
-    let fast = "test -f never.txt";
-    let t = task("T1", &["**"], vec![cmd(slow), cmd(fast)]);
+    let costly = "test -f never.txt";
+    let cheap = "test -f also-never.txt";
+    let t = task("T1", &["**"], vec![cmd(costly), cmd(cheap)]);
 
-    // First pass: no history — declared order, real durations recorded.
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
+    // A log that priced nothing: declared order, and this pass records
+    // what each command cost.
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
-    assert_eq!(outcome, PreCheckOutcome::Red);
-    assert_eq!(runs[0].cmd, slow);
-    assert_eq!(runs[1].cmd, fast);
+    assert!(surprises(&t, &runs).is_empty());
+    assert_eq!(runs[0].cmd, costly);
+    assert_eq!(runs[1].cmd, cheap);
     assert!(
         runs.iter().all(|run| run.duration_ms.is_some()),
         "executed criteria must record their duration: {runs:?}"
     );
 
-    // The tree changes (no memo reuse), and the learned medians reorder:
-    // the historically-fast criterion now runs first to fail fast.
+    // The tree changes (no memo reuse), and the medians the log holds
+    // reorder the pass: the cheap command runs first to fail fast.
     std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
+    let history = priced(&[(costly, &[400, 600]), (cheap, &[5, 7])]);
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &history, owner.supervision())
         .await
         .unwrap();
-    assert_eq!(
-        outcome,
-        PreCheckOutcome::Red,
+    assert!(
+        surprises(&t, &runs).is_empty(),
         "ordering never alters the verdict"
     );
     assert_eq!(
-        runs[0].cmd, fast,
-        "learned order must put the fast criterion first"
+        runs[0].cmd, cheap,
+        "the order the log priced must put the cheap criterion first"
     );
-    assert_eq!(runs[1].cmd, slow);
+    assert_eq!(runs[1].cmd, costly);
+}
+
+#[tokio::test]
+async fn pre_check_uses_medians_with_outliers_and_stable_declaration_ties() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let slow = "test -f slow.txt";
+    let tied_first = "test -f tied-first.txt";
+    let tied_second = "test -f tied-second.txt";
+    let unpriced_command = "test -f unpriced.txt";
+    let t = task(
+        "T1",
+        &["**"],
+        vec![
+            cmd(slow),
+            cmd(tied_first),
+            cmd(unpriced_command),
+            cmd(tied_second),
+        ],
+    );
+    let history = priced(&[
+        (slow, &[1, 50, 99]),
+        (tied_first, &[12, 12, 1000]),
+        (tied_second, &[1000, 12, 12]),
+    ]);
+
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &history, owner.supervision())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        runs.iter().map(|run| run.cmd.as_str()).collect::<Vec<_>>(),
+        [tied_first, tied_second, slow, unpriced_command],
+        "outliers do not change medians, equal medians retain declaration order, and unknown history sorts last"
+    );
+    assert_eq!(runs.len(), t.criteria.len(), "every criterion still runs");
+    assert!(
+        surprises(&t, &runs).is_empty(),
+        "ordering does not alter the verdict"
+    );
 }
 
 #[tokio::test]
 async fn reused_criteria_carry_no_duration() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
 
-    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(!runs[0].reused);
@@ -722,7 +1009,7 @@ async fn reused_criteria_carry_no_duration() {
 
     // Same tree: the memo answers, and a reused result has no duration
     // of its own (nothing ran).
-    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(runs[0].reused);
@@ -731,6 +1018,7 @@ async fn reused_criteria_carry_no_duration() {
 
 #[tokio::test]
 async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     // A trivially-green criterion among red ones: the verdict must be
@@ -749,43 +1037,141 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
     for (i, permutation) in permutations.drain(..).enumerate() {
         let memo = Memo::new(yunta_core::sha256_hex(format!("config-{i}").as_bytes()));
         let t = task("T1", &["**"], permutation);
-        let (_, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
+        let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
             .await
             .unwrap();
-        verdicts.push(outcome);
+        verdicts.push(surprises(&t, &runs));
     }
     assert!(
         verdicts
             .iter()
-            .all(|v| matches!(v, PreCheckOutcome::TrivialCriterion { .. })),
+            .all(|found| matches!(found.as_slice(), [Surprise::TrivialCriterion { .. }])),
         "got: {verdicts:?}"
     );
 }
 
-#[test]
-fn criterion_results_without_duration_still_parse() {
-    // Additive payload evolution — an older event without
-    // `duration_ms` parses, and the field reads back `None`.
-    let old = r#"{ "cmd": "cargo test", "exit_code": 0, "reused": false }"#;
-    let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();
-    assert_eq!(result.duration_ms, None);
+#[tokio::test]
+async fn a_reused_red_answer_still_says_why_and_a_reused_green_one_names_nothing() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let t = task(
+        "T1",
+        &["**"],
+        vec![
+            cmd("echo red-said-this; exit 1"),
+            guard("echo green-said-this"),
+        ],
+    );
+    let printed = |run: &CriterionRun| {
+        run.output.as_ref().map(|output| match output {
+            yunta_engine::process::Printed::Ran(output) => {
+                String::from_utf8_lossy(output.bytes()).into_owned()
+            }
+            yunta_engine::process::Printed::Recorded { tail, .. } => tail.join("\n"),
+        })
+    };
+
+    let ran = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    let reused = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+
+    let by_cmd = |runs: &[CriterionRun], prefix: &str| {
+        runs.iter()
+            .find(|run| run.cmd.starts_with(prefix))
+            .cloned()
+            .expect("declared")
+    };
+    let (red, green) = (by_cmd(&ran, "echo red"), by_cmd(&ran, "echo green"));
+    assert_eq!(printed(&red).as_deref(), Some("red-said-this\n"));
+    assert_eq!(printed(&green).as_deref(), Some("green-said-this\n"));
+
+    let (red, green) = (by_cmd(&reused, "echo red"), by_cmd(&reused, "echo green"));
+    assert!(red.reused && green.reused);
+    assert_eq!(
+        printed(&red).as_deref(),
+        Some("red-said-this\n"),
+        "the close that reuses a session's own check still says why it fails"
+    );
+    assert_eq!(printed(&green), None);
 }
 
-/// A `SessionObserver` whose every append fails, standing in for storage
-/// that has gone down mid-session.
-struct FailingObserver;
+#[test]
+fn criterion_results_from_before_their_later_fields_still_parse() {
+    // Additive payload evolution — an older event without `duration_ms`,
+    // `output` or `tail` parses, and each reads back empty.
+    let old = r#"{ "cmd": "cargo test", "exit_code": 1, "reused": false }"#;
+    let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();
+    assert_eq!(result.duration_ms, None);
+    assert_eq!(result.output, None);
+    assert!(result.tail.is_empty());
+
+    let old = r#"{ "phase": "before", "command": "npm ci", "exit_code": 1 }"#;
+    let hook: yunta_core::events::HookExecutedPayload = serde_json::from_str(old).unwrap();
+    assert_eq!(hook.output, None);
+    assert!(hook.tail.is_empty());
+}
+
+/// Which store a [`FailingObserver`] stands in for, gone down mid-session.
+#[derive(Clone, Copy)]
+enum Down {
+    /// Every append of an event fails.
+    Log,
+    /// Every object a command's output would be kept as fails.
+    Objects,
+}
+
+/// A `SessionObserver` whose `Down` store fails every write.
+struct FailingObserver(Down);
+
+#[async_trait::async_trait]
+impl yunta_engine::KeepsOutput for FailingObserver {
+    async fn keep_output(
+        &self,
+        output: &yunta_engine::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash> {
+        match self.0 {
+            Down::Objects => Err(std::io::Error::other("object storage is down")),
+            Down::Log => Ok(yunta_core::sha256_hex(output.bytes())),
+        }
+    }
+
+    async fn kept_output(&self, _hash: &yunta_core::ContentHash) -> Option<Vec<u8>> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl yunta_engine::SessionObserver for FailingObserver {
-    async fn emit_session_event(
+    async fn record(
         &self,
         _node_id: &yunta_core::NodeId,
         _payload: yunta_core::events::EventPayload,
-    ) -> Result<(), yunta_storage::StorageError> {
-        Err(yunta_storage::StorageError::Append {
-            run_id: yunta_core::RunId::from("run-test"),
-            source: "audit storage is down".into(),
-        })
+    ) -> Result<yunta_core::Seq, yunta_storage::StorageError> {
+        match self.0 {
+            Down::Log => Err(yunta_storage::StorageError::Append {
+                run_id: yunta_core::RunId::from("run-test"),
+                source: "audit storage is down".into(),
+            }),
+            Down::Objects => Ok(yunta_core::Seq::from(1)),
+        }
+    }
+
+    async fn refused_writes(
+        &self,
+        _sessions: &[yunta_core::SessionId],
+    ) -> Result<Vec<yunta_core::events::ToolTarget>, yunta_storage::StorageError> {
+        match self.0 {
+            Down::Log => Err(yunta_storage::StorageError::Append {
+                run_id: yunta_core::RunId::from("run-test"),
+                source: "audit storage is down".into(),
+            }),
+            Down::Objects => Ok(Vec::new()),
+        }
     }
 
     fn process_registry(&self) -> Option<&yunta_engine::ProcessRegistry> {
@@ -798,54 +1184,352 @@ async fn a_lost_session_audit_event_fails_the_task() {
     // A session's audit event that cannot be appended is not dropped
     // with a warning: the storage cause travels back and fails the task,
     // so the trail never silently loses an event.
-    let dir = tempfile::tempdir().unwrap();
-    init_repo(dir.path());
-    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-
-    let t = task(
-        "write-output",
-        &["output.txt"],
-        vec![cmd("test -f output.txt")],
-    );
-    let adapter = MockAdapter::from_yaml(
-        r#"
-effects:
-  - { path: output.txt, content: "hello\n" }
-outcome: { type: completed, summary: "wrote it" }
-"#,
-    )
-    .unwrap();
-
-    let node = yunta_core::NodeId::from("build");
-    let observer = FailingObserver;
-    let err = run_task(
-        &t,
-        "Implement your task.",
-        AttemptEnv {
-            adapter: &adapter,
-            cwd: dir.path(),
-            max_retries: 2,
-            budget: Budget::default(),
-            memo: &memo,
-            registry: None,
-        },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
-        Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
-        &tokio_util::sync::CancellationToken::new(),
-        &yunta_engine::SessionSetup::bare(yunta_core::NodeId::from_static("build")),
-    )
-    .await
-    .unwrap_err();
-
+    let err = a_cycle_with_its_store_down(Down::Log).await;
     assert!(
         matches!(err, yunta_engine::TaskCycleError::Audit { .. }),
         "a lost session audit event must fail the task, got: {err:?}"
     );
+}
+
+#[tokio::test]
+async fn output_the_run_cannot_keep_fails_the_task() {
+    // A check whose output cannot be kept would reach the log naming
+    // nothing to read: the storage cause fails the task instead.
+    let err = a_cycle_with_its_store_down(Down::Objects).await;
+    assert!(
+        matches!(err, yunta_engine::TaskCycleError::KeepOutput { .. }),
+        "output the run cannot keep must fail the task, got: {err:?}"
+    );
+}
+
+/// One task's cycle, audited by an observer whose `down` store fails:
+/// the error the cycle ends with.
+async fn a_cycle_with_its_store_down(down: Down) -> yunta_engine::TaskCycleError {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    // A check that prints, which leaves something to keep.
+    let t = task("write-output", &["output.txt"], vec![cmd("cat output.txt")]);
+    let adapter = scripted(
+        r#"
+dialect: claude-code
+effects:
+  - { path: output.txt, content: "hello\n" }
+outcome: { type: completed, summary: "wrote it" }
+"#,
+    );
+
+    let node = yunta_core::NodeId::from("build");
+    let observer = FailingObserver(down);
+    run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter: &adapter,
+            unit: &unit,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
+        },
+        ungoverned(&GrantWindow::seeded(0)),
+        Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run.path()),
+    )
+    .await
+    .unwrap_err()
+}
+
+/// The verdict is a function of what ran, not of the order it ran in.
+/// The pre-check evaluates the whole set and names every criterion that
+/// already passes and every guard already red, in the order the task
+/// declares them.
+#[test]
+fn surprises_names_every_trivial_criterion_and_every_broken_guard_in_declaration_order() {
+    let t = task(
+        "a-whole-set",
+        &["out.txt"],
+        vec![
+            cmd("test -f out.txt"),
+            guard("lint"),
+            cmd("already-green"),
+            guard("build"),
+        ],
+    );
+    // Run out of declared order, the way the learned ordering runs them.
+    let runs = vec![
+        ran("already-green", 0, false),
+        ran("build", 1, true),
+        ran("test -f out.txt", 1, false),
+        ran("lint", 0, true),
+    ];
+
+    assert_eq!(
+        surprises(&t, &runs),
+        vec![
+            Surprise::TrivialCriterion {
+                cmd: "already-green".to_string()
+            },
+            Surprise::BrokenGuard {
+                cmd: "build".to_string(),
+                proves: None,
+            },
+        ],
+        "every surprise, in the order the task declares its criteria"
+    );
+
+    let all_red = vec![
+        ran("test -f out.txt", 1, false),
+        ran("lint", 0, true),
+        ran("already-green", 1, false),
+        ran("build", 0, true),
+    ];
+    assert!(
+        surprises(&t, &all_red).is_empty(),
+        "nothing prejudged is the normal case"
+    );
+}
+
+/// One `criterion_checked`, as the pre-check records it.
+fn ran(cmd: &str, exit_code: i32, is_guard: bool) -> CriterionRun {
+    CriterionRun {
+        cmd: cmd.to_string(),
+        exit_code,
+        is_guard,
+        reused: false,
+        duration_ms: None,
+        output: None,
+        tree: None,
+        head: None,
+    }
+}
+
+/// One task cycle with nothing but the task and its mock: no observer,
+/// no grants.
+async fn cycle(
+    owner: &Owner,
+    unit: &Unit,
+    run_dir: &std::path::Path,
+    t: &Task,
+    adapter: &MockAdapter,
+) -> yunta_engine::TaskCycleReport {
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    run_task(
+        t,
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter,
+            unit,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
+        },
+        ungoverned(&GrantWindow::seeded(0)),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run_dir),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_criterion_that_cannot_run_blocks_before_any_attempt() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    // A program no `PATH` has: the shell answers 127 whatever the tree
+    // holds, so the criterion proves nothing about the work.
+    let t = task(
+        "no-such-tool",
+        &["output.txt"],
+        vec![cmd("yunta-no-such-tool --version")],
+    );
+    let adapter = scripted(
+        r#"dialect: claude-code
+outcome: { type: completed, summary: "ok" }"#,
+    );
+
+    let report = cycle(&owner, &unit, run.path(), &t, &adapter).await;
+
+    assert!(report.attempts.is_empty(), "no session was spent on it");
+    assert!(adapter.requests_seen().is_empty());
+    let TaskOutcome::Blocked {
+        cause: TaskCause::PreCheck { found },
+    } = report.outcome
+    else {
+        panic!("expected Blocked, got {:?}", report.outcome);
+    };
+    assert_eq!(
+        found.as_slice(),
+        &[Surprise::Unrunnable {
+            cmd: "yunta-no-such-tool --version".to_string(),
+            exit_code: 127,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_criterion_that_could_not_run_runs_again_on_the_same_tree() {
+    let owner = Owner::new();
+    let (dir, _run, _unit) = a_unit(&owner).await;
+    let t = task("memo", &["output.txt"], vec![cmd("yunta-no-such-tool")]);
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    for check in 0..2 {
+        let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+            .await
+            .unwrap();
+        assert_eq!(runs[0].exit_code, 127);
+        assert!(
+            !runs[0].reused,
+            "check {check}: a command that was not found says nothing about the tree, so \
+             it is never answered from the cache"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_criterion_that_cannot_run_after_an_attempt_ends_the_cycle() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    // Red before the work, and a missing program once the work is there.
+    let t = task(
+        "breaks-after",
+        &["made.txt"],
+        vec![cmd(
+            "if [ -f made.txt ]; then yunta-no-such-tool; else exit 1; fi",
+        )],
+    );
+    let adapter = scripted(
+        r#"
+dialect: claude-code
+sessions:
+  - effects:
+      - { path: made.txt, content: "made" }
+    outcome: { type: completed, summary: "attempt 1" }
+  - outcome: { type: completed, summary: "attempt 2" }
+  - outcome: { type: completed, summary: "attempt 3" }
+"#,
+    );
+
+    let report = cycle(&owner, &unit, run.path(), &t, &adapter).await;
+
+    assert_eq!(
+        report.attempts.len(),
+        1,
+        "another attempt would not change it"
+    );
+    let TaskOutcome::Blocked { cause } = report.outcome else {
+        panic!("expected Blocked, got {:?}", report.outcome);
+    };
+    let TaskCause::Unrunnable { runs } = &cause else {
+        panic!("expected an unrunnable criterion, got {cause:?}");
+    };
+    assert_eq!(
+        Unanswered::of(runs[0].exit_code),
+        Some(Unanswered::NotFound),
+        "{cause:?}"
+    );
+}
+
+/// A unit whose tree moved on since a task's last attempt left its work:
+/// both changed `a.txt` from the same line, so the work no longer
+/// applies. Answers with the unit and the commit holding that work.
+async fn a_unit_the_left_work_no_longer_fits(
+    owner: &Owner,
+    repo: &std::path::Path,
+) -> (Unit, yunta_core::CommitSha) {
+    init_repo(repo);
+    yunta_testkit::write(&repo.join("a.txt"), "base\n");
+    yunta_testkit::git(repo, &["add", "a.txt"]);
+    yunta_testkit::git(repo, &["commit", "-q", "-m", "base"]);
+    yunta_testkit::git(repo, &["checkout", "-q", "-b", "left"]);
+    yunta_testkit::write(&repo.join("a.txt"), "left\n");
+    yunta_testkit::git(repo, &["commit", "-q", "-am", "left"]);
+    let left = yunta_testkit::git_output(repo, &["rev-parse", "HEAD"])
+        .parse()
+        .unwrap();
+    yunta_testkit::git(repo, &["checkout", "-q", yunta_testkit::INITIAL_BRANCH]);
+    yunta_testkit::write(&repo.join("a.txt"), "moved\n");
+    yunta_testkit::git(repo, &["commit", "-q", "-am", "moved"]);
+    let who = UnitId::Task("carried".into());
+    let keeps = yunta_engine::UnitRef::of(&yunta_core::RunId::from("run-test"), &who, 1);
+    let unit = Unit {
+        who,
+        worktree: repo.to_path_buf(),
+        base: yunta_engine::head_commit(repo, owner.supervision())
+            .await
+            .unwrap(),
+        from: yunta_engine::head_tree(repo, owner.supervision())
+            .await
+            .unwrap(),
+        keeps,
+    };
+    (unit, left)
+}
+
+#[tokio::test]
+async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_it_began() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    let run = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    let (unit, left) = a_unit_the_left_work_no_longer_fits(&owner, repo).await;
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let adapter = scripted("dialect: claude-code\nsessions: []\n");
+
+    let report = run_task(
+        &task("carried", &["a.txt"], vec![cmd("grep -q left a.txt")]),
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter: &adapter,
+            unit: &unit,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: Some(&left),
+            resume: None,
+        },
+        ungoverned(&GrantWindow::seeded(0)),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run.path()),
+    )
+    .await
+    .unwrap();
+
+    let TaskOutcome::Blocked { cause } = report.outcome else {
+        panic!("expected Blocked, got {:?}", report.outcome);
+    };
+    assert_eq!(
+        cause,
+        TaskCause::CarriedWorkNoLongerApplies {
+            paths: vec!["a.txt".into()]
+        }
+    );
+    assert!(adapter.requests_seen().is_empty(), "no session was spent");
+    assert_eq!(
+        yunta_testkit::git_output(repo, &["status", "--porcelain"]),
+        "",
+        "the checkout is back as the unit began"
+    );
+}
+
+/// The failure a session ends with when it runs past its own timeout.
+fn session_timeout(after_ms: u64) -> Failure {
+    Failure::TimedOut {
+        after_ms,
+        timed: Timed::Session,
+    }
 }

@@ -7,26 +7,38 @@ license.workspace = true
 repository.workspace = true
 description = "Adapter trait and CLI integrations (claude-code, codex, mock) for Yunta."
 
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 
 [dependencies]
 yunta-core.workspace = true
+# A pull request's body is drawn for a person, in the words and blocks
+# every other reader of Yunta is told things in.
+yunta-render.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 tracing.workspace = true
 # "process"/"io-util" drive the real `claude-code` subprocess:
-# spawning it, streaming its stdout, and reaping it on exit.
-tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "process", "io-util"] }
+# spawning it, streaming its stdout, and reaping it on exit. "net" probes
+# whether the service a session lost answers again.
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "process", "io-util", "net"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# A limit's reset is an instant: the stream names it in Unix seconds, and
+# the failure keeps it as the log does.
+chrono.workspace = true
 thiserror.workspace = true
 # `codex exec -c key=value` takes TOML values on the command line, and a
 # path or a URL that carries a `"` or a `\` has to reach the CLI escaped.
 # Rendering only — the parser stays out of the binary.
 toml = { workspace = true }
 # `GitHubForge`: the REST calls that publish artifacts, open a PR and
-# poll its review state — same TLS backend `yunta-engine` already
+# poll its review state — same TLS implementation `yunta-engine` already
 # selects for its own outbound HTTP (rustls, not native-tls).
 reqwest = { workspace = true, features = [
     "json",
@@ -37,7 +49,7 @@ reqwest = { workspace = true, features = [
 base64.workspace = true
 # Signals to processes and process groups (`signal.rs`): the kernel's
 # own `errno` instead of a `kill` binary's exit status, with no unsafe
-# code of ours (D118). Already in the tree through `rmcp`.
+# code of ours. Already in the tree through `rmcp`.
 nix.workspace = true
 # The mock's `run_tool` fixture step: the mock acts as a real MCP client
 # against the engine's per-run listener, over the same streamable-HTTP
@@ -51,6 +63,7 @@ rmcp = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+yunta-testkit-core.workspace = true
 # The tests read back what `config.rs` renders, which needs the parser
 # the adapter itself has no use for.
 toml = { workspace = true, features = ["parse"] }
@@ -60,4 +73,7 @@ yunta-core = { workspace = true, features = ["testkit"] }
 # builds on, so nothing new enters the tree.
 axum = { workspace = true, features = ["tokio", "http1", "json", "query"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+# The contract suite's real subjects catch SIGINT before they spawn a CLI, as
+# the CLI does: a suite started with SIGINT ignored would hand that ignore to
+# every stub it runs, and a stub cannot trap a signal that is ignored.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "signal"] }

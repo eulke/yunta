@@ -1,6 +1,8 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::template::TemplateVar;
+use yunta_core::{OptionId, RunCommand};
 
 /// Scans every literal `bash`/hook command for a `git push`
 /// aimed at the base branch — the `{{project.base_branch}}` template,
@@ -13,7 +15,7 @@ use super::*;
 pub(crate) fn collect_push_to_base_warnings(
     workflow: &Workflow,
     config: &ConfigLayer,
-    warnings: &mut Vec<CheckWarning>,
+    warnings: &mut Vec<Caution>,
 ) {
     let base_branch = config
         .project
@@ -23,12 +25,9 @@ pub(crate) fn collect_push_to_base_warnings(
         if !command.contains("git push") {
             return None;
         }
-        if command.contains("{{project.base_branch}}") {
-            return Some(
-                base_branch
-                    .map(str::to_string)
-                    .unwrap_or_else(|| "{{project.base_branch}}".to_string()),
-            );
+        let templated = TemplateVar::ProjectBaseBranch.braced();
+        if command.contains(&templated) {
+            return Some(base_branch.map(str::to_string).unwrap_or(templated));
         }
         let base = base_branch?;
         let named = command
@@ -46,63 +45,21 @@ pub(crate) fn collect_push_to_base_warnings(
         .enumerate()
         .map(|(i, node)| (&node.id, i))
         .collect();
-    fn gate_protected(
-        i: usize,
-        nodes: &[Node],
-        index_of: &HashMap<&NodeId, usize>,
-        cache: &mut [Option<bool>],
-    ) -> bool {
-        if let Some(&Some(known)) = cache.get(i) {
-            return known;
-        }
-        if let Some(slot) = cache.get_mut(i) {
-            *slot = Some(false); // cycle guard; real cycles error elsewhere
-        }
-        let protected = nodes.get(i).is_some_and(|node| {
-            node.depends_on.iter().any(|dep| {
-                index_of.get(dep).is_some_and(|&d| {
-                    nodes
-                        .get(d)
-                        .is_some_and(|n| matches!(n.kind, NodeKind::Gate { .. }))
-                        || gate_protected(d, nodes, index_of, cache)
-                })
-            })
-        });
-        if let Some(slot) = cache.get_mut(i) {
-            *slot = Some(protected);
-        }
-        protected
-    }
     let mut cache: Vec<Option<bool>> = vec![None; nodes.len()];
 
     for (i, node) in nodes.iter().enumerate() {
         let protected = gate_protected(i, nodes, &index_of, &mut cache);
         // A parallel child's commands push from the same ancestry as
         // its group.
-        let mut targets: Vec<(&Node, &str)> = Vec::new();
-        fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a str)>) {
-            if let NodeKind::Bash { run } = &node.kind {
-                targets.push((node, run));
-            }
-            if let Some(hooks) = &node.hooks {
-                for step in hooks.before.iter().chain(&hooks.after) {
-                    targets.push((node, &step.run));
-                }
-            }
-            if let NodeKind::Parallel {
-                nodes: children, ..
-            } = &node.kind
-            {
-                for child in children {
-                    collect_commands(child, targets);
-                }
-            }
-        }
+        let mut targets: Vec<(&Node, &RunCommand)> = Vec::new();
         collect_commands(node, &mut targets);
         for (owner, command) in targets {
+            let Some(command) = command.text(config) else {
+                continue;
+            };
             if let Some(branch) = pushes_to_base(command) {
                 if !protected {
-                    warnings.push(CheckWarning::PushToBaseWithoutGate {
+                    warnings.push(Caution::PushToBaseWithoutGate {
                         node: owner.id.clone(),
                         branch,
                     });
@@ -112,26 +69,71 @@ pub(crate) fn collect_push_to_base_warnings(
     }
 }
 
-/// A `kind: gate` with `external:` needs
-/// `forge.github` configured (`external.kind` is a closed enum with one
-/// variant today, so this is a total match); an internal gate's own
-/// `on:` mapping must reference declared options and existing targets —
-/// the same broken-reference class `BrokenReference` already catches.
+fn gate_protected(
+    i: usize,
+    nodes: &[Node],
+    index_of: &HashMap<&NodeId, usize>,
+    cache: &mut [Option<bool>],
+) -> bool {
+    if let Some(&Some(known)) = cache.get(i) {
+        return known;
+    }
+    if let Some(slot) = cache.get_mut(i) {
+        *slot = Some(false); // cycle guard; real cycles error elsewhere
+    }
+    let protected = nodes.get(i).is_some_and(|node| {
+        node.depends_on.iter().any(|dep| {
+            index_of.get(dep).is_some_and(|&d| {
+                nodes
+                    .get(d)
+                    .is_some_and(|n| matches!(n.kind, NodeKind::Gate { .. }))
+                    || gate_protected(d, nodes, index_of, cache)
+            })
+        })
+    });
+    if let Some(slot) = cache.get_mut(i) {
+        *slot = Some(protected);
+    }
+    protected
+}
+
+fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a RunCommand)>) {
+    targets.extend(yunta_core::node_commands(node).map(|run| (node, run)));
+    if let NodeKind::Parallel {
+        nodes: children, ..
+    } = &node.kind
+    {
+        for child in children {
+            collect_commands(child, targets);
+        }
+    }
+}
+
+/// A `kind: gate` with `external:` needs `forge.github` configured
+/// (`external.kind` is a closed enum with one variant today, so this is
+/// a total match) and shows nothing here, and an internal gate's `on:`
+/// maps only options it declares. That each `on:` target is a node the workflow declares is
+/// the reading door's, like every other reference.
 pub(crate) fn check_gate(
     node: &Node,
-    known_ids: &HashSet<NodeId>,
     config: &yunta_core::ConfigLayer,
     errors: &mut Vec<CheckError>,
 ) {
     let NodeKind::Gate {
         options,
         on,
+        shows,
         external,
         ..
     } = &node.kind
     else {
         return;
     };
+    if external.is_some() && !shows.is_empty() {
+        errors.push(CheckError::ShowsOnExternalGate {
+            node: node.id.clone(),
+        });
+    }
     if let Some(external) = external {
         match external.kind {
             yunta_core::ForgeKind::PullRequest => {
@@ -147,26 +149,64 @@ pub(crate) fn check_gate(
             }
         }
     }
-    for (option, target) in on {
-        if !options.iter().any(|declared| declared == option) {
-            errors.push(CheckError::GateOnUndeclaredOption {
-                node: node.id.clone(),
-                option: option.clone(),
-            });
-        }
-        if !known_ids.contains(target) {
-            errors.push(CheckError::BrokenReference {
-                node: node.id.clone(),
-                field: format!("on.{option}"),
-                target: target.clone(),
-            });
-        }
+    for option in on.keys() {
+        let route = if !options.iter().any(|declared| declared == option) {
+            UntakenRoute::Undeclared(option.clone())
+        } else if yunta_core::reserved::ReservedOption::of(option)
+            == Some(yunta_core::reserved::ReservedOption::Abort)
+        {
+            UntakenRoute::Abort
+        } else {
+            continue;
+        };
+        errors.push(CheckError::GateRouteNeverTaken {
+            node: node.id.clone(),
+            route,
+        });
     }
+}
+
+/// An internal gate's `on:` route that no answer ever follows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UntakenRoute {
+    /// `options:` does not declare this option, so no one can choose it.
+    Undeclared(OptionId),
+    /// `abort` pauses the run whatever `on:` says.
+    Abort,
 }
 
 /// A `parallel` group's children share a worktree
 /// and join semantics a forge round-trip has no defined relationship to
 /// — refused outright rather than guessing one.
+/// A node that asks, inside a `parallel` group, would never be asked:
+/// the scheduler puts questions to a person one top-level node at a
+/// time, so the child's wait has nothing to end it and whatever follows
+/// the group mounts answers that never arrive. Refused outright rather
+/// than left to hang.
+pub(crate) fn check_no_questions_in_parallel(
+    nodes: &[Node],
+    parent_group: Option<&Node>,
+    errors: &mut Vec<CheckError>,
+) {
+    for node in nodes {
+        if let Some(group) = parent_group {
+            if node.asks() {
+                errors.push(CheckError::QuestionsInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_no_questions_in_parallel(children, Some(node), errors);
+        }
+    }
+}
+
+/// A `parallel` group holds no gate and no group of its own.
 pub(crate) fn check_no_gate_in_parallel(
     nodes: &[Node],
     parent_group: Option<&Node>,
@@ -176,6 +216,12 @@ pub(crate) fn check_no_gate_in_parallel(
         if let Some(group) = parent_group {
             if matches!(node.kind, NodeKind::Gate { .. }) {
                 errors.push(CheckError::GateInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+            if matches!(node.kind, NodeKind::Parallel { .. }) {
+                errors.push(CheckError::ParallelInsideParallel {
                     node: node.id.clone(),
                     group: group.id.clone(),
                 });

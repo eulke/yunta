@@ -38,21 +38,45 @@
 //! what that surface advertises. Each tool family then answers for
 //! itself — [`submission`] for documents, [`findings`] for findings,
 //! [`blackboard`] for the group's shared view, [`tasks`] for the tasks document —
-//! and the two text modules hold every sentence a session reads:
-//! [`notice`] before it calls anything, [`verdicts`] in answer to a call.
+//! and the text modules hold the sentences a session reads: [`words`] holds
+//! every one of them, one file per surface, and [`verdicts`] holds the shape
+//! an answer takes, with [`notice`] choosing what a session is told ahead of
+//! any call it makes.
 
+mod answer;
 mod blackboard;
-mod catalog;
+pub mod catalog;
+mod deviation;
+mod error;
+mod findable;
 mod findings;
+mod handover;
 mod host;
 mod listener;
 mod notice;
+mod rail;
+mod scope;
 mod session;
+mod stop;
 mod submission;
 mod tasks;
 mod verdicts;
+mod watch;
+pub(crate) mod words;
 
 pub use blackboard::consolidate_blackboard;
-pub use host::{RunToolsAccess, RunToolsHost};
+pub use host::{
+    Formatter, HostOf, NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess, TaskExpansion,
+};
+mod format;
+pub(crate) use error::RunToolError;
+pub(crate) use listener::run_tools_unreachable;
 pub use listener::{open_session_listener, RunToolsSession};
-pub(crate) use notice::submission_notice;
+pub(crate) use notice::{
+    continuation_notice, fresh_respecify_notice, fresh_review_notice, naming_notice,
+    submission_notice, task_notice, Asker,
+};
+pub(crate) use rail::{refused_writes, unrecorded_storage_cause, SessionRails};
+pub(crate) use session::Arrivals;
+pub(crate) use submission::verify_declared;
+pub use yunta_core::RunTool;

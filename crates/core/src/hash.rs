@@ -9,6 +9,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::ids::{string_id, InvalidId};
@@ -33,10 +34,12 @@ const fn is_content_hash(bytes: &[u8]) -> bool {
 }
 
 /// Git prints an object id abbreviated to no fewer than 7 digits, in
-/// full as 40 (SHA-1) or 64 (SHA-256).
-const COMMIT_SHA_RULE: &str = "7 to 64 lowercase hex digits: a git object id, abbreviated or full";
+/// full as 40 (SHA-1) or 64 (SHA-256). A commit and a tree are both
+/// objects and are named by the same shape, so one rule serves the two
+/// types that carry them.
+const GIT_OBJECT_RULE: &str = "7 to 64 lowercase hex digits: a git object id, abbreviated or full";
 
-const fn is_commit_sha(bytes: &[u8]) -> bool {
+const fn is_git_object(bytes: &[u8]) -> bool {
     bytes.len() >= 7 && bytes.len() <= 64 && is_lower_hex(bytes)
 }
 
@@ -50,16 +53,30 @@ string_id!(
     /// A git object id as git or a forge reports it: the commit a run
     /// starts from, the head a review covers, the merge commit an
     /// approval landed as.
-    CommitSha, what = "commit sha", rule = COMMIT_SHA_RULE, check = is_commit_sha
+    CommitSha, what = "commit sha", rule = GIT_OBJECT_RULE, check = is_git_object
 );
 
-fn lower_hex(bytes: &[u8]) -> String {
-    use std::fmt::Write;
+string_id!(
+    /// The id of a git tree, as `git write-tree` prints it: the state a
+    /// unit of work started from, which its own diff is judged against.
+    ///
+    /// Its own type and not a [`CommitSha`]: a tree is what a commit
+    /// points at, and a caller that hands one where the other belongs is
+    /// a mistake the compiler catches rather than a diff against the
+    /// wrong thing.
+    TreeId, what = "tree id", rule = GIT_OBJECT_RULE, check = is_git_object
+);
 
+/// One lowercase hex digit for a value below 16.
+fn nibble(n: u8) -> char {
+    char::from(if n < 10 { b'0' + n } else { b'a' + (n - 10) })
+}
+
+fn lower_hex(bytes: &[u8]) -> String {
     let mut hex = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        // Writing into a `String` cannot fail.
-        let _ = write!(hex, "{byte:02x}");
+    for &byte in bytes {
+        hex.push(nibble(byte >> 4));
+        hex.push(nibble(byte & 0x0f));
     }
     hex
 }
@@ -112,6 +129,15 @@ impl CommitSha {
         }
         Self(Cow::Owned(lower_hex(bytes)))
     }
+
+    /// The id as a reader meets it in a line about something else: the
+    /// first twelve digits, or the whole id when git printed a shorter
+    /// one. Prose, not an identifier — what compares, and what a lock
+    /// records, is the whole value.
+    pub fn abbreviated(&self) -> &str {
+        let digits = self.as_str();
+        &digits[..digits.len().min(ABBREVIATED_DIGITS)]
+    }
 }
 
 /// Lowercase-hex SHA-256 of raw bytes — what `artifact_accepted` records
@@ -119,6 +145,17 @@ impl CommitSha {
 /// (artifacts are identified by their bytes, never by their format).
 pub fn sha256_hex(bytes: &[u8]) -> ContentHash {
     ContentHash::sha256(bytes)
+}
+
+/// The id git gives `bytes` as a blob: the SHA-1 of `blob <length>`, a NUL
+/// byte and the bytes, in lowercase hex. It is the `sha` the GitHub Contents
+/// API reports for a file, so a local copy of the content compares with that
+/// report directly.
+pub fn git_blob_id(bytes: &[u8]) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(format!("blob {}\0", bytes.len()).as_bytes());
+    hasher.update(bytes);
+    lower_hex(&hasher.finalize())
 }
 
 #[cfg(test)]
@@ -191,5 +228,10 @@ mod tests {
             CommitSha::from_bytes(&7u64.to_be_bytes()).as_str(),
             "0000000000000007"
         );
+    }
+
+    #[test]
+    fn the_empty_blob_has_the_id_git_gives_it() {
+        assert_eq!(git_blob_id(b""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
     }
 }

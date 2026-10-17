@@ -5,20 +5,21 @@
 //! chart or a Terraform module has to its runtime.
 //!
 //! Normative split this type exists to enforce: a pack **requires**
-//! runners by name (with the permissions each needs) and **declares** a
-//! permissions ceiling it promises never to exceed — never a binding, a
-//! concrete model or a secret. The installing team resolves those names
-//! against its own `runners:`; `declares` is validated as a hard
-//! ceiling by `check`, not just documented here. This module only
-//! parses the manifest — resolving `requires` against local config and
-//! enforcing `declares` are the engine's own, separate jobs.
+//! runners by name and **declares** a permissions ceiling it promises
+//! never to exceed — never a binding, a concrete model or a secret. The
+//! installing team resolves those names against its own `runners:`;
+//! `declares` is validated as a hard ceiling by `check`, not just
+//! documented here. This module only parses the manifest — resolving
+//! `requires` against local config and enforcing `declares` are the
+//! engine's own, separate jobs.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::hash::ContentHash;
-use crate::ids::{PackName, PackRef, Publisher, RunnerName};
+use crate::hash::{CommitSha, ContentHash};
+use crate::ids::{McpServerName, PackName, PackRef, Publisher, RunnerName};
+use crate::schema_range::SchemaRange;
 use crate::workflow::NodePermissions;
 
 /// The pack's own identity: `publisher/name`, invoked as
@@ -38,23 +39,21 @@ pub struct PackManifest {
     /// version is never auto-resolved (`update` always names an exact
     /// target ref), so nothing in v1 needs to *compare* versions,
     /// only record and display them. Kept a plain string rather than a
-    /// `semver` dependency for the same reason `yunta_schema` (below)
-    /// stays a hand-rolled range check instead of one (see
-    /// `engine/src/check.rs`'s own `yunta_schema_satisfied` doc comment)
-    /// — add the dependency the day something actually needs to compare
-    /// two versions, not ahead of that need.
+    /// `semver` dependency for the same reason [`SchemaRange`] is a
+    /// hand-rolled comparator range instead of one — add the dependency
+    /// the day something actually needs to compare two full versions,
+    /// not ahead of that need.
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    /// `">=1 <2"` — the same comparator-range syntax and the same
-    /// binary schema major (`yunta_core::YUNTA_SCHEMA`) a workflow's own
-    /// `yunta_schema:` is checked against; `check_yunta_schema`'s
-    /// range parser is reused verbatim once compatibility is actually
-    /// enforced, not duplicated here.
+    /// `">=1 <2"` — the same range a workflow's own `yunta_schema:`
+    /// states, read by the same parser and checked against the same
+    /// binary schema major (`yunta_core::YUNTA_SCHEMA`). `pack add`
+    /// refuses a pack whose range this binary does not satisfy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yunta_schema: Option<String>,
+    pub yunta_schema: Option<SchemaRange>,
     #[serde(default)]
     pub requires: PackRequires,
     pub declares: PackDeclares,
@@ -72,37 +71,37 @@ pub struct PackRequires {
     pub runners: Vec<RequiredRunner>,
     /// Names the installer must define under its own `mcp_servers:`.
     #[serde(default)]
-    pub mcp_servers: Vec<String>,
-    /// Binaries the pack's `bash` nodes assume are on `PATH`.
+    pub mcp_servers: Vec<McpServerName>,
+    /// Programs the pack's `bash` nodes and hooks start themselves and
+    /// assume are on `PATH`. A capability the project provides — its
+    /// lint, its tests — is a command the workflow names instead, and
+    /// never listed here.
     #[serde(default)]
-    pub commands: Vec<String>,
+    pub programs: Vec<String>,
 }
 
-/// One entry in `requires.runners` — a runner name plus the ceiling of
-/// permissions the pack asks that runner be resolvable with.
-/// `permissions` absent means the pack doesn't care what profile the
-/// runner resolves under, only that the name itself is defined.
+/// One entry in `requires.runners`: a runner name the installer's own
+/// `runners:` must define with a candidate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequiredRunner {
     pub name: RunnerName,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permissions: Option<NodePermissions>,
+    /// Parsed only so `check` refuses the key by name; no profile enforces it.
+    #[serde(default, rename = "permissions", skip_serializing)]
+    #[schemars(skip)]
+    pub retired_permissions: Option<serde_json::Value>,
 }
 
-/// The pack's own permissions **ceiling** — `check` rejects any
-/// node, hook or criterion inside the pack that would exceed this,
-/// error not warning; this type only carries the declared
-/// values, it enforces nothing itself.
+/// The pack's own permissions **ceiling**: `check` rejects any `prompt` or `loop`
+/// node of the pack whose effective permissions exceed this, as an error.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackDeclares {
     pub permissions: NodePermissions,
-    /// The pack's `bash`/`command` nodes never assume network access —
-    /// declarative only, mirrors `NetworkPermissions`'s own "no
-    /// enforcement, audit-only" stance: this field is
-    /// carried for `pack audit` and org policy
-    /// (`permissions.packs`), the engine itself never blocks on it.
+    /// Whether the pack's nodes may reach the network. `false`, the
+    /// default, is a ceiling the pack promises: `check` refuses a node of
+    /// the pack that asks for the network with `network: true`, and
+    /// `pack audit` prints the value.
     #[serde(default)]
     pub network: bool,
     /// Executable code shipped with the pack — empty means the pack is
@@ -122,6 +121,10 @@ pub struct PackContents {
     pub workflows: Vec<String>,
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Agent definitions the pack ships, each a Markdown file a node or a
+    /// runner names as `publisher/agent`.
+    #[serde(default)]
+    pub agents: Vec<String>,
     /// A pack can be knowledge-only (an org
     /// knowledge-pack layer) — an empty `workflows`/`skills` with a
     /// non-empty `knowledge` is a legitimate pack, not a degenerate one.
@@ -150,7 +153,7 @@ pub struct PackLockEntry {
     /// actually cloned, independent of whether `ref` later moves (a
     /// branch does; a tag by convention shouldn't, but nothing here
     /// trusts that).
-    pub commit: String,
+    pub commit: CommitSha,
     /// Content hash of the vendored tree (sha256 over sorted
     /// relative-path + file-content pairs, `.git` excluded) — what an
     /// offline `add`/CI verifies the vendoring on disk against,
@@ -166,6 +169,14 @@ pub struct PackLockEntry {
 pub struct PackLock {
     #[serde(default)]
     pub packs: BTreeMap<PackRef, PackLockEntry>,
+}
+
+impl crate::persisted::Persisted for PackLock {
+    /// 1 from the first version that stamps one. A lock written before
+    /// this reads as 0, which is older than this binary and therefore
+    /// readable — which is what tolerance means here.
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "pack lock";
 }
 
 /// A manifest field whose value would reach outside the pack once it
@@ -202,6 +213,7 @@ impl PackManifest {
             ("contents.workflows", &contents.workflows),
             ("contents.skills", &contents.skills),
             ("contents.knowledge", &contents.knowledge),
+            ("contents.agents", &contents.agents),
             ("contents.docs", &contents.docs),
         ] {
             for path in paths {

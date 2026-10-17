@@ -12,43 +12,17 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# One release per tag.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  # Gate: identical to `ci.yml`'s own checks, plus the factory packs. If
-  # this fails, nothing below it runs and no release is created.
+  # Gate: `ci.yml` itself, so the release runs the checks CI runs rather
+  # than a re-listed subset that drifts. If this fails, nothing below it
+  # runs and no release is created.
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          rustflags: ""
-
-      - name: fmt
-        run: cargo fmt --all -- --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
-      - name: test (workspace)
-        run: cargo test --workspace --locked
-
-      - name: build (release binary, for the factory-pack checks below)
-        run: cargo build --release --locked -p yunta
-
-      - name: the repository's own workflows and the factory packs pass check and their cases
-        run: |
-          bin="$PWD/target/release/yunta"
-          for wf in .yunta/workflows/*.yaml packs/*/.yunta/workflows/*.yaml; do
-            echo "::group::check $wf"
-            "$bin" check "$wf"
-            echo "::endgroup::"
-          done
-          echo "::group::test cases (mock adapter)"
-          "$bin" test
-          "$bin" test --dir packs/starter
-          "$bin" test --dir packs/fragua
-          echo "::endgroup::"
+    uses: ./.github/workflows/ci.yml
 
   # Four-target matrix, all gated on `test`. musl via `cross` (a real
   # static Linux binary, no glibc dependency); macOS compiles natively on
@@ -77,12 +51,14 @@ jobs:
             os: macos-latest
             cross: false
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           target: ${{ matrix.target }}
           cache-key: ${{ matrix.target }}
+          build-warnings: ""
           rustflags: ""
 
       - name: install cross
@@ -112,7 +88,7 @@ jobs:
       # container (proving the musl binary has no hidden glibc
       # dependency); macOS uses the runner itself, which is already a
       # fresh, single-use VM.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         if: matrix.docker_platform
       - name: verify install (clean container)
         if: matrix.docker_platform
@@ -125,7 +101,7 @@ jobs:
         shell: bash
         run: '"target/${{ matrix.target }}/release/yunta" --version'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: yunta-${{ matrix.target }}
           path: yunta-*.tar.gz
@@ -137,14 +113,15 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -158,9 +135,10 @@ jobs:
         with:
           config: cliff.toml
           args: --latest --strip header
-          output: CHANGELOG.md
+        env:
+          OUTPUT: CHANGELOG.md
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: CHANGELOG.md
           files: |
@@ -173,10 +151,12 @@ jobs:
   publish-crates:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
+          build-warnings: ""
           rustflags: ""
       # crates.io rejects a crate whose path dependencies aren't yet
       # indexed — dependency order and waiting for each to actually
@@ -208,17 +188,18 @@ jobs:
   publish-container:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: yunta-x86_64-unknown-linux-musl
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: yunta-aarch64-unknown-linux-musl
           path: dist
@@ -239,14 +220,14 @@ jobs:
             echo "minor=$minor"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: build and push (amd64 + arm64, tags latest/X.Y.Z/X.Y)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

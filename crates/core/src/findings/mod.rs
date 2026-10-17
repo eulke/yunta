@@ -1,7 +1,9 @@
 //! The `kind: findings` artifact — what a reviewing session writes and
 //! the engine reads at node close. An agent wrote it, so every type
 //! here refuses a key it does not know; the log records each entry as
-//! [`events::Finding`], which reads what a later writer adds.
+//! [`events::Finding`], which reads what a later writer adds. What the run
+//! holds is a [`HeldFindings`]: the entries sessions wrote, and the findings
+//! the engine reports, each with its cause.
 //!
 //! The shape published to whoever writes one, and the rules that hold
 //! across the whole document, live alongside the types: they are one
@@ -9,45 +11,39 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::findings::FindingSays;
 use crate::events::{self, FindingSeverity};
 use crate::ids::FindingId;
 
-/// The artifact's document — sole top-level key `findings:`, mirroring
-/// a tasks document's `tasks:`-only shape.
+/// What a review found: one entry per finding.
+// Sole top-level key `findings:`, as a tasks document has only `tasks:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingsFile {
     pub findings: Vec<FindingEntry>,
 }
 
-impl FindingsFile {
-    /// The document that carries `findings` forward — what a run
-    /// writes for its successor to inherit.
-    pub fn from_findings(findings: Vec<events::Finding>) -> Self {
-        FindingsFile {
-            findings: findings.into_iter().map(FindingEntry::from).collect(),
-        }
-    }
-}
-
-/// One finding as the artifact declares it.
+/// One finding: where it is, how much it matters, and what goes wrong.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingEntry {
+    /// Unique among the findings one node reports.
     pub id: FindingId,
     pub severity: FindingSeverity,
+    /// What goes wrong, in one line.
     pub title: String,
-    pub location: String,
+    pub location: Location,
+    /// What goes wrong, and when: the input or the sequence that shows it.
     pub detail: String,
+    /// A command that fails now and passes once the finding is fixed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
 }
 
 /// Taking one finding back: which, and why.
-///
-/// A document like any other — strict about its keys, with a rule of its
-/// own — because it reaches the engine the same way a finding does, and
-/// a withdrawal nobody can explain is a finding that disappeared.
+// A document like any other — strict about its keys, with a rule of its
+// own — because it reaches the engine the same way a finding does, and a
+// withdrawal nobody can explain is a finding that disappeared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Withdrawal {
@@ -55,18 +51,12 @@ pub struct Withdrawal {
     pub reason: String,
 }
 
-impl Withdrawal {
-    /// What the document owes once its keys are known: a reason with
-    /// something in it.
-    pub fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
-        rules::check_withdrawal(self)
-    }
-}
-
 /// A criterion the author proposes to verify the finding's fix.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposedCriterionEntry {
+    /// The command, run under `sh` on the run's tree; it passes when it
+    /// exits 0.
     pub cmd: String,
 }
 
@@ -75,23 +65,12 @@ impl From<FindingEntry> for events::Finding {
         events::Finding {
             id: entry.id,
             severity: entry.severity,
-            title: entry.title,
+            says: FindingSays::Written {
+                title: entry.title,
+                detail: entry.detail,
+            },
             location: entry.location,
-            detail: entry.detail,
             proposed_criterion: entry.proposed_criterion.map(Into::into),
-        }
-    }
-}
-
-impl From<events::Finding> for FindingEntry {
-    fn from(finding: events::Finding) -> Self {
-        FindingEntry {
-            id: finding.id,
-            severity: finding.severity,
-            title: finding.title,
-            location: finding.location,
-            detail: finding.detail,
-            proposed_criterion: finding.proposed_criterion.map(Into::into),
         }
     }
 }
@@ -108,6 +87,13 @@ impl From<events::ProposedCriterion> for ProposedCriterionEntry {
     }
 }
 
+pub use fault::FindingFault;
+pub use held::{FoundEntry, HeldEntry, HeldFindings};
+pub use location::{InvalidLocation, LineRange, Location, RelativePath};
+
+pub mod fault;
+mod held;
+mod location;
 mod rules;
 
 /// The shape this document publishes, as the YAML it is.
@@ -129,4 +115,42 @@ impl crate::shape::Document for FindingsFile {
     }
 
     const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
+
+    const RUN_RULES: &'static [crate::diagnostic::Rule] = rules::RUN_RULES;
+}
+
+/// The shape one finding takes on its own, as a session hands it over.
+const ENTRY_EXAMPLE: &str = include_str!("entry.yaml");
+
+/// One finding, read the way the document that holds it is read.
+///
+/// A session reports findings one at a time, so a single entry is a
+/// document in its own right at that frontier — and the rules it is held
+/// to are exactly the ones the whole file holds it to, because every
+/// rule of a findings document except the duplicate id is about an
+/// entry.
+impl crate::shape::Document for FindingEntry {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
+    const EXAMPLE: &'static str = ENTRY_EXAMPLE;
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check_entry(self, 0)
+    }
+
+    const RULES: &'static [crate::diagnostic::Rule] = rules::ENTRY_RULES;
+}
+
+/// The shape a withdrawal takes, as a session hands it over.
+const WITHDRAWAL_EXAMPLE: &str = include_str!("withdrawal.yaml");
+
+/// Taking a finding back, read the way every other document is read.
+impl crate::shape::Document for Withdrawal {
+    const KIND: crate::ArtifactKind = crate::ArtifactKind::Findings;
+    const EXAMPLE: &'static str = WITHDRAWAL_EXAMPLE;
+
+    fn check(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::check_withdrawal(self)
+    }
+
+    const RULES: &'static [crate::diagnostic::Rule] = rules::WITHDRAWAL_RULES;
 }

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta answers",
+  "description": "The answers artifact's document — written by the ENGINE, never an\nagent, next to the questions artifact it answers.",
+  "type": "object",
+  "properties": {
+    "answers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Answer"
+      }
+    }
+  },
+  "required": [
+    "answers"
+  ],
+  "$defs": {
+    "Answer": {
+      "description": "One answer: the question's `id` and the person's value, as text — a\n`boolean` answer is the string `true`/`false`, a `choice` one of the\ndeclared `values`.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/QuestionId"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "value"
+      ]
+    },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

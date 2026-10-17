@@ -1,0 +1,305 @@
+//! What a node's record remembers across its attempts.
+
+use yunta_core::events::{
+    EventMeta, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeLedger, NodeOutcome,
+    NodeStartedPayload, SessionEvent, Suspensions, TokenUsage,
+};
+use yunta_core::{NodeId, TreeId};
+use yunta_testkit_core::all_kinds;
+
+/// Folds `events` onto one node, in order.
+fn fold(events: Vec<NodeEvent>) -> NodeLedger {
+    let node = NodeId::from_static("compare");
+    let mut ledger = NodeLedger::default();
+    for (seq, event) in events.iter().enumerate() {
+        let meta = EventMeta {
+            seq: (seq as u64 + 1).into(),
+            at: chrono::DateTime::UNIX_EPOCH,
+            node: Some(&node),
+        };
+        ledger.apply(event, &meta, &Suspensions::default());
+    }
+    ledger
+}
+
+fn started(attempt: u32, tree: &str) -> NodeEvent {
+    NodeEvent::Started(NodeStartedPayload::attempt_from(
+        attempt,
+        tree.parse::<TreeId>().unwrap(),
+    ))
+}
+
+fn failed(outcome: &str) -> NodeEvent {
+    NodeEvent::Failed(NodeFailedPayload::new(
+        Failure::Message {
+            outcome: outcome.into(),
+        },
+        TokenUsage::default(),
+    ))
+}
+
+#[test]
+fn the_attempt_after_a_failure_remembers_that_failure() {
+    let ledger = fold(vec![
+        started(1, "a1a1a1a"),
+        failed("regression"),
+        started(2, "a1a1a1a"),
+    ]);
+    let record = ledger.get("compare").unwrap();
+    let earlier = record
+        .failed_before
+        .as_ref()
+        .expect("the attempt before failed");
+    assert_eq!(earlier.attempt, 1);
+    assert_eq!(
+        earlier.failure,
+        Failure::Message {
+            outcome: "regression".into(),
+        }
+    );
+}
+
+#[test]
+fn an_attempt_that_follows_no_failure_remembers_none() {
+    let ledger = fold(vec![started(1, "a1a1a1a"), started(2, "a1a1a1a")]);
+    assert_eq!(ledger.get("compare").unwrap().failed_before, None);
+}
+
+/// Folds `events`, each under its node, in order.
+fn fold_nodes(events: Vec<(&str, NodeEvent)>) -> NodeLedger {
+    let mut ledger = NodeLedger::default();
+    for (seq, (node, event)) in events.iter().enumerate() {
+        let node = NodeId::from(*node);
+        ledger.apply(
+            event,
+            &EventMeta {
+                seq: (seq as u64 + 1).into(),
+                at: chrono::DateTime::UNIX_EPOCH,
+                node: Some(&node),
+            },
+            &Suspensions::default(),
+        );
+    }
+    ledger
+}
+
+fn finished(tree: &str) -> NodeEvent {
+    NodeEvent::Finished(yunta_core::events::NodeFinishedPayload::leaving(
+        NodeOutcome::Summary("ok".to_string()),
+        TokenUsage::default(),
+        tree.parse().unwrap(),
+    ))
+}
+
+fn moved(ledger: &NodeLedger, node: &str) -> bool {
+    ledger.get(node).is_some_and(|record| record.tree_moved)
+}
+
+#[test]
+fn a_close_that_moved_the_tree_marks_the_attempts_beside_it() {
+    let ledger = fold_nodes(vec![
+        ("lint", started(1, "a1a1a1a")),
+        ("fix", started(1, "a1a1a1a")),
+        ("fix", finished("b2b2b2b")),
+        ("lint", finished("b2b2b2b")),
+    ]);
+    assert!(
+        moved(&ledger, "lint"),
+        "lint was open while fix moved the tree"
+    );
+
+    let ledger = fold_nodes(vec![
+        ("lint", started(1, "a1a1a1a")),
+        ("fix", started(1, "a1a1a1a")),
+        ("lint", finished("b2b2b2b")),
+        (
+            "fix",
+            NodeEvent::Failed(
+                NodeFailedPayload::new(
+                    Failure::Message {
+                        outcome: "exit 1".into(),
+                    },
+                    TokenUsage::default(),
+                )
+                .leaving("b2b2b2b".parse().unwrap()),
+            ),
+        ),
+    ]);
+    assert!(
+        moved(&ledger, "lint"),
+        "lint closed after a failing fix started, and the failure moved the tree"
+    );
+}
+
+#[test]
+fn an_attempt_that_started_on_the_tree_the_writer_left_is_not_marked() {
+    let ledger = fold_nodes(vec![
+        ("fix", started(1, "a1a1a1a")),
+        ("lint", started(1, "b2b2b2b")),
+        ("fix", finished("b2b2b2b")),
+    ]);
+    assert!(!moved(&ledger, "lint"));
+}
+
+#[test]
+fn an_attempt_that_closed_before_the_writer_started_is_not_marked() {
+    let ledger = fold_nodes(vec![
+        ("lint", started(1, "a1a1a1a")),
+        ("lint", finished("a1a1a1a")),
+        ("fix", started(1, "a1a1a1a")),
+        ("fix", finished("b2b2b2b")),
+    ]);
+    assert!(!moved(&ledger, "lint"));
+}
+
+#[test]
+fn a_new_attempt_starts_unmarked() {
+    let ledger = fold_nodes(vec![
+        ("lint", started(1, "a1a1a1a")),
+        ("fix", started(1, "a1a1a1a")),
+        ("fix", finished("b2b2b2b")),
+        ("lint", finished("b2b2b2b")),
+        ("lint", started(2, "b2b2b2b")),
+    ]);
+    assert!(!moved(&ledger, "lint"));
+}
+
+fn rerouted(origin: yunta_core::events::RerouteOrigin) -> NodeEvent {
+    NodeEvent::Rerouted(yunta_core::events::NodeReroutedPayload::new(
+        NodeId::from_static("spec"),
+        Failure::Message {
+            outcome: "sent back".into(),
+        },
+        origin,
+        Some(1),
+        Some(1),
+    ))
+}
+
+#[test]
+fn only_a_reroute_its_own_on_failure_made_counts_against_its_max() {
+    use yunta_core::events::RerouteOrigin::{GateChoice, OnFailure};
+    let ledger = fold(vec![
+        failed("sent back"),
+        rerouted(GateChoice),
+        failed("red"),
+        rerouted(OnFailure),
+    ]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    assert_eq!(record.reroutes, 2, "every re-route is one");
+    assert_eq!(
+        record.on_failure_reroutes, 1,
+        "a person's choice that sent the run elsewhere is no retry"
+    );
+}
+
+/// The sample the registry builds for the session event `kind`.
+fn sampled_session(kind: &str) -> SessionEvent {
+    match all_kinds()
+        .into_iter()
+        .find(|payload| payload.kind_name() == kind)
+    {
+        Some(EventPayload::Session(event)) => event,
+        _ => panic!("the registry samples `{kind}` as a session event"),
+    }
+}
+
+/// Folds session events onto one node's record, in order.
+fn heard(events: &[SessionEvent]) -> NodeLedger {
+    let node = NodeId::from_static("compare");
+    let mut ledger = NodeLedger::default();
+    for (seq, event) in events.iter().enumerate() {
+        let meta = EventMeta {
+            seq: (seq as u64 + 1).into(),
+            at: chrono::DateTime::UNIX_EPOCH,
+            node: Some(&node),
+        };
+        ledger.apply_session(event, &meta).unwrap();
+    }
+    ledger
+}
+
+/// The sample session the attempt opened, with the model it named cleared.
+fn opened_without_model() -> SessionEvent {
+    let SessionEvent::Opened(mut opened) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    opened.model = None;
+    SessionEvent::Opened(opened)
+}
+
+#[test]
+fn a_rail_summary_fills_the_model_its_open_session_opened_without() {
+    let ledger = heard(&[opened_without_model(), sampled_session("rail_summary")]);
+    let sessions = &ledger
+        .get(&NodeId::from_static("compare"))
+        .unwrap()
+        .sessions;
+    assert_eq!(
+        sessions[0].model.as_ref().map(ToString::to_string),
+        Some("mock-model".to_string())
+    );
+}
+
+#[test]
+fn a_rail_summary_keeps_the_model_its_session_reported_at_opening() {
+    let SessionEvent::Opened(mut opened) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    opened.model = Some("opened-model".parse().unwrap());
+    let ledger = heard(&[
+        SessionEvent::Opened(opened),
+        sampled_session("rail_summary"),
+    ]);
+    let sessions = &ledger
+        .get(&NodeId::from_static("compare"))
+        .unwrap()
+        .sessions;
+    assert_eq!(
+        sessions[0].model.as_ref().map(ToString::to_string),
+        Some("opened-model".to_string())
+    );
+}
+
+#[test]
+fn a_rail_summary_for_another_session_fills_nothing() {
+    let SessionEvent::RailSummary(mut summary) = sampled_session("rail_summary") else {
+        panic!("the registry samples a rail summary");
+    };
+    summary.session_id = "sess-2".into();
+    let ledger = heard(&[opened_without_model(), SessionEvent::RailSummary(summary)]);
+    let sessions = &ledger
+        .get(&NodeId::from_static("compare"))
+        .unwrap()
+        .sessions;
+    assert_eq!(sessions[0].model, None);
+}
+
+#[test]
+fn a_rail_summary_with_no_open_session_changes_nothing() {
+    let ledger = heard(&[sampled_session("rail_summary")]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    assert!(record.sessions.is_empty());
+}
+
+#[test]
+fn a_node_keeps_each_model_its_sessions_reported_once() {
+    let SessionEvent::Opened(mut first) = sampled_session("agent_session_opened") else {
+        panic!("the registry samples an opened session");
+    };
+    first.model = Some("opened-model".parse().unwrap());
+    let mut again = first.clone();
+    again.session_id = "sess-2".into();
+    let ledger = heard(&[SessionEvent::Opened(first), SessionEvent::Opened(again)]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    let models: Vec<String> = record.models.iter().map(ToString::to_string).collect();
+    assert_eq!(models, ["opened-model"]);
+}
+
+#[test]
+fn a_node_keeps_the_model_the_rail_heard_for_a_session_that_opened_without_one() {
+    let ledger = heard(&[opened_without_model(), sampled_session("rail_summary")]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    let models: Vec<String> = record.models.iter().map(ToString::to_string).collect();
+    assert_eq!(models, ["mock-model"]);
+}

@@ -1,0 +1,161 @@
+//! What the engine attached to an escalation so a person can audit its
+//! summary against the run's own log.
+
+use serde::{Deserialize, Serialize};
+
+use crate::events::LoggedWords;
+
+/// One fact the engine read off the log: the label a reader scans for,
+/// and the value under it.
+///
+/// The label is optional because not every fact needs one. A cause like
+/// `exit 1` or a sentence like `no forge reachable from this machine`
+/// already names itself, and putting a word in front of it would add
+/// reading without adding meaning; a bare number like `400` says
+/// nothing until `limits.max_tokens_per_run` is in front of it. A fact
+/// that carries a label states it here rather than writing it into the
+/// value, so every surface sets the two apart the same way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Fact {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub value: String,
+}
+
+impl Fact {
+    /// A labelled fact — the shape for a value that needs a word in
+    /// front of it to mean anything.
+    pub fn labelled(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Fact {
+            label: Some(label.into()),
+            value: value.into(),
+        }
+    }
+
+    /// A fact that names itself, kept as the engine read it.
+    pub fn bare(value: impl Into<String>) -> Self {
+        Fact {
+            label: None,
+            value: value.into(),
+        }
+    }
+}
+
+/// The facts a record holds beside the claim it rests on, as the log keeps
+/// them.
+///
+/// The pair is the point: the claim says what happened and these facts are
+/// the *record* it rests on, so neither one repeats the other. A producer
+/// that writes the cause into both leaves every surface printing it twice,
+/// under a heading that promised something new.
+///
+/// Untagged, with `Prose` last: a payload carrying a list reads as
+/// [`Evidence::Facts`], and a log written before evidence was data
+/// carries one string and reads back as [`Evidence::Prose`], which
+/// reads as the single unlabelled fact it always was. That tolerance
+/// is the rule for what is persisted and versioned, and it is why no
+/// reader needs to know which version wrote the line it is looking at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum Evidence {
+    /// What this binary writes: the labelled facts, in the order a
+    /// reader meets them.
+    Facts(Vec<Fact>),
+    /// One string, as an older log recorded it. Only reading produces
+    /// this; nothing in this workspace writes one.
+    Prose(LoggedWords),
+}
+
+impl Default for Evidence {
+    /// No fact attached: what an escalation carries when nothing was attached.
+    fn default() -> Self {
+        Evidence::Facts(Vec::new())
+    }
+}
+
+impl Evidence {
+    /// Nothing attached — the shape for an escalation whose summary is
+    /// the whole of what the log says.
+    pub fn none() -> Self {
+        Evidence::default()
+    }
+
+    /// Whether no fact is attached, so a line carries no evidence key at all.
+    /// An older log's prose is a fact, even when its words are empty.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Evidence::Facts(facts) if facts.is_empty())
+    }
+
+    /// The facts, with an older log's prose read as the one unlabelled
+    /// fact it is: the one place that tolerance is applied.
+    pub fn facts(&self) -> Vec<Fact> {
+        match self {
+            Evidence::Facts(facts) => facts.clone(),
+            Evidence::Prose(text) => vec![Fact::bare(text.as_str())],
+        }
+    }
+}
+
+impl From<Vec<Fact>> for Evidence {
+    fn from(facts: Vec<Fact>) -> Self {
+        Evidence::Facts(facts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn facts_are_kept_in_the_order_they_were_attached() {
+        let evidence = Evidence::from(vec![
+            Fact::labelled("limits.max_tokens_per_run", "400"),
+            Fact::labelled("spent", "500"),
+        ]);
+        assert_eq!(
+            evidence.facts(),
+            vec![
+                Fact::labelled("limits.max_tokens_per_run", "400"),
+                Fact::labelled("spent", "500"),
+            ]
+        );
+    }
+
+    #[test]
+    fn evidence_with_nothing_attached_has_no_facts() {
+        assert!(Evidence::none().facts().is_empty());
+    }
+
+    #[test]
+    fn a_log_that_recorded_evidence_as_one_string_still_reads() {
+        let from_an_older_log: Evidence = serde_json::from_str(r#""exit 1""#).unwrap();
+        assert_eq!(from_an_older_log, Evidence::Prose("exit 1".into()));
+        assert_eq!(from_an_older_log.facts(), vec![Fact::bare("exit 1")]);
+    }
+
+    #[test]
+    fn evidence_with_no_fact_attached_is_empty_and_a_fact_or_prose_is_not() {
+        assert!(Evidence::default().is_empty());
+        assert!(Evidence::none().is_empty());
+        assert!(!Evidence::from(vec![Fact::bare("exit 1")]).is_empty());
+        assert!(!Evidence::Prose("exit 1".into()).is_empty());
+    }
+
+    #[test]
+    fn facts_round_trip_through_the_wire_as_a_list() {
+        let evidence = Evidence::from(vec![
+            Fact::labelled("assignee", "the release lead"),
+            Fact::bare("exit 1"),
+        ]);
+        let json = serde_json::to_string(&evidence).unwrap();
+        assert_eq!(
+            json,
+            r#"[{"label":"assignee","value":"the release lead"},{"value":"exit 1"}]"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Evidence>(&json).unwrap(),
+            evidence,
+            "what this binary writes reads back as what it wrote"
+        );
+    }
+}

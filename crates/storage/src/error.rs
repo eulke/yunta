@@ -29,6 +29,16 @@ pub enum StorageError {
         source: serde_json::Error,
     },
 
+    /// An event whose secrets cannot be taken out of it while it still reads
+    /// back as the same event: refused, and never written in the clear.
+    #[error("the event cannot be stored with its secrets taken out: {0}")]
+    Unredactable(#[from] yunta_core::Unredactable),
+
+    /// An event that names no subject its kind can be read against. The
+    /// draft refuses it when it is built, so it never reaches the log.
+    #[error("the event names no subject it can be read against: {0}")]
+    Subject(#[from] yunta_core::events::SubjectError),
+
     #[error("failed to read events for run `{run_id}`")]
     Read {
         run_id: RunId,

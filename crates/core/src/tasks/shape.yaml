@@ -1,36 +1,99 @@
 # A tasks document: one task per independently-verifiable unit of work.
-# Written strictly — any key not listed here fails the node.
+# Written strictly — any key not listed here is refused.
+#
+# `summary`, `description`, `why` of each decision, and each task's
+# `description`, `changes` (each with its `code`, unless a shape of the
+# task lives in its file) and `outcome`, and each criterion's `proves`,
+# are for the person who reviews the plan. They are optional, and required
+# when the workflow has a gate show the plan to that person.
+
+summary: "Add a dark mode the user can switch on"   # one line: what changes
+description: |                          # Markdown: what changes, why, and how
+  Users working at night asked for a darker theme. The theme becomes a
+  setting the toggle writes and every screen reads:
+
+  ```mermaid
+  graph LR
+    Toggle --> Settings --> Screens
+  ```
+# optional. Markdown: how the parts fit together, around the shapes below
+design: |
+  A screen reads the theme once, when it opens:
+
+  ```rust
+  let theme = settings.theme();
+  ```
+decisions:                              # optional: every point left open, closed
+  - id: default-theme                   #   here rather than by whoever builds it
+    question: "Which theme does a new user start with?"
+    choice: "Light"
+    alternatives: ["Dark", "Whatever the operating system uses"]
+    why: "Nothing changes for anyone who never opens the setting"
+    # answers: theme                    # optional: the run's question this
+                                        #   restates, when a person answered it
+shapes:                                 # optional: each shape the plan creates or
+  - name: Theme                         #   changes, declared once, in its file,
+    owner: add-dark-mode                #   by the one task that builds it; its
+    file: "src/theme/mod.rs"            #   owner's scope covers the file
+    code: |
+      pub enum Theme { Light, Dark }
+
+      impl Settings {
+          pub fn theme(&self) -> Theme;
+      }
+risks:                                  # optional
+  - "Screens with hard-coded colors keep them until they read the theme"
+out_of_scope:                           # optional
+  - "Following the operating system's theme"
 
 tasks:                                  # required, at least one
   - id: add-dark-mode                   # required, unique. A letter, then
                                         #   letters, digits, `_` or `-`.
     title: "Add the dark mode toggle"   # required, non-empty
+    description: "Adds `Theme` and the toggle that sets it in `Settings`."
+                                        # Markdown: what the task does and why
     scope: ["src/theme/**"]             # required, at least one glob: the
                                         #   only paths this task may touch
+    changes:                            # every place the task changes, inside
+      - at: "src/theme/mod.rs::Theme"   #   its scope: a file, or a file and
+        what: "the enum, and the setting that holds it"   # what in it
+                                        # its code is the shape above
+      - at: "src/theme/toggle.rs::on_toggle"
+        what: "the toggle writes the setting"
+        code: |                         # how the change will read: each
+          fn on_toggle(settings: &mut Settings, on: bool) {   # declaration
+              settings.set_theme(if on { Theme::Dark } else { Theme::Light });
+          }                             #   it adds or changes, whole
+    outcome: "The settings screen has a dark mode switch, and turning it on darkens every screen"
+    invariants:                         # optional: what the code it touches
+      - "A screen never reads settings while it draws"   # already promises
     criteria:                           # required, at least one
-      - cmd: "cargo test -p ui dark_mode"   # required, non-empty. Must FAIL
-                                            #   before the work and pass after.
-      - cmd: "cargo clippy -- -D warnings"
+      - cmd: "make test T=dark_mode"    # required, non-empty. Must FAIL
+                                        #   before the work and pass after.
+        proves: "the toggle switches the theme"   # in words
+      - cmd: "make lint"
         type: guard                     # optional. A guard passes before AND
                                         #   after the work, rather than failing
                                         #   first.
+        proves: "the code still lints clean"
 
   - id: document-dark-mode
     title: "Document the toggle in the README"
+    description: "Tells users where the toggle is."
     scope: ["README.md"]
     depends_on: [add-dark-mode]         # optional, ids declared in this file
+    uses: [Theme]                       # optional: shapes another task owns;
+                                        #   the task waits for their owner
+    changes:
+      - at: "README.md"
+        what: "a section on the toggle"
+        code: |
+          ## Dark mode
+
+          Settings › Appearance › Dark mode switches every screen to the dark theme.
+    outcome: "The README says where the toggle is and what it changes"
     notes: "Link the screenshot the first task adds."   # optional, one line of
                                         #   context for a runner with no history
     criteria:
       - cmd: "grep -q 'dark mode' README.md"
-
-  - id: review-contrast
-    title: "Check the dark palette reads at AA contrast"
-    scope: ["src/theme/tokens.css"]
-    depends_on: [add-dark-mode]
-    manual_review: true              # optional. An audit node judges whether
-                                     #   this task is complete.
-    justification: "Contrast against the new palette is a judgement no command makes."
-                                     #   say why a command cannot settle it
-    criteria:
-      - cmd: "test -f src/theme/tokens.css"
+        proves: "the README mentions the toggle"

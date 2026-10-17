@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ConfigLayer, Manifest};
+use yunta_core::{ConfigLayer, Isolation, Manifest, RunId};
 
 pub struct Project {
     pub config: ConfigLayer,
@@ -37,20 +37,59 @@ impl Project {
         candidates
             .into_iter()
             .map(|root| root.join(run_id))
-            .find(|run_dir| run_dir.join("manifest.yaml").exists())
+            .find(|run_dir| yunta_engine::run_dir::manifest_path(run_dir).exists())
     }
 
     /// The worktrees root a run's checkout lives under: the one *frozen*
     /// in its manifest, so a `paths.*` change after the run was created
-    /// never loses its worktree; a pre-freeze manifest (no `paths:`)
-    /// falls back to this project's current root, the old behavior. The
-    /// one place `resume` and `gc` derive a run's worktree location from.
+    /// never loses its worktree; a manifest with no `paths:` falls back
+    /// to this project's current root. The one place `resume` and `gc`
+    /// derive a run's worktree location from.
     pub fn worktrees_root_for(&self, manifest: &Manifest) -> PathBuf {
         manifest
             .paths
             .as_ref()
             .map(|paths| paths.worktrees_root().to_path_buf())
             .unwrap_or_else(|| self.worktrees_root.clone())
+    }
+
+    /// The pool of checkouts run `manifest` takes its trees from, for the
+    /// run whose directory is `run_dir`, reached from the checkout `repo`.
+    /// `clock` is the invocation's own, so the pool reads time as the
+    /// command does.
+    pub fn pool_of(
+        &self,
+        manifest: &Manifest,
+        repo: &Path,
+        run_dir: &Path,
+        clock: std::sync::Arc<dyn yunta_core::Clock>,
+    ) -> std::sync::Arc<yunta_engine::CheckoutPool> {
+        yunta_engine::CheckoutPool::of_run(
+            &self.worktrees_root_for(manifest),
+            repo,
+            run_dir,
+            manifest,
+            clock,
+        )
+    }
+
+    /// The tree run `run_id` works in: the checkout of its own its log
+    /// names — `bound` — or, for a log that names none, the one named after
+    /// it under the worktrees root its manifest froze; for a run that
+    /// isolates nothing, the checkout this invocation runs in, `cwd`.
+    pub fn run_tree(
+        &self,
+        manifest: &Manifest,
+        bound: Option<&Path>,
+        run_id: &RunId,
+        cwd: &Path,
+    ) -> PathBuf {
+        match manifest.isolation {
+            Isolation::Worktree => bound
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| self.worktrees_root_for(manifest).join(run_id.as_str())),
+            Isolation::None => cwd.to_path_buf(),
+        }
     }
 }
 
@@ -74,7 +113,7 @@ pub enum ProjectError {
     },
     /// A layer declaring a `version:` this binary doesn't read is
     /// refused up front — parsing on regardless could silently misread
-    /// a future format.
+    /// a newer format.
     #[error(
         "config layer `{path}` declares `version: {declared}` but this binary reads \
          version {supported}"
@@ -86,31 +125,21 @@ pub enum ProjectError {
     },
 }
 
-/// The process environment, read once here at the CLI's boundary so no
-/// code below reads it live — `std::env` stays at the shell's edge and
-/// everything downstream (core's `user_state_root`, a run's ambient) takes
-/// the resulting [`Env`](yunta_core::Env). A run leaves `subprocess_vars`
-/// empty: its nodes inherit this process's environment unchanged.
+/// The process environment as the CLI's boundary captures it, with every
+/// variable a built adapter reaches its service by, so no code below
+/// reads it live and everything downstream (core's `user_state_root`, a
+/// run's ambient, a service probe) takes the resulting
+/// [`Env`](yunta_core::Env). A run leaves `subprocess_vars` empty: its
+/// nodes inherit this process's environment unchanged.
 pub(crate) fn process_env() -> yunta_core::Env {
-    yunta_core::Env {
-        home: std::env::var_os("HOME").map(PathBuf::from),
-        yunta_home: std::env::var_os("YUNTA_HOME").map(PathBuf::from),
-        org_config: std::env::var_os("YUNTA_ORG_CONFIG").map(PathBuf::from),
-        subprocess_vars: Vec::new(),
-    }
+    yunta_core::Env::of_process(&crate::commands::service_vars())
 }
 
-fn user_root() -> Result<PathBuf, ProjectError> {
+pub(crate) fn user_root() -> Result<PathBuf, ProjectError> {
     yunta_core::user_state_root(&process_env()).ok_or(ProjectError::NoStateRoot)
 }
 
-fn org_config_path() -> PathBuf {
-    process_env()
-        .org_config
-        .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"))
-}
-
-fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
+fn load_layer(path: &Path, home: Option<&Path>) -> Result<Option<ConfigLayer>, ProjectError> {
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -126,13 +155,10 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
             path: path.to_path_buf(),
             detail: e.to_string(),
         })?;
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    layer
-        .expand_home(home.as_deref())
-        .map_err(|e| ProjectError::Parse {
-            path: path.to_path_buf(),
-            detail: e.to_string(),
-        })?;
+    layer.expand_home(home).map_err(|e| ProjectError::Parse {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })?;
     if let Some(declared) = layer.version {
         if declared != CONFIG_VERSION {
             return Err(ProjectError::UnsupportedVersion {
@@ -149,16 +175,21 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
 /// named so `permissions` conflicts can cite which layer tried to loosen
 /// which. Shared by [`resolve`] and by `yunta check`'s layered path.
 pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
-    let user_root = user_root()?;
+    let env = process_env();
+    let user_root = yunta_core::user_state_root(&env).ok_or(ProjectError::NoStateRoot)?;
+    let org = env
+        .org_config
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"));
     let candidates = [
-        ("org", org_config_path()),
+        ("org", org),
         ("user", user_root.join("config.yaml")),
         ("repo", cwd.join(".yunta/config.yaml")),
     ];
 
     let mut layers = Vec::new();
     for (name, path) in candidates {
-        if let Some(layer) = load_layer(&path)? {
+        if let Some(layer) = load_layer(&path, env.home.as_deref())? {
             layers.push((name, layer));
         }
     }
@@ -209,4 +240,9 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
         worktrees_root,
         storage_path,
     })
+}
+
+/// The checkout of its own a run's state names, when it names one.
+pub fn bound_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
+    state.run.checkout().map(Path::to_path_buf)
 }

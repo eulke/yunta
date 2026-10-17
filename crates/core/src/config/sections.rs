@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName};
-use crate::workflow::OnInterrupt;
+use crate::ids::{
+    AdapterId, AgentName, CommandName, ExecutorName, GitHubRepo, ModelName, RunnerName, SkillName,
+};
+use crate::workflow::{Effort, OnInterrupt};
 
 /// One binding candidate for a role in `runners:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -17,6 +19,22 @@ pub struct RunnerCandidate {
     pub model: ModelName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentName>,
+    /// How long the model reasons, unless the node says otherwise; absent
+    /// leaves it to the CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
+}
+
+/// One rule of `format:`: the files a project command formats the moment a
+/// session writes one of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FormatRule {
+    /// The files it formats, as scope globs.
+    pub paths: Vec<crate::ScopeGlob>,
+    /// The project command that formats them, handed every path as an
+    /// argument.
+    pub run: CommandName,
 }
 
 /// One server in `mcp_servers:` — the reference config's own
@@ -56,6 +74,17 @@ pub struct GitHubForgeConfig {
     /// The environment variable holding the token; its value never
     /// enters the config.
     pub token_env: String,
+    /// The git remote a run pushes its branch to for a pull request;
+    /// `origin` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+}
+
+impl GitHubForgeConfig {
+    /// The git remote a run pushes to.
+    pub fn remote(&self) -> &str {
+        self.remote.as_deref().unwrap_or("origin")
+    }
 }
 
 /// Adapter-specific settings: a portable binary override plus the
@@ -73,7 +102,7 @@ pub struct AdapterSettings {
     pub adapter_settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// `storage:` — SQLite is the only backend.
+/// `storage:` — SQLite is the only storage engine.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
@@ -81,12 +110,14 @@ pub struct StorageConfig {
     pub path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<u32>,
+    /// What the project's checkouts may keep of the disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<super::PoolConfig>,
 }
 
 /// `project:` — backs the `{{project.*}}` template namespace, the
-/// reference config's own three fields. Currently read-only data for
-/// templates, nothing here drives behavior yet (`base_branch` isn't
-/// consulted by any re-route/PR logic).
+/// reference config's own three fields. `base_branch` is also the branch
+/// a `pull_request` node opens its pull request into.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
@@ -110,16 +141,20 @@ pub struct PathsConfig {
     pub worktrees: Option<PathBuf>,
 }
 
-/// How a first-level run isolates its working tree from the checkout
-/// that started it. `worktree` (default) gives each run its
-/// own `git worktree`; `none` operates directly on the given checkout,
-/// legitimate for watching an agent edit live or for CI already inside
-/// an ephemeral container. `inherit` (sub-runs only) isn't a value
-/// here — a first-level run has no parent to inherit from — and
-/// `container` isn't a schema value at all (not yet designed).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
+/// Whether a unit of work gets a working tree of its own, or works in
+/// the one it was handed.
+///
+/// `worktree` (the default) gives it its own `git worktree`; `none`
+/// works directly in the checkout it was given — legitimate for watching
+/// an agent edit live, or for CI already inside an ephemeral container.
+///
+/// One word for every level, run and `kind: workflow` node alike:
+/// `none` is true wherever it is written, while a word naming a parent
+/// would not be — a first-level run has no parent unit, it has a
+/// person's checkout. `container` is not a value at all; it is not
+/// designed. (A node that wants a tree of its own declares `scope:`,
+/// which is what asks for one.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
     #[default]
@@ -127,12 +162,48 @@ pub enum Isolation {
     None,
 }
 
+impl Isolation {
+    /// The word this repository retired, and what it is now called.
+    ///
+    /// Read by whoever tolerates it — a manifest frozen while that word
+    /// was current — so the retirement is stated once and the two halves
+    /// of it cannot disagree.
+    pub const RETIRED: (&'static str, &'static str) = ("inherit", "none");
+}
+
+impl<'de> Deserialize<'de> for Isolation {
+    /// Author input is held to the one vocabulary, and a document that
+    /// uses the retired word is told what replaced it rather than what
+    /// the alternatives are: `inherit` said "the tree of whoever made
+    /// me", which is what `none` says at every level.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let word = String::deserialize(deserializer)?;
+        let (retired, replacement) = Isolation::RETIRED;
+        match word.as_str() {
+            "worktree" => Ok(Isolation::Worktree),
+            "none" => Ok(Isolation::None),
+            other if other == retired => Err(serde::de::Error::custom(format!(
+                "`{retired}` is no longer an isolation — write `{replacement}`, which says \
+                 the same thing at every level"
+            ))),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown isolation `{other}` — expected `worktree` or `none`"
+            ))),
+        }
+    }
+}
+
+/// Whether this isolation is the one a document that says nothing gets,
+/// so the default is never written down.
+pub fn is_default_isolation(isolation: &Isolation) -> bool {
+    *isolation == Isolation::default()
+}
+
 /// `defaults:` — the reference config's whole group. Each field
 /// has its consumer: `isolation`, `max_parallel_nodes`,
 /// `on_interrupt`, `runner` (a node that declares none),
-/// `timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is
-/// built — `check` refuses the others rather than accepting them
-/// silently).
+/// `timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed
+/// node does to the run).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultsConfig {
@@ -141,12 +212,14 @@ pub struct DefaultsConfig {
     /// The runner a node without `runner:` resolves through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerName>,
-    /// Per-session wall-clock budget (`Budget.timeout`), in minutes —
-    /// the granularity the reference schema uses for whole sessions.
+    /// Per-session budget of time the host is awake (`Budget.timeout`),
+    /// in minutes — the granularity the reference schema uses for whole
+    /// sessions. A suspended host spends none of it, and the run's log
+    /// records the suspension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<u64>,
-    /// What a failed node without its own `on_failure:` does. Only
-    /// `pause` (today's behavior) is built; `check` refuses the rest.
+    /// What a failed node without its own `on_failure:` re-route does
+    /// to the run. Absent is `pause`, the schema's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<DefaultOnFailure>,
     /// How many DAG nodes with no dependency on each other the scheduler
@@ -163,9 +236,10 @@ pub struct DefaultsConfig {
     pub on_interrupt: Option<OnInterrupt>,
 }
 
-/// `defaults.on_failure` values (reference schema). Only `Pause` has an
-/// implementation — the enum still parses all three so the reference
-/// config round-trips, and `check` names the unimplemented ones.
+/// `defaults.on_failure` values (reference schema): `pause` freezes the
+/// run resumable, `abort` closes it failed at once, and `continue` skips
+/// the failed node's dependents and closes failed once the rest of the
+/// graph has run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultOnFailure {
@@ -191,9 +265,9 @@ pub struct PricingEntry {
 /// lives here and nowhere else. Budgets are advisory ceilings the engine
 /// enforces by escalation/diagnostic, never OS enforcement.
 ///
-/// Canonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves
-/// `2_000_000` as a *string*, which fails the parse loudly instead of
-/// silently becoming an unlimited run.
+/// A limit is an integer: `2000000`, or `2_000_000` with its digits
+/// grouped, which reads as the same number — never as a string that
+/// leaves a run without its limit.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LimitsConfig {
@@ -236,6 +310,11 @@ pub struct LimitsConfig {
 #[serde(deny_unknown_fields)]
 pub struct BaselineConfig {
     pub suite: String,
+    /// Project commands measured beside the suite, on the same tree: each
+    /// that passes there holds every task of a loop as a guard, as the
+    /// suite does — the project's lint, for one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<CommandName>,
 }
 
 /// `coverage:` — backs the `coverage_gate` check kind; `cmd`'s stdout must
@@ -270,7 +349,7 @@ pub struct SkillsConfig {
     /// Skill names mounted on every session, before any node's own
     /// list.
     #[serde(default)]
-    pub always: Vec<String>,
+    pub always: Vec<SkillName>,
 }
 
 /// One `skills.executors:` entry — `name` is what a `kind: executor`

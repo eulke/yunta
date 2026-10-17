@@ -12,19 +12,27 @@
 //! the install, and every write goes through a staging directory or a
 //! temporary file so a failure leaves the repository as it was.
 
-use yunta_core::text::problems;
 use yunta_core::{
-    ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher, Workflow,
+    ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher,
 };
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
-use crate::error::{note, warn, CliError, Outcome};
+use crate::context::Context;
+use crate::error::{CliError, Outcome};
+use crate::output::{blank, document, say};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
-    vendor_into_place,
+    vendor_into_place, with_cleanup, PackError, Swap,
 };
+use crate::render::blocks::{Checklist, Fields, Found};
+use crate::render::doc::Doc;
+use crate::render::Look;
+
+mod scaffold;
+
+pub use scaffold::new_pack;
 
 /// The merged `permissions.packs` verdicts, with the layers that
 /// declare each restriction kept by name — a refusal that can't say
@@ -93,6 +101,27 @@ fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, CliError> {
     })
 }
 
+/// The schema gate: a pack states the schema major it needs, and a
+/// binary outside that range cannot run its workflows. Refused before
+/// anything is vendored — a pack on disk that no run can use is a
+/// failure discovered later, with a tree to clean up.
+fn enforce_schema_range(manifest: &PackManifest) -> Result<(), CliError> {
+    let Some(range) = &manifest.yunta_schema else {
+        return Ok(());
+    };
+    if range.holds_for(yunta_core::YUNTA_SCHEMA) {
+        return Ok(());
+    }
+    Err(CliError::msg(format!(
+        "`{}/{}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema {} — \
+         install a version of yunta inside that range, or a release of the pack that \
+         accepts this one.",
+        manifest.publisher,
+        manifest.name,
+        yunta_core::YUNTA_SCHEMA,
+    )))
+}
+
 /// The publisher allow-list gate: a non-empty
 /// `permissions.packs.publishers.allow` in the merged config refuses
 /// any publisher outside it, naming the declaring layer(s).
@@ -105,10 +134,10 @@ fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &Publisher) -> Resu
     }
     Err(CliError::msg(format!(
         "publisher `{publisher}` is not in `permissions.packs.publishers.allow` \
-         (declared by the {} config layer{}) — allowed: {}. Add the publisher there, or \
+         (declared by the {} config {}) — allowed: {}. Add the publisher there, or \
          install a pack from an allowed publisher.",
         declared_by.join("/"),
-        if declared_by.len() == 1 { "" } else { "s" },
+        yunta_core::text::agreeing(declared_by.len(), "layer", "layers"),
         allow
             .iter()
             .map(ToString::to_string)
@@ -134,27 +163,23 @@ fn enforce_executor_policy(
     match policy.executors {
         PackExecutorPolicy::Allow => Ok(()),
         PackExecutorPolicy::Deny => Err(CliError::msg(format!(
-            "this pack declares {} executor(s) and `permissions.packs.executors` \
-             is `deny` (declared by the {} config layer{}) — `--yes` cannot override a \
+            "this pack declares {} and `permissions.packs.executors` \
+             is `deny` (declared by the {} config {}) — `--yes` cannot override a \
              permissions ceiling. Change the policy there, or {verb} a pack \
              without executors.",
-            manifest.declares.executors.len(),
+            yunta_core::text::counted(manifest.declares.executors.len(), "executor"),
             policy.executors_declared_by.join("/"),
-            if policy.executors_declared_by.len() == 1 {
-                ""
-            } else {
-                "s"
-            },
+            yunta_core::text::agreeing(policy.executors_declared_by.len(), "layer", "layers"),
         ))),
         PackExecutorPolicy::Prompt => {
             if confirmed {
                 return Ok(());
             }
             Err(CliError::msg(format!(
-                "this pack declares {} executor(s) — executable code, not just \
+                "this pack declares {} — executable code, not just \
                  declarative YAML. Review the inventory above, then re-run with `--yes` to \
                  confirm the {verb}.",
-                manifest.declares.executors.len()
+                yunta_core::text::counted(manifest.declares.executors.len(), "executor")
             )))
         }
     }
@@ -170,8 +195,12 @@ pub async fn add(
     source: &str,
     confirmed_executors: bool,
     run_tests: bool,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // The invocation's own composition root: `pack add` clones, and a
+    // clone is a subprocess that answers to whoever ran the command.
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
 
     let (source_part, ref_arg) = split_source_and_ref(source);
     let url = clone_url(source_part);
@@ -181,7 +210,7 @@ pub async fn add(
         source,
     })?;
 
-    clone_pack(&url, ref_arg, clone_dir.path()).await?;
+    clone_pack(&url, ref_arg, clone_dir.path(), ctx.supervision()).await?;
 
     let manifest = read_manifest(clone_dir.path())?;
 
@@ -197,6 +226,7 @@ pub async fn add(
 
     // Policy first: a refused publisher or a denied executor leaves no
     // decision for a person to make, so the audit is not even printed.
+    enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, &manifest.publisher)?;
     if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
@@ -206,14 +236,14 @@ pub async fn add(
     // The audit is read, never run: the inventory a person confirms
     // against, printed before anything is vendored.
     let audit = audit_pack(clone_dir.path(), manifest.clone());
-    print_report(&audit);
-    println!();
+    print_report(&audit, look);
+    blank();
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
 
-    let commit = head_commit(clone_dir.path()).await?;
+    let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
     let resolved_ref = match ref_arg {
         Some(ref_arg) => ref_arg.to_string(),
-        None => current_branch(clone_dir.path()).await?,
+        None => current_branch(clone_dir.path(), ctx.supervision()).await?,
     };
 
     // The lock is loaded before anything is written, so a lock that
@@ -221,13 +251,10 @@ pub async fn add(
     let mut lock = load_lock(&cwd)?;
 
     let staging = staging_dir(&cwd, &pack);
-    vendor_into_place(clone_dir.path(), &staging, &dest)?;
+    let swap = vendor_into_place(clone_dir.path(), &staging, &dest)?;
     let content_hash = match hash_tree(&dest) {
         Ok(hash) => hash,
-        Err(e) => {
-            roll_back_vendored(&dest);
-            return Err(e.into());
-        }
+        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
     };
 
     lock.packs.insert(
@@ -241,50 +268,44 @@ pub async fn add(
             content_hash,
         },
     );
-    if let Err(e) = save_lock(&cwd, &lock) {
-        roll_back_vendored(&dest);
-        return Err(e.into());
+    if let Err(cause) = save_lock(&cwd, &lock) {
+        return Err(with_cleanup(cause, swap.undo()).into());
     }
+    swap.commit();
 
-    println!(
-        "installed {}/{} @ {} ({}) -> {}",
-        manifest.publisher,
-        manifest.name,
-        manifest.version,
-        &commit[..commit.len().min(12)],
-        dest.display()
+    say(
+        look,
+        format!(
+            "installed {}/{} @ {} ({}) {} {}",
+            manifest.publisher,
+            manifest.name,
+            manifest.version,
+            commit.abbreviated(),
+            look.glyphs.arrow(),
+            crate::render::paths::shown(&dest, &cwd, None)
+        ),
     );
+    super::pack_needs::report(&ctx, &dest, &manifest, look).await?;
 
     // The pack's own cases run last, on the vendored copy, and only on
     // request — after the confirmation, never as part of deciding it.
     let tests = if run_tests {
-        run_pack_tests(&dest).await
+        run_pack_tests(&dest, &ctx).await
     } else {
         count_pack_tests(&dest)
     };
-    print_test_summary(&tests);
+    print_test_summary(&tests, look);
     Ok(Outcome::Success)
-}
-
-/// Removes a tree this command vendored moments ago, when a later step
-/// failed: an install that did not complete leaves nothing behind.
-fn roll_back_vendored(dest: &std::path::Path) {
-    if let Err(e) = std::fs::remove_dir_all(dest) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            warn(format!(
-                "could not remove the vendored tree at {} after the failed install: {e}",
-                dest.display()
-            ));
-        }
-    }
 }
 
 pub async fn update(
     pack: &PackRef,
     new_ref: &str,
     confirmed_executors: bool,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
     let mut lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
         return Err(CliError::msg(format!(
@@ -296,7 +317,13 @@ pub async fn update(
         context: "create a temp directory to clone into".to_string(),
         source,
     })?;
-    clone_pack(&entry.source, Some(new_ref), clone_dir.path()).await?;
+    clone_pack(
+        &entry.source,
+        Some(new_ref),
+        clone_dir.path(),
+        ctx.supervision(),
+    )
+    .await?;
     let manifest = read_manifest(clone_dir.path())?;
     if manifest.reference() != *pack {
         return Err(CliError::msg(format!(
@@ -309,26 +336,31 @@ pub async fn update(
     // The same policy gates as `add` — a new ref is where new executor
     // code first appears, and an allow-list narrowed since the install
     // must stop pulling from a publisher it no longer trusts.
+    enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, pack.publisher())?;
     if !manifest.declares.executors.is_empty() {
         // The decision being demanded needs the same evidence `add`
         // shows — nothing executes until a human has seen the
         // inventory — printed only when there's a decision to make.
-        print_report(&audit_pack(clone_dir.path(), manifest.clone()));
-        println!();
+        print_report(&audit_pack(clone_dir.path(), manifest.clone()), look);
+        blank();
     }
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
 
-    let commit = head_commit(clone_dir.path()).await?;
+    let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
 
     // The new ref is vendored beside the installed tree and swapped in
     // only once it is complete: a ref that cannot be vendored leaves the
-    // installed pack, and the lock, exactly as they were.
+    // installed pack, and the lock, exactly as they were. A failure after
+    // the swap puts the installed pack back.
     let dest = vendor_dir(&cwd, pack);
     let staging = staging_dir(&cwd, pack);
-    vendor_into_place(clone_dir.path(), &staging, &dest)?;
-    let content_hash = hash_tree(&dest)?;
+    let swap = vendor_into_place(clone_dir.path(), &staging, &dest)?;
+    let content_hash = match hash_tree(&dest) {
+        Ok(hash) => hash,
+        Err(cause) => return Err(with_cleanup(cause, swap.undo()).into()),
+    };
 
     lock.packs.insert(
         pack.clone(),
@@ -341,39 +373,86 @@ pub async fn update(
             content_hash,
         },
     );
-    save_lock(&cwd, &lock)?;
+    if let Err(cause) = save_lock(&cwd, &lock) {
+        return Err(with_cleanup(cause, swap.undo()).into());
+    }
+    swap.commit();
 
-    println!(
-        "updated {pack} -> {new_ref} ({})",
-        &commit[..commit.len().min(12)]
+    say(
+        look,
+        format!(
+            "updated {pack} {} {new_ref} ({})",
+            look.glyphs.arrow(),
+            commit.abbreviated()
+        ),
     );
     Ok(Outcome::Success)
 }
 
-pub fn remove(pack: &PackRef) -> Result<Outcome, CliError> {
+pub fn remove(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let mut lock = load_lock(&cwd)?;
     if lock.packs.remove(pack).is_none() {
         return Err(CliError::msg(format!("`{pack}` isn't installed")));
     }
 
+    // The tree moves aside and is deleted only once the lock without it is
+    // saved: a failed save puts it back.
     let dest = vendor_dir(&cwd, pack);
-    if let Err(source) = std::fs::remove_dir_all(&dest) {
-        if source.kind() != std::io::ErrorKind::NotFound {
-            return Err(CliError::io("remove", dest.display(), source));
-        }
+    let aside = Swap::aside(&dest)?;
+    if let Err(cause) = save_lock(&cwd, &lock) {
+        return Err(with_cleanup(cause, aside.map_or(Ok(()), Swap::undo)).into());
     }
-    save_lock(&cwd, &lock)?;
+    if let Some(swap) = aside {
+        swap.commit();
+    }
 
-    println!("removed {pack}");
+    say(look, format!("removed {pack}"));
     Ok(Outcome::Success)
 }
 
-pub fn list() -> Result<Outcome, CliError> {
+/// What a vendored tree says about its lock entry, as its `list` row states
+/// it: whether its files still hash to the recorded content, or why they
+/// cannot be read.
+fn vendored_verdict(
+    dest: &std::path::Path,
+    entry: &PackLockEntry,
+    installed: &str,
+) -> (Found, String) {
+    match hash_tree(dest) {
+        Ok(hash) if hash == entry.content_hash => {
+            (Found::Holds, format!("{installed}, as its lock records it"))
+        }
+        Ok(_) => (
+            Found::Caution,
+            format!("{installed}, modified: its files no longer match its lock"),
+        ),
+        // Only a directory that is not there counts as missing.
+        Err(PackError::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => (
+            Found::Problem,
+            format!("{installed}, missing: its directory is not there"),
+        ),
+        Err(error) => (
+            Found::Problem,
+            format!(
+                "{installed}, cannot be read: {}",
+                yunta_core::describe(&error)
+            ),
+        ),
+    }
+}
+
+pub fn list(look: &Look) -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let lock = load_lock(&cwd)?;
     if lock.packs.is_empty() {
-        println!("no packs installed under {}", packs_root(&cwd).display());
+        say(
+            look,
+            format!(
+                "no packs installed under {}",
+                crate::render::paths::shown(&packs_root(&cwd), &cwd, None)
+            ),
+        );
         return Ok(Outcome::Success);
     }
 
@@ -381,168 +460,19 @@ pub fn list() -> Result<Outcome, CliError> {
     // re-hash what's actually vendored on disk and say so when it no
     // longer matches what the lock recorded, rather than just trusting
     // the lock's own numbers back at the user.
+    let mut checks = Checklist::default();
     for (key, entry) in &lock.packs {
         let dest = vendor_dir(&cwd, key);
-        let status = match hash_tree(&dest) {
-            Ok(hash) if hash == entry.content_hash => "ok".to_string(),
-            Ok(_) => "MODIFIED (vendored content no longer matches the lock)".to_string(),
-            Err(_) => "MISSING (vendored directory not found)".to_string(),
-        };
-        println!(
-            "{key} @ {} ({}) — {status}",
-            entry.r#ref,
-            &entry.commit[..entry.commit.len().min(12)]
-        );
+        let installed = format!("{} ({})", entry.r#ref, entry.commit.abbreviated());
+        let (found, said) = vendored_verdict(&dest, entry, &installed);
+        checks.push(found, key.to_string(), said);
     }
-    println!("lock: {}", lock_path(&cwd).display());
-    Ok(Outcome::Success)
-}
-
-// --- `yunta pack new` scaffolding -------------------------------------
-//
-// Written as literal templates (not built from the typed values) so the
-// generated files read exactly as an author would write them; `{{name}}`
-// and `{{publisher}}` are the only substitutions, and the manifest and
-// workflow are parsed back into their types before anything is written,
-// so a skeleton that does not parse never reaches disk.
-
-const PACK_MANIFEST_TEMPLATE: &str = r#"name: {{name}}
-publisher: {{publisher}}
-version: 0.1.0
-description: A yunta pack — one verified workflow to build on.
-license: Apache-2.0
-declares:
-  permissions: edit
-  network: false
-  executors: []
-requires:
-  runners:
-    - name: executor
-contents:
-  workflows:
-    - .yunta/workflows/example.yaml
-  docs:
-    - README.md
-"#;
-
-const PACK_WORKFLOW_TEMPLATE: &str = r#"name: example
-description: >-
-  The smallest verified shape: a prompt node with its own scope, checked
-  by a bash node before the work counts as done. Swap the marker check
-  for your own test suite.
-nodes:
-  - id: work
-    kind: prompt
-    runner: executor
-    scope: ["src/**"]
-    prompt: |
-      Do the work described here, editing only files under src/. When the
-      change is in place, create an empty file at src/.done.
-  - id: verify
-    kind: bash
-    invariant: true
-    depends_on: [work]
-    run: "test -f src/.done"
-"#;
-
-// Self-test config: never shipped in `contents:`, used only when this
-// pack's own `.yunta/tests/` run in isolation.
-const PACK_SELFTEST_CONFIG: &str = r#"# Self-test config only — runs this pack's own .yunta/tests/ under the
-# mock adapter. A project that installs this pack uses its own config.
-runners:
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
-
-const PACK_CASE_TEMPLATE: &str = r#"workflow: example
-fixture: fixtures/example.yaml
-expect:
-  final_state: finished
-  nodes:
-    work: finished
-    verify: finished
-"#;
-
-const PACK_FIXTURE_TEMPLATE: &str = r#"effects:
-  - { path: src/.done, content: "" }
-outcome: { type: completed, summary: "done" }
-"#;
-
-const PACK_README_TEMPLATE: &str = r#"# {{publisher}}/{{name}}
-
-A yunta pack scaffolded by `yunta pack new`. It ships one workflow,
-`example`, and a self-test that runs it under the mock adapter.
-
-## example
-
-A prompt node with a declared `scope`, checked by a bash node before the
-work counts as done. Swap the `verify` command for your own test suite.
-
-## Testing
-
-    yunta test --dir .
-"#;
-
-/// Scaffolds a new pack at `<cwd>/<name>`: a manifest, one verified
-/// workflow, a self-test config and case, and a README — the shape
-/// `docs/packs.md` describes. The manifest and workflow are validated by
-/// parsing before any file is written, then the pack is checked and its
-/// case is run, so a freshly scaffolded pack passes from the first
-/// command. Refuses to write over an existing directory.
-pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-    let dir = cwd.join(pack.name().as_str());
-    if dir.exists() {
-        return Err(CliError::msg(format!(
-            "{} already exists — choose another name or remove it first",
-            dir.display()
-        )));
-    }
-
-    let fill = |template: &str| {
-        template
-            .replace("{{publisher}}", pack.publisher().as_str())
-            .replace("{{name}}", pack.name().as_str())
-    };
-    let manifest_yaml = fill(PACK_MANIFEST_TEMPLATE);
-    let workflow_yaml = fill(PACK_WORKFLOW_TEMPLATE);
-
-    // Parse the real types first: a skeleton that does not parse is a bug
-    // here, never a broken pack on disk.
-    let _: PackManifest = yunta_core::yaml::parse(&manifest_yaml)
-        .map_err(|e| CliError::msg(format!("the pack manifest skeleton does not parse: {e}")))?;
-    let workflow: Workflow = yunta_core::yaml::parse(&workflow_yaml)
-        .map_err(|e| CliError::msg(format!("the workflow skeleton does not parse: {e}")))?;
-
-    let write = |rel: &str, contents: &str| -> Result<(), CliError> {
-        let path = dir.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|s| CliError::io("create", parent.display(), s))?;
-        }
-        std::fs::write(&path, contents).map_err(|s| CliError::io("write", path.display(), s))
-    };
-    write("pack.yaml", &manifest_yaml)?;
-    write("README.md", &fill(PACK_README_TEMPLATE))?;
-    write(".yunta/config.yaml", PACK_SELFTEST_CONFIG)?;
-    write(".yunta/workflows/example.yaml", &workflow_yaml)?;
-    write(".yunta/tests/example.yaml", PACK_CASE_TEMPLATE)?;
-    write(".yunta/tests/fixtures/example.yaml", PACK_FIXTURE_TEMPLATE)?;
-    println!("wrote {}", dir.display());
-
-    // Verify against the pack's own self-test config, then run its case.
-    let config = ConfigLayer::merge_layers(
-        crate::project::load_named_layers(&dir)?
-            .into_iter()
-            .map(|(_, layer)| layer),
+    let lock_file = crate::render::paths::shown(&lock_path(&cwd), &cwd, None);
+    document(
+        look,
+        Doc::new()
+            .with(checks)
+            .with(Fields::new().push_if("lock", lock_file)),
     );
-    let errors = yunta_engine::check(&workflow, &config);
-    if !errors.is_empty() {
-        note(problems(
-            dir.join(".yunta/workflows/example.yaml").display(),
-            &errors,
-        ));
-        return Ok(Outcome::Reported);
-    }
-    super::test::test(Some(&dir)).await
+    Ok(Outcome::Success)
 }

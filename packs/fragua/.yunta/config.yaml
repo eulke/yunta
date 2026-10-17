@@ -16,3 +16,9 @@ runners:
     - { adapter: mock, model: mock-model }
 baseline:
   suite: "true"
+commands:
+  lint: "true"
+# A case never reaches a real forge: `yunta test` opens the pull request
+# on a stand-in in its place, so this only has to name one.
+forge:
+  github: { repo: yunta/fragua-self-test, token_env: FRAGUA_SELF_TEST_TOKEN }

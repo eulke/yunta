@@ -7,21 +7,20 @@
 //! machine picks up the approval on a completely separate `execute_run`
 //! call, simulating `yunta resume`.
 
-use std::collections::HashMap;
+mod common;
+#[path = "external_gate/console.rs"]
+mod console;
 
-use yunta_adapters::{Adapter, MockForge, MockForgeState};
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
+use std::sync::Arc;
 
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::events::{Failure, FindingCause, FindingSays, GateEvent, NodeEvent};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::Bench;
+use yunta_testkit_core::golden::assert_golden;
+
+/// A claude-code fixture that scripts no session, so a run reaches only its gates.
+const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";
 
 const GATE_ONLY_WORKFLOW: &str = r#"
 name: gate-scenario
@@ -60,103 +59,23 @@ nodes:
     run: "false"
 "#;
 
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-    manifest: yunta_core::Manifest,
-    run_dir: std::path::PathBuf,
-}
-
-impl Bench {
-    async fn new() -> Self {
-        Self::with_workflow(GATE_ONLY_WORKFLOW).await
-    }
-
-    async fn with_workflow(workflow_yaml: &str) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let run_id = RunId::from("run-gate-1");
-
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &ConfigLayer::default(),
-            &worktree,
-            &worktree,
-            &HashMap::new(),
-        )
-        .unwrap()
-        .manifest;
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &run_id,
-                manifest: &manifest,
-                runs_root: &runs_root,
-                mode: &"default".into(),
-                worktree: &worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        Bench {
-            _root: root,
-            worktree,
-            storage,
-            run_id,
-            manifest,
-            run_dir,
-        }
-    }
-
-    /// One `execute_run` invocation — a fresh call each time, exactly
-    /// like a separate `yunta run`/`yunta resume` process would make;
-    /// nothing here carries state across calls except the log itself.
-    async fn wake(
-        &self,
-        forge: Option<&dyn yunta_adapters::Forge>,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        let adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        let report = execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &self.manifest,
-            run_dir: &self.run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &NoInteraction,
-            forge,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-        })
-        .await
-        .unwrap();
-        (report.terminal, report.state)
-    }
+/// A bench whose every wake reads one forge, alongside that forge's
+/// state — the handle person B acts through, with no Yunta on their end.
+fn bench_on_a_forge() -> (Bench, MockForgeState) {
+    let forge_state = MockForgeState::new();
+    let bench = Bench::with_run_id("run-gate-1").with_forge(Arc::new(MockForge::new(
+        forge_state.clone(),
+        yunta_testkit_core::spell(),
+    )));
+    (bench, forge_state)
 }
 
 #[tokio::test]
 async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
     // Person A's machine: first wake reaches the gate, publishes, pauses.
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "got {terminal:?}"
@@ -165,13 +84,15 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     // never "absent" and never running/failed.
     assert!(
         matches!(
-            state.nodes.get("approve"),
+            state.nodes.state("approve"),
             Some(NodeState::Waiting {
-                external_ref: Some(_)
+                on: yunta_engine::NodeWait::Gate {
+                    external_ref: Some(_)
+                }
             })
         ),
         "a published unresolved gate must derive Waiting with its PR ref, got {:?}",
-        state.nodes.get("approve")
+        state.nodes.state("approve")
     );
     assert!(
         forge_state.pr_number(bench.run_id.as_str()).is_some(),
@@ -184,16 +105,16 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
 
     // Person A's machine, a second, wholly separate `execute_run` call
     // (simulating `yunta resume`): picks the approval up on its own.
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resolved = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
         _ => None,
     });
     let Some(yunta_core::events::GateResolvedPayload::Approved { by, .. }) = resolved else {
@@ -207,20 +128,18 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // Needs a still-open run (see this workflow's own doc comment) —
     // `after` fails with no `on_failure`, so the run pauses rather than
     // reaching `run_finished` once the gate resolves.
-    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW).await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    let (terminal, _) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, .. } = bench.run(GATE_THEN_UNRESOLVED_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     forge_state.approve(bench.run_id.as_str(), &"person-b".into());
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     // The gate itself resolved (Finished), but `after` failed on its own
     // with nowhere to reroute — the run as a whole is still Paused, not
     // Finished, which is exactly what keeps it open to recheck.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -230,21 +149,26 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 
     // A third wake must notice the approval no longer covers the
     // current head and go back to waiting.
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !matches!(state.nodes.get("approve"), Some(NodeState::Finished { .. })),
+        !matches!(
+            state.nodes.state("approve"),
+            Some(NodeState::Finished { .. })
+        ),
         "a stale approval must return the gate to waiting, not stay silently Finished"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let started_count = events
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::NodeStarted(_))
+                    Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        _
+                    )))
                 )
         })
         .count();
@@ -256,75 +180,75 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // A fresh approval at the new head resolves it again, same as the
     // first time.
     forge_state.approve(bench.run_id.as_str(), &"person-b".into());
-    let (_, state) = bench.wake(Some(&forge)).await;
+    let RunReport { state, .. } = bench.wake().await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 }
 
 #[tokio::test]
-async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+async fn changes_requested_posts_findings_and_fails_the_node() {
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     forge_state.request_changes(
         bench.run_id.as_str(),
         &"person-b".into(),
-        vec![yunta_adapters::ReviewComment {
+        vec![yunta_core::port::ReviewComment {
             author: "person-b".to_string(),
             body: "please add a test".to_string(),
             path: Some("src/lib.rs".to_string()),
         }],
     );
 
-    let (terminal, state) = bench.wake(Some(&forge)).await;
-    // No `on_failure` declared on this workflow's gate, so a retryable
-    // failure with nowhere to reroute to just pauses — the same rule
-    // any other failed node without `on_failure` already follows.
+    let RunReport { terminal, state } = bench.wake().await;
+    // No `on_failure` declared on this workflow's gate, so a failure with
+    // nowhere to reroute to just pauses — the same rule any other failed
+    // node without `on_failure` already follows.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    assert!(matches!(
-        state.nodes.get("approve"),
-        Some(NodeState::Failed {
-            retryable: true,
-            ..
-        })
-    ));
+    let failure = match state.nodes.state("approve") {
+        Some(NodeState::Failed { failure, .. }) => failure,
+        other => panic!("the gate fails on the review: {other:?}"),
+    };
+    let Failure::ChangesRequested { requested_by, .. } = failure else {
+        panic!("a request for changes: {failure:?}");
+    };
+    assert_eq!(requested_by, "person-b");
+    assert!(yunta_render::failure::sentence(failure).starts_with("changes requested by person-b"));
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let finding = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
-        _ => None,
-    });
-    assert_eq!(
-        finding.map(|f| f.detail.as_str()),
-        Some("please add a test")
+    let events = bench.events();
+    let finding = common::findings_posted(&events).first().copied();
+    assert!(
+        matches!(
+            finding.map(|f| &f.says),
+            Some(FindingSays::Found {
+                cause: FindingCause::ReviewComment { body, .. },
+            }) if body.as_str() == "please add a test"
+        ),
+        "the finding's cause carries the review comment: {finding:?}"
     );
 }
 
 #[tokio::test]
 async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     // Person B merges the PR outright: an approval that also landed.
     let merge_sha = forge_state.merge(bench.run_id.as_str(), &"person-b".into());
 
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resolved = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
             _ => None,
         })
         .expect("the gate resolves");
@@ -342,35 +266,35 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
 async fn a_merged_gate_stays_resolved_on_later_wakes() {
     // Needs a still-open run (see this workflow's own doc comment): the
     // drift recheck only runs while the run is open.
-    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW).await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_THEN_UNRESOLVED_WORKFLOW, NO_SESSIONS).await;
     forge_state.merge(bench.run_id.as_str(), &"person-b".into());
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
     // A merged pull request cannot move, and its evidence is the merge
     // commit, not the branch head. A later wake leaves the gate as it
     // resolved instead of reading the difference as drift.
-    let (_, state) = bench.wake(Some(&forge)).await;
+    let RunReport { state, .. } = bench.wake().await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resolutions = events
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::GateResolved(_))
+                    Some(yunta_core::events::EventPayload::Gates(
+                        GateEvent::Resolved(_)
+                    ))
                 )
         })
         .count();
@@ -381,42 +305,193 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
 }
 
 #[tokio::test]
-async fn a_closed_pr_fails_the_node_non_retryably() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+async fn a_closed_pr_fails_the_node_without_approval() {
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     forge_state.close(bench.run_id.as_str());
 
-    let (_, state) = bench.wake(Some(&forge)).await;
-    assert!(matches!(
-        state.nodes.get("approve"),
-        Some(NodeState::Failed {
-            retryable: false,
-            ..
-        })
-    ));
+    let RunReport { state, .. } = bench.wake().await;
+    let failure = match state.nodes.state("approve") {
+        Some(NodeState::Failed { failure, .. }) => failure,
+        other => panic!("the gate fails when its pull request closes: {other:?}"),
+    };
+    assert!(
+        matches!(failure, Failure::PullRequestClosed { .. }),
+        "{failure:?}"
+    );
+    assert_eq!(
+        yunta_render::failure::sentence(failure),
+        "the pull request was closed without approval"
+    );
 }
 
 #[tokio::test]
 async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
-    let bench = Bench::new().await;
-    // `NoInteraction` always reports "can't interact" — the same
-    // degrade-to-pause path a headless console already takes.
-    let (terminal, state) = bench.wake(None).await;
+    // A bench with no forge and no human answering: the gate takes the
+    // same degrade-to-pause path a headless console already takes.
+    let bench = Bench::with_run_id("run-gate-1");
+    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !state.nodes.contains_key("approve"),
+        !state.nodes.has_state("approve"),
         "no forge and no answer from the console must not fabricate a resolution"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateWaiting(_))
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                _
+            )))
         )),
         "an unresolved degraded gate must not be recorded as published"
     );
+}
+
+/// A planner, and an external gate that publishes its plan and sends a
+/// request for changes back to it.
+const PLAN_UNDER_REVIEW: &str = r#"
+name: plan-under-review
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: approve-plan
+    kind: gate
+    assignee: lead
+    message: "Is this plan the one to build?"
+    depends_on: [plan]
+    on_failure: { goto: plan, max_reroutes: 2 }
+    external:
+      kind: pull_request
+      artifacts: [tasks]
+      branch: "{{run.branch}}"
+"#;
+
+/// The first plan, and the one the review's comments correct it into.
+const PLANNER: &str = r#"
+dialect: claude-code
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
+            tasks:
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+    outcome: { type: completed, summary: "planned" }
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
+            tasks:
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+              - { id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], changes: [{ at: said.txt, what: "the file", code: "the file's first line" }], outcome: "said.txt exists", criteria: [{ cmd: "test -f said.txt", proves: "it was said" }] }
+    outcome: { type: completed, summary: "planned again" }
+"#;
+
+/// The text a file on the run's pull request holds.
+fn published(forge: &MockForgeState, path: &str) -> String {
+    let pr = forge.pull_requests().remove(0);
+    String::from_utf8(pr.files[path].clone()).unwrap()
+}
+
+#[tokio::test]
+async fn a_published_gate_asks_its_question_and_publishes_the_plan_to_read() {
+    let (bench, forge_state) = bench_on_a_forge();
+
+    let RunReport { terminal, .. } = bench.run(PLAN_UNDER_REVIEW, PLANNER).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let prs = forge_state.pull_requests();
+    assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].title, "Is this plan the one to build?");
+    assert!(
+        prs[0]
+            .body
+            .contains("each comment reaches `plan` as a finding"),
+        "{}",
+        prs[0].body
+    );
+    assert!(published(&forge_state, "tasks.yaml").contains("T001"));
+    let drawn = published(&forge_state, "tasks.md");
+    assert!(drawn.contains("Make it"), "{drawn}");
+    assert!(
+        drawn.contains("test -f made.txt"),
+        "the plan is published whole, with what proves each task: {drawn}"
+    );
+
+    // What a reviewer reads, byte for byte.
+    let goldens = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/forge");
+    assert_golden(&goldens.join("gate.md"), &prs[0].body);
+    assert_golden(&goldens.join("gate-tasks.md"), &drawn);
+}
+
+/// The planner's CLI runs tools and cannot resume a session, so its correction is a fresh one.
+#[tokio::test]
+async fn changes_requested_publish_the_corrected_plan_on_the_same_pull_request() {
+    let (bench, forge_state) = bench_on_a_forge();
+    let bench = bench.with_capabilities(yunta_core::Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
+    bench.run(PLAN_UNDER_REVIEW, PLANNER).await;
+    forge_state.request_changes(
+        bench.run_id.as_str(),
+        &"person-b".into(),
+        vec![yunta_core::port::ReviewComment {
+            author: "person-b".to_string(),
+            body: "split the greeting into its own task".to_string(),
+            path: None,
+        }],
+    );
+
+    // The review sends the run back to the planner, whose correction is
+    // published on the pull request the review was left on — and that
+    // review, of the plan before it, decides nothing about the new one.
+    let RunReport { terminal, state } = bench.wake().await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.state("approve-plan"),
+            Some(NodeState::Waiting { .. })
+        ),
+        "the gate waits on a review of the correction, got {:?}",
+        state.nodes.state("approve-plan")
+    );
+    assert_eq!(forge_state.pull_requests().len(), 1);
+    assert!(published(&forge_state, "tasks.md").contains("Say it"));
+
+    // A wake before anyone reviewed the correction finds the first review
+    // still the last one on the pull request: it waits.
+    let RunReport { state, .. } = bench.wake().await;
+    assert!(
+        matches!(
+            state.nodes.state("approve-plan"),
+            Some(NodeState::Waiting { .. })
+        ),
+        "a review of the plan before the correction decides nothing, got {:?}",
+        state.nodes.state("approve-plan")
+    );
+
+    forge_state.approve(bench.run_id.as_str(), &"person-b".into());
+    let RunReport { terminal, .. } = bench.wake().await;
+    assert_eq!(terminal, RunTerminal::Finished);
 }

@@ -5,12 +5,18 @@
 //! read them; `schema --check` verifies the committed files are exactly
 //! what the types emit, which is what CI runs. `smells` measures the
 //! rebuild's ratchet counts against `xtask/smells.baseline`; `smells
-//! --check` fails when one rises — both run in CI.
+//! --check` fails when one rises. `adr` derives the index of
+//! `docs/design/adrs.md` from the decision files and proves what they
+//! say about each other; `adr --check` fails when the two disagree. All
+//! three run in CI.
 
+mod adr;
 mod smells;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+use yunta_core::durable::{self, Durability};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -24,7 +30,9 @@ fn main() -> ExitCode {
         ["schema", "--check"] => schema(Mode::Check),
         ["smells"] => smells::write(),
         ["smells", "--check"] => smells::check(),
-        _ => Err("usage: cargo xtask <schema|smells> [--check]".to_string()),
+        ["adr"] => adr::run(Mode::Write),
+        ["adr", "--check"] => adr::run(Mode::Check),
+        _ => Err("usage: cargo xtask <schema|smells|adr> [--check]".to_string()),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
@@ -36,7 +44,7 @@ fn main() -> ExitCode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Write,
     Check,
 }
@@ -71,7 +79,7 @@ fn schema(mode: Mode) -> Result<(), String> {
             Mode::Write => {
                 std::fs::create_dir_all(&dir)
                     .map_err(|error| format!("cannot create `{}`: {error}", dir.display()))?;
-                std::fs::write(&path, &rendered)
+                durable::replace(&path, rendered.as_bytes(), Durability::Atomic)
                     .map_err(|error| format!("cannot write `{}`: {error}", path.display()))?;
                 println!("wrote {}", path.display());
             }

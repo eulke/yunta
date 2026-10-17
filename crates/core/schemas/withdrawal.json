@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta finding withdrawal",
-  "description": "Taking one finding back: which, and why.\n\nA document like any other — strict about its keys, with a rule of its\nown — because it reaches the engine the same way a finding does, and\na withdrawal nobody can explain is a finding that disappeared.",
+  "description": "Taking one finding back: which, and why.",
   "type": "object",
   "properties": {
     "id": {

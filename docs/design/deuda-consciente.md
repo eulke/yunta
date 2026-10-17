@@ -2,9 +2,12 @@
 
 Lo deliberadamente no resuelto. Regla: **nada de esta lista se resuelve
 implícitamente durante la implementación**: cada ítem requiere una decisión
-explícita registrada en el registro de decisiones antes de codearse. Los
-identificadores (A-01…) son **estables**: no se renumeran al cerrarse un ítem, para
-que las referencias desde los ADRs nunca se rompan.
+explícita registrada en el registro de decisiones antes de codearse. La lista lleva
+además lo construido y todavía no verificado contra el sistema real que describe,
+donde lo que cierra el ítem es una corrida y no una decisión; cada entrada dice cuál
+de las dos la resuelve. Los identificadores (A-01…) son **estables**: no se
+renumeran al cerrarse un ítem, para que las referencias desde los ADRs nunca se
+rompan.
 
 ## Abiertos
 
@@ -13,9 +16,6 @@ fuente de verdad (I2).
 
 **A-02 · Notificaciones locales.** Canal de comando local y eventos suscribibles.
 Los canales de equipo (Slack, dashboard) son del proyecto de servidor separado.
-
-**A-03 · Perfiles de permisos de red y filesystem por nodo.** Más allá de
-ReadOnly/Edit/Full, como extensión del modelo unificado de §6.1 del Contrato.
 
 **A-04 · `yunta serve`.** Fuera de alcance (D77): las capacidades de equipo (estado
 compartido, gates remotos, dashboard, notificaciones de equipo, triggers sin padre
@@ -75,6 +75,48 @@ Para entrar necesita: el objeto de entrada mínimo (identidad del run y del nodo
 rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts producidos) y
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
+**A-14 · Preguntas respondibles por pull request.** `Channel` es `{tty, mcp}`;
+un `kind: questions` se responde por consola. Lo resolvería una forja que
+publique las preguntas y lea las respuestas, con su `Channel::Pr` (D167). El
+par `questions_asked`/`questions_answered` (D173) es la forma que esa forja
+publica y lee, como `gate_waiting`/`gate_resolved`; la tool MCP que responde
+por el otro canal es el ítem 5-06.
+
+**A-15 · Fuentes de contexto provistas por executors.** `ContextSpec` es una
+enum cerrada de ocho fuentes. Lo resolvería un extension point con contrato
+propio (entrada, salida, hash de lo materializado) y su ADR (D167).
+
+**A-16 · Viaje en el tiempo: `yunta replay` y `yunta diff`.** RFC-0003 §2 promete
+reconstruir lo que cualquier agente tenía delante en cualquier instante: `yunta
+replay <run> --at <seq>` rinde el estado del run, el contexto montado y la evidencia
+disponible en ese punto, y `yunta diff <run-a> <run-b>` reporta, entre dos corridas
+del mismo workflow, el primer punto de divergencia y qué contexto difería. D55 las
+registra como capacidades de producto post-v1 temprano y fija no recortar nada de esa
+persistencia "por eficiencia", para no cerrar la puerta. Es deuda porque la data está
+entera y ningún comando la lee de vuelta: el log está secuenciado y encadenado por
+hash, cada `context_assembled` guarda el hash de cada segmento de contexto
+(spec-events §5.8, D42) —el insumo directo del diff—, y el binario no tiene
+subcomando `replay` ni `diff`. Lo resolvería la superficie de reconstrucción sobre
+ese log: un comando que rinda estado, contexto y evidencia a un `seq` dado, y otro
+que compare los hashes de segmento de dos corridas y nombre el primer segmento que
+difiere.
+
+**A-17 · Verificación en vivo de adapters, forja y MCP.** Los adapters `codex` y
+`claude-code`, la forja de GitHub, `yunta mcp` montado en un cliente real, el MCP
+por-run con un agente real y `pack add` contra un host remoto están construidos
+contra documentación y ejemplos reales, sin una corrida contra el sistema que
+describen (`status.md`). Del cerco queda una pregunta: qué parte del stderr del hook
+de Claude Code llega al `tool_result` del stream. La otra ya está medida: `codex`
+0.157.0 no emite ningún ítem para un proceso que su sandbox denegó
+(`smoke-checklist.md`, sección G). Es deuda porque lo único que confirma el contrato de
+un sistema ajeno es una corrida contra él: hasta que ocurra, el comportamiento que el
+adapter espera es el documentado y no el medido. La resuelve la checklist de
+`smoke-checklist.md`, que describe cada corrida y su protocolo —cada divergencia se
+corrige en su propia tarea, con el test de regresión que la hubiera atrapado, y el
+resultado de cada corrida se registra en `status.md`—; pide binarios autenticados y
+un token con repo descartable. No espera una decisión: espera credenciales y una
+sesión.
+
 ## Riesgos conocidos
 
 - **Dependencia de flags headless de los CLIs.** Mitigada por diseño (todo flag
@@ -83,6 +125,64 @@ un `schema_version` propio, versionado como los eventos (spec-events §2).
   CLI instalado.
 - **Nombre.** `yunta`, `yunta-core`, `yunta-storage`, `yunta-adapters` y
   `yunta-engine` deben estar libres en crates.io antes de publicar (D03).
+
+## Sitios justificados
+
+Son los sitios que el ratchet acepta: un `let _ =` o un `.ok();` de sentencia en
+producción, con `// best-effort:` en la línea de arriba; una llamada de disco en
+un `async fn`, con `// blocking:`; y la espera de un sondeo. Cada uno dice por qué
+no se resuelve. Ninguno graba nada en el log: el paso sigue porque no tiene canal
+de run a donde entregar el fallo. El único paso que sí graba es el cierre del
+cliente MCP (`best_effort_failed`, con `best_effort::record`), que el run recibe.
+El payload `capability_degraded` está cerrado a capacidades de adapter, así que no
+hay donde anotar el resto.
+
+**`// best-effort:` (9).**
+
+- `core/src/rail/hook.rs`, `settle`: `endpoint.report(&report).ok()`. Si el reporte
+  no llega, la negativa queda como única huella.
+- `cli/src/commands/mod.rs`, el reaper: `child.wait()`. El reaper solo recoge la
+  salida del hijo; el log del hijo dice cómo fue el run.
+- `cli/src/commands/init.rs`: el aviso de lo que hace Escape, dicho antes de los
+  prompts. El aviso solo informa: si la escritura se niega, los prompts siguen y
+  los valores quedan en su default.
+- `engine/src/task_cycle/session.rs`, `end_running`: `session.interrupt()`. Una
+  sesión que rechaza el interrupt termina con el `kill` que sigue.
+- `engine/src/run_tools/format.rs`: la salida de un formateador que el store no
+  guarda. El evento queda sin salida.
+- `engine/src/run_tools/listener.rs`: el cuerpo de un pedido negado con 401 que no
+  se puede leer. Queda solo la negativa por responder.
+- `adapters/src/mock/stand_in.rs`, dos: un grupo que ya terminó no tiene nada que
+  matar, y nadie espera el estado; importa solo la salida.
+- `testkit/src/bench/mod.rs`, el `Drop` del bench: `force_kill_process_group(group)`
+  sobre los grupos que el registro del run todavía nombra. Un grupo que termina
+  entre la lectura y el kill no tiene nada que parar; el bench no tiene run al que
+  entregar la negativa.
+
+**`// blocking:` (32).** Cada marca dice por qué una llamada de disco dentro de un
+`async fn` corre en su hilo; `grep -rnE '^\s*// blocking:' crates/` las lista. Casi
+todas son un archivo chico que se escribe o se lee entero. En `engine/src/lock.rs`
+van cuatro: la creación del lock (`create_new`, la operación cuya atomicidad es todo
+el mecanismo), `hand_over` (el dueño de un archivo antes de que su proceso exista) y
+la lectura y el borrado de `release`, que corren desde el `Drop` del lock en el hilo
+que lo suelta. `tokio::fs` las correría en un hilo del pool sin hacerlas más atómicas.
+
+**Espera de sondeo (1).** `engine/src/pace.rs`, `Pace`, que usan
+`cli/src/commands/cancel.rs` y `engine/src/lock.rs`: el ritmo con que un sondeo mira
+el estado que posee otro proceso. Solo espacia las miradas; la condición y el plazo
+quedan en el sitio que llama.
+
+**Números que el ratchet sostiene por encima de cero (3).** Son tamaños, no patrones
+que el código deba dejar de tener; cada uno baja cuando un cambio toca su sitio.
+
+- `prod_fns_over_50_lines` (34): funciones de producción de 50 a 99 líneas. El
+  contador de 100 líneas es el límite duro y está en cero. El número queda por debajo
+  de 40: ninguna se parte solo por cifra, y cada una se parte cuando un cambio la toque.
+- `test_files_over_500_lines` (35): archivos de prueba de más de 500 líneas, cada
+  uno de un área. Partirlos en masa no cambia lo que prueban; un archivo que un
+  cambio lleve por encima de 500 líneas se parte en ese cambio.
+- `test_fns_over_50_lines` (125): pruebas de escenario, cada una con su preparación
+  y sus aserciones. No hay meta a cero; se parten al tocarlas.
 
 ## Cerrados
 
@@ -99,6 +199,26 @@ Se conservan para que nadie los reabra por accidente; el ADR citado manda.
 - Política org sobre executors y publishers de packs → **D51 + D72**.
 - Prompt injection en packs de terceros → **D71** (audit inventaría, no juzga).
 - Paralelismo de tareas del documento de tareas → **D65** (§5.5).
+- **A-13 · El cerco en los adapters** → **D172** (`plan-de-raiz/cerco.md`):
+  `yunta_core::fence::Fence::judge` es el único juez, `yunta rail <adapter-id>
+  before-write` el hook que los CLIs ejecutan para preguntarle al engine (D249);
+  `claude-code` lo instala como `PreToolUse`, `codex` como `PreToolUse` sobre
+  `apply_patch` y cerca además sus comandos por el sandbox de su proceso, y el mock
+  juzga cada efecto de su fixture por la misma función. Lo que el cerco no pudo
+  evitar sigue atrapándolo el diff del post-check, y una escritura que llega al diff
+  de una sesión que deja el checkout solo al cerco es además un `engine_finding`.
+- **A-03 · Perfiles de permisos de red y filesystem por nodo** → `core::confinement`:
+  `Confinement::of` es la única resolución de lo que una sesión escribe y alcanza.
+  El filesystem sale del perfil del nodo (`read-only`, `edit` o `full`) y del sandbox
+  de `edit`; la red, del `network:` del nodo o del proyecto. Cada adapter lo aplica
+  exacto o lo rechaza, y el log guarda la confinación de cada sesión en
+  `agent_session_opened.confinement`. Los tres perfiles siguen siendo los únicos.
+- Durabilidad de las escrituras del engine → `core::durable`, con dos clases:
+  `Atomic` (un rename, sin fsync) para el estado que se reescribe, manifest de cada
+  run incluido, y `Synced` (fsync del archivo y de su directorio) para los objetos
+  por SHA-256 y el lock del pack. Costo: cada escritura `Synced` espera al disco
+  antes de existir; las demás no pagan ese fsync. Un corte de energía antes de que el
+  sistema de archivos confirme el rename puede dejar un run sin su `manifest.yaml`.
 
 ## Ideas estacionadas (no comprometidas)
 

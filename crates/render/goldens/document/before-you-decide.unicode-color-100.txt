@@ -1,0 +1,13 @@
+  ␛[1mbefore you decide␛[0m
+
+    ␛[33m`approve` is not offered, because␛[0m
+      ␛[33m▲␛[0m `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
+        ␛[2mso          ␛[0m no session may write it, so the task cannot be done as planned
+        ␛[2mfix         ␛[0m leave the test as the spec wrote it, and change the code it tests
+      ␛[33m▲␛[0m `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
+        ␛[2mso          ␛[0m it passes once `greet` is done, whatever this task does
+        ␛[2mfix         ␛[0m judge the task by a test of its own
+    ␛[2m·␛[0m handed over 16 times; refused 15: criterion-already-passes ×12, shared-criterion ×3
+    ␛[2m·␛[0m 2 of 3 changes show no code
+    ␛[2m·␛[0m nothing but the suite checks 1 promise the tasks keep
+    ␛[33m▲␛[0m risk: A name with a newline in it breaks the line it is printed on.

@@ -1,10 +1,11 @@
 //! Context assembly: sources, templates, stable-first hashing, knowledge layering across repo/user/org, and loop-level context.
 
-use yunta_engine::RunTerminal;
-use yunta_testkit::{Bench, MOCK_CONFIG};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
 mod common;
 use common::*;
+use yunta_core::events::{Failure, NodeEvent, PauseReason};
 
 #[tokio::test]
 async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
@@ -12,9 +13,12 @@ async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
     std::fs::write(bench.worktree.join("a.txt"), "MARKER-FILES-CONTENT\n").unwrap();
 
     let workflow = context_workflow("      - files: [\"a.txt\"]\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FILES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-FILES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -28,9 +32,12 @@ async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
 async fn a_command_source_resolves_stdout_and_is_replayable() {
     let bench = Bench::new();
     let workflow = context_workflow("      - command: \"echo MARKER-COMMAND-OUTPUT\"\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-COMMAND-OUTPUT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-COMMAND-OUTPUT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -62,11 +69,14 @@ nodes:
       - artifact: { node: grill, name: brief.md }
 "#;
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"MARKER-ARTIFACT-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"MARKER-ARTIFACT-CONTENT\"\n    outcome: {{ type: completed, summary: planned }}\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - {{ path: \"{}/brief.md\", content: \"MARKER-ARTIFACT-CONTENT\" }}\n    outcome: {{ type: completed, summary: grilled }}\n  - match_prompt_contains: \"MARKER-ARTIFACT-CONTENT\"\n    outcome: {{ type: completed, summary: planned }}\n",
         bench.staging("grill").display()
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -92,7 +102,7 @@ nodes:
 
 #[tokio::test]
 async fn a_missing_artifact_reference_fails_the_node_never_silently_empty() {
-    // ✓ del Plan: "fuente caída = nodo failed" — referencing a real,
+    // A source that is down fails the node. The reference points at a real,
     // already-run node whose artifact was simply never produced.
     let bench = Bench::new();
     let workflow = r#"
@@ -109,12 +119,12 @@ nodes:
     context:
       - artifact: { node: grill, name: brief.md }
 "#;
-    let fixture = "sessions: []";
+    let fixture = "dialect: claude-code\nsessions: []";
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
-    match &state.nodes.get("plan") {
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
+    match &state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
+            assert_eq!(yunta_render::failure::sentence(failure), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
         }
         other => panic!("expected plan to fail citing the missing artifact, got {other:?}"),
     }
@@ -122,6 +132,124 @@ nodes:
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_missing_optional_file_is_marked_in_the_context_and_recorded() {
+    // An optional file the tree does not hold is not a failed source: the
+    // session is told it is absent — the fixture only answers a prompt
+    // that says so — and the event names it, so replay knows what the
+    // session went without.
+    let bench = Bench::new();
+    write(&bench.worktree.join("a.txt"), "MARKER-FILES-CONTENT\n");
+    let workflow = context_workflow(
+        "      - files: [{ path: docs/architecture.md, optional: true }, \"a.txt\"]\n",
+    );
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"# docs/architecture.md\\n[absent — declared optional; not in the run's tree]\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let RunReport { terminal, .. } = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources[0].source_id, "files:docs/architecture.md,a.txt");
+    assert_eq!(sources[0].absent, vec!["docs/architecture.md".to_string()]);
+    assert_materialized(&bench.run_dir(), &sources[0]);
+    let object = String::from_utf8(bench.object(&sources[0].content_hash).unwrap()).unwrap();
+    assert!(
+        object.contains("MARKER-FILES-CONTENT"),
+        "the files that are there are read as always: {object}"
+    );
+}
+
+/// A node reading one required file, and the one session that answers
+/// only once the file's content is in its prompt.
+fn reads_architecture() -> (String, &'static str) {
+    (
+        context_workflow("      - files: [\"docs/architecture.md\"]\n"),
+        "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-ARCHITECTURE\"\n    outcome: { type: completed, summary: ok }\n",
+    )
+}
+
+#[tokio::test]
+async fn a_missing_file_fails_the_node_saying_where_the_next_attempt_looks() {
+    // Where the file has to be for the next attempt — the run's own tree,
+    // and the commit it starts from — not the checkout this attempt read.
+    let bench = Bench::new();
+    let (workflow, fixture) = reads_architecture();
+
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("ask") else {
+        panic!("expected `ask` to fail on the missing file");
+    };
+    assert_eq!(
+        yunta_render::failure::sentence(failure),
+        format!(
+            "context `files:docs/architecture.md` on node `ask`: `docs/architecture.md` is not \
+             in the run's tree, which starts from commit `{}` — a file that is not committed \
+             there, or that git ignores, never reaches it; put it at `{}` and choose `retry`, \
+             or declare the entry `optional: true` if the node can do without it",
+            bench.manifest().base_commit.abbreviated(),
+            bench.worktree.join("docs/architecture.md").display()
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_missing_file_retried_after_it_is_put_in_place_finishes() {
+    // Once a person puts the file where the failure said, `retry` runs the
+    // node again instead of leaving the run parked on it.
+    let bench = Bench::new();
+    let (workflow, fixture) = reads_architecture();
+    let RunReport { terminal, .. } = bench.run(&workflow, fixture).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    write(
+        &bench.worktree.join("docs/architecture.md"),
+        "MARKER-ARCHITECTURE\n",
+    );
+    answer_parked(&bench, "retry").await.unwrap();
+    let RunReport { terminal, state } = bench.wake_on_fixture(fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.state("ask"),
+        Some(yunta_engine::NodeState::Finished { .. })
+    ));
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert_eq!(context_sources(&events, "ask")[0].kind, "files");
+}
+
+#[tokio::test]
+async fn a_command_measured_against_the_run_s_base_sees_everything_the_run_changed() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ctx-run-base
+nodes:
+  - id: write
+    kind: bash
+    run: "printf a > written-by-the-run.txt"
+  - id: read
+    kind: prompt
+    runner: executor
+    depends_on: [write]
+    prompt: "Say what changed."
+    context:
+      - command: "git diff --name-only {{run.base}}"
+"#;
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"written-by-the-run.txt\"\n    outcome: { type: completed, summary: read }\n";
+
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
 }
 
 #[tokio::test]
@@ -144,13 +272,18 @@ nodes:
     // The failures reach the prompt as canonical JSONL, so the event's
     // kind reads `node_failed` (not the Rust Debug `NodeFailed`).
     let fixture =
-        "sessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
+        "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted: exit 1: "
+        RunTerminal::Paused {
+            reason: reason @ PauseReason::Escalation(_),
+        } => assert_eq!(
+            yunta_render::pause::sentence(&reason),
+            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
         ),
         other => panic!(
             "lint stays red, so the run pauses once its single reroute is exhausted, got {other:?}"
@@ -191,13 +324,20 @@ nodes:
         )),
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let sources = context_sources(&events, "audit");
     assert_eq!(sources[0].kind, "tasks");
     assert_materialized(&bench.run_dir(), &sources[0]);
+    // The agent reads each task by the word every surface calls its
+    // status, never a type's debug form.
+    let said = String::from_utf8(bench.object(&sources[0].content_hash).unwrap()).unwrap();
+    assert_eq!(said, "task-x: pending");
 }
 
 #[tokio::test]
@@ -211,9 +351,12 @@ async fn a_knowledge_source_resolves_the_repo_layer_and_is_replayable() {
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: {}\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-KNOWLEDGE-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-KNOWLEDGE-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -239,9 +382,12 @@ nodes:
     context:
       - node-output: { node: build }
 "#;
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-BUILD-OUTPUT\"\n    outcome: { type: completed, summary: reported }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-BUILD-OUTPUT\"\n    outcome: { type: completed, summary: reported }\n";
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -250,23 +396,41 @@ nodes:
     assert_materialized(&bench.run_dir(), &sources[0]);
 }
 
-// --- templates — {{runner.role}}, {{project.*}} ----------------------
+// --- templates — {{runner.name}}, {{node.id}}, {{project.*}} ---------
 
 #[tokio::test]
-async fn a_node_can_reference_its_own_runner_role_by_template() {
-    // render golden — {{runner.role}} es el nombre de rol
-    // declarado en `runner:`, conocido estáticamente, nunca el
-    // adapter/model que una resolución posterior elige.
+async fn a_node_can_reference_its_own_runner_by_template() {
+    // `{{runner.name}}` is the name the node declares under `runner:`,
+    // known from the workflow alone — never the adapter or model a later
+    // resolution picks.
     let bench = Bench::new();
     let workflow = r#"
-name: role-template
+name: runner-template
 nodes:
   - id: only
     kind: bash
     runner: executor
-    run: "test 'executor' = '{{runner.role}}'"
+    run: "test 'executor' = '{{runner.name}}'"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
+async fn a_node_can_reference_its_own_id_by_template() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: node-id-template
+nodes:
+  - id: only
+    kind: bash
+    run: "test 'only' = '{{node.id}}'"
+"#;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -283,8 +447,8 @@ nodes:
     kind: bash
     run: "test '{{project.name}}' = 'mi-repo' && test '{{project.base_branch}}' = 'main' && test '{{project.branch_prefix}}' = 'yunta/'"
 "#;
-    let (terminal, _) = bench
-        .run_with_config(workflow, "sessions: []", &config)
+    let RunReport { terminal, state: _ } = bench
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []", &config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
@@ -302,10 +466,22 @@ nodes:
     kind: bash
     run: "echo {{inputs.idea}}"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     match terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(reason, "node `only` failed: template references `{{inputs.idea}}`, which is not defined here");
+        RunTerminal::Paused {
+            reason:
+                PauseReason::NodeFailed {
+                    node,
+                    failure: Failure::Template { template, .. },
+                },
+        } => {
+            assert_eq!(node.as_str(), "only");
+            assert_eq!(
+                template.to_string(),
+                "template references `{{inputs.idea}}`, which is not defined here"
+            );
         }
         other => panic!("expected the run to pause citing the undefined variable, got {other:?}"),
     }
@@ -328,17 +504,18 @@ nodes:
     kind: bash
     run: "test '{{inputs.greeting}}' = 'hola'"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
 #[tokio::test]
 async fn the_stable_and_run_stable_segments_hash_identically_across_runs_with_different_volatile_content(
 ) {
-    // "comparar hashes entre sesiones es la
-    // verificación mecánica de que el prefijo se mantuvo estable" —
-    // `command:` (volatile) cambia entre las dos corridas; `files:`
-    // (stable) y `artifact:` (run-stable) no.
+    // Comparing the hashes across the two runs checks that the prefix stayed
+    // stable. `command:` (volatile) changes between the runs; `files:`
+    // (stable) and `artifact:` (run-stable) do not.
     let bench_a = Bench::new();
     let (stable_a, run_stable_a, segments_a) = run_stable_first(&bench_a, "VOLATILE-A").await;
 
@@ -385,9 +562,12 @@ async fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_
 
     let bench = Bench::new().with_user_state_root(user_home.path());
     let workflow = context_workflow("      - knowledge: { layers: [user] }\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -421,9 +601,12 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: {}\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -450,9 +633,8 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
 
 #[tokio::test]
 async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
-    // The org layer is the union of installed knowledge packs —
-    // "knowledge pack instalado se resuelve
-    // como capa org sin config extra".
+    // The org layer is the union of installed knowledge packs, and each one
+    // resolves as that layer with no extra config.
     let bench = Bench::new();
     write_org_pack(
         &bench.worktree,
@@ -462,9 +644,9 @@ async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
     );
 
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-ORG-CONVENTIONS\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-ORG-CONVENTIONS\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -497,9 +679,9 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: {}\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -543,12 +725,12 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     );
 
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
-    let fixture = "sessions: []";
+    let fixture = "dialect: claude-code\nsessions: []";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
-    match &state.nodes.get("ask") {
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
+    match &state.nodes.state("ask") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            assert_eq!(failure.to_string(), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
+            assert_eq!(yunta_render::failure::sentence(failure), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
         }
         other => panic!("expected `ask` to fail naming both packs, got {other:?}"),
     }
@@ -575,9 +757,9 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
     .unwrap();
 
     let workflow = context_workflow("      - knowledge: { layers: [repo] }\n");
-    let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-REPO-LOCAL\"\n    outcome: { type: completed, summary: ok }\n";
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"MARKER-REPO-LOCAL\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -600,9 +782,10 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
     // the degradation-with-error refusal a stub without a resolver would give.
     let bench = Bench::new();
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
-    let fixture = "sessions:\n  - outcome: { type: completed, summary: ok }\n";
+    let fixture =
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 }
 
@@ -648,7 +831,10 @@ nodes:
         ));
     }
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // One `context_assembled` per task brief, each naming its task.
@@ -661,7 +847,7 @@ nodes:
                 .is_some_and(|id| id.as_str() == "implement")
         })
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ContextAssembled(p)) => Some(
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))) => Some(
                 p.task_id
                     .as_ref()
                     .map(|t| t.to_string())
@@ -703,7 +889,7 @@ nodes:
     // the run reaching a session at all is the assertion. `type: guard`
     // appears only in the shape, never in the author's prompt.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "type: guard"
     steps:
@@ -715,7 +901,10 @@ sessions:
     outcome: { type: completed, summary: planned }
 "#;
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -745,9 +934,9 @@ nodes:
     // The file is the engine's to write, so the shape names the way in
     // rather than a path: the script only matches a prompt that says so.
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
-  - match_prompt_contains: "hand it over with `yunta_submit_tasks`"
+  - match_prompt_contains: "hand it over with `mcp__yunta-run__yunta_submit_tasks`"
     steps:
       - type: run_tool
         tool: yunta_submit_tasks
@@ -757,7 +946,10 @@ sessions:
     outcome: { type: completed, summary: planned }
 "#;
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -775,11 +967,14 @@ nodes:
       produces: [report.md]
 "#;
     let fixture = format!(
-        "sessions:\n  - effects:\n      - {{ path: \"{}/report.md\", content: \"done\\n\" }}\n    outcome: {{ type: completed, summary: written }}\n",
+        "dialect: claude-code\nsessions:\n  - effects:\n      - {{ path: \"{}/report.md\", content: \"done\\n\" }}\n    outcome: {{ type: completed, summary: written }}\n",
         bench.staging("write").display()
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -787,7 +982,9 @@ nodes:
         e.node_id.as_ref().is_some_and(|id| id.as_str() == "write")
             && matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::ContextAssembled(_))
+                Some(yunta_core::events::EventPayload::Node(
+                    NodeEvent::ContextAssembled(_)
+                ))
             )
     });
     assert!(
@@ -824,6 +1021,7 @@ nodes:
 "#;
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{dir}/report.md", content: "ALPHA-REPORT" }}
@@ -833,10 +1031,10 @@ sessions:
         dir = bench.staging("alpha").display()
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
-    match state.nodes.get("plan") {
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
+    match state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
-            let text = failure.to_string();
+            let text = yunta_render::failure::sentence(failure);
             assert!(
                 text.contains("report.md") && text.contains("bare"),
                 "the failure names the artifact and the node that did not produce it: {text}"
@@ -895,6 +1093,7 @@ nodes:
     );
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
@@ -909,6 +1108,6 @@ sessions:
         beta = bench.staging("beta").display()
     );
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 }

@@ -1,18 +1,17 @@
 //! Concurrent execution: parallel nodes, join:all / join:any groups, per-loop concurrency, and orphan resume across a crash.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_testkit::{git, Bench, FixedClock, MOCK_CONFIG};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::{git, git_output, Bench};
+use yunta_testkit_core::FixedClock;
 
 mod common;
+#[path = "run_concurrency/join_any_failure.rs"]
+mod join_any_failure;
 use common::*;
+use yunta_core::events::{
+    ArtifactEvent, Failure, Interruption, NodeEvent, PauseReason, RunEvent, TaskEvent,
+};
+use yunta_core::{Capabilities, JoinPolicy};
 
 #[tokio::test]
 async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
@@ -22,7 +21,7 @@ async fn independent_nodes_run_concurrently_up_to_max_parallel_nodes() {
     // a barrier that cannot clear unless two nodes run at once. It forces
     // the batch to overlap deterministically, with no wall clock: if the
     // scheduler ran them one at a time the barrier would never clear.
-    let workflow_yaml = r#"
+    let workflow = r#"
 name: fan-out
 nodes:
   - id: a
@@ -35,53 +34,15 @@ nodes:
     kind: bash
     run: 'touch c.started; while :; do set -- *.started; [ "$#" -ge 2 ] && break; done'
 "#;
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer =
-        serde_norway::from_str("defaults:\n  max_parallel_nodes: 2\n").unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    assert_eq!(report.terminal, RunTerminal::Finished);
+    let RunReport { terminal, .. } = bench
+        .run_with_config(
+            workflow,
+            "dialect: claude-code\nsessions: []",
+            "defaults:\n  max_parallel_nodes: 2\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
         max_open_nodes(&bench.events()),
@@ -94,7 +55,7 @@ nodes:
 async fn max_parallel_nodes_defaults_to_1_and_stays_fully_sequential() {
     let bench = Bench::new();
 
-    let workflow_yaml = r#"
+    let workflow = r#"
 name: fan-out
 nodes:
   - id: a
@@ -104,52 +65,11 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config = ConfigLayer::default();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    assert_eq!(report.terminal, RunTerminal::Finished);
+    let RunReport { terminal, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(
         max_open_nodes(&bench.events()),
@@ -158,87 +78,50 @@ nodes:
     );
 }
 
+/// Leaves `node` on the log the way a killed engine does: started, with
+/// no terminal event after it.
+fn orphan_a_node(bench: &Bench, node: &str) {
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft::new(
+                bench.run_id.clone(),
+                Some(node.into()),
+                yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            )
+            .expect("a draft names its subject"),
+            &FixedClock,
+        )
+        .expect("the log takes the start a crash left behind");
+}
+
 #[tokio::test]
 async fn a_run_interrupted_mid_node_resumes_by_restarting_the_orphan() {
     let bench = Bench::new();
 
-    let workflow_yaml = r#"
+    let workflow = r#"
 name: resumable
 nodes:
   - id: only
     kind: bash
     run: "test -f present.txt"
 "#;
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
-    // Simulate a crash mid-node: the log has node_started with no
-    // terminal event — exactly what a killed engine leaves behind.
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("only".into()),
-                payload: yunta_core::events::EventPayload::NodeStarted(
-                    yunta_core::events::NodeStartedPayload { attempt: 1 },
-                ),
-            },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
+            orphan_a_node(&bench, "only");
+            yunta_testkit::write(&bench.worktree.join("present.txt"), "here");
+        })
+        .await;
 
-    std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
-
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-
-    assert_eq!(report.terminal, RunTerminal::Finished);
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert_eq!(terminal, RunTerminal::Finished);
+    let events = bench.events();
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::RunResumed(_))
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Resumed(_)))
         )),
         "resume must be recorded in the log"
     );
@@ -246,7 +129,7 @@ nodes:
     let last_start = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::NodeStarted(p)) => Some(p.attempt),
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(p))) => Some(p.attempt),
             _ => None,
         })
         .next_back();
@@ -257,7 +140,7 @@ nodes:
 async fn a_node_with_on_interrupt_fail_if_uncertain_pauses_instead_of_restarting() {
     let bench = Bench::new();
 
-    let workflow_yaml = r#"
+    let workflow = r#"
 name: uncertain-on-crash
 nodes:
   - id: only
@@ -265,80 +148,29 @@ nodes:
     run: "test -f present.txt"
     on_interrupt: fail_if_uncertain
 "#;
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
-    // Same simulated crash as the restart_node test: node_started with no
-    // terminal event.
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("only".into()),
-                payload: yunta_core::events::EventPayload::NodeStarted(
-                    yunta_core::events::NodeStartedPayload { attempt: 1 },
-                ),
-            },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
+            orphan_a_node(&bench, "only");
+        })
+        .await;
 
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-
-    match report.terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "node(s) `only` were running with no terminal event when the engine last stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether they finished; verify manually before resuming"),
+    match terminal {
+        RunTerminal::Paused {
+            reason: PauseReason::UncertainOrphans { nodes },
+        } => assert_eq!(nodes, vec![yunta_core::NodeId::from("only")]),
         other => panic!("expected Paused, got {other:?}"),
     }
     // Never restarted: no second node_started attempt was ever emitted.
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let starts = events
         .iter()
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::NodeStarted(_))
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    _
+                )))
             )
         })
         .count();
@@ -366,24 +198,20 @@ nodes:
     prompt: "Implement your task."
 "#;
 
-    // One task whose criterion the executor never satisfies; with
-    // DEFAULT_MAX_RETRIES=2 that's three executor sessions, then blocked.
+    // One task whose criterion the executor never satisfies: one executor
+    // session leaves it red, and the task blocks there.
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("T001", "Impossible", "missing.txt", "test -f missing.txt")
     ));
-    for attempt in 1..=(DEFAULT_MAX_RETRIES + 1) {
-        fixture.push_str(&format!(
-            "  - outcome: {{ type: completed, summary: \"attempt {attempt}\" }}\n"
-        ));
-    }
+    fixture.push_str("  - outcome: { type: completed, summary: \"attempt 1\" }\n");
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert_eq!(
-        state.tasks.get("T001"),
-        Some(&yunta_core::events::TaskStatus::Blocked)
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Blocked)
     );
 }
 
@@ -406,13 +234,15 @@ nodes:
         run: "touch load.txt"
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["pre-launch", "write-docs", "load-test"] {
         assert!(
-            matches!(state.nodes.get(id), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
             "expected `{id}` finished, got {:?}",
-            state.nodes.get(id)
+            state.nodes.state(id)
         );
     }
     assert!(bench.worktree.join("docs.txt").exists());
@@ -438,16 +268,30 @@ nodes:
         run: "exit 1"
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `pre-launch` failed: child `load-test` failed under join: all"
-        ),
+        RunTerminal::Paused {
+            reason: PauseReason::NodeFailed { node, failure },
+        } => {
+            assert_eq!(node.as_str(), "pre-launch");
+            assert_eq!(
+                failure,
+                Failure::ChildrenFailed {
+                    join: JoinPolicy::All,
+                    children_failed: vec!["load-test".into()],
+                }
+            );
+            assert_eq!(
+                yunta_render::failure::sentence(&failure),
+                "child `load-test` failed under join: all"
+            );
+        }
         other => panic!("expected Paused, got {other:?}"),
     }
     assert!(matches!(
-        state.nodes.get("load-test"),
+        state.nodes.state("load-test"),
         Some(NodeState::Failed { .. })
     ));
 }
@@ -471,11 +315,13 @@ nodes:
         run: "tail -f /dev/null; touch slow-finished-fully.txt"
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("fast"),
+        state.nodes.state("fast"),
         Some(NodeState::Finished { .. })
     ));
     // The slow sibling blocks forever and is interrupted the moment `fast`
@@ -489,7 +335,7 @@ nodes:
 async fn resuming_a_crashed_parallel_group_never_re_runs_a_child_that_already_finished() {
     let bench = Bench::new();
 
-    let workflow_yaml = r#"
+    let workflow = r#"
 name: pre-launch
 nodes:
   - id: pre-launch
@@ -503,99 +349,60 @@ nodes:
         kind: bash
         run: "test -f present.txt"
 "#;
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
-    // Simulate a crash mid-group: the parallel node and one child
-    // (write-docs) finished; the other child (load-test) never started.
-    for event in [
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("pre-launch".into()),
-            payload: yunta_core::events::EventPayload::NodeStarted(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("write-docs".into()),
-            payload: yunta_core::events::EventPayload::NodeStarted(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("write-docs".into()),
-            payload: yunta_core::events::EventPayload::NodeFinished(
-                yunta_core::events::NodeFinishedPayload {
-                    outcome: "exit 0".to_string(),
-                    tokens_used: Default::default(),
-                },
-            ),
-        },
-    ] {
-        bench
-            .storage
-            .append(&event, &yunta_core::SystemClock)
-            .unwrap();
-    }
-    // If write-docs re-ran, it would overwrite this — instead assert it
-    // survives untouched, since a second `touch` would only prove nothing.
-    std::fs::write(bench.worktree.join("docs.txt"), "original").unwrap();
-    std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
+            // Simulate a crash mid-group: the parallel node and one child
+            // (write-docs) finished; the other child (load-test) never started.
+            for event in [
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("pre-launch".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        yunta_core::events::NodeStartedPayload::attempt(1),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("write-docs".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        yunta_core::events::NodeStartedPayload::attempt(1),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("write-docs".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                        yunta_core::events::NodeFinishedPayload::new(
+                            yunta_core::events::NodeOutcome::Summary("exit 0".to_string()),
+                            Default::default(),
+                        ),
+                    )),
+                )
+                .expect("a draft names its subject"),
+            ] {
+                bench.storage.append(&event, &FixedClock).unwrap();
+            }
+            // If write-docs re-ran, it would overwrite this — instead assert it
+            // survives untouched, since a second `touch` would only prove nothing.
+            std::fs::write(bench.worktree.join("docs.txt"), "original").unwrap();
+            std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
+        })
+        .await;
 
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-
-    assert_eq!(report.terminal, RunTerminal::Finished);
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert_eq!(terminal, RunTerminal::Finished);
+    let events = bench.events();
     let write_docs_starts = events
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("write-docs")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::NodeStarted(_))
+                    Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        _
+                    )))
                 )
         })
         .count();
@@ -606,52 +413,53 @@ nodes:
 }
 
 #[tokio::test]
-async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits() {
+async fn four_independent_tasks_at_concurrency_2_match_concurrency_1_state_and_commits() {
     // Same final state, same commit sequence, regardless of
-    // concurrency — the batch mechanism integrates strictly in declaration
-    // declaration order no matter how many tasks dispatch at once.
-    let sequential = Bench::new();
-    let workflow_seq = concurrency_workflow(1);
-    let fixture_seq = eight_tasks_fixture();
-    let (terminal_seq, state_seq) = sequential
-        .run_with_config(&workflow_seq, &fixture_seq, CONCURRENCY_CONFIG)
-        .await;
+    // concurrency — the batch mechanism integrates strictly in
+    // declaration order no matter how many tasks dispatch at once. Four
+    // tasks are more than two slots hold, so the parallel run integrates
+    // batches whose tasks finish in whatever order they finish. The two
+    // runs share nothing, so they run side by side.
+    let (sequential, parallel) = (Bench::new(), Bench::new());
+    let fixture = independent_tasks_fixture(4);
+    let (workflow_seq, workflow_par) = (concurrency_workflow(1), concurrency_workflow(2));
+    let (
+        RunReport {
+            terminal: terminal_seq,
+            state: state_seq,
+        },
+        RunReport {
+            terminal: terminal_par,
+            state: state_par,
+        },
+    ) = tokio::join!(
+        sequential.run(&workflow_seq, &fixture),
+        parallel.run(&workflow_par, &fixture),
+    );
     assert_eq!(terminal_seq, RunTerminal::Finished);
-
-    let parallel = Bench::new();
-    let workflow_par = concurrency_workflow(4);
-    let fixture_par = eight_tasks_fixture();
-    let (terminal_par, state_par) = parallel
-        .run_with_config(&workflow_par, &fixture_par, CONCURRENCY_CONFIG)
-        .await;
     assert_eq!(terminal_par, RunTerminal::Finished);
 
-    for n in 1..=8 {
+    for n in 1..=4 {
         let id: yunta_core::TaskId = format!("task-{n}").parse().unwrap();
         assert_eq!(
-            state_seq.tasks.get(&id),
-            Some(&yunta_core::events::TaskStatus::Done)
+            state_seq.tasks.status(&id),
+            Some(yunta_core::events::TaskStatus::Done)
         );
         assert_eq!(
-            state_par.tasks.get(&id),
-            state_seq.tasks.get(&id),
+            state_par.tasks.status(&id),
+            state_seq.tasks.status(&id),
             "task-{n} status must match between concurrency levels"
         );
     }
 
-    let commits_seq = commit_subjects(&sequential.worktree);
-    let commits_par = commit_subjects(&parallel.worktree);
-    assert_eq!(
-        commits_seq.len(),
-        8,
-        "expected one commit per task, got {commits_seq:?}"
-    );
+    let commits_seq = sequential.commit_subjects();
+    let commits_par = parallel.commit_subjects();
     assert_eq!(
         commits_seq, commits_par,
         "the same tasks document must produce the same commit sequence at any concurrency"
     );
-    // Declaration order, not finishing order.
-    let expected: Vec<String> = (1..=8)
+    // One commit per task, in declaration order, not finishing order.
+    let expected: Vec<String> = (1..=4)
         .map(|n| format!("task task-{n}: Write out-{n}"))
         .collect();
     assert_eq!(commits_seq, expected);
@@ -662,8 +470,8 @@ async fn a_task_green_in_isolation_but_broken_by_a_sibling_s_integration_returns
     // Task A always integrates cleanly. Task B's own criterion is
     // satisfied in isolation (its own worktree predates A's integration)
     // but is re-checked false once A's file exists on the tree B rebases
-    // onto — exactly "pasa en su worktree pero rompe tras la integración
-    // de otra". B must go back to `ready` without touching A.
+    // onto: it passes in its own worktree but breaks after another task's
+    // integration. B must go back to `ready` without touching A.
     let bench = Bench::new();
 
     let workflow = r#"
@@ -699,32 +507,30 @@ nodes:
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
-    // Several task-b sessions: the first attempt succeeds in isolation and
-    // is rejected at integration (back to ready); the retried attempt(s)
-    // are now genuinely red (a.txt is already on the integrated tree) and
-    // exhaust run_task's own retries into a real Blocked.
-    for _ in 0..(DEFAULT_MAX_RETRIES + 2) {
+    // Two task-b sessions: the first succeeds in isolation and is rejected
+    // at integration (back to ready, on a tree that changed under it); the
+    // second is genuinely red (a.txt is already on the integrated tree),
+    // and the task blocks.
+    for _ in 0..2 {
         fixture.push_str(
             "  - match_prompt_contains: \"task-b\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-b }\n",
         );
     }
 
-    let (terminal, state) = bench
-        .run_with_config(workflow, &fixture, CONCURRENCY_CONFIG)
-        .await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
     // task-a must have succeeded and stayed succeeded, unaffected by
     // task-b's fate.
     assert_eq!(
-        state.tasks.get("task-a"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("task-a"),
+        Some(yunta_core::events::TaskStatus::Done),
         "task-a stays Done regardless of task-b's fate"
     );
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let a_statuses: Vec<_> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+            Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                 if p.task_id.as_str() == "task-a" =>
             {
                 Some(p.new_status)
@@ -744,7 +550,7 @@ nodes:
     let b_statuses: Vec<_> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+            Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                 if p.task_id.as_str() == "task-b" =>
             {
                 Some(p.new_status)
@@ -772,16 +578,19 @@ nodes:
     // a.txt" once a.txt is permanently integrated) — that's expected, not
     // a test bug: the point here is task-a's own success was untouched.
     match terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("task-b"),
-            "the pause names the task the run gave up on: {reason}"
-        ),
+        RunTerminal::Paused { reason } => {
+            let words = yunta_render::pause::sentence(&reason);
+            assert!(
+                words.contains("task-b"),
+                "the pause names the task the run gave up on: {words}"
+            );
+        }
         other => panic!("expected the run to eventually pause on task-b, got {other:?}"),
     }
     assert_eq!(
-        state.tasks.get("task-b"),
-        Some(&yunta_core::events::TaskStatus::Blocked),
-        "the run pauses because task-b exhausted its retries into Blocked"
+        state.tasks.status("task-b"),
+        Some(yunta_core::events::TaskStatus::Blocked),
+        "the run pauses because task-b's attempt on the changed tree left it Blocked"
     );
 }
 
@@ -804,23 +613,23 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
         plan_session(&tasks),
     );
 
-    let (terminal, state) = bench
-        .run_with_config(&workflow, &fixture, CONCURRENCY_CONFIG)
-        .await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-x"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-x"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("task-y"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-y"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     for (task, forbidden) in [("task-x", "y.txt"), ("task-y", "x.txt")] {
         for event in &events {
-            if let Some(yunta_core::events::EventPayload::ScopeChecked(p)) = event.payload() {
+            if let Some(yunta_core::events::EventPayload::Node(NodeEvent::ScopeChecked(p))) =
+                event.payload()
+            {
                 if p.task_id.as_ref().map(|id| id.as_str()) == Some(task) {
                     assert!(
                         !p.diff
@@ -838,198 +647,157 @@ async fn a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s() {
 #[tokio::test]
 async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     let bench = Bench::new();
-    let artifacts_dir = bench.run_dir().join("artifacts");
 
-    let workflow: yunta_core::Workflow = serde_norway::from_str(&concurrency_workflow(2)).unwrap();
-    let config: yunta_core::ConfigLayer = serde_norway::from_str(CONCURRENCY_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
+    let workflow = concurrency_workflow(2);
+    let fixture = "dialect: claude-code\nsessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
 
-    let tasks = format!(
-        "tasks:\n{}{}",
-        task_yaml("task-p", "p", "p.txt", "test -f p.txt"),
-        task_yaml("task-q", "q", "q.txt", "test -f q.txt"),
-    );
-    std::fs::create_dir_all(&artifacts_dir).unwrap();
-    std::fs::write(artifacts_dir.join("plan.yaml"), &tasks).unwrap();
-    // The bytes the crashed run accepted, where it kept them: the loop
-    // reads its tasks from the run's own store, not from the view.
-    let tasks_hash = yunta_core::sha256_hex(tasks.as_bytes());
-    std::fs::create_dir_all(run_dir.join("objects")).unwrap();
-    std::fs::write(run_dir.join("objects").join(tasks_hash.as_str()), &tasks).unwrap();
+    let RunReport { terminal, state } = bench
+        .run_sabotaged(&workflow, fixture, |run_dir| {
+            let tasks = format!(
+                "tasks:\n{}{}",
+                task_yaml("task-p", "p", "p.txt", "test -f p.txt"),
+                task_yaml("task-q", "q", "q.txt", "test -f q.txt"),
+            );
+            let artifacts_dir = run_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts_dir).unwrap();
+            std::fs::write(artifacts_dir.join("plan.yaml"), &tasks).unwrap();
+            // The bytes the crashed run accepted, where it kept them: the loop
+            // reads its tasks from the run's own store, not from the view.
+            let tasks_hash = yunta_core::sha256_hex(tasks.as_bytes());
+            std::fs::create_dir_all(run_dir.join("objects")).unwrap();
+            std::fs::write(run_dir.join("objects").join(tasks_hash.as_str()), &tasks).unwrap();
 
-    // Simulate the crash by hand-writing the log up through: plan already
-    // registered, the loop started, task-p already Done and committed,
-    // and task-q left `Running` with no terminal event — an orphan.
-    // The same branch the loop's own dispatch would have made for this
-    // run's attempt at `task-p`, composed the one way the engine does.
-    let task_p_branch = yunta_engine::task_branch(&bench.run_id, &"task-p".into(), 1);
-    git(&bench.worktree, &["checkout", "-b", &task_p_branch]);
-    std::fs::write(bench.worktree.join("p.txt"), "p").unwrap();
-    git(&bench.worktree, &["add", "-A"]);
-    git(&bench.worktree, &["commit", "-q", "-m", "task task-p: p"]);
-    git(&bench.worktree, &["checkout", "-"]);
-    git(&bench.worktree, &["merge", "--ff-only", &task_p_branch]);
+            // Simulate the crash by hand-writing the log up through: plan already
+            // registered, the loop started, task-p already Done and committed,
+            // and task-q left `Running` with no terminal event — an orphan.
+            // task-p's work, committed where its unit would have and landed
+            // on the run's tree.
+            let task_p_branch = "task-p-landed";
+            git(&bench.worktree, &["checkout", "-b", task_p_branch]);
+            std::fs::write(bench.worktree.join("p.txt"), "p").unwrap();
+            git(&bench.worktree, &["add", "-A"]);
+            git(&bench.worktree, &["commit", "-q", "-m", "task task-p: p"]);
+            git(&bench.worktree, &["checkout", "-"]);
+            git(&bench.worktree, &["merge", "--ff-only", task_p_branch]);
 
-    for event in [
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("plan".into()),
-            payload: yunta_core::events::EventPayload::NodeStarted(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("plan".into()),
-            // A log written before `artifact_accepted` existed: the
-            // fold reads it as the same artifact under the same hash.
-            payload: yunta_core::events::EventPayload::ArtifactWritten(
-                yunta_core::events::ArtifactWrittenPayload {
-                    path: "artifacts/plan.yaml".into(),
-                    content_hash: tasks_hash.clone(),
-                    artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
-                },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("plan".into()),
-            payload: yunta_core::events::EventPayload::TaskRegistered(
-                yunta_core::events::TaskRegisteredPayload {
-                    task_id: "task-p".into(),
-                    criteria: vec![],
-                    scope: vec!["p.txt".to_string()],
-                    depends_on: vec![],
-                },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("plan".into()),
-            payload: yunta_core::events::EventPayload::TaskRegistered(
-                yunta_core::events::TaskRegisteredPayload {
-                    task_id: "task-q".into(),
-                    criteria: vec![],
-                    scope: vec!["q.txt".to_string()],
-                    depends_on: vec![],
-                },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("plan".into()),
-            payload: yunta_core::events::EventPayload::NodeFinished(
-                yunta_core::events::NodeFinishedPayload {
-                    outcome: "planned".to_string(),
-                    tokens_used: Default::default(),
-                },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("implement".into()),
-            payload: yunta_core::events::EventPayload::NodeStarted(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("implement".into()),
-            payload: yunta_core::events::EventPayload::TaskStatusChanged(
-                yunta_core::events::TaskStatusChangedPayload {
-                    task_id: "task-p".into(),
-                    new_status: yunta_core::events::TaskStatus::Running,
-                    caused_by: 1.into(),
-                    commit: None,
-                },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("implement".into()),
-            payload: yunta_core::events::EventPayload::TaskStatusChanged(
-                yunta_core::events::TaskStatusChangedPayload {
-                    task_id: "task-q".into(),
-                    new_status: yunta_core::events::TaskStatus::Running,
-                    caused_by: 1.into(),
-                    commit: None,
-                },
-            ),
-        },
-        yunta_core::events::EventDraft {
-            run_id: bench.run_id.clone(),
-            node_id: Some("implement".into()),
-            payload: yunta_core::events::EventPayload::TaskStatusChanged(
-                yunta_core::events::TaskStatusChangedPayload {
-                    task_id: "task-p".into(),
-                    new_status: yunta_core::events::TaskStatus::Done,
-                    caused_by: 1.into(),
-                    commit: None,
-                },
-            ),
-        },
-        // task-q never got a follow-up — orphaned Running, no p.txt-style
-        // commit ever landed for it.
-    ] {
-        bench
-            .storage
-            .append(&event, &yunta_core::SystemClock)
-            .unwrap();
-    }
+            for event in [
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        yunta_core::events::NodeStartedPayload::attempt(1),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    // A log written before `artifact_accepted` existed: the
+                    // fold reads it as the same artifact under the same hash.
+                    yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Written(
+                        yunta_core::events::ArtifactWrittenPayload {
+                            path: "artifacts/plan.yaml".into(),
+                            content_hash: tasks_hash.clone(),
+                            artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
+                        },
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(
+                        yunta_core::events::TaskRegisteredPayload {
+                            task_id: "task-p".into(),
+                            criteria: vec![],
+                            scope: vec!["p.txt".into()],
+                            depends_on: vec![],
+                        },
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(
+                        yunta_core::events::TaskRegisteredPayload {
+                            task_id: "task-q".into(),
+                            criteria: vec![],
+                            scope: vec!["q.txt".into()],
+                            depends_on: vec![],
+                        },
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("plan".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                        yunta_core::events::NodeFinishedPayload::new(
+                            yunta_core::events::NodeOutcome::Summary("planned".to_string()),
+                            Default::default(),
+                        ),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        yunta_core::events::NodeStartedPayload::attempt(1),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
+                        yunta_core::events::TaskStatusChangedPayload::to(
+                            "task-p".into(),
+                            yunta_core::events::TaskStatus::Running,
+                            1.into(),
+                        ),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
+                        yunta_core::events::TaskStatusChangedPayload::to(
+                            "task-q".into(),
+                            yunta_core::events::TaskStatus::Running,
+                            1.into(),
+                        ),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                yunta_core::events::EventDraft::new(
+                    bench.run_id.clone(),
+                    Some("implement".into()),
+                    yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
+                        yunta_core::events::TaskStatusChangedPayload::to(
+                            "task-p".into(),
+                            yunta_core::events::TaskStatus::Done,
+                            1.into(),
+                        ),
+                    )),
+                )
+                .expect("a draft names its subject"),
+                // task-q never got a follow-up — orphaned Running, no p.txt-style
+                // commit ever landed for it.
+            ] {
+                bench.storage.append(&event, &FixedClock).unwrap();
+            }
+        })
+        .await;
 
-    let fixture = "sessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
-    let adapter = yunta_adapters::MockAdapter::from_yaml(fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-
-    assert_eq!(report.terminal, RunTerminal::Finished);
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert_eq!(terminal, RunTerminal::Finished);
+    let events = bench.events();
     let p_running_count = events
         .iter()
         .filter(|e| {
-            matches!(e.payload(), Some(yunta_core::events::EventPayload::TaskStatusChanged(p)) if p.task_id.as_str() == "task-p" && p.new_status == yunta_core::events::TaskStatus::Running)
+            matches!(e.payload(), Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p))) if p.task_id.as_str() == "task-p" && p.new_status == yunta_core::events::TaskStatus::Running)
         })
         .count();
     assert_eq!(
@@ -1037,8 +805,8 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
         "an already-Done task must never be re-dispatched on resume"
     );
     assert_eq!(
-        report.state.tasks.get("task-q"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("task-q"),
+        Some(yunta_core::events::TaskStatus::Done),
         "the orphaned task must be re-run to completion"
     );
 }
@@ -1063,7 +831,7 @@ nodes:
     depends_on: [plan]
     join: any
     nodes:
-      - id: quick
+      - id: alpha
         kind: bash
         run: "true"
       - id: slow-loop
@@ -1083,17 +851,23 @@ nodes:
     ));
     fixture.push_str("  - outcome: { type: hang }\n");
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert!(matches!(
-        state.nodes.get("race"),
+        state.nodes.state("race"),
         Some(NodeState::Finished { .. })
     ));
-    match state.nodes.get("slow-loop") {
+    match state.nodes.state("slow-loop") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                failure.to_string(),
+                failure,
+                &Failure::Interrupted {
+                    interrupted_by: Interruption::SiblingWon,
+                }
+            );
+            assert_eq!(
+                yunta_render::failure::sentence(failure),
                 "interrupted: a sibling in this join: any group finished first"
             );
         }
@@ -1104,15 +878,16 @@ nodes:
 #[tokio::test]
 async fn a_join_any_race_cancels_a_slow_check_child_when_a_sibling_wins() {
     let bench = Bench::new();
-    // The baseline suite blocks forever; the losing check ends only when
+    // The coverage command blocks forever; the losing check ends only when
     // the race cancels it. If it were not cancelled the run would hang here,
     // so its finishing is the proof — never a wall-clock margin.
     let config = r#"
 runners:
   executor:
     - { adapter: mock, model: mock-model }
-baseline:
-  suite: "tail -f /dev/null"
+coverage:
+  cmd: "tail -f /dev/null"
+  threshold: 80.0
 "#;
     let workflow = r#"
 name: race-check
@@ -1121,25 +896,473 @@ nodes:
     kind: parallel
     join: any
     nodes:
-      - id: quick
+      - id: alpha
         kind: bash
         run: "true"
       - id: slow-check
         kind: check
-        builtin: baseline_compare
+        builtin: coverage_gate
 "#;
 
-    let (terminal, state) = bench
-        .run_with_config(workflow, "sessions: []\n", config)
+    let RunReport { terminal, state } = bench
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []\n", config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get("slow-check") {
+    match state.nodes.state("slow-check") {
         Some(NodeState::Failed { failure, .. }) => {
             assert_eq!(
-                failure.to_string(),
+                failure,
+                &Failure::Interrupted {
+                    interrupted_by: Interruption::SiblingWon,
+                }
+            );
+            assert_eq!(
+                yunta_render::failure::sentence(failure),
                 "interrupted: a sibling in this join: any group finished first"
             );
         }
         other => panic!("the losing check must be recorded interrupted, got {other:?}"),
     }
+}
+
+/// The plan session hands over one task, and the executor's task session
+/// finishes it.
+fn resolved_runner_fixture() -> String {
+    format!(
+        "dialect: claude-code\nsessions:\n{}{}",
+        tasks_session(
+            &format!(
+                "tasks:\n{}",
+                task_yaml("T001", "Write out.txt", "out.txt", "test -f out.txt")
+            ),
+            "planned",
+        ),
+        "  - effects:\n      - { path: out.txt, content: \"1\" }\n    \
+         outcome: { type: completed, summary: \"did T001\" }\n",
+    )
+}
+
+#[tokio::test]
+async fn a_task_session_runs_on_the_model_and_agent_the_runner_resolved() {
+    let bench = Bench::new();
+
+    // Two runners on one adapter, each with its own model, and the
+    // executor with a named agent: what every session mounts is then
+    // readable apart, session by session.
+    let config = r#"
+runners:
+  planner:
+    - { adapter: mock, model: plan-model }
+  executor:
+    - { adapter: mock, model: task-model, agent: builder }
+"#;
+    let workflow = r#"
+name: resolved-runner
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let fixture = resolved_runner_fixture();
+
+    install_agent(&bench.worktree, "builder");
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, &fixture, config).await;
+    let adapter = bench.mock();
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        adapter.models_seen(),
+        vec![Some("plan-model".into()), Some("task-model".into())],
+        "each session runs on the model its own runner resolved",
+    );
+    assert_eq!(
+        adapter.agents_seen(),
+        vec![None, Some("builder".into())],
+        "the task session runs as the agent its runner named",
+    );
+}
+
+#[tokio::test]
+async fn a_loop_node_declaring_an_interpreted_artifact_is_refused_without_run_tools() {
+    // The adapter declares no capabilities at all, so no run tools either.
+    let bench = Bench::new().with_capabilities(Capabilities::default());
+
+    // The document a `findings` artifact holds reaches the engine
+    // through the run tools and nowhere else, so a loop node that
+    // declares one on an adapter without them is refused before any
+    // session opens — not after one produced nothing.
+    let workflow = r#"
+name: findings-loop
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+    artifacts:
+      produces: [findings]
+"#;
+
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
+
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+    match state.nodes.state("implement") {
+        Some(NodeState::Failed { failure, .. }) => {
+            let said = yunta_render::failure::sentence(failure);
+            assert!(
+                said.contains("declares a `findings` artifact")
+                    && said.contains("declares no `run_tools` capability"),
+                "the refusal names the artifact and the missing capability, got {said}",
+            );
+        }
+        other => panic!("the node must be refused before it opens a session, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_parallel_child_with_fail_if_uncertain_fails_instead_of_restarting() {
+    let bench = Bench::new();
+
+    // `audit` is the child that was running when the engine stopped.
+    // Its work is not safe to repeat, so it says so.
+    let workflow = r#"
+name: pre-launch
+nodes:
+  - id: pre-launch
+    kind: parallel
+    join: all
+    nodes:
+      - id: write-docs
+        kind: bash
+        run: "touch docs.txt"
+      - id: audit
+        kind: bash
+        on_interrupt: fail_if_uncertain
+        run: "touch audit-ran-again.txt"
+"#;
+
+    let RunReport { terminal, state } = bench
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
+            // A crash mid-group: the group and `audit` both started, and
+            // nothing recorded how `audit` ended.
+            for node in ["pre-launch", "audit"] {
+                bench
+                    .storage
+                    .append(
+                        &yunta_core::events::EventDraft::new(
+                            bench.run_id.clone(),
+                            Some(node.into()),
+                            yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                                yunta_core::events::NodeStartedPayload::attempt(1),
+                            )),
+                        )
+                        .expect("a draft names its subject"),
+                        &FixedClock,
+                    )
+                    .unwrap();
+            }
+        })
+        .await;
+
+    assert!(
+        !bench.worktree.join("audit-ran-again.txt").exists(),
+        "a child that refuses to guess whether it finished never runs a second time",
+    );
+    match state.nodes.state("audit") {
+        Some(NodeState::Failed { failure, .. }) => {
+            assert_eq!(
+                failure,
+                &Failure::Uncertain {
+                    uncertain: "audit".into(),
+                }
+            );
+            assert!(
+                yunta_render::failure::sentence(failure).contains("fail_if_uncertain"),
+                "the failure says which policy refused, got {failure:?}",
+            );
+        }
+        other => panic!("the uncertain child is recorded failed, got {other:?}"),
+    }
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+}
+
+// --- who receives a tree of its own -----------------------------------------
+
+/// Two nodes that run at once meet here before either writes, so both
+/// capture their starting tree before the other has touched anything —
+/// which is the only way the blame is mutual. The rendezvous is under
+/// the run directory because that is the one place every node of a run
+/// reaches whether or not it works in a tree of its own.
+fn meet_then_write(mine: &str, marker: &str) -> String {
+    format!(
+        "mkdir -p {mine} \"{{{{run.dir}}}}/meet\"; touch \"{{{{run.dir}}}}/meet/{marker}\"; \
+         while :; do set -- \"{{{{run.dir}}}}/meet\"/*; [ \"$#\" -ge 2 ] && break; done; \
+         echo x > {mine}/out.txt"
+    )
+}
+
+/// Each child writes only inside the globs it declared, and `check`
+/// already proved those globs disjoint. Neither is answerable for what
+/// the other wrote.
+#[tokio::test]
+async fn two_parallel_children_with_disjoint_scope_both_finish_clean() {
+    let bench = Bench::new();
+    let workflow = format!(
+        r#"
+name: sweep
+nodes:
+  - id: sweep
+    kind: parallel
+    join: all
+    nodes:
+      - id: sweep-a
+        kind: bash
+        scope: ["a/**"]
+        run: '{}'
+      - id: sweep-b
+        kind: bash
+        scope: ["b/**"]
+        run: '{}'
+"#,
+        meet_then_write("a", "a"),
+        meet_then_write("b", "b"),
+    );
+
+    let RunReport { terminal, state } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []")
+        .await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "{:?}",
+        state.nodes.state("sweep-a")
+    );
+    for id in ["sweep-a", "sweep-b"] {
+        assert!(
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
+            "expected `{id}` finished, got {:?}",
+            state.nodes.state(id)
+        );
+    }
+    assert!(bench.worktree.join("a/out.txt").exists(), "a's work landed");
+    assert!(bench.worktree.join("b/out.txt").exists(), "b's work landed");
+}
+
+/// The same, for nodes the scheduler batched rather than a group the
+/// author declared: `max_parallel_nodes` is what puts them together, and
+/// neither answers for the other either.
+#[tokio::test]
+async fn fan_out_nodes_under_max_parallel_two_do_not_blame_each_other() {
+    let bench = Bench::new();
+    let workflow = format!(
+        r#"
+name: fan-out-scoped
+nodes:
+  - id: sweep-a
+    kind: bash
+    scope: ["a/**"]
+    run: '{}'
+  - id: sweep-b
+    kind: bash
+    scope: ["b/**"]
+    run: '{}'
+"#,
+        meet_then_write("a", "a"),
+        meet_then_write("b", "b"),
+    );
+
+    let RunReport { terminal, state } = bench
+        .run_with_config(
+            &workflow,
+            "dialect: claude-code\nsessions: []",
+            "defaults:\n  max_parallel_nodes: 2\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    for id in ["sweep-a", "sweep-b"] {
+        assert!(
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
+            "expected `{id}` finished, got {:?}",
+            state.nodes.state(id)
+        );
+    }
+}
+
+/// A child that writes outside every glob it declared fails for its own
+/// write, and takes nobody with it: the sibling that stayed inside its
+/// scope finishes and lands.
+#[tokio::test]
+async fn a_parallel_child_that_writes_outside_every_scope_fails_alone() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: sweep
+nodes:
+  - id: sweep
+    kind: parallel
+    join: all
+    nodes:
+      - id: tidy
+        kind: bash
+        scope: ["a/**"]
+        run: "mkdir -p a && echo x > a/out.txt && echo escaped > loose.txt"
+      - id: neat
+        kind: bash
+        scope: ["b/**"]
+        run: "mkdir -p b && echo x > b/out.txt"
+"#;
+
+    let RunReport { state, .. } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
+    assert!(
+        matches!(state.nodes.state("tidy"), Some(NodeState::Failed { .. })),
+        "the node that wrote outside its scope fails, got {:?}",
+        state.nodes.state("tidy")
+    );
+    assert!(
+        matches!(state.nodes.state("neat"), Some(NodeState::Finished { .. })),
+        "and the sibling that stayed inside its own finishes, got {:?}",
+        state.nodes.state("neat")
+    );
+    assert!(
+        !bench.worktree.join("loose.txt").exists(),
+        "a unit that failed never lands, so its write never reaches the run's tree"
+    );
+}
+
+/// Two units that landed on one branch left one history, not two heads:
+/// the run's tree carries both, each as its own commit.
+#[tokio::test]
+async fn two_units_landing_on_one_branch_serialize() {
+    let bench = Bench::new();
+    let workflow = format!(
+        r#"
+name: sweep
+nodes:
+  - id: sweep
+    kind: parallel
+    join: all
+    nodes:
+      - id: sweep-a
+        kind: bash
+        scope: ["a/**"]
+        run: '{}'
+      - id: sweep-b
+        kind: bash
+        scope: ["b/**"]
+        run: '{}'
+"#,
+        meet_then_write("a", "a"),
+        meet_then_write("b", "b"),
+    );
+
+    let RunReport { terminal, .. } = bench
+        .run(&workflow, "dialect: claude-code\nsessions: []")
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let log = git_output(&bench.worktree, &["log", "--oneline", "--first-parent"]);
+    let landed = log
+        .lines()
+        .filter(|line| line.contains("sweep-a") || line.contains("sweep-b"))
+        .count();
+    assert_eq!(landed, 2, "both units landed, one commit each:\n{log}");
+    assert!(
+        git_output(&bench.worktree, &["status", "--porcelain"])
+            .trim()
+            .is_empty(),
+        "and the run's tree is clean once they have"
+    );
+}
+
+/// A node that declares no scope keeps the run's own tree: what it
+/// writes is there for the next node exactly as before, including what
+/// git ignores — which a checkout of its own would never have carried.
+#[tokio::test]
+async fn a_node_without_scope_keeps_the_runs_own_tree() {
+    let bench = Bench::new();
+    tokio::fs::write(bench.worktree.join(".gitignore"), "build/\n")
+        .await
+        .unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-qm", "ignore build"]);
+
+    let workflow = r#"
+name: ignored-output
+nodes:
+  - id: compile
+    kind: bash
+    run: "mkdir -p build && echo artifact > build/out.bin"
+  - id: consume
+    kind: bash
+    depends_on: [compile]
+    run: "test -f build/out.bin"
+"#;
+
+    let RunReport { terminal, state } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []")
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        matches!(
+            state.nodes.state("consume"),
+            Some(NodeState::Finished { .. })
+        ),
+        "what a node with no declared scope leaves is still there for the next one"
+    );
+}
+
+/// A node with a tree of its own that the engine left running never
+/// landed it, so the run's tree does not carry what it wrote. The
+/// restart opens a fresh unit — its attempt is part of the name — over
+/// the run's tree as it actually stands, and lands from there: what an
+/// interrupted attempt left behind is never mistaken for work the run
+/// accepted.
+#[tokio::test]
+async fn a_unit_whose_attempt_was_interrupted_restarts_over_the_tree_that_landed() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: resumable
+nodes:
+  - id: only
+    kind: bash
+    scope: ["out/**"]
+    run: "mkdir -p out && echo second > out/done.txt"
+"#;
+
+    let RunReport { terminal, state } = bench
+        .run_sabotaged(workflow, "dialect: claude-code\nsessions: []", |_run_dir| {
+            orphan_a_node(&bench, "only");
+        })
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        matches!(state.nodes.state("only"), Some(NodeState::Finished { .. })),
+        "the orphan restarts and closes, got {:?}",
+        state.nodes.state("only")
+    );
+    assert_eq!(
+        yunta_testkit::read(&bench.worktree.join("out/done.txt")),
+        "second\n",
+        "the run's tree carries what the attempt that landed wrote"
+    );
+    assert!(
+        git_output(&bench.worktree, &["status", "--porcelain"])
+            .trim()
+            .is_empty(),
+        "and nothing of the interrupted attempt is lying in it"
+    );
 }

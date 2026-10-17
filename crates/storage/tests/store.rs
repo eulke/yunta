@@ -1,9 +1,28 @@
+//! The SQLite event store: appending, reading back, and the hash chain
+//! over what was stored.
+//!
+//! A seq is assigned per run and never collides, however many threads or
+//! connections append at once, and a reopened database keeps what it
+//! held. The chain verifies an untouched log intact and names the exact
+//! seq where a tampered payload, a deleted row or a single flipped byte
+//! breaks it, and a log whose tail was deleted reads as broken.
+
 use std::sync::Arc;
 use std::thread;
 
-use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, RunPausedPayload};
-use yunta_core::{RunId, Seq};
+use proptest::prelude::*;
+use yunta_core::events::RunEvent;
+use yunta_core::events::{
+    EventBody, EventDraft, EventPayload, EventShapeError, PauseReason, RunPausedPayload,
+};
+use yunta_core::{NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, ChainVerification, Purge, Storage, StorageError};
+use yunta_testkit_core::FixedClock;
+
+#[path = "store/chain.rs"]
+mod chain;
+#[path = "store/events.rs"]
+mod events;
 
 fn open_temp() -> (tempfile::TempDir, Storage) {
     let dir = tempfile::tempdir().unwrap();
@@ -17,13 +36,10 @@ fn append_then_read_round_trips() {
     let run_id = RunId::from("run-1");
 
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     let seq = storage
-        .append(
-            &paused_draft("run-1", "budget exceeded"),
-            &yunta_core::SystemClock,
-        )
+        .append(&paused_draft("run-1", "budget exceeded"), &FixedClock)
         .unwrap();
     assert_eq!(seq.get(), 2);
 
@@ -31,7 +47,12 @@ fn append_then_read_round_trips() {
     assert_eq!(events.len(), 2);
     assert_eq!(events[1].seq.get(), 2);
     match events[1].payload() {
-        Some(EventPayload::RunPaused(p)) => assert_eq!(p.reason, "budget exceeded"),
+        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(
+            p.pause,
+            PauseReason::Recorded {
+                sentence: "budget exceeded".into()
+            }
+        ),
         other => panic!("expected RunPaused, got {other:?}"),
     }
 }
@@ -42,14 +63,11 @@ fn seq_is_assigned_monotonically_per_run_and_replay_is_ordered() {
     let run_id = RunId::from("run-1");
 
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     for i in 0..5 {
         let seq = storage
-            .append(
-                &paused_draft("run-1", &format!("reason-{i}")),
-                &yunta_core::SystemClock,
-            )
+            .append(&paused_draft("run-1", &format!("reason-{i}")), &FixedClock)
             .unwrap();
         assert_eq!(seq.get(), i + 2);
     }
@@ -64,19 +82,19 @@ fn different_runs_get_independent_sequences() {
     let (_dir, storage) = open_temp();
 
     storage
-        .append(&created_draft("run-a"), &yunta_core::SystemClock)
+        .append(&created_draft("run-a"), &FixedClock)
         .unwrap();
     storage
-        .append(&created_draft("run-b"), &yunta_core::SystemClock)
+        .append(&created_draft("run-b"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-a", "a1"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-a", "a1"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-b", "b1"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-b", "b1"), &FixedClock)
         .unwrap();
     let seq_a2 = storage
-        .append(&paused_draft("run-a", "a2"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-a", "a2"), &FixedClock)
         .unwrap();
 
     assert_eq!(seq_a2.get(), 3);
@@ -92,7 +110,7 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
     let storage = Arc::new(Storage::open(&dir.path().join("yunta.db")).unwrap());
     let run_id = RunId::from("run-concurrent");
     storage
-        .append(&created_draft("run-concurrent"), &yunta_core::SystemClock)
+        .append(&created_draft("run-concurrent"), &FixedClock)
         .unwrap();
 
     let handles: Vec<_> = (0..8)
@@ -102,7 +120,7 @@ fn concurrent_appends_never_lose_or_collide_a_seq() {
                 storage
                     .append(
                         &paused_draft("run-concurrent", &format!("writer-{i}")),
-                        &yunta_core::SystemClock,
+                        &FixedClock,
                     )
                     .unwrap()
             })
@@ -139,7 +157,7 @@ fn concurrent_appends_across_two_connections_never_fail_busy() {
     let second = Arc::new(Storage::open(storage.path()).unwrap());
     let run_id = RunId::from("run-two-conns");
     storage
-        .append(&created_draft("run-two-conns"), &yunta_core::SystemClock)
+        .append(&created_draft("run-two-conns"), &FixedClock)
         .unwrap();
 
     const PER_WRITER: usize = 50;
@@ -152,7 +170,7 @@ fn concurrent_appends_across_two_connections_never_fail_busy() {
                     handle
                         .append(
                             &paused_draft("run-two-conns", &format!("writer-{writer}-{i}")),
-                            &yunta_core::SystemClock,
+                            &FixedClock,
                         )
                         .unwrap();
                 }
@@ -170,17 +188,65 @@ fn concurrent_appends_across_two_connections_never_fail_busy() {
     assert_eq!(seqs, expected, "no gaps, no duplicates, both connections");
 }
 
+/// Eight handles open the same new log at once, fifty times over: every
+/// opening succeeds, and none reports the database as locked.
+#[test]
+fn concurrent_opens_of_a_fresh_log_all_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    for round in 0..50 {
+        let log = dir.path().join(format!("round-{round}.db"));
+        let failed = opened_at_once(&log);
+        assert!(failed.is_empty(), "round {round}: {failed:?}");
+    }
+}
+
+/// A log written before the chain had its hash column gains the column
+/// once: eight handles opening it at once all succeed.
+#[test]
+fn concurrent_opens_of_a_log_from_before_the_chain_all_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    for round in 0..20 {
+        let log = dir.path().join(format!("round-{round}.db"));
+        let old = rusqlite::Connection::open(&log).unwrap();
+        old.pragma_update(None, "journal_mode", "WAL").unwrap();
+        old.execute_batch(
+            "CREATE TABLE events (run_id TEXT NOT NULL, seq INTEGER NOT NULL, ts TEXT NOT NULL, \
+             node_id TEXT, kind TEXT NOT NULL, payload_json TEXT NOT NULL, \
+             schema_version INTEGER NOT NULL, PRIMARY KEY (run_id, seq));",
+        )
+        .unwrap();
+        drop(old);
+        let failed = opened_at_once(&log);
+        assert!(failed.is_empty(), "round {round}: {failed:?}");
+    }
+}
+
+/// Opens `log` from eight threads at once: what each opening that failed
+/// said.
+fn opened_at_once(log: &std::path::Path) -> Vec<String> {
+    std::thread::scope(|scope| {
+        let opens: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| Storage::open(log).err()))
+            .collect();
+        opens
+            .into_iter()
+            .filter_map(|open| open.join().unwrap())
+            .map(|e| e.to_string())
+            .collect()
+    })
+}
+
 #[test]
 fn list_runs_returns_every_distinct_run() {
     let (_dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-a"), &yunta_core::SystemClock)
+        .append(&created_draft("run-a"), &FixedClock)
         .unwrap();
     storage
-        .append(&created_draft("run-b"), &yunta_core::SystemClock)
+        .append(&created_draft("run-b"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-a", "a2"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-a", "a2"), &FixedClock)
         .unwrap();
 
     let run_ids: Vec<RunId> = storage
@@ -200,13 +266,10 @@ fn a_reopened_database_keeps_its_events() {
     {
         let storage = Storage::open(&db_path).unwrap();
         storage
-            .append(&created_draft("run-1"), &yunta_core::SystemClock)
+            .append(&created_draft("run-1"), &FixedClock)
             .unwrap();
         storage
-            .append(
-                &paused_draft("run-1", "first session"),
-                &yunta_core::SystemClock,
-            )
+            .append(&paused_draft("run-1", "first session"), &FixedClock)
             .unwrap();
     }
 
@@ -221,10 +284,10 @@ fn a_corrupted_payload_surfaces_as_a_typed_error_not_a_panic() {
     let db_path = dir.path().join("yunta.db");
     let storage = Storage::open(&db_path).unwrap();
     storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
+        .append(&created_draft("run-1"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-1", "fine"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-1", "fine"), &FixedClock)
         .unwrap();
 
     // Reach past the crate's own interface to corrupt the row directly —
@@ -242,168 +305,19 @@ fn a_corrupted_payload_surfaces_as_a_typed_error_not_a_panic() {
     assert!(matches!(result, Err(StorageError::CorruptPayload { .. })));
 }
 
-// --- event hash chain ---------------------------------------------------
-
-#[test]
-fn an_untouched_log_verifies_intact() {
-    let (_dir, storage) = open_temp();
-    let run_id = RunId::from("run-1");
-    storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
-        .unwrap();
-    storage
-        .append(
-            &paused_draft("run-1", "first pause"),
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
-    storage
-        .append(
-            &paused_draft("run-1", "second pause"),
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
-
-    match storage.verify_chain(&run_id).unwrap() {
-        ChainVerification::Intact { events } => assert_eq!(events, 3),
-        other => panic!("expected an intact chain, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_tampered_payload_breaks_the_chain_at_that_exact_seq() {
-    let dir = tempfile::tempdir().unwrap();
-    let db = dir.path().join("yunta.db");
-    let storage = Storage::open(&db).unwrap();
-    let run_id = RunId::from("run-1");
-    storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
-        .unwrap();
-    storage
-        .append(&paused_draft("run-1", "honest"), &yunta_core::SystemClock)
-        .unwrap();
-    storage
-        .append(&paused_draft("run-1", "later"), &yunta_core::SystemClock)
-        .unwrap();
-    drop(storage);
-
-    // Tamper behind the store's back — exactly what the chain exists to
-    // catch: integrity, not authenticity.
-    let conn = rusqlite::Connection::open(&db).unwrap();
-    conn.execute(
-        "UPDATE events SET payload_json = replace(payload_json, 'honest', 'edited') \
-         WHERE run_id = 'run-1' AND seq = 2",
-        [],
-    )
-    .unwrap();
-    drop(conn);
-
-    let storage = Storage::open(&db).unwrap();
-    match storage.verify_chain(&run_id).unwrap() {
-        ChainVerification::Broken { seq, detail } => {
-            assert_eq!(seq.get(), 2);
-            assert!(!detail.is_empty());
-        }
-        other => panic!("expected a broken chain at seq 2, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_deleted_event_breaks_the_chain_where_the_gap_starts() {
-    let dir = tempfile::tempdir().unwrap();
-    let db = dir.path().join("yunta.db");
-    let storage = Storage::open(&db).unwrap();
-    let run_id = RunId::from("run-1");
-    storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
-        .unwrap();
-    storage
-        .append(&paused_draft("run-1", "a"), &yunta_core::SystemClock)
-        .unwrap();
-    storage
-        .append(&paused_draft("run-1", "b"), &yunta_core::SystemClock)
-        .unwrap();
-    drop(storage);
-
-    let conn = rusqlite::Connection::open(&db).unwrap();
-    conn.execute("DELETE FROM events WHERE run_id = 'run-1' AND seq = 2", [])
-        .unwrap();
-    drop(conn);
-
-    let storage = Storage::open(&db).unwrap();
-    match storage.verify_chain(&run_id).unwrap() {
-        ChainVerification::Broken { seq, detail } => {
-            assert_eq!(seq.get(), 3, "the gap is visible where seq jumps");
-            assert!(!detail.is_empty());
-        }
-        other => panic!("expected a broken chain, got {other:?}"),
-    }
-}
-
-#[test]
-fn a_single_byte_flip_at_any_position_breaks_the_chain() {
-    // Every position — the run_created genesis and each event after it —
-    // corrupted in its own fresh store, since verify_chain stops at the first
-    // break it finds and one corruption per run isolates each position.
-    let drafts = [
-        created_draft("run-1"),
-        paused_draft("run-1", "one"),
-        paused_draft("run-1", "two"),
-        paused_draft("run-1", "three"),
-    ];
-    for seq in 1..=drafts.len() as i64 {
-        let (_dir, storage) = open_temp();
-        for draft in &drafts {
-            storage.append(draft, &yunta_testkit::FixedClock).unwrap();
-        }
-
-        storage
-            .corrupt_event_payload(&RunId::from("run-1"), Seq::try_from(seq).unwrap())
-            .unwrap();
-
-        match storage.verify_chain(&RunId::from("run-1")).unwrap() {
-            ChainVerification::Broken { .. } => {}
-            ChainVerification::Intact { .. } => {
-                panic!("a corrupted event at seq {seq} went undetected")
-            }
-        }
-    }
-}
-
-#[test]
-fn a_run_whose_first_event_is_not_run_created_is_refused_at_append() {
-    let (_dir, storage) = open_temp();
-    let err = storage
-        .append(
-            &paused_draft("run-genesis", "no birth certificate"),
-            &yunta_core::SystemClock,
-        )
-        .unwrap_err();
-    assert!(
-        matches!(err, StorageError::GenesisMissing { .. }),
-        "got: {err:?}"
-    );
-}
-
-#[test]
-fn verifying_an_unknown_run_is_an_error_not_a_vacuous_intact() {
-    let (_dir, storage) = open_temp();
-    assert!(storage.verify_chain(&RunId::from("run-ghost")).is_err());
-}
-
 // --- database-level retention ---------------------------------------------
 
 #[test]
 fn purge_run_removes_every_row_for_exactly_that_run() {
     let (_dir, storage) = open_temp();
     storage
-        .append(&created_draft("run-old"), &yunta_core::SystemClock)
+        .append(&created_draft("run-old"), &FixedClock)
         .unwrap();
     storage
-        .append(&paused_draft("run-old", "done"), &yunta_core::SystemClock)
+        .append(&paused_draft("run-old", "done"), &FixedClock)
         .unwrap();
     storage
-        .append(&created_draft("run-live"), &yunta_core::SystemClock)
+        .append(&created_draft("run-live"), &FixedClock)
         .unwrap();
 
     let purged = storage.purge_run(&RunId::from("run-old")).unwrap();
@@ -438,31 +352,26 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
 
     let run_id = RunId::from("run-reopen");
     let seq1 = storage
-        .append(&created_draft("run-reopen"), &yunta_core::SystemClock)
+        .append(&created_draft("run-reopen"), &FixedClock)
         .unwrap();
-    let mut event = created_draft("run-reopen");
-    event.payload =
-        yunta_core::events::EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
-            reason: "from the second handle".to_string(),
-        });
-    let seq2 = second.append(&event, &yunta_core::SystemClock).unwrap();
+    let event = paused_draft("run-reopen", "from the second handle");
+    let seq2 = second.append(&event, &FixedClock).unwrap();
 
     assert_eq!((seq1.get(), seq2.get()), (1, 2));
     let events = storage.events_for_run(&run_id).unwrap();
     assert_eq!(events.len(), 2);
     assert!(matches!(
         events[1].payload(),
-        Some(yunta_core::events::EventPayload::RunPaused(_))
+        Some(yunta_core::events::EventPayload::Run(RunEvent::Paused(_)))
     ));
 }
 
-// --- drafts, stored events and the tolerant reader -------------------------
-
 fn created_draft(run_id: &str) -> EventDraft {
-    EventDraft {
-        run_id: RunId::from(run_id),
-        node_id: None,
-        payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
+    EventDraft::new(
+        RunId::from(run_id),
+        None,
+        EventPayload::Run(RunEvent::Created(yunta_core::events::RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"abc123manifest"),
             inputs: Default::default(),
             mode: "default".into(),
@@ -470,168 +379,25 @@ fn created_draft(run_id: &str) -> EventDraft {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
-        }),
-    }
+            environment: None,
+            left_out: Vec::new(),
+            opens_on_base: false,
+        })),
+    )
+    .expect("a draft names its subject")
 }
 
 fn paused_draft(run_id: &str, reason: &str) -> EventDraft {
-    EventDraft {
-        run_id: RunId::from(run_id),
-        node_id: None,
-        payload: EventPayload::RunPaused(RunPausedPayload {
-            reason: reason.to_string(),
-        }),
-    }
-}
-
-#[test]
-fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
-    let (_dir, storage) = open_temp();
-    let instant = chrono::DateTime::parse_from_rfc3339("2026-09-02T10:00:00+00:00")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
-    let clock = yunta_testkit::AtClock(instant);
-
-    let first = storage.append(&created_draft("run-1"), &clock).unwrap();
-    let second = storage
-        .append(&paused_draft("run-1", "budget"), &clock)
-        .unwrap();
-    assert_eq!(first, Seq::FIRST);
-    assert_eq!(second, Seq::FIRST.next());
-
-    let events = storage.events_for_run(&RunId::from("run-1")).unwrap();
-    assert_eq!(events[1].seq, second);
-    assert_eq!(events[1].timestamp, instant);
-    match events[1].payload() {
-        Some(EventPayload::RunPaused(p)) => assert_eq!(p.reason, "budget"),
-        other => panic!("expected run_paused, got {other:?}"),
-    }
-}
-
-#[test]
-fn unknown_kind_is_preserved_not_fatal() {
-    let (dir, storage) = open_temp();
-    storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
-        .unwrap();
-    // A row a newer binary wrote: a kind this one does not know.
-    let conn = rusqlite::Connection::open(dir.path().join("yunta.db")).unwrap();
-    conn.execute(
-        "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
-         event_hash) VALUES ('run-1', 2, '2026-09-02T10:00:00+00:00', 'plan', 'future_kind', \
-         '{\"kind\":\"future_kind\",\"novel\":true}', 3, 'unverified')",
-        [],
+    EventDraft::new(
+        RunId::from(run_id),
+        None,
+        EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            &PauseReason::Recorded {
+                sentence: reason.into(),
+            },
+        ))),
     )
-    .unwrap();
-
-    let events = storage.events_for_run(&RunId::from("run-1")).unwrap();
-    assert_eq!(events.len(), 2);
-    let EventBody::Unknown(unknown) = &events[1].body else {
-        panic!(
-            "expected the unknown kind to be preserved, got {:?}",
-            events[1].body
-        );
-    };
-    assert_eq!(unknown.kind, "future_kind");
-    assert_eq!(unknown.schema_version, 3);
-    assert_eq!(unknown.payload["novel"], serde_json::Value::Bool(true));
-    assert_eq!(events[1].seq.get(), 2);
-    assert_eq!(
-        events[1].node_id.as_ref().map(|id| id.as_str()),
-        Some("plan")
-    );
-}
-
-#[test]
-fn a_known_kind_whose_payload_is_not_its_shape_is_corrupt_not_unknown() {
-    let (dir, storage) = open_temp();
-    storage
-        .append(&created_draft("run-1"), &yunta_core::SystemClock)
-        .unwrap();
-    let conn = rusqlite::Connection::open(dir.path().join("yunta.db")).unwrap();
-    conn.execute(
-        "INSERT INTO events (run_id, seq, ts, node_id, kind, payload_json, schema_version, \
-         event_hash) VALUES ('run-1', 2, '2026-09-02T10:00:00+00:00', NULL, 'run_paused', \
-         '{\"kind\":\"run_paused\"}', 1, 'unverified')",
-        [],
-    )
-    .unwrap();
-    let result = storage.events_for_run(&RunId::from("run-1"));
-    assert!(
-        matches!(
-            result,
-            Err(StorageError::CorruptPayload { ref seq, ref source, .. })
-                if seq.get() == 2 && matches!(source, EventShapeError::Payload { kind, .. } if kind == "run_paused")
-        ),
-        "{result:?}"
-    );
-}
-
-#[test]
-fn runs_are_listed_by_their_first_timestamp() {
-    let (_dir, storage) = open_temp();
-    let at = |text: &str| {
-        yunta_testkit::AtClock(
-            chrono::DateTime::parse_from_rfc3339(text)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )
-    };
-    storage
-        .append(&created_draft("run-late"), &at("2026-09-02T12:00:00+00:00"))
-        .unwrap();
-    storage
-        .append(
-            &created_draft("run-early"),
-            &at("2026-09-02T09:00:00+00:00"),
-        )
-        .unwrap();
-    storage
-        .append(
-            &paused_draft("run-early", "later"),
-            &at("2026-09-02T13:00:00+00:00"),
-        )
-        .unwrap();
-
-    let listed = storage.list_runs().unwrap();
-    let ids: Vec<&str> = listed.iter().map(|run| run.run_id.as_str()).collect();
-    assert_eq!(ids, vec!["run-early", "run-late"]);
-    assert_eq!(
-        listed[0].created_at,
-        at("2026-09-02T09:00:00+00:00").0,
-        "a run is dated by its first event, not its latest"
-    );
-}
-
-#[test]
-fn a_storage_error_keeps_its_cause_without_naming_the_backend() {
-    let dir = tempfile::tempdir().unwrap();
-    let error = Storage::open(dir.path()).unwrap_err();
-    let StorageError::Open { source, .. } = &error else {
-        panic!("expected an open error, got {error:?}");
-    };
-    let cause: &(dyn std::error::Error + Send + Sync) = source.as_ref();
-    assert!(!cause.to_string().is_empty());
-    assert!(std::error::Error::source(&error).is_some());
-}
-
-#[test]
-fn purging_a_run_reports_the_rows_it_removed() {
-    let (_dir, storage) = open_temp();
-    storage
-        .append(&created_draft("run-old"), &yunta_core::SystemClock)
-        .unwrap();
-    storage
-        .append(&paused_draft("run-old", "x"), &yunta_core::SystemClock)
-        .unwrap();
-    assert_eq!(
-        storage.purge_run(&RunId::from("run-old")).unwrap(),
-        Purge { rows: 2 }
-    );
-    assert_eq!(
-        storage.purge_run(&RunId::from("run-old")).unwrap(),
-        Purge { rows: 0 }
-    );
+    .expect("a draft names its subject")
 }
 
 #[tokio::test]

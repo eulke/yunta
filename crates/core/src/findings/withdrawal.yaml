@@ -1,0 +1,6 @@
+# Taking one finding back: which, and why.
+
+id: null-deref-on-resize              # required: a finding this node posted
+reason: >-                            # required, non-empty: why it no longer
+  Fixed by the guard added in the same session; the handler now returns
+  early before the first paint.

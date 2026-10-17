@@ -1,59 +1,100 @@
 //! Dispatching one task of a batch in its own worktree, with the
-//! attempt number and the expansions already granted to it.
+//! attempt number and the expansions already granted to it. What a task
+//! leaves in that worktree is committed here, on the unit's own branch.
 
-use std::path::PathBuf;
+use yunta_core::commit_message::CommitMessage;
+use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{CommitSha, Isolation, Node, Task};
+use yunta_core::{CommitSha, Node, Seq, Task};
 
-use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
-use crate::worktree::prepare_worktree;
+use crate::scope_expansion::GrantWindow;
+use crate::task_cycle::{
+    run_task, scope_in_force, AttemptEnv, Continuing, ScopeGovernance, TaskCycleError,
+    TaskCycleReport,
+};
+use crate::worktree::{commit_work, head_commit, Lease, Unit, UnitHome, UnitId};
 
+use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
+use yunta_core::events::TaskEvent;
 
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
 /// worktree/branch names unique across a resumed orphan's fresh attempt;
-/// never fed into retry-limit logic (that's `run_task`'s own
-/// `max_retries`, scoped to one dispatch).
-pub(super) fn attempt_number(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> u32 {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::TaskStatusChanged(p))
-                    if p.task_id == *task_id && p.new_status == TaskStatus::Running
-            )
-        })
-        .count() as u32
-        + 1
+/// never fed into the cycle's own decision whether to dispatch again.
+pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> u32 {
+    state.tasks.get(task_id).map_or(0, |record| record.attempts) + 1
 }
 
-/// Every path a prior `scope_expansion_granted` on the log authorized
-/// for `task_id` — the retry after a human grant derives its
-/// widened scope from here, never from in-memory state.
-fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Vec<String> {
-    events
-        .iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::ScopeExpansionGranted(p)) if &p.task_id == task_id => {
-                Some(p.paths.iter().cloned())
-            }
-            _ => None,
-        })
-        .flatten()
-        .collect()
+/// The checkout and the session a task reopened to resume picks back
+/// up: the unit holding the work its session left, held for it, and that
+/// session with the answer it waited for. `None` for a task reopened any
+/// other way —
+/// and for one whose checkout is gone, which then continues from the work
+/// in a fresh unit, with the log saying the session was not resumed.
+async fn continuation(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    state: &RunState,
+    adapter: &dyn yunta_core::port::Adapter,
+) -> Result<Option<(Unit, Lease, Continuing)>, RunError> {
+    let Some(record) = state.tasks.get(&task.id) else {
+        return Ok(None);
+    };
+    // What the session is picked back up on: the answer to the departure
+    // it declared when the task's reopening followed one, and otherwise
+    // the answer to the scope it asked for.
+    let answer = match &record.deviation_answer {
+        Some(departure) => Some(crate::task_cycle::Answer::Deviation(departure.clone())),
+        None => state
+            .grants
+            .answer_for(&task.id)
+            .cloned()
+            .map(crate::task_cycle::Answer::Scope),
+    };
+    let (Some(session), Some((_, work)), Some(answer)) =
+        (record.resumes.clone(), record.left_work.as_ref(), answer)
+    else {
+        return Ok(None);
+    };
+    let reopened = ctx.pool.reopen_unit(
+        ctx.run_id,
+        UnitId::Task(task.id.clone()),
+        Some(work),
+        ctx.root_supervision(),
+    );
+    let Some((unit, lease)) = reopened.await? else {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
+                yunta_core::events::CapabilityDegradedPayload::new(
+                    yunta_core::Capability::ResumeSession,
+                    adapter.id().clone(),
+                    yunta_core::port::Policy::FreshSession,
+                ),
+            )),
+        )
+        .await?;
+        return Ok(None);
+    };
+    Ok(Some((unit, lease, Continuing { session, answer })))
 }
 
-/// Isolates one batch member in its own worktree — each task in the
-/// batch gets its own worktree derived from the current base commit —
-/// and runs it through the ordinary task cycle there — pre-check,
-/// dispatch, post-check, scope-check, retried up to `max_task_retries`
-/// exactly as the sequential path always has. Never commits or marks
-/// the task `done`/`blocked` in the log itself; that's the caller's job
-/// once every batch member's dispatch has settled, so integration can
-/// stay strictly serial and in declaration order.
+/// The protected set one task is judged by: the run's own, lifted by what a
+/// person granted that task.
+fn protection_of(
+    ctx: &RunCtx<'_>,
+    state: &RunState,
+    task_id: &yunta_core::TaskId,
+) -> std::sync::Arc<yunta_core::protected::Protected> {
+    std::sync::Arc::new(
+        ctx.protected()
+            .lifting(state.grants.person_granted_to_task(task_id)),
+    )
+}
+
 /// Everything every member of one batch dispatches with — identical
 /// across the whole `batch.iter().zip(&briefs).map(...)` fan-out that
 /// calls [`dispatch_task_in_isolation`]; only `task`/`instruction` vary
@@ -61,51 +102,124 @@ fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Ve
 #[derive(Clone, Copy)]
 pub(super) struct BatchDispatchEnv<'a> {
     pub(super) events: &'a [StoredEvent],
+    /// The state the batch was selected from: each member's reach and
+    /// attempt number are read from it.
+    pub(super) state: &'a RunState,
+    /// Every task of the batch: what each member's others may write is
+    /// what evidence alone never grants it.
+    pub(super) batch: &'a [&'a Task],
     pub(super) base_commit: &'a CommitSha,
-    pub(super) adapter: &'a dyn yunta_adapters::Adapter,
+    pub(super) adapter: &'a dyn yunta_core::port::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
-    pub(super) grants: &'a crate::scope_expansion::GrantLedger,
+    pub(super) grants: &'a GrantWindow,
     pub(super) cancel: &'a tokio_util::sync::CancellationToken,
     pub(super) setup: &'a crate::task_cycle::SessionSetup,
 }
 
+/// One batch member's dispatch: its task, the unit it worked in and the
+/// hold on that unit's checkout — kept until the task is integrated or
+/// set aside — and what its cycle reported.
+pub(super) struct Dispatched<'a> {
+    pub(super) task: &'a Task,
+    pub(super) unit: Unit,
+    pub(super) lease: Lease,
+    pub(super) report: TaskCycleReport,
+}
+
+/// Isolates one batch member in its own worktree — each task in the
+/// batch gets its own worktree derived from the current base commit —
+/// and runs it through the ordinary task cycle there — pre-check,
+/// dispatch, post-check, scope-check, exactly as the sequential path
+/// always has. Never commits or marks
+/// the task `done`/`blocked` in the log itself; that's the caller's job
+/// once every batch member's dispatch has settled, so integration can
+/// stay strictly serial and in declaration order.
 pub(super) async fn dispatch_task_in_isolation<'a>(
     ctx: &RunCtx<'_>,
     node: &Node,
     env: &BatchDispatchEnv<'_>,
     task: &'a Task,
     instruction: &str,
-) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
-    let BatchDispatchEnv {
-        events,
-        base_commit,
-        adapter,
-        scope_expansion,
-        grants,
-        cancel,
-        setup,
-    } = *env;
-    let attempt = attempt_number(events, &task.id);
-    let task_worktree = ctx
-        .run_dir
-        .join("task-worktrees")
-        .join(format!("{}-{attempt}", task.id));
-    let branch = crate::worktree::task_branch(ctx.run_id, &task.id, attempt);
-    prepare_worktree(
-        ctx.worktree,
-        &task_worktree,
-        base_commit,
-        &branch,
-        Isolation::Worktree,
+) -> Result<Dispatched<'a>, RunError> {
+    let (unit, lease, resume) = open_unit(ctx, node, env, task).await?;
+    let registered_seq = registration_seq(env.events, task)?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            task.id.clone(),
+            TaskStatus::Running,
+            registered_seq,
+        ))),
     )
     .await?;
 
-    let registered_seq = events
+    let report = match run_cycle(ctx, node, env, task, instruction, &unit, resume).await {
+        Ok(report) => report,
+        Err(error) => {
+            // A session the engine could not stop may still write in this
+            // checkout, so the hold stands while one of its groups runs.
+            if matches!(
+                error,
+                RunError::TaskCycle(TaskCycleError::NotStopped { .. })
+            ) && lease.groups_running().await
+            {
+                lease.keep();
+            }
+            return Err(error);
+        }
+    };
+    Ok(Dispatched {
+        task,
+        unit,
+        lease,
+        report,
+    })
+}
+
+/// The unit a task's cycle works in and the hold on its checkout: the unit a
+/// session left for the task to continue, with the session to pick back up,
+/// or a fresh unit cut from the batch's base commit.
+async fn open_unit(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    env: &BatchDispatchEnv<'_>,
+    task: &Task,
+) -> Result<(Unit, Lease, Option<Continuing>), RunError> {
+    let BatchDispatchEnv {
+        state,
+        base_commit,
+        adapter,
+        ..
+    } = *env;
+    if let Some((unit, lease, continuing)) = continuation(ctx, node, task, state, adapter).await? {
+        return Ok((unit, lease, Some(continuing)));
+    }
+    let (unit, lease) = ctx
+        .pool
+        .open(
+            UnitHome {
+                repo: ctx.worktree,
+                run_dir: ctx.run_dir,
+                run_id: ctx.run_id,
+                base: base_commit,
+            },
+            UnitId::Task(task.id.clone()),
+            attempt_number(state, &task.id),
+            ctx.root_supervision(),
+        )
+        .await?;
+    Ok((unit, lease, None))
+}
+
+/// The sequence number of the registration the log holds for `task`, which the
+/// status change that starts its dispatch cites.
+fn registration_seq(events: &[StoredEvent], task: &Task) -> Result<Seq, RunError> {
+    events
         .iter()
         .find(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::TaskRegistered(p)) if p.task_id == task.id
+                Some(EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id == task.id
             )
         })
         .map(|event| event.seq)
@@ -114,28 +228,63 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
                 "task `{}` is dispatched but the log has no task_registered for it",
                 task.id
             ),
-        })?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-            task_id: task.id.clone(),
-            new_status: TaskStatus::Running,
-            caused_by: registered_seq,
-            commit: None,
-        }),
-    )
-    .await?;
+        })
+}
 
-    let report = run_task(
+/// What the other tasks of the batch may write: a path the evidence locates
+/// there is a person's to grant, never the engine's.
+fn beside_of(batch: &[&Task], state: &RunState, task: &Task) -> Vec<ScopeGlob> {
+    batch
+        .iter()
+        .filter(|other| other.id != task.id)
+        .flat_map(|other| scope_in_force(other, &state.grants.reach_for(&other.id)))
+        .collect()
+}
+
+/// Runs the task's cycle in its unit, with the scope the rest of the batch
+/// leaves it, the session it picks back up, and the budget the node has left.
+async fn run_cycle(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    env: &BatchDispatchEnv<'_>,
+    task: &Task,
+    instruction: &str,
+    unit: &Unit,
+    resume: Option<Continuing>,
+) -> Result<TaskCycleReport, RunError> {
+    let BatchDispatchEnv {
+        state,
+        batch,
+        adapter,
+        scope_expansion,
+        grants,
+        cancel,
+        setup,
+        ..
+    } = *env;
+    let beside = beside_of(batch, state, task);
+    let budget = ctx.session_budget().await?;
+    Ok(run_task(
         task,
         instruction,
         AttemptEnv {
             adapter,
-            cwd: &task_worktree,
-            max_retries: ctx.max_task_retries,
-            budget: ctx.session_budget().await?,
+            node,
+            unit,
+            budget,
             memo: &ctx.memo,
-            registry: ctx.process_registry.as_ref(),
+            history: &state.tasks,
+            supervision: ctx.supervision(cancel),
+            // A task a person reopened to continue carries the work it
+            // continues from on the reopening itself — unless the session
+            // that left it picks it back up in the unit that holds it.
+            carry: state
+                .tasks
+                .get(&task.id)
+                .and_then(|record| record.left_work.as_ref())
+                .map(|(_, work)| work)
+                .filter(|_| resume.is_none()),
+            resume,
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),
@@ -143,13 +292,65 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             scope_expansion,
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
-            already_granted_paths: &granted_paths_for(events, &task.id),
+            protected: protection_of(ctx, state, &task.id),
+            already_granted_paths: &state.grants.reach_for(&task.id),
+            beside: &beside,
         },
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
         setup,
     )
-    .await?;
+    .await?)
+}
 
-    Ok((task, task_worktree, report))
+/// What a blocked task's last attempt left in its unit, committed on the
+/// unit's own branch so a person can have the next cycle continue from
+/// it. `None` when the attempt changed nothing.
+pub(super) async fn left_work(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    unit: &Unit,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Option<CommitSha>, RunError> {
+    let supervision = ctx.supervision(cancel);
+    commit_work(
+        unit,
+        &CommitMessage::new(
+            format!("task {}: the work its last attempt left", task.id),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
+        supervision,
+    )
+    .await?;
+    let head = head_commit(&unit.worktree, supervision).await?;
+    Ok((head != unit.base).then_some(head))
+}
+
+/// Commits the work a task left in its unit as the task's own commit, before
+/// anything judges it. What git ignores stays out of it: the close of the
+/// task's attempt judged the ignored paths the run protects.
+pub(super) async fn commit_task_work(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    unit: &Unit,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(), RunError> {
+    commit_work(
+        unit,
+        &CommitMessage::new(
+            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
+        supervision,
+    )
+    .await?;
+    Ok(())
 }

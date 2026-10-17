@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::hash::{sha256_hex, CommitSha, ContentHash};
-use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
+use crate::ids::{AgentName, ExecutorName, InputName, SkillName};
+use crate::{AdapterId, ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
 /// post config layers. Absolute by construction ([`FrozenPaths::new`] is
@@ -98,7 +99,75 @@ pub struct PackProvenance {
     pub name: PackName,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
+    pub commit: Option<CommitSha>,
+}
+
+/// The repository a run was created in: the git directory that its main
+/// checkout and every linked worktree share, absolute and canonical. Every
+/// run on a machine lives under one state root, so this is what says
+/// which of them are one project's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProjectIdentity {
+    pub git_common_dir: std::path::PathBuf,
+}
+
+/// Frozen with the run: `Named` pins every runner to its candidate on that
+/// adapter; `Mock` carries the fixture text read at creation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum RunAdapter {
+    Named(AdapterId),
+    Mock { fixture: String },
+}
+
+impl RunAdapter {
+    /// What runner resolution is pinned to; `None` for mock.
+    pub fn pinned(&self) -> Option<&AdapterId> {
+        match self {
+            Self::Named(id) => Some(id),
+            Self::Mock { .. } => None,
+        }
+    }
+}
+
+/// Every input a run's nodes interpret, by content hash in the run's store.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Frozen {
+    /// Each agent a node or a runner names, by the hash of its definition.
+    pub agents: BTreeMap<AgentName, ContentHash>,
+    /// Each skill's files, by their paths within the skill.
+    pub skills: BTreeMap<SkillName, BTreeMap<PathBuf, ContentHash>>,
+    /// Each executor a node runs, by the hash of its files.
+    pub executors: BTreeMap<ExecutorName, ContentHash>,
+    /// Every child reached through `use:`, transitively; packs included.
+    pub workflows: BTreeMap<String, FrozenWorkflow>,
+    /// Keyed `<layer>:<relative path>`.
+    pub knowledge: BTreeMap<String, ContentHash>,
+}
+
+/// A child workflow as its parent's run was born with it: its text, the
+/// prompts it reads, and the pack it came from as the parent's birth read
+/// it, so the child is born with the provenance its parent froze.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FrozenWorkflow {
+    pub text: String,
+    pub prompts: BTreeMap<NodeId, String>,
+    /// `None` for a child from the repo, and for a pack whose own manifest
+    /// could not be read when the parent was born (its gap says why).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<PackProvenance>,
+    /// The pack files whose provenance could not be read when the parent
+    /// was born; empty when every file was read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance_gaps: Vec<ProvenanceGap>,
+}
+
+/// A pack file whose provenance could not be read when the run was born,
+/// with the reason it could not be read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProvenanceGap {
+    pub file: String,
+    pub detail: String,
 }
 
 /// Everything a run needs frozen at creation time. The
@@ -117,7 +186,7 @@ pub struct Manifest {
     /// provided or the spec's own `default`, already validated.
     /// Frozen here so a node never resolves a default itself:
     /// that would be per-node non-deterministic state.
-    pub inputs: BTreeMap<String, String>,
+    pub inputs: BTreeMap<InputName, String>,
     /// Content of every `prompt: {file: ...}` at freeze time, keyed by
     /// node id. Inline prompts are already frozen inside `workflow`.
     pub prompts: BTreeMap<NodeId, String>,
@@ -144,6 +213,70 @@ pub struct Manifest {
     /// before pack support existed (tolerant reader).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pack: Option<PackProvenance>,
+    /// `None` for a manifest written before runs recorded the repository
+    /// they were created in (tolerant reader), and for one created where
+    /// git could not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectIdentity>,
+    /// The adapter the run was born on (`yunta run --adapter`). `Named`
+    /// pins each runner to its candidate on that adapter and passes over
+    /// the rest; `Mock` carries the fixture the sessions are scripted from,
+    /// read when the run was created. Frozen with the run, so whatever
+    /// invocation drives it — a detached child, a resume after a pause, a
+    /// successor, a child workflow — resolves the same way. `None`: each
+    /// runner takes its first available candidate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<RunAdapter>,
+    /// What the run's nodes interpret, frozen when the run was born. `None`
+    /// on a manifest written before runs froze their inputs: its nodes read
+    /// the checkout, as they always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen: Option<Frozen>,
+    /// Pack files whose provenance could not be read when the run was born:
+    /// empty when every file was read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance_gaps: Vec<ProvenanceGap>,
+}
+
+impl crate::persisted::Persisted for Manifest {
+    /// 5 since `frozen` joined it, 4 since `adapter` joined it, 3 since
+    /// `project` did, 2 since `paths` and `pack` did. A manifest stamped
+    /// lower is read as it is: every field a later version added is
+    /// optional, and a run born without one still resumes.
+    const SCHEMA_VERSION: u32 = 5;
+    const NAME: &'static str = "run manifest";
+
+    /// A manifest frozen while `inherit` was still a word reads as what
+    /// that word meant: this unit does not isolate. The run's own
+    /// `isolation` and every `kind: workflow` node's alike, wherever
+    /// that key sits in the document, because a frozen manifest is not
+    /// rewritten to be readable.
+    fn reconcile(value: &mut crate::yaml::Value) {
+        let (retired, replacement) = crate::Isolation::RETIRED;
+        rename_isolation(value, retired, replacement);
+    }
+}
+
+/// Rewrites every `isolation: <retired>` in `value`, at any depth.
+fn rename_isolation(value: &mut crate::yaml::Value, retired: &str, replacement: &str) {
+    match value {
+        crate::yaml::Value::Mapping(fields) => {
+            if let Some(found) = fields.get_mut("isolation") {
+                if found.as_str() == Some(retired) {
+                    *found = crate::yaml::Value::from(replacement);
+                }
+            }
+            for nested in fields.values_mut() {
+                rename_isolation(nested, retired, replacement);
+            }
+        }
+        crate::yaml::Value::Sequence(items) => {
+            for item in items {
+                rename_isolation(item, retired, replacement);
+            }
+        }
+        _ => {}
+    }
 }
 
 impl Manifest {

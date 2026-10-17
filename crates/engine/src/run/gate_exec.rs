@@ -4,59 +4,60 @@
 //! translates its answer into the same event vocabulary every other
 //! node kind already uses (`node_started`/`node_finished`/
 //! `node_failed`) — so nothing downstream (`on_failure.goto`,
-//! `progress.md`, `yunta status`) needs to know a gate is different
+//! `yunta status`) needs to know a gate is different
 //! from any other node once it's resolved. Comments on a
 //! changes-requested review become `finding_posted`, mounted for the
 //! corrective node the same way `node-output` already is — a reviewer's
 //! words reach the fixing session without an intermediate summary.
 //!
 //! **No forge, no credentials: degrades to console.** Both entry points
-//! fall back to the exact same `HumanInteraction` escalation
-//! `GateExhaustedReroutes` already uses — same object, same "`None`
-//! means pause, never guess" rule — building a synthetic PR-less
-//! decision instead of a forge round-trip. Nothing is ever recorded as
-//! published while degraded (no `gate_waiting` without a resolved
-//! answer alongside it, mirroring `GateExhaustedReroutes`'s own pattern
-//! exactly), so a still-unresolved degraded gate asks fresh on every
-//! wake rather than remembering a decision that was never really made.
+//! fall back to [`console_gate`](super::console_gate), which asks here
+//! with the same escalation vocabulary every other menu uses. A plan that
+//! cannot be proven as it is written is never published:
+//! [`flawed`](super::flawed) sends it back instead.
 
-use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
-    GateWaitingPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
+    Approval, Claim, EngineFact, Escalation, EventPayload, Failure, Finding, FindingCause,
+    FindingPostedPayload, FindingSays, FindingSeverity, GateResolvedPayload, NodeOutcome,
+    NodeStartedPayload, PauseReason, PublishedGate, Shown, TokenUsage,
 };
-use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
+use yunta_core::port::{
+    Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewComment, ReviewOutcome,
+};
+use yunta_core::{CommitSha, ExternalGate, FindingId, Node, Responder};
 
-use super::node_close::{fail, write_progress};
+use super::node_close::{fail, fail_with, finish_node};
 use super::node_exec::template_vars;
+use super::pull_request_exec::forge_limit;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
-use crate::reserved::ReservedOption;
+use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
+use yunta_core::{Location, RelativePath};
 
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
 pub(super) enum GateStep {
-    StillWaiting { reason: String },
+    Waiting(PauseReason),
     Resolved,
 }
 
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn publish_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
     assignee: &str,
+    message: Option<&str>,
     external: &ExternalGate,
     forge: Option<&dyn Forge>,
 ) -> Result<GateStep, RunError> {
     let Some(forge) = forge else {
-        return degrade_to_console(
+        return super::console_gate::degrade_to_console(
             ctx,
             node,
-            format!(
-                "node `{}` wants an external gate (assignee: {assignee}) but no forge is \
-                 reachable from this machine (no credentials, or none configured) — resolve \
-                 it here instead",
-                node.id
-            ),
+            Claim::ForgeUnreachable {
+                node: node.id.clone(),
+                assignee: assignee.to_string(),
+            },
         )
         .await;
     };
@@ -65,69 +66,149 @@ pub(super) async fn publish_gate(
         Step::Value(rendered) => rendered,
         Step::Ended(step) => return Ok(step),
     };
+    let Some((artifacts, shows)) = held_for_review(ctx, node, external).await? else {
+        return Ok(GateStep::Resolved);
+    };
+    let state = ctx.run_view().await?.state;
+    let shown = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
+    let flaws = super::flawed::unprovable(&shown);
+    if !flaws.is_empty() {
+        return super::flawed::send_back(ctx, node, &flaws).await;
+    }
 
-    // What the reviewer is shown is what the run holds: the acceptance
-    // its log states, with the bytes out of its object store.
+    let summary = Claim::AwaitsReview {
+        node: node.id.clone(),
+        assignee: Some(assignee.to_string()),
+    };
+    let request = PublishRequest {
+        branch,
+        base_branch: ctx.manifest.base_branch.clone(),
+        run_id: ctx.run_id.clone(),
+        decision: decision(ctx, node, assignee, message),
+        artifacts,
+        shown,
+    };
+
+    let Some(published) = publish_or_fail(ctx, node, forge, &request).await? else {
+        return Ok(GateStep::Resolved);
+    };
+
+    emit_waiting(ctx, node, summary, &published).await?;
+    Ok(GateStep::Waiting(PauseReason::ExternalGate {
+        url: published.url,
+    }))
+}
+
+/// Publishes the gate's pull request. A forge whose rate limit is spent
+/// fails the node with the account's limit, and `None` says the node ended
+/// that way; any other refusal is the run's error.
+async fn publish_or_fail(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    forge: &dyn Forge,
+    request: &PublishRequest,
+) -> Result<Option<PullRequestRef>, RunError> {
+    match forge.publish(request).await {
+        Ok(published) => Ok(Some(published)),
+        Err(error) => {
+            let Some(failure) = forge_limit(&error, ctx.clock.now()) else {
+                return Err(RunError::Forge {
+                    context: format!("publish node `{}`'s external gate", node.id),
+                    source: error,
+                });
+            };
+            // Publishing does not start the node, so a refusal starts it
+            // first, as every other failure of this step does.
+            emit_started(ctx, node).await?;
+            fail_with(ctx, node, failure, TokenUsage::default()).await?;
+            Ok(None)
+        }
+    }
+}
+
+/// Emits the gate's waiting event, naming the pull request it waits on.
+async fn emit_waiting(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    summary: Claim,
+    published: &PullRequestRef,
+) -> Result<(), RunError> {
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Waiting(Box::new(
+            Escalation::published_to(
+                summary,
+                PublishedGate {
+                    url: published.url.clone(),
+                },
+                encode_ref(published),
+            )
+            .into_payload(),
+        ))),
+    )
+    .await?;
+    Ok(())
+}
+
+/// What the reviewer decides on, as the run holds it: each artifact's
+/// bytes under the name its identity gives it, and the log's name for
+/// each. `None` once the node failed for one the run does not hold — a
+/// partial review is never published.
+async fn held_for_review(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    external: &ExternalGate,
+) -> Result<Option<(Vec<(String, Vec<u8>)>, Vec<Shown>)>, RunError> {
     let events = ctx.load_events().await?;
     let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
     let mut artifacts = Vec::new();
+    let mut shows = Vec::new();
     for spec in &external.artifacts {
         let wanted = yunta_core::events::ArtifactId::from(spec);
         let Some(artifact) = held.held(&wanted, None) else {
             emit_started(ctx, node).await?;
-            fail(
-                ctx,
-                node,
-                format!(
-                    "node `{}` publishes the {} with its external gate, and this run holds \
-                     no such artifact — no node produced it",
-                    node.id,
-                    wanted.label()
-                ),
-                false,
-            )
-            .await?;
-            return Ok(GateStep::Resolved);
+            let failure = Failure::GateArtifactMissing {
+                node: node.id.clone(),
+                gate_artifact: wanted,
+            };
+            fail(ctx, node, failure).await?;
+            return Ok(None);
         };
-        artifacts.push((wanted.view_name(), held.bytes(artifact)?));
+        let bytes = held
+            .bytes(artifact)
+            .await
+            .map_err(crate::artifacts::HeldError::from)?;
+        artifacts.push((wanted.view_name(), bytes));
+        shows.push(Shown {
+            producer: artifact.producer.clone(),
+            artifact: artifact.artifact.clone(),
+            content_hash: artifact.content_hash.clone(),
+        });
     }
-
-    let summary = format!(
-        "node `{}` is waiting on external review (assignee: {assignee})",
-        node.id
-    );
-    let request = PublishRequest {
-        branch,
-        base_branch: ctx.manifest.base_branch.clone(),
-        run_id: ctx.run_id.to_string(),
-        summary: summary.clone(),
-        artifacts,
-    };
-
-    let published = forge
-        .publish(&request)
-        .await
-        .map_err(|source| RunError::Forge {
-            context: format!("publish node `{}`'s external gate", node.id),
-            source,
-        })?;
-
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::GateWaiting(GateWaitingPayload {
-            summary,
-            evidence: published.url.clone(),
-            options: Vec::new(),
-            external_ref: Some(encode_ref(&published)),
-        }),
-    )
-    .await?;
-    pause(ctx, format!("waiting on external gate: {}", published.url)).await?;
-    Ok(GateStep::StillWaiting {
-        reason: published.url,
-    })
+    Ok(Some((artifacts, shows)))
 }
 
+/// What the gate's pull request asks, and what each answer a review can
+/// give does to the run: the nodes that wait on it go on once it passes,
+/// and a request for changes goes where its `on_failure` sends it.
+fn decision(ctx: &RunCtx<'_>, node: &Node, assignee: &str, message: Option<&str>) -> GateDecision {
+    GateDecision {
+        node: node.id.clone(),
+        question: super::internal_gate::claim(node, message),
+        assignee: assignee.to_string(),
+        then: ctx
+            .manifest
+            .workflow
+            .nodes
+            .iter()
+            .filter(|next| next.depends_on.contains(&node.id))
+            .map(|next| next.id.clone())
+            .collect(),
+        corrected_by: node.on_failure.as_ref().map(|on| on.goto.clone()),
+    }
+}
+
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn poll_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -135,19 +216,18 @@ pub(super) async fn poll_gate(
     forge: Option<&dyn Forge>,
 ) -> Result<GateStep, RunError> {
     let Some(forge) = forge else {
-        return degrade_to_console(
+        return super::console_gate::degrade_to_console(
             ctx,
             node,
-            format!(
-                "node `{}`'s external gate (published at {external_ref}) needs re-checking, \
-                 but no forge is reachable from this machine — resolve it here instead",
-                node.id
-            ),
+            Claim::RecheckUnreachable {
+                node: node.id.clone(),
+                external_ref: external_ref.to_string(),
+            },
         )
         .await;
     };
 
-    let published: PublishedGate = decode_ref(external_ref)?;
+    let published: PullRequestRef = decode_ref(external_ref)?;
     let polled = forge
         .poll(&published)
         .await
@@ -156,14 +236,14 @@ pub(super) async fn poll_gate(
             source,
         })?;
 
-    resolve_from_poll(ctx, node, &polled).await
+    resolve_from_poll(ctx, node, &polled, &published).await
 }
 
 /// The review→outcome mapping, applied uniformly whether resolving a
 /// gate for the first time or re-checking one already `Finished` for
 /// SHA drift (see this module's own doc comment): a review only counts
 /// if it covers the PR's *current* head; anything
-/// else — no decisive review yet, or one that no longer covers the
+/// else — no decisive review recorded, or one that no longer covers the
 /// current commit — is "still waiting", not a decision.
 /// The gate continues: `gate_resolved` records who approved and the
 /// commit the approval covers, and the node finishes.
@@ -172,26 +252,24 @@ async fn resolve_approved(
     node: &Node,
     by: &Responder,
     approved_sha: &CommitSha,
-    outcome: String,
+    on: Approval,
 ) -> Result<GateStep, RunError> {
     emit_started(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload::Approved {
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
             by: by.clone(),
             sha: approved_sha.clone(),
-        }),
+        })),
     )
     .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
-            outcome,
-            tokens_used: TokenUsage::default(),
-        }),
+    finish_node(
+        ctx,
+        node,
+        NodeOutcome::Fact(EngineFact::Approved { by: by.clone(), on }),
+        TokenUsage::default(),
     )
     .await?;
-    write_progress(ctx).await?;
     Ok(GateStep::Resolved)
 }
 
@@ -199,101 +277,113 @@ async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,
     polled: &PolledGate,
+    published: &PullRequestRef,
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
-            resolve_approved(ctx, node, by, &polled.head_sha, format!("approved by {by}")).await
+            resolve_approved(ctx, node, by, &polled.head_sha, Approval::Review).await
         }
         // A merge is an approval that also landed: the evidence is the
         // merge commit, and nothing can move the branch after it.
         ReviewOutcome::Merged { by, merge_sha } => {
-            resolve_approved(ctx, node, by, merge_sha, format!("merged by {by}")).await
+            resolve_approved(ctx, node, by, merge_sha, Approval::Merge).await
         }
+        // Like an approval, a request for changes decides what it
+        // reviewed: one left on an earlier head waits for a review of
+        // what the correction published.
         ReviewOutcome::ChangesRequested {
             by,
             reviewed_sha,
             comments,
-        } => {
-            emit_started(ctx, node).await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::ChangesRequested {
-                    by: by.clone(),
-                }),
-            )
-            .await?;
-            for (i, comment) in comments.iter().enumerate() {
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::FindingPosted(FindingPostedPayload {
-                        finding: Finding {
-                            id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
-                            severity: FindingSeverity::Major,
-                            title: format!("changes requested by {}", comment.author),
-                            location: comment
-                                .path
-                                .clone()
-                                .unwrap_or_else(|| "(pull request)".to_string()),
-                            detail: comment.body.clone(),
-                            proposed_criterion: None,
-                        },
-                    }),
-                )
-                .await?;
-            }
-            fail(
-                ctx,
-                node,
-                format!(
-                    "changes requested by {by} at {reviewed_sha} ({} comment(s))",
-                    comments.len()
-                ),
-                true,
-            )
-            .await?;
-            Ok(GateStep::Resolved)
+        } if *reviewed_sha == polled.head_sha => {
+            resolve_changes_requested(ctx, node, by, reviewed_sha, comments).await
         }
-        ReviewOutcome::Closed => {
-            emit_started(ctx, node).await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::Closed),
-            )
-            .await?;
-            fail(
-                ctx,
-                node,
-                "the pull request was closed without approval".to_string(),
-                false,
-            )
-            .await?;
-            Ok(GateStep::Resolved)
-        }
-        // Pending, or an approval that no longer covers the current
-        // head — the engine detects that by comparing SHAs — not a
-        // decision.
-        ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => {
-            pause(
-                ctx,
-                format!("waiting on external gate for node `{}`", node.id),
-            )
-            .await?;
-            Ok(GateStep::StillWaiting {
-                reason: node.id.to_string(),
-            })
+        ReviewOutcome::Closed => resolve_closed(ctx, node, published).await,
+        // Pending, or a review that does not cover the current head —
+        // the engine detects that by comparing SHAs — not a decision.
+        ReviewOutcome::Pending
+        | ReviewOutcome::Approved { .. }
+        | ReviewOutcome::ChangesRequested { .. } => {
+            Ok(GateStep::Waiting(PauseReason::ExternalGate {
+                url: published.url.clone(),
+            }))
         }
     }
+}
+
+/// Resolves a changes-requested review: each comment becomes a finding, and the node fails.
+async fn resolve_changes_requested(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    by: &Responder,
+    reviewed_sha: &CommitSha,
+    comments: &[ReviewComment],
+) -> Result<GateStep, RunError> {
+    emit_started(ctx, node).await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
+            by: by.clone(),
+        })),
+    )
+    .await?;
+    for (i, comment) in comments.iter().enumerate() {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: Finding {
+                    id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
+                    severity: FindingSeverity::Major,
+                    says: FindingSays::Found {
+                        cause: FindingCause::ReviewComment {
+                            author: comment.author.clone(),
+                            body: comment.body.clone(),
+                        },
+                    },
+                    location: Location::work(RelativePath::of(comment.path.as_deref()), None),
+                    proposed_criterion: None,
+                },
+            })),
+        )
+        .await?;
+    }
+    let failure = Failure::ChangesRequested {
+        requested_by: by.to_string(),
+        reviewed_sha: reviewed_sha.clone(),
+        comments: comments.len(),
+    };
+    fail(ctx, node, failure).await?;
+    Ok(GateStep::Resolved)
+}
+
+/// Resolves a gate whose pull request closed without merging: the node fails.
+async fn resolve_closed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    published: &PullRequestRef,
+) -> Result<GateStep, RunError> {
+    emit_started(ctx, node).await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
+    )
+    .await?;
+    let failure = Failure::PullRequestClosed {
+        closed_pull_request: Some(published.url.clone()),
+    };
+    fail(ctx, node, failure).await?;
+    Ok(GateStep::Resolved)
 }
 
 /// Re-checks every already-`Finished` `kind: gate` node against its
 /// forge's current state — detected by comparing SHAs — run once per
 /// `execute_run` invocation, before the scheduling loop, so
-/// "al despertar" (`resume`, `status`, a scheduled job) means once per
+/// "on wake" (`resume`, `status`, a scheduled job) means once per
 /// wake, not once per scheduling iteration. A node whose approval no
 /// longer covers the PR's current head is re-opened (`node_started` at
 /// the next attempt) so the ordinary dispatch path re-resolves it fresh
 /// — `resolve_from_poll` naturally lands it back on "still waiting"
-/// when nothing new has been approved yet.
+/// when nothing new has been approved.
 ///
 /// **Only reachable while the run is still open.** Its one caller
 /// (`run/mod.rs::execute_run`) places this after the "already
@@ -312,22 +402,22 @@ pub(super) async fn recheck_approved_gates(
         return Ok(()); // nothing to re-check without a live forge
     };
 
-    let crate::replay::RunView { events, state } = ctx.run_view().await?;
+    let state = ctx.run_view().await?.state;
 
     for node in &ctx.manifest.workflow.nodes {
         if !matches!(node.kind, yunta_core::NodeKind::Gate { .. }) {
             continue;
         }
-        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.get(&node.id) else {
+        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.state(&node.id) else {
             continue;
         };
-        let Some(approved_sha) = last_approved_sha(&events, &node.id) else {
+        let Some(approved_sha) = state.gates.approved_sha(&node.id).cloned() else {
             continue;
         };
-        let Some(external_ref) = last_external_ref(&events, &node.id) else {
+        let Some(external_ref) = state.gates.last_external_ref(&node.id) else {
             continue;
         };
-        let published: PublishedGate = decode_ref(&external_ref)?;
+        let published: PullRequestRef = decode_ref(external_ref)?;
         let polled = forge
             .poll(&published)
             .await
@@ -348,251 +438,30 @@ pub(super) async fn recheck_approved_gates(
     Ok(())
 }
 
-fn last_approved_sha(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> Option<CommitSha> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateResolved(GateResolvedPayload::Approved { sha, .. }))
-            if e.node_id.as_ref() == Some(node_id) =>
-        {
-            Some(sha.clone())
-        }
-        _ => None,
-    })
-}
-
-fn last_external_ref(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> Option<String> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateWaiting(p)) if e.node_id.as_ref() == Some(node_id) => {
-            p.external_ref.clone()
-        }
-        _ => None,
-    })
-}
-
-/// Resolves an internal gate (`external: None`): builds the escalation
-/// object from the node's own `message`/`options`/`on` and puts it to
-/// `HumanInteraction`. Semantics: an option mapped in `on` re-routes
-/// exactly like `on_failure.goto` — the gate fails retryable, control
-/// transfers, and once the target's subgraph completes the gate asks
-/// again; an unmapped option finishes the gate with that choice as its
-/// outcome; the engine-appended `abort` pauses the run (same convention
-/// as every other escalation). No surface → `StillWaiting`, with
-/// nothing recorded, so a resume re-asks (the same rule every
-/// unresolved question follows).
-pub(super) async fn resolve_internal_gate(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    assignee: &str,
-    message: Option<&str>,
-    options: &[OptionId],
-    on: &indexmap::IndexMap<OptionId, yunta_core::NodeId>,
-) -> Result<GateStep, RunError> {
-    // Shared with `current_escalation` so a `resolve_gate`
-    // MCP call, running in a process that never paused this run,
-    // reconstructs the identical object instead of a second copy that
-    // could drift.
-    let escalation =
-        super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on);
-    // A decision `resolve_gate` pre-seeded onto the log while
-    // this run was parked is consumed here, by this same consequence
-    // code — never re-asked, and its escalation pair is already
-    // recorded so it is never re-emitted. Re-validated against the
-    // re-derived menu: a mismatch means ask normally.
-    let events = ctx.load_events().await?;
-    let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id, &escalation);
-    let already_recorded = pre_seeded.is_some();
-    let choice = match pre_seeded {
-        Some(choice) => choice,
-        None => match ctx.ask_human(&escalation).await? {
-            Some(choice) => choice,
-            None => {
-                return Ok(GateStep::StillWaiting {
-                    reason: format!(
-                        "gate `{}` (assignee: {assignee}) awaits a decision",
-                        node.id
-                    ),
-                });
-            }
-        },
-    };
-
-    // Whether `abort` is the engine's own appended option (never the
-    // author's) — the same rule `build_internal_gate_escalation`
-    // applies when it decides whether to append it at all.
-    let engine_abort = !options
-        .iter()
-        .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
-    if engine_abort && ReservedOption::of(&choice.option) == Some(ReservedOption::Abort) {
-        // The usual escalation convention exactly: record the
-        // interaction, pause the run, leave the node stateless so a
-        // resume re-asks if the human changes their mind.
-        if !already_recorded {
-            ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-                .await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
-            )
-            .await?;
-        }
-        return Ok(GateStep::StillWaiting {
-            reason: format!(
-                "gate `{}` was resolved to abort{}",
-                node.id,
-                choice
-                    .free_text
-                    .as_deref()
-                    .map(|text| format!(": {text}"))
-                    .unwrap_or_default()
-            ),
-        });
-    }
-
-    emit_started(ctx, node).await?;
-    if !already_recorded {
-        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-            .await?;
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
-        )
-        .await?;
-    }
-    let chosen = choice.option;
-    match on.get(&chosen) {
-        Some(target) => {
-            // Same shape as any other reroute: the gate fails (retryable
-            // — a human chose a correction lap, not a dead end) and
-            // control re-routes; the scheduler's ordinary reroute
-            // machinery brings it back to ask again when `target`'s
-            // subgraph completes.
-            fail(
-                ctx,
-                node,
-                format!("gate chose `{chosen}` — re-routing to `{target}`"),
-                true,
-            )
-            .await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeRerouted(yunta_core::events::NodeReroutedPayload {
-                    to_node: target.clone(),
-                    cause: format!("gate `{}` chose `{chosen}`", node.id),
-                    // A gate choice is a routing decision, not a bounded
-                    // retry: it has no attempt or cap to report.
-                    attempt: None,
-                    max_reroutes: None,
-                    origin: yunta_core::events::RerouteOrigin::GateChoice,
-                }),
-            )
-            .await?;
-        }
-        None => {
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::NodeFinished(NodeFinishedPayload {
-                    outcome: chosen.to_string(),
-                    tokens_used: TokenUsage::default(),
-                }),
-            )
-            .await?;
-            write_progress(ctx).await?;
-        }
-    }
-    Ok(GateStep::Resolved)
-}
-
-async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
-    let events = ctx.load_events().await?;
-    let attempt = events
-        .iter()
-        .filter(|e| {
-            e.node_id.as_ref() == Some(&node.id)
-                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
-        })
-        .count() as u32
-        + 1;
+pub(super) async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
+    let state = ctx.run_view().await?.state;
+    let attempts = state
+        .nodes
+        .get(&node.id)
+        .map_or(0, |record| record.attempts);
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeStarted(NodeStartedPayload { attempt }),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(
+            attempts + 1,
+        ))),
     )
     .await?;
     Ok(())
 }
 
-async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<(), RunError> {
-    super::record_pause(ctx, &reason).await
-}
-
-fn encode_ref(published: &PublishedGate) -> String {
+fn encode_ref(published: &PullRequestRef) -> String {
     serde_json::to_string(published).unwrap_or_default()
 }
 
-fn decode_ref(external_ref: &str) -> Result<PublishedGate, RunError> {
+fn decode_ref(external_ref: &str) -> Result<PullRequestRef, RunError> {
     serde_json::from_str(external_ref).map_err(|e| RunError::Broken {
         diagnostic: format!("gate_waiting.external_ref `{external_ref}` isn't valid: {e}"),
     })
-}
-
-/// The escalation object, reused verbatim for the no-forge
-/// degradation — two options wide enough to cover every review mapping
-/// a human can decide from the console: approve (finishes the node) or
-/// reject (fails it, retryable — so a declared `on_failure.goto` still
-/// gets a chance, same as a real "changes requested").
-async fn degrade_to_console(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    summary: String,
-) -> Result<GateStep, RunError> {
-    let escalation = GateWaitingPayload {
-        summary: summary.clone(),
-        evidence: "no forge reachable from this machine".to_string(),
-        options: vec![
-            GateOption {
-                id: ReservedOption::Approve.id(),
-                label: "Approve".to_string(),
-                tradeoff: "Marks the gate as passed; the run continues".to_string(),
-            },
-            GateOption {
-                id: ReservedOption::Reject.id(),
-                label: "Reject".to_string(),
-                tradeoff: "Fails the node; its declared re-route (if any) takes over".to_string(),
-            },
-        ],
-        external_ref: None,
-    };
-    let Some(choice) = ctx.ask_human(&escalation).await? else {
-        pause(ctx, summary.clone()).await?;
-        return Ok(GateStep::StillWaiting { reason: summary });
-    };
-
-    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-        .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
-    )
-    .await?;
-    emit_started(ctx, node).await?;
-    if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: format!("approved from the console by {}", choice.by),
-                tokens_used: TokenUsage::default(),
-            }),
-        )
-        .await?;
-        write_progress(ctx).await?;
-    } else {
-        fail(ctx, node, "rejected from the console".to_string(), true).await?;
-    }
-    Ok(GateStep::Resolved)
 }
 
 /// Renders `external.branch`'s template, or fails the *run* the same
@@ -603,11 +472,11 @@ async fn render_or_fail_here(
     node: &Node,
     input: &str,
 ) -> Result<GateRender, RunError> {
-    match crate::template::render_template(input, &template_vars(ctx, node)) {
+    match yunta_core::template::render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Step::Value(rendered)),
-        Err(e) => {
+        Err(template) => {
             emit_started(ctx, node).await?;
-            fail(ctx, node, e.to_string(), false).await?;
+            fail(ctx, node, Failure::from(template)).await?;
             Ok(Step::Ended(GateStep::Resolved))
         }
     }

@@ -29,7 +29,7 @@ impl SessionSlot<'_> {
     /// name can neither escape the run directory nor collide with the
     /// engine's own files beside it.
     pub(crate) fn scratch_dir(&self, run_dir: &Path) -> PathBuf {
-        let sessions = run_dir.join(crate::run_dir::SCRATCH_DIR).join("sessions");
+        let sessions = crate::run_dir::sessions_root(run_dir);
         match self {
             Self::Node(node) => sessions.join(node.as_str()),
             Self::Task(node, task) => sessions.join(node.as_str()).join(task.as_str()),

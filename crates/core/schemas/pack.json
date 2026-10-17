@@ -7,6 +7,7 @@
     "contents": {
       "$ref": "#/$defs/PackContents",
       "default": {
+        "agents": [],
         "docs": [],
         "knowledge": [],
         "skills": [],
@@ -37,20 +38,24 @@
     "requires": {
       "$ref": "#/$defs/PackRequires",
       "default": {
-        "commands": [],
         "mcp_servers": [],
+        "programs": [],
         "runners": []
       }
     },
     "version": {
-      "description": "Semver — no comparison logic lives here; a pack's own\nversion is never auto-resolved (`update` always names an exact\ntarget ref), so nothing in v1 needs to *compare* versions,\nonly record and display them. Kept a plain string rather than a\n`semver` dependency for the same reason `yunta_schema` (below)\nstays a hand-rolled range check instead of one (see\n`engine/src/check.rs`'s own `yunta_schema_satisfied` doc comment)\n— add the dependency the day something actually needs to compare\ntwo versions, not ahead of that need.",
+      "description": "Semver — no comparison logic lives here; a pack's own\nversion is never auto-resolved (`update` always names an exact\ntarget ref), so nothing in v1 needs to *compare* versions,\nonly record and display them. Kept a plain string rather than a\n`semver` dependency for the same reason [`SchemaRange`] is a\nhand-rolled comparator range instead of one — add the dependency\nthe day something actually needs to compare two full versions,\nnot ahead of that need.",
       "type": "string"
     },
     "yunta_schema": {
-      "description": "`\">=1 <2\"` — the same comparator-range syntax and the same\nbinary schema major (`yunta_core::YUNTA_SCHEMA`) a workflow's own\n`yunta_schema:` is checked against; `check_yunta_schema`'s\nrange parser is reused verbatim once compatibility is actually\nenforced, not duplicated here.",
-      "type": [
-        "string",
-        "null"
+      "description": "`\">=1 <2\"` — the same range a workflow's own `yunta_schema:`\nstates, read by the same parser and checked against the same\nbinary schema major (`yunta_core::YUNTA_SCHEMA`). `pack add`\nrefuses a pack whose range this binary does not satisfy.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SchemaRange"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
@@ -62,6 +67,11 @@
     "declares"
   ],
   "$defs": {
+    "McpServerName": {
+      "description": "A MCP server name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "NodePermissions": {
       "type": "string",
       "enum": [
@@ -74,6 +84,14 @@
       "description": "What the pack physically ships — paths relative to the pack's\nown root, resolved by whoever vendors it, not by this type.",
       "type": "object",
       "properties": {
+        "agents": {
+          "description": "Agent definitions the pack ships, each a Markdown file a node or a\nrunner names as `publisher/agent`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
         "docs": {
           "type": "array",
           "default": [],
@@ -107,7 +125,7 @@
       "additionalProperties": false
     },
     "PackDeclares": {
-      "description": "The pack's own permissions **ceiling** — `check` rejects any\nnode, hook or criterion inside the pack that would exceed this,\nerror not warning; this type only carries the declared\nvalues, it enforces nothing itself.",
+      "description": "The pack's own permissions **ceiling**: `check` rejects any `prompt` or `loop`\nnode of the pack whose effective permissions exceed this, as an error.",
       "type": "object",
       "properties": {
         "executors": {
@@ -119,7 +137,7 @@
           }
         },
         "network": {
-          "description": "The pack's `bash`/`command` nodes never assume network access —\ndeclarative only, mirrors `NetworkPermissions`'s own \"no\nenforcement, audit-only\" stance: this field is\ncarried for `pack audit` and org policy\n(`permissions.packs`), the engine itself never blocks on it.",
+          "description": "Whether the pack's nodes may reach the network. `false`, the\ndefault, is a ceiling the pack promises: `check` refuses a node of\nthe pack that asks for the network with `network: true`, and\n`pack audit` prints the value.",
           "type": "boolean",
           "default": false
         },
@@ -141,16 +159,16 @@
       "description": "What the installer's own config must provide — never satisfied\nby the pack itself; `check`/`add` validate these against the local\nmerged config, this type only parses what's asked for.",
       "type": "object",
       "properties": {
-        "commands": {
-          "description": "Binaries the pack's `bash` nodes assume are on `PATH`.",
+        "mcp_servers": {
+          "description": "Names the installer must define under its own `mcp_servers:`.",
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/McpServerName"
           }
         },
-        "mcp_servers": {
-          "description": "Names the installer must define under its own `mcp_servers:`.",
+        "programs": {
+          "description": "Programs the pack's `bash` nodes and hooks start themselves and\nassume are on `PATH`. A capability the project provides — its\nlint, its tests — is a command the workflow names instead, and\nnever listed here.",
           "type": "array",
           "default": [],
           "items": {
@@ -173,21 +191,11 @@
       "minLength": 1
     },
     "RequiredRunner": {
-      "description": "One entry in `requires.runners` — a runner name plus the ceiling of\npermissions the pack asks that runner be resolvable with.\n`permissions` absent means the pack doesn't care what profile the\nrunner resolves under, only that the name itself is defined.",
+      "description": "One entry in `requires.runners`: a runner name the installer's own\n`runners:` must define with a candidate.",
       "type": "object",
       "properties": {
         "name": {
           "$ref": "#/$defs/RunnerName"
-        },
-        "permissions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/NodePermissions"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "additionalProperties": false,
@@ -197,6 +205,11 @@
     },
     "RunnerName": {
       "description": "A runner name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "SchemaRange": {
+      "description": "a schema range: whitespace-separated comparators (`>=`, `<=`, `>`, `<`, `=`) over whole schema majors, e.g. `>=1 <2`",
       "type": "string",
       "minLength": 1
     }

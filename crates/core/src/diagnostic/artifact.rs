@@ -18,6 +18,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::DiagnosticCode;
+
 use super::Report;
 use crate::events::ArtifactId;
 use crate::{NodeId, RunId};
@@ -88,11 +90,13 @@ impl ArtifactFailure {
     ///
     /// `None` for a content failure, which is not one problem but every
     /// problem the document has, each carrying its own code.
-    pub fn code(&self) -> Option<&'static str> {
+    pub fn code(&self) -> Option<DiagnosticCode> {
         match self {
-            ArtifactFailure::File { problem, .. } => Some(problem.code()),
-            ArtifactFailure::Undelivered { .. } => Some("artifact-undelivered"),
-            ArtifactFailure::Unheld { .. } => Some("artifact-unheld"),
+            ArtifactFailure::File { problem, .. } => Some(DiagnosticCode::File(problem.code())),
+            ArtifactFailure::Undelivered { .. } => {
+                Some(DiagnosticCode::Artifact(ArtifactCode::Undelivered))
+            }
+            ArtifactFailure::Unheld { .. } => Some(DiagnosticCode::Artifact(ArtifactCode::Unheld)),
             ArtifactFailure::Content(_) => None,
         }
     }
@@ -187,12 +191,60 @@ pub enum FileProblem {
 impl FileProblem {
     /// The stable name of this kind of problem: what a receipt counts
     /// and a log is grepped by, unaffected by any rewording.
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> FileCode {
         match self {
-            FileProblem::Missing { .. } => "artifact-missing",
-            FileProblem::Empty => "artifact-empty",
-            FileProblem::Oversized { .. } => "artifact-oversized",
-            FileProblem::Unreadable { .. } => "artifact-unreadable",
+            FileProblem::Missing { .. } => FileCode::Missing,
+            FileProblem::Empty => FileCode::Empty,
+            FileProblem::Oversized { .. } => FileCode::Oversized,
+            FileProblem::Unreadable { .. } => FileCode::Unreadable,
+        }
+    }
+}
+
+/// The stable name of what is wrong with the file a node wrote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FileCode {
+    Missing,
+    Empty,
+    Oversized,
+    Unreadable,
+}
+
+impl FileCode {
+    pub const ALL: [FileCode; 4] = [
+        FileCode::Missing,
+        FileCode::Empty,
+        FileCode::Oversized,
+        FileCode::Unreadable,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FileCode::Missing => "artifact-missing",
+            FileCode::Empty => "artifact-empty",
+            FileCode::Oversized => "artifact-oversized",
+            FileCode::Unreadable => "artifact-unreadable",
+        }
+    }
+}
+
+/// The stable name of what is wrong with the artifact as a whole. No
+/// file was opened for either, which is why neither is a [`FileCode`]:
+/// one names a document its node never handed over, the other an
+/// artifact no run holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ArtifactCode {
+    Undelivered,
+    Unheld,
+}
+
+impl ArtifactCode {
+    pub const ALL: [ArtifactCode; 2] = [ArtifactCode::Undelivered, ArtifactCode::Unheld];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ArtifactCode::Undelivered => "artifact-undelivered",
+            ArtifactCode::Unheld => "artifact-unheld",
         }
     }
 }

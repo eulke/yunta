@@ -1,12 +1,12 @@
-# Both reviewers report through their run tools, so the fixture declares
-# the capability the nodes need. Neither finds anything, and neither
-# needs a step to say so: the engine writes an empty findings artifact
-# from what the node reported.
+# Both reviewers report through their run tools, which the claude-code
+# dialect declares. Neither finds anything, and neither needs a step to
+# say so: the engine writes an empty findings artifact from what the node
+# reported.
 #
 # The two siblings run the same prompt — each produces its own findings
 # artifact under its own node — so the scripts are taken in declaration
 # order rather than selected by anything in the text.
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "reviewed" }
   - outcome: { type: completed, summary: "reviewed-alt" }

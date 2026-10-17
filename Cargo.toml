@@ -5,13 +5,15 @@ members = [
     "crates/storage",
     "crates/adapters",
     "crates/engine",
+    "crates/render",
     "crates/cli",
     "crates/testkit",
+    "crates/testkit-core",
     "xtask",
 ]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 rust-version = "1.98"
 license = "Apache-2.0"
@@ -22,34 +24,50 @@ repository = "https://github.com/eulke/yunta"
 # crates carry `version` because crates.io rejects a path dependency
 # without one.
 [workspace.dependencies]
-yunta-core = { path = "crates/core", version = "0.0.4" }
-yunta-storage = { path = "crates/storage", version = "0.0.4" }
-yunta-adapters = { path = "crates/adapters", version = "0.0.4" }
-yunta-engine = { path = "crates/engine", version = "0.0.4" }
+yunta-core = { path = "crates/core", version = "0.0.5" }
+yunta-storage = { path = "crates/storage", version = "0.0.5" }
+yunta-adapters = { path = "crates/adapters", version = "0.0.5" }
+yunta-engine = { path = "crates/engine", version = "0.0.5" }
+yunta-render = { path = "crates/render", version = "0.0.5" }
 # Test-support crate: a dev-dependency only (never published), but it
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.
-yunta-testkit = { path = "crates/testkit", version = "0.0.4" }
+yunta-testkit = { path = "crates/testkit", version = "0.0.5" }
+yunta-testkit-core = { path = "crates/testkit-core", version = "0.0.5" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4"
 clap = "4"
+clap_complete = "4"
 futures = "0.3"
 globset = "0.4"
+dialoguer = { version = "0.12", default-features = false }
+errno = "0.3"
 indexmap = "2"
+indicatif = "0.18"
 nix = { version = "0.31", features = ["signal", "process"] }
+libc = "0.2"
+rustix = { version = "1.1", features = ["fs", "process"] }
+procfs = "0.18"
+libproc = "0.14.11"
 proptest = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false }
-rmcp = { version = "3.3", default-features = false }
-rusqlite = "0.32"
+rmcp = { version = "3.4", default-features = false }
+# Storage names the features it uses: the defaults add a wasm SQLite
+# backend, for a target this project never builds.
+rusqlite = { version = "0.40", default-features = false }
 schemars = "1"
 serde = "1"
 serde_json = "1"
 serde_path_to_error = "0.1"
-serde_norway = "0.9"
-sha2 = "0.10"
+serde-saphyr = "2"
+strsim = "0.11"
+subtle = { version = "2", default-features = false }
+# Each 0.11 line builds on digest 0.11, so sha1 and sha2 move together.
+sha1 = "0.11"
+sha2 = "0.11"
 tempfile = "3"
 toml = { version = "1", default-features = false, features = ["display", "serde"] }
 thiserror = "2"
@@ -58,6 +76,7 @@ tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 ulid = "3"
+unicode-width = "0.2"
 uuid = "1"
 
 # Lints apply to every crate, tests included, through `[lints]
@@ -74,3 +93,23 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# A debug build carries what a backtrace needs to name the workspace's
+# own frames, and nothing for dependencies. Debug information kept in
+# its split form leaves each rebuild's object files beside the binaries;
+# on macOS nothing ever removes them, and a directory holding hundreds of
+# thousands of them makes every program started from it wait while the
+# system reads it. Kept off, a macOS backtrace names frames without
+# their lines, and a panic still says where it happened.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
+[profile.dev.package."*"]
+debug = false
+
+# The build a debugger wants: `--profile debugging`.
+[profile.debugging]
+inherits = "dev"
+debug = true
+split-debuginfo = "unpacked"

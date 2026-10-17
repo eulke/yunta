@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 
+use super::fault::FindingFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{FindingId, FindingsFile};
 
@@ -21,10 +22,6 @@ pub(super) const RULES: &[Rule] = &[
     Rule {
         code: RuleCode::EmptyTitle,
         demand: "`title` is a non-empty one-line summary",
-    },
-    Rule {
-        code: RuleCode::EmptyLocation,
-        demand: "`location` names a non-empty path, with its range when there is one",
     },
     Rule {
         code: RuleCode::EmptyDetail,
@@ -44,6 +41,51 @@ pub(super) const RULES: &[Rule] = &[
     },
 ];
 
+/// What the engine demands where it runs a finding's proposed criterion,
+/// on the run's tree as the finding is reported: that it runs, and that
+/// it fails there — what passes before a fix proves no fix.
+pub(super) const RUN_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::CriterionCannotRun,
+        demand: "a `proposed_criterion` runs where the engine runs criteria: each program it \
+                 calls is on that `PATH`",
+    },
+    Rule {
+        code: RuleCode::ProposedCriterionAlreadyPasses,
+        demand: "a `proposed_criterion` fails on the run's tree until the finding is fixed",
+    },
+];
+
+/// What one entry is held to on its own — every rule of a findings
+/// document except the one that spans it.
+pub(super) const ENTRY_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::EmptyTitle,
+        demand: "`title` is a non-empty one-line summary",
+    },
+    Rule {
+        code: RuleCode::EmptyDetail,
+        demand: "`detail` is non-empty: what goes wrong, and when",
+    },
+];
+
+/// What a withdrawal is held to: the reason it owes, and the two the
+/// run's own log decides.
+pub(super) const WITHDRAWAL_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::EmptyReason,
+        demand: "a withdrawal says why, in a non-empty `reason`",
+    },
+    Rule {
+        code: RuleCode::UnknownId,
+        demand: "an update or a withdrawal names an id this node posted",
+    },
+    Rule {
+        code: RuleCode::WithdrawnId,
+        demand: "a withdrawn id is final: it is not posted, updated or withdrawn again",
+    },
+];
+
 /// What a withdrawal owes.
 ///
 /// The three rules above it — the id is one this node posted, and not one
@@ -54,20 +96,31 @@ pub(super) fn check_withdrawal(withdrawal: &crate::findings::Withdrawal) -> Vec<
     if withdrawal.reason.trim().is_empty() {
         return vec![Diagnostic::new(
             Subject::Finding(Named::new(withdrawal.id.clone(), 0)),
-            Problem::rule(
-                RuleCode::EmptyReason,
-                "say why it no longer stands, so the log keeps the reason",
-            ),
+            Problem::broke(FindingFault::EmptyReason),
         )];
     }
     Vec::new()
 }
 
-fn broke(index: usize, id: &FindingId, code: RuleCode, detail: &str) -> Diagnostic {
+fn broke(index: usize, id: &FindingId, fault: FindingFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Finding(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
+}
+
+/// What one entry owes on its own: the emptiness a `String` cannot
+/// refuse. `index` is where it sits in the document a reader opens — 0
+/// for an entry that arrived alone, through the tool that posts one.
+pub(super) fn check_entry(entry: &crate::findings::FindingEntry, index: usize) -> Vec<Diagnostic> {
+    [
+        (&entry.title, FindingFault::EmptyTitle),
+        (&entry.detail, FindingFault::EmptyDetail),
+    ]
+    .into_iter()
+    .filter(|(value, _)| value.trim().is_empty())
+    .map(|(_, fault)| broke(index, &entry.id, fault))
+    .collect()
 }
 
 /// Every violation the file carries, collected rather than stopped at
@@ -78,27 +131,9 @@ pub(super) fn check(file: &FindingsFile) -> Vec<Diagnostic> {
 
     for (index, finding) in file.findings.iter().enumerate() {
         if !known_ids.insert(&finding.id) {
-            broken.push(broke(
-                index,
-                &finding.id,
-                RuleCode::DuplicateId,
-                "a second finding already carries this id; every id is declared once",
-            ));
+            broken.push(broke(index, &finding.id, FindingFault::DuplicateFinding));
         }
-        for (value, key, code) in [
-            (&finding.title, "title", RuleCode::EmptyTitle),
-            (&finding.location, "location", RuleCode::EmptyLocation),
-            (&finding.detail, "detail", RuleCode::EmptyDetail),
-        ] {
-            if value.trim().is_empty() {
-                broken.push(broke(
-                    index,
-                    &finding.id,
-                    code,
-                    &format!("`{key}` is empty"),
-                ));
-            }
-        }
+        broken.extend(check_entry(finding, index));
     }
 
     broken

@@ -50,6 +50,10 @@ pub enum CatalogError {
     Unreadable { path: PathBuf, detail: String },
     #[error("pack manifest `{path}` is malformed: {detail}")]
     Malformed { path: PathBuf, detail: String },
+    /// A workflow a pack declares lies outside the pack's directory, so it
+    /// is not resolved at all.
+    #[error("pack `{pack}` declares `{path}`, which leaves the pack's own directory")]
+    Escapes { pack: String, path: String },
 }
 
 /// Every pack under a publisher: the ones whose `pack.yaml` parsed, and
@@ -80,19 +84,78 @@ pub struct ResolvedWorkflow {
     pub origin: WorkflowOrigin,
 }
 
+/// A path a pack's manifest declares, with the directory of the pack it is
+/// relative to and the pack's label. A freeze checks that the path stays
+/// inside the pack before it joins it; a checkout reader joins it as it
+/// stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeclaredPath {
+    /// The pack's label, `publisher/name`.
+    pub(crate) pack: String,
+    pub(crate) pack_dir: PathBuf,
+    /// The path as the manifest writes it, relative to `pack_dir`.
+    pub(crate) declared: String,
+}
+
+impl DeclaredPath {
+    pub(crate) fn of_pack(pack_dir: PathBuf, manifest: &PackManifest, declared: String) -> Self {
+        Self {
+            pack: format!("{}/{}", manifest.publisher, manifest.name),
+            pack_dir,
+            declared,
+        }
+    }
+
+    /// The declared path joined onto the pack's directory, with no check.
+    pub(crate) fn joined(&self) -> PathBuf {
+        self.pack_dir.join(&self.declared)
+    }
+
+    /// The declared path joined onto the pack's directory when it stays
+    /// inside the pack; `None` when it leaves it. The one containment rule
+    /// every reader of a pack's paths asks.
+    pub(crate) fn contained(&self) -> Option<PathBuf> {
+        yunta_core::stays_inside(&self.declared).then(|| self.joined())
+    }
+}
+
+/// Where a workflow name resolves, before a pack's declared path is joined
+/// onto the pack's directory.
+pub(crate) enum Named {
+    /// The repo's own file.
+    Repo(PathBuf),
+    /// A file a pack declares, with the origin that says which pack.
+    Pack {
+        declared: DeclaredPath,
+        origin: WorkflowOrigin,
+    },
+}
+
 /// Resolves a `use:`/`yunta run` target name against the repo catalog
 /// first, packs second (packs are the bottom
-/// layer, never shadowing something the repo already names).
+/// layer, never shadowing something the repo already names). A pack's
+/// declared path that leaves the pack is refused, naming the pack and the
+/// path, so no reader loads a file outside the pack that declares it.
 pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError> {
-    // Both forms are joined onto paths below: a segment that is not one
-    // would walk out of the catalog instead of naming something in it.
-    let well_formed = match name.split_once('/') {
-        Some((publisher, workflow)) => {
-            publisher.parse::<Publisher>().is_ok() && yunta_core::is_path_segment(workflow)
-        }
-        None => yunta_core::is_path_segment(name),
-    };
-    if !well_formed {
+    Ok(match name_workflow(repo_root, name)? {
+        Named::Repo(path) => ResolvedWorkflow {
+            path,
+            origin: WorkflowOrigin::Repo,
+        },
+        Named::Pack { declared, origin } => ResolvedWorkflow {
+            path: declared.contained().ok_or_else(|| CatalogError::Escapes {
+                pack: declared.pack.clone(),
+                path: declared.declared.clone(),
+            })?,
+            origin,
+        },
+    })
+}
+
+/// The lookup [`resolve_workflow`] makes, with a pack's declared path left
+/// unjoined: the freeze checks that it stays inside its pack first.
+pub(crate) fn name_workflow(repo_root: &Path, name: &str) -> Result<Named, CatalogError> {
+    if !is_reference(name) {
         return Err(CatalogError::InvalidName {
             name: name.to_string(),
         });
@@ -101,10 +164,7 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
         .join(".yunta/workflows")
         .join(format!("{name}.yaml"));
     if repo_path.is_file() {
-        return Ok(ResolvedWorkflow {
-            path: repo_path,
-            origin: WorkflowOrigin::Repo,
-        });
+        return Ok(Named::Repo(repo_path));
     }
 
     let Some((publisher, workflow)) = name.split_once('/') else {
@@ -120,7 +180,7 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
     };
 
     let publisher_dir = repo_root.join(".yunta/packs").join(publisher);
-    let Ok(entries) = std::fs::read_dir(&publisher_dir) else {
+    let Some(candidates) = declaring_packs(&publisher_dir, workflow)? else {
         return Err(CatalogError::NotFound {
             name: name.to_string(),
             repo_path,
@@ -128,8 +188,72 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
             workflow: workflow.to_string(),
         });
     };
+    let (pack_name, declared) = choose(name, repo_path, publisher, workflow, candidates)?;
+    Ok(Named::Pack {
+        declared,
+        origin: WorkflowOrigin::Pack {
+            publisher: publisher_id,
+            pack_name,
+        },
+    })
+}
 
-    let mut candidates: Vec<(PackName, PathBuf)> = Vec::new();
+/// Whether `name` is a bare name or `publisher/name`, each one path segment.
+/// Both forms are joined onto paths: a segment that is not one would walk
+/// out of the catalog instead of naming something in it.
+fn is_reference(name: &str) -> bool {
+    match name.split_once('/') {
+        Some((publisher, workflow)) => {
+            publisher.parse::<Publisher>().is_ok() && yunta_core::is_path_segment(workflow)
+        }
+        None => yunta_core::is_path_segment(name),
+    }
+}
+
+/// The one pack a publisher's name resolves to: two packs declaring it are
+/// ambiguous, and no pack declaring it is `NotFound`.
+fn choose(
+    name: &str,
+    repo_path: PathBuf,
+    publisher: &str,
+    workflow: &str,
+    mut candidates: Vec<(PackName, DeclaredPath)>,
+) -> Result<(PackName, DeclaredPath), CatalogError> {
+    if candidates.len() > 1 {
+        return Err(CatalogError::Ambiguous {
+            name: name.to_string(),
+            publisher: publisher.to_string(),
+            workflow: workflow.to_string(),
+            count: candidates.len(),
+            candidates: candidates
+                .iter()
+                .map(|(pack_name, _)| pack_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+    // Exactly one match resolves; an empty set is `NotFound` — the
+    // `ok_or_else` here is the zero case, so taking the single element
+    // needs no unwrap.
+    candidates.pop().ok_or_else(|| CatalogError::NotFound {
+        name: name.to_string(),
+        repo_path,
+        publisher: publisher.to_string(),
+        workflow: workflow.to_string(),
+    })
+}
+
+/// The installed packs under a publisher's directory that declare a
+/// workflow file whose basename is `workflow`, each with the path it
+/// declares. `None` when the publisher has no readable directory.
+fn declaring_packs(
+    publisher_dir: &Path,
+    workflow: &str,
+) -> Result<Option<Vec<(PackName, DeclaredPath)>>, CatalogError> {
+    let Ok(entries) = std::fs::read_dir(publisher_dir) else {
+        return Ok(None);
+    };
+    let mut candidates = Vec::new();
     for entry in entries.flatten() {
         let pack_dir = entry.path();
         if !pack_dir.is_dir() {
@@ -163,42 +287,12 @@ pub fn resolve_workflow(repo_root: &Path, name: &str) -> Result<ResolvedWorkflow
                 .and_then(|s| s.to_str())
                 .is_some_and(|stem| stem == workflow);
             if stem_matches {
-                candidates.push((manifest.name.clone(), pack_dir.join(declared)));
+                let found = DeclaredPath::of_pack(pack_dir.clone(), &manifest, declared.clone());
+                candidates.push((manifest.name.clone(), found));
             }
         }
     }
-
-    if candidates.len() > 1 {
-        return Err(CatalogError::Ambiguous {
-            name: name.to_string(),
-            publisher: publisher.to_string(),
-            workflow: workflow.to_string(),
-            count: candidates.len(),
-            candidates: candidates
-                .iter()
-                .map(|(pack_name, _)| pack_name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-        });
-    }
-    // Exactly one match resolves; an empty set is `NotFound` — the
-    // `else` here is the zero case, so taking the single element needs no
-    // unwrap.
-    let Some((pack_name, path)) = candidates.into_iter().next() else {
-        return Err(CatalogError::NotFound {
-            name: name.to_string(),
-            repo_path,
-            publisher: publisher.to_string(),
-            workflow: workflow.to_string(),
-        });
-    };
-    Ok(ResolvedWorkflow {
-        path,
-        origin: WorkflowOrigin::Pack {
-            publisher: publisher_id,
-            pack_name,
-        },
-    })
+    Ok(Some(candidates))
 }
 
 /// Every pack vendored under `.yunta/packs/<publisher>/` whose manifest
@@ -243,6 +337,24 @@ pub fn packs_for_publisher(repo_root: &Path, publisher: &Publisher) -> Publisher
         }
     }
     packs
+}
+
+/// Every path an installed pack declares as knowledge, unjoined, in the
+/// order the packs are listed.
+pub(crate) fn declared_knowledge(repo_root: &Path) -> Vec<DeclaredPath> {
+    let mut declared = Vec::new();
+    for publisher in installed_publishers(repo_root) {
+        for (pack_dir, manifest) in packs_for_publisher(repo_root, &publisher).installed {
+            for path in &manifest.contents.knowledge {
+                declared.push(DeclaredPath::of_pack(
+                    pack_dir.clone(),
+                    &manifest,
+                    path.clone(),
+                ));
+            }
+        }
+    }
+    declared
 }
 
 /// Where `workflow_path` actually lives, relative to `repo_root` — the

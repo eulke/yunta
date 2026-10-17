@@ -5,7 +5,7 @@
 
 use yunta_core::{RunId, Seq};
 use yunta_storage::Storage;
-use yunta_testkit::{init_repo, run_id_from, stderr, stdout, write, yunta_in};
+use yunta_testkit::{checked, init_repo, run_id_from, stderr, stdout, write, yunta_in};
 
 const ONE_NODE: &str = "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n";
 
@@ -46,9 +46,9 @@ fn broken_chain_exits_nonzero_naming_the_seq() {
         stderr(&broken)
     );
     assert!(
-        stderr(&broken).contains("BROKEN at seq 2"),
+        checked(&stdout(&broken), "chain").is_some_and(|said| said.starts_with("broken at seq 2")),
         "the failing seq must be named: {}",
-        stderr(&broken)
+        stdout(&broken)
     );
 }
 
@@ -80,9 +80,13 @@ fn a_corrupt_object_is_reported_beside_an_intact_chain() {
     let intact = yunta_in!(&repo, &home, &["verify", &run_id]);
     assert!(intact.status.success(), "stderr: {}", stderr(&intact));
     let text = stdout(&intact);
-    assert!(text.contains("chain intact"), "got: {text}");
     assert!(
-        text.contains("objects intact") && text.contains("1 artifact"),
+        checked(&text, "chain").is_some_and(|said| said.starts_with("intact")),
+        "got: {text}"
+    );
+    assert_eq!(
+        checked(&text, "objects").as_deref(),
+        Some("intact — 1 artifact verified"),
         "the objects are their own report: {text}"
     );
 
@@ -104,14 +108,11 @@ fn a_corrupt_object_is_reported_beside_an_intact_chain() {
         "an object that is not its own bytes must exit non-zero: {}",
         stderr(&broken)
     );
+    let reported = stdout(&broken);
+    let said = |subject| checked(&reported, subject).unwrap_or_default();
     assert!(
-        stdout(&broken).contains("chain intact"),
-        "a corrupt object does not break the chain: {}",
-        stdout(&broken)
+        said("chain").starts_with("intact") && said("objects").starts_with("broken"),
+        "a corrupt object does not break the chain, and the objects say so: {reported}"
     );
-    let reported = stderr(&broken);
-    assert!(
-        reported.contains("objects BROKEN") && reported.contains("report.md"),
-        "the failing artifact is named: {reported}"
-    );
+    assert!(reported.contains("report.md"), "{reported}");
 }

@@ -1,56 +1,50 @@
 //! Runs of `kind: questions` nodes: pausing on unanswered questions and the live surface that answers them on resume.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::AdapterId;
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
-    DEFAULT_MAX_RETRIES,
-};
-use yunta_testkit::{Bench, FixedClock, MOCK_CONFIG};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
 mod common;
 use common::*;
+use yunta_core::events::{GateEvent, NodeEvent, PauseReason};
 
 #[tokio::test]
 async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_closed() {
-    // "el nodo que pregunta cierra su sesión antes de que se
-    // renderice nada" (la sesión mock corre y cierra normalmente, y solo
-    // *después* de eso el engine actúa sobre las preguntas) y "sin TTY el
-    // run queda `waiting`, nunca cuelga ni falla" — en este recorte no
-    // existe ninguna superficie TTY/MCP/PR todavía, así que ese
-    // es el único camino: el run pausa citando las preguntas, no panickea
-    // ni queda colgado.
+    // The node that asks closes its session before anything is rendered: the
+    // mock session runs and closes normally, and only *after* that does the
+    // engine act on the questions. With no surface to answer them, as on this
+    // bench, the run pauses citing the questions; it never hangs or fails.
     let bench = Bench::new();
 
-    let (terminal, _state) = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
 
     match &terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(
-                *reason,
-                "node `ask` asked 2 question(s) awaiting an answer: q1, q2"
-            );
+        RunTerminal::Paused {
+            reason: PauseReason::Questions { node, pending },
+        } => {
+            let asked: Vec<&str> = pending.as_slice().iter().map(|id| id.as_str()).collect();
+            assert_eq!(node.as_str(), "ask");
+            assert_eq!(asked, ["q1", "q2"]);
         }
         other => panic!("expected the run to pause on unanswered questions, got {other:?}"),
     }
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
-        yunta_testkit::accepted(&events)
-            .iter()
-            .any(|held| held.artifact
-                == yunta_core::events::ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Questions
-                }),
+        bench.accepted().iter().any(|held| held.artifact
+            == yunta_core::events::ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Questions
+            }),
         "the questions artifact must still be an artifact the run holds"
     );
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::NodeFinished(_))
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                _
+            )))
         )),
         "a node with unanswered questions must never reach node_finished"
     );
@@ -59,90 +53,32 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
 #[tokio::test]
 async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_without_a_new_session(
 ) {
-    // ✓ del Plan: "matar el engine durante la espera y reanudar rehace
-    // las preguntas sin estado conversacional" — el segundo `execute_run`
-    // usa un fixture sin sesiones disponibles; si el resume intentara
-    // volver a despachar el nodo, fallaría por "fixture exhausted" en vez
-    // de devolver la misma pausa.
+    // Killing the engine while it waits and resuming re-asks the questions
+    // with no conversational state. The second dispatch uses a fixture with
+    // no sessions available; if the resume tried to dispatch the node again,
+    // it would fail with "fixture exhausted" instead of returning the same
+    // pause.
     let bench = Bench::new();
-    let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
-    let first_adapter = MockAdapter::from_yaml(QUESTIONS_FIXTURE).unwrap();
-    let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    first_adapters.insert("mock".into(), Arc::new(first_adapter));
-    let first_report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &first_adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    match &first_report.terminal {
+    let RunReport {
+        terminal: first_terminal,
+        ..
+    } = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
+    match &first_terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the first run to pause, got {other:?}"),
     }
 
     // No `sessions:` at all — any attempt to dispatch a new session errors.
-    let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
-    let mut resume_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    resume_adapters.insert("mock".into(), Arc::new(empty_adapter));
-    let resumed_report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &resume_adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
+    let RunReport {
+        terminal: resumed_terminal,
+        ..
+    } = bench
+        .wake_on_fixture("dialect: claude-code\nsessions: []")
+        .await;
 
     assert_eq!(
-        resumed_report.terminal, first_report.terminal,
+        resumed_terminal, first_terminal,
         "resume must replay the exact same pause, no new session needed"
     );
 }
@@ -158,21 +94,23 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")], // q2 is not required
     };
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("ask"),
+        state.nodes.state("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let answered = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::QuestionsAnswered(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::QuestionsAnswered(p))) => {
+                Some(p)
+            }
             _ => None,
         })
         .expect("questions_answered must be on the log");
@@ -186,38 +124,37 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     // the given values, consumable by a later node via `artifact:`.
     let raw = String::from_utf8(
         bench
-            .projection(Some("ask"), "questions.answers.yaml")
+            .projection(Some("ask"), "answers.yaml")
             .expect("the answers artifact has a view"),
     )
     .unwrap();
-    let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
+    let parsed: yunta_core::AnswersFile = yunta_core::yaml::parse(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "staging")]);
 
     // The answers are the run's too, with the origin that says the
     // engine materialized them from what a person replied.
-    let held = yunta_testkit::accepted(&events)
+    let held = bench
+        .accepted()
         .into_iter()
         .find(|held| {
             held.artifact
-                == yunta_core::events::ArtifactId::Opaque {
-                    name: "questions.answers.yaml".to_string(),
+                == yunta_core::events::ArtifactId::Interpreted {
+                    kind: yunta_core::ArtifactKind::Answers,
                 }
         })
         .expect("the answers are an artifact the run holds");
-    assert_eq!(held.origin, yunta_core::events::ArtifactOrigin::Answered);
+    assert_eq!(held.origin, yunta_core::events::RecordedOrigin::Answered);
     assert_eq!(held.content_hash, answered.answers_hash);
     assert_eq!(
-        std::fs::read(
-            bench
-                .run_dir()
-                .join("objects")
-                .join(held.content_hash.as_str())
-        )
-        .expect("the bytes are in the store"),
+        bench
+            .object(&held.content_hash)
+            .expect("the bytes are in the store"),
         raw.as_bytes()
     );
 }
 
+/// A surface that answered and a surface that could not are two
+/// different facts, and the pause says which.
 #[tokio::test]
 async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     let bench = Bench::new();
@@ -225,21 +162,38 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     let interaction = ScriptedAnswers {
         answers: vec![answer("q2", "just a note")], // q1 (required) missing
     };
-    let (terminal, _state) = bench
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench
         .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(*reason, "node `ask` asked 1 question(s) awaiting an answer: required question `q1` has no answer");
+            let PauseReason::AnswersRefused { node, .. } = reason else {
+                panic!("an incomplete reply pauses on the answers it refused: {reason:?}");
+            };
+            assert_eq!(
+                node.as_str(),
+                "ask",
+                "the pause says whose answers were refused"
+            );
+            let words = yunta_render::pause::sentence(reason);
+            assert!(
+                words.contains("`q1`") && words.contains("nothing answers it"),
+                "and which question went unanswered, in the engine's own words: {words}"
+            );
         }
         other => panic!("an incomplete reply must pause, got {other:?}"),
     }
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::QuestionsAnswered(_))
+            Some(yunta_core::events::EventPayload::Gates(
+                GateEvent::QuestionsAnswered(_)
+            ))
         )),
         "an invalid reply must never be recorded as answered"
     );
@@ -251,105 +205,42 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
     // invocation (yunta resume with a TTY) re-asks and continues — no
     // conversational state, no new agent session.
     let bench = Bench::new();
-    let workflow: yunta_core::Workflow = serde_norway::from_str(QUESTIONS_WORKFLOW).unwrap();
-    let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
     // First invocation: headless — asks, pauses.
-    let first_adapter = MockAdapter::from_yaml(QUESTIONS_FIXTURE).unwrap();
-    let mut first_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    first_adapters.insert("mock".into(), Arc::new(first_adapter));
-    let first = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &first_adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    assert!(matches!(first.terminal, RunTerminal::Paused { .. }));
+    let RunReport {
+        terminal: first_terminal,
+        state: first_state,
+    } = bench.run(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE).await;
+    assert!(matches!(first_terminal, RunTerminal::Paused { .. }));
     // The paused node derives `waiting`, never "absent" or failed.
     assert!(
         matches!(
-            first.state.nodes.get("ask"),
+            first_state.nodes.state("ask"),
             Some(yunta_engine::NodeState::Waiting { .. })
         ),
         "got {:?}",
-        first.state.nodes.get("ask")
+        first_state.nodes.state("ask")
     );
 
     // Second invocation: a live surface, an empty fixture — answering
     // needs no new session, only the log and the artifact on disk.
-    let empty_adapter = MockAdapter::from_yaml("sessions: []").unwrap();
-    let mut resume_adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    resume_adapters.insert("mock".into(), Arc::new(empty_adapter));
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "production")],
     };
-    let resumed = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &resume_adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &interaction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
+    let RunReport {
+        terminal: resumed_terminal,
+        state: resumed_state,
+    } = bench
+        .wake_on_fixture_answering("dialect: claude-code\nsessions: []", &interaction)
+        .await;
 
-    assert_eq!(resumed.terminal, RunTerminal::Finished);
+    assert_eq!(resumed_terminal, RunTerminal::Finished);
     assert!(matches!(
-        resumed.state.nodes.get("ask"),
+        resumed_state.nodes.state("ask"),
         Some(yunta_engine::NodeState::Finished { .. })
     ));
-    let raw = String::from_utf8(
-        bench
-            .projection(Some("ask"), "questions.answers.yaml")
-            .unwrap(),
-    )
-    .unwrap();
-    let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
+    let raw = String::from_utf8(bench.projection(Some("ask"), "answers.yaml").unwrap()).unwrap();
+    let parsed: yunta_core::AnswersFile = yunta_core::yaml::parse(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "production")]);
 }
 
@@ -360,15 +251,23 @@ async fn a_choice_answer_outside_its_declared_values_pauses_citing_the_value() {
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "qa")], // not in [staging, production]
     };
-    let (terminal, _state) = bench
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench
         .run_with_interaction(QUESTIONS_WORKFLOW, QUESTIONS_FIXTURE, &interaction)
         .await;
 
     match &terminal {
         RunTerminal::Paused { reason } => {
+            let PauseReason::AnswersRefused { node, .. } = reason else {
+                panic!("an out-of-values choice pauses on the answers it refused: {reason:?}");
+            };
+            assert_eq!(node.as_str(), "ask");
+            let words = yunta_render::pause::sentence(reason);
             assert!(
-                reason.contains("qa") || reason.contains("q1"),
-                "must cite the invalid value or its question: {reason}"
+                words.contains("qa") || words.contains("q1"),
+                "must cite the invalid value or its question: {words}"
             );
         }
         other => panic!("an out-of-values choice must pause, got {other:?}"),

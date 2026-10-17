@@ -1,8 +1,14 @@
-//! One module per subcommand; `main.rs` only parses and dispatches.
+//! One module per subcommand, beside the few things more than one of
+//! them shares; `main.rs` only parses and dispatches.
 
+pub(crate) mod advice;
 pub mod cancel;
 pub mod check;
+pub mod close;
+pub(crate) mod committer;
 pub mod doctor;
+pub(crate) mod drive;
+pub(crate) mod forge;
 pub mod gc;
 pub mod init;
 pub mod list;
@@ -10,46 +16,63 @@ pub mod mcp;
 pub mod new;
 pub mod pack;
 pub mod pack_audit;
+pub(crate) mod pack_needs;
 pub(crate) mod promote;
+pub mod rail;
 pub mod receipt;
+pub(crate) mod refusals;
+pub(crate) mod registry;
 pub mod resolve_gate;
 pub mod resume;
 pub mod run;
+pub(crate) mod run_ref;
 pub mod schema;
 pub mod stats;
 pub mod status;
 pub mod test;
+pub(crate) mod verdict;
 pub mod verify;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_adapters::{
-    Adapter, ClaudeCodeAdapter, CodexAdapter, Forge, GitHubForge, ProbeReport, CLAUDE_CODE_ID,
-    CODEX_ID,
-};
-use yunta_core::{describe, AdapterId, ConfigLayer, Secret, Workflow};
-use yunta_engine::{RunReport, RunTerminal, UnknownKindCount};
+use chrono::{DateTime, Utc};
+use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
+use yunta_core::events::PauseReason;
+use yunta_core::port::{Adapter, ProbeReport};
+use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
+use yunta_engine::{RunState, UnknownKindCount};
 
-use crate::error::{note, warn, CliError, Outcome};
+use crate::error::CliError;
+use crate::output::Mode;
+use crate::render::Look;
 
-/// Ctrl-C → the run's root `CancellationToken`. The in-process
-/// interrupt→kill path does the actual exterminating; this only
-/// bridges the signal to the token and tells the user what's
-/// happening. Installing the handler means SIGINT no longer kills the
-/// process outright — the run pauses cleanly with `run_paused
-/// { reason: "cancelled by user" }` instead.
-pub(crate) fn cancel_on_ctrl_c() -> tokio_util::sync::CancellationToken {
-    let root = tokio_util::sync::CancellationToken::new();
-    let token = root.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            note("interrupt received — stopping the run (sessions get interrupt, then kill)");
-            token.cancel();
+/// A detached `yunta resume` that never started, and the run it was
+/// for. Recover by running that command yourself: the run is on disk
+/// and unchanged, so nothing is lost by handing it forward by hand.
+///
+/// Every surface that hands a run off reports the same failure, so the
+/// sentence is worded here once and each caller only says what it was
+/// doing when it got this back — with the run's whole id, since the
+/// control plane is one of those surfaces.
+#[derive(Debug, thiserror::Error)]
+#[error("cannot spawn a detached `{}`: {source}", advice::resume(.run_id.as_str()))]
+pub(crate) struct DetachedResumeError {
+    run_id: RunId,
+    #[source]
+    source: std::io::Error,
+}
+
+impl DetachedResumeError {
+    /// The failure of a hand-off for `run_id`, keeping what the OS said
+    /// about it.
+    pub(crate) fn new(run_id: &RunId, source: std::io::Error) -> Self {
+        Self {
+            run_id: run_id.clone(),
+            source,
         }
-    });
-    root
+    }
 }
 
 /// Hands a run off to a fully independent `yunta resume` and returns
@@ -72,15 +95,13 @@ pub(crate) async fn spawn_detached_resume(
     run_dir: &Path,
     run_id: &str,
     cwd: &Path,
-) -> std::io::Result<()> {
+) -> std::io::Result<Pid> {
     let log_path = run_dir
         .join(yunta_engine::run_dir::SCRATCH_DIR)
         .join("detached.log");
-    let log = std::fs::File::create(&log_path)?;
+    let log = detached_log(&log_path).await?;
     let log_err = log.try_clone()?;
-    let mut child_cmd = tokio::process::Command::new(
-        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("yunta")),
-    );
+    let mut child_cmd = tokio::process::Command::new(crate::context::own_binary());
     child_cmd
         .arg("resume")
         .arg(run_id)
@@ -91,54 +112,139 @@ pub(crate) async fn spawn_detached_resume(
     #[cfg(unix)]
     child_cmd.process_group(0);
     let mut child = child_cmd.spawn()?;
+    // Who the run was handed to. A caller holding a claim on something
+    // the child is about to work in — the checkout's own lock, under
+    // `isolation: none` — has to move it, and cannot without a name.
+    let pid = child
+        .id()
+        .and_then(|id| Pid::try_from(id).ok())
+        .ok_or_else(|| std::io::Error::other("the detached child reported no usable process id"))?;
     tokio::spawn(async move {
+        // best-effort: the reaper only collects the child; its own log says how the run went.
         let _ = child.wait().await;
     });
-    Ok(())
+    Ok(pid)
 }
 
-/// Prints a run's outcome and reports its verdict: success only when the
-/// run finished; a paused or unresolved-promoted run ran to a stop that
-/// needs a decision, reported as its own output rather than an error.
-pub(crate) fn report_outcome(run_id: &str, report: &RunReport) -> Outcome {
-    match &report.terminal {
-        RunTerminal::Finished => {
-            println!("run {run_id}: finished");
-            Outcome::Success
-        }
-        RunTerminal::Paused { reason } => {
-            println!(
-                "run {run_id}: paused — {}",
-                yunta_core::text::hanging(reason, "  ")
-            );
-            Outcome::Reported
-        }
-        RunTerminal::Failed { reason } => {
-            println!(
-                "run {run_id}: failed — {}",
-                yunta_core::text::hanging(reason, "  ")
-            );
-            Outcome::Reported
-        }
-        // `run`/`resume` always route a fresh `RunReport` through
-        // `promote::drive_promotions` first — by the time anything
-        // calls `report_outcome`, a `Promoted` terminal has already
-        // been chased to whatever it became next.
-        RunTerminal::Promoted { suggested_mode } => {
-            println!("run {run_id}: promoted to `{suggested_mode}` (unresolved)");
-            Outcome::Reported
-        }
+/// The detached log at `path`, opened to add to it: a run that pauses on a
+/// reset again hands itself to a later link of the same chain, and each
+/// link's log follows the one before it instead of erasing it.
+async fn detached_log(path: &Path) -> std::io::Result<std::fs::File> {
+    let file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    Ok(file.into_std().await)
+}
+
+/// The instant a run paused on a limit's reset resumes at, or `None` for
+/// any other run. A resume of such a run waits for that instant before it
+/// takes anything.
+pub(crate) fn reset_at(state: &RunState) -> Option<DateTime<Utc>> {
+    match state.run.paused() {
+        Some((PauseReason::AwaitingReset { at, .. }, _)) => Some(*at),
+        _ => None,
     }
 }
 
-/// The adapter registry a real invocation can offer: `claude-code` and
-/// `codex`, each built only when `runners:` names it as a candidate
-/// somewhere in the merged config, with that adapter's own settings (a
-/// `binary` override, if declared). Mock fixtures stay routed through
-/// `yunta test` only — real invocations never touch the mock, and a
-/// real run never gets a simulated agent either.
-pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<AdapterId, Arc<dyn Adapter>> {
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
+/// The adapters a run executes its sessions on, by the name `runners:`
+/// reaches each one under. Named beside the function that builds it, so
+/// every caller that passes a registry around spells the same type.
+pub(crate) type Adapters = HashMap<AdapterId, Arc<dyn Adapter>>;
+
+/// Every adapter this binary builds, with `settings` applied to each —
+/// the composition root's one declaration of what a real invocation can
+/// run on. Adding an adapter is adding a line here: what `runners:` may
+/// name, what `doctor` probes, what `init` offers and what a refusal
+/// lists all read from this.
+///
+/// The mock is not among them. Mock fixtures stay routed through `yunta
+/// test`, so a real run never gets a simulated agent.
+pub(crate) fn built_adapters(
+    settings: impl Fn(&AdapterId) -> AdapterSettings,
+) -> Vec<Arc<dyn Adapter>> {
+    vec![
+        Arc::new(ClaudeCodeAdapter::new(&settings(&CLAUDE_CODE_ID))),
+        Arc::new(CodexAdapter::new(&settings(&CODEX_ID))),
+    ]
+}
+
+/// Every variable a built adapter reaches its service by, once each: what
+/// the shell captures so a probe reaches the endpoint the adapter's CLI
+/// will, without anything below the shell reading the process.
+pub(crate) fn service_vars() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = built_adapters(|_| AdapterSettings::default())
+        .iter()
+        .flat_map(|adapter| adapter.service_vars().iter().copied())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// What every adapter this binary builds declares it can do, and what its
+/// sandbox is set to for an `edit` session, each under the settings the
+/// config gives it: what `check` judges a workflow's `permissions:` and
+/// `agent:` against. `None` for an adapter this binary does not build: a
+/// capability it cannot see is not one it can call absent.
+pub(crate) fn declared_facts(
+    config: &ConfigLayer,
+) -> impl Fn(&AdapterId) -> Option<yunta_engine::AdapterFacts> {
+    let configured = config.adapters.clone().unwrap_or_default();
+    let built_facts: Vec<(AdapterId, yunta_engine::AdapterFacts)> =
+        built_adapters(|id| configured.get(id).cloned().unwrap_or_default())
+            .iter()
+            .map(|built| {
+                let facts = yunta_engine::AdapterFacts {
+                    capabilities: built.capabilities(),
+                    edit_sandbox: built.edit_sandbox(),
+                };
+                (built.id().clone(), facts)
+            })
+            .collect();
+    move |id| {
+        built_facts
+            .iter()
+            .find(|(built, _)| built == id)
+            .map(|(_, facts)| facts.clone())
+    }
+}
+
+/// The adapter this binary built under `id`, constructed without a
+/// probe: what a rail hook needs to reach one adapter's codec.
+pub(crate) fn built_adapter(id: &AdapterId) -> Option<std::sync::Arc<dyn Adapter>> {
+    built_adapters(|_| AdapterSettings::default())
+        .into_iter()
+        .find(|built| built.id() == id)
+}
+
+/// What this binary can run on, as a person reads it: every built
+/// adapter's own id, in order, comma-separated — the phrase a refusal
+/// ends with, derived rather than written.
+pub(crate) fn built_adapter_names() -> String {
+    let names: Vec<String> = built_adapters(|_| AdapterSettings::default())
+        .iter()
+        .map(|adapter| format!("`{}`", adapter.id()))
+        .collect();
+    names.join(", ")
+}
+
+/// The id a surface names when it shows what a `runners:` entry looks
+/// like. The first this binary builds, so the example is always an
+/// adapter that exists.
+pub(crate) fn first_built_adapter() -> AdapterId {
+    built_adapters(|_| AdapterSettings::default())
+        .first()
+        .map(|adapter| adapter.id().clone())
+        .unwrap_or_else(|| CLAUDE_CODE_ID.clone())
+}
+
+/// The adapters a real invocation offers: those of [`built_adapters`]
+/// that `runners:` names as a candidate somewhere in the merged config,
+/// each with that adapter's own settings (a `binary` override, if
+/// declared).
+pub(crate) fn real_adapters(config: &ConfigLayer) -> Adapters {
     let named: Vec<&AdapterId> = config
         .runners
         .iter()
@@ -147,74 +253,36 @@ pub(crate) fn real_adapters(config: &ConfigLayer) -> HashMap<AdapterId, Arc<dyn 
         .map(|candidate| &candidate.adapter)
         .collect();
 
-    let settings_for = |id: &AdapterId| {
+    built_adapters(|id| {
         config
             .adapters
             .as_ref()
             .and_then(|adapters| adapters.get(id))
             .cloned()
             .unwrap_or_default()
-    };
-
-    if named.contains(&&CLAUDE_CODE_ID) {
-        adapters.insert(
-            CLAUDE_CODE_ID.clone(),
-            Arc::new(ClaudeCodeAdapter::new(&settings_for(&CLAUDE_CODE_ID))),
-        );
-    }
-    if named.contains(&&CODEX_ID) {
-        adapters.insert(
-            CODEX_ID.clone(),
-            Arc::new(CodexAdapter::new(&settings_for(&CODEX_ID))),
-        );
-    }
-
-    adapters
+    })
+    .into_iter()
+    .filter(|adapter| named.contains(&adapter.id()))
+    .map(|adapter| (adapter.id().clone(), adapter))
+    .collect()
 }
 
-/// The forge a real invocation can offer — `None` when either
-/// `forge.github` isn't configured, or the named `token_env` isn't
-/// actually set in *this* process's environment, in which case a gate
-/// degrades to the console instead. `yunta check` already refuses a
-/// workflow with an external gate when the former is missing; the
-/// latter is a legitimate, expected runtime state — person B's machine,
-/// with no credentials at all, still runs `yunta` just fine, it only
-/// ever falls back to the console for a gate it can't reach the forge
-/// for.
-pub(crate) fn real_forge(config: &ConfigLayer) -> Option<Arc<dyn Forge>> {
-    let github = config.forge.as_ref()?.github.as_ref()?;
-    let token = std::env::var(&github.token_env).ok()?;
-    match GitHubForge::new(github.repo.clone(), Secret::new(token)) {
-        Ok(forge) => Some(Arc::new(forge)),
-        Err(e) => {
-            warn(format!(
-                "the forge is unavailable — {}; external gates degrade to the console",
-                describe(&e)
-            ));
-            None
-        }
-    }
-}
-
-/// Refuses early when `workflow` needs agent sessions no available
-/// adapter can provide: an error in check, never emulation at runtime.
+/// Refuses early when one of `nodes`, the nodes a run reaches, needs an
+/// agent session and no available adapter can provide one: an error in
+/// check, never emulation at runtime.
 pub(crate) fn refuse_unrunnable(
-    workflow: &Workflow,
-    adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
+    nodes: &[&yunta_core::Node],
+    adapters: &Adapters,
 ) -> Result<(), CliError> {
-    let needs_sessions = workflow.nodes.iter().any(|node| {
-        matches!(
-            node.kind,
-            yunta_core::NodeKind::Prompt { .. } | yunta_core::NodeKind::Loop { .. }
-        )
-    });
+    let needs_sessions = nodes.iter().any(|node| node.opens_session());
     if needs_sessions && adapters.is_empty() {
-        return Err(CliError::msg(
+        return Err(CliError::msg(format!(
             "this workflow has prompt/loop nodes but `runners:` in the merged config\n\
-             names no adapter this binary can run (only `claude-code` and `codex`\n\
-             are built). To exercise this workflow with the `mock` adapter instead, declare\n\
-             a test case under .yunta/tests/ and run `yunta test`.",
-        ));
+             names no adapter this binary can run (built: {}). To exercise this\n\
+             workflow with the `mock` adapter instead, declare a test case under\n\
+             .yunta/tests/ and run `yunta test`.",
+            built_adapter_names()
+        )));
     }
     Ok(())
 }
@@ -225,17 +293,17 @@ pub(crate) fn refuse_unrunnable(
 /// doctor` calls the same adapters' `probe()` directly instead of
 /// through this helper, since it reports every result rather than
 /// stopping at the first failure.
-pub(crate) async fn probe_or_refuse(
-    adapters: &HashMap<AdapterId, Arc<dyn Adapter>>,
-) -> Result<(), CliError> {
+pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {
         match adapter.probe().await {
             Ok(ProbeReport::Healthy { .. }) => {}
+            // An adapter that reports itself unhealthy without saying
+            // why is listed by name alone.
             Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                unhealthy.push(format!("{name}: {diagnostic}"));
+                unhealthy.push(yunta_core::text::detailed(name, &diagnostic));
             }
-            Err(e) => unhealthy.push(format!("{name}: {e}")),
+            Err(e) => unhealthy.push(yunta_core::text::detailed(name, &e.to_string())),
         }
     }
     if unhealthy.is_empty() {
@@ -255,37 +323,22 @@ pub(crate) async fn probe_or_refuse(
 /// prints it on its own, so the framing is each caller's and the
 /// sentence is one — a reader meets the same fact worded the same way
 /// on either surface.
-pub(crate) fn unknown_kinds_note(counts: &[UnknownKindCount]) -> Option<String> {
+pub(crate) fn unknown_kinds_note(
+    counts: &[UnknownKindCount],
+    glyphs: crate::render::Glyphs,
+) -> Option<String> {
     if counts.is_empty() {
         return None;
     }
     let kinds: Vec<String> = counts
         .iter()
-        .map(|count| format!("{} ×{}", count.kind, count.events))
+        .map(|count| format!("{} {}{}", count.kind, glyphs.times(), count.events))
         .collect();
     Some(format!(
         "{}, interpreted partially: {}",
-        counted(counts.len(), "unknown event kind"),
+        yunta_core::text::counted(counts.len(), "unknown event kind"),
         kinds.join(", ")
     ))
-}
-
-/// `n` things, named: `1 case`, `2 cases`. The one place the CLI turns a
-/// count it is already holding into a phrase, so no message hedges with
-/// `(s)` while the number sits right there.
-///
-/// `noun` takes a plain `-s` plural, which is every noun the CLI counts.
-///
-/// The phrase is one string, so its width varies with the count. A
-/// column that right-aligns its number (`{:>3}`) has to keep the two
-/// apart — format the count itself and follow it with the noun — or the
-/// column goes ragged the first time a total reaches two digits.
-pub(crate) fn counted(n: usize, noun: &str) -> String {
-    if n == 1 {
-        format!("{n} {noun}")
-    } else {
-        format!("{n} {noun}s")
-    }
 }
 
 /// Resolves a workflow reference to a file, the one rule `check`, `run`
@@ -302,38 +355,130 @@ pub(crate) fn resolve_workflow_ref(cwd: &Path, reference: &Path) -> Result<PathB
     }
 }
 
-/// `yunta check` before running anything — a workflow that fails static
-/// validation never creates a run. `workflow_path` is where `workflow`
-/// itself was loaded from — needed to tell `check_workflow_refs`
-/// whether this workflow already lives inside a pack, since the
-/// cross-pack composition rule only applies once you're inside one.
-pub(crate) fn check_or_refuse(
+/// The literal `files:` paths the nodes of `workflow` that `mode_nodes`
+/// includes (every node when `None`) read and a run started at
+/// `ctx.cwd` from `base` would not find: refused when nothing that runs
+/// before the reader can write them, warned about when something might.
+pub(crate) async fn context_files(
+    ctx: &crate::context::Context,
     workflow: &Workflow,
-    config: &ConfigLayer,
-    workflow_path: &std::path::Path,
-) -> Result<(), CliError> {
-    // Warnings (e.g. a `parallel` group that can't verify its children
-    // won't collide) are visible but never block — only `check()`'s
-    // errors do.
-    for warning in yunta_engine::check_warnings(workflow, config) {
-        warn(warning);
+    mode_nodes: Option<&std::collections::HashSet<yunta_core::NodeId>>,
+    isolation: yunta_core::Isolation,
+    base: &yunta_core::CommitSha,
+) -> Result<yunta_engine::ContextFilesCheck, CliError> {
+    yunta_engine::check_context_files(
+        workflow,
+        mode_nodes,
+        yunta_engine::RunTreeOrigin {
+            checkout: &ctx.cwd,
+            isolation,
+            base,
+        },
+        ctx.supervision(),
+    )
+    .await
+    .map_err(CliError::from)
+}
+
+/// [`context_files`] for a run started here now, from the commit
+/// `ctx.cwd` is on. Every node counts, since nothing has chosen a mode.
+/// Nothing to say outside a repository with a commit, where no run starts
+/// either; a stop while asking for that commit is the command's stop.
+pub(crate) async fn context_files_at_head(
+    ctx: &crate::context::Context,
+    workflow: &Workflow,
+    isolation: yunta_core::Isolation,
+) -> Result<yunta_engine::ContextFilesCheck, CliError> {
+    let base = match yunta_engine::head_commit(&ctx.cwd, ctx.supervision()).await {
+        Ok(base) => base,
+        Err(stopped) if stopped.cancelled() => {
+            return Err(yunta_engine::RunError::from(stopped).into())
+        }
+        Err(_) => return Ok(Default::default()),
+    };
+    context_files(ctx, workflow, None, isolation, &base).await
+}
+
+/// The line a run starts with: its whole id — the record a script and a
+/// log keep — what is happening to it, and the command that follows it
+/// by its handle. Under `--quiet`, the id and nothing else; under `--json`,
+/// nothing, because the document is the whole answer.
+pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, look: &Look) {
+    match output {
+        Mode::Human => crate::output::say(
+            look,
+            format!(
+                "run {run_id}: {doing} — `{}` follows it",
+                advice::status(run_id.handle())
+            ),
+        ),
+        Mode::Quiet => crate::output::say(look, run_id.to_string()),
+        Mode::Json => {}
     }
-    let mut errors = yunta_engine::check(workflow, config);
-    // The composition reference graph (`use:` names resolve, acyclic,
-    // within depth) reads the repo catalog under the current
-    // directory — the same `.yunta/workflows/` a run's children resolve
-    // against at birth.
-    if let Ok(cwd) = std::env::current_dir() {
-        let origin = yunta_engine::origin_of(&cwd, workflow_path);
-        errors.extend(yunta_engine::check_workflow_refs(
-            workflow, config, &cwd, &origin,
-        ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use yunta_core::describe;
+
+    #[tokio::test]
+    async fn a_later_link_of_a_detached_chain_adds_to_the_log() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("detached.log");
+        for line in ["first link\n", "second link\n"] {
+            detached_log(&path)
+                .await
+                .unwrap()
+                .write_all(line.as_bytes())
+                .unwrap();
+        }
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written, "first link\nsecond link\n");
     }
-    if errors.is_empty() {
-        return Ok(());
+
+    /// Every sentence that tells a person which adapters exist reads
+    /// from the one place they are declared. Before this, three of them
+    /// spelled the pair out, so a third adapter would have landed with
+    /// the refusal, the probe listing and the `init` template all still
+    /// naming two.
+    #[test]
+    fn what_a_refusal_names_is_what_this_binary_builds() {
+        let built = built_adapters(|_| AdapterSettings::default());
+        assert!(
+            !built.is_empty(),
+            "a binary with no adapter can run no session"
+        );
+
+        let workflow = yunta_core::yaml::parse::<Workflow>(
+            "name: w\nnodes:\n  - id: a\n    kind: prompt\n    runner: r\n    prompt: p\n",
+        )
+        .expect("the workflow parses");
+        let refusal =
+            refuse_unrunnable(&workflow.iter_nodes().collect::<Vec<_>>(), &Adapters::new())
+                .expect_err("a prompt node with no adapter is unrunnable");
+
+        let text = describe(&refusal);
+        for adapter in &built {
+            assert!(
+                text.contains(adapter.id().as_str()),
+                "the refusal names `{}`, which this binary builds: {text}",
+                adapter.id()
+            );
+        }
     }
-    Err(CliError::msg(yunta_core::text::problems(
-        "the workflow fails `yunta check`",
-        &errors,
-    )))
+
+    /// The example a surface offers is an adapter that exists, so
+    /// copying the line it prints produces a config this binary can run.
+    #[test]
+    fn the_example_a_surface_offers_is_an_adapter_this_binary_builds() {
+        let example = first_built_adapter();
+        assert!(
+            built_adapters(|_| AdapterSettings::default())
+                .iter()
+                .any(|adapter| *adapter.id() == example),
+            "`{example}` is offered as an example and is not built"
+        );
+    }
 }

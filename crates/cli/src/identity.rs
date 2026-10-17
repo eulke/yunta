@@ -9,11 +9,11 @@ use yunta_core::Responder;
 /// authenticates it. The log stays honest about which identities were
 /// asserted and which were merely ambient. `$USER` unset degrades to
 /// `unverified:unknown` rather than dropping the attribution entirely.
-pub(crate) fn responder(claimed: Option<&Responder>) -> Responder {
+pub(crate) fn responder(claimed: Option<&Responder>, user: Option<&str>) -> Responder {
     match claimed {
         Some(by) => by.clone(),
         None => {
-            let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+            let user = user.unwrap_or("unknown");
             // `$USER` is one word on every shell this runs under; a value
             // that is not one line falls back to the unknown ambient identity.
             format!("unverified:{user}")
@@ -31,18 +31,20 @@ mod tests {
     #[test]
     fn an_explicit_claim_is_recorded_verbatim() {
         let alice: Responder = "alice".parse().unwrap();
-        assert_eq!(responder(Some(&alice)), "alice");
+        assert_eq!(responder(Some(&alice), None), "alice");
+        assert_eq!(responder(Some(&alice), Some("ada")), "alice");
     }
 
     #[test]
     fn an_ambient_user_is_marked_unverified() {
-        // Whatever `$USER` is, a decision made without `--by` carries the
-        // `unverified:` mark so the log never presents an ambient identity
-        // as a claimed one.
-        assert!(
-            responder(None).as_str().starts_with("unverified:"),
-            "got: {}",
-            responder(None)
-        );
+        // A decision made without `--by` carries the `unverified:` mark, so
+        // the log never presents an ambient identity as a claimed one.
+        assert_eq!(responder(None, Some("ada")), "unverified:ada");
+    }
+
+    #[test]
+    fn an_unset_or_multi_line_user_degrades_to_unknown() {
+        assert_eq!(responder(None, None), "unverified:unknown");
+        assert_eq!(responder(None, Some("ada\nlovelace")), "unverified:unknown");
     }
 }

@@ -1,34 +1,55 @@
 //! Sessions end-to-end: session events, the skills chain, on_finish distillation, runner fan-out, forensic events.jsonl, and resume_session.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_testkit::{Bench, FixedClock, MOCK_CONFIG};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::Bench;
+use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{
+    ArtifactEvent, Failure, FindingEvent, NodeEvent, NodeOutcome, PauseReason, ScopeEvent,
+    SessionEvent,
+};
+use yunta_core::port::{Policy, PolicyApplied};
+use yunta_core::Capabilities;
+
+#[path = "run_sessions/confinement.rs"]
+mod confinement;
+
+#[path = "run_sessions/frozen.rs"]
+mod frozen;
+
+#[path = "run_sessions/messages.rs"]
+mod messages;
+
+#[path = "run_sessions/distill.rs"]
+mod distill;
+
+/// Whether a pause is the failure of `node`, and the headline its failure states.
+fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
+    matches!(
+        pause,
+        PauseReason::NodeFailed { node: named, failure }
+            if named.as_str() == node && yunta_render::failure::headline(failure) == headline
+    )
+}
 
 #[tokio::test]
 async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() {
     let bench = Bench::new();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let opened = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::AgentSessionOpened(p)) => {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(p))) => {
                 Some((e.node_id.clone(), p.clone()))
             }
             _ => None,
@@ -43,126 +64,78 @@ sessions:
 }
 
 #[tokio::test]
-async fn agent_messages_are_bounded_summaries_that_never_carry_note_content() {
-    let bench = Bench::new();
-    let fixture = r#"
-sessions:
-  - steps:
-      - { type: note, text: "thinking about SECRET-TOKEN-123 carefully" }
-      - { type: usage, input_tokens: 40, output_tokens: 10 }
-      - { type: tool_use, name: edit, target_digest: abc123 }
-    outcome: { type: completed, summary: "done" }
-"#;
-    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let messages: Vec<&yunta_core::events::AgentMessagePayload> = events
-        .iter()
-        .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::AgentMessage(p)) => Some(p),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(messages.len(), 3, "one agent_message per adapter event");
-
-    // Never the content — a mechanical size+digest summary only.
-    let jsonl = serde_json::to_string(&messages).unwrap();
-    assert!(
-        !jsonl.contains("SECRET-TOKEN-123"),
-        "note content must never be persisted: {jsonl}"
-    );
-    let note = messages
-        .iter()
-        .find(|m| m.message_type == yunta_core::events::AgentMessageType::Note)
-        .unwrap();
-    let summary = note.text.as_deref().unwrap_or_default();
-    assert_eq!(summary, "41 bytes, sha256 052f9656f4d7");
-
-    let usage = messages
-        .iter()
-        .find(|m| m.message_type == yunta_core::events::AgentMessageType::Usage)
-        .unwrap();
-    assert_eq!(usage.input_tokens, Some(40));
-    assert_eq!(usage.output_tokens, Some(10));
-
-    let tool = messages
-        .iter()
-        .find(|m| m.message_type == yunta_core::events::AgentMessageType::ToolUse)
-        .unwrap();
-    assert_eq!(tool.tool_name.as_deref(), Some("edit"));
-    assert_eq!(tool.target_digest.as_deref(), Some("abc123"));
-}
-
-#[tokio::test]
 async fn resolved_skills_reach_the_session_request_always_first() {
     let bench = Bench::new();
     install_skill(&bench.worktree, "conventions");
     install_skill(&bench.worktree, "grill");
     let fixture = r#"
-capabilities: { skills: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, adapter) =
-        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    let RunReport { terminal, .. } = bench
+        .run_with_config(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let seen = adapter.skills_seen();
+    // A run mounts each skill from the copy it froze at birth, in its own
+    // directory, not from the checkout.
+    let frozen = bench.run_dir().join("frozen/skills");
+    let seen = bench.mock().skills_seen();
     assert_eq!(seen.len(), 1);
     assert_eq!(
         seen[0],
-        vec![
-            bench.worktree.join(".yunta/skills/conventions"),
-            bench.worktree.join(".yunta/skills/grill"),
-        ],
+        vec![frozen.join("conventions"), frozen.join("grill")],
         "skills.always mounts first, then the node's own list"
     );
 }
 
+/// A skill the run cannot resolve refuses the run at birth, and the refusal
+/// names the skill and the directory it looked in.
 #[tokio::test]
-async fn a_missing_skill_name_fails_the_node_with_where_it_looked() {
+async fn a_missing_skill_name_refuses_the_run_at_birth() {
     let bench = Bench::new();
     install_skill(&bench.worktree, "conventions");
     // `grill` is never installed.
     let fixture = r#"
-capabilities: { skills: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state, adapter) =
-        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
-    match &terminal {
-        RunTerminal::Paused { reason } => {
-            assert_eq!(
-                *reason,
-                format!(
-                    "node `work` failed: skill `grill` not found under `{}` — add the directory, fix `skills.paths` in the config, or install the pack that declares it",
-                    bench.worktree.join(".yunta/skills").display()
-                )
-            );
-        }
-        other => panic!("a missing skill must fail the node, got {other:?}"),
-    }
-    assert!(matches!(
-        state.nodes.get("work"),
-        Some(NodeState::Failed { .. })
-    ));
-    assert!(adapter.skills_seen().is_empty(), "no session was spawned");
+    let error = bench
+        .try_create(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await
+        .expect_err("a skill that resolves to nothing refuses the run");
+
+    let said = error.to_string();
+    let looked = bench.worktree.join(".yunta/skills").display().to_string();
+    assert!(said.contains("grill") && said.contains(&looked), "{said}");
+    assert!(
+        !bench.run_dir().exists(),
+        "a refused birth creates no run directory"
+    );
+    assert!(bench.events().is_empty(), "no session was spawned");
 }
 
 #[tokio::test]
 async fn an_adapter_without_the_skills_capability_degrades_with_an_event() {
-    let bench = Bench::new();
+    // Only skills are absent. Run tools stay declared: a session's hook
+    // reaches the engine through the run's listener, and without one the
+    // session opens nothing.
+    let bench = Bench::new().with_capabilities(Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     install_skill(&bench.worktree, "conventions");
     install_skill(&bench.worktree, "grill");
-    // Default capabilities: `skills: false`.
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, adapter) =
-        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    let RunReport { terminal, .. } = bench
+        .run_with_config(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -170,15 +143,17 @@ sessions:
     );
 
     assert_eq!(
-        adapter.skills_seen(),
+        bench.mock().skills_seen(),
         vec![Vec::<std::path::PathBuf>::new()],
         "the engine never populates skills an adapter didn't declare"
     );
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let degraded = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(
+                p,
+            ))) => Some(p),
             _ => None,
         })
         .expect("the degradation must be an event, never silence");
@@ -190,7 +165,7 @@ sessions:
 async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let bench = Bench::new();
     let fixture = distill_fixture(&bench);
-    let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let dest = bench
@@ -200,8 +175,8 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let copied = std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land");
     assert_eq!(copied, "DISTILLED-MARKER: the durable decision\n");
 
-    let provenance: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     assert_eq!(
         provenance["source_run"].as_str(),
@@ -219,142 +194,11 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
 
     // The knowledge travels on the run's own branch: a conventional
     // commit exists in the worktree.
-    let log = std::process::Command::new("git")
-        .args(["log", "--oneline", "-3"])
-        .current_dir(&bench.worktree)
-        .output()
-        .unwrap();
-    let log = String::from_utf8_lossy(&log.stdout);
+    let subjects = bench.commit_subjects();
     assert!(
-        log.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
-        "got: {log}"
+        subjects.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
+        "got: {subjects:?}"
     );
-}
-
-#[tokio::test]
-async fn a_distill_path_never_produced_becomes_a_finding_and_the_rest_lands() {
-    let bench = Bench::new();
-    let workflow = r#"
-name: distiller
-nodes:
-  - id: plan
-    kind: prompt
-    runner: executor
-    prompt: "Write the plan to {{node.artifacts}}/plan.md."
-    artifacts:
-      produces: [plan.md]
-  - id: notes
-    kind: prompt
-    runner: executor
-    depends_on: [plan]
-    prompt: "Maybe write notes."
-    artifacts:
-      produces: [notes.md]
-on_finish:
-  - distill: [{ node: plan, name: plan.md }, { node: notes, name: notes.md }]
-"#;
-    // `notes` fails before producing its artifact — but with a re-route
-    // budget of zero the run pauses... instead: notes produces, then we
-    // delete it? Simpler: notes' fixture writes the artifact and the run
-    // finishes, then this test only covers the produced path. The
-    // missing-path case uses a workflow whose declared artifact the
-    // session legitimately produced but distill names one more — which
-    // check would refuse. So: simulate runtime-missing by removing the
-    // file after the run? No — distill runs inside execute_run. The
-    // honest runtime-missing case: `notes` is mode-excluded.
-    let workflow = workflow.replace(
-        "on_finish:",
-        "modes:\n  quick: { include: [plan] }\n  full: { include: all }\non_finish:",
-    );
-    let fixture = format!(
-        r#"
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.md", content: "plan\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-"#,
-        artifacts = bench.staging("plan").display()
-    );
-    // Run in `quick` mode: `notes` never runs, its artifact never
-    // exists, but distill declares it.
-    let workflow_parsed: Workflow = serde_norway::from_str(&workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow_parsed,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"quick".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
-    assert_eq!(report.terminal, RunTerminal::Finished);
-
-    let dest = bench
-        .worktree
-        .join(".yunta/knowledge/distilled/distiller")
-        .join(bench.run_id.as_str());
-    assert!(dest.join("plan.md").exists(), "the produced path lands");
-    assert!(!dest.join("notes.md").exists());
-
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let finding = events
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
-            _ => None,
-        })
-        .expect("the missing path must become a finding, never be lost");
-    assert!(finding.title.contains("notes.md"), "got: {finding:?}");
-    assert_eq!(finding.severity, yunta_core::events::FindingSeverity::Minor);
-
-    let provenance: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
-            .unwrap();
-    let listed: Vec<&str> = provenance["artifacts"]
-        .as_sequence()
-        .unwrap()
-        .iter()
-        .map(|a| a["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(listed, vec!["plan.md", "notes.md"]);
-    assert_eq!(provenance["artifacts"][1]["missing"].as_bool(), Some(true));
 }
 
 #[tokio::test]
@@ -377,7 +221,7 @@ on_finish:
   - distill: [{ node: plan, name: plan.md }]
 "#;
     let fixture = distill_fixture(&bench);
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
         !bench.worktree.join(".yunta/knowledge").exists(),
@@ -389,7 +233,7 @@ on_finish:
 async fn a_later_run_mounts_the_distilled_knowledge() {
     let bench = Bench::new();
     let fixture = distill_fixture(&bench);
-    let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // Second run, same checkout: a knowledge context source must see
@@ -405,60 +249,15 @@ nodes:
     prompt: "Use what the team learned."
 "#;
     let second_fixture = r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "DISTILLED-MARKER"
     outcome: { type: completed, summary: "informed" }
 "#;
-    let workflow: Workflow = serde_norway::from_str(second_workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let second_id = RunId::from("run-test-2");
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &second_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-    let report = execute_run(RunEnv {
-        run_id: &second_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
+    let consumer = bench.beside("run-test-2");
+    let RunReport { terminal, .. } = consumer.run(second_workflow, second_fixture).await;
     assert_eq!(
-        report.terminal,
+        terminal,
         RunTerminal::Finished,
         "the consumer session only matches if the distilled content reached its prompt"
     );
@@ -475,9 +274,9 @@ nodes:
   - id: review
     kind: prompt
     runners: [reviewer, reviewer-alt]
-    prompt: "Audit as {{runner.role}}; write {{node.artifacts}}/findings-{{runner.role}}.md"
+    prompt: "Audit as {{runner.name}}; write {{node.artifacts}}/findings-{{runner.name}}.md"
     artifacts:
-      produces: ["findings-{{runner.role}}.md"]
+      produces: ["findings-{{runner.name}}.md"]
 "#;
     let config = r#"
 runners:
@@ -490,6 +289,7 @@ runners:
     // directory of its own.
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Audit as reviewer;"
     effects:
@@ -504,13 +304,13 @@ sessions:
         alt = bench.staging("review@reviewer-alt").display()
     );
 
-    let (terminal, state) = bench.run_with_config(workflow, &fixture, config).await;
+    let RunReport { terminal, state } = bench.run_with_config(workflow, &fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["review@reviewer", "review@reviewer-alt"] {
         assert!(
-            matches!(state.nodes.get(node), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` should be finished, got {:?}",
-            state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
     // The templated artifact names rendered per expanded node, each
@@ -544,7 +344,7 @@ nodes:
   - id: review
     kind: prompt
     runners: [reviewer, reviewer-alt]
-    prompt: "Audit as {{runner.role}} and report what you find."
+    prompt: "Audit as {{runner.name}} and report what you find."
     artifacts:
       produces: [findings]
 "#;
@@ -556,7 +356,7 @@ runners:
     - { adapter: mock, model: mock-model }
 "#;
     let fixture = r#"
-capabilities: { run_tools: true }
+dialect: claude-code
 sessions:
   - match_prompt_contains: "Audit as reviewer and"
     steps:
@@ -572,7 +372,7 @@ sessions:
     outcome: { type: completed, summary: "reviewed-alt" }
 "#;
 
-    let (terminal, state) = bench.run_with_config(workflow, fixture, config).await;
+    let RunReport { terminal, state } = bench.run_with_config(workflow, fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     // One acceptance per sibling, under the same identity and different
@@ -631,17 +431,93 @@ runners:
     - { adapter: mock, model: mock-model, agent: benito }
 "#;
     let fixture = r#"
-capabilities: { custom_agents: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "audited" }
 "#;
-    let (terminal, _, adapter) = run_with_recording_mock(&bench, workflow, fixture, config).await;
+    install_agent(&bench.worktree, "security-auditor");
+    // The candidate's own agent is resolved when the run is born, too.
+    install_agent(&bench.worktree, "benito");
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        adapter.agents_seen(),
+        bench.mock().agents_seen(),
         vec![Some("security-auditor".into())],
         "the node's own agent wins over the candidate's"
     );
+    let instructions = bench.mock().requests_seen()[0]
+        .agent
+        .as_ref()
+        .map(|agent| agent.instructions.clone());
+    assert_eq!(instructions.as_deref(), Some("Work as security-auditor."));
+}
+
+/// A node's own effort wins over its runner's, one that names none runs
+/// at its runner's, and the log says at which each session reasoned.
+#[tokio::test]
+async fn a_node_s_effort_wins_over_its_runner_s_and_the_session_records_it() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: effort
+nodes:
+  - { id: deep, kind: prompt, runner: thinker, effort: xhigh, prompt: "Think." }
+  - { id: plain, kind: prompt, runner: thinker, depends_on: [deep], prompt: "Do." }
+"#;
+    let config = r#"
+runners:
+  thinker:
+    - { adapter: mock, model: mock-model, effort: medium }
+"#;
+    let fixture = r#"
+dialect: claude-code
+sessions:
+  - outcome: { type: completed, summary: "thought" }
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let asked: Vec<_> = bench
+        .mock()
+        .requests_seen()
+        .iter()
+        .map(|request| request.effort)
+        .collect();
+    use yunta_core::Effort;
+    assert_eq!(asked, vec![Some(Effort::Xhigh), Some(Effort::Medium)]);
+    let recorded: Vec<_> = bench
+        .events()
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(p))) => {
+                Some(p.effort)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(recorded, asked);
+}
+
+/// An agent the run cannot resolve to a definition refuses the run at
+/// birth, before any session spends a token on it, saying where it looked.
+#[tokio::test]
+async fn an_agent_without_a_definition_refuses_the_run_at_birth() {
+    let bench = Bench::new();
+    let workflow = "name: w\nnodes:\n  - { id: audit, kind: prompt, runner: executor, agent: nobody, prompt: \"Audit.\" }\n";
+    let fixture =
+        "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: done }\n";
+
+    let error = bench
+        .try_create(workflow, fixture, yunta_testkit::MOCK_CONFIG)
+        .await
+        .expect_err("an agent that resolves to nothing refuses the run");
+
+    assert!(error.to_string().contains(".yunta/agents"), "{error}");
+    assert!(
+        !bench.run_dir().exists(),
+        "a refused birth creates no run directory"
+    );
+    assert!(bench.events().is_empty(), "no session was opened");
 }
 
 #[tokio::test]
@@ -671,7 +547,6 @@ nodes:
     prompt: "Read your task from the tasks document and implement it."
     scope_expansion:
       mode: rules
-      within: ["extra-*.txt"]
       max_per_run: 2
 "#;
     let mut tasks = String::from("tasks:\n");
@@ -686,25 +561,30 @@ nodes:
 
     let mut fixture = plan_session(&tasks);
     for n in 1..=4 {
-        let request_yaml = format!(
-            "paths:\n  - extra-{n}.txt\nreason: \"needs the extra file\"\nproposed_criterion:\n  cmd: \"test -f extra-{n}.txt\"\n"
-        );
         fixture.push_str(&format!(
-            "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: a{n}.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: did-{n} }}\n",
-            yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
-            request_yaml,
+            "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: a{n}.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-{n} }}\n",
+            request_step(serde_json::json!({
+                "paths": [format!("extra-{n}.txt")],
+                "reason": "needs the extra file",
+                "proposed_criterion": { "cmd": format!("test -f extra-{n}.txt") },
+            })),
         ));
     }
 
-    let (_terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal: _terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let requested = events
         .iter()
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::ScopeExpansionRequested(_))
+                Some(yunta_core::events::EventPayload::Scope(
+                    ScopeEvent::Requested(_)
+                ))
             )
         })
         .count();
@@ -713,7 +593,9 @@ nodes:
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::ScopeExpansionGranted(_))
+                Some(yunta_core::events::EventPayload::Scope(
+                    ScopeEvent::Granted(_)
+                ))
             )
         })
         .count();
@@ -739,69 +621,30 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    // Corrupt the log by hand: a node_finished with no node_started —
-    // exactly the class of inconsistency `derive` refuses to guess over.
-    let wf: Workflow = serde_norway::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &wf,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("ghost".into()),
-                payload: yunta_core::events::EventPayload::NodeFinished(
-                    yunta_core::events::NodeFinishedPayload {
-                        outcome: "??".to_string(),
-                        tokens_used: yunta_core::events::TokenUsage::default(),
-                    },
-                ),
-            },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
-
-    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    let result = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await;
+    // Corrupt the log by hand between the run's creation and its first
+    // wake: a node_finished with no node_started — exactly the class of
+    // inconsistency `derive` refuses to guess over.
+    let result = bench
+        .try_run_sabotaged(workflow, "dialect: claude-code\nsessions: []\n", |_| {
+            bench
+                .storage
+                .append(
+                    &yunta_core::events::EventDraft::new(
+                        bench.run_id.clone(),
+                        Some("ghost".into()),
+                        yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                            yunta_core::events::NodeFinishedPayload::new(
+                                NodeOutcome::Summary("??".to_string()),
+                                yunta_core::events::TokenUsage::default(),
+                            ),
+                        )),
+                    )
+                    .expect("a draft names its subject"),
+                    &FixedClock,
+                )
+                .unwrap();
+        })
+        .await;
 
     assert!(
         matches!(result, Err(yunta_engine::RunError::Broken { .. })),
@@ -809,7 +652,7 @@ nodes:
     );
     // The corrupt log is exactly the one you most want exported — the
     // forensic copy exists even though the run errored.
-    let exported = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    let exported = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
     let kinds: Vec<String> = exported
         .lines()
         .filter(|line| !line.is_empty())
@@ -832,7 +675,7 @@ nodes:
 #[tokio::test]
 async fn an_orphaned_prompt_with_resume_session_continues_the_same_session() {
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "picked up where it left off" }
 "#;
@@ -841,6 +684,7 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: &[],
+        capabilities: None,
     })
     .await;
 
@@ -853,7 +697,7 @@ sessions:
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
         )),
         "a successful resume degrades nothing"
     );
@@ -862,6 +706,7 @@ sessions:
 #[tokio::test]
 async fn resume_session_without_the_capability_degrades_to_restart_with_an_event() {
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
@@ -870,6 +715,10 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: &[],
+        capabilities: Some(yunta_core::Capabilities {
+            run_tools: true,
+            ..Default::default()
+        }),
     })
     .await;
 
@@ -878,8 +727,8 @@ sessions:
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied.contains("restart_node")
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
+                    && p.policy == PolicyApplied::Known(Policy::FreshSession)
         )),
         "degrading to a fresh session must be an event, never a silence"
     );
@@ -888,7 +737,7 @@ sessions:
 #[tokio::test]
 async fn resume_session_with_no_recorded_session_restarts_with_an_event() {
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "fresh session" }
 "#;
@@ -897,6 +746,7 @@ sessions:
         fixture,
         session: None,
         staged: &[],
+        capabilities: None,
     })
     .await;
 
@@ -905,8 +755,8 @@ sessions:
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied.contains("no session")
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
+                    && p.policy == PolicyApplied::Known(Policy::FreshSession)
         )),
         "a crash before the session opened restarts WITH an explicit event"
     );
@@ -915,19 +765,20 @@ sessions:
 #[tokio::test]
 async fn a_clean_first_run_under_resume_session_spawns_normally_without_events() {
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "first run" }
 "#;
     let bench = Bench::new();
-    let (terminal, _state, adapter) =
-        run_with_recording_mock(&bench, RESUME_WORKFLOW, fixture, MOCK_CONFIG).await;
+    let RunReport { terminal, .. } = bench.run(RESUME_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    assert!(adapter.resumes_seen().is_empty());
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(bench.mock().resumes_seen().is_empty());
+    let events = bench.events();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
+        Some(yunta_core::events::EventPayload::Session(
+            SessionEvent::CapabilityDegraded(_)
+        ))
     )));
 }
 
@@ -955,7 +806,7 @@ async fn a_continued_session_keeps_the_artifact_it_had_already_written() {
     // file is work it did. It does not write it again, and the node
     // closes on it.
     let fixture = r#"
-capabilities: { resume_session: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "finished what it had started" }
 "#;
@@ -964,6 +815,7 @@ sessions:
         fixture,
         session: Some("mock-session-orig"),
         staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+        capabilities: None,
     })
     .await;
 
@@ -980,7 +832,7 @@ sessions:
     let accepted: Vec<String> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ArtifactAccepted(p)) => {
+            Some(yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(p))) => {
                 Some(p.artifact.to_string())
             }
             _ => None,
@@ -1000,14 +852,19 @@ async fn a_fresh_session_replacing_an_interrupted_one_opens_on_an_empty_staging(
     // what the one before it left is not its work, and the node owes an
     // artifact it never produced.
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "started over" }
 "#;
-    let (terminal, _events, adapter) = resume_orphan_with_mock(Orphan {
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
         workflow: RESUME_ARTIFACT_WORKFLOW,
         fixture,
         session: Some("mock-session-orig"),
         staged: REPORT_LEFT_BY_THE_CUT_SESSION,
+        capabilities: Some(yunta_core::Capabilities {
+            run_tools: true,
+            ..Default::default()
+        }),
     })
     .await;
 
@@ -1015,14 +872,23 @@ sessions:
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("a fresh session is judged on what it produced: {terminal:?}");
     };
+    let state = yunta_engine::derive(&events);
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("work") else {
+        panic!("`work` failed: {reason:?}");
+    };
+    let sentence = yunta_render::failure::sentence(failure);
     assert!(
-        reason.contains("report.md") && reason.contains("never produced"),
-        "nothing the replaced session left becomes this session's artifact: {reason}"
+        matches!(
+            reason,
+            PauseReason::NodeFailed { node, failure: cause }
+                if node.as_str() == "work"
+                    && yunta_render::failure::headline(cause).contains("report.md")
+        ) && sentence.contains("never produced"),
+        "nothing the replaced session left becomes this session's artifact: {reason:?} / {sentence}"
     );
 }
 
-/// A `prompt` node that declares `network: false` — the policy no adapter
-/// can enforce.
+/// A `prompt` node that declares `network: false`.
 const NETWORK_DECLARED_WORKFLOW: &str = r#"
 name: network-declared
 nodes:
@@ -1035,39 +901,76 @@ nodes:
 
 #[tokio::test]
 async fn network_false_is_reported_as_declarative_only() {
-    // `network: false` is a declared policy, not a capability the engine has:
-    // no adapter isolates the network (D105/D119). The engine records the gap
-    // before the session with a `capability_degraded`, never consolidating it
-    // into silence.
-    let bench = Bench::new();
+    // On an adapter that declares no network isolation, `network: false` is
+    // a declared policy it cannot keep. The engine records the gap before
+    // the session with a `capability_degraded`, never consolidating it into
+    // silence. Run tools stay declared, as the session's hook needs them.
+    let bench = Bench::new().with_capabilities(Capabilities {
+        run_tools: true,
+        ..Default::default()
+    });
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
         "network: false blocks nothing — policy, not capability"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let degraded = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
-                if p.capability == yunta_core::Capability::NetworkIsolation =>
-            {
-                Some(p)
-            }
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(
+                p,
+            ))) if p.capability == yunta_core::Capability::NetworkIsolation => Some(p),
             _ => None,
         })
         .expect("network: false the adapter cannot enforce must be an event, never silence");
     assert_eq!(degraded.adapter, "mock");
+    assert_eq!(degraded.policy, PolicyApplied::Known(Policy::NetworkOpen));
+
+    // The policy still reaches the session, which the adapter cannot enforce.
+    let networks: Vec<bool> = bench
+        .mock()
+        .requests_seen()
+        .iter()
+        .map(|req| req.confinement.network)
+        .collect();
+    assert_eq!(networks, [false]);
+}
+
+/// On an adapter that isolates the network, the node's `network: false`
+/// reaches the session's request, and nothing is degraded.
+#[tokio::test]
+async fn network_false_closes_the_network_of_the_session_s_commands() {
+    let bench = Bench::new();
+    let fixture = r#"
+dialect: claude-code
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let RunReport { terminal, state: _ } = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
     assert_eq!(
-        degraded.policy_applied,
-        "declarative-only — the adapter declares no network isolation; `network: false` is recorded for policy and audit, not enforced"
+        requests
+            .iter()
+            .map(|req| req.confinement.network)
+            .collect::<Vec<_>>(),
+        [false]
     );
+    assert!(!bench.events().iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::Session(
+            SessionEvent::CapabilityDegraded(_)
+        ))
+    )));
 }
 
 #[tokio::test]
@@ -1077,17 +980,18 @@ async fn a_node_that_declares_no_network_policy_records_no_isolation_degradation
     // there is nothing to degrade.
     let bench = Bench::new();
     let fixture = r#"
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an unset network policy is not a degradation"
@@ -1101,19 +1005,18 @@ async fn an_adapter_that_isolates_the_network_records_no_degradation() {
     // nothing — the policy is applied, not degraded.
     let bench = Bench::new();
     let fixture = r#"
-capabilities: { network_isolation: true }
+dialect: claude-code
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, _adapter) =
-        run_with_recording_mock(&bench, NETWORK_DECLARED_WORKFLOW, fixture, MOCK_CONFIG).await;
+    let RunReport { terminal, .. } = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an adapter that declares network isolation leaves nothing to degrade"
@@ -1149,7 +1052,7 @@ on_finish:
         view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
     );
     let fixture = distill_fixture(&bench);
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let dest = bench
@@ -1164,8 +1067,8 @@ on_finish:
 
     let held = bench.accepted();
     assert_eq!(held.len(), 1, "{held:?}");
-    let provenance: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     assert_eq!(
         provenance["artifacts"][0]["content_hash"].as_str(),
@@ -1192,6 +1095,7 @@ nodes:
     let staging = bench.staging("plan");
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - match_prompt_contains: "{staging}/plan.md"
     effects:
@@ -1201,7 +1105,7 @@ sessions:
         staging = staging.display()
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert_eq!(
         bench.mock().artifact_dirs_seen(),
@@ -1211,5 +1115,498 @@ sessions:
     assert_eq!(
         bench.artifact("plan.md").expect("the run holds it"),
         b"the plan\n"
+    );
+}
+
+/// A prompt node's session and a loop node's task session are opened by
+/// the same door, so neither can quietly get a different contract.
+///
+/// They differ in exactly three things, all of them the session's own:
+/// what it is asked to do, where it works, and where it may scaffold.
+/// Everything else — the model, the agent, the permissions, the skills,
+/// the secrets, the budget, the adapter settings, the tools endpoint's
+/// presence, the artifact directory — comes from the node, and the two
+/// nodes here declare the same runner.
+#[tokio::test]
+async fn a_prompt_session_and_a_task_session_are_opened_by_the_same_door() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: one-door
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
+    );
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "the run reaches its end");
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(requests.len(), 2, "one prompt session, one task session");
+    let (prompt, task) = (&requests[0], &requests[1]);
+
+    assert_eq!(prompt.model, task.model, "the same runner, the same model");
+    assert_eq!(prompt.agent, task.agent);
+    assert_eq!(prompt.confinement.profile, task.confinement.profile);
+    assert_eq!(prompt.skills, task.skills);
+    assert_eq!(
+        prompt
+            .env
+            .plain
+            .keys()
+            .chain(prompt.env.secret.keys())
+            .collect::<Vec<_>>(),
+        task.env
+            .plain
+            .keys()
+            .chain(task.env.secret.keys())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(prompt.budget, task.budget);
+    assert_eq!(prompt.adapter_settings, task.adapter_settings);
+    assert_eq!(
+        prompt.run_tools_endpoint.is_some(),
+        task.run_tools_endpoint.is_some(),
+        "both sessions hold the run's tools, or neither does"
+    );
+
+    // And the three that are the session's own.
+    assert_ne!(prompt.prompt, task.prompt);
+    assert_ne!(prompt.cwd, task.cwd, "a task works in its own worktree");
+    assert_ne!(
+        prompt.scratch_dir, task.scratch_dir,
+        "concurrent sessions never scaffold over each other"
+    );
+}
+
+/// A task session's brief names its task and says where its contract is
+/// read — never the contract itself. The notes, scope and criteria stay
+/// in the run's tasks document, which the session reads and checks its
+/// work against through its own tools; and a check it asks for is the
+/// close's own judgement, so the close answers that tree from it.
+#[tokio::test]
+async fn a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_close_s() {
+    let bench = Bench::new();
+    let tasks = "tasks:\n  - id: task-1\n    title: \"Write a1\"\n    notes: \"the parser lives in src/lex.rs\"\n    scope: [\"a1.txt\"]\n    criteria:\n      - cmd: \"test -f a1.txt\"\n";
+    let mut fixture = plan_session(tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    steps:\n      - { type: run_tool, tool: yunta_task }\n      - { type: run_tool, tool: yunta_check_task }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let RunReport { terminal, state: _ } = bench.run(PLAN_THEN_LOOP_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let brief = bench
+        .mock()
+        .requests_seen()
+        .into_iter()
+        .map(|request| request.prompt)
+        .find(|prompt| prompt.contains("task-1"))
+        .expect("the task session's brief");
+    assert!(brief.contains("Your task: `task-1` — Write a1."), "{brief}");
+    assert!(
+        brief.contains("`mcp__yunta-run__yunta_task`")
+            && brief.contains("`mcp__yunta-run__yunta_check_task`"),
+        "the brief says where the task is read and how the work is judged: {brief}"
+    );
+    assert!(
+        brief.contains("It also carries the plan the task belongs to"),
+        "and that the plan is read there too: {brief}"
+    );
+    assert!(
+        !brief.contains("the parser lives in src/lex.rs") && !brief.contains("test -f a1.txt"),
+        "the brief carries no copy of the task's contract: {brief}"
+    );
+
+    assert_eq!(
+        first_post_check_reused(&bench.events()),
+        Some(true),
+        "the attempt's close answers the tree the session's own check already judged"
+    );
+}
+
+/// A planner that hands over a tasks document, and a loop that works it.
+const PLAN_THEN_LOOP_WORKFLOW: &str = r#"
+name: noted
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+
+/// Whether the run's first post-check answered from the cache rather
+/// than running its first criterion again.
+fn first_post_check_reused(events: &[yunta_core::events::StoredEvent]) -> Option<bool> {
+    events.iter().find_map(|event| match event.payload() {
+        Some(yunta_core::events::EventPayload::Node(NodeEvent::CriteriaChecked(p)))
+            if p.phase == yunta_core::events::Phase::Post =>
+        {
+            p.results.first().map(|result| result.reused)
+        }
+        _ => None,
+    })
+}
+
+/// A planner that hands over a criterion the engine cannot run hears so
+/// in the same session, fixes it, and the loop's pre-check reads what the
+/// handover already ran rather than running it again.
+#[tokio::test]
+async fn a_plan_refused_for_a_criterion_that_cannot_run_is_fixed_in_its_own_session() {
+    let bench = Bench::new();
+    let task = |criterion: &str| {
+        format!(
+            "{{ tasks: [{{ id: task-1, title: Write a1, scope: [a1.txt], \
+             criteria: [{{ cmd: \"{criterion}\" }}] }}] }}"
+        )
+    };
+    let fixture = format!(
+        "dialect: claude-code\nsessions:\n  - steps:\n\
+         \x20     - {{ type: run_tool, tool: yunta_submit_tasks, expect: refused, arguments: {{ document: {} }} }}\n\
+         \x20     - {{ type: run_tool, tool: yunta_submit_tasks, arguments: {{ document: {} }} }}\n\
+         \x20   outcome: {{ type: completed, summary: planned }}\n\
+         \x20 - match_prompt_contains: \"task-1\"\n    effects:\n      - {{ path: a1.txt, content: \"a\" }}\n\
+         \x20   outcome: {{ type: completed, summary: did-1 }}\n",
+        task("yunta-no-such-tool --version"),
+        task("test -f a1.txt"),
+    );
+
+    let RunReport { terminal, state } = bench.run(PLAN_THEN_LOOP_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let pre = bench
+        .events()
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::CriteriaChecked(p)))
+                if p.phase == yunta_core::events::Phase::Pre =>
+            {
+                Some(p.results.clone())
+            }
+            _ => None,
+        });
+    let pre = pre.expect("the loop pre-checked its task");
+    assert!(
+        pre[0].reused,
+        "the handover ran this criterion on the same tree: {pre:?}"
+    );
+}
+
+/// A loop whose runner cannot hold the run tools is refused before any
+/// session opens: its task sessions would have no way to read what their
+/// task asks, and a session working blind is what the refusal prevents.
+#[tokio::test]
+async fn a_loop_on_a_runner_without_run_tools_fails_before_any_session_opens() {
+    let bench = Bench::new().with_capabilities(Capabilities::default());
+    let workflow = r#"
+name: no-tools
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{node.artifacts}}/tasks.yaml"
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let RunReport { terminal, state: _ } = bench
+        .run(workflow, "dialect: claude-code\nsessions: []\n")
+        .await;
+
+    let RunTerminal::Paused { reason } = &terminal else {
+        panic!("the loop is refused, and the run waits on it: {terminal:?}");
+    };
+    let sentence = yunta_render::pause::sentence(reason);
+    assert!(
+        sentence.contains("node `implement` is a loop")
+            && sentence.contains("declares no `run_tools` capability"),
+        "{reason:?}"
+    );
+    assert!(
+        bench.mock().requests_seen().is_empty(),
+        "no session opened, so no token was spent"
+    );
+}
+
+/// Every session carries what it may write, always: a node that
+/// declared a scope carries it, and a `read_only` node carries a
+/// ceiling that admits nothing under the worktree.
+#[tokio::test]
+async fn every_session_carries_its_fence_and_read_only_allows_nothing_under_the_worktree() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: two-nodes
+nodes:
+  - id: scoped
+    kind: prompt
+    runner: executor
+    prompt: "Do the scoped thing."
+    scope: ["src/**"]
+  - id: reading
+    kind: prompt
+    runner: executor
+    depends_on: [scoped]
+    permissions: read-only
+    prompt: "Read the thing."
+"#;
+    let fixture = r#"
+dialect: claude-code
+sessions:
+  - outcome: { type: completed, summary: "scoped" }
+  - outcome: { type: completed, summary: "reading" }
+"#;
+    let RunReport { terminal, state: _ } = bench.run(workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(
+        requests[0].fence.allowed.as_deref(),
+        Some(["src/**".into()].as_slice()),
+        "the node's declared scope is the ceiling it works to"
+    );
+    assert_eq!(
+        requests[1].fence.allowed.as_deref(),
+        Some([].as_slice()),
+        "a read-only node may write nothing under the worktree"
+    );
+    assert!(
+        requests[0].confinement.writes_worktree(),
+        "a node with a declared scope may write its checkout"
+    );
+    assert!(
+        !requests[1].confinement.writes_worktree(),
+        "a read-only node writes nothing of its checkout"
+    );
+}
+
+/// A session that can ask for more scope is told to ask; one that
+/// cannot is told to report the need and move on.
+#[tokio::test]
+async fn a_task_session_advises_expansion_and_a_prompt_session_advises_a_finding() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: plan-then-work
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the tasks."
+    artifacts:
+      produces: [tasks]
+  - id: work
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
+    );
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(
+        requests[0].fence.advice,
+        yunta_core::fence::Advice::ReportFinding,
+        "a prompt session has no tool to ask with"
+    );
+    assert_eq!(
+        requests[1].fence.advice,
+        yunta_core::fence::Advice::RequestExpansion,
+        "a task session mounted the tool that asks"
+    );
+}
+
+/// A session whose stream ends saying nothing is not a sentence the
+/// engine invents: it is a fact with the adapter that owned it and how
+/// its process went, so a reader can tell a CLI that refused its
+/// configuration from one that merely stopped.
+#[tokio::test]
+async fn a_node_whose_session_died_fails_naming_the_adapter_and_the_exit() {
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run(
+            SESSION_EVENTS_WORKFLOW,
+            "dialect: claude-code\nsessions:\n  - outcome: { type: crash }\n",
+        )
+        .await;
+    assert!(
+        matches!(
+            terminal,
+            RunTerminal::Paused { .. } | RunTerminal::Failed { .. }
+        ),
+        "a run whose only node died does not finish: {terminal:?}"
+    );
+
+    let failure = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(p))) => {
+                Some(p.failure.clone())
+            }
+            _ => None,
+        })
+        .expect("the node failed");
+    let Failure::SessionDied { died } = &failure else {
+        panic!("a dead session is a fact, not a sentence: {failure:?}");
+    };
+    assert_eq!(died.adapter, "mock");
+    // A mock has no process of its own, so there is nothing to report
+    // about how one ended — and the sentence says exactly that.
+    assert_eq!(died.exit, None);
+    assert_eq!(
+        yunta_render::failure::sentence(&failure),
+        "session `mock` ended without a terminal event"
+    );
+    assert!(bench.mock().interrogated(), "the one that died was asked");
+    let work: yunta_core::NodeId = "work".parse().unwrap();
+    assert!(matches!(
+        state.nodes.state(&work),
+        Some(NodeState::Failed { .. })
+    ));
+}
+
+/// Asking costs a kill and a wait. A session that closed its turn said
+/// everything it had to say, so the question is never put to it.
+#[tokio::test]
+async fn a_session_that_finished_its_turn_is_never_asked_how_it_exited() {
+    let bench = Bench::new();
+    let RunReport { terminal, state: _ } = bench
+        .run(
+            SESSION_EVENTS_WORKFLOW,
+            "dialect: claude-code\nsessions:\n  - outcome: { type: completed, summary: \"done\" }\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(!bench.mock().interrogated());
+}
+
+// --- what every session and command of a run shares ------------------------
+
+/// A config whose one shared directory sits in the bench's world, beside
+/// the checkout and never inside it.
+fn sharing(bench: &Bench) -> (String, std::path::PathBuf) {
+    let dir = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("shared-cache");
+    let config = format!(
+        "{}shared_dirs:\n  SHARED_CACHE: {}\n",
+        yunta_testkit::MOCK_CONFIG,
+        dir.display()
+    );
+    (config, dir)
+}
+
+#[tokio::test]
+async fn a_command_of_the_run_finds_the_shared_directory_under_its_variable() {
+    let bench = Bench::new();
+    let (config, dir) = sharing(&bench);
+    let workflow = r#"
+name: shares
+nodes:
+  - id: build
+    kind: bash
+    run: "test -d \"$SHARED_CACHE\" && echo built > \"$SHARED_CACHE/built\""
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "dialect: claude-code\nsessions: []", &config)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        tokio::fs::read_to_string(dir.join("built")).await.unwrap(),
+        "built\n"
+    );
+}
+
+#[tokio::test]
+async fn a_session_that_writes_keeps_the_shared_directory_writable_and_one_that_reads_does_not() {
+    let bench = Bench::new();
+    let (config, dir) = sharing(&bench);
+    let workflow = r#"
+name: shares-with-sessions
+nodes:
+  - id: write
+    kind: prompt
+    runner: executor
+    prompt: "Write."
+  - id: read
+    kind: prompt
+    runner: executor
+    permissions: read-only
+    depends_on: [write]
+    prompt: "Read."
+"#;
+    let fixture = "\
+dialect: claude-code
+sessions:
+  - match_prompt_contains: \"Write.\"
+    outcome: { type: completed, summary: wrote }
+  - match_prompt_contains: \"Read.\"
+    outcome: { type: completed, summary: read }
+";
+
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    let (write, read) = (&requests[0], &requests[1]);
+    for request in [write, read] {
+        assert_eq!(
+            request.env.plain.get("SHARED_CACHE").map(String::as_str),
+            Some(dir.display().to_string().as_str()),
+            "every session finds the directory under its variable"
+        );
+    }
+    assert!(
+        write.confinement.roots.contains(&dir),
+        "{:?}",
+        write.confinement.roots
+    );
+    assert!(
+        !read.confinement.roots.contains(&dir),
+        "{:?}",
+        read.confinement.roots
     );
 }

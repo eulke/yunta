@@ -23,15 +23,18 @@
 //! always-approved gate is the node doing its job, excluded by
 //! construction).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use yunta_core::events::{EventPayload, GateResolvedPayload, Phase, StoredEvent};
+use yunta_core::events::{CriterionType, EventPayload, GateResolvedPayload, Phase, StoredEvent};
+use yunta_core::events::{GateEvent, NodeEvent, RunPhaseRaw};
 use yunta_core::{ModeName, NodeId, Workflow};
+
+use crate::replay::{derive, RunState};
 
 /// Below this many independent samples, a signal says nothing — a
 /// number without a distribution behind it is a guess wearing a data
 /// costume (same floor, and the same reasoning, as the prior
-/// estimation in `stats.rs`).
+/// estimation in `history.rs`).
 pub const MIN_SAMPLES: usize = 3;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,7 +61,7 @@ pub struct AlwaysFirstTryTasks {
     pub sample_count: usize,
 }
 
-/// A declared mode no historical run ever chose ("modo sin uso") —
+/// A declared mode no historical run ever chose ("unused mode") —
 /// evidence is "enough runs happened and none picked it", never "it has
 /// existed a long time".
 #[derive(Debug, Clone, PartialEq)]
@@ -89,39 +92,37 @@ impl VerificationFindings {
 /// `history` is every past run's own full event log — the caller's job
 /// (imperative shell) is gathering those; this function only reads them.
 pub fn analyze(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> VerificationFindings {
+    let states: Vec<RunState> = history.iter().map(|events| derive(events)).collect();
     VerificationFindings {
         never_red_criteria: never_red_criteria(history),
         never_triggered_reroutes: never_triggered_reroutes(workflow, history),
         always_approved_gates: always_approved_gates(workflow, history),
         always_first_try_tasks: always_first_try_tasks(history),
-        unused_modes: unused_modes(workflow, history),
+        unused_modes: unused_modes(workflow, &states),
     }
 }
 
-/// "modo sin uso": every declared mode against the mode
-/// each historical run actually recorded in its own `run_created`.
-fn unused_modes(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> Vec<UnusedMode> {
+/// "unused mode": every declared mode against the mode each historical
+/// run recorded when it was created. A log with no creation recorded no
+/// mode, so it counts toward the sample but names none.
+fn unused_modes(workflow: &Workflow, states: &[RunState]) -> Vec<UnusedMode> {
     let Some(modes) = &workflow.modes else {
         return Vec::new();
     };
-    if history.len() < MIN_SAMPLES {
+    if states.len() < MIN_SAMPLES {
         return Vec::new();
     }
-    let used: std::collections::HashSet<&ModeName> = history
+    let used: HashSet<&ModeName> = states
         .iter()
-        .filter_map(|events| {
-            events.iter().find_map(|e| match e.payload() {
-                Some(EventPayload::RunCreated(p)) => Some(&p.mode),
-                _ => None,
-            })
-        })
+        .filter(|state| !matches!(state.run.phase(), RunPhaseRaw::Unborn))
+        .map(|state| state.run.mode())
         .collect();
     modes
         .keys()
         .filter(|name| !used.contains(name))
         .map(|name| UnusedMode {
             name: name.clone(),
-            runs_observed: history.len(),
+            runs_observed: states.len(),
         })
         .collect()
 }
@@ -138,13 +139,20 @@ fn never_red_criteria(history: &[Vec<StoredEvent>]) -> Vec<NeverRedCriterion> {
     let mut samples: HashMap<String, (usize, usize)> = HashMap::new(); // cmd -> (total, red)
     for events in history {
         for event in events {
-            let Some(EventPayload::CriteriaChecked(p)) = event.payload() else {
+            let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() else {
                 continue;
             };
             if p.phase != Phase::Pre {
                 continue;
             }
-            for result in &p.results {
+            // A guard is green before the work by definition — it is
+            // there to stay green — so never being red is what it is
+            // for, not a sign it checks nothing.
+            for result in p
+                .results
+                .iter()
+                .filter(|result| result.r#type != Some(CriterionType::Guard))
+            {
                 let entry = samples.entry(result.cmd.clone()).or_default();
                 entry.0 += 1;
                 if result.exit_code != 0 {
@@ -194,7 +202,10 @@ fn never_triggered_reroutes(
             let ran = events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
+                    Some(
+                        EventPayload::Node(NodeEvent::Finished(_))
+                            | EventPayload::Node(NodeEvent::Failed(_))
+                    )
                 ) && e.node_id.as_ref() == Some(&node.id)
             });
             if !ran {
@@ -204,7 +215,7 @@ fn never_triggered_reroutes(
             let rerouted = events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(EventPayload::NodeRerouted(p)) if p.to_node == on_failure.goto
+                    Some(EventPayload::Node(NodeEvent::Rerouted(p))) if p.to_node == on_failure.goto
                 ) && e.node_id.as_ref() == Some(&node.id)
             });
             if rerouted {
@@ -250,7 +261,7 @@ fn always_approved_gates(
         let mut needed_adjustment = 0usize;
         for events in history {
             for event in events {
-                let Some(EventPayload::GateResolved(p)) = event.payload() else {
+                let Some(EventPayload::Gates(GateEvent::Resolved(p))) = event.payload() else {
                     continue;
                 };
                 if event.node_id.as_ref() != Some(&node_id) {
@@ -286,7 +297,7 @@ fn always_first_try_tasks(history: &[Vec<StoredEvent>]) -> Option<AlwaysFirstTry
     for events in history {
         let mut post_checks: HashMap<yunta_core::TaskId, usize> = HashMap::new();
         for event in events {
-            let Some(EventPayload::CriteriaChecked(p)) = event.payload() else {
+            let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() else {
                 continue;
             };
             if p.phase == Phase::Post {

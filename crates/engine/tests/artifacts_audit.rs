@@ -8,7 +8,7 @@
 //! bytes in the run's object store — and every reader resolves it there.
 
 use yunta_core::events::ArtifactId;
-use yunta_engine::RunTerminal;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 /// `alpha` produces `report.md`; `beta` declares `notes.md` of its own and
@@ -45,6 +45,7 @@ async fn a_node_that_writes_over_another_nodes_name_reaches_nothing() {
     let beta = bench.staging("beta");
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
@@ -60,7 +61,7 @@ sessions:
         beta = beta.display()
     );
 
-    let (terminal, state) = bench.run(THREE_NODES, &fixture).await;
+    let RunReport { terminal, state } = bench.run(THREE_NODES, &fixture).await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -134,6 +135,7 @@ nodes:
 "#;
     let fixture = format!(
         r#"
+dialect: claude-code
 sessions:
   - effects:
       - {{ path: "{alpha}/report.md", content: "ALPHA-REPORT" }}
@@ -148,7 +150,7 @@ sessions:
         beta = bench.staging("beta").display()
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let held = bench.accepted();

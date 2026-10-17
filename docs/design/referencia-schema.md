@@ -19,12 +19,18 @@ project:
   base_branch: main
   branch_prefix: yunta/
 
+forge:                              # la forja del equipo; token_env nombra la variable, nunca el token
+  github: { repo: acme/web, token_env: GITHUB_TOKEN }
+
 # Runners: bindings que los nodos piden vía nombre de rol.
 # Cada rol resuelve a una lista ordenada de candidatos.
 runners:
   planner:
-    - { adapter: claude-code, model: claude-opus-4-8 }
-    - { adapter: codex, model: gpt-5-codex }
+    - { adapter: claude-code, model: claude-opus-4-8, effort: high }
+    - { adapter: codex, model: gpt-5-codex, effort: high }
+                                    # effort: low | medium | high | xhigh — cuánto razona
+                                    # el modelo; ausente lo deja al CLI. Un nodo puede
+                                    # decir el suyo, que gana
   executor:
     - { adapter: claude-code, model: claude-sonnet-4-6 }
   reviewer:
@@ -39,15 +45,15 @@ adapters:
     binary: ~/.local/bin/claude     # override local (capa usuario)
   codex:
     binary: /usr/local/bin/codex
-    adapter_settings: { sandbox: workspace-write }
+    adapter_settings: { sandbox: workspace-write }   # sandbox de las sesiones edit: workspace-write (por defecto), read-only o danger-full-access. Las tres dan raíces el directorio del artefacto y los shared_dirs. Red: la del nodo con workspace-write; cerrada con read-only; exigida abierta con danger-full-access, que corre sin confinar
 
 defaults:
   runner: executor
-  isolation: worktree               # worktree | none (§7.3; `inherit` solo en nodos workflow)
+  isolation: worktree               # worktree | none (§7.3; la misma palabra en un nodo workflow)
   timeout_minutes: 45
   max_parallel_nodes: 4
   on_failure: pause                 # pause | abort | continue
-  on_interrupt: restart_node        # restart_node | resume_session
+  on_interrupt: restart_node        # restart_node | fail_if_uncertain | resume_session
 
 skills:
   paths: [.yunta/skills, ~/.yunta/skills]
@@ -58,15 +64,30 @@ skills:
 mcp_servers:                        # servers para la fuente de contexto `mcp`
   internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
 
+commands:                           # lo que el proyecto corre por cada capacidad que un workflow nombra
+  lint: "cargo clippy --workspace -- -D warnings"
+  fmt: "cargo fmt"
+  format: "rustfmt --edition 2021"
+
+format:                             # qué comando formatea qué archivos en cuanto una sesión los escribe (D255)
+  - { paths: ["**/*.rs"], run: format }   # la primera regla que cubre un archivo; recibe las rutas como argumentos
+
+shared_dirs:                        # caches que comparten todos los comandos y sesiones de un run; nunca la salida de un build (D236)
+  PIP_CACHE_DIR: ~/.cache/yunta/pip   # exportado bajo la variable; escribible solo en las sesiones que no son read-only, y fuera del worktree
 baseline:
   suite: "cargo test --workspace"
+  held: [lint]                      # comandos de `commands:` medidos al lado de la suite: el que pasa
+                                    # en la base sostiene cada tarea como guarda, igual que la suite (D256)
 coverage:
   cmd: "cargo llvm-cov --summary-only"
   threshold: 90
 
 storage:
-  path: ~/.yunta/yunta.db           # SQLite en modo WAL — único backend (D53)
+  path: ~/.yunta/yunta.db           # SQLite en modo WAL — único motor de almacenamiento (D53)
   retention_days: 90
+  pool:                             # lo que los checkouts del proyecto guardan del disco (D247)
+    budget: 60G                     # bytes (80G, 500M, 1.5T) o parte del disco (20%)
+    keep_free: 10%                  # lo que del disco siempre queda libre
 
 paths:                              # dónde vive el estado (§2.2); `YUNTA_HOME` los sobreescribe
   runs: ~/.yunta/runs
@@ -74,20 +95,24 @@ paths:                              # dónde vive el estado (§2.2); `YUNTA_HOME
 
 permissions:                        # techo; las capas inferiores solo estrechan (§6.1)
   commands:
+    allow: []                       # vacía: todo lo no denegado corre; no vacía: lista blanca estricta
     deny: ["curl * | *", "sudo *"]
+  paths:
+    deny: [".github/**"]            # ningún run los escribe, sea cual sea el scope
   packs:
     executors: prompt               # allow | prompt | deny
     publishers: { allow: [acme] }
   network:
-    default: true
+    default: true                   # red de los nodos que no la dicen; un nodo read-only nunca la tiene
+  scope_expansion: { max_mode: ask }   # rules | ask | deny: lo más permisivo que un nodo puede pedir
 
 limits:
-  max_tokens_per_run: 2_000_000
+  max_tokens_per_run: 2000000     # tokens del run: asentados más en vuelo (§8.4)
   max_loop_iterations: 12
   max_concurrent_runs: 3
   max_workflow_depth: 4
-  max_artifact_bytes: 50_000_000    # guardia contra accidentes (§4)
-  inline_context_bytes: 32_000      # sobre este umbral, el contexto se monta por referencia (§9.1)
+  max_artifact_bytes: 50000000    # guardia contra accidentes (§4)
+  inline_context_bytes: 32000      # sobre este umbral, el contexto se monta por referencia (§9.1)
 
 pricing:                            # opcional — sin esto, stats y recibo son solo tokens (§8.4)
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
@@ -101,46 +126,65 @@ secrets:                            # nombres de env vars; valores JAMÁS acá
 
 ```yaml
 name: build-feature
-description: Feature completa con grill, documento de tareas verificado, review multi-runner y PR
+description: Complete feature with grill, verified tasks document, multi-runner review and PR
 yunta_schema: ">=1 <2"              # opcional (§2.1); sin declarar, se infiere del binario
 inputs:
   idea:
     type: string
     required: true
-    description: "Qué construir — se convierte en el brief"
+    description: "What to build — it becomes the brief"
 
 modes:                              # nombres y cantidad libres del autor (§10.1);
                                     # el orden declara la escalera de promoción
-  quick:    { include: [grill, plan, implement, lint, fix-lint, tests, ship, pr] }
-  standard: { include: [grill, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr], ask: required }
+                                    # ask: qué rondas de preguntas detienen el run —`always`
+                                    # (default) o `required`—; el `ask` de un nodo gana (D244)
+  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
   full:     { include: all }
 
 node_defaults:
   hooks:
     after:
       - run: "cargo fmt"
+  cli_config: isolated              # inherit (default) | isolated: qué config del CLI
+                                    # del agente cargan las sesiones; un nodo puede
+                                    # decir la suya (D250)
 
 nodes:                              # id: letra seguida de letras, dígitos, `_` o `-`
   - id: grill
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true               # §4.1 — dato de presentación: cómo se muestran las preguntas
     prompt: |
-      Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
-      necesarias como artifact; no converses. Con las respuestas, escribí el brief.
+      Identify the ambiguities in "{{inputs.idea}}" and write the questions
+      needed as an artifact; do not converse.
     artifacts:
-      produces: [questions, brief.md]
+      produces: [questions]         # §4.1 — un nodo que pregunta no declara nada más
+                                    # ask: always | required — solo en un nodo que pregunta
+
+  - id: brief
+    kind: prompt
+    runner: planner
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+    prompt: |
+      Write the brief for "{{inputs.idea}}" from the questions and their
+      answers.
+    artifacts:
+      produces: [brief.md]
 
   - id: plan
     kind: prompt
     runner: planner
+    effort: xhigh                   # sobre el `effort` del candidato que resuelva
     permissions: read-only
-    depends_on: [grill]
+    depends_on: [brief]
     context:
-      - artifact: { node: grill, name: brief.md }
+      - artifact: { node: brief, name: brief.md }
       - knowledge: {}
-      - files: ["docs/architecture.md"]
+      - files: ["docs/architecture.md"]   # or { path: ..., optional: true } when the node can do without it (D186)
       - command: "git log --oneline -20"
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
     prompt: { file: prompts/plan.md }   # §9.3 — también admite string inline
@@ -151,9 +195,10 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan registrado. ¿Aprobás?"
-    options: [aprobar, ajustar, abortar]
-    on: { ajustar: plan }
+    message: "Plan recorded. Do you approve?"
+    options: [approve, adjust]
+    on: { adjust: plan }              # pide qué cambiar y retoma la sesión de `plan` con eso (D194)
+    shows: [{ node: plan, kind: tasks }]   # el plan que se aprueba, atado a su hash en `gate_waiting`
 
   - id: implement
     kind: loop
@@ -164,24 +209,24 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     concurrency: 2                  # tareas simultáneas con scopes disjuntos (§5.5); default 1
     scope_expansion:                # §6.2 — default deny si se omite
       mode: ask
-      within: ["src/**"]
-      max_per_run: 3
+      max_per_run: 3                # cuenta solo las concesiones que decide el engine (§6.2)
     prompt: |
-      Leé tu tarea del documento de tareas. Implementala dentro de su scope.
+      Read your task in the tasks document. Implement it within its scope.
 
   - id: lint
     kind: bash
     invariant: true
+    optional: true                  # sin `commands.lint` el run corre sin este nodo (D204)
     depends_on: [implement]
-    run: "cargo clippy -- -D warnings"
-    on_failure: { goto: fix-lint, max_reroutes: 2 }
+    run: { command: lint }
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
 
   - id: fix-lint
     kind: prompt
     runner: mechanical
     context: [{ node-output: { node: lint } }]
-    prompt: "Corregí exclusivamente los errores del reporte."
-    scope: ["src/**"]
+    prompt: "Fix only the errors in the report."
+    scope: run                     # lo que el run cambió hasta acá (D205)
 
   - id: tests
     kind: check
@@ -194,7 +239,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Auditá los cambios y reportá cada hallazgo."
+    prompt: "Audit the changes and report each finding."
     artifacts:
       produces: [findings]
 
@@ -204,20 +249,18 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     depends_on: [review]
     context:
       - run-events: { filter: findings }   # hallazgos como datos, no como prosa
-    prompt: "Corregí hallazgos bloqueantes; documentá los descartados con motivo."
+    prompt: "Fix the blocking findings; document each dismissed one with its reason."
 
   - id: ship
     kind: gate
     depends_on: [fix-findings]
     assignee: lead
-    message: "¿Creo el PR?"
+    message: "Create the PR?"
 
   - id: pr
-    kind: bash
+    kind: pull_request     # push de la rama del run + PR por el forge (D207)
     depends_on: [ship]
-    run: |
-      git push -u origin {{run.branch}}
-      gh pr create --fill --base {{project.base_branch}}
+    title: "{{inputs.idea}}"
 
 on_finish:
   - cleanup: worktree
@@ -279,9 +322,13 @@ nodes:
 El cliente lanza `yunta mcp` como subproceso por stdio; tools expuestas:
 `list_workflows` (catálogo vivo del repo y de packs: nombre, descripción, inputs,
 modos), `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`. Además
-existe el **MCP por-run** (endpoint que el engine pasa en
-`SessionRequest.run_tools_endpoint`) con tools de scope de run: `yunta_post_finding`,
-`yunta_get_blackboard`, `yunta_task_status`, `yunta_request_scope_expansion`.
+existe el **MCP por-run**, que el engine monta él mismo en cada sesión bajo el
+nombre `yunta-run` (endpoint que pasa en `SessionRequest.run_tools_endpoint`), con
+tools de scope de run: `yunta_post_finding`,
+`yunta_get_blackboard`, `yunta_task_status`, `yunta_request_scope_expansion`,
+—solo en una sesión de tarea— `yunta_task`, `yunta_check_task` y
+`yunta_declare_deviation` (con `kind`: `departure` o `unpassable`), y —solo en la
+sesión propia de un nodo con `scope:`— `yunta_check_scope`.
 
 Para que el agente cliente sepa **cuándo** usar todo esto, `yunta init` instala una
 skill de mecanismo en el repo y ofrece una línea para el CLAUDE.md del equipo (D74).
@@ -317,13 +364,19 @@ que siempre está al día.
   kind en todo run que lo tenga, así que `as:` al lado de un `kind:` se rechaza al
   leer el workflow.
 - **Variables de template**: lo que un nodo puede escribir entre `{{ }}` en su
-  prompt, su `run:`, sus hooks y sus patrones de `context:` — `{{run.dir}}`,
-  `{{run.worktree}}`, `{{run.branch}}`, `{{node.artifacts}}` (el directorio propio
-  del nodo, donde escribe lo que declara), `{{runner.role}}` cuando el nodo declara
-  un runner, `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}`
-  según lo que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado.
-  Una variable que no está definida ahí falla el nodo nombrándola; `yunta check`
-  además rechaza estáticamente todo `{{inputs.x}}` que `inputs:` no declare.
+  prompt, su `run:`, sus hooks y sus patrones de `context:`. El conjunto es cerrado
+  (`TemplateVar`): `{{run.dir}}`, `{{run.worktree}}`, `{{run.branch}}`,
+  `{{run.base}}` (el commit del que partió el run: `git diff {{run.base}}` es todo
+  lo que el run cambió), `{{run.staging}}` (la raíz bajo la que cuelga el staging
+  de cada nodo),
+  `{{node.artifacts}}` (el directorio propio del nodo, donde escribe lo que
+  declara), `{{node.id}}`, `{{runner.name}}` cuando el nodo declara un runner,
+  `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}` según lo
+  que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado. Un nombre
+  que no es ninguna de esas no es una variable y se rechaza al leer el template,
+  nombrando las que existen; una variable del conjunto que nadie definió en ese
+  sitio falla el nodo nombrándola; `yunta check` además rechaza estáticamente todo
+  `{{inputs.x}}` que `inputs:` no declare.
 - **`skills:` vs `context:`**: propiedades separadas por diseño. `context:` inyecta
   datos (sobre qué trabajar) vía `ContextSource`; `skills:` monta instrucciones y
   capacidades (cómo trabajar) por el mecanismo nativo del adapter. La sintaxis
@@ -337,8 +390,15 @@ que siempre está al día.
     runner: reviewer
     agent: security-auditor
     permissions: read-only
+    prompt: "Auditá los cambios y reportá cada hallazgo de seguridad."
   ```
 
-  En workflows compartidos, preferir el agente en los candidatos del runner
-  (portabilidad multi-adapter); el override por nodo es para workflows internos del
-  equipo.
+  El nombre resuelve a `.yunta/agents/<nombre>.md` del proyecto, o a la definición
+  que un pack declara en `contents.agents` (`publisher/agente`): front matter con
+  `name` y `description`, y el cuerpo como instrucciones. La misma definición corre
+  en todo adapter; un nombre sin definición falla el nodo antes de abrir la sesión.
+- **`effort:`** en un candidato del runner o en el nodo, que gana: `low`, `medium`,
+  `high` o `xhigh`, los niveles que aceptan todos los CLIs. `claude-code` lo recibe
+  como `--effort` y `codex` como `-c model_reasoning_effort`, también al retomar una
+  sesión; un nivel que solo un CLI tiene (`max`, `minimal`) se rechaza al leer el
+  YAML. El nivel pedido queda en `agent_session_opened.effort`.

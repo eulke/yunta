@@ -1,20 +1,28 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection};
-use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent};
+use rusqlite::{params, Connection, Transaction};
+use yunta_core::events::{
+    EventBody, EventDraft, EventPayload, EventShapeError, StoredEvent, KIND_VERSION,
+};
 use yunta_core::ContentHash;
 use yunta_core::{Clock, NodeId, RunId, Seq};
 
 use crate::error::{Cause, Result, StorageError};
+use yunta_core::events::RunEvent;
+
+mod chain;
+mod opening;
+pub use chain::ChainVerification;
 
 /// The schema migration, embedded in the binary rather than shipped as a
-/// file — the whole schema is one append-only table, so there is nothing
-/// a migration runner would buy over `CREATE TABLE IF NOT EXISTS` today.
-/// `event_hash` is nullable at the SQL level only so the `ALTER TABLE`
-/// migration below can add it to databases created before the hash chain
-/// existed — every append since writes it, and `verify_chain` reports a
-/// NULL as a break, never skips it.
+/// file — the schema is a few tables, so there is nothing a migration runner
+/// would buy over `CREATE TABLE IF NOT EXISTS`. `event_hash` is nullable at
+/// the SQL level only so the `ALTER TABLE` migration in [`Storage::open`] can add it to
+/// databases created before the hash chain existed — every append since
+/// writes it, and `verify_chain` reports a NULL as a break, never skips it.
+/// `run_heads` holds each run's last appended seq and hash, the anchor that
+/// shows a log whose tail was deleted.
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS events (
     run_id TEXT NOT NULL,
@@ -27,22 +35,12 @@ CREATE TABLE IF NOT EXISTS events (
     event_hash TEXT,
     PRIMARY KEY (run_id, seq)
 );
+CREATE TABLE IF NOT EXISTS run_heads (
+    run_id TEXT PRIMARY KEY,
+    seq INTEGER NOT NULL,
+    event_hash TEXT NOT NULL
+);
 ";
-
-/// `yunta verify` / receipt-time integrity: the chain covers integrity
-/// and order, never authenticity.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ChainVerification {
-    Intact {
-        events: usize,
-    },
-    /// The first event where the chain stops holding, with what exactly
-    /// stopped holding.
-    Broken {
-        seq: Seq,
-        detail: String,
-    },
-}
 
 /// One run as `list_runs` reports it: its id and when its first event
 /// was written.
@@ -103,6 +101,33 @@ fn genesis_hash(manifest_hash: &str) -> ContentHash {
     yunta_core::sha256_hex(manifest_hash.as_bytes())
 }
 
+/// The hash the event at `seq` chains onto: the manifest-derived genesis for
+/// a run's first event, the stored hash of the previous event otherwise.
+fn previous_hash(tx: &Transaction<'_>, draft: &EventDraft, seq: i64) -> Result<String> {
+    if seq == 1 {
+        let EventPayload::Run(RunEvent::Created(created)) = draft.payload() else {
+            return Err(StorageError::GenesisMissing {
+                run_id: draft.run_id().clone(),
+            });
+        };
+        return Ok(genesis_hash(created.manifest_hash.as_str()).to_string());
+    }
+    let stored = tx
+        .query_row(
+            "SELECT event_hash FROM events WHERE run_id = ?1 AND seq = ?2",
+            params![draft.run_id().as_str(), seq - 1],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map_err(|error| StorageError::Append {
+            run_id: draft.run_id().clone(),
+            source: cause(error),
+        })?;
+    // A NULL here means the run predates the hash chain — its chain is
+    // already unverifiable; anchoring on the empty string keeps the append
+    // working while `verify_chain` reports the truth.
+    Ok(stored.unwrap_or_default())
+}
+
 fn cause(error: rusqlite::Error) -> Cause {
     Box::new(error)
 }
@@ -138,50 +163,6 @@ fn lock(conn: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
 }
 
 impl Storage {
-    /// Opens (creating if needed) the event log at `path` in WAL mode,
-    /// running the embedded schema migration.
-    pub fn open(path: &Path) -> Result<Self> {
-        let open_err = |error| StorageError::Open {
-            path: path.to_path_buf(),
-            source: cause(error),
-        };
-
-        let conn = Connection::open(path).map_err(open_err)?;
-        // WAL admits exactly one writer at a time; a second handle onto
-        // the same database (a status/follower reader, a per-session
-        // run-tools listener) must wait for a busy writer instead of
-        // surfacing SQLITE_BUSY as a spurious append failure. Writes
-        // here are all sub-millisecond appends — 5s of patience means
-        // something is truly wedged, not busy. Set before the journal
-        // pragma so even that first statement waits rather than fails
-        // when another connection happens to be mid-write.
-        // Note the timeout alone is NOT enough for `append` — see the
-        // BEGIN IMMEDIATE note there.
-        conn.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(open_err)?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(open_err)?;
-        conn.execute_batch(SCHEMA_V1).map_err(open_err)?;
-
-        // A database created before the chain existed has the table but
-        // not the column — added here once, with old rows left NULL
-        // (visible to `verify_chain` as a break, never silently
-        // backfilled with hashes nothing ever wrote).
-        let has_hash_column = conn
-            .prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'event_hash'")
-            .and_then(|mut stmt| stmt.exists([]))
-            .map_err(open_err)?;
-        if !has_hash_column {
-            conn.execute("ALTER TABLE events ADD COLUMN event_hash TEXT", [])
-                .map_err(open_err)?;
-        }
-
-        Ok(Self {
-            conn: Mutex::new(conn),
-            path: path.to_path_buf(),
-        })
-    }
-
     /// Where this log lives.
     pub fn path(&self) -> &Path {
         &self.path
@@ -205,7 +186,7 @@ impl Storage {
     /// thread, so the instant recorded is the one its clock reported.
     pub fn append_at(&self, draft: &EventDraft, at: chrono::DateTime<chrono::Utc>) -> Result<Seq> {
         let append_err = |error| StorageError::Append {
-            run_id: draft.run_id.clone(),
+            run_id: draft.run_id().clone(),
             source: cause(error),
         };
 
@@ -227,51 +208,31 @@ impl Storage {
         let seq: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?1",
-                params![draft.run_id.as_str()],
+                params![draft.run_id().as_str()],
                 |row| row.get(0),
             )
             .map_err(append_err)?;
 
         let payload_json =
-            serde_json::to_string(&draft.payload).map_err(|source| StorageError::Serialize {
-                run_id: draft.run_id.clone(),
+            serde_json::to_string(draft.payload()).map_err(|source| StorageError::Serialize {
+                run_id: draft.run_id().clone(),
                 source,
             })?;
 
         // The chain hash, computed inside the same transaction that
-        // assigns `seq` — the previous event's stored hash (or the
-        // manifest-derived genesis for the run's first event) anchors it.
-        let prev_hash = if seq == 1 {
-            let EventPayload::RunCreated(created) = &draft.payload else {
-                return Err(StorageError::GenesisMissing {
-                    run_id: draft.run_id.clone(),
-                });
-            };
-            genesis_hash(created.manifest_hash.as_str()).to_string()
-        } else {
-            tx.query_row(
-                "SELECT event_hash FROM events WHERE run_id = ?1 AND seq = ?2",
-                params![draft.run_id.as_str(), seq - 1],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .map_err(append_err)?
-            // A NULL here means the run predates the hash chain — its
-            // chain is already unverifiable; anchoring on the empty
-            // string keeps the append working while `verify_chain`
-            // reports the truth.
-            .unwrap_or_default()
-        };
+        // assigns `seq`, anchored on the previous event's hash.
+        let prev_hash = previous_hash(&tx, draft, seq)?;
 
         let ts = at.to_rfc3339();
         let event_hash = chain_hash(ChainHashFields {
             prev_hash: &prev_hash,
-            run_id: draft.run_id.as_str(),
+            run_id: draft.run_id().as_str(),
             seq,
             ts: &ts,
-            node_id: draft.node_id.as_ref().map(NodeId::as_str),
-            kind: draft.payload.kind_name(),
+            node_id: draft.node_id().map(NodeId::as_str),
+            kind: draft.payload().kind_name(),
             payload_json: &payload_json,
-            schema_version: draft.payload.schema_version(),
+            schema_version: KIND_VERSION,
         });
 
         tx.execute(
@@ -279,125 +240,34 @@ impl Storage {
              event_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                draft.run_id.as_str(),
+                draft.run_id().as_str(),
                 seq,
                 ts,
-                draft.node_id.as_ref().map(NodeId::as_str),
-                draft.payload.kind_name(),
+                draft.node_id().map(NodeId::as_str),
+                draft.payload().kind_name(),
                 payload_json,
-                draft.payload.schema_version(),
+                KIND_VERSION,
                 event_hash.as_str(),
             ],
+        )
+        .map_err(append_err)?;
+
+        // The head moves with the row it names, in the same transaction, so a
+        // tail deleted afterwards reads as broken at this head.
+        tx.execute(
+            "INSERT INTO run_heads (run_id, seq, event_hash) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(run_id) DO UPDATE SET seq = excluded.seq, \
+             event_hash = excluded.event_hash",
+            params![draft.run_id().as_str(), seq, event_hash.as_str()],
         )
         .map_err(append_err)?;
 
         tx.commit().map_err(append_err)?;
 
         Seq::try_from(seq).map_err(|source| StorageError::CorruptSeq {
-            run_id: draft.run_id.clone(),
+            run_id: draft.run_id().clone(),
             source,
         })
-    }
-
-    /// Walks the run's whole chain recomputing every hash from the bytes
-    /// as persisted, one row at a time: an altered payload, a deleted,
-    /// inserted or reordered event, an altered stored hash, or a missing
-    /// one all surface as [`ChainVerification::Broken`] naming the exact
-    /// seq. Runs automatically at receipt time and on demand via
-    /// `yunta verify <run_id>`.
-    pub fn verify_chain(&self, run_id: &RunId) -> Result<ChainVerification> {
-        let read_err = |error| StorageError::Read {
-            run_id: run_id.clone(),
-            source: cause(error),
-        };
-
-        let conn = lock(&self.conn);
-        let mut stmt = conn
-            .prepare(
-                "SELECT seq, ts, node_id, kind, payload_json, schema_version, event_hash
-                 FROM events WHERE run_id = ?1 ORDER BY seq ASC",
-            )
-            .map_err(read_err)?;
-        let rows = stmt
-            .query_map(params![run_id.as_str()], |row| {
-                Ok(StoredRow {
-                    seq: row.get(0)?,
-                    ts: row.get(1)?,
-                    node_id: row.get(2)?,
-                    kind: row.get(3)?,
-                    payload_json: row.get(4)?,
-                    schema_version: row.get(5)?,
-                    event_hash: row.get(6)?,
-                })
-            })
-            .map_err(read_err)?;
-
-        let mut prev_hash: Option<String> = None;
-        let mut verified = 0usize;
-        for row in rows {
-            let row = row.map_err(read_err)?;
-            let expected_seq = verified as i64 + 1;
-            let seq = Seq::try_from(row.seq).map_err(|source| StorageError::CorruptSeq {
-                run_id: run_id.clone(),
-                source,
-            })?;
-            if row.seq != expected_seq {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: format!(
-                        "expected seq {expected_seq} but found {} — an event was deleted, \
-                         inserted or reordered",
-                        row.seq
-                    ),
-                });
-            }
-            let Some(stored_hash) = &row.event_hash else {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: "event has no stored hash (written before the chain existed)"
-                        .to_string(),
-                });
-            };
-            let anchor = match &prev_hash {
-                Some(prev) => prev.clone(),
-                None => match genesis_from_first_row(run_id, &row) {
-                    Ok(anchor) => anchor,
-                    Err(error) => {
-                        return Ok(ChainVerification::Broken {
-                            seq,
-                            detail: error.to_string(),
-                        })
-                    }
-                },
-            };
-            let recomputed = chain_hash(ChainHashFields {
-                prev_hash: &anchor,
-                run_id: run_id.as_str(),
-                seq: row.seq,
-                ts: &row.ts,
-                node_id: row.node_id.as_deref(),
-                kind: &row.kind,
-                payload_json: &row.payload_json,
-                schema_version: row.schema_version,
-            });
-            if recomputed.as_str() != stored_hash.as_str() {
-                return Ok(ChainVerification::Broken {
-                    seq,
-                    detail: "stored hash does not match the recomputed chain — the event or \
-                             its predecessor's hash was altered"
-                        .to_string(),
-                });
-            }
-            prev_hash = Some(stored_hash.clone());
-            verified += 1;
-        }
-
-        if verified == 0 {
-            return Err(StorageError::VerifyUnknownRun {
-                run_id: run_id.clone(),
-            });
-        }
-        Ok(ChainVerification::Intact { events: verified })
     }
 
     /// Test-support fault injection: alters the `seq`-th event's persisted
@@ -528,16 +398,27 @@ impl Storage {
     /// `events.jsonl` is the self-contained copy) is already gone — the
     /// database is never the first copy to die.
     pub fn purge_run(&self, run_id: &RunId) -> Result<Purge> {
-        let conn = lock(&self.conn);
-        let rows = conn
+        let purge_err = |error| StorageError::Read {
+            run_id: run_id.clone(),
+            source: cause(error),
+        };
+        let mut conn = lock(&self.conn);
+        // The head goes with the rows, so no anchor outlives its events.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(purge_err)?;
+        let rows = tx
             .execute(
                 "DELETE FROM events WHERE run_id = ?1",
                 params![run_id.as_str()],
             )
-            .map_err(|error| StorageError::Read {
-                run_id: run_id.clone(),
-                source: cause(error),
-            })?;
+            .map_err(purge_err)?;
+        tx.execute(
+            "DELETE FROM run_heads WHERE run_id = ?1",
+            params![run_id.as_str()],
+        )
+        .map_err(purge_err)?;
+        tx.commit().map_err(purge_err)?;
         Ok(Purge { rows })
     }
 
@@ -574,37 +455,4 @@ impl Storage {
         }
         Ok(runs)
     }
-}
-
-/// One persisted row as `verify_chain` reads it back.
-struct StoredRow {
-    seq: i64,
-    ts: String,
-    node_id: Option<String>,
-    kind: String,
-    payload_json: String,
-    schema_version: u32,
-    event_hash: Option<String>,
-}
-
-/// The chain's anchor for a run's first row: `run_created`'s own
-/// manifest hash, hashed.
-fn genesis_from_first_row(run_id: &RunId, row: &StoredRow) -> Result<String> {
-    if row.kind != "run_created" {
-        return Err(StorageError::GenesisMissing {
-            run_id: run_id.clone(),
-        });
-    }
-    let manifest_hash = serde_json::from_str::<serde_json::Value>(&row.payload_json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("manifest_hash")
-                .and_then(|hash| hash.as_str().map(String::from))
-        });
-    manifest_hash
-        .map(|hash| genesis_hash(&hash).to_string())
-        .ok_or_else(|| StorageError::CorruptGenesis {
-            run_id: run_id.clone(),
-        })
 }

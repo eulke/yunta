@@ -28,6 +28,19 @@ pub struct PermissionsConfig {
     pub network: Option<NetworkPermissions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_expansion: Option<ScopeExpansionPermissions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<PathPermissions>,
+}
+
+/// `permissions.paths` — what no node and no task of any run may write:
+/// the project's CI, the configuration of its own checks, whatever the
+/// team decides no agent touches. A ceiling like the rest: every layer's
+/// denies stand, and none is ever granted back.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PathPermissions {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny: Vec<crate::ScopeGlob>,
 }
 
 /// `permissions.scope_expansion`: the layered ceiling
@@ -41,7 +54,7 @@ pub struct PermissionsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionPermissions {
-    pub max_mode: crate::policy::ScopeExpansionMode,
+    pub max_mode: crate::policy::ScopeCeiling,
 }
 
 /// `permissions.commands` — patterns matched against every hook, criterion,
@@ -57,11 +70,9 @@ pub struct CommandPermissions {
     pub allow: Vec<String>,
 }
 
-/// `permissions.packs` — governance over pack contents. Parsed
-/// and merged here; *enforced* at `pack add`/check once pack support
-/// lands fully — a key without its consumer yet, kept
-/// because the org ceiling file is one document and its schema shouldn't
-/// dribble in piecemeal.
+/// `permissions.packs` — governance over pack contents. Parsed and
+/// merged here; enforced by `pack add` and `pack update`, which read the
+/// merged value and name the layer that declared it when they refuse.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackPermissions {
@@ -84,6 +95,15 @@ pub enum PackExecutorPolicy {
 }
 
 impl PackExecutorPolicy {
+    /// The value as a config file writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PackExecutorPolicy::Allow => "allow",
+            PackExecutorPolicy::Prompt => "prompt",
+            PackExecutorPolicy::Deny => "deny",
+        }
+    }
+
     fn strictness(self) -> u8 {
         match self {
             PackExecutorPolicy::Allow => 0,
@@ -102,10 +122,10 @@ pub struct PublisherPermissions {
     pub allow: Vec<Publisher>,
 }
 
-/// `permissions.network` — declarative ONLY: `default: false`
-/// activates no sandboxing whatsoever. It exists for policy and audit; an
-/// executor that wants to actually enforce it does so on its own. Policy
-/// ≠ capability ≠ OS enforcement — Yunta core never promises the third.
+/// `permissions.network` — whether the commands an agent's session runs
+/// may reach the network when its node says nothing: the session's CLI
+/// keeps it in its own sandbox. For any other command it is declarative;
+/// an executor that wants to enforce it does so on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkPermissions {
@@ -128,101 +148,111 @@ pub(super) fn merge_permissions(
         (Some(c), Some(l)) => (c, l),
     };
 
-    let commands = match (ceiling.commands, lower.commands) {
-        (None, None) => None,
-        (Some(c), None) => Some(c),
-        (None, Some(l)) => Some(l),
-        (Some(c), Some(l)) => {
-            // Denies union: adding denies is narrowing, always legal.
-            let mut deny = c.deny.clone();
-            for pattern in l.deny {
-                if !deny.contains(&pattern) {
-                    deny.push(pattern);
-                }
-            }
-            // Allows: the ceiling's non-empty allow bounds the lower
-            // layer's — entries outside it are dropped here (and reported
-            // as conflicts by the checker, not swallowed silently).
-            let allow = if c.allow.is_empty() {
-                l.allow
-            } else if l.allow.is_empty() {
-                c.allow
-            } else {
-                l.allow
-                    .into_iter()
-                    .filter(|pattern| c.allow.contains(pattern))
-                    .collect()
-            };
-            Some(CommandPermissions { deny, allow })
-        }
-    };
-
-    let packs = match (ceiling.packs, lower.packs) {
-        (None, None) => None,
-        (Some(c), None) => Some(c),
-        (None, Some(l)) => Some(l),
-        (Some(c), Some(l)) => {
-            let executors = match (c.executors, l.executors) {
-                (Some(a), Some(b)) => Some(if a.strictness() >= b.strictness() {
-                    a
-                } else {
-                    b
-                }),
-                (a, b) => a.or(b),
-            };
-            let publishers = match (c.publishers, l.publishers) {
-                (None, None) => None,
-                (Some(p), None) => Some(p),
-                (None, Some(p)) => Some(p),
-                (Some(c_pub), Some(l_pub)) => {
-                    // Empty = everyone — a non-empty ceiling bounds
-                    // the lower list; both non-empty intersect.
-                    let allow = if c_pub.allow.is_empty() {
-                        l_pub.allow
-                    } else if l_pub.allow.is_empty() {
-                        c_pub.allow
-                    } else {
-                        l_pub
-                            .allow
-                            .into_iter()
-                            .filter(|publisher| c_pub.allow.contains(publisher))
-                            .collect()
-                    };
-                    Some(PublisherPermissions { allow })
-                }
-            };
-            Some(PackPermissions {
-                executors,
-                publishers,
-            })
-        }
-    };
-
-    // Ceiling semantics, same as packs: the strictest declared wins.
-    let scope_expansion = match (ceiling.scope_expansion, lower.scope_expansion) {
-        (Some(c), Some(l)) => Some(if c.max_mode.strictness() >= l.max_mode.strictness() {
-            c
-        } else {
-            l
-        }),
-        (c, l) => c.or(l),
-    };
-
-    let network = match (ceiling.network, lower.network) {
-        (Some(c), Some(l)) => Some(NetworkPermissions {
+    Some(PermissionsConfig {
+        commands: merge_group(ceiling.commands, lower.commands, merge_commands),
+        packs: merge_group(ceiling.packs, lower.packs, merge_packs),
+        network: merge_group(ceiling.network, lower.network, |c, l| NetworkPermissions {
             // `false` is the narrower value — a ceiling that turned the
             // default off stays off no matter what a lower layer says.
             default: c.default && l.default,
         }),
-        (c, l) => c.or(l),
-    };
-
-    Some(PermissionsConfig {
-        commands,
-        packs,
-        network,
-        scope_expansion,
+        // Ceiling semantics, same as packs: the strictest declared wins.
+        scope_expansion: merge_group(ceiling.scope_expansion, lower.scope_expansion, |c, l| {
+            ScopeExpansionPermissions {
+                max_mode: c.max_mode.stricter(l.max_mode),
+            }
+        }),
+        // Union, like `commands.deny`: a lower layer only ever adds a path.
+        paths: merge_group(ceiling.paths, lower.paths, merge_paths),
     })
+}
+
+/// One group of `permissions` across both layers: a group only one layer
+/// names stands as written, and a group both name merges by `both`.
+fn merge_group<T>(ceiling: Option<T>, lower: Option<T>, both: impl FnOnce(T, T) -> T) -> Option<T> {
+    match (ceiling, lower) {
+        (Some(c), Some(l)) => Some(both(c, l)),
+        (c, l) => c.or(l),
+    }
+}
+
+/// Commands: denies union, and the ceiling's non-empty allow bounds the
+/// lower layer's.
+fn merge_commands(ceiling: CommandPermissions, lower: CommandPermissions) -> CommandPermissions {
+    // Denies union: adding denies is narrowing, always legal.
+    let mut deny = ceiling.deny;
+    for pattern in lower.deny {
+        if !deny.contains(&pattern) {
+            deny.push(pattern);
+        }
+    }
+    // Allows: the ceiling's non-empty allow bounds the lower
+    // layer's — entries outside it are dropped here (and reported
+    // as conflicts by the checker, not swallowed silently).
+    let allow = if ceiling.allow.is_empty() {
+        lower.allow
+    } else if lower.allow.is_empty() {
+        ceiling.allow
+    } else {
+        lower
+            .allow
+            .into_iter()
+            .filter(|pattern| ceiling.allow.contains(pattern))
+            .collect()
+    };
+    CommandPermissions { deny, allow }
+}
+
+/// Packs: the strictest executor policy wins, and publishers intersect.
+fn merge_packs(ceiling: PackPermissions, lower: PackPermissions) -> PackPermissions {
+    PackPermissions {
+        executors: merge_group(ceiling.executors, lower.executors, |a, b| {
+            if a.strictness() >= b.strictness() {
+                a
+            } else {
+                b
+            }
+        }),
+        publishers: merge_group(ceiling.publishers, lower.publishers, merge_publishers),
+    }
+}
+
+/// Publishers: empty means everyone, so a non-empty ceiling bounds the
+/// lower list, and two non-empty lists intersect.
+fn merge_publishers(
+    ceiling: PublisherPermissions,
+    lower: PublisherPermissions,
+) -> PublisherPermissions {
+    let allow = if ceiling.allow.is_empty() {
+        lower.allow
+    } else if lower.allow.is_empty() {
+        ceiling.allow
+    } else {
+        lower
+            .allow
+            .into_iter()
+            .filter(|publisher| ceiling.allow.contains(publisher))
+            .collect()
+    };
+    PublisherPermissions { allow }
+}
+
+/// Paths: the union of both layers' denies, so a lower layer only adds.
+fn merge_paths(ceiling: PathPermissions, lower: PathPermissions) -> PathPermissions {
+    let mut deny = ceiling.deny;
+    for glob in lower.deny {
+        if !deny.contains(&glob) {
+            deny.push(glob);
+        }
+    }
+    PathPermissions { deny }
+}
+
+/// Whether a session's commands may reach the network: the node's word
+/// when it gives one, else the project's default, else open.
+pub fn network_asked(node: Option<bool>, project: Option<NetworkPermissions>) -> bool {
+    node.or(project.map(|network| network.default))
+        .unwrap_or(true)
 }
 
 /// Detects loosening attempts across ordered permission layers — the
@@ -266,7 +296,9 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 {
                     if lower_pol.strictness() < higher_pol.strictness() {
                         conflicts.push(format!(
-                            "layer `{lower_name}` loosens `packs.executors` to `{lower_pol:?}` below layer `{higher_name}`'s `{higher_pol:?}` — permissions only narrow"
+                            "layer `{lower_name}` loosens `packs.executors` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
+                            lower_pol.as_str(),
+                            higher_pol.as_str()
                         ));
                     }
                 }
@@ -296,11 +328,11 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
             if let (Some(lower_se), Some(higher_se)) =
                 (lower.scope_expansion, higher.scope_expansion)
             {
-                if lower_se.max_mode.strictness() < higher_se.max_mode.strictness() {
+                if !higher_se.max_mode.allows(lower_se.max_mode.0) {
                     conflicts.push(format!(
                         "layer `{lower_name}` softens `scope_expansion.max_mode` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
-                        lower_se.max_mode.as_str(),
-                        higher_se.max_mode.as_str()
+                        lower_se.max_mode.0.as_str(),
+                        higher_se.max_mode.0.as_str()
                     ));
                 }
             }

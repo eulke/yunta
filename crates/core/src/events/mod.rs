@@ -1,5 +1,5 @@
 //! Event log types: every `kind` the engine emits, as the event schema
-//! (`docs/design/spec-events.md`) defines them.
+//! (`crates/core/schemas/events.json`) defines them.
 //!
 //! Versioning: `schema_version` is
 //! per `kind`, not global. Every kind starts at v1 here — there is no
@@ -12,12 +12,55 @@
 //! here carries a hash.
 
 pub mod artifacts;
+pub mod children;
+mod evidence;
 mod failure;
 pub mod findings;
-mod payloads;
+pub mod gates;
+mod logged_words;
+pub mod meta;
+pub mod node;
+mod redact;
+mod registry;
+pub mod run;
+#[cfg(feature = "testkit")]
+mod samples;
+pub mod scope;
+pub mod session;
+mod spend;
+pub mod tasks;
+mod unknown;
+mod wire;
 
-pub use failure::Failure;
-pub use payloads::*;
+pub use artifacts::{payloads::*, ArtifactEvent};
+pub use children::{ledger::*, payloads::*, ChildEvent};
+pub use evidence::{Evidence, Fact};
+pub use failure::{
+    AccountLimit, CapabilityUse, ChildRefusal, CommandExit, CommandOrigin, DeniedBy, DeniedCommand,
+    DeniedRule, EngineError, EngineStep, Facts, Failure, FailureCause, FrozenRead, Interruption,
+    LimitSource, MountError, NameProblem, ObjectProblem, Outlook, OwedScope, Precondition,
+    RedCheck, RefusalCause, Remedy, RequestedScope, RunnerRefusal, SessionDeath, SessionEnd,
+    SessionExit, SessionRefusal, Stuck, Timed, Unanswered, Unchanged, UnpassableTask,
+    STOPPED_EXIT_CODE, TAIL_LINES,
+};
+pub use findings::{cause::*, payloads::*, FindingEvent};
+pub use gates::{
+    escalation::*, ledger::*, menu::*, offer::*, payloads::*, scope_wait::*, GateEvent,
+    WhyWithheld, Withheld,
+};
+pub use logged_words::LoggedWords;
+pub use meta::EventMeta;
+pub use node::{ledger::*, payloads::*, NodeEvent};
+pub use redact::Unredactable;
+#[cfg(feature = "testkit")]
+pub use registry::sample_payloads;
+pub use registry::KIND_VERSION;
+pub use run::{ledger::*, metrics::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
+pub use scope::{ledger::*, payloads::*, ScopeEvent};
+pub use session::{ledger::*, note::*, payloads::*, SessionEvent};
+pub use spend::Spend;
+pub use tasks::{ledger::*, payloads::*, stop::*, TaskEvent};
+pub use unknown::UnknownKindCount;
 
 // Re-exported for convenience: `agent_session_opened`'s payload uses this
 // type, but it is defined at the crate root (`capabilities.rs`) since the
@@ -26,17 +69,63 @@ pub use crate::Capabilities;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ModeName, NodeId, RunId, Seq};
+use crate::ids::{NodeId, RunId, Seq};
 
 /// What the engine hands to storage: what happened, in which run, for
 /// which node. Storage assigns the position (`seq`) and the timestamp
 /// (from the injected clock) — a draft carries neither, so no caller can
-/// invent them.
+/// invent them. [`EventDraft::new`] is the only way to build one, and it
+/// refuses a draft whose subject the log could not be read against.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventDraft {
-    pub run_id: RunId,
-    pub node_id: Option<NodeId>,
-    pub payload: EventPayload,
+    run_id: RunId,
+    node_id: Option<NodeId>,
+    payload: EventPayload,
+}
+
+/// A draft whose subject the log cannot be read against.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SubjectError {
+    #[error("a grant names neither a task nor a node")]
+    UngrantableSubject,
+    #[error("a session fact is written with no node")]
+    SessionWithoutNode,
+}
+
+impl EventDraft {
+    /// Builds a draft. A grant names what it widens: a task, or the node
+    /// it is written under when it has no task.
+    pub fn new(
+        run_id: RunId,
+        node_id: Option<NodeId>,
+        payload: EventPayload,
+    ) -> Result<Self, SubjectError> {
+        if let EventPayload::Scope(ScopeEvent::Granted(grant)) = &payload {
+            if grant.task_id.is_none() && node_id.is_none() {
+                return Err(SubjectError::UngrantableSubject);
+            }
+        }
+        Ok(EventDraft {
+            run_id,
+            node_id,
+            payload,
+        })
+    }
+
+    /// The run the event belongs to.
+    pub fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+
+    /// The node the event is written under, if it has one.
+    pub fn node_id(&self) -> Option<&NodeId> {
+        self.node_id.as_ref()
+    }
+
+    /// What happened.
+    pub fn payload(&self) -> &EventPayload {
+        &self.payload
+    }
 }
 
 /// One event as persisted and read back. On the wire (`events.jsonl`,
@@ -82,10 +171,11 @@ impl EventBody {
         }
     }
 
-    /// The version the event was written under.
+    /// The schema version of the event: [`KIND_VERSION`] for a kind this
+    /// binary knows, the version it was stored with for one it does not.
     pub fn schema_version(&self) -> u32 {
         match self {
-            EventBody::Known(payload) => payload.schema_version(),
+            EventBody::Known(_) => KIND_VERSION,
             EventBody::Unknown(unknown) => unknown.schema_version,
         }
     }
@@ -277,149 +367,66 @@ impl schemars::JsonSchema for StoredEvent {
     }
 }
 
-/// All 36 event kinds, internally tagged by `kind`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+/// What happened, in the terms of the domain it happened to.
+///
+/// Nine arms, one per domain; each domain declares its own kinds and
+/// their payloads. Nothing outside a domain has to know every kind, and a
+/// kind's name and sample are its row in the registry.
+///
+/// On the wire this is still one flat object tagged by `kind`: `serde`
+/// goes through a private flat enum that the registry generates, in the
+/// order the log has always written its kinds, so the shape a log carries
+/// is independent of the shape the engine reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    from = "registry::EventPayloadWire",
+    into = "registry::EventPayloadWire"
+)]
 pub enum EventPayload {
-    RunCreated(RunCreatedPayload),
-    RunnerResolved(RunnerResolvedPayload),
-    BaselineCaptured(BaselineCapturedPayload),
-    NodeStarted(NodeStartedPayload),
-    AgentSessionOpened(AgentSessionOpenedPayload),
-    AgentMessage(AgentMessagePayload),
-    ArtifactWritten(ArtifactWrittenPayload),
-    ContextAssembled(ContextAssembledPayload),
-    TaskRegistered(TaskRegisteredPayload),
-    CriteriaChecked(CriteriaCheckedPayload),
-    TaskStatusChanged(TaskStatusChangedPayload),
-    ScopeChecked(ScopeCheckedPayload),
-    ScopeExpansionRequested(ScopeExpansionRequestedPayload),
-    ScopeExpansionGranted(ScopeExpansionGrantedPayload),
-    ScopeExpansionDenied(ScopeExpansionDeniedPayload),
-    NodeFinished(NodeFinishedPayload),
-    NodeFailed(NodeFailedPayload),
-    HookExecuted(HookExecutedPayload),
-    NodeRerouted(NodeReroutedPayload),
-    GateWaiting(GateWaitingPayload),
-    GateResolved(GateResolvedPayload),
-    QuestionsAnswered(QuestionsAnsweredPayload),
-    LoopIteration(LoopIterationPayload),
-    FindingPosted(FindingPostedPayload),
-    FindingUpdated(FindingUpdatedPayload),
-    FindingWithdrawn(FindingWithdrawnPayload),
-    FindingRefused(FindingRefusedPayload),
-    ArtifactSubmitted(ArtifactSubmittedPayload),
-    ArtifactAccepted(ArtifactAcceptedPayload),
-    PromotionSignaled(PromotionSignaledPayload),
-    ChildRunCreated(ChildRunCreatedPayload),
-    ChildRunFinished(ChildRunFinishedPayload),
-    CapabilityDegraded(CapabilityDegradedPayload),
-    RunPaused(RunPausedPayload),
-    RunResumed(RunResumedPayload),
-    RunFinished(RunFinishedPayload),
+    Run(RunEvent),
+    Node(NodeEvent),
+    Session(SessionEvent),
+    Tasks(TaskEvent),
+    Scope(ScopeEvent),
+    Findings(FindingEvent),
+    Artifacts(ArtifactEvent),
+    Gates(GateEvent),
+    Children(ChildEvent),
 }
 
-/// The mode `run_created` froze for this log — always the log's own
-/// first event; the default mode for a log without one (written before
-/// modes existed, or truncated). This is the one place that mode is
-/// derived: `execute_run`'s resume and the stats surfaces must never
-/// disagree about a run's mode.
-pub fn run_mode(events: &[StoredEvent]) -> ModeName {
-    match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::RunCreated(p)) => p.mode.clone(),
-        _ => ModeName::default(),
+/// The schema published for an event payload is the wire shape's: a
+/// `oneOf` with one branch per kind, each pinning its own `kind`, in the
+/// order the log writes them. The nine domains are an internal shape and
+/// no reader of `events.json` ever learns about them.
+impl schemars::JsonSchema for EventPayload {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("EventPayload")
+    }
+
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        registry::EventPayloadWire::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        registry::EventPayloadWire::json_schema(generator)
     }
 }
 
-impl EventPayload {
-    /// Every kind this binary knows, as persisted — what the reader checks
-    /// a stored `kind` against before deciding it is unknown.
-    pub const KINDS: &'static [&'static str] = &[
-        "run_created",
-        "runner_resolved",
-        "baseline_captured",
-        "node_started",
-        "agent_session_opened",
-        "agent_message",
-        "artifact_written",
-        "context_assembled",
-        "task_registered",
-        "criteria_checked",
-        "task_status_changed",
-        "scope_checked",
-        "scope_expansion_requested",
-        "scope_expansion_granted",
-        "scope_expansion_denied",
-        "node_finished",
-        "node_failed",
-        "hook_executed",
-        "node_rerouted",
-        "gate_waiting",
-        "gate_resolved",
-        "questions_answered",
-        "loop_iteration",
-        "finding_posted",
-        "finding_updated",
-        "finding_withdrawn",
-        "finding_refused",
-        "artifact_submitted",
-        "artifact_accepted",
-        "promotion_signaled",
-        "child_run_created",
-        "child_run_finished",
-        "capability_degraded",
-        "run_paused",
-        "run_resumed",
-        "run_finished",
-    ];
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::ScopeExpansionMode;
 
-    /// The persisted `kind` string — what storage writes to its
-    /// `kind` column, independent of re-serializing the whole payload.
-    pub fn kind_name(&self) -> &'static str {
-        match self {
-            Self::RunCreated(_) => "run_created",
-            Self::RunnerResolved(_) => "runner_resolved",
-            Self::BaselineCaptured(_) => "baseline_captured",
-            Self::NodeStarted(_) => "node_started",
-            Self::AgentSessionOpened(_) => "agent_session_opened",
-            Self::AgentMessage(_) => "agent_message",
-            Self::ArtifactWritten(_) => "artifact_written",
-            Self::ContextAssembled(_) => "context_assembled",
-            Self::TaskRegistered(_) => "task_registered",
-            Self::CriteriaChecked(_) => "criteria_checked",
-            Self::TaskStatusChanged(_) => "task_status_changed",
-            Self::ScopeChecked(_) => "scope_checked",
-            Self::ScopeExpansionRequested(_) => "scope_expansion_requested",
-            Self::ScopeExpansionGranted(_) => "scope_expansion_granted",
-            Self::ScopeExpansionDenied(_) => "scope_expansion_denied",
-            Self::NodeFinished(_) => "node_finished",
-            Self::NodeFailed(_) => "node_failed",
-            Self::HookExecuted(_) => "hook_executed",
-            Self::NodeRerouted(_) => "node_rerouted",
-            Self::GateWaiting(_) => "gate_waiting",
-            Self::GateResolved(_) => "gate_resolved",
-            Self::QuestionsAnswered(_) => "questions_answered",
-            Self::LoopIteration(_) => "loop_iteration",
-            Self::FindingPosted(_) => "finding_posted",
-            Self::FindingUpdated(_) => "finding_updated",
-            Self::FindingWithdrawn(_) => "finding_withdrawn",
-            Self::FindingRefused(_) => "finding_refused",
-            Self::ArtifactSubmitted(_) => "artifact_submitted",
-            Self::ArtifactAccepted(_) => "artifact_accepted",
-            Self::PromotionSignaled(_) => "promotion_signaled",
-            Self::ChildRunCreated(_) => "child_run_created",
-            Self::ChildRunFinished(_) => "child_run_finished",
-            Self::CapabilityDegraded(_) => "capability_degraded",
-            Self::RunPaused(_) => "run_paused",
-            Self::RunResumed(_) => "run_resumed",
-            Self::RunFinished(_) => "run_finished",
-        }
-    }
-
-    /// Every kind is currently at v1 — this is a
-    /// stub now, and becomes real per-variant lookup the day any kind
-    /// gets an incompatible `_v2` sibling.
-    pub fn schema_version(&self) -> u32 {
-        1
+    #[test]
+    fn a_grant_naming_no_subject_is_refused_at_the_draft() {
+        let grant = ScopeEvent::Granted(ScopeExpansionGrantedPayload {
+            task_id: None,
+            decided_by: Decider::Rule,
+            mode: Some(ScopeExpansionMode::Rules),
+            count_this_run: 1,
+            paths: vec![],
+        });
+        let draft = EventDraft::new(RunId::from("run-1"), None, EventPayload::Scope(grant));
+        assert!(matches!(draft, Err(SubjectError::UngrantableSubject)));
     }
 }

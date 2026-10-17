@@ -1,7 +1,7 @@
-//! `declares.permissions` as a ceiling enforced by `check`:
-//! a pack's own `prompt`/`loop` node can never request a
-//! session profile above what its manifest promises — pure filesystem
-//! fixtures, no live run needed.
+//! `declares` as a ceiling enforced by `check`: a pack's own
+//! `prompt`/`loop` node can never request a session profile above what its
+//! manifest promises, nor a network the manifest declares closed — pure
+//! filesystem fixtures, no live run needed.
 
 use std::path::Path;
 
@@ -16,12 +16,28 @@ fn write(path: &Path, contents: &str) {
 }
 
 fn write_pack(root: &Path, publisher: &str, pack_name: &str, declared_permissions: &str) {
-    let pack_dir = root.join(".yunta/packs").join(publisher).join(pack_name);
+    write_manifest(
+        root,
+        publisher,
+        pack_name,
+        &format!("permissions: {declared_permissions}"),
+    );
+}
+
+/// A pack that declares an edit ceiling and whether it may use the network.
+fn write_pack_declaring_network(root: &Path, publisher: &str, pack_name: &str, network: bool) {
+    let declares = format!("permissions: edit\n  network: {network}");
+    write_manifest(root, publisher, pack_name, &declares);
+}
+
+/// Writes the pack's `pack.yaml`, with `declares` as the lines under its
+/// `declares:` key.
+fn write_manifest(root: &Path, publisher: &str, pack_name: &str, declares: &str) {
     write(
-        &pack_dir.join("pack.yaml"),
+        &pack_dir(root, publisher, pack_name).join("pack.yaml"),
         &format!(
             "name: {pack_name}\npublisher: {publisher}\nversion: 1.0.0\ndeclares:\n  \
-             permissions: {declared_permissions}\ncontents:\n  workflows: [review.yaml]\n"
+             {declares}\ncontents:\n  workflows: [review.yaml]\n"
         ),
     );
 }
@@ -33,9 +49,9 @@ fn pack_dir(root: &Path, publisher: &str, pack_name: &str) -> std::path::PathBuf
 fn check(root: &Path, publisher: &str, pack_name: &str, workflow_yaml: &str) -> Vec<CheckError> {
     let path = pack_dir(root, publisher, pack_name).join("review.yaml");
     write(&path, workflow_yaml);
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).unwrap();
     let origin = origin_of(root, &path);
-    check_workflow_refs(&workflow, &ConfigLayer::default(), root, &origin)
+    check_workflow_refs(&workflow, &ConfigLayer::default(), root, &origin, &|_| None).errors
 }
 
 #[test]
@@ -120,10 +136,17 @@ fn a_repo_origin_workflow_has_no_ceiling_to_enforce() {
     let text =
         "name: review\nnodes:\n  - { id: draft, kind: prompt, prompt: hi, permissions: full }\n";
     write(&path, text);
-    let workflow: Workflow = serde_norway::from_str(text).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(text).unwrap();
     let origin = origin_of(root.path(), &path);
 
-    let errors = check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(
+        &workflow,
+        &ConfigLayer::default(),
+        root.path(),
+        &origin,
+        &|_| None,
+    )
+    .errors;
     assert!(errors.is_empty(), "got: {errors:?}");
 }
 
@@ -144,15 +167,46 @@ fn a_node_exceeding_the_ceiling_inside_a_composed_child_is_also_caught() {
     let parent_text = "name: review\nnodes:\n  - { id: sub, kind: workflow, use: acme/qa }\n";
     let parent_path = dir.join("review.yaml");
     write(&parent_path, parent_text);
-    let parent: Workflow = serde_norway::from_str(parent_text).unwrap();
+    let parent: Workflow = yunta_core::yaml::parse(parent_text).unwrap();
     let origin = origin_of(root.path(), &parent_path);
 
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(
+        &parent,
+        &ConfigLayer::default(),
+        root.path(),
+        &origin,
+        &|_| None,
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
             CheckError::PackPermissionsCeilingExceeded { node, .. } if node.as_str() == "check"
         )),
         "got: {errors:?}"
+    );
+}
+
+/// A pack that declares its network closed refuses a node that asks for one,
+/// as it refuses a node that asks for more than its permissions ceiling.
+#[test]
+fn a_pack_node_asking_for_the_network_is_refused_when_the_pack_declares_it_closed() {
+    let root = tempfile::tempdir().unwrap();
+    write_pack_declaring_network(root.path(), "acme", "review-pack", false);
+
+    let errors = check(
+        root.path(),
+        "acme",
+        "review-pack",
+        "name: review\nnodes:\n  - { id: draft, kind: prompt, prompt: hi, permissions: edit, network: true }\n",
+    );
+
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::PackNetworkCeilingExceeded { node, pack }
+                if node.as_str() == "draft" && pack == "acme/review-pack"
+        )),
+        "a pack that declares no network refuses a node that asks for it: {errors:?}"
     );
 }

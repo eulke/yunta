@@ -5,7 +5,7 @@
 //! `yunta_engine::derive`) annotated: no new events, no agent involved
 //! in producing the graph itself, same as `status`.
 
-use yunta_testkit::{init_repo, stdout, write, yunta_in};
+use yunta_testkit::{init_repo, run_id_from, stdout, write, yunta_in};
 
 const WORKFLOW: &str = r#"
 name: graph-fixture
@@ -97,7 +97,7 @@ nodes:
         })
         .expect("run id in output");
 
-    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let output = yunta_in!(&repo, &home, &["graph", "--run", &run_id]);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -112,15 +112,16 @@ nodes:
 }
 
 #[test]
-fn graph_refuses_a_workflow_that_fails_check() {
+fn graph_refuses_a_workflow_that_breaks_its_own_rules() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
     let home = root.path().join("state");
 
-    // depends_on references a node that doesn't exist — check must catch
-    // this before graph tries to render anything.
+    // depends_on references a node that doesn't exist: the file breaks
+    // its own rules, and every command that reads it refuses it the same
+    // way before anything is drawn.
     write(
         &repo.join("wf.yaml"),
         r#"
@@ -135,6 +136,43 @@ nodes:
 
     let output = yunta_in!(&repo, &home, &["graph", "wf.yaml"]);
     assert!(!output.status.success());
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+}
+
+#[test]
+fn graph_draws_a_workflow_check_refuses_and_exits_with_its_verdict() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // A sound file the project's config cannot run: its runner is not
+    // declared. The graph is the file's, so it is drawn.
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: unrunnable
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "plan it"
+"#,
+    );
+
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml"]);
+    assert!(!output.status.success(), "the exit code is the verdict");
+    assert!(
+        stdout(&output).starts_with("graph TD"),
+        "the workflow is drawn: {}",
+        stdout(&output)
+    );
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        said.contains("fails `yunta check`") && said.contains("runner `planner`"),
+        "the verdict goes beside the drawing: {said}"
+    );
 }
 
 #[test]
@@ -165,11 +203,11 @@ fn graph_resolves_a_bare_catalog_name() {
 
 #[test]
 fn labels_are_escaped() {
-    // A node's derived-state label carries the run's own outcome text,
-    // which can hold characters that break a diagram: quotes, `<`/`>`/`&`
-    // (Mermaid renders labels as HTML) and backslashes (DOT). A failed
-    // bash node's outcome is `exit <code>: <stderr tail>`, so its stderr
-    // is a direct, controllable source of those characters.
+    // A node's derived-state label carries what the run's log says about
+    // it, which can hold characters that break a diagram: quotes,
+    // `<`/`>`/`&` (Mermaid renders labels as HTML) and backslashes (DOT).
+    // A node that writes one file outside its scope fails naming that
+    // file, so a file name is a direct, controllable source of them.
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -177,8 +215,8 @@ fn labels_are_escaped() {
     let home = root.path().join("state");
     write(
         &repo.join("wf.yaml"),
-        "name: escaping\nnodes:\n  - id: boom\n    kind: bash\n    \
-         run: \"printf '%s' 'a\\\"b<c>d&e' 1>&2; exit 1\"\n",
+        "name: escaping\nnodes:\n  - id: boom\n    kind: bash\n    scope: [src/**]\n    \
+         run: \"printf x > 'a\\\"b<c>d&e'\"\n",
     );
 
     // The run fails (the node exits non-zero); its events still record the
@@ -197,7 +235,7 @@ fn labels_are_escaped() {
     // it did, its `"`/`<`/`>` would break the syntax.
     let raw = "a\"b<c>d&e";
 
-    let mermaid = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let mermaid = yunta_in!(&repo, &home, &["graph", "--run", &run_id]);
     assert!(
         mermaid.status.success(),
         "stderr: {}",
@@ -218,7 +256,7 @@ fn labels_are_escaped() {
     let dot = yunta_in!(
         &repo,
         &home,
-        &["graph", "wf.yaml", "--run", &run_id, "--format", "dot"]
+        &["graph", "--run", &run_id, "--format", "dot"]
     );
     assert!(
         dot.status.success(),
@@ -263,4 +301,118 @@ fn graph_renders_dot_with_solid_dependencies_and_dashed_reroutes() {
         "missing dashed re-route edge: {text}"
     );
     assert!(text.trim_end().ends_with('}'), "got: {text}");
+}
+
+/// A node the run's mode leaves out and a node the run never reached are
+/// two different answers, and a diagram that leaves either one bare says
+/// neither.
+#[test]
+fn graph_with_a_run_id_labels_the_nodes_the_log_never_mentions() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: graph-mode-fixture
+modes:
+  quick: { include: [first, blocked] }
+  full: { include: all }
+nodes:
+  - { id: first, kind: bash, run: "false" }
+  - { id: blocked, kind: bash, run: "true", depends_on: [first] }
+  - { id: excluded, kind: bash, run: "true" }
+"#,
+    );
+
+    // `first` fails, so `blocked` never starts and `excluded` is outside
+    // the mode: one run holds both cases at once.
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "quick"]);
+    let run_id = run_id_from(&run);
+
+    let output = yunta_in!(&repo, &home, &["graph", "--run", &run_id]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = stdout(&output);
+    assert!(text.contains("first: failed"), "got: {text}");
+    assert!(text.contains("blocked: never ran"), "got: {text}");
+    assert!(text.contains("excluded: skipped"), "got: {text}");
+}
+
+/// `--run` draws the workflow that run froze, not the file beside it,
+/// and a `parallel` group is one box with its children inside.
+#[test]
+fn graph_with_a_run_id_draws_the_runs_frozen_workflow_with_its_groups_as_subgraphs() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: grouped
+nodes:
+  - id: review
+    kind: parallel
+    nodes:
+      - { id: review-a, kind: bash, run: "true" }
+      - { id: review-b, kind: bash, run: "true" }
+"#,
+    );
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+
+    // The file says something else by now; the diagram is of the run.
+    write(
+        &repo.join("wf.yaml"),
+        "name: grouped\nnodes:\n  - { id: elsewhere, kind: bash, run: \"true\" }\n",
+    );
+
+    let text = stdout(&yunta_in!(&repo, &home, &["graph", "--run", &run_id]));
+    assert!(
+        text.contains("subgraph review[\"review:"),
+        "the group is one box: {text}"
+    );
+    assert!(
+        text.contains("    review-a[\"review-a:") && text.contains("    review-b[\"review-b:"),
+        "its children are inside it: {text}"
+    );
+    assert!(
+        !text.contains("elsewhere"),
+        "the run's own frozen workflow, not the file beside it: {text}"
+    );
+}
+
+/// One source, always: naming a file and a run at once is two answers
+/// to the same question.
+#[test]
+fn graph_refuses_a_workflow_and_a_run_at_once() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join("wf.yaml"), WORKFLOW);
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    assert!(!output.status.success());
+    let refusal = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        refusal.contains("draws one workflow") && refusal.contains("Drop one of the two"),
+        "the refusal names both sources and what to do: {refusal}"
+    );
+
+    let output = yunta_in!(&repo, &home, &["graph"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("needs a workflow"),
+        "and naming neither is refused the same way"
+    );
 }

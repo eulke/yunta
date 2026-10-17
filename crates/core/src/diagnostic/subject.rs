@@ -9,8 +9,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::DocumentKind;
 use crate::ids::TaskId;
-use crate::{FindingId, QuestionId};
+use crate::yaml::Pointer;
+use crate::{FindingId, NodeId, QuestionId};
 
 /// One entry of a document: by name when its id parsed, by position
 /// when the id is the thing that could not be read.
@@ -66,9 +68,12 @@ pub enum Subject {
     },
     Finding(Named<FindingId>),
     Question(Named<QuestionId>),
+    /// One task's spec, named by the task it holds.
+    Spec(Named<TaskId>),
+    /// A node of a workflow, for a rule about the graph the file
+    /// declares.
+    Node(Named<NodeId>),
 }
-
-impl Subject {}
 
 /// `the first task`, `the 5th finding` — how an entry is named when its
 /// own id could not be read.
@@ -78,18 +83,37 @@ fn ordinal(noun: &str, index: usize) -> String {
         1 => "first".to_string(),
         2 => "second".to_string(),
         3 => "third".to_string(),
-        n => format!("{n}{}", ordinal_suffix(n)),
+        n => crate::text::ordinal(n),
     };
     format!("the {word} {noun}")
 }
 
-fn ordinal_suffix(n: usize) -> &'static str {
-    match (n % 100, n % 10) {
-        (11..=13, _) => "th",
-        (_, 1) => "st",
-        (_, 2) => "nd",
-        (_, 3) => "rd",
-        _ => "th",
+impl Subject {
+    /// Where this entry is written in a document of `kind`, from its
+    /// root: a task, a criterion, a finding, a question or its answer, a
+    /// spec, or a workflow node by its id when the id was read.
+    pub fn pointer(&self, kind: DocumentKind) -> Pointer {
+        let root = Pointer::root();
+        match self {
+            Subject::Document => root,
+            Subject::Task(task) => root.key("tasks").index(task.index),
+            Subject::Criterion { task, index } => root
+                .key("tasks")
+                .index(task.index)
+                .key("criteria")
+                .index(*index),
+            Subject::Finding(finding) => root.key("findings").index(finding.index),
+            Subject::Question(question) => match kind {
+                DocumentKind::Artifact(crate::ArtifactKind::Answers) => root.key("answers"),
+                _ => root.key("questions"),
+            }
+            .index(question.index),
+            Subject::Spec(spec) => root.key("specs").index(spec.index),
+            Subject::Node(node) => match &node.id {
+                Some(id) => root.key("nodes").node(id.as_str()),
+                None => root.key("nodes").index(node.index),
+            },
+        }
     }
 }
 
@@ -103,6 +127,8 @@ impl fmt::Display for Subject {
             }
             Subject::Finding(finding) => f.write_str(&finding.render("finding")),
             Subject::Question(question) => f.write_str(&question.render("question")),
+            Subject::Spec(spec) => f.write_str(&spec.render("spec of task")),
+            Subject::Node(node) => f.write_str(&node.render("node")),
         }
     }
 }

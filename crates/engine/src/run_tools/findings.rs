@@ -12,16 +12,18 @@
 //! leaves a trace the run can be read back from.
 
 use serde_json::Value;
-use yunta_core::diagnostic::{Diagnostic, DocumentRef, Named, Problem, Report, RuleCode, Subject};
+use yunta_core::diagnostic::{Diagnostic, DocumentRef, Named, Problem, Report, Subject};
 use yunta_core::events::findings::{FindingLedger, Slot};
 use yunta_core::events::{
     EventPayload, Finding, FindingOperation, FindingPostedPayload, FindingRefusedPayload,
     FindingUpdatedPayload, FindingWithdrawnPayload,
 };
-use yunta_core::{ArtifactKind, FindingEntry, FindingId, FindingsFile, Withdrawal};
+use yunta_core::{ArtifactKind, FindingEntry, FindingFault, FindingId, Withdrawal};
 
+use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::refusal;
+use super::verdicts::{refusal, Reply};
+use yunta_core::events::FindingEvent;
 
 impl SessionTools {
     pub(super) async fn post_finding(
@@ -30,11 +32,19 @@ impl SessionTools {
     ) -> Result<String, RunToolError> {
         let entry = self.vetted(FindingOperation::Post, args).await?;
         let id = entry.id.clone();
-        self.append(EventPayload::FindingPosted(FindingPostedPayload {
-            finding: Finding::from(entry),
-        }))
+        self.append(EventPayload::Findings(FindingEvent::Posted(
+            FindingPostedPayload {
+                finding: Finding::from(entry),
+            },
+        )))
         .await?;
-        Ok(format!("finding `{id}` recorded"))
+        Ok(Reply::new(format!("finding `{id}` recorded"))
+            .next(format!(
+                "`{}` changes it and `{}` takes it back, saying why",
+                self.called(RunTool::UpdateFinding),
+                self.called(RunTool::WithdrawFinding)
+            ))
+            .text())
     }
 
     pub(super) async fn update_finding(
@@ -43,11 +53,13 @@ impl SessionTools {
     ) -> Result<String, RunToolError> {
         let entry = self.vetted(FindingOperation::Update, args).await?;
         let id = entry.id.clone();
-        self.append(EventPayload::FindingUpdated(FindingUpdatedPayload {
-            finding: Finding::from(entry),
-        }))
+        self.append(EventPayload::Findings(FindingEvent::Updated(
+            FindingUpdatedPayload {
+                finding: Finding::from(entry),
+            },
+        )))
         .await?;
-        Ok(format!("finding `{id}` updated"))
+        Ok(Reply::new(format!("finding `{id}` updated")).text())
     }
 
     pub(super) async fn withdraw_finding(
@@ -56,27 +68,25 @@ impl SessionTools {
     ) -> Result<String, RunToolError> {
         let operation = FindingOperation::Withdraw;
         let document = DocumentRef::new(ArtifactKind::Findings, tool_of(operation));
-        let withdrawal: Withdrawal = match serde_path_to_error::deserialize(Value::Object(args)) {
-            Ok(withdrawal) => withdrawal,
-            Err(error) => {
-                let report = Report::new(document, vec![parse_problem(&error)]);
-                return Err(self.refuse(operation, None, report).await);
-            }
-        };
+        let withdrawal: Withdrawal =
+            match yunta_core::shape::accept(Value::Object(args), tool_of(operation)) {
+                Ok(withdrawal) => withdrawal,
+                Err(report) => return Err(self.refuse(operation, None, report).await),
+            };
         let id = withdrawal.id.clone();
-        let mut broken = withdrawal.check();
         let standing = self.finding_status(&id).await?;
-        broken.extend(Self::id_rule(operation, &id, standing.as_ref()));
-        if !broken.is_empty() {
-            let report = Report::new(document, broken);
+        if let Some(broken) = Self::id_rule(operation, &id, standing.as_ref()) {
+            let report = Report::new(document, vec![broken]);
             return Err(self.refuse(operation, Some(id), report).await);
         }
-        self.append(EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
-            id: id.clone(),
-            reason: withdrawal.reason,
-        }))
+        self.append(EventPayload::Findings(FindingEvent::Withdrawn(
+            FindingWithdrawnPayload {
+                id: id.clone(),
+                reason: withdrawal.reason,
+            },
+        )))
         .await?;
-        Ok(format!("finding `{id}` withdrawn"))
+        Ok(Reply::new(format!("finding `{id}` withdrawn")).text())
     }
 
     /// The finding a `post` or an `update` offers, once it has passed the
@@ -95,7 +105,11 @@ impl SessionTools {
         };
         let id = entry.id.clone();
         let standing = self.finding_status(&id).await?;
-        if let Some(broken) = Self::id_rule(operation, &id, standing.as_ref()) {
+        let mut broken = Self::id_rule(operation, &id, standing.as_ref());
+        if let (None, Some(proposed)) = (&broken, &entry.proposed_criterion) {
+            broken = self.proposed_breaks(&id, &proposed.cmd).await?;
+        }
+        if let Some(broken) = broken {
             let report = Report::new(
                 DocumentRef::new(ArtifactKind::Findings, tool_of(operation)),
                 vec![broken],
@@ -113,19 +127,7 @@ impl SessionTools {
     /// over a finding is the frontier where a key nobody declared is a
     /// mistake to name rather than a field to drop.
     fn entry(&self, args: serde_json::Map<String, Value>) -> Result<FindingEntry, Report> {
-        let document = DocumentRef::new(ArtifactKind::Findings, ArtifactKind::POST_FINDING_TOOL);
-        let entry: FindingEntry = serde_path_to_error::deserialize(Value::Object(args))
-            .map_err(|error| Report::new(document.clone(), vec![parse_problem(&error)]))?;
-        // One entry is a whole findings document as far as the rules are
-        // concerned: every rule of that document is about an entry.
-        let broken = yunta_core::shape::Document::check(&FindingsFile {
-            findings: vec![entry.clone()],
-        });
-        if broken.is_empty() {
-            Ok(entry)
-        } else {
-            Err(Report::new(document, broken))
-        }
+        yunta_core::shape::accept(Value::Object(args), ArtifactKind::POST_FINDING_TOOL)
     }
 
     /// Where `id` stands for this node, folded from the run's own log.
@@ -144,30 +146,20 @@ impl SessionTools {
         id: &FindingId,
         standing: Option<&Slot>,
     ) -> Option<Diagnostic> {
-        let broken = |code: RuleCode, detail: &str| {
+        let broken = |fault: FindingFault| {
             Some(Diagnostic::new(
                 Subject::Finding(Named::new(id.clone(), 0)),
-                Problem::rule(code, detail),
+                Problem::broke(fault),
             ))
         };
         match (operation, standing) {
             (FindingOperation::Post, None) => None,
-            (FindingOperation::Post, Some(Slot::Live(_))) => broken(
-                RuleCode::DuplicateId,
-                "this node already reported a finding under that id; report the new one \
-                 under an id of its own, or update the one that stands",
-            ),
-            (_, Some(Slot::Withdrawn { .. })) => broken(
-                RuleCode::WithdrawnId,
-                "this node withdrew that id, and a withdrawal is final; a finding that \
-                 comes back is a new id",
-            ),
+            (FindingOperation::Post, Some(Slot::Live(_))) => broken(FindingFault::PostedTwice),
+            (_, Some(Slot::Withdrawn { .. })) => broken(FindingFault::WithdrawnId),
             (_, Some(Slot::Live(_))) => None,
-            (FindingOperation::Update | FindingOperation::Withdraw, None) => broken(
-                RuleCode::UnknownId,
-                "this node never reported a finding under that id; only the node that \
-                 reported one can change it",
-            ),
+            (FindingOperation::Update | FindingOperation::Withdraw, None) => {
+                broken(FindingFault::NeverPosted)
+            }
         }
     }
 
@@ -185,11 +177,13 @@ impl SessionTools {
     ) -> RunToolError {
         let text = refusal(operation, &report);
         match self
-            .append(EventPayload::FindingRefused(FindingRefusedPayload {
-                operation,
-                id,
-                report,
-            }))
+            .append(EventPayload::Findings(FindingEvent::Refused(
+                FindingRefusedPayload {
+                    operation,
+                    id,
+                    report,
+                },
+            )))
             .await
         {
             Ok(()) => RunToolError::Refused { text },
@@ -206,14 +200,4 @@ fn tool_of(operation: FindingOperation) -> &'static str {
         FindingOperation::Update => ArtifactKind::UPDATE_FINDING_TOOL,
         FindingOperation::Withdraw => ArtifactKind::WITHDRAW_FINDING_TOOL,
     }
-}
-
-/// What a session offered that the document's own type could not read,
-/// pointed at the field that could not be read — never the
-/// deserializer's account of itself.
-fn parse_problem(error: &serde_path_to_error::Error<serde_json::Error>) -> Diagnostic {
-    Diagnostic::new(
-        Subject::Document,
-        Problem::parse(error.path().to_string(), error.inner().to_string()),
-    )
 }

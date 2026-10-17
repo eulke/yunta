@@ -6,13 +6,18 @@
 //! so it stays testable without going through a CLI process.
 
 use std::path::{Path, PathBuf};
+use yunta_core::CommitSha;
+use yunta_engine::process::Supervision;
+use yunta_engine::GitError;
 
+use crate::error::warn;
+use yunta_core::durable::{self, Durability};
 use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
-    #[error("git {args}: {detail}")]
-    Git { args: String, detail: String },
+    #[error(transparent)]
+    Git(GitError),
     #[error("failed to read `{path}`: {source}")]
     Read {
         path: PathBuf,
@@ -31,6 +36,12 @@ pub enum PackError {
     InvalidManifest { path: PathBuf, detail: String },
     #[error("`{path}` isn't valid UTF-8, can't be hashed as pack content")]
     NonUtf8Path { path: PathBuf },
+    #[error("`git rev-parse HEAD` answered `{line}`, which is not a commit")]
+    NotACommit {
+        line: String,
+        #[source]
+        source: yunta_core::InvalidId,
+    },
     #[error(
         "`{path}` is a symlink — a pack ships regular files only, so vendoring never follows a \
          link out of the pack or copies what one points at"
@@ -38,6 +49,12 @@ pub enum PackError {
     Symlink { path: PathBuf },
     #[error("pack.yaml: {detail}")]
     Manifest { detail: String },
+    #[error("{cause}; the cleanup also failed: {cleanup}")]
+    Cleanup {
+        #[source]
+        cause: Box<PackError>,
+        cleanup: Box<PackError>,
+    },
 }
 
 /// `<source>[@<ref>]` (e.g. `github.com/acme/review-pack@v1.2.0`) —
@@ -71,31 +88,35 @@ pub fn clone_url(source: &str) -> String {
     }
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
-    yunta_engine::git::output(cwd, args)
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, PackError> {
+    yunta_engine::git::read(cwd, args, supervision)
         .await
         .map(|stdout| stdout.trim().to_string())
-        .map_err(|e| {
-            let detail = e.detail();
-            PackError::Git {
-                args: e.args,
-                detail,
-            }
-        })
+        .map_err(PackError::Git)
 }
 
 /// Clones `url` into `dest` (a fresh, empty directory), checking out
 /// `ref_` when given — a full clone, not shallow: `--depth 1` would
 /// only work for a ref that's a branch tip, and a ref here can just as
 /// well be a tag or a commit-ish.
-pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<(), PackError> {
+pub async fn clone_pack(
+    url: &str,
+    ref_: Option<&str>,
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<(), PackError> {
     run_git(
         Path::new("."),
         &["clone", "--quiet", url, &dest.display().to_string()],
+        supervision,
     )
     .await?;
     if let Some(ref_) = ref_ {
-        run_git(dest, &["checkout", "--quiet", ref_]).await?;
+        run_git(dest, &["checkout", "--quiet", ref_], supervision).await?;
     }
     Ok(())
 }
@@ -103,15 +124,23 @@ pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<()
 /// The commit `dest` (an already-cloned working tree) currently has
 /// checked out — what `add`/`update` records as the lock entry's
 /// `commit`, independent of whether `ref` itself later moves.
-pub async fn head_commit(dest: &Path) -> Result<String, PackError> {
-    run_git(dest, &["rev-parse", "HEAD"]).await
+pub async fn head_commit(
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, PackError> {
+    let line = run_git(dest, &["rev-parse", "HEAD"], supervision).await?;
+    line.parse()
+        .map_err(|source| PackError::NotACommit { line, source })
 }
 
 /// The branch `dest` landed on when no explicit ref was requested — the
 /// descriptive `ref` a lock entry records for a plain `pack add <url>`
 /// with no `@ref` suffix, so `yunta.lock` never has to say "unknown".
-pub async fn current_branch(dest: &Path) -> Result<String, PackError> {
-    run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"]).await
+pub async fn current_branch(
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<String, PackError> {
+    run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await
 }
 
 /// Reads, parses and validates `<dir>/pack.yaml`: a manifest whose
@@ -266,21 +295,101 @@ pub fn staging_dir(cwd: &Path, pack: &PackRef) -> PathBuf {
         .join(format!(".staging-{}-{}", pack.name(), std::process::id()))
 }
 
-/// Vendors `src` into `dest` through a staging directory beside it:
-/// the whole tree is copied first and renamed into place last, so
-/// `dest` either does not exist or holds the complete pack. A failure
-/// leaves nothing behind; a `dest` that already exists is replaced only
-/// after the new tree is complete, and the old tree is dropped only
-/// once the new one is in place.
-pub fn vendor_into_place(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackError> {
-    let outcome = stage_and_swap(src, staging, dest);
-    if outcome.is_err() {
-        let _ = std::fs::remove_dir_all(staging);
-    }
-    outcome
+/// A tree moved into place. The tree it replaced stays on disk until the
+/// caller knows the whole install, the lock included, has landed.
+#[must_use]
+pub struct Swap {
+    dest: PathBuf,
+    previous: Option<PathBuf>,
 }
 
-fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackError> {
+impl Swap {
+    /// The install failed after the move: the installed tree is removed, and
+    /// the replaced tree, when there was one, goes back to `dest`.
+    pub fn undo(self) -> Result<(), PackError> {
+        // Nothing is there when the move never reached `dest`.
+        Swap::discard(&self.dest)?;
+        let Some(previous) = self.previous else {
+            return Ok(());
+        };
+        std::fs::rename(&previous, &self.dest).map_err(|source| PackError::Write {
+            path: self.dest,
+            source,
+        })
+    }
+
+    /// The install landed: the replaced tree is dropped. A failure here is a
+    /// warning, because the installed tree is already in place.
+    pub fn commit(self) {
+        if let Some(previous) = self.previous {
+            if let Err(error) = std::fs::remove_dir_all(&previous) {
+                warn(format!(
+                    "could not remove the replaced tree at {}: {error}",
+                    previous.display()
+                ));
+            }
+        }
+    }
+
+    /// Removes the tree at `staging` when there is one; a failure is the
+    /// caller's to report.
+    pub fn discard(staging: &Path) -> Result<(), PackError> {
+        match std::fs::remove_dir_all(staging) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(PackError::Write {
+                path: staging.to_path_buf(),
+                source,
+            }),
+        }
+    }
+
+    /// Moves the tree at `dest` aside for `remove`: nothing is deleted until
+    /// `commit`. `None` when there is no tree to move.
+    pub fn aside(dest: &Path) -> Result<Option<Swap>, PackError> {
+        let previous = dest.with_file_name(format!(
+            ".removed-{}-{}",
+            dest.file_name().and_then(|n| n.to_str()).unwrap_or("pack"),
+            std::process::id()
+        ));
+        match std::fs::rename(dest, &previous) {
+            Ok(()) => Ok(Some(Swap {
+                dest: dest.to_path_buf(),
+                previous: Some(previous),
+            })),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(PackError::Write {
+                path: dest.to_path_buf(),
+                source,
+            }),
+        }
+    }
+}
+
+/// The error of a step that failed, joined with the error of the cleanup
+/// that followed it when that cleanup failed too.
+pub fn with_cleanup(cause: PackError, cleanup: Result<(), PackError>) -> PackError {
+    match cleanup {
+        Ok(()) => cause,
+        Err(cleanup) => PackError::Cleanup {
+            cause: Box::new(cause),
+            cleanup: Box::new(cleanup),
+        },
+    }
+}
+
+/// Vendors `src` into `dest` through a staging directory beside it: the
+/// whole tree is copied first and renamed into place last, so `dest` either
+/// does not exist or holds the complete pack. A failure removes the staging
+/// tree and puts `dest` back as it was; a cleanup that fails too is joined to
+/// the error. A `dest` that already exists is replaced only after the new
+/// tree is complete, and the replaced tree stays on disk until the returned
+/// `Swap` is committed.
+pub fn vendor_into_place(src: &Path, staging: &Path, dest: &Path) -> Result<Swap, PackError> {
+    stage_and_swap(src, staging, dest).map_err(|cause| with_cleanup(cause, Swap::discard(staging)))
+}
+
+fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<Swap, PackError> {
     if let Some(parent) = staging.parent() {
         std::fs::create_dir_all(parent).map_err(|source| PackError::Write {
             path: parent.to_path_buf(),
@@ -300,22 +409,24 @@ fn stage_and_swap(src: &Path, staging: &Path, dest: &Path) -> Result<(), PackErr
             source,
         })?;
     }
-    if let Err(source) = std::fs::rename(staging, dest) {
-        if had_previous {
-            let _ = std::fs::rename(&previous, dest);
+    let swap = Swap {
+        dest: dest.to_path_buf(),
+        previous: had_previous.then_some(previous),
+    };
+    match std::fs::rename(staging, dest) {
+        Ok(()) => Ok(swap),
+        Err(source) => {
+            let cause = PackError::Write {
+                path: dest.to_path_buf(),
+                source,
+            };
+            // Without a replaced tree, `dest` was never this swap's to clear.
+            if !had_previous {
+                return Err(cause);
+            }
+            Err(with_cleanup(cause, swap.undo()))
         }
-        return Err(PackError::Write {
-            path: dest.to_path_buf(),
-            source,
-        });
     }
-    if had_previous {
-        std::fs::remove_dir_all(&previous).map_err(|source| PackError::Write {
-            path: previous,
-            source,
-        })?;
-    }
-    Ok(())
 }
 
 pub fn lock_path(cwd: &Path) -> PathBuf {
@@ -324,13 +435,13 @@ pub fn lock_path(cwd: &Path) -> PathBuf {
 
 pub fn load_lock(cwd: &Path) -> Result<PackLock, PackError> {
     let path = lock_path(cwd);
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => {
-            yunta_core::yaml::parse(&contents).map_err(|e| PackError::InvalidManifest {
+    match std::fs::read(&path) {
+        Ok(bytes) => yunta_core::persisted::PersistedDoc::<PackLock>::read(&bytes)
+            .map(|lock| lock.doc)
+            .map_err(|e| PackError::InvalidManifest {
                 path,
-                detail: e.to_string(),
-            })
-        }
+                detail: yunta_core::describe(&e),
+            }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PackLock::default()),
         Err(source) => Err(PackError::Read { path, source }),
     }
@@ -344,18 +455,13 @@ pub fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
             source,
         })?;
     }
-    let yaml = yunta_core::yaml::to_string(lock).map_err(|e| PackError::Manifest {
-        detail: format!("cannot serialize yunta.lock: {e}"),
-    })?;
-    // Written beside the lock and renamed over it: a reader never sees
-    // a half-written file, and a failed write leaves the old lock intact.
-    let staging = path.with_extension("lock.tmp");
-    std::fs::write(&staging, yaml).map_err(|source| PackError::Write {
-        path: staging.clone(),
-        source,
-    })?;
-    std::fs::rename(&staging, &path).map_err(|source| {
-        let _ = std::fs::remove_file(&staging);
-        PackError::Write { path, source }
-    })
+    let yaml = yunta_core::persisted::PersistedDoc::of(lock.clone())
+        .write()
+        .map_err(|e| PackError::Manifest {
+            detail: format!("cannot serialize yunta.lock: {}", yunta_core::describe(&e)),
+        })?;
+    // Replaced whole and synced before the call returns: a reader never sees
+    // a half-written lock, and a failed write leaves the lock as it was.
+    durable::replace(&path, &yaml, Durability::Synced)
+        .map_err(|source| PackError::Write { path, source })
 }

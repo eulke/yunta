@@ -1,14 +1,18 @@
 //! Resolving a node's runner into an adapter, model and agent, opening
 //! its per-run tools, and recording what the adapter cannot enforce.
 
-use yunta_core::events::{EventPayload, RunnerResolvedPayload};
-use yunta_core::{AdapterId, AgentName, Node};
+use yunta_core::events::{
+    CapabilityUse, EngineError, EngineStep, EventPayload, Failure, RunnerRefusal,
+    RunnerResolvedPayload,
+};
+use yunta_core::{AdapterId, Node, NodeId, RunAdapter};
 
-use crate::runner::resolve_runner;
+use crate::runner::{resolve_runner, RunnerError};
 
 use super::node_close::fail;
 use super::step::Step;
 use super::{RunCtx, RunError};
+use yunta_core::events::NodeEvent;
 
 /// Resolves the node's runner or fails the node; on success emits
 /// `runner_resolved` and hands back the request pieces.
@@ -17,40 +21,27 @@ pub(super) async fn resolve_node_runner(
     node: &Node,
 ) -> Result<Step<yunta_core::RunnerCandidate>, RunError> {
     // A node without `runner:` falls back to `defaults.runner`.
-    let default_runner = ctx
-        .manifest
-        .config
-        .defaults
-        .as_ref()
-        .and_then(|defaults| defaults.runner.as_ref());
-    let Some(role) = node.runner.as_ref().or(default_runner) else {
-        let end = fail(
-            ctx,
-            node,
-            format!(
-                "node `{}` has no `runner:` and the config declares no `defaults.runner` — \
-                 declare one",
-                node.id
-            ),
-            false,
-        )
-        .await?;
+    let Some(role) = ctx.manifest.config.runner_role(node) else {
+        let end = super::check_exec::unset(ctx, node, yunta_core::ConfigKey::Runner).await?;
         return Ok(Step::Ended(end));
     };
 
+    // A run pinned to an adapter takes only the candidates on it; a run on
+    // the mock pins none and takes the first available candidate.
     match resolve_runner(
         role,
         &ctx.manifest.config,
         &|adapter| ctx.adapters.contains_key(adapter),
-        ctx.adapter_override,
+        ctx.manifest.adapter.as_ref().and_then(RunAdapter::pinned),
     ) {
         Ok(resolved) => {
             let mut chosen = resolved.chosen.clone();
-            // The node's own `agent:` wins over the
+            // The node's own `agent:` and `effort:` win over the
             // candidate's.
             if let Some(agent) = &node.agent {
                 chosen.agent = Some(agent.clone());
             }
+            chosen.effort = node.effort.or(chosen.effort);
             // An adapter without `custom_agents` fails the node
             // rather than silently dropping the requested agent.
             if chosen.agent.is_some() {
@@ -60,42 +51,54 @@ pub(super) async fn resolve_node_runner(
                         .declares(yunta_core::Capability::CustomAgents)
                 });
                 if !has_custom_agents {
-                    let end = fail(
-                        ctx,
-                        node,
-                        format!(
-                            "node `{}` requests agent `{}` but adapter `{}` does not declare \
-                             `custom_agents` — pick a candidate on an adapter that does, or \
-                             drop the agent",
-                            node.id,
-                            chosen.agent.as_ref().map_or("", AgentName::as_str),
-                            chosen.adapter
-                        ),
-                        false,
-                    )
-                    .await?;
+                    let failure = Failure::CapabilityMissing {
+                        node: node.id.clone(),
+                        capability: yunta_core::Capability::CustomAgents,
+                        adapter: chosen.adapter.clone(),
+                        used_for: None,
+                        agent: chosen.agent.clone(),
+                    };
+                    let end = fail(ctx, node, failure).await?;
                     return Ok(Step::Ended(end));
                 }
             }
             ctx.emit(
                 Some(&node.id),
-                EventPayload::RunnerResolved(RunnerResolvedPayload {
+                EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
                     runner: resolved.runner.clone(),
                     chosen: chosen.clone(),
                     discarded: resolved.discarded.clone(),
-                }),
+                })),
             )
             .await?;
             Ok(Step::Value(chosen))
         }
-        Err(e) => Ok(Step::Ended(fail(ctx, node, e.to_string(), false).await?)),
+        Err(error) => {
+            let failure = runner_failure(error);
+            Ok(Step::Ended(fail(ctx, node, failure).await?))
+        }
+    }
+}
+
+/// The failure a node leaves when its runner does not resolve: the runner it
+/// asked for, and why no candidate of it can be used.
+fn runner_failure(error: RunnerError) -> Failure {
+    let (runner, runner_refusal) = match error {
+        RunnerError::UnknownRunner { runner } => (runner, RunnerRefusal::Unknown),
+        RunnerError::NoCandidateAvailable { runner, tried } => {
+            (runner, RunnerRefusal::NoCandidate { tried })
+        }
+    };
+    Failure::RunnerUnresolved {
+        runner,
+        runner_refusal,
     }
 }
 
 /// A blackboard group's session that cannot reach the per-run MCP
 /// endpoint — the node fails with it, never emulates.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum RunToolsSetupError {
+pub enum RunToolsSetupError {
     #[error(
         "node `{node}` is in a `coordination: blackboard` group but adapter `{adapter}` declares \
          no `run_tools` capability — the blackboard cannot be mounted; pick a runner on an \
@@ -135,134 +138,132 @@ pub(super) enum RunToolsSetupError {
         #[source]
         source: std::io::Error,
     },
+    #[error(
+        "node `{node}` is a loop, whose task sessions read their task and check their work \
+         through the run tools, and adapter `{adapter}` declares no `run_tools` capability — \
+         a session there could not learn what its task asks; pick a runner on an adapter \
+         that can be a client of the per-run MCP endpoint"
+    )]
+    TaskNeedsRunTools {
+        node: yunta_core::NodeId,
+        adapter: AdapterId,
+    },
+    #[error(
+        "node `{node}` is a loop, whose task sessions read their task through the run tools, \
+         and its per-run MCP listener failed to start: {source}"
+    )]
+    TaskListenerFailed {
+        node: yunta_core::NodeId,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
-/// What [`open_run_tools`] resolved. `session` is the listener when one
-/// opened; `degraded` carries the reason to record when the session
-/// proceeds without run tools — the caller emits that
-/// `capability_degraded` on the run's log, since this function has no
-/// fallible emit of its own.
-pub(super) struct RunToolsResolution {
-    pub session: Option<crate::run_tools::RunToolsSession>,
-    pub degraded: Option<String>,
+impl RunToolsSetupError {
+    /// The failure this error leaves on its node. A listener that did not
+    /// start is an engine step that failed on its own; a capability the
+    /// adapter lacks is the adapter's, and says what the node needs it for.
+    pub(crate) fn failure(&self) -> Failure {
+        match self {
+            RunToolsSetupError::NoRunToolsCapability { node, adapter } => {
+                capability_missing(node, adapter, CapabilityUse::Blackboard)
+            }
+            RunToolsSetupError::TypedArtifactNeedsRunTools {
+                node,
+                adapter,
+                kind,
+            } => capability_missing(node, adapter, CapabilityUse::TypedArtifact { kind: *kind }),
+            RunToolsSetupError::TaskNeedsRunTools { node, adapter } => {
+                capability_missing(node, adapter, CapabilityUse::LoopTasks)
+            }
+            listener => Failure::EngineFailed {
+                engine_error: EngineError::Step {
+                    step: EngineStep::RunTools,
+                    report: Some(listener.to_string()),
+                },
+            },
+        }
+    }
 }
 
-/// Opens this session attempt's per-run MCP listener, or decides
-/// it must not exist. A resolution with no session and no degradation —
-/// no `run_tools` capability outside a blackboard group — is the resting
-/// state. A resolution carrying `degraded` is the recorded fallback: the
-/// listener could not bind but the node can proceed without it.
-/// `Err(diagnostic)` is the fatal case: the node's group declared
-/// `coordination: blackboard` and this session cannot carry it
-/// (capability missing, or the listener failed to bind) — the caller
-/// fails the node with it, never emulates.
-/// The first interpreted artifact this node declares, if any: the one a
-/// refusal names, so a reader has somewhere to look.
-fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::ArtifactKind> {
-    crate::run::node_exec::declared_artifacts(ctx, node)
-        .into_iter()
-        .find_map(|spec| spec.kind())
+/// The run tools' capability is missing from `adapter`, for what the node
+/// needs them for.
+fn capability_missing(node: &NodeId, adapter: &AdapterId, used_for: CapabilityUse) -> Failure {
+    Failure::CapabilityMissing {
+        node: node.clone(),
+        capability: yunta_core::Capability::RunTools,
+        adapter: adapter.clone(),
+        used_for: Some(used_for),
+        agent: None,
+    }
 }
 
-pub(super) async fn open_run_tools(
+/// Whether this node's sessions may mount the run tools, or why they
+/// must not open at all.
+///
+/// The adapter's capability decides, and what the node declared decides
+/// what its absence costs: a document that reaches the engine through
+/// these tools and nowhere else, a `coordination: blackboard` group
+/// whose semantics the engine never emulates, or a loop whose task
+/// sessions read their task nowhere else, is a refusal before any token
+/// is spent; anything else runs without them.
+///
+/// Asked once per node, and answered without binding anything: a
+/// listener belongs to a session, and a node that opens many owns none
+/// of them itself.
+pub(crate) fn run_tools_allowed(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
-    adapter_id: &AdapterId,
-    task: Option<&yunta_core::TaskId>,
-) -> Result<RunToolsResolution, RunToolsSetupError> {
-    let host = &ctx.run_tools_host;
-    let needs_blackboard = host.is_blackboard_member(&node.id);
-    // An interpreted artifact reaches the engine through these tools and
-    // nowhere else, so a node that declares one and cannot mount them
-    // fails before a session opens rather than after one produced
-    // nothing. The blackboard's own reason comes first: it is the older
-    // one, and a node can owe both.
-    let typed = declared_typed_artifact(ctx, node);
-    if !adapter
+    adapter: &dyn yunta_core::port::Adapter,
+) -> Result<(), RunToolsSetupError> {
+    if adapter
         .capabilities()
         .declares(yunta_core::Capability::RunTools)
     {
-        if needs_blackboard {
-            return Err(RunToolsSetupError::NoRunToolsCapability {
-                node: node.id.clone(),
-                adapter: adapter_id.clone(),
-            });
-        }
-        if let Some(kind) = typed {
-            return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
-                node: node.id.clone(),
-                kind,
-                adapter: adapter_id.clone(),
-            });
-        }
-        return Ok(RunToolsResolution {
-            session: None,
-            degraded: None,
-        });
+        return Ok(());
     }
-    match crate::run_tools::open_session_listener(
-        crate::run_tools::RunToolsAccess {
-            host: host.clone(),
-            node: node.id.clone(),
-            declared: crate::run::node_exec::declared_artifacts(ctx, node),
-        },
-        task.cloned(),
-        ctx.worktree.to_path_buf(),
-    )
-    .await
-    {
-        Ok(session) => Ok(RunToolsResolution {
-            session: Some(session),
-            degraded: None,
-        }),
-        Err(e) => {
-            if needs_blackboard {
-                return Err(RunToolsSetupError::ListenerFailed {
-                    node: node.id.clone(),
-                    source: e,
-                });
-            }
-            if let Some(kind) = typed {
-                return Err(RunToolsSetupError::TypedArtifactListenerFailed {
-                    node: node.id.clone(),
-                    kind,
-                    source: e,
-                });
-            }
-            Ok(RunToolsResolution {
-                session: None,
-                degraded: Some(format!("the session runs without run tools: {e}")),
+    let need = crate::task_cycle::RunToolsNeed::of(
+        node,
+        ctx.run_tools_host.is_blackboard_member(&node.id),
+        &crate::run::node_exec::declared_artifacts(ctx, node),
+    );
+    let (node, adapter) = (node.id.clone(), adapter.id().clone());
+    match need {
+        None => Ok(()),
+        Some(crate::task_cycle::RunToolsNeed::Blackboard) => {
+            Err(RunToolsSetupError::NoRunToolsCapability { node, adapter })
+        }
+        Some(crate::task_cycle::RunToolsNeed::TypedArtifact(kind)) => {
+            Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
+                node,
+                kind,
+                adapter,
             })
+        }
+        Some(crate::task_cycle::RunToolsNeed::Task) => {
+            Err(RunToolsSetupError::TaskNeedsRunTools { node, adapter })
         }
     }
 }
 
 /// Records that a node's `network: false` is declarative only when the
-/// session's resolved adapter cannot enforce it (D105/D119): before the
+/// session's resolved adapter cannot enforce it: before the
 /// session, the engine states it will not sandbox the network — it never
 /// emulates isolation it does not have. A node that declares no network
 /// policy (`None`) or one whose adapter isolates the network records nothing.
 pub(super) async fn report_declarative_network(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
-    adapter_id: &AdapterId,
+    adapter: &dyn yunta_core::port::Adapter,
 ) -> Result<(), RunError> {
-    if node.network == Some(false)
-        && !adapter
-            .capabilities()
-            .declares(yunta_core::Capability::NetworkIsolation)
-    {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::NetworkIsolation,
-                adapter: adapter_id.clone(),
-                policy_applied: "declarative-only — the adapter declares no network isolation; \
-                                 `network: false` is recorded for policy and audit, not enforced"
-                    .to_string(),
-            }),
+    // Only an explicit `network: false` asks for isolation; a node that
+    // never mentions the network declares no policy to degrade.
+    if node.network == Some(false) {
+        crate::run::capability::require(
+            ctx,
+            adapter,
+            yunta_core::Capability::NetworkIsolation,
+            node,
         )
         .await?;
     }

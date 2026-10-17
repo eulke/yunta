@@ -1,77 +1,69 @@
-//! The escalation options the engine itself builds and interprets. Their
-//! spellings live here once, so no run-loop branch ever matches a human's
-//! choice or a node's outcome against a bare string literal — the reserved
-//! vocabulary is one closed enum, built from it and read back through it.
+//! The escalation options the engine builds. The reserved vocabulary is one
+//! closed enum in the core crate, built from here and read back through it,
+//! so no run-loop branch matches a human's choice or a node's outcome against
+//! a bare string literal.
 
-use std::str::FromStr;
+use yunta_core::events::{Decider, HumanChoice};
+use yunta_core::expansion::{node_offer, Decision, Denial};
+use yunta_core::protected::Protected;
+use yunta_core::reserved::ReservedOption;
+use yunta_core::ScopeGlob;
 
-use yunta_core::OptionId;
-
-/// An option the engine appends to an escalation and acts on when a human
-/// picks it — as opposed to an author-declared option, which the engine
-/// only records. Everything the run loop decides on goes through this
-/// enum, never a literal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReservedOption {
-    /// Pause the run with the decision recorded (every escalation offers it).
-    Abort,
-    /// Re-route to the corrective node once more, past the reroute cap.
-    Retry,
-    /// Accept promotion to the next declared mode.
-    Promote,
-    /// Approve a published gate.
-    Approve,
-    /// Grant a scope expansion a task requested.
-    Grant,
-    /// Deny a scope expansion a task requested.
-    Deny,
-    /// Lift a budget cap for this invocation only.
-    Continue,
-    /// Reject a published gate resolved from the console.
-    Reject,
-}
-
-impl ReservedOption {
-    /// The YAML/log spelling — the one place each option's text is
-    /// written, for both building an escalation and comparing a choice.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            ReservedOption::Abort => "abort",
-            ReservedOption::Retry => "retry",
-            ReservedOption::Promote => "promote",
-            ReservedOption::Approve => "approve",
-            ReservedOption::Grant => "grant",
-            ReservedOption::Deny => "deny",
-            ReservedOption::Continue => "continue",
-            ReservedOption::Reject => "reject",
-        }
+/// What a person's choice decides about a request the loop escalated: the
+/// grant the choice names, unless the protected set refuses one of its paths,
+/// or else the refusal the choice is. A task's own request is always
+/// widenable.
+pub(crate) fn decision_of_choice(
+    choice: &HumanChoice,
+    paths: &[ScopeGlob],
+    protected: &Protected,
+    by: &Decider,
+) -> Decision {
+    if ReservedOption::of(&choice.option) != Some(ReservedOption::Grant) {
+        return Decision::Deny(Denial::Chosen {
+            option: choice.option.as_str().to_string(),
+            note: choice.free_text.clone(),
+        });
     }
-
-    /// The option as an escalation offers it.
-    pub(crate) fn id(self) -> OptionId {
-        OptionId::from_static(self.as_str())
-    }
-
-    /// The reserved option `id` spells, or `None` for an author's own.
-    pub(crate) fn of(id: &OptionId) -> Option<Self> {
-        id.as_str().parse().ok()
+    match node_offer(paths, protected, true) {
+        Ok(granted) => Decision::Grant {
+            paths: granted,
+            by: by.clone(),
+        },
+        Err(denial) => Decision::Deny(denial),
     }
 }
 
-impl FromStr for ReservedOption {
-    type Err = ();
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::{GateOption, Leads};
+    use yunta_core::reserved::ReservedOption;
+    use yunta_core::OptionId;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "abort" => Ok(ReservedOption::Abort),
-            "retry" => Ok(ReservedOption::Retry),
-            "promote" => Ok(ReservedOption::Promote),
-            "approve" => Ok(ReservedOption::Approve),
-            "grant" => Ok(ReservedOption::Grant),
-            "deny" => Ok(ReservedOption::Deny),
-            "continue" => Ok(ReservedOption::Continue),
-            "reject" => Ok(ReservedOption::Reject),
-            _ => Err(()),
+    /// Every option the engine offers: each reserved option, built the way a
+    /// menu builds it, and an author's option that goes on past a gate and
+    /// keeps the id it declares. The closed set an escalation draws from.
+    fn every_offer() -> Vec<GateOption> {
+        let on = Leads::On {
+            next: Vec::new(),
+            settles: false,
+        };
+        ReservedOption::all()
+            .into_iter()
+            .map(GateOption::reserved)
+            .chain([GateOption::leading(OptionId::from_static("ship-it"), on)])
+            .collect()
+    }
+
+    #[test]
+    fn an_offer_is_answered_by_the_id_the_engine_reads_back() {
+        for option in every_offer() {
+            let id = &option.id;
+            assert!(
+                ReservedOption::of(id).is_some() || id.as_str() == "ship-it",
+                "`{id}` is offered but no reserved option spells it, so the run \
+                 loop cannot act on the answer"
+            );
         }
     }
 }

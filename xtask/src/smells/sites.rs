@@ -1,0 +1,436 @@
+//! The counters that measure where a pattern is written.
+//!
+//! Each of these names a capability, the sites that own it, and counts
+//! every line that writes it somewhere else. The second site is the
+//! defect: the clock enters through one boundary, git runs from one
+//! module, a session request is built by the plan that knows what a
+//! session needs. A copy elsewhere answers the same question a second
+//! time, and the two answers drift apart in silence.
+//!
+//! The corpus is `crates/*/src` and `crates/*/tests`, and counting is by
+//! line, so a contributor and CI see the number `grep -c` gives for the
+//! same pattern over the same files.
+
+use std::path::Path;
+
+use super::cli::{count_cli_print_outside_output, count_exit_failure_in_cli};
+use super::corpus::ratchet_corpus;
+use super::read_corpus;
+use Mark::{Macro, Spelled, StructNamed, Text};
+
+/// A counter: the name it carries in the baseline, and the function that
+/// measures it against a workspace root.
+pub type Counter = (&'static str, fn(&Path) -> usize);
+
+/// Every counter this module measures.
+pub const COUNTERS: &[Counter] = &[
+    (
+        "execute_run_outside_testkit",
+        count_execute_run_outside_testkit,
+    ),
+    (
+        "create_run_outside_testkit",
+        count_create_run_outside_testkit,
+    ),
+    (
+        "git_command_outside_git_rs",
+        count_git_command_outside_git_rs,
+    ),
+    (
+        "system_clock_outside_boundary",
+        count_system_clock_outside_boundary,
+    ),
+    ("env_read_outside_boundary", count_env_read_outside_boundary),
+    ("env_mutation_in_tests", count_env_mutation_in_tests),
+    (
+        "sleep_outside_mock_latency",
+        count_sleep_outside_mock_latency,
+    ),
+    (
+        "event_builder_outside_testkit",
+        count_event_builder_outside_testkit,
+    ),
+    (
+        "bench_struct_outside_testkit",
+        count_bench_struct_outside_testkit,
+    ),
+    (
+        "session_request_literal_outside_plan",
+        count_session_request_literal_outside_plan,
+    ),
+    ("reason_built_by_format", count_reason_built_by_format),
+    ("sgr_outside_ink", count_sgr_outside_ink),
+    (
+        "token_count_formatted_outside_units",
+        count_token_count_formatted_outside_units,
+    ),
+    (
+        "run_tool_named_outside_vocabulary",
+        count_run_tool_named_outside_vocabulary,
+    ),
+    ("cli_word_outside_cli", count_cli_word_outside_cli),
+    ("exit_failure_in_cli", count_exit_failure_in_cli),
+    ("cli_print_outside_output", count_cli_print_outside_output),
+];
+
+/// What a line carries to count as a write of the pattern.
+pub(super) enum Mark {
+    /// The line carries this text anywhere on it.
+    Text(&'static str),
+    /// The line carries this text followed by a lowercase letter, the way a
+    /// message spells a command or a flag: `--input` and `yunta gc` match,
+    /// and a delimiter such as `---` does not.
+    Spelled(&'static str),
+    /// The line declares a struct with this word in its name, whatever
+    /// stands between the keyword and the word.
+    StructNamed(&'static str),
+    /// The line calls this macro: the name stands alone, so `println!` does
+    /// not match inside `eprintln!`.
+    Macro(&'static str),
+}
+
+impl Mark {
+    /// Whether `line` writes the pattern. A comment does not: prose
+    /// naming a mechanism is a reader being told about it, and a counter
+    /// that rises when someone explains the rule measures the
+    /// explanation.
+    pub(super) fn on(&self, line: &str) -> bool {
+        if line.trim_start().starts_with("//") {
+            return false;
+        }
+        match self {
+            Text(text) => line.contains(text),
+            Spelled(text) => line.match_indices(text).any(|(at, _)| {
+                line[at + text.len()..].starts_with(|c: char| c.is_ascii_lowercase())
+            }),
+            StructNamed(word) => line
+                .split_once("struct ")
+                .is_some_and(|(_, name)| name.contains(word)),
+            Macro(name) => line.match_indices(name).any(|(at, _)| {
+                line[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !(c.is_alphabetic() || c == '_'))
+            }),
+        }
+    }
+}
+
+/// Lines under `root` carrying any of `marks`, outside the files that
+/// `owners` names.
+///
+/// An owner is a path fragment: a directory fragment ends in `/` so it
+/// covers what is under it, and `*` stands for the rest of one path
+/// segment, so `crates/testkit*/src/repo.rs` names that file in every
+/// harness crate. A line carrying two marks counts once, the way a
+/// line-oriented search counts it. A `pub use` line is a re-export, and
+/// is not a write of anything.
+pub(super) fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
+    ratchet_corpus(root)
+        .iter()
+        .filter(|path| !owned(path, owners))
+        .map(|path| read_corpus(path))
+        .map(|text| {
+            text.lines()
+                .filter(|line| !line.trim_start().starts_with("pub use"))
+                .filter(|line| marks.iter().any(|mark| mark.on(line)))
+                .count()
+        })
+        .sum()
+}
+
+/// Paint written outside the one place that paints.
+///
+/// Color only repeats what the words say, and the module that writes it
+/// is what proves a painted line reads the same once the color is gone.
+/// An escape written anywhere else is color nothing holds to that. The
+/// prompt's bracketed-paste switch is a terminal mode, not paint, a test
+/// that types keys into a terminal sends what a keyboard sends, and a
+/// golden shows paint rather than making it.
+fn count_sgr_outside_ink(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("\\x1b[")],
+        &[
+            "crates/render/src/ink.rs",
+            "crates/cli/src/ask/keys.rs",
+            "crates/cli/tests/",
+            "crates/testkit/src/terminal.rs",
+            // A golden writes the paint a surface printed where a
+            // reviewer can read it, and its test paints to prove that.
+            "crates/testkit-core/src/golden.rs",
+        ],
+    )
+}
+
+/// A count of tokens written as a bare number beside its unit, outside
+/// the module that says how a count of tokens reads.
+///
+/// `1859898 tokens` is a number a reader has to count the digits of, and
+/// two surfaces that each format their own say the same count two ways.
+/// The units module reads it as `1.86M tokens` everywhere, and exactly
+/// where the count stands beside a limit.
+fn count_token_count_formatted_outside_units(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("} tok"), Text(", \"token\")")],
+        &["crates/core/src/units.rs"],
+    )
+}
+
+/// Whether `path` is one of the sites `owners` names.
+pub(super) fn owned(path: &Path, owners: &[&str]) -> bool {
+    let shown = path.to_string_lossy().replace('\\', "/");
+    owners.iter().any(|owner| match owner.split_once('*') {
+        None => shown.contains(owner),
+        Some((head, tail)) => shown.match_indices(head).any(|(at, _)| {
+            let rest = &shown[at + head.len()..];
+            let segment = rest.find('/').unwrap_or(rest.len());
+            rest[segment..].starts_with(tail)
+        }),
+    })
+}
+
+/// A run executed outside the owners that call it.
+///
+/// Driving the engine by hand repeats the setup the owners perform — the
+/// store, the clock, the process registry — and a repeat drifts from it.
+/// The engine's run module owns the run's own steps, and the command
+/// registry owns the call from a command.
+fn count_execute_run_outside_testkit(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("execute_run(")],
+        &[
+            "crates/testkit/",
+            "crates/engine/src/run/",
+            "crates/cli/src/commands/registry.rs",
+        ],
+    )
+}
+
+/// A run created outside the owners that call it.
+///
+/// Creating a run is where the plan is frozen and the baseline taken; a
+/// second site that does it by hand freezes a different one. The engine's
+/// run module creates a run, and the command registry is the one command
+/// path that does it for a person.
+fn count_create_run_outside_testkit(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("create_run(")],
+        &[
+            "crates/testkit/",
+            "crates/engine/src/run/",
+            "crates/cli/src/commands/registry.rs",
+        ],
+    )
+}
+
+/// A git subprocess spawned outside the git module, which is the one door
+/// to git.
+///
+/// Every git call needs the same answers — which directory, which
+/// environment, which failure is a diagnostic — and a call written
+/// somewhere else answers them again, usually with one of them missing.
+/// The needle ends before the closing parenthesis, so it counts a spawn
+/// through `std::process::Command` and through `GovernedCommand` alike.
+fn count_git_command_outside_git_rs(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("Command::new(\"git\"")],
+        &["crates/engine/src/git/", "crates/testkit*/src/repo.rs"],
+    )
+}
+
+/// The wall clock read below the boundary that injects it.
+///
+/// The clock enters once, at the shell, and travels as an injected
+/// `Clock`. Read deeper in, it makes a decision depend on when it runs:
+/// the state stops deriving from the log, and a replay of the same log
+/// gives a different answer.
+fn count_system_clock_outside_boundary(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("SystemClock"), Text("Utc::now")],
+        &["crates/core/src/clock.rs", "crates/cli/src/context.rs"],
+    )
+}
+
+/// The process environment read below the boundary that reads it.
+///
+/// The environment enters once, at the shell, and travels as config. Read
+/// deeper in, it is an input nothing declares: a test cannot set it, a
+/// diagnostic cannot name it, and the same code behaves differently on
+/// two machines.
+fn count_env_read_outside_boundary(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("std::env::var")],
+        &[
+            "crates/core/src/config/env.rs",
+            // A stub stands in for a program on `PATH`: knowing what
+            // `PATH` is, and where the real program lives, is the whole
+            // of what it does.
+            "crates/testkit/src/stubs.rs",
+            // Blessing a golden is what a person asks of a test run, and
+            // reading that request is what the module is for.
+            "crates/testkit-core/src/golden.rs",
+        ],
+    )
+}
+
+/// A test that writes the process environment.
+///
+/// The environment is one variable shared by every test in the binary, so
+/// a write reaches the tests running beside it and the failure lands in
+/// one of them. What a test needs from the environment it injects.
+fn count_env_mutation_in_tests(root: &Path) -> usize {
+    outside(root, &[Text("env::set_var"), Text("env::remove_var")], &[])
+}
+
+/// A sleep outside the places where waiting is the behaviour.
+///
+/// A sleep as synchronization is a guess about how long something takes:
+/// it passes on a fast machine, fails on a loaded one, and costs its
+/// duration either way. A condition is waited for explicitly. The mock
+/// adapter's scripted latency, the harness's wait, and the pace of a poll
+/// over another process's state are the places where the delay is the
+/// thing being built.
+fn count_sleep_outside_mock_latency(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("tokio::time::sleep("), Text("thread::sleep(")],
+        &[
+            "crates/adapters/src/mock/script.rs",
+            "crates/testkit*/src/wait.rs",
+            "crates/engine/src/pace.rs",
+        ],
+    )
+}
+
+/// An event builder written outside the support crate that owns one.
+///
+/// Building an event for a test means getting the sequence, the run and
+/// the node right; a copy of that bookkeeping in a test file gets one of
+/// them wrong the day the payload changes, and the test that reads the
+/// log stops proving what it names.
+fn count_event_builder_outside_testkit(root: &Path) -> usize {
+    outside(root, &[Text("fn event(")], &["crates/testkit-core/"])
+}
+
+/// A bench or a clock declared outside the support crate.
+///
+/// Both are test infrastructure: a crate that grows its own is a second
+/// harness, and the two disagree about what a run under test looks like
+/// and what time it is.
+fn count_bench_struct_outside_testkit(root: &Path) -> usize {
+    outside(
+        root,
+        &[StructNamed("Bench"), StructNamed("Clock")],
+        // The clock the product reads time from is declared where the
+        // `Clock` trait is; every other clock in the workspace is a
+        // test's, and belongs to the harness.
+        &["crates/testkit*/", "crates/core/src/clock.rs"],
+    )
+}
+
+/// A session request built as a literal outside the plan.
+///
+/// What a session receives — its prompt, its capabilities, its settings,
+/// its working copy — is decided in one place, from the node and the
+/// config. A literal written elsewhere is a session that misses whatever
+/// the plan learned to add.
+fn count_session_request_literal_outside_plan(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("SessionRequest {")],
+        &[
+            "crates/engine/src/run/session_plan.rs",
+            // The type's own declaration, and the request the adapters'
+            // tests vary one field of.
+            "crates/core/src/port/session.rs",
+            "crates/adapters/tests/",
+            "crates/testkit-core/src/adapter.rs",
+        ],
+    )
+}
+
+/// A reason, a summary, a cause or an applied policy built by `format!`
+/// at the site that records it.
+///
+/// A field of the log holds what happened, with the values it happened
+/// with, so a reader can group it, count it and render it. Formatted into
+/// a sentence at the site, it becomes prose no consumer can take apart,
+/// and the text for a human stops being produced once, at the edge.
+fn count_reason_built_by_format(root: &Path) -> usize {
+    outside(
+        root,
+        &[
+            Text("reason: format!"),
+            Text("summary: format!"),
+            Text("cause: format!"),
+            Text("policy_applied: format!"),
+        ],
+        &[],
+    )
+}
+
+/// A run tool named by a literal outside the vocabulary that names it.
+///
+/// What a session calls a tool is its CLI's to say, and a text the
+/// engine shows a session names one through the session's own rule. A
+/// literal `yunta_task` written somewhere else is the bare name, which a
+/// CLI that prefixes the tools it mounts has nothing under: the session
+/// calls it, misses, and pays for a second turn to find the real one.
+fn count_run_tool_named_outside_vocabulary(root: &Path) -> usize {
+    outside(
+        root,
+        &[
+            Text("yunta_task"),
+            Text("yunta_check_task"),
+            Text("yunta_check_artifact"),
+            Text("yunta_get_blackboard"),
+            Text("yunta_check_scope"),
+            Text("yunta_request_scope_expansion"),
+            Text("yunta_declare_deviation"),
+            Text("yunta_post_finding"),
+            Text("yunta_update_finding"),
+            Text("yunta_withdraw_finding"),
+            Text("yunta_answer_finding"),
+            Text("yunta_findings"),
+            Text("yunta_submit_"),
+        ],
+        &[
+            "/tests/",
+            "crates/testkit",
+            "crates/core/src/run_tool.rs",
+            "crates/core/src/workflow/artifacts.rs",
+            // The rule itself, and the cases that pin it.
+            "crates/core/src/capabilities.rs",
+        ],
+    )
+}
+
+/// A message in the engine or the core that writes a CLI command or flag.
+///
+/// The words that tell a person what to run belong to the CLI, which owns
+/// what it accepts. A crate below it that writes `yunta gc` or `--input`
+/// keeps a spelling the CLI cannot reach. A git argument array has no
+/// backticks, so the flags git takes never count.
+fn count_cli_word_outside_cli(root: &Path) -> usize {
+    let marks = [Spelled("`yunta "), Spelled("`--")];
+    ratchet_corpus(root)
+        .iter()
+        .filter(|path| owned(path, &["crates/engine/src/", "crates/core/src/"]))
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| {
+            text.lines()
+                .filter(|line| marks.iter().any(|mark| mark.on(line)))
+                .count()
+        })
+        .sum()
+}
+
+#[cfg(test)]
+mod tests;

@@ -14,13 +14,17 @@
 // double has nothing to recover and unwrapping is the honest response.
 #![allow(clippy::unwrap_used)]
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
+use yunta_core::step::Spell;
 use yunta_core::{CommitSha, Responder};
 
-use super::{
-    Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
+use yunta_core::port::{
+    Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
+    ReviewComment, ReviewOutcome,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,10 +50,28 @@ struct MockPr {
     number: u64,
     run_id: String,
     branch: String,
+    base: String,
+    title: String,
+    body: String,
     url: String,
     head_sha: CommitSha,
     open: bool,
     review: Review,
+    /// What the branch holds, by path.
+    files: BTreeMap<String, Vec<u8>>,
+}
+
+/// A pull request the mock opened, as a test reads it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockPullRequest {
+    pub number: u64,
+    pub head: String,
+    pub base: String,
+    pub title: String,
+    pub body: String,
+    pub open: bool,
+    /// What its branch holds, by path.
+    pub files: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -59,6 +81,8 @@ struct Inner {
     prs: Vec<MockPr>,
     next_number: u64,
     next_sha: u64,
+    /// The wait the next `open_pull_request` is refused with, once.
+    rate_limit: Option<Duration>,
 }
 
 impl Inner {
@@ -84,6 +108,12 @@ pub struct MockForgeState(Arc<Mutex<Inner>>);
 impl MockForgeState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The next `open_pull_request` is refused as a rate limit that names
+    /// `retry_after` as its wait; the call after it answers as usual.
+    pub fn rate_limit_next(&self, retry_after: Duration) {
+        self.0.lock().unwrap().rate_limit = Some(retry_after);
     }
 
     /// Person B approves — no Yunta involved on their end, just this
@@ -149,6 +179,25 @@ impl MockForgeState {
         sha
     }
 
+    /// Every pull request the forge holds, in the order it opened them.
+    pub fn pull_requests(&self) -> Vec<MockPullRequest> {
+        self.0
+            .lock()
+            .unwrap()
+            .prs
+            .iter()
+            .map(|pr| MockPullRequest {
+                number: pr.number,
+                head: pr.branch.clone(),
+                base: pr.base.clone(),
+                title: pr.title.clone(),
+                body: pr.body.clone(),
+                open: pr.open,
+                files: pr.files.clone(),
+            })
+            .collect()
+    }
+
     /// The run's newest PR.
     pub fn pr_number(&self, run_id: &str) -> Option<u64> {
         self.0
@@ -161,27 +210,56 @@ impl MockForgeState {
 
 pub struct MockForge {
     state: MockForgeState,
+    spell: Spell,
 }
 
 impl MockForge {
-    pub fn new(state: MockForgeState) -> Self {
-        Self { state }
+    /// A double over `state` that writes its next steps with `spell`.
+    pub fn new(state: MockForgeState, spell: Spell) -> Self {
+        Self { state, spell }
     }
-}
 
-#[async_trait]
-impl Forge for MockForge {
-    async fn publish(&self, req: &PublishRequest) -> Result<PublishedGate, ForgeError> {
+    /// Commits `files` to pull request `number`'s branch. A file that
+    /// changes moves the head, as a commit would; one the branch already
+    /// holds commits nothing.
+    fn commit(&self, number: u64, files: Vec<(String, Vec<u8>)>) {
+        let mut inner = self.state.0.lock().unwrap();
+        let head = inner.fresh_sha();
+        let Some(pr) = inner.prs.iter_mut().find(|pr| pr.number == number) else {
+            return;
+        };
+        let mut moved = false;
+        for (path, content) in files {
+            if pr.files.get(&path) != Some(&content) {
+                pr.files.insert(path, content);
+                moved = true;
+            }
+        }
+        if moved {
+            pr.head_sha = head;
+        }
+    }
+
+    /// The open pull request `run_id` has on `head`, or a new one saying
+    /// `title` and `body` — the rule the GitHub forge follows too.
+    fn open_or_reuse(
+        &self,
+        run_id: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> PullRequestRef {
         let mut inner = self.state.0.lock().unwrap();
         let existing = inner
             .prs
             .iter()
-            .find(|pr| pr.open && pr.branch == req.branch && pr.run_id == req.run_id);
+            .find(|pr| pr.open && pr.branch == head && pr.run_id == run_id);
         if let Some(existing) = existing {
-            return Ok(PublishedGate {
+            return PullRequestRef {
                 url: existing.url.clone(),
                 number: existing.number,
-            });
+            };
         }
         inner.next_number += 1;
         let number = inner.next_number;
@@ -189,17 +267,61 @@ impl Forge for MockForge {
         let head_sha = inner.fresh_sha();
         inner.prs.push(MockPr {
             number,
-            run_id: req.run_id.clone(),
-            branch: req.branch.clone(),
+            run_id: run_id.to_string(),
+            branch: head.to_string(),
+            base: base.to_string(),
+            title: title.to_string(),
+            body: body.to_string(),
             url: url.clone(),
             head_sha,
             open: true,
             review: Review::Pending,
+            files: BTreeMap::new(),
         });
-        Ok(PublishedGate { url, number })
+        PullRequestRef { url, number }
+    }
+}
+
+#[async_trait]
+impl Forge for MockForge {
+    async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
+        // Titled, written and committed the one way every forge does it,
+        // so a test reads what a reviewer reads.
+        let published = self.open_or_reuse(
+            req.run_id.as_str(),
+            &req.branch,
+            &req.base_branch,
+            &super::gate_title(req),
+            &super::gate_body(req, &*self.spell),
+        );
+        self.commit(published.number, super::gate_files(req, &*self.spell));
+        Ok(published)
     }
 
-    async fn poll(&self, gate: &PublishedGate) -> Result<PolledGate, ForgeError> {
+    async fn open_pull_request(
+        &self,
+        req: &PullRequestRequest,
+    ) -> Result<PullRequestRef, ForgeError> {
+        let refused = self.state.0.lock().unwrap().rate_limit.take();
+        if let Some(retry_after) = refused {
+            return Err(ForgeError::RateLimited {
+                action: "open the pull request",
+                retry_after: Some(retry_after),
+            });
+        }
+        // The body a forge's page would show, composed the one way every
+        // forge composes it, so a test reads what a reviewer reads.
+        let body = super::pull_request_body(req, &*self.spell);
+        Ok(self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &body))
+    }
+
+    async fn probe(&self) -> Result<ForgeProbe, ForgeError> {
+        Ok(ForgeProbe {
+            can_push: Some(true),
+        })
+    }
+
+    async fn poll(&self, gate: &PullRequestRef) -> Result<PolledGate, ForgeError> {
         let inner = self.state.0.lock().unwrap();
         let pr = inner.prs.iter().find(|pr| pr.number == gate.number).ok_or(
             ForgeError::UnknownGate {

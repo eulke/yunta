@@ -9,45 +9,65 @@
 //! missing or wrong, instead of reporting that nothing matched.
 
 mod artifacts;
+mod audit;
+mod command;
 mod context;
+mod expand;
+mod fault;
 mod hooks;
 mod node;
 mod node_kind;
+mod node_policy;
+mod optional;
 mod parse;
+mod place;
+mod scope;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::ids::{ModeName, NodeId};
+use crate::ids::{InputName, ModeName, NodeId, WorkflowName};
 use crate::inputs::InputSpec;
 use crate::yaml::Value;
 use parse::{describe, keyed_entry, nested};
 
-pub use artifacts::{ArtifactKind, ArtifactRefId, ArtifactSpec, Artifacts, ARTIFACTS_DIR};
+pub mod read;
+pub mod reads;
+
+pub use artifacts::{
+    ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
+    UnknownArtifactKind, ARTIFACTS_DIR, OBJECTS_DIR,
+};
+pub use command::{node_commands, Resolved, RunCommand};
 pub use context::{
-    ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
+    ArtifactContextRef, ContextFile, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
+pub use fault::WorkflowFault;
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
-pub use node::{LoopUntil, Node, NodeDefaults, NodePermissions, OnInterrupt};
+pub use node::{Node, NodeDefaults};
 pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,
-    NodeKind, PromptSource, WorkflowIsolation,
+    NodeKind, PromptSource,
 };
+pub use node_policy::{Ask, CliConfig, Effort, LoopUntil, NodePermissions, OnInterrupt};
+pub use optional::{followers, left_out, reroute_sources, Because, LeftOut};
+pub use place::Place;
+pub use scope::NodeScope;
 
 /// A workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Workflow {
-    pub name: String,
+    pub name: WorkflowName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// `modes:` — an ordered map, free in name and count:
-    /// quick/standard/full are the reference workflows' own convention,
-    /// never reserved schema words. **Declaration order is the
-    /// promotion ladder** — promotion only ever targets a mode
+    /// `modes:` — an ordered map, free in name and count: each workflow
+    /// names its own, and no name is reserved as a schema word.
+    /// **Declaration order is the promotion ladder** — promotion only
+    /// ever targets a mode
     /// later in this map's own iteration order, never an earlier one.
     /// Absent entirely means the workflow has no modes at all: every
     /// node always runs.
@@ -62,7 +82,7 @@ pub struct Workflow {
     /// output (`list_workflows`, `--help`) and `check` diagnostics
     /// reproducible.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub inputs: BTreeMap<String, InputSpec>,
+    pub inputs: BTreeMap<InputName, InputSpec>,
     /// Workflow-level fallbacks a node inherits when it declares none of
     /// its own — visible in the same file the team reads,
     /// never injected from a config layer.
@@ -75,7 +95,7 @@ pub struct Workflow {
     /// means "whatever this binary speaks" (the reference text's own
     /// rule) — inferred, never an error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yunta_schema: Option<String>,
+    pub yunta_schema: Option<crate::SchemaRange>,
     /// `on_finish:`: close-of-run steps. The engine
     /// imposes the phase order (distill before any cleanup) —
     /// declaration order in the YAML carries no meaning.
@@ -105,6 +125,39 @@ impl Workflow {
         NodeGroupIter {
             stack: self.nodes.iter().rev().map(|node| (node, None)).collect(),
         }
+    }
+
+    /// [`iter_nodes`](Self::iter_nodes) over the top-level nodes `tops`
+    /// names, each with every node nested in it; every node when `tops` is
+    /// `None`. A mode names top-level nodes, so this is the walk of what a
+    /// run in a mode reaches.
+    pub fn iter_nodes_under(&self, tops: Option<&HashSet<NodeId>>) -> NodeIter<'_> {
+        NodeIter {
+            stack: self
+                .nodes
+                .iter()
+                .rev()
+                .filter(|node| tops.is_none_or(|ids| ids.contains(&node.id)))
+                .collect(),
+        }
+    }
+
+    /// The mode a run starts at when nothing names one: the first declared,
+    /// because promotion only ever moves forward. A workflow without
+    /// `modes:` runs every node, under the default name.
+    pub fn first_mode(&self) -> ModeName {
+        self.modes
+            .as_ref()
+            .and_then(|modes| modes.keys().next().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Which rounds of `node`'s questions stop a run in `mode`: what the
+    /// node says, else what its mode says, else every round.
+    pub fn ask(&self, node: &Node, mode: &ModeName) -> Ask {
+        node.ask
+            .or_else(|| self.modes.as_ref()?.get(mode)?.ask)
+            .unwrap_or_default()
     }
 }
 
@@ -221,6 +274,10 @@ pub enum CleanupTarget {
 #[serde(deny_unknown_fields)]
 pub struct ModeSpec {
     pub include: ModeInclude,
+    /// `ask:` — which rounds of questions stop a run in this mode, for a
+    /// node that does not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<Ask>,
 }
 
 /// `include: all` or `include: [id, id, ...]` — the bare string literal

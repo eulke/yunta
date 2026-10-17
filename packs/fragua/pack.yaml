@@ -3,8 +3,10 @@ publisher: yunta
 version: 0.1.0
 description: >-
   The full reference pipeline: an ambiguity-resolving grill, a plan
-  registered as a verified tasks document, implementation checked task by
-  task, a lint→fix cycle, a baseline check, a two-runner review, a PR —
+  registered as a verified tasks document, the tests its tasks are held to
+  written before any is built, implementation checked task by task, a
+  two-runner review beside a check of the work against the plan a person
+  approved, one round of fixes, a lint→fix cycle, a baseline check, a PR —
   open modes throughout, and the plan distilled to knowledge on finish.
   Installable and removable like any third-party pack; the engine
   never treats it specially.
@@ -22,6 +24,6 @@ requires:
     - name: reviewer-alt
 contents:
   workflows:
-    - .yunta/workflows/build-feature.yaml
+    - .yunta/workflows/fragua.yaml
   docs:
     - README.md

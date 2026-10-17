@@ -23,6 +23,16 @@
         }
       ]
     },
+    "commands": {
+      "description": "`commands:` — `{name: command}`, what this project runs for each\ncapability a workflow names (`run: { command: lint }`). The name\nis the workflow's, the text the project's: a pack asks for \"the\nlint\" and the project says which tool that is.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "coverage": {
       "anyOf": [
         {
@@ -52,6 +62,16 @@
           "type": "null"
         }
       ]
+    },
+    "format": {
+      "description": "`format:` — which project command formats which files, run on what\na session writes the moment it writes it. The first rule whose\npaths match a file formats it.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/FormatRule"
+      }
     },
     "limits": {
       "anyOf": [
@@ -131,6 +151,16 @@
         "type": "string"
       }
     },
+    "shared_dirs": {
+      "description": "`shared_dirs:` — `{VARIABLE: directory}`, directories every\ncommand and every session of a run shares: each is exported under\nits variable and stays writable inside every session that may\nwrite, so a build cache outlives the checkout each task works in.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "skills": {
       "anyOf": [
         {
@@ -197,6 +227,13 @@
       "description": "`baseline:` — backs the `baseline_compare` check kind; the suite the engine\nruns and re-runs to catch regressions (\"cero regresiones\" as a data\ncomparison, never an agent's claim).",
       "type": "object",
       "properties": {
+        "held": {
+          "description": "Project commands measured beside the suite, on the same tree: each\nthat passes there holds every task of a loop as a guard, as the\nsuite does — the project's lint, for one.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommandName"
+          }
+        },
         "suite": {
           "type": "string"
         }
@@ -205,6 +242,11 @@
       "required": [
         "suite"
       ]
+    },
+    "CommandName": {
+      "description": "A command name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "CommandPermissions": {
       "description": "`permissions.commands` — patterns matched against every hook, criterion,\nbash node and executor command right before it runs. Empty\n`allow` = denylist mode (everything not denied runs); a non-empty\n`allow` switches to a strict, opt-in allowlist.",
@@ -244,7 +286,7 @@
       ]
     },
     "DefaultOnFailure": {
-      "description": "`defaults.on_failure` values (reference schema). Only `Pause` has an\nimplementation — the enum still parses all three so the reference\nconfig round-trips, and `check` names the unimplemented ones.",
+      "description": "`defaults.on_failure` values (reference schema): `pause` freezes the\nrun resumable, `abort` closes it failed at once, and `continue` skips\nthe failed node's dependents and closes failed once the rest of the\ngraph has run.",
       "type": "string",
       "enum": [
         "pause",
@@ -253,7 +295,7 @@
       ]
     },
     "DefaultsConfig": {
-      "description": "`defaults:` — the reference config's whole group. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is\nbuilt — `check` refuses the others rather than accepting them\nsilently).",
+      "description": "`defaults:` — the reference config's whole group. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed\nnode does to the run).",
       "type": "object",
       "properties": {
         "isolation": {
@@ -276,7 +318,7 @@
           "minimum": 0
         },
         "on_failure": {
-          "description": "What a failed node without its own `on_failure:` does. Only\n`pause` (today's behavior) is built; `check` refuses the rest.",
+          "description": "What a failed node without its own `on_failure:` re-route does\nto the run. Absent is `pause`, the schema's own default.",
           "anyOf": [
             {
               "$ref": "#/$defs/DefaultOnFailure"
@@ -309,7 +351,7 @@
           ]
         },
         "timeout_minutes": {
-          "description": "Per-session wall-clock budget (`Budget.timeout`), in minutes —\nthe granularity the reference schema uses for whole sessions.",
+          "description": "Per-session budget of time the host is awake (`Budget.timeout`),\nin minutes — the granularity the reference schema uses for whole\nsessions. A suspended host spends none of it, and the run's log\nrecords the suspension.",
           "type": [
             "integer",
             "null"
@@ -319,6 +361,20 @@
         }
       },
       "additionalProperties": false
+    },
+    "DiskShare": {
+      "description": "An amount of a disk: bytes — `80G`, `500M`, `1.5T`, in decimal units —\nor a share of the whole file system, `20%`.",
+      "type": "string"
+    },
+    "Effort": {
+      "description": "How long the model reasons before it answers. The four levels every\nadapter's CLI accepts, each handed to it under the CLI's own name for\nthem; a level one CLI has and another lacks is no level here.",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
     },
     "ExecutorKind": {
       "description": "Closed at `binary` today — `wasm` is reserved as a future\nadditive variant once demand for it shows up, so this is an enum even\nwith a single variant, not a bare string that would silently accept\nanything.",
@@ -370,9 +426,38 @@
       },
       "additionalProperties": false
     },
+    "FormatRule": {
+      "description": "One rule of `format:`: the files a project command formats the moment a\nsession writes one of them.",
+      "type": "object",
+      "properties": {
+        "paths": {
+          "description": "The files it formats, as scope globs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "run": {
+          "description": "The project command that formats them, handed every path as an\nargument.",
+          "$ref": "#/$defs/CommandName"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "paths",
+        "run"
+      ]
+    },
     "GitHubForgeConfig": {
       "type": "object",
       "properties": {
+        "remote": {
+          "description": "The git remote a run pushes its branch to for a pull request;\n`origin` when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "repo": {
           "$ref": "#/$defs/GitHubRepo"
         },
@@ -393,7 +478,7 @@
       "pattern": "^[^/]+/[^/]+$"
     },
     "Isolation": {
-      "description": "How a first-level run isolates its working tree from the checkout\nthat started it. `worktree` (default) gives each run its\nown `git worktree`; `none` operates directly on the given checkout,\nlegitimate for watching an agent edit live or for CI already inside\nan ephemeral container. `inherit` (sub-runs only) isn't a value\nhere — a first-level run has no parent to inherit from — and\n`container` isn't a schema value at all (not yet designed).",
+      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike:\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own declares `scope:`,\nwhich is what asks for one.)",
       "type": "string",
       "enum": [
         "worktree",
@@ -401,7 +486,7 @@
       ]
     },
     "LimitsConfig": {
-      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where the reference schema itself names one\n([`ConfigLayer::resolved_max_loop_iterations`](super::ConfigLayer::resolved_max_loop_iterations),\n[`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)), and that default\nlives here and nowhere else. Budgets are advisory ceilings the engine\nenforces by escalation/diagnostic, never OS enforcement.\n\nCanonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves\n`2_000_000` as a *string*, which fails the parse loudly instead of\nsilently becoming an unlimited run.",
+      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where the reference schema itself names one\n([`ConfigLayer::resolved_max_loop_iterations`](super::ConfigLayer::resolved_max_loop_iterations),\n[`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)), and that default\nlives here and nowhere else. Budgets are advisory ceilings the engine\nenforces by escalation/diagnostic, never OS enforcement.\n\nA limit is an integer: `2000000`, or `2_000_000` with its digits\ngrouped, which reads as the same number — never as a string that\nleaves a run without its limit.",
       "type": "object",
       "properties": {
         "inline_context_bytes": {
@@ -495,7 +580,7 @@
       "minLength": 1
     },
     "NetworkPermissions": {
-      "description": "`permissions.network` — declarative ONLY: `default: false`\nactivates no sandboxing whatsoever. It exists for policy and audit; an\nexecutor that wants to actually enforce it does so on its own. Policy\n≠ capability ≠ OS enforcement — Yunta core never promises the third.",
+      "description": "`permissions.network` — whether the commands an agent's session runs\nmay reach the network when its node says nothing: the session's CLI\nkeeps it in its own sandbox. For any other command it is declarative;\nan executor that wants to enforce it does so on its own.",
       "type": "object",
       "properties": {
         "default": {
@@ -534,7 +619,7 @@
       ]
     },
     "PackPermissions": {
-      "description": "`permissions.packs` — governance over pack contents. Parsed\nand merged here; *enforced* at `pack add`/check once pack support\nlands fully — a key without its consumer yet, kept\nbecause the org ceiling file is one document and its schema shouldn't\ndribble in piecemeal.",
+      "description": "`permissions.packs` — governance over pack contents. Parsed and\nmerged here; enforced by `pack add` and `pack update`, which read the\nmerged value and name the layer that declared it when they refuse.",
       "type": "object",
       "properties": {
         "executors": {
@@ -556,6 +641,19 @@
               "type": "null"
             }
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PathPermissions": {
+      "description": "`permissions.paths` — what no node and no task of any run may write:\nthe project's CI, the configuration of its own checks, whatever the\nteam decides no agent touches. A ceiling like the rest: every layer's\ndenies stand, and none is ever granted back.",
+      "type": "object",
+      "properties": {
+        "deny": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
         }
       },
       "additionalProperties": false
@@ -613,10 +711,49 @@
             }
           ]
         },
+        "paths": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PathPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "scope_expansion": {
           "anyOf": [
             {
               "$ref": "#/$defs/ScopeExpansionPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PoolConfig": {
+      "description": "`storage.pool` — both optional: what is not said falls back to what\nthe disk and the builds the pool measured say.",
+      "type": "object",
+      "properties": {
+        "budget": {
+          "description": "What the builds of the project's checkouts may take together.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskShare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keep_free": {
+          "description": "What of the disk the pool always leaves free.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskShare"
             },
             {
               "type": "null"
@@ -641,7 +778,7 @@
       ]
     },
     "ProjectConfig": {
-      "description": "`project:` — backs the `{{project.*}}` template namespace, the\nreference config's own three fields. Currently read-only data for\ntemplates, nothing here drives behavior yet (`base_branch` isn't\nconsulted by any re-route/PR logic).",
+      "description": "`project:` — backs the `{{project.*}}` template namespace, the\nreference config's own three fields. `base_branch` is also the branch\na `pull_request` node opens its pull request into.",
       "type": "object",
       "properties": {
         "base_branch": {
@@ -700,6 +837,17 @@
             }
           ]
         },
+        "effort": {
+          "description": "How long the model reasons, unless the node says otherwise; absent\nleaves it to the CLI.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "model": {
           "$ref": "#/$defs/ModelName"
         }
@@ -715,6 +863,10 @@
       "type": "string",
       "minLength": 1
     },
+    "ScopeCeiling": {
+      "description": "The most permissive `scope_expansion.mode` a permissions layer allows a\nnode to declare: a node may declare any mode at least as strict.",
+      "$ref": "#/$defs/ScopeExpansionMode"
+    },
     "ScopeExpansionMode": {
       "description": "How a loop node treats an agent's request to widen its scope.\nDefault `Deny`: a node that omits `scope_expansion:` entirely gets\nthe same behavior as one that declares it with no `mode:` — no\nexpansions, every request becomes a finding without interrupting.",
       "type": "string",
@@ -729,13 +881,23 @@
       "type": "object",
       "properties": {
         "max_mode": {
-          "$ref": "#/$defs/ScopeExpansionMode"
+          "$ref": "#/$defs/ScopeCeiling"
         }
       },
       "additionalProperties": false,
       "required": [
         "max_mode"
       ]
+    },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
+    },
+    "SkillName": {
+      "description": "A skill name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "SkillsConfig": {
       "description": "`skills:` — currently carries only `executors`, the one\nsub-field `kind: executor` needs to resolve its own `executor:` name\nto a binary on disk. `paths`/`always` (skill discovery and injection\ninto a node's assembled context) are context-assembly work, with\nno consumer yet.",
@@ -746,7 +908,7 @@
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/SkillName"
           }
         },
         "executors": {
@@ -768,13 +930,24 @@
       "additionalProperties": false
     },
     "StorageConfig": {
-      "description": "`storage:` — SQLite is the only backend.",
+      "description": "`storage:` — SQLite is the only storage engine.",
       "type": "object",
       "properties": {
         "path": {
           "type": [
             "string",
             "null"
+          ]
+        },
+        "pool": {
+          "description": "What the project's checkouts may keep of the disk.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PoolConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "retention_days": {

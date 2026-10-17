@@ -43,17 +43,26 @@ fn loop_until_is_an_exhaustive_enum() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `l`: unknown variant `forever`, expected `all_tasks_complete` at line 3 column 3"
+        "`nodes[0]`: node `l`: unknown variant `forever`, expected `all_tasks_complete` at line 3 column 5"
     );
 }
 
 #[test]
-fn node_network_is_none_and_interactive_false_unless_declared() {
+fn node_network_is_none_unless_declared() {
     let wf = workflow(
-        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    network: true\n    interactive: true\n",
+        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    network: true\n",
     );
-    assert!(wf.nodes[0].network.is_none() && !wf.nodes[0].interactive);
-    assert!(wf.nodes[1].network == Some(true) && wf.nodes[1].interactive);
+    assert!(wf.nodes[0].network.is_none());
+    assert_eq!(wf.nodes[1].network, Some(true));
+}
+
+#[test]
+fn a_node_that_produces_questions_asks() {
+    let wf = workflow(
+        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    artifacts: { produces: [questions] }\n",
+    );
+    assert!(!wf.nodes[0].asks());
+    assert!(wf.nodes[1].asks());
 }
 
 #[test]
@@ -76,14 +85,14 @@ fn an_input_that_contradicts_itself_is_refused_at_parse() {
     ));
     assert_eq!(
         text,
-        "`inputs.idea`: inputs: `required: true` and a `default` contradict each other — the default is what makes an input optional; drop one of them at line 3 column 3"
+        "`inputs.idea`: `required: true` and a `default` contradict each other — the default is what makes an input optional; drop one of them at line 3 column 9"
     );
     let text = refused::<Workflow>(&format!(
         "name: w\ninputs:\n  idea: {{ type: string, required: false }}\n{BASH}"
     ));
     assert_eq!(
         text,
-        "`inputs.idea`: inputs: `required: false` with no `default` leaves the input without a value — give it a default, or drop `required: false` at line 3 column 3"
+        "`inputs.idea`: `required: false` with no `default` leaves the input without a value — give it a default, or drop `required: false` at line 3 column 9"
     );
 }
 
@@ -101,7 +110,8 @@ fn config_maps_are_ordered_by_key() {
     let text = yaml::to_string(&config).unwrap();
     assert!(text.find("alpha").unwrap() < text.find("zeta").unwrap());
     let _: Option<&BTreeMap<AdapterId, AdapterSettings>> = config.adapters.as_ref();
-    let _: Option<&BTreeMap<String, McpServerConfig>> = config.mcp_servers.as_ref();
+    let _: Option<&BTreeMap<yunta_core::McpServerName, McpServerConfig>> =
+        config.mcp_servers.as_ref();
     let _: Option<&BTreeMap<String, PricingEntry>> = config.pricing.as_ref();
 }
 
@@ -166,12 +176,13 @@ fn a_number_input_with_a_non_finite_bound_or_default_is_refused_at_parse() {
         let text = refused::<Workflow>(&format!(
             "name: w\ninputs:\n  n: {{ type: number, {field}: {value} }}\n{BASH}"
         ));
-        assert_eq!(
-            text,
-            format!(
-                "`inputs.n`: inputs: `{field}` is not a finite number — a number input's default and bounds are finite at line 3 column 3"
-            ),
-            "for {field}: {value}"
+        // Refused at parse, naming the value it is about, whether the
+        // parser refuses the literal or the input's own rule does.
+        assert!(
+            text.starts_with("`inputs.n")
+                && text.contains(field)
+                && text.contains("not a finite number"),
+            "for {field}: {value}: {text}"
         );
     }
 }

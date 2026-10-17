@@ -2,97 +2,89 @@
 
 use super::*;
 use thiserror::Error;
-use yunta_core::OptionId;
+use yunta_core::events::{DeniedCommand, NameProblem};
+use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
-/// A `yunta_schema:` range the parser cannot read.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum SchemaRangeError {
-    #[error("the range is empty")]
-    Empty,
-    #[error("comparator `{comparator}` has no version number")]
-    NoVersion { comparator: String },
-    #[error("`{text}` is not a whole schema version")]
-    NotAVersion { text: String },
-    #[error("unknown comparator `{op}`")]
-    UnknownOperator { op: String },
-}
-
+/// What refuses a workflow: something its frozen inputs make certain to
+/// stop the run, found ahead of any spend. Its `Display` is the
+/// variant's code; the words a person reads are written where they are
+/// shown, from the data each variant holds.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
-    #[error("duplicate node id `{id}`")]
-    DuplicateNodeId { id: NodeId },
+    #[error("depends_on_cycle")]
+    DependsOnCycle { cycle: Vec<NodeId> },
 
-    /// A node's field names a target node the workflow doesn't define — the
-    /// one broken-reference error, whatever field carries the reference
-    /// (`depends_on`, `on_failure.goto`, a gate option's `on.<option>`, a
-    /// `mounts` entry). Catching it here means the run never starts having
-    /// silently dropped work its author named.
-    #[error("node `{node}`: `{field}` references unknown node `{target}`")]
-    BrokenReference {
+    /// A node asks its adapter for something the adapter does not
+    /// declare and the engine never emulates. Refused before a run is
+    /// born: a session that ignored the profile or the agent it was
+    /// given would run under something nobody asked for.
+    #[error("capability_unsupported")]
+    CapabilityUnsupported {
         node: NodeId,
         field: String,
-        target: NodeId,
+        capability: yunta_core::Capability,
+        adapters: String,
+    },
+    #[error("unknown_runner")]
+    UnknownRunner {
+        node: NodeId,
+        runner: RunnerName,
+        /// The runner `runners:` does define that is one slip away.
+        near: Option<String>,
     },
 
-    #[error("cycle in depends_on: {path}")]
-    DependsOnCycle { path: String },
-
-    #[error("node `{node}` references runner `{runner}`, which `runners:` does not define")]
-    UnknownRunner { node: NodeId, runner: RunnerName },
-
-    #[error(
-        "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
-    )]
+    #[error("runner_has_no_candidates")]
     RunnerHasNoCandidates { node: NodeId, runner: RunnerName },
 
-    /// `parallel`'s children share one worktree — a scope
-    /// overlap between two of them is a verifiable-in-advance write
-    /// collision, error rather than warning.
-    #[error(
-        "parallel group `{group}`: children `{a}` and `{b}` declare overlapping scope \
-         (`{glob_a}` / `{glob_b}`) — they run at once and share one worktree"
-    )]
-    OverlappingParallelScope {
-        group: NodeId,
-        a: NodeId,
-        b: NodeId,
-        glob_a: String,
-        glob_b: String,
+    /// A config key the node's kind cannot run without, left unset. A
+    /// run freezes its config when it is created, so the node would stop
+    /// the run every time it is reached.
+    #[error("unset")]
+    Unset {
+        node: NodeId,
+        key: yunta_core::ConfigKey,
+        /// The name the config does declare that is one slip away from
+        /// the one the node asks for.
+        near: Option<String>,
     },
+
+    /// A literal `files:` path the tree a run starts from does not hold,
+    /// read by a node nothing that runs before can write it for.
+    #[error("context_file_unreachable")]
+    ContextFileUnreachable {
+        node: NodeId,
+        path: String,
+        base: Option<String>,
+        missing: MissingContextFile,
+    },
+
+    /// A read nothing in the run can answer, so the node that makes it
+    /// stops every time it runs.
+    #[error(transparent)]
+    Unanswerable(#[from] Unanswerable),
 
     /// `runner:` and `runners:` on one node is a contradiction,
     /// not a merge.
-    #[error("node `{node}` declares both `runner:` and `runners:` — use exactly one")]
+    #[error("both_runner_and_runners")]
     BothRunnerAndRunners { node: NodeId },
 
     /// Once `review` is many nodes there is no unambiguous
     /// "return control to review" — a re-route, gate `on:` or context
     /// artifact reference must name a specific node.
-    #[error(
-        "node `{node}` targets `{target}`, which is a `runners:` fan-out — target one of its \
-         expanded nodes (`{target}@<role>`) or a non-fan-out node"
-    )]
+    #[error("fan_out_target")]
     FanOutTarget { node: NodeId, target: NodeId },
 
     /// `on_finish.distill` names a path no node declares
     /// producing — statically wrong (the runtime "declared but not
     /// produced this run" case degrades to a finding instead).
-    #[error(
-        "`on_finish.distill` names {artifact} but that node's `artifacts.produces` does not \
-         declare it — declare the artifact on the node that produces it, or drop it from \
-         `distill`"
-    )]
+    #[error("distill_unknown_artifact")]
     DistillUnknownArtifact {
         artifact: yunta_core::DistillArtifact,
     },
 
     /// A node produces at most one document of each kind: the identity
     /// is `(node, kind)`, so a second declaration names the first.
-    #[error(
-        "node `{node}` declares `{kind}` twice — a node produces at most one {label}, and it \
-         is identified by its kind, so there is no second one to declare",
-        label = .kind.label()
-    )]
+    #[error("duplicate_artifact_kind")]
     DuplicateArtifactKind {
         node: NodeId,
         kind: yunta_core::ArtifactKind,
@@ -100,56 +92,40 @@ pub enum CheckError {
 
     /// An input document and a node producing the same kind are two
     /// producers of one identity with nothing to order them.
-    #[error(
-        "input `{input}` brings in the {label} and node `{node}` produces one too — a run \
-         resolving `{kind}` would get whichever landed last, which nothing in the workflow \
-         decides; drop the input, or `{kind}` from node `{node}`'s `artifacts.produces`",
-        label = .kind.label()
-    )]
+    #[error("input_document_also_produced")]
     InputDocumentAlsoProduced {
-        input: String,
+        input: InputName,
         node: NodeId,
         kind: yunta_core::ArtifactKind,
     },
 
     /// The three kind names are how a document the engine reads is
     /// referred to, so none of them is available as a file name.
-    #[error(
-        "{site} names the artifact `{name}`, and `{name}` is a document Yunta reads — refer to \
-         it with `kind: {name}` instead; the names {kinds} are not available as file names",
-        kinds = yunta_core::ArtifactKind::listed()
-    )]
-    ReservedArtifactName { site: String, name: String },
+    #[error("reserved_artifact_name")]
+    ReservedArtifactName { place: Place, name: String },
 
     /// An artifact is written under `run.dir/artifacts/`; a name that
     /// is absolute or climbs with `..` would land somewhere else.
-    #[error(
-        "node `{node}` produces `{name}` — an artifact name is a relative path with no `..` \
-         component, so it stays under the run's `artifacts/`"
-    )]
-    ArtifactNameEscapes { node: NodeId, name: String },
+    /// The name a node declares is not one an artifact can take. The
+    /// reason comes from the name's own parser, so `check` and the run
+    /// refuse the same names for the same stated reason.
+    #[error("artifact_name_refused")]
+    ArtifactNameRefused {
+        node: NodeId,
+        /// The name as the node writes it, which the reason quotes.
+        name: String,
+        problem: NameProblem,
+    },
 
     /// The workflow demands a schema this binary doesn't speak.
-    #[error(
-        "`yunta_schema: \"{range}\"` — this binary's schema is outside the required range (this \
-         binary speaks schema {binary})"
-    )]
-    YuntaSchemaOutside { range: String, binary: u32 },
-
-    /// The workflow's `yunta_schema:` range cannot be read.
-    #[error("`yunta_schema: \"{range}\"` — {source} (this binary speaks schema {binary})")]
-    YuntaSchemaUnreadable {
-        range: String,
-        binary: u32,
-        #[source]
-        source: SchemaRangeError,
-    },
+    #[error("yunta_schema_outside")]
+    YuntaSchemaOutside { range: SchemaRange, binary: u32 },
 
     /// A pack-origin workflow's `pack.yaml` exists but cannot be read —
     /// its `declares.permissions` ceiling is the pack's only governance
     /// rule, so a manifest the check cannot read is a check error naming
     /// the file, never a silently skipped ceiling.
-    #[error("pack manifest `{path}` cannot be read: {detail}")]
+    #[error("pack_manifest_unreadable")]
     PackManifestUnreadable {
         path: std::path::PathBuf,
         detail: String,
@@ -157,7 +133,7 @@ pub enum CheckError {
 
     /// A pack-origin workflow's `pack.yaml` does not parse — same
     /// reasoning as [`CheckError::PackManifestUnreadable`].
-    #[error("pack manifest `{path}` is malformed: {detail}")]
+    #[error("pack_manifest_malformed")]
     PackManifestMalformed {
         path: std::path::PathBuf,
         detail: String,
@@ -171,24 +147,20 @@ pub enum CheckError {
     /// approximation by design: "no relative order declared" is the
     /// rule, never a simulation of what the scheduler would actually
     /// interleave.
-    #[error(
-        "nodes `{a}` and `{b}` have no dependency path between them and declare overlapping \
-         scope (`{glob_a}` / `{glob_b}`) — with `max_parallel_nodes` > 1 they can write the \
-         same paths at once; chain them with `depends_on` or make their scopes disjoint"
-    )]
+    #[error("overlapping_fan_out_scope")]
     OverlappingFanOutScope {
         a: NodeId,
         b: NodeId,
-        glob_a: String,
-        glob_b: String,
+        glob_a: ScopeGlob,
+        glob_b: ScopeGlob,
     },
 
     /// The first enforcement moment: the command as written in
     /// the YAML already violates the merged `permissions` model. The scan
     /// matches the *literal* text — a command assembled by template gets
     /// caught by the second moment, at runtime, right before execution.
-    #[error("node `{node}`: {rule}")]
-    CommandDenied { node: NodeId, rule: String },
+    #[error("command_denied")]
+    CommandDenied { node: NodeId, denied: DeniedCommand },
 
     /// `context:` is resolved into a session's own
     /// prompt — `kind: prompt` (the node's one session) and `kind:
@@ -196,25 +168,22 @@ pub enum CheckError {
     /// `bash`/`check`/`executor`/`gate` node has no session to consume
     /// it. Declaring it there is caught here rather than silently
     /// ignored at runtime.
-    #[error(
-        "node `{node}`: `context:` is only supported on `kind: prompt` and `kind: loop` nodes \
-         — nothing else opens a session that could consume it"
-    )]
+    #[error("context_on_unsupported_node")]
     ContextOnUnsupportedNode { node: NodeId },
 
-    #[error("input `{name}` is type `enum` with an empty `values` list")]
-    InputEmptyEnumValues { name: String },
+    #[error("input_empty_enum_values")]
+    InputEmptyEnumValues { name: InputName },
 
-    #[error("input `{name}`'s `min` ({min}) is greater than its `max` ({max})")]
+    #[error("input_min_exceeds_max")]
     InputMinExceedsMax {
-        name: String,
+        name: InputName,
         min: String,
         max: String,
     },
 
-    #[error("input `{name}`'s `pattern` `{pattern}` is not a valid regex: {detail}")]
+    #[error("input_invalid_pattern")]
     InputInvalidPattern {
-        name: String,
+        name: InputName,
         pattern: String,
         detail: String,
     },
@@ -226,7 +195,9 @@ pub enum CheckError {
     /// isn't scanned: `check` never reads files (see this module's own
     /// doc comment), so an undeclared reference there still only
     /// surfaces at run time.
-    #[error("node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare")]
+    /// The reference as written: what an author reads back, whether or
+    /// not it could have been an input name at all.
+    #[error("undeclared_input")]
     UndeclaredInput { node: NodeId, name: String },
 
     /// A `kind: gate` with `external:` has nowhere to
@@ -237,235 +208,180 @@ pub enum CheckError {
     /// — a specific machine lacking the named credential env var at
     /// *runtime* is a different, degrade-not-refuse case (it degrades
     /// to console instead of failing).
-    #[error("node `{node}`: `kind: gate` with `external: {{kind: pull_request}}` needs `forge.github` configured")]
+    #[error("external_gate_without_forge")]
     ExternalGateWithoutForge { node: NodeId },
+
+    /// An external gate is decided on the forge, which shows its
+    /// `artifacts:`; nothing here would ever put a `shows:` in front of
+    /// anyone.
+    #[error("shows_on_external_gate")]
+    ShowsOnExternalGate { node: NodeId },
 
     /// A gate's resolution is a forge round-trip, one at a time — never
     /// scoped to a `parallel` group's shared worktree/join semantics
     /// (neither concept is defined for a gate).
-    #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
+    #[error("gate_inside_parallel")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
-    /// `on:` may only map options the gate itself declares —
-    /// mapping an undeclared one is a choice no human can ever make.
-    #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
-    GateOnUndeclaredOption { node: NodeId, option: OptionId },
+    /// A group inside a group. Every surface draws a group's children
+    /// one step under it, and the scheduler pairs each node with the
+    /// group that holds it — both are exact at one level and false at
+    /// two. Nesting arrives the day somebody asks for it, with the
+    /// design it needs.
+    #[error("parallel_inside_parallel")]
+    ParallelInsideParallel { node: NodeId, group: NodeId },
 
-    /// The same broken-reference class as `BrokenReference` —
-    /// catching it here means the run never starts with a mode that
-    /// silently omits work its own author meant to include.
-    #[error("mode `{mode}` includes unknown node `{node}`")]
-    ModeReferencesUnknownNode { mode: ModeName, node: NodeId },
-
-    /// A mode trims deliberation, never verification — checked
-    /// independent of the mode's name or count.
-    #[error("node `{node}` is `invariant: true` but mode `{mode}` doesn't include it")]
-    InvariantNodeExcludedFromMode { node: NodeId, mode: ModeName },
-
-    /// A mode's own coherence rule, made an error rather than a warning
-    /// for the same reason: it's the same broken-reference class
-    /// `BrokenReference` catches, just scoped to one mode's variant of
-    /// the graph instead of the whole file. The message names both ways
-    /// out.
-    #[error(
-        "node `{node}` is in mode `{mode}`, but its on_failure.goto target `{goto}` isn't — \
-         include `{goto}` in `{mode}`, or drop the re-route there"
-    )]
-    RerouteTargetExcludedFromMode {
-        mode: ModeName,
+    /// A node that asks ends when it asks: its answers are the next
+    /// node's context, so nothing it declares beside `questions` could
+    /// be written after them.
+    #[error("questions_alongside_other_artifacts")]
+    QuestionsAlongsideOtherArtifacts {
         node: NodeId,
-        goto: NodeId,
+        others: Vec<ArtifactSpec>,
     },
+
+    /// The engine writes the answers to a `questions` document, so a
+    /// node that declared them would owe a document nobody can hand it.
+    #[error("answers_declared_as_produced")]
+    AnswersDeclaredAsProduced { node: NodeId },
+
+    /// Answers exist because a node asked, so a node that asks nothing
+    /// has none to read.
+    #[error("answers_from_node_that_never_asks")]
+    AnswersFromNodeThatNeverAsks { node: NodeId, place: Place },
+
+    /// Only a `prompt` node holds the session that hands questions over
+    /// and the close that waits on them.
+    #[error("questions_on_kind")]
+    QuestionsOnKind { node: NodeId, kind: &'static str },
+
+    /// The scheduler puts questions to a person one top-level node at a
+    /// time, so a group's child is never asked — its wait would never
+    /// end and the node after the group would mount answers that never
+    /// arrive.
+    #[error("questions_inside_parallel")]
+    QuestionsInsideParallel { node: NodeId, group: NodeId },
+
+    /// An `on:` route no answer ever follows: a promise the gate cannot keep.
+    #[error("gate_route_never_taken")]
+    GateRouteNeverTaken { node: NodeId, route: UntakenRoute },
 
     /// A `kind: workflow` node never opens a session of its own —
     /// the child's nodes bind their own runners — so a runner binding
     /// here would be accepted and ignored, which the engine never
     /// allows silently.
-    #[error(
-        "node `{node}`: `{field}` has no meaning on `kind: workflow` — the child workflow's \
-         own nodes bind their runners"
-    )]
+    #[error("workflow_node_runner_binding")]
     WorkflowNodeRunnerBinding { node: NodeId, field: &'static str },
 
-    /// A parallel child with `isolation: inherit` shares the parent's
+    /// A parallel child with `isolation: none` shares the parent's
     /// one tree with every concurrent sibling, so an undeclared scope
     /// makes disjointness unverifiable: refused, same rank as
     /// `OverlappingParallelScope` (which catches the declared-overlap
     /// half of the same rule).
-    #[error(
-        "parallel group `{group}`: child `{node}` is `kind: workflow` with `isolation: \
-         inherit` and no `scope` — inherit children share the parent's tree, so each must \
-         declare a disjoint scope"
-    )]
+    #[error("inherit_child_without_scope")]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 
     /// Mounting one's own artifact is a read of an outcome that
     /// cannot exist yet — the implied `depends_on` would be a self-cycle.
-    #[error(
-        "node `{node}`: `mounts` references the node itself — a mount reads a *finished* \
-         node's artifact, which this node cannot be for its own birth"
-    )]
+    #[error("mount_on_self")]
     MountOnSelf { node: NodeId },
 
     /// Same reasoning as `FanOutTarget` — once `runners:` expands
     /// a node into `<id>@<role>` siblings there is no "the" node to
     /// mount from.
-    #[error(
-        "node `{node}`: `mounts` references `{target}`, which `runners:` fans out into one \
-         node per role — mount a specific `{target}@<role>` sibling instead"
-    )]
+    #[error("mount_on_fan_out")]
     MountOnFanOut { node: NodeId, target: NodeId },
 
     /// Parallel children run concurrently — no DAG order exists
     /// inside the group, so "the source node already finished" cannot
     /// hold there and the implied `depends_on` would mean nothing.
-    #[error(
-        "parallel group `{group}`: child `{node}` declares `mounts` — parallel children have \
-         no order to guarantee a finished source; mount on a top-level workflow node instead"
-    )]
+    #[error("mount_inside_parallel")]
     MountInsideParallel { group: NodeId, node: NodeId },
 
     /// Only `kind: prompt` opens a node-scoped session —
     /// declaring `resume_session` anywhere else names a conversation
     /// that doesn't exist (a loop's per-task sessions re-run from the
     /// tasks document; bash/check/executor/gate/workflow open none).
-    #[error(
-        "node `{node}`: `on_interrupt: resume_session` is only supported on `kind: prompt` \
-         nodes — nothing else has a node-scoped session to resume; declare `restart_node` \
-         (the default) instead"
-    )]
+    #[error("resume_session_on_sessionless_node")]
     ResumeSessionOnSessionlessNode { node: NodeId },
+
+    /// `ask` says which rounds of a node's questions stop the run; on a
+    /// node that hands over no `questions` it says nothing.
+    #[error("ask_on_a_node_that_asks_nothing")]
+    AskOnANodeThatAsksNothing { node: NodeId },
+
+    /// `network: true` on a session that runs read-only, which gets none.
+    #[error("network_open_under_read_only")]
+    NetworkOpenUnderReadOnly { node: NodeId },
+
+    /// A closed network on a session that runs unconfined, which nothing keeps closed.
+    #[error("closed_network_unconfined")]
+    ClosedNetworkUnconfined { node: NodeId },
 
     /// The node asks for a scope-expansion mode more
     /// permissive than the merged `permissions.scope_expansion.max_mode`
     /// ceiling allows — same only-narrowing model as every other
     /// `permissions` group; which *layer* set the binding ceiling
     /// is `permission_layer_conflicts`' territory at config load.
-    #[error(
-        "node `{node}`: `scope_expansion.mode: {mode}` exceeds the merged permissions ceiling \
-         `scope_expansion.max_mode: {ceiling}` — harden the node's mode, or raise \
-         the ceiling in the layer that set it"
-    )]
+    #[error("scope_expansion_mode_over_ceiling")]
     ScopeExpansionModeOverCeiling {
         node: NodeId,
         mode: &'static str,
         ceiling: &'static str,
     },
 
+    /// `scope_expansion.within` is retired: a loop that still declares it
+    /// is refused, because the key would otherwise be read as a ceiling
+    /// it no longer is.
+    #[error("scope_expansion_within_retired")]
+    ScopeExpansionWithinRetired { node: NodeId },
+
     /// A 0 would starve every ready node forever — a config
     /// mistake surfaced here as a refusal (the scheduler's clamp to 1
     /// stays as defense in depth).
-    #[error(
-        "`defaults.max_parallel_nodes: 0` would starve every node forever — declare 1 or more, \
-         or drop the field (default: 1)"
-    )]
+    #[error("max_parallel_nodes_zero")]
     MaxParallelNodesZero,
 
-    /// A composition reference that can't resolve today — the
-    /// same broken-reference class as `BrokenReference`, across
-    /// files. Advisory about the *current* catalog by design: the child
-    /// freezes its own file at birth, so a run only ever meets the file
-    /// as it is then.
-    #[error("node `{node}`: `use: {name}` cannot be resolved — {detail}")]
-    WorkflowRefMissing {
-        node: NodeId,
-        name: String,
-        detail: String,
+    /// A `use:` reference to another workflow, refused.
+    #[error(transparent)]
+    Composition(#[from] super::refs::Composition),
+
+    /// A comparison against a baseline nothing measures: the lineage
+    /// measures once, before its first node, and only the suite the
+    /// config names.
+    #[error("baseline_without_suite")]
+    BaselineWithoutSuite { sites: String },
+
+    /// A config key that names a project command the project does not
+    /// declare — a `format:` rule, a command `baseline.held` holds tasks
+    /// to — would do nothing, with nobody told why.
+    #[error("command_unset_in")]
+    CommandUnsetIn {
+        field: &'static str,
+        command: yunta_core::CommandName,
+        near: Option<String>,
     },
 
-    /// Two packs installed under the same publisher each declare a
-    /// workflow with the same file basename — the flat
-    /// `publisher/workflow` namespace can't tell them apart.
-    #[error("node `{node}`: `use: {name}` is ambiguous — {detail}")]
-    AmbiguousWorkflowRef {
-        node: NodeId,
-        name: String,
-        detail: String,
-    },
-
-    /// Cross-pack references aren't supported — a workflow
-    /// that lives inside a pack may only `use:` other workflows from
-    /// that same pack, never the repo's own catalog or a different
-    /// pack (no transitive pack dependencies).
-    #[error(
-        "node `{node}`: `use: {name}` reaches outside pack `{from_pack}` — composition across \
-         packs isn't supported; copy what you need into your own pack instead"
-    )]
-    CrossPackWorkflowRef {
-        node: NodeId,
-        name: String,
-        from_pack: String,
-    },
-
-    #[error("workflow `{path}` (referenced through composition) does not parse: {detail}")]
-    WorkflowRefUnparseable {
-        path: std::path::PathBuf,
-        detail: String,
-    },
-
-    /// The graph of references between workflows must be acyclic.
-    #[error("workflow composition cycle: {chain}")]
-    WorkflowRefCycle { chain: String },
-
-    /// The configurable maximum nesting depth, checked statically over
-    /// the reference graph (the runtime guard at child birth enforces
-    /// the same limit over what actually loads).
-    #[error(
-        "workflow composition {chain} nests {depth} level(s) deep but \
-         `limits.max_workflow_depth` is {max} — flatten the composition or raise the limit"
-    )]
-    WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
+    /// A pack says what it needs from the project and the machine under
+    /// `requires:`; a run of its workflows without it stops where the need
+    /// is.
+    #[error("pack_requirement_unmet")]
+    PackRequirementUnmet { pack: String, requirement: String },
 
     /// A pack's `declares` field is a ceiling, not a description — a
     /// pack's own `prompt`/`loop` node can never request a session
     /// profile above what its manifest promises, even when the node's
     /// own YAML asks for more (or asks for nothing and falls back to
     /// the engine's own `edit` default).
-    #[error(
-        "node `{node}` requests permissions `{effective}` but pack `{pack}` declares a ceiling \
-         of `{declared}` — lower the node's permissions or raise the pack's declared ceiling"
-    )]
+    #[error("pack_permissions_ceiling_exceeded")]
     PackPermissionsCeilingExceeded {
         node: NodeId,
         pack: String,
         declared: &'static str,
         effective: &'static str,
     },
-}
 
-/// A non-blocking finding — the run can still start (`check`
-/// warns, it doesn't refuse, when a collision can't be verified for lack
-/// of declared scope). Kept separate from `CheckError` rather than adding
-/// a severity field to it: every existing caller of `check()` keeps
-/// treating its `Vec<CheckError>` as "must be empty to proceed" without
-/// learning to filter by severity.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum CheckWarning {
-    #[error(
-        "parallel group `{group}`: two or more children can write and don't declare scope as \
-         disjoint — the engine can't verify they won't collide; declare `scope` on each \
-         to make the check real"
-    )]
-    UndeclaredParallelScope { group: NodeId },
-
-    /// The fan-out analogue of `UndeclaredParallelScope` — one
-    /// warning per connected component of mutually-independent,
-    /// write-capable, scope-less top-level nodes (per pair would drown
-    /// the signal in noise).
-    #[error(
-        "nodes {nodes} have no dependency paths between them and can all write without \
-         declared scope — with `max_parallel_nodes` > 1 the engine can't verify they won't \
-         collide; declare `scope` on each or chain them with `depends_on`"
-    )]
-    UndeclaredFanOutScope { nodes: String },
-
-    /// A literal `git push` aimed at the base branch with no
-    /// gate anywhere before it in the DAG — warning, not error: a team
-    /// may genuinely want it, but nobody should discover an ungated
-    /// push to `main` from the push itself.
-    #[error(
-        "node `{node}` pushes to the base branch (`{branch}`) with no gate anywhere before it \
-         in the DAG — put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
-    )]
-    PushToBaseWithoutGate { node: NodeId, branch: String },
+    /// A pack's `declares.network: false` closes the network for each node.
+    #[error("pack_network_ceiling_exceeded")]
+    PackNetworkCeilingExceeded { node: NodeId, pack: String },
 }

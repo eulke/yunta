@@ -17,6 +17,24 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
+mod composite;
+mod finding;
+mod node;
+mod process;
+mod run;
+mod sequence;
+mod task;
+#[cfg(test)]
+mod tests;
+
+pub use composite::{GitHubRepo, PackRef};
+pub use finding::FindingId;
+pub use node::NodeId;
+pub use process::Pid;
+pub use run::RunId;
+pub use sequence::Seq;
+pub use task::TaskId;
+
 /// A value that breaks the rule of the identifier it was meant to be.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("`{value}` is not a valid {what}: {rule}")]
@@ -47,6 +65,31 @@ const fn is_name(bytes: &[u8]) -> bool {
     }
     while let Some((byte, tail)) = rest.split_first() {
         if !(byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'-') {
+            return false;
+        }
+        rest = tail;
+    }
+    true
+}
+
+const SHARED_DIR_VAR_RULE: &str =
+    "an uppercase letter or `_` followed by uppercase letters, digits or `_`, and not `PATH`";
+
+/// A variable a shared directory is exported under: shaped like an
+/// environment variable, and never `PATH`, which lists directories
+/// rather than naming one.
+const fn is_shared_dir_var(bytes: &[u8]) -> bool {
+    if let [b'P', b'A', b'T', b'H'] = bytes {
+        return false;
+    }
+    let Some((first, mut rest)) = bytes.split_first() else {
+        return false;
+    };
+    if !(first.is_ascii_uppercase() || *first == b'_') {
+        return false;
+    }
+    while let Some((byte, tail)) = rest.split_first() {
+        if !(byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_') {
             return false;
         }
         rest = tail;
@@ -290,56 +333,6 @@ macro_rules! string_id {
 pub(crate) use string_id;
 
 string_id!(
-    /// A node's id, unique within a workflow: `^[A-Za-z][A-Za-z0-9_-]*$`
-    /// as authored. A fan-out sibling — one of the nodes the manifest
-    /// expands a `runners:` node into — is `<base>@<runner>`; authored
-    /// YAML never spells that form, the manifest does.
-    NodeId, what = "node id", rule = NODE_RULE, check = is_node_id
-);
-
-impl NodeId {
-    /// The id of the sibling of `base` that runs under `runner`. `base`
-    /// contributes its authored id, so the result is one `@` deep even
-    /// when `base` is itself a sibling.
-    pub fn fan_out(base: &NodeId, runner: &RunnerName) -> NodeId {
-        NodeId(Cow::Owned(format!(
-            "{}{}{runner}",
-            base.base_str(),
-            FAN_OUT_SEPARATOR as char
-        )))
-    }
-
-    /// Whether this is a fan-out sibling (`<base>@<runner>`).
-    pub fn is_fan_out(&self) -> bool {
-        self.0.contains(FAN_OUT_SEPARATOR as char)
-    }
-
-    /// The authored id: the part before `@` for a sibling, the id itself
-    /// otherwise.
-    pub fn base(&self) -> NodeId {
-        if self.is_fan_out() {
-            NodeId(Cow::Owned(self.base_str().to_string()))
-        } else {
-            self.clone()
-        }
-    }
-
-    /// The runner a fan-out sibling runs under; `None` for an authored
-    /// node.
-    pub fn runner(&self) -> Option<RunnerName> {
-        self.0
-            .split_once(FAN_OUT_SEPARATOR as char)
-            .map(|(_, runner)| RunnerName(Cow::Owned(runner.to_string())))
-    }
-
-    fn base_str(&self) -> &str {
-        self.0
-            .split_once(FAN_OUT_SEPARATOR as char)
-            .map_or(self.as_str(), |(base, _)| base)
-    }
-}
-
-string_id!(
     /// A runner's name — the key under `runners:` a node's `runner:`
     /// and a pack's `requires.runners` refer to:
     /// `^[A-Za-z][A-Za-z0-9_-]*$`.
@@ -350,6 +343,31 @@ string_id!(
     /// An adapter's id as config names it (`claude-code`, `codex`,
     /// `mock`): `^[A-Za-z][A-Za-z0-9_-]*$`.
     AdapterId, what = "adapter id", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// A workflow's own `name:`, and the key the catalog files it under
+    /// — what a `kind: workflow` node's `use:` names and what `yunta
+    /// run` takes: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    WorkflowName, what = "workflow name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// A skill's name as a node's `skills:` lists it and a pack
+    /// declares it: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    SkillName, what = "skill name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// An input's name — the key under `inputs:` that `{{inputs.<name>}}`
+    /// resolves: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    InputName, what = "input name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// An MCP server's name — the key under `mcp_servers:` a node's
+    /// `mcp:` refers to: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    McpServerName, what = "MCP server name", rule = NAME_RULE, check = is_name
 );
 
 string_id!(
@@ -379,35 +397,22 @@ impl Default for ModeName {
 }
 
 string_id!(
+    /// A command the project declares under `commands:` and a workflow
+    /// runs by name: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    CommandName, what = "command name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// The variable a directory under `shared_dirs:` is exported under,
+    /// to every command and session of a run:
+    /// `^[A-Z_][A-Z0-9_]*$`, and not `PATH`.
+    SharedDirVar, what = "shared directory variable", rule = SHARED_DIR_VAR_RULE, check = is_shared_dir_var
+);
+
+string_id!(
     /// An executor's name — a `skills.executors` entry a `kind: executor`
     /// node refers to: `^[A-Za-z][A-Za-z0-9_-]*$`.
     ExecutorName, what = "executor name", rule = NAME_RULE, check = is_name
-);
-
-string_id!(
-    /// A run's id — the name of its directory under the runs root.
-    RunId, what = "run id", rule = SEGMENT_RULE, check = is_segment
-);
-
-/// A ULID is 26 Crockford base32 characters — one path segment by
-/// construction, so the conversion is total.
-impl From<ulid::Ulid> for RunId {
-    fn from(ulid: ulid::Ulid) -> Self {
-        RunId(Cow::Owned(ulid.to_string()))
-    }
-}
-
-string_id!(
-    /// A task's id from the tasks document, unique within one tasks document:
-    /// `^[A-Za-z][A-Za-z0-9_-]*$`.
-    TaskId, what = "task id", rule = NAME_RULE, check = is_name
-);
-
-string_id!(
-    /// A finding's id within a `kind: findings` artifact — one printable
-    /// label, unique per author. The engine's own findings compose theirs
-    /// from the node or artifact they concern.
-    FindingId, what = "finding id", rule = OPAQUE_RULE, check = is_opaque
 );
 
 string_id!(
@@ -446,415 +451,3 @@ string_id!(
     /// A pack's own name — its directory under its publisher's.
     PackName, what = "pack name", rule = SEGMENT_RULE, check = is_segment
 );
-
-// --- Composite identifiers ---------------------------------------------
-
-/// A pack's identity, `publisher/name`: what `yunta run acme/review`
-/// and `use: acme/qa-review` name, and the key of `yunta.lock`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackRef {
-    publisher: Publisher,
-    name: PackName,
-}
-
-const PACK_REF_RULE: &str = "`publisher/name`, each one path segment";
-
-impl PackRef {
-    pub fn new(publisher: Publisher, name: PackName) -> Self {
-        PackRef { publisher, name }
-    }
-
-    pub fn publisher(&self) -> &Publisher {
-        &self.publisher
-    }
-
-    pub fn name(&self) -> &PackName {
-        &self.name
-    }
-}
-
-impl fmt::Display for PackRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.publisher, self.name)
-    }
-}
-
-impl FromStr for PackRef {
-    type Err = InvalidId;
-
-    fn from_str(value: &str) -> Result<Self, InvalidId> {
-        let invalid = || InvalidId {
-            what: "pack reference",
-            value: value.to_string(),
-            rule: PACK_REF_RULE,
-        };
-        let (publisher, name) = value.split_once('/').ok_or_else(invalid)?;
-        Ok(PackRef {
-            publisher: publisher.parse().map_err(|_| invalid())?,
-            name: name.parse().map_err(|_| invalid())?,
-        })
-    }
-}
-
-impl TryFrom<String> for PackRef {
-    type Error = InvalidId;
-
-    fn try_from(value: String) -> Result<Self, InvalidId> {
-        value.parse()
-    }
-}
-
-impl Serialize for PackRef {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
-
-impl<'de> Deserialize<'de> for PackRef {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl schemars::JsonSchema for PackRef {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "PackRef".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "string",
-            "pattern": "^[^/]+/[^/]+$",
-            "description": format!("A pack reference: {}", PACK_REF_RULE),
-        })
-    }
-}
-
-/// A GitHub repository, `owner/name`: the two path segments every
-/// forge URL is built from, and nothing else.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GitHubRepo {
-    owner: String,
-    name: String,
-}
-
-const GITHUB_REPO_RULE: &str = "`owner/name`, each one path segment";
-
-impl GitHubRepo {
-    pub fn owner(&self) -> &str {
-        &self.owner
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl fmt::Display for GitHubRepo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.owner, self.name)
-    }
-}
-
-impl FromStr for GitHubRepo {
-    type Err = InvalidId;
-
-    fn from_str(value: &str) -> Result<Self, InvalidId> {
-        let invalid = || InvalidId {
-            what: "GitHub repository",
-            value: value.to_string(),
-            rule: GITHUB_REPO_RULE,
-        };
-        let (owner, name) = value.split_once('/').ok_or_else(invalid)?;
-        if !is_path_segment(owner) || !is_path_segment(name) {
-            return Err(invalid());
-        }
-        Ok(GitHubRepo {
-            owner: owner.to_string(),
-            name: name.to_string(),
-        })
-    }
-}
-
-impl TryFrom<String> for GitHubRepo {
-    type Error = InvalidId;
-
-    fn try_from(value: String) -> Result<Self, InvalidId> {
-        value.parse()
-    }
-}
-
-impl Serialize for GitHubRepo {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
-
-impl<'de> Deserialize<'de> for GitHubRepo {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl schemars::JsonSchema for GitHubRepo {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "GitHubRepo".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "string",
-            "pattern": "^[^/]+/[^/]+$",
-            "description": format!("A GitHub repository: {}", GITHUB_REPO_RULE),
-        })
-    }
-}
-
-// --- Process ids ---------------------------------------------------------
-
-/// A process id: a positive number, as the kernel hands them out. Zero
-/// and negatives — what a signal call or a lock file could otherwise
-/// carry by mistake — are unrepresentable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Pid(u32);
-
-const PID_RULE: &str = "a positive number that fits a signed 32-bit integer";
-
-impl Pid {
-    /// This process's own id. The kernel never runs a user process as
-    /// pid 0, so no check is needed here.
-    pub fn current() -> Pid {
-        Pid(std::process::id())
-    }
-
-    pub const fn as_u32(self) -> u32 {
-        self.0
-    }
-
-    /// The id as the kernel's own type; the constructors guarantee it
-    /// fits.
-    pub const fn as_i32(self) -> i32 {
-        self.0 as i32
-    }
-}
-
-impl fmt::Display for Pid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl TryFrom<u32> for Pid {
-    type Error = InvalidId;
-
-    fn try_from(value: u32) -> Result<Self, InvalidId> {
-        if value == 0 || i32::try_from(value).is_err() {
-            return Err(InvalidId {
-                what: "process id",
-                value: value.to_string(),
-                rule: PID_RULE,
-            });
-        }
-        Ok(Pid(value))
-    }
-}
-
-impl TryFrom<i32> for Pid {
-    type Error = InvalidId;
-
-    fn try_from(value: i32) -> Result<Self, InvalidId> {
-        u32::try_from(value)
-            .ok()
-            .filter(|raw| *raw > 0)
-            .map(Pid)
-            .ok_or_else(|| InvalidId {
-                what: "process id",
-                value: value.to_string(),
-                rule: PID_RULE,
-            })
-    }
-}
-
-impl Serialize for Pid {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u32(self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for Pid {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = u32::deserialize(deserializer)?;
-        Pid::try_from(value).map_err(serde::de::Error::custom)
-    }
-}
-
-impl schemars::JsonSchema for Pid {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Pid".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "integer",
-            "minimum": 1,
-            "maximum": i32::MAX,
-            "description": format!("A process id: {}", PID_RULE),
-        })
-    }
-}
-
-// --- Sequence numbers ----------------------------------------------------
-
-/// An event's position in its run's log: 1 for the run's first event,
-/// counting up without gaps. Assigned by storage when a draft is
-/// appended; never chosen by the engine.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Seq(u64);
-
-const SEQ_RULE: &str = "a positive number";
-
-impl Seq {
-    /// The first event of every run.
-    pub const FIRST: Seq = Seq(1);
-
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-
-    /// The position right after this one.
-    pub const fn next(self) -> Seq {
-        Seq(self.0 + 1)
-    }
-}
-
-impl fmt::Debug for Seq {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Seq({})", self.0)
-    }
-}
-
-impl fmt::Display for Seq {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl TryFrom<i64> for Seq {
-    type Error = InvalidId;
-
-    fn try_from(value: i64) -> Result<Self, InvalidId> {
-        u64::try_from(value)
-            .ok()
-            .filter(|raw| *raw > 0)
-            .map(Seq)
-            .ok_or_else(|| InvalidId {
-                what: "seq",
-                value: value.to_string(),
-                rule: SEQ_RULE,
-            })
-    }
-}
-
-impl Serialize for Seq {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u64(self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for Seq {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = u64::deserialize(deserializer)?;
-        i64::try_from(value)
-            .map_err(|_| InvalidId {
-                what: "seq",
-                value: value.to_string(),
-                rule: SEQ_RULE,
-            })
-            .and_then(Seq::try_from)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-impl schemars::JsonSchema for Seq {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Seq".into()
-    }
-
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "type": "integer",
-            "minimum": 1,
-            "description": format!("A position in a run's log: {}", SEQ_RULE),
-        })
-    }
-}
-
-/// Test convenience: a literal that is not a position panics. Production
-/// code takes the seq storage assigned.
-#[cfg(any(test, feature = "testkit"))]
-// A bad literal in a fixture is a test-authoring mistake, meant to abort
-// the test loudly — the one place a panic is the right answer.
-#[allow(clippy::panic)]
-impl From<u64> for Seq {
-    fn from(value: u64) -> Self {
-        match i64::try_from(value).ok().map(Seq::try_from) {
-            Some(Ok(seq)) => seq,
-            _ => panic!("`{value}` is not a valid seq: {SEQ_RULE}"),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_name_starts_with_a_letter_and_continues_with_letters_digits_underscore_or_dash() {
-        assert!(is_name(b"a"));
-        assert!(is_name(b"review-alt_2"));
-        assert!(!is_name(b""));
-        assert!(!is_name(b"2fast"));
-        assert!(!is_name(b"a.b"));
-        assert!(!is_name(b"a b"));
-    }
-
-    #[test]
-    fn a_node_id_admits_exactly_one_fan_out_separator_between_two_names() {
-        assert!(is_node_id(b"review"));
-        assert!(is_node_id(b"review@alt"));
-        assert!(!is_node_id(b"review@"));
-        assert!(!is_node_id(b"@alt"));
-        assert!(!is_node_id(b"a@b@c"));
-    }
-
-    #[test]
-    fn a_segment_is_a_printable_word_that_names_one_directory() {
-        assert!(is_segment(b"acme"));
-        assert!(is_segment(b"run-1"));
-        assert!(!is_segment(b"."));
-        assert!(!is_segment(b".."));
-        assert!(!is_segment(b"a/b"));
-        assert!(!is_segment(b"a\\b"));
-        assert!(!is_segment(b"a b"));
-        assert!(!is_segment(b""));
-    }
-
-    #[test]
-    fn a_static_identifier_borrows_and_a_parsed_one_owns_but_they_compare_equal() {
-        static STATIC: AdapterId = AdapterId::from_static("codex");
-        let parsed: AdapterId = "codex".parse().unwrap();
-        assert_eq!(STATIC, parsed);
-        let mut set = std::collections::HashSet::new();
-        set.insert(parsed);
-        assert!(set.contains(&STATIC));
-        assert!(set.contains("codex"));
-    }
-
-    #[test]
-    fn debug_names_the_type_around_the_value() {
-        let id: NodeId = "plan".parse().unwrap();
-        assert_eq!(format!("{id:?}"), "NodeId(\"plan\")");
-    }
-}

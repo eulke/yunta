@@ -19,7 +19,7 @@ fn with_no_arguments_it_lists_every_document_yunta_reads() {
     let output = yunta_in!(here.path(), here.path(), &["schema"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let text = stdout(&output);
-    for kind in ["tasks", "findings", "questions"] {
+    for kind in ["tasks", "spec", "findings", "questions"] {
         assert!(text.contains(kind), "{kind} missing from {text}");
     }
 }
@@ -51,7 +51,7 @@ fn the_shape_needs_no_project_around_it() {
     // An empty directory: no `.yunta/`, no config, no run. Learning the
     // format cannot depend on having set anything up.
     let here = tempfile::tempdir().unwrap();
-    for kind in ["tasks", "findings", "questions"] {
+    for kind in ["tasks", "spec", "findings", "questions"] {
         let output = yunta_in!(here.path(), here.path(), &["schema", kind]);
         assert!(output.status.success(), "{kind}: {}", stderr(&output));
         assert!(!stdout(&output).trim().is_empty(), "{kind} printed nothing");
@@ -87,6 +87,7 @@ fn the_json_schema_served_is_the_one_committed_in_the_repository() {
     let here = tempfile::tempdir().unwrap();
     for (kind, file) in [
         ("tasks", "tasks.json"),
+        ("spec", "spec.json"),
         ("findings", "findings.json"),
         ("questions", "questions.json"),
     ] {

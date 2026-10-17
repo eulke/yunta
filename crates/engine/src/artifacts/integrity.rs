@@ -20,7 +20,7 @@
 //! run and derived for a new one, with the run's age deciding which. So
 //! it is counted as what it is: an artifact this binary cannot check,
 //! reported with its count wherever the verification is reported. Same
-//! reading as an event kind from the future — derive what can be
+//! reading as an event kind from a newer binary — derive what can be
 //! derived, say what could not be, never `broken` for it.
 
 use std::path::Path;
@@ -28,7 +28,7 @@ use std::path::Path;
 use yunta_core::events::{ArtifactOrigin, StoredEvent};
 use yunta_core::RunId;
 
-use super::{describe, ObjectError, RunArtifacts};
+use super::{describe, RunArtifacts, StoreError};
 
 /// One artifact whose bytes are not the bytes the run accepted.
 #[derive(Debug)]
@@ -37,8 +37,9 @@ pub struct ArtifactFault {
     /// path of its view, which is the file a reader opens.
     pub artifact: String,
     /// What the store answered — absent bytes, or bytes that are no
-    /// longer what their own name says, with both hashes.
-    pub error: ObjectError,
+    /// longer what their own name says, with both hashes; or the store's
+    /// own read failing.
+    pub error: StoreError,
 }
 
 /// What a run's log says it holds, checked against the bytes it has.
@@ -58,7 +59,7 @@ impl ArtifactIntegrity {
     ///
     /// Total: an artifact ends up in exactly one of the three counts, so
     /// the result accounts for every acceptance the log carries.
-    pub fn of(run_dir: &Path, events: &[StoredEvent]) -> Self {
+    pub async fn of(run_dir: &Path, events: &[StoredEvent]) -> Self {
         let artifacts = RunArtifacts::of(run_dir, events);
         let mut integrity = ArtifactIntegrity::default();
         for held in artifacts.ledger().every() {
@@ -66,7 +67,7 @@ impl ArtifactIntegrity {
                 integrity.unverifiable += 1;
                 continue;
             }
-            match artifacts.bytes(held) {
+            match artifacts.bytes(held).await {
                 Ok(_) => integrity.verified += 1,
                 Err(error) => integrity.faults.push(ArtifactFault {
                     artifact: describe(held),
@@ -90,30 +91,21 @@ impl ArtifactIntegrity {
         let faults: Vec<String> = self
             .faults
             .iter()
-            .map(|fault| format!("`{}`: {}", fault.artifact, fault.error))
+            .map(|fault| format!("`{}`: {}", fault.artifact, fault.error.sentence()))
             .collect();
         Some(format!(
-            "run `{run_id}` no longer holds the bytes its log accepted for {} of the {} \
-             artifact(s) it names: {}",
+            "run `{run_id}` no longer holds the bytes its log accepted for {} of the {} it \
+             names: {}",
             self.faults.len(),
-            self.verified + self.faults.len(),
+            yunta_core::text::counted(self.verified + self.faults.len(), "artifact"),
             faults.join("; ")
         ))
     }
 
-    /// What the verification could not check, as a sentence for a
-    /// person — `None` when it checked everything the log names.
-    pub fn unverifiable_detail(&self) -> Option<String> {
-        (self.unverifiable > 0).then(|| {
-            format!(
-                "{} artifact(s) of this run are named by `artifact_written`, written before a run \
-                 kept the bytes of its artifacts under `{}/`: no object answers for them and none \
-                 ever did, so they are left unchecked and the {} artifact(s) the log accepted are \
-                 the ones verified",
-                self.unverifiable,
-                super::store::OBJECTS_DIR,
-                self.verified,
-            )
-        })
+    /// What the verification could not check: the artifacts it left
+    /// unchecked, and the ones it verified, as the counts a finding states.
+    /// `None` when it checked everything the log names.
+    pub fn unverified(&self) -> Option<(usize, usize)> {
+        (self.unverifiable > 0).then_some((self.unverifiable, self.verified))
     }
 }

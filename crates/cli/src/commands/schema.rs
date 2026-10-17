@@ -16,49 +16,67 @@ use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
+use crate::output::{document, raw, Mode};
+use crate::render::blocks::{Fields, Next};
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::Line;
+use crate::render::Look;
 
 /// Prints one kind's shape, or lists the kinds when none is named.
-pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
+pub fn schema(kind: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let Some(name) = kind else {
-        if json {
+        if output == Mode::Json {
             return Err(CliError::msg(
                 "`--json` emits one document's schema: name a kind, or run `yunta schema` \
                  with no arguments to list them",
             ));
         }
-        println!("{}", list());
+        document(look, list());
         return Ok(Outcome::Success);
     };
 
     // One parse and one sentence: `ArtifactKind`'s own `FromStr` names
     // the kinds that exist, so this door and the `document_shape` tool
     // answer the same mistake with the same words.
-    let kind = name
-        .parse::<ArtifactKind>()
-        .map_err(|e| CliError::msg(e.to_string()))?;
-    if json {
+    let kind = name.parse::<ArtifactKind>()?;
+    if output == Mode::Json {
         // The committed bytes CI proves still match the types (`cargo
         // xtask schema --check`), never a schema generated here:
         // generating it would pull `schemars` and the whole
         // schema-building machinery into the shipped binary — around
         // 100 KB, reachable from this one flag — against a recorded
-        // binary-size ceiling (D124).
-        print!("{}", yunta_core::schema::json(kind));
+        // binary-size ceiling.
+        raw(yunta_core::schema::json(kind));
     } else {
-        print!("{}", contract(kind));
+        raw(&contract(kind));
     }
     Ok(Outcome::Success)
 }
 
-/// The catalog, one kind per line with what it is for.
-fn list() -> String {
-    let mut out = String::from("Documents Yunta reads and validates:\n");
-    for kind in ArtifactKind::ALL {
-        out.push_str(&format!("  {:<12} {}\n", kind.as_str(), kind.label()));
-    }
-    out.push_str(
-        "\nRun `yunta schema <kind>` for the shape to write, or add `--json` for the \
-         JSON Schema an editor can validate against.",
-    );
-    out
+/// The catalog, one kind per row with what it is for, and the two
+/// commands that show a kind's shape.
+fn list() -> Doc<'static> {
+    let kinds = ArtifactKind::ALL
+        .into_iter()
+        .fold(Fields::new(), |fields, kind| {
+            fields.push_if(kind.as_str(), kind.purpose())
+        });
+    let next = Next {
+        steps: vec![
+            ("yunta schema <kind>".to_string(), "the shape to write"),
+            (
+                "yunta schema <kind> --json".to_string(),
+                "the JSON Schema an editor validates against",
+            ),
+        ],
+    };
+    // The blank line that separates the kinds from the commands is a
+    // block of its own: the two blocks around it draw none.
+    Doc::new()
+        .with(Block::Title(
+            Line::new().plain("Documents Yunta reads and validates:"),
+        ))
+        .with(kinds)
+        .with(Block::Lines(vec![Line::new()]))
+        .with(next)
 }

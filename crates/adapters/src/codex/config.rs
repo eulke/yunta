@@ -27,20 +27,27 @@ impl ConfigOverride {
         }
     }
 
-    /// A TOML array of strings.
-    pub(super) fn list<I>(key: impl Into<String>, values: I) -> Self
-    where
-        I: IntoIterator,
-        I::Item: Into<String>,
-    {
+    /// A TOML boolean.
+    pub(super) fn bool(key: impl Into<String>, value: bool) -> Self {
         Self {
             key: key.into(),
-            value: Value::Array(
-                values
-                    .into_iter()
-                    .map(|v| Value::String(v.into()))
-                    .collect(),
-            ),
+            value: Value::Boolean(value),
+        }
+    }
+
+    /// A TOML float.
+    pub(super) fn float(key: impl Into<String>, value: f64) -> Self {
+        Self {
+            key: key.into(),
+            value: Value::Float(value),
+        }
+    }
+
+    /// Any TOML value — a table, an array of tables — rendered whole.
+    pub(super) fn value(key: impl Into<String>, value: Value) -> Self {
+        Self {
+            key: key.into(),
+            value,
         }
     }
 
@@ -118,8 +125,9 @@ mod tests {
     #[test]
     fn a_list_reads_back_as_its_items() {
         let items = ["/run/artifacts".to_string(), r#"/odd"path"#.to_string()];
+        let list = Value::Array(items.iter().cloned().map(Value::String).collect());
         assert_eq!(
-            read_back(ConfigOverride::list("k", items.clone())),
+            read_back(ConfigOverride::value("k", list)),
             Value::Array(items.into_iter().map(Value::String).collect())
         );
     }
@@ -127,7 +135,7 @@ mod tests {
     #[test]
     fn an_empty_list_renders_as_an_empty_array() {
         assert_eq!(
-            assignment(ConfigOverride::list("k", Vec::<String>::new())),
+            assignment(ConfigOverride::value("k", Value::Array(Vec::new()))),
             "k=[]"
         );
     }

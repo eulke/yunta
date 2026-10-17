@@ -22,8 +22,11 @@ pub(crate) fn permission_rank(permissions: yunta_core::NodePermissions) -> u8 {
 /// every `prompt`/`loop` node's own *effective* permission — the node's
 /// explicit `permissions:` if it has one, the engine's own `edit`
 /// default otherwise (a pack declaring `read-only` can't rely on a node
-/// silently defaulting past it). A no-op for a repo-origin workflow:
-/// there is no pack manifest to hold a ceiling against.
+/// silently defaulting past it). `declares.network` is a ceiling on the
+/// network every node of the pack may ask for: a node asking for
+/// `network: true` is refused where the pack declares it closed. A no-op
+/// for a repo-origin workflow: there is no pack manifest to hold a ceiling
+/// against.
 pub(crate) fn check_declares_ceiling(
     workflow: &Workflow,
     origin: &crate::catalog::WorkflowOrigin,
@@ -41,47 +44,55 @@ pub(crate) fn check_declares_ceiling(
         .join(publisher.as_str())
         .join(pack_name.as_str())
         .join("pack.yaml");
-    // The manifest is this pack's only governance rule; a copy that
-    // cannot be read or parsed is a check error naming the file, never a
-    // ceiling silently switched off.
-    let text = match std::fs::read_to_string(&manifest_path) {
-        Ok(text) => text,
-        Err(e) => {
-            return vec![CheckError::PackManifestUnreadable {
-                path: manifest_path,
-                detail: e.to_string(),
-            }]
-        }
-    };
-    let manifest = match yunta_core::yaml::parse::<yunta_core::PackManifest>(&text) {
+    let manifest = match read_manifest(manifest_path) {
         Ok(manifest) => manifest,
-        Err(e) => {
-            return vec![CheckError::PackManifestMalformed {
-                path: manifest_path,
-                detail: e.to_string(),
-            }]
-        }
+        Err(error) => return vec![*error],
     };
+    let pack = format!("{publisher}/{pack_name}");
     let ceiling = manifest.declares.permissions;
-
-    workflow
-        .iter_nodes()
-        .filter_map(|node| {
-            let effective = match &node.kind {
-                NodeKind::Prompt { .. } | NodeKind::Loop { .. } => node
-                    .permissions
-                    .unwrap_or(yunta_core::NodePermissions::Edit),
-                _ => return None,
-            };
-            if permission_rank(effective) <= permission_rank(ceiling) {
-                return None;
-            }
-            Some(CheckError::PackPermissionsCeilingExceeded {
-                node: node.id.clone(),
-                pack: format!("{publisher}/{pack_name}"),
-                declared: permission_label(ceiling),
-                effective: permission_label(effective),
-            })
+    let over_permissions = workflow.iter_nodes().filter_map(|node| {
+        let effective = match &node.kind {
+            NodeKind::Prompt { .. } | NodeKind::Loop { .. } => node
+                .permissions
+                .unwrap_or(yunta_core::NodePermissions::Edit),
+            _ => return None,
+        };
+        if permission_rank(effective) <= permission_rank(ceiling) {
+            return None;
+        }
+        Some(CheckError::PackPermissionsCeilingExceeded {
+            node: node.id.clone(),
+            pack: pack.clone(),
+            declared: permission_label(ceiling),
+            effective: permission_label(effective),
         })
-        .collect()
+    });
+    let network_closed = !manifest.declares.network;
+    let over_network = workflow
+        .iter_nodes()
+        .filter(|node| network_closed && node.network == Some(true))
+        .map(|node| CheckError::PackNetworkCeilingExceeded {
+            node: node.id.clone(),
+            pack: pack.clone(),
+        });
+    over_permissions.chain(over_network).collect()
+}
+
+/// The pack manifest at `path`. It is the pack's only governance rule, so a
+/// copy that cannot be read or parsed is a check error naming the file,
+/// never a ceiling silently switched off. The error is boxed so the
+/// `Result` stays small: a `CheckError` is large.
+fn read_manifest(path: std::path::PathBuf) -> Result<yunta_core::PackManifest, Box<CheckError>> {
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        Box::new(CheckError::PackManifestUnreadable {
+            path: path.clone(),
+            detail: e.to_string(),
+        })
+    })?;
+    yunta_core::yaml::parse::<yunta_core::PackManifest>(&text).map_err(|e| {
+        Box::new(CheckError::PackManifestMalformed {
+            path,
+            detail: e.to_string(),
+        })
+    })
 }
