@@ -13,6 +13,7 @@ mod audit;
 mod command;
 mod context;
 mod expand;
+mod fault;
 mod hooks;
 mod node;
 mod node_kind;
@@ -44,6 +45,7 @@ pub use context::{
     ArtifactContextRef, ContextFile, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
+pub use fault::WorkflowFault;
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
 pub use node::{Node, NodeDefaults};
 pub use node_kind::{

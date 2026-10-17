@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::git::GitError;
 use crate::process::Supervision;
-use yunta_core::events::ConfinementRecord;
+use yunta_core::events::{ConfinementRecord, FindingCause};
 use yunta_core::fence::Coverage;
 use yunta_core::protected::{Closing, Pathspecs, Protected, Protection, Trespass};
 use yunta_core::{Location, NodeScope, RelativePath, ScopeGlob, TreeId};
@@ -324,12 +324,6 @@ impl Breach {
     /// scheme the engine's own findings use.
     pub const ID: &'static str = "engine-fence-breach";
 
-    /// What the finding says: the fence let a write through where nothing
-    /// else could write.
-    pub fn title() -> String {
-        "the fence let a write through where nothing else could write".to_string()
-    }
-
     /// The first path, which is where a reader looks. Under the work:
     /// a breach is a write to the project that the fence said it had
     /// stopped.
@@ -337,16 +331,13 @@ impl Breach {
         Location::work(RelativePath::of(self.paths.first()), None)
     }
 
-    pub fn detail(&self, adapter: &yunta_core::AdapterId) -> String {
-        format!(
-            "fence on {adapter}; {} paths reached the diff outside it: {}",
-            self.paths.len(),
-            self.paths
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+    /// What the engine found: the fence of `adapter` let writes through
+    /// where nothing else could write, and these paths reached the diff.
+    pub fn cause(&self, adapter: &yunta_core::AdapterId) -> FindingCause {
+        FindingCause::FenceBreached {
+            adapter: adapter.clone(),
+            paths: self.paths.clone(),
+        }
     }
 }
 

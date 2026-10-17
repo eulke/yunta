@@ -13,6 +13,7 @@
 //! [`AnswersFile::against`], because the questions are a second document
 //! and a door that reads one cannot see the other.
 
+use super::QuestionFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Report, Rule, RuleCode, Subject};
 use crate::questions::{Answer, AnswerType, AnswersFile, QuestionsFile};
 use crate::shape::Document;
@@ -58,10 +59,7 @@ impl Document for AnswersFile {
             if !answered.insert(&answer.id) {
                 broken.push(Diagnostic::new(
                     Subject::Question(Named::new(answer.id.clone(), index)),
-                    Problem::rule(
-                        RuleCode::DuplicateId,
-                        "this question is already answered above; one question has one answer",
-                    ),
+                    Problem::broke(QuestionFault::DuplicateAnswer),
                 ));
             }
         }
@@ -96,12 +94,7 @@ impl AnswersFile {
                         question.required && !given.iter().any(|answer| answer.id == question.id)
                     })
                     .map(|(index, question)| {
-                        broke(
-                            index,
-                            &question.id,
-                            RuleCode::MissingAnswer,
-                            "this question is `required` and nothing answers it".to_string(),
-                        )
+                        broke(index, &question.id, QuestionFault::MissingAnswer)
                     }),
             )
             .collect();
@@ -126,35 +119,28 @@ fn answers_its_question(
     answer: &Answer,
 ) -> Option<Diagnostic> {
     let Some(question) = questions.questions.iter().find(|q| q.id == answer.id) else {
-        return Some(broke(
-            index,
-            &answer.id,
-            RuleCode::UnknownId,
-            "no question carries this id; an answer answers a question that was asked".to_string(),
-        ));
+        return Some(broke(index, &answer.id, QuestionFault::UnknownQuestion));
     };
-    let mismatch = match question.answer_type {
-        AnswerType::Choice if !question.values.contains(&answer.value) => format!(
-            "`{}` is not one of the values this question allows: {}",
-            answer.value,
-            question.values.join(", ")
-        ),
+    let fault = match question.answer_type {
+        AnswerType::Choice if !question.values.contains(&answer.value) => {
+            QuestionFault::NotAValue {
+                value: answer.value.clone(),
+                allowed: question.values.clone(),
+            }
+        }
         AnswerType::Boolean if answer.value != "true" && answer.value != "false" => {
-            format!("`{}` is not `true` or `false`", answer.value)
+            QuestionFault::NotABoolean {
+                value: answer.value.clone(),
+            }
         }
         AnswerType::Text | AnswerType::Choice | AnswerType::Boolean => return None,
     };
-    Some(broke(
-        index,
-        &answer.id,
-        RuleCode::MismatchedAnswer,
-        mismatch,
-    ))
+    Some(broke(index, &answer.id, fault))
 }
 
-fn broke(index: usize, id: &crate::QuestionId, code: RuleCode, detail: String) -> Diagnostic {
+fn broke(index: usize, id: &crate::QuestionId, fault: QuestionFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Question(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }

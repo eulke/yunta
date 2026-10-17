@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::events::gates::escalation::Escalation;
-use crate::events::Failure;
+use crate::events::{Failure, LoggedWords};
 use crate::ids::{NodeId, QuestionId, RunId};
 
 /// Why a run is parked, as a fact rather than a sentence.
@@ -73,7 +73,7 @@ pub enum PauseReason {
         report: crate::diagnostic::Report,
     },
     /// Prose a log carries as one sentence; shown as written.
-    Recorded { sentence: String },
+    Recorded { sentence: LoggedWords },
 }
 
 impl PauseReason {
@@ -91,25 +91,27 @@ impl PauseReason {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{Evidence, GateOption};
+    use crate::events::{AuthorGate, Claim, GateOption, Leads, Menu};
     use crate::ids::OptionId;
 
     /// Every reason a run can park on reads back as the fact it was
     /// written as, including the ones that nest a payload or a pause.
     #[test]
     fn every_pause_reads_back_as_the_fact_it_was_written_as() {
-        let option = GateOption {
-            id: OptionId::from_static("approve"),
-            label: Some("Approve".to_string()),
-            tradeoff: Some("none".to_string()),
-            asks: None,
-        };
+        let option = GateOption::leading(
+            OptionId::from_static("approve"),
+            Leads::On {
+                next: Vec::new(),
+                settles: false,
+            },
+        );
         let escalation = Escalation::new(
-            "the gate waits",
-            Evidence::none(),
+            Claim::Written("the gate waits".to_string()),
+            Menu::Gate(AuthorGate {
+                assignee: "lead".into(),
+            }),
             crate::NonEmpty::from((option, Vec::new())),
-        )
-        .expect("the claim does not repeat its record");
+        );
         let pauses = [
             PauseReason::Escalation(Box::new(escalation)),
             PauseReason::Cancelled,
@@ -131,7 +133,7 @@ mod tests {
                 pending: crate::NonEmpty::from((QuestionId::from_static("q-1"), Vec::new())),
             },
             PauseReason::Recorded {
-                sentence: "waiting".to_string(),
+                sentence: "waiting".into(),
             },
         ];
         for pause in pauses {

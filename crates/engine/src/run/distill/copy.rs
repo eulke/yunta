@@ -3,7 +3,7 @@
 //! the artifact never ran.
 
 use yunta_core::durable::{self, Durability};
-use yunta_core::events::{ArtifactId, FindingSeverity};
+use yunta_core::events::{ArtifactId, FindingCause, FindingSeverity};
 use yunta_core::{DistillArtifact, Location, RelativePath};
 
 use super::ProvenanceArtifact;
@@ -65,7 +65,6 @@ async fn missing_declared(
         None,
         &format!("distill-missing-{}-{}", declaration.node, declaration.id),
         FindingSeverity::Minor,
-        format!("distill: declared artifact {declaration} was never produced"),
         Location::run(
             RelativePath::of([crate::artifacts::store::view_path(
                 Some(&declaration.node),
@@ -73,9 +72,10 @@ async fn missing_declared(
             )]),
             None,
         ),
-        "the workflow's `on_finish.distill` names this artifact \
-         but the node that produces it never did in this run"
-            .to_string(),
+        FindingCause::DistillMissing {
+            node: declaration.node.clone(),
+            artifact: declaration.id.clone(),
+        },
     )
     .await?;
     Ok(ProvenanceArtifact {

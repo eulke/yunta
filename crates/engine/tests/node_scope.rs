@@ -61,8 +61,7 @@ async fn a_scope_violation_names_every_path_outside_and_the_decision_shows_them(
     .unwrap()
     .expect("a failed node is a pause with a menu");
     let menu = escalation
-        .failure
-        .as_ref()
+        .failure()
         .expect("the menu carries the failure it answers");
     assert_eq!(
         menu.failure.outside_scope(),
@@ -137,7 +136,7 @@ async fn a_scope_violation_is_offered_the_grant_that_widens_the_node_by_what_it_
     .await
     .unwrap()
     .unwrap();
-    let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
+    let (label, _) = yunta_render::offers::option_words(&escalation, &escalation.options()[0]);
     assert_eq!(
         label,
         "Allow the node to also write Cargo.toml and run it again (attempt 2)"

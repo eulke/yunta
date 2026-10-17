@@ -11,8 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    ArtifactEvent, ArtifactId, ArtifactWrittenPayload, EventDraft, EventPayload, NodeEvent,
-    NodeStartedPayload, RunEvent,
+    ArtifactEvent, ArtifactId, ArtifactWrittenPayload, EventDraft, EventPayload, FindingCause,
+    FindingSays, NodeEvent, NodeStartedPayload, RunEvent,
 };
 use yunta_core::{sha256_hex, ContentHash};
 use yunta_engine::{BirthArtifact, BirthOrigin, RunError, RunReport, RunTerminal};
@@ -228,18 +228,19 @@ async fn a_run_whose_log_predates_the_object_store_resumes_and_says_what_it_coul
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     let standing = state.effective_findings();
-    let finding = standing
+    let unchecked = standing
         .iter()
-        .find(|finding| finding.detail.contains("artifact_written"))
+        .find_map(|finding| match &finding.says {
+            FindingSays::Found {
+                cause: FindingCause::ArtifactsUnverified { unchecked, .. },
+            } => Some(*unchecked),
+            _ => None,
+        })
         .unwrap_or_else(|| {
             panic!(
                 "the resume says what it could not verify: {:?}",
                 state.effective_findings()
             )
         });
-    assert!(
-        finding.detail.contains('1'),
-        "it says how many artifacts it left unchecked: {}",
-        finding.detail
-    );
+    assert_eq!(unchecked, 1, "it says how many artifacts it left unchecked");
 }

@@ -8,9 +8,13 @@ use yunta_testkit::{Bench, ScriptedInteraction};
 mod common;
 use common::*;
 use yunta_core::events::{
-    EventPayload, GateEvent, ScopeEvent, SessionEvent, StoredEvent, TaskEvent, ToolTarget,
+    AskedScope, EventPayload, FindingCause, FindingSays, GateEvent, ScopeAsker, ScopeEvent,
+    SessionEvent, StoredEvent, TaskEvent, ToolTarget,
 };
 use yunta_core::{Capabilities, FenceLevel};
+
+#[path = "run_scope/denials.rs"]
+mod denials;
 
 /// A bench whose CLI runs tools and cannot resume, and whose writes the rail
 /// judges: the attempt after a grant opens fresh, on the work it left.
@@ -85,130 +89,6 @@ async fn writing_outside_scope_without_a_request_is_refused_never_an_implicit_ex
             Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p))) if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-s")
         )),
         "no scope_expansion_* event may fire when the agent never wrote a request"
-    );
-}
-
-#[tokio::test]
-async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even_in_ask_mode() {
-    // A proposed criterion that already passes is rejected without consulting
-    // anyone, in every mode, not even `ask`, which would otherwise escalate
-    // and pause the run.
-    let bench = Bench::new();
-
-    let workflow = scope_expansion_workflow("ask", None);
-    let tasks = format!(
-        "tasks:\n{}",
-        task_yaml("task-p", "p", "a.txt", "test -f a.txt")
-    );
-
-    let mut fixture = plan_session(&tasks);
-    fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-p\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-p }}\n",
-        request_step(serde_json::json!({
-            "paths": ["c.txt"],
-            "reason": "already fine, no work needed",
-            "proposed_criterion": { "cmd": "true" },
-        })),
-    ));
-
-    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
-
-    assert_eq!(
-        terminal,
-        RunTerminal::Finished,
-        "an auto-rejected request must never pause the run, even under ask mode"
-    );
-    assert_eq!(
-        state.tasks.status("task-p"),
-        Some(yunta_core::events::TaskStatus::Done)
-    );
-
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let denied = events
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
-                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-p") =>
-            {
-                Some(p)
-            }
-            _ => None,
-        })
-        .expect("a Denied event must be recorded");
-    assert_eq!(
-        denied.why(),
-        Some(yunta_core::expansion::Denial::PrecheckPasses)
-    );
-
-    let findings = findings_posted(&events);
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.detail.contains("already fine, no work needed")),
-        "the finding must carry the agent's own reason: {findings:?}"
-    );
-}
-
-#[tokio::test]
-async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterion() {
-    // Every denial, here the default `deny` with no `scope_expansion:` block
-    // in the workflow, becomes a finding that carries the agent's own reason
-    // and proposed_criterion, not an explanation the engine made up.
-    let bench = Bench::new();
-
-    let workflow = no_scope_expansion_workflow();
-    let tasks = format!(
-        "tasks:\n{}",
-        task_yaml("task-d", "d", "a.txt", "test -f a.txt")
-    );
-
-    let mut fixture = plan_session(&tasks);
-    fixture.push_str(&format!(
-        "  - match_prompt_contains: \"task-d\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n{}    outcome: {{ type: completed, summary: did-d }}\n",
-        request_step(serde_json::json!({
-            "paths": ["b.txt"],
-            "reason": "need an adjacent fix in b.txt",
-            "proposed_criterion": { "cmd": "test -f b.txt" },
-        })),
-    ));
-
-    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
-
-    assert_eq!(terminal, RunTerminal::Finished);
-    assert_eq!(
-        state.tasks.status("task-d"),
-        Some(yunta_core::events::TaskStatus::Done)
-    );
-
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let denied = events
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
-                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-d") =>
-            {
-                Some(p)
-            }
-            _ => None,
-        })
-        .expect("a Denied event must be recorded under the default deny mode");
-    assert_eq!(denied.why(), Some(yunta_core::expansion::Denial::ModeDeny));
-
-    let findings = findings_posted(&events);
-    let finding = findings
-        .iter()
-        .find(|f| f.detail.contains("need an adjacent fix in b.txt"))
-        .expect("a finding carrying the agent's own reason must exist");
-    assert_eq!(
-        finding.proposed_criterion,
-        Some(yunta_core::events::ProposedCriterion {
-            cmd: "test -f b.txt".to_string()
-        })
-    );
-    assert_eq!(
-        finding.location,
-        "b.txt".into(),
-        "the finding locates where the agent asked to write"
     );
 }
 
@@ -482,7 +362,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     // other gate: waiting + resolved, together.
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) if matches!(p.summary(), yunta_core::events::Claim::Written(text) if text.contains("task-h"))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) if matches!(p.summary(), yunta_core::events::Claim::ScopeAsked { task, .. } if task.as_str() == "task-h")
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),

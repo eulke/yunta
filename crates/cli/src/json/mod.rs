@@ -29,7 +29,8 @@ use diagnostics::{node_diagnostics, ArtifactProblems};
 use node::{NodeJson, NodeWaitJson};
 
 use crate::commands::advice;
-use crate::commands::status::{decision, progress};
+use crate::commands::status::decision_json::DecisionJson;
+use crate::commands::status::progress;
 use crate::error::Outcome;
 pub use crate::output::print_json;
 use crate::render::state::RunWord;
@@ -142,7 +143,7 @@ pub(crate) struct RunDocument {
     /// forge. Those pauses are answered where they were raised, and
     /// `waiting_on` carries what the run is waiting on.
     #[serde(skip_serializing_if = "Option::is_none")]
-    decision: Option<decision::DecisionJson>,
+    decision: Option<DecisionJson>,
     /// What the run is parked on, for every parked run — including the
     /// pauses `decision` is absent for. `summary` says it in a sentence;
     /// this says it in a shape a program acts on without parsing one.
@@ -268,16 +269,12 @@ fn parked_decision(
     run_id: &RunId,
     decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     phase: &RunPhase,
-) -> Option<decision::DecisionJson> {
+) -> Option<DecisionJson> {
     if !matches!(phase, RunPhase::Waiting { .. }) {
         return None;
     }
     let (node, escalation) = decision?;
-    Some(decision::DecisionJson::new(
-        run_id,
-        &node,
-        escalation.into_payload(),
-    ))
+    Some(DecisionJson::new(run_id, &node, escalation.into_payload()))
 }
 
 /// The decision a run waits on, rebuilt from the run's derived state and

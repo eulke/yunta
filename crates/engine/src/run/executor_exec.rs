@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Failure, NodeOutcome, Timed, TokenUsage};
+use yunta_core::events::{
+    DeniedRule, EngineError, EngineFact, EngineStep, Failure, NodeOutcome, Timed, TokenUsage,
+};
 use yunta_core::{ExecutorKind, ExecutorName, Node};
 
 use super::node_close::{close_node, fail, fail_with, Close};
@@ -76,11 +78,13 @@ async fn executor_path(
     };
     // Executors are among the four command surfaces the permission model
     // covers; an executor's "command" is the binary path its config declares.
-    if let Some(rule) = crate::permissions::command_violation(
+    if let Some(denied) = crate::permissions::command_violation(
         &declared.display().to_string(),
         ctx.manifest.config.permissions.as_ref(),
     ) {
-        let failure = Failure::CommandDenied { denied_rule: rule };
+        let failure = Failure::CommandDenied {
+            denied_rule: DeniedRule::Command(denied),
+        };
         return Ok(Err(fail(ctx, node, failure).await?));
     }
     Ok(Ok(path))
@@ -118,8 +122,12 @@ pub(super) async fn execute_executor(
     let stdin_bytes = match serde_json::to_vec(&build_stdin(ctx, with)) {
         Ok(bytes) => bytes,
         Err(source) => {
-            let engine_error =
-                format!("failed to serialize executor `{executor}`'s stdin: {source}");
+            let engine_error = EngineError::Step {
+                step: EngineStep::ExecutorStdin {
+                    executor: executor.clone(),
+                },
+                report: Some(source.to_string()),
+            };
             return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
         }
     };
@@ -150,11 +158,7 @@ pub(super) async fn execute_executor(
 
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
-        let summary = serde_json::from_slice::<ExecutorOutput>(stdout_bytes)
-            .ok()
-            .and_then(|output| output.summary)
-            .unwrap_or_else(|| format!("executor `{executor}` exited 0"));
-        let node_outcome = NodeOutcome::Summary(summary);
+        let node_outcome = exited_ok(executor, stdout_bytes);
         close_node(ctx, node, Close::new(node_outcome, TokenUsage::default())).await
     } else {
         // An executor that signals only through its exit code — a probe
@@ -171,5 +175,19 @@ pub(super) async fn execute_executor(
         )
         .await?;
         fail_with(ctx, node, failure, TokenUsage::default()).await
+    }
+}
+
+/// The outcome of an executor that exited 0: the summary its output carries,
+/// or, when it carries none, the fact that it exited.
+fn exited_ok(executor: &ExecutorName, stdout: &[u8]) -> NodeOutcome {
+    let summary = serde_json::from_slice::<ExecutorOutput>(stdout)
+        .ok()
+        .and_then(|output| output.summary);
+    match summary {
+        Some(summary) => NodeOutcome::Summary(summary),
+        None => NodeOutcome::Fact(EngineFact::ExecutorExited {
+            executor: executor.clone(),
+        }),
     }
 }

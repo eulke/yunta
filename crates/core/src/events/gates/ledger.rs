@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::events::gates::kinds::GateEvent;
+use crate::events::gates::menu::Menu;
 use crate::events::gates::payloads::{
     GateResolvedPayload, GateWaitingPayload, QuestionsAnsweredPayload, QuestionsAskedPayload,
 };
@@ -129,7 +130,7 @@ impl GateLedger {
             // A run-level escalation: it gates the whole invocation, so
             // no node record answers for it.
             if let GateEvent::Waiting(p) = event {
-                self.run_level.push((p.clone(), meta.seq));
+                self.run_level.push((p.as_ref().clone(), meta.seq));
             }
             return;
         };
@@ -176,7 +177,7 @@ impl GateRecord {
                 if let Some(reference) = p.external_ref() {
                     self.external_ref = Some(reference.to_string());
                 }
-                self.waiting = Some((p.clone(), seq));
+                self.waiting = Some((p.as_ref().clone(), seq));
             }
             GateEvent::Resolved(p) => {
                 // A merge is an approval whose evidence is the merge
@@ -197,7 +198,7 @@ impl GateRecord {
                 let answers_a_task = self
                     .waiting
                     .as_ref()
-                    .is_some_and(|(asked, _)| asked.scope().is_some() || asked.departure.is_some());
+                    .is_some_and(|(asked, _)| asked.menu().is_some_and(Menu::answers_a_task));
                 if answers_a_task {
                     self.task_answers.insert(seq);
                 }
@@ -224,30 +225,29 @@ impl GateRecord {
 mod tests {
     use super::*;
     use crate::events::{
-        DepartureMenu, Escalation, Evidence, Failure, FailureMenu, GateOption, HumanChoice,
+        Claim, DepartureMenu, Escalation, Failure, FailureMenu, GateOption, HumanChoice, Menu,
         ScopeWait,
     };
     use crate::expansion::Waiting;
+    use crate::ids::TaskId;
     use crate::reserved::ReservedOption;
     use crate::NonEmpty;
 
-    fn option(choice: ReservedOption) -> GateOption {
-        GateOption {
-            id: choice.id(),
-            label: None,
-            tradeoff: None,
-            asks: None,
-        }
-    }
-
-    /// A question with two answers and nothing in its record.
-    fn question(first: ReservedOption, second: ReservedOption) -> Escalation {
+    /// A question with two reserved answers, what it is about, and its claim.
+    fn question(
+        claim: Claim,
+        menu: Menu,
+        first: ReservedOption,
+        second: ReservedOption,
+    ) -> Escalation {
         Escalation::new(
-            "a question with two answers",
-            Evidence::none(),
-            NonEmpty::from((option(first), vec![option(second)])),
+            claim,
+            menu,
+            NonEmpty::from((
+                GateOption::reserved(first),
+                vec![GateOption::reserved(second)],
+            )),
         )
-        .expect("a claim with no evidence repeats none")
     }
 
     fn apply_at(ledger: &mut GateLedger, node: &NodeId, seq: u64, event: GateEvent) {
@@ -269,7 +269,7 @@ mod tests {
 
     /// The event that writes `escalation` as the gate a node waits on.
     fn waiting(escalation: Escalation) -> GateEvent {
-        GateEvent::Waiting(escalation.into_payload())
+        GateEvent::Waiting(Box::new(escalation.into_payload()))
     }
 
     #[test]
@@ -278,9 +278,18 @@ mod tests {
         let mut ledger = GateLedger::default();
         let scope = ScopeWait {
             because: Waiting::ModeAsk,
+            paths: Vec::new(),
             proposed: None,
         };
-        let escalation = question(ReservedOption::Grant, ReservedOption::Deny).with_scope(scope);
+        let escalation = question(
+            Claim::ScopeAsked {
+                task: TaskId::from_static("task-h"),
+                reason: None,
+            },
+            Menu::Scope(scope),
+            ReservedOption::Grant,
+            ReservedOption::Deny,
+        );
         apply_at(&mut ledger, &node, 1, waiting(escalation));
         apply_at(&mut ledger, &node, 2, chosen(ReservedOption::Deny));
 
@@ -299,8 +308,14 @@ mod tests {
             rewritten_by: None,
             accept_offered: true,
         };
-        let escalation =
-            question(ReservedOption::Accept, ReservedOption::Abort).with_departure(departure);
+        let escalation = question(
+            Claim::Departs {
+                task: TaskId::from_static("task-h"),
+            },
+            Menu::Departure(Box::new(departure)),
+            ReservedOption::Accept,
+            ReservedOption::Abort,
+        );
         apply_at(&mut ledger, &node, 1, waiting(escalation));
         apply_at(&mut ledger, &node, 2, chosen(ReservedOption::Accept));
 
@@ -321,7 +336,12 @@ mod tests {
             stuck: None,
             reroute: None,
         };
-        let escalation = question(ReservedOption::Retry, ReservedOption::Abort).with_failure(menu);
+        let escalation = question(
+            Claim::NodeFailed { node: node.clone() },
+            Menu::Failure(Box::new(menu)),
+            ReservedOption::Retry,
+            ReservedOption::Abort,
+        );
         apply_at(&mut ledger, &node, 1, waiting(escalation));
         apply_at(&mut ledger, &node, 2, chosen(ReservedOption::Retry));
 

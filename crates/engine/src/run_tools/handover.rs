@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
+use yunta_core::diagnostic::{Diagnostic, Named, Problem, RunFault, Subject};
 use yunta_core::events::{ExecutionEnvironment, TaskProbe};
 use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
 
@@ -161,8 +161,10 @@ impl SessionTools {
         let subject = || Subject::Spec(Named::new(one.task.clone(), index));
         let Some(task) = plan.and_then(|plan| plan.tasks.iter().find(|task| task.id == one.task))
         else {
-            let unknown =
-                Problem::rule(RuleCode::UnknownSpecTask, words::unplanned(&one.task, plan));
+            let unknown = Problem::broke(RunFault::UnplannedTask {
+                task: one.task.clone(),
+                planned: plan.map(|plan| plan.tasks.iter().map(|task| task.id.clone()).collect()),
+            });
             return Ok((vec![Diagnostic::new(subject(), unknown)], Vec::new()));
         };
         let tested = Task {
@@ -196,22 +198,23 @@ impl SessionTools {
                 .await
                 .map_err(|source| RunToolError::Check { source })?;
         probing.done(&self.host.pool, supervision).await;
-        let problem = if run.could_not_run().is_some() {
-            Problem::rule(
-                RuleCode::CriterionCannotRun,
-                words::cannot_run(&run, self.host.environment.as_ref()),
-            )
+        let fault = if run.could_not_run().is_some() {
+            RunFault::CannotRun {
+                cmd: run.cmd.clone(),
+                exit_code: run.exit_code,
+                said: run.conclusion(),
+                environment: self.host.environment.clone(),
+            }
         } else if run.exit_code == 0 {
-            Problem::rule(
-                RuleCode::ProposedCriterionAlreadyPasses,
-                words::proposed_passes(cmd),
-            )
+            RunFault::ProposedPasses {
+                cmd: cmd.to_string(),
+            }
         } else {
             return Ok(None);
         };
         Ok(Some(Diagnostic::new(
             Subject::Finding(Named::new(id.clone(), 0)),
-            problem,
+            Problem::broke(fault),
         )))
     }
 
@@ -305,28 +308,18 @@ impl Probing {
 /// tests, or gives a task departed from the tests it had.
 fn rewritten(spec: &SpecFile, held: &SpecFile, owed: &[TaskId]) -> Vec<Diagnostic> {
     let mut found = Vec::new();
-    let mut flag = |task: &TaskId, index: Option<usize>, code: RuleCode, detail: String| {
+    let mut flag = |task: &TaskId, index: Option<usize>, fault: RunFault| {
         let subject = match index {
             Some(index) => Subject::Spec(Named::new(task.clone(), index)),
             None => Subject::Document,
         };
-        found.push(Diagnostic::new(subject, Problem::rule(code, detail)));
+        found.push(Diagnostic::new(subject, Problem::broke(fault)));
     };
     for (index, one) in spec.specs.iter().enumerate() {
         let was = held.of(&one.task);
         match (owed.contains(&one.task), was == Some(one)) {
-            (true, true) => flag(
-                &one.task,
-                Some(index),
-                RuleCode::DepartedSpecUnchanged,
-                words::spec_departed_unchanged().to_string(),
-            ),
-            (false, false) => flag(
-                &one.task,
-                Some(index),
-                RuleCode::OtherSpecChanged,
-                words::spec_other_changed().to_string(),
-            ),
+            (true, true) => flag(&one.task, Some(index), RunFault::DepartedUnchanged),
+            (false, false) => flag(&one.task, Some(index), RunFault::OtherChanged),
             _ => {}
         }
     }
@@ -334,8 +327,9 @@ fn rewritten(spec: &SpecFile, held: &SpecFile, owed: &[TaskId]) -> Vec<Diagnosti
         flag(
             &gone.task,
             None,
-            RuleCode::OtherSpecChanged,
-            words::spec_left_out(&gone.task),
+            RunFault::LeftOut {
+                task: gone.task.clone(),
+            },
         );
     }
     found
@@ -363,7 +357,9 @@ async fn already_held(
             if !listed.is_empty() {
                 found.push(Diagnostic::new(
                     Subject::Spec(Named::new(one.task.clone(), index)),
-                    Problem::rule(RuleCode::TestFileExists, words::test_file_held(&file.path)),
+                    Problem::broke(RunFault::FileHeld {
+                        path: file.path.clone(),
+                    }),
                 ));
             }
         }
@@ -386,25 +382,24 @@ fn judged(
         .iter()
         .enumerate()
         .filter_map(|(at, run)| {
-            let (code, detail) = if run.could_not_run().is_some() {
-                (
-                    RuleCode::CriterionCannotRun,
-                    words::cannot_run(run, environment),
-                )
+            let fault = if run.could_not_run().is_some() {
+                RunFault::CannotRun {
+                    cmd: run.cmd.clone(),
+                    exit_code: run.exit_code,
+                    said: run.conclusion(),
+                    environment: environment.cloned(),
+                }
             } else if independent && !run.is_guard && run.exit_code == 0 {
-                (
-                    RuleCode::CriterionAlreadyPasses,
-                    words::already_passes(&run.cmd, &words::quoted_conclusion(run)),
-                )
+                RunFault::AlreadyPasses {
+                    cmd: run.cmd.clone(),
+                    said: run.conclusion(),
+                }
             } else if independent && run.is_guard && run.exit_code != 0 {
-                (
-                    RuleCode::GuardAlreadyRed,
-                    words::guard_already_red(
-                        &run.cmd,
-                        run.exit_code,
-                        &words::quoted_conclusion(run),
-                    ),
-                )
+                RunFault::GuardAlreadyRed {
+                    cmd: run.cmd.clone(),
+                    exit_code: run.exit_code,
+                    said: run.conclusion(),
+                }
             } else {
                 return None;
             };
@@ -413,7 +408,7 @@ fn judged(
                     task: Named::new(task.id.clone(), index),
                     index: at,
                 },
-                Problem::rule(code, detail),
+                Problem::broke(fault),
             ))
         })
         .collect()

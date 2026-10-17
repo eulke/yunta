@@ -12,9 +12,9 @@ use std::path::Path;
 
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
-    EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,
-    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RecordedOrigin, StoredEvent, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage, UnknownEvent,
+    EventPayload, Failure, Finding, FindingPostedPayload, FindingSays, FindingSeverity,
+    NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RecordedOrigin,
+    StoredEvent, TaskStatus, TaskStatusChangedPayload, TokenUsage, UnknownEvent,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{PauseReason, RunPausedPayload, TaskRegisteredPayload};
@@ -23,13 +23,18 @@ use yunta_core::{NodeId, Seq, SessionId};
 use yunta_engine::{dedup_findings, derive, NodeState};
 use yunta_testkit_core::Log;
 
+#[path = "replay/broken.rs"]
+mod broken;
+
 fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> Finding {
     Finding {
         id: id.into(),
         severity,
-        title: title.to_string(),
+        says: FindingSays::Written {
+            title: title.to_string(),
+            detail: "detail".to_string(),
+        },
         location: location.into(),
-        detail: "detail".to_string(),
         proposed_criterion: None,
     }
 }
@@ -285,42 +290,6 @@ fn dedup_findings_merges_same_location_and_normalized_title_keeping_the_first() 
     assert_eq!(deduped.len(), 2);
     assert_eq!(deduped[0].id, "reviewer-a-1", "keeps the first occurrence");
     assert_eq!(deduped[1].id, "reviewer-a-2");
-}
-
-#[test]
-fn replay_stops_deriving_further_state_once_broken() {
-    let events = Log::for_run("run-1")
-        // broken immediately: no prior node_started for "lint"
-        .node(
-            "lint",
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                NodeOutcome::Summary("criteria green".to_string()),
-                tokens(1, 1),
-            ))),
-        )
-        // a perfectly valid event that comes after the break point
-        .event(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
-            &PauseReason::Recorded {
-                sentence: "irrelevant".to_string(),
-            },
-        ))))
-        .node(
-            "implement",
-            EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
-                task_id: "graph-cmd".into(),
-                criteria: vec![],
-                scope: vec![],
-                depends_on: vec![],
-            })),
-        )
-        .build();
-
-    let state = derive(&events);
-    assert!(state.broken.is_some());
-    assert!(
-        state.tasks.is_empty(),
-        "no event past the break point should be applied"
-    );
 }
 
 #[test]

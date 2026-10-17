@@ -47,6 +47,11 @@ pub(super) fn plain_failure_samples() -> Vec<Failure> {
         },
         Failure::SessionNotStopped {
             session_not_stopped: "kill refused".into(),
+            release_failed: None,
+        },
+        Failure::SessionNotStopped {
+            session_not_stopped: "kill refused".into(),
+            release_failed: Some("busy".into()),
         },
         Failure::FrozenInput {
             frozen_input: "agents/reviewer.md".into(),
@@ -231,9 +236,8 @@ pub(super) fn confinement_and_frozen_samples() -> Vec<Failure> {
     ]
 }
 
-/// The samples a composed run, a capability, an engine step, a command and
-/// a skill raise.
-pub(super) fn engine_step_samples() -> Vec<Failure> {
+/// The samples a composed run, a capability and a skill raise.
+pub(super) fn composed_capability_and_skill_samples() -> Vec<Failure> {
     vec![
         Failure::NestedTooDeep {
             depth: 5,
@@ -269,15 +273,39 @@ pub(super) fn engine_step_samples() -> Vec<Failure> {
             }),
             agent: Some(AgentName::from_static("reviewer")),
         },
-        Failure::EngineFailed {
-            engine_error: "cannot read the run's log".into(),
-        },
-        Failure::CommandDenied {
-            denied_rule: "commands.deny: rm".into(),
-        },
         Failure::SkillMissing {
             missing_skill: SkillName::from_static("review"),
             searched: vec!["/repo/.claude/skills".into()],
+        },
+    ]
+}
+
+/// The samples an engine step and a denied command raise: each as the log
+/// holds it now, and as an older log stored it.
+pub(super) fn engine_error_and_denial_samples() -> Vec<Failure> {
+    vec![
+        Failure::EngineFailed {
+            engine_error: EngineError::Logged("cannot read the run's log".into()),
+        },
+        Failure::EngineFailed {
+            engine_error: EngineError::Step {
+                step: EngineStep::Push {
+                    head: "yunta/run/01".into(),
+                    remote: "origin".into(),
+                },
+                report: Some("rejected".into()),
+            },
+        },
+        Failure::CommandDenied {
+            denied_rule: DeniedRule::Logged("commands.deny: rm".into()),
+        },
+        Failure::CommandDenied {
+            denied_rule: DeniedRule::Command(DeniedCommand {
+                command: "rm -rf x".into(),
+                by: DeniedBy::Deny {
+                    pattern: "rm *".into(),
+                },
+            }),
         },
     ]
 }

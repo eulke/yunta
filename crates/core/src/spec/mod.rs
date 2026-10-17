@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Criterion, ScopeGlob, TaskId};
 
+mod fault;
 mod rules;
 mod specified;
+
+pub use fault::SpecFault;
 
 /// The tests a plan's tasks are held to, one spec per task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

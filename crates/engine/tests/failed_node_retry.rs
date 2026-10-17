@@ -67,7 +67,7 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     assert_eq!(escalation.summary(), &node_failed("broken"));
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
-    let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
+    let (label, _) = yunta_render::offers::option_words(&escalation, &escalation.options()[0]);
     assert_eq!(
         label,
         "Run it again (attempt 2) once something outside the tree changes"
@@ -96,8 +96,7 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["abort"]);
     let menu = escalation
-        .failure
-        .as_ref()
+        .failure()
         .expect("the menu carries the failure it answers");
     assert!(
         matches!(
@@ -203,7 +202,7 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
     .await
     .unwrap()
     .expect("the second failure is a decision too");
-    let (label, _) = yunta_render::escalation::option_words(&escalation, &escalation.options()[0]);
+    let (label, _) = yunta_render::offers::option_words(&escalation, &escalation.options()[0]);
     assert_eq!(
         label,
         "Run it again (attempt 3) once something outside the tree changes"

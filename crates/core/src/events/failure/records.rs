@@ -28,12 +28,15 @@ pub struct Unchanged {
 }
 
 /// One task's request for scope, owed a person's decision: what it asked
-/// to be allowed to write, and why, in its session's own words.
+/// to be allowed to write, and why, in its session's own words. `reason` is
+/// absent when a red criterion of the task located the refused writes, rather
+/// than its session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OwedScope {
     pub task_id: crate::TaskId,
     pub paths: Vec<ScopeGlob>,
-    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// What a node's session asked to be allowed to write, and why, in its
@@ -333,5 +336,16 @@ mod tests {
                  `objects/` are not the bytes the run accepted"
             )
         );
+    }
+
+    #[test]
+    fn an_owed_request_with_no_reason_of_its_session_writes_none() {
+        let owed: OwedScope = serde_json::from_value(serde_json::json!({
+            "task_id": "T001",
+            "paths": ["a.txt"],
+        }))
+        .expect("a request owed without a reason reads back");
+        assert_eq!(owed.reason, None);
+        assert!(serde_json::to_value(&owed).unwrap().get("reason").is_none());
     }
 }

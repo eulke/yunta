@@ -18,13 +18,13 @@ use super::session::{RunToolError, SessionTools};
 
 /// Post-join consolidation, pure over the log: every finding a member
 /// of the group still stands by — the content of its latest posting,
-/// and nothing its author took back — sorted by `(node, finding id,
-/// title)` and **never by arrival order**, which is exactly what makes
-/// two runs whose posts raced differently produce byte-identical
-/// output. Written as the group's own node-output at
-/// its close, consumable by a node after the `parallel`
-/// (`context: [{node-output: {node: <group_id>}}]`) — never between
-/// siblings hot.
+/// and nothing its author took back — sorted by `(node, finding id)`
+/// and **never by arrival order**, which is exactly what makes two runs
+/// whose posts raced differently produce byte-identical output. An id is
+/// unique within its node, so the pair orders every entry. Written as the
+/// group's own node-output at its close, consumable by a node after the
+/// `parallel` (`context: [{node-output: {node: <group_id>}}]`) — never
+/// between siblings hot.
 pub fn consolidate_blackboard(events: &[StoredEvent], members: &[NodeId]) -> String {
     let mut entries: Vec<(String, Finding)> = FindingLedger::of(events)
         .effective()
@@ -36,7 +36,7 @@ pub fn consolidate_blackboard(events: &[StoredEvent], members: &[NodeId]) -> Str
                 .then(|| (node.to_string(), posted.finding))
         })
         .collect();
-    entries.sort_by(|a, b| (&a.0, &a.1.id, &a.1.title).cmp(&(&b.0, &b.1.id, &b.1.title)));
+    entries.sort_by(|a, b| (&a.0, &a.1.id).cmp(&(&b.0, &b.1.id)));
     let rendered: Vec<Value> = entries
         .into_iter()
         .map(|(node, finding)| {

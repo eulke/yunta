@@ -9,14 +9,13 @@
 //! the person said.
 
 use yunta_core::events::{
-    DepartsFrom, DepartureMenu, DeviationDeclaredPayload, DeviationResolvedPayload, Escalation,
-    EscalationError, EventPayload, Evidence, Failure, HumanChoice, PauseReason, TaskCause,
+    Claim, DepartsFrom, DepartureMenu, DeviationDeclaredPayload, DeviationResolvedPayload,
+    Escalation, EventPayload, Failure, GateOption, HumanChoice, Menu, PauseReason, TaskCause,
     TaskEvent, TaskLedger, TaskStatus, TaskStatusChangedPayload, TaskStop, TokenUsage,
 };
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{Node, NonEmpty, Seq, TaskId};
 
-use crate::reserved::offers;
 use crate::run::escalation::decided;
 use crate::run::node_close::fail_with;
 use crate::run::node_exec::NodeEnd;
@@ -147,11 +146,7 @@ pub(super) async fn resolve_departures(
 ) -> Result<Option<NodeEnd>, RunError> {
     let mut unanswered: Vec<TaskStop> = Vec::new();
     for departure in pending {
-        let escalation =
-            escalation(&departure, holders).map_err(|source| RunError::Escalation {
-                context: format!("task `{}`'s departure", departure.task_id),
-                source,
-            })?;
+        let escalation = escalation(&departure, holders);
         let state = ctx.run_view().await?.state;
         let Some((choice, resolved)) =
             decided(ctx, &state, &node.id, Some(&departure.task_id), &escalation).await?
@@ -268,14 +263,20 @@ async fn reopened(
 /// a test the run's spec gave the task is accepted only where a node of the
 /// run writes the spec again: accepted with nobody to rewrite the test, the
 /// task would stay held to what everyone agreed is wrong.
-fn escalation(
-    departure: &PendingDeparture,
-    holders: &Holders<'_>,
-) -> Result<Escalation, EscalationError> {
+fn escalation(departure: &PendingDeparture, holders: &Holders<'_>) -> Escalation {
     let accept_offered = !(holders.respecifies(departure) && holders.writer.is_none());
     let options = match accept_offered {
-        true => NonEmpty::from((offers::accept(), vec![offers::send_back(), offers::abort()])),
-        false => NonEmpty::from((offers::send_back(), vec![offers::abort()])),
+        true => NonEmpty::from((
+            GateOption::reserved(ReservedOption::Accept),
+            vec![
+                GateOption::reserved(ReservedOption::SendBack),
+                GateOption::reserved(ReservedOption::Abort),
+            ],
+        )),
+        false => NonEmpty::from((
+            GateOption::reserved(ReservedOption::SendBack),
+            vec![GateOption::reserved(ReservedOption::Abort)],
+        )),
     };
     let menu = DepartureMenu {
         deviations: departure.deviations.as_slice().to_vec(),
@@ -292,12 +293,10 @@ fn escalation(
         accept_offered,
     };
     Escalation::new(
-        format!(
-            "task `{}`'s session departs from the plan",
-            departure.task_id
-        ),
-        Evidence::none(),
+        Claim::Departs {
+            task: departure.task_id.clone(),
+        },
+        Menu::Departure(Box::new(menu)),
         options,
     )
-    .map(|escalation| escalation.with_departure(menu))
 }

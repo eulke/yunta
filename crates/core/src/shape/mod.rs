@@ -80,6 +80,7 @@ mod sealed {
     impl Sealed for crate::AnswersFile {}
     impl Sealed for crate::FindingEntry {}
     impl Sealed for crate::Withdrawal {}
+    impl Sealed for crate::findings::HeldFindings {}
 }
 
 /// Reads `bytes` into `T`, or reports every problem the document has.

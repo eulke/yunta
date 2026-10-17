@@ -25,6 +25,7 @@ use crate::diagnostic::{
 use crate::glob::might_overlap;
 
 pub use super::expand::{expand_implicit_dependencies, expand_runner_fanout};
+use super::WorkflowFault;
 use crate::ids::ModeName;
 use crate::{ModeInclude, Node, NodeId, NodeKind, Workflow};
 
@@ -190,12 +191,10 @@ fn invariants_on_top(workflow: &Workflow) -> Vec<Diagnostic> {
             Some(about(
                 index,
                 &node.id,
-                RuleCode::InvariantInParallel,
-                format!(
-                    "`{}` is a child of the `parallel` group `{}` and declares `invariant: \
-                     true`, which only a top-level node can honor; move it out of the group",
-                    node.id, group.id
-                ),
+                WorkflowFault::InvariantInParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                },
             ))
         })
         .collect()
@@ -217,17 +216,20 @@ fn declared_once(workflow: &Workflow) -> Declared<'_> {
     let mut broken = Vec::new();
     for (index, node) in workflow.iter_nodes().enumerate() {
         if !ids.insert(&node.id) {
-            broken.push(about(
-                index,
-                &node.id,
-                RuleCode::DuplicateId,
-                "another node already carries this id; every id is declared once, \
-                 `parallel` children included"
-                    .to_string(),
-            ));
+            broken.push(about(index, &node.id, WorkflowFault::DuplicateNode));
         }
     }
     Declared { ids, broken }
+}
+
+/// The id among the file's other nodes nearest a reference that names no
+/// node. Never the node's own id: a node that named itself would be a cycle,
+/// not a slip.
+fn nearest_other(ids: &HashSet<&NodeId>, own: &NodeId, target: &NodeId) -> Option<NodeId> {
+    let others: Vec<&NodeId> = ids.iter().copied().filter(|id| *id != own).collect();
+    crate::text::nearest(target.as_str(), others.iter().map(|id| id.as_str()))
+        .and_then(|near| others.iter().find(|id| id.as_str() == near))
+        .map(|id| (**id).clone())
 }
 
 /// Every reference a node makes reaches a node the file declares.
@@ -236,22 +238,16 @@ fn references_reach(workflow: &Workflow, ids: &HashSet<&NodeId>) -> Vec<Diagnost
     for (index, node) in workflow.nodes.iter().enumerate() {
         let mut reaches = |field: &str, target: &NodeId, at: crate::yaml::Pointer| {
             if !ids.contains(target) {
+                let nearest = nearest_other(ids, &node.id, target);
                 broken.push(
                     about(
                         index,
                         &node.id,
-                        RuleCode::UnknownDependency,
-                        format!(
-                            "`{field}` names `{target}`, and no node carries that id{}",
-                            // Never the node's own id: a node that named
-                            // itself would be a cycle, not a slip.
-                            crate::text::did_you_mean(
-                                target.as_str(),
-                                ids.iter()
-                                    .filter(|id| ***id != node.id)
-                                    .map(|id| id.as_str())
-                            )
-                        ),
+                        WorkflowFault::UnknownReference {
+                            field: field.to_string(),
+                            target: target.clone(),
+                            nearest,
+                        },
                     )
                     .within(at),
                 );
@@ -303,12 +299,12 @@ fn parallel_scopes(nodes: &[Node]) -> Vec<Diagnostic> {
                             broken.push(about(
                                 index,
                                 &node.id,
-                                RuleCode::OverlappingScope,
-                                format!(
-                                    "`{}` scopes `{glob_a}` and `{}` scopes `{glob_b}`, and the \
-                                     two can reach the same files; they run at once, in one tree",
-                                    a.id, b.id
-                                ),
+                                WorkflowFault::OverlappingParallelScope {
+                                    node: a.id.clone(),
+                                    glob: glob_a.clone(),
+                                    other: b.id.clone(),
+                                    other_glob: glob_b.clone(),
+                                },
                             ));
                         }
                     }
@@ -392,8 +388,10 @@ fn unlisted_or_invariant(
             broken.push(about(
                 index,
                 id,
-                RuleCode::UnknownDependency,
-                format!("mode `{mode}` includes `{id}`, and no top-level node carries that id"),
+                WorkflowFault::UnknownModeNode {
+                    mode: mode.clone(),
+                    node: id.clone(),
+                },
             ));
         }
     }
@@ -402,11 +400,7 @@ fn unlisted_or_invariant(
             broken.push(about(
                 index,
                 id,
-                RuleCode::IncoherentMode,
-                format!(
-                    "this node is `invariant` and mode `{mode}` leaves it out; a mode chooses \
-                     what to skip, never what the workflow cannot run without"
-                ),
+                WorkflowFault::InvariantLeftOut { mode: mode.clone() },
             ));
         }
     }
@@ -435,11 +429,11 @@ fn cut_links(
                 broken.push(about(
                     index,
                     &node.id,
-                    RuleCode::IncoherentMode,
-                    format!(
-                        "`{field}` sends control to `{target}`, and mode `{mode}` leaves \
-                         `{target}` out; a mode that keeps a node keeps what it reroutes to"
-                    ),
+                    WorkflowFault::RerouteLeftOut {
+                        field: field.to_string(),
+                        target: target.clone(),
+                        mode: mode.clone(),
+                    },
                 ));
             }
         }
@@ -451,12 +445,11 @@ fn cut_links(
                 broken.push(about(
                     index,
                     &node.id,
-                    RuleCode::IncoherentMode,
-                    format!(
-                        "`{field}` reads from `{source}`, and mode `{mode}` leaves \
-                         `{source}` out, as does every mode before it; a mode that keeps \
-                         a node keeps what it reads from"
-                    ),
+                    WorkflowFault::SourceLeftOut {
+                        field: field.to_string(),
+                        source: source.clone(),
+                        mode: mode.clone(),
+                    },
                 ));
             }
         }
@@ -477,9 +470,9 @@ fn reroute_targets(node: &Node) -> Vec<(&'static str, &NodeId)> {
     targets
 }
 
-pub(super) fn about(index: usize, id: &NodeId, code: RuleCode, detail: String) -> Diagnostic {
+pub(super) fn about(index: usize, id: &NodeId, fault: WorkflowFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Node(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }

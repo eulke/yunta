@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use yunta_core::events::{
-    Claim, Escalation, EscalationError, EventPayload, Evidence, ExhaustedReroute, Failure,
-    FailureMenu, GateResolvedPayload, GateWaitingPayload, HumanChoice, Outlook, Refusal, Remedy,
+    Asks, Claim, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu, GateOption,
+    GateResolvedPayload, GateWaitingPayload, HumanChoice, Menu, Outlook, Refusal, Remedy, Withheld,
 };
 use yunta_core::protected::Protected;
 use yunta_core::reserved::ReservedOption;
@@ -22,14 +22,13 @@ use yunta_core::{
 use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
-use crate::reserved::offers;
 use crate::run_log::RunLog;
 use yunta_core::events::GateEvent;
 
 /// The escalation object for a node whose re-routes are exhausted: retry once
 /// more, abort, or — when `modes:` has somewhere later to go — promote. The
 /// menu carries the failure that exhausted the re-routes and the re-route it
-/// closes; the words of each option come from that menu.
+/// closes; a surface writes the words of each option from that menu.
 pub(crate) fn build_reroute_escalation(
     workflow: &Workflow,
     mode_name: &ModeName,
@@ -37,11 +36,11 @@ pub(crate) fn build_reroute_escalation(
     goto: &NodeId,
     max_reroutes: u32,
     cause: &Failure,
-) -> Result<Escalation, EscalationError> {
+) -> Escalation {
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
-    let mut rest = vec![offers::abort()];
+    let mut rest = vec![GateOption::reserved(ReservedOption::Abort)];
     if suggested_mode.is_some() {
-        rest.push(offers::failure_option(ReservedOption::Promote));
+        rest.push(GateOption::reserved(ReservedOption::Promote));
     }
     let menu = FailureMenu {
         attempt: max_reroutes + 1,
@@ -58,10 +57,9 @@ pub(crate) fn build_reroute_escalation(
     // the claim names only the node.
     Escalation::new(
         Claim::NodeFailed { node: node.clone() },
-        Evidence::none(),
-        NonEmpty::from((offers::failure_option(ReservedOption::Retry), rest)),
+        Menu::Failure(Box::new(menu)),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Retry), rest)),
     )
-    .map(|escalation| escalation.with_failure(menu))
 }
 
 /// The escalation object for a node that failed with no re-route of its own
@@ -78,7 +76,7 @@ pub(crate) fn build_failure_escalation(
     failure: &Failure,
     next: u32,
     outlook: &Outlook,
-) -> Result<Escalation, EscalationError> {
+) -> Escalation {
     let remedies: &[Remedy] = match outlook {
         Outlook::Choose(remedies) => remedies,
         _ => &[],
@@ -90,12 +88,11 @@ pub(crate) fn build_failure_escalation(
     // Abort comes last and the list is never empty: each option goes in front
     // of the options built so far, so the options read in the order the
     // remedies name them.
-    let mut options = NonEmpty::from((offers::failure_option(ReservedOption::Abort), Vec::new()));
+    let mut options = NonEmpty::from((GateOption::reserved(ReservedOption::Abort), Vec::new()));
     for option in named_options(remedies).into_iter().rev() {
-        options = options.preceded_by(offers::failure_option(option));
+        options = options.preceded_by(GateOption::reserved(option));
     }
-    // The summary stays the node's name, and the evidence is empty: the
-    // failure's facts travel in the menu.
+    // The summary stays the node's name: the failure's facts travel in the menu.
     let menu = FailureMenu {
         attempt: next,
         failure: failure.clone(),
@@ -105,10 +102,9 @@ pub(crate) fn build_failure_escalation(
     };
     Escalation::new(
         Claim::NodeFailed { node: node.clone() },
-        Evidence::none(),
+        Menu::Failure(Box::new(menu)),
         options,
     )
-    .map(|escalation| escalation.with_failure(menu))
 }
 
 /// The reserved options the remedies name, each once and in the order the
@@ -215,8 +211,7 @@ fn menu_of(
                 &goto,
                 max_reroutes,
                 &cause,
-            )
-            .ok()?;
+            );
             Some((node, escalation))
         }
         Decision::EscalateFailure {
@@ -225,8 +220,7 @@ fn menu_of(
             next_attempt,
             outlook,
         } => {
-            let escalation =
-                build_failure_escalation(&node, &failure, next_attempt, &outlook).ok()?;
+            let escalation = build_failure_escalation(&node, &failure, next_attempt, &outlook);
             Some((node, escalation))
         }
         _ => None,
@@ -296,11 +290,14 @@ pub async fn resolve_gate(
                 declared: offered,
             },
             Refusal::Unsaid { chosen, asks } => ResolveGateError::Unsaid { chosen, asks },
-            Refusal::Withheld { chosen, because } => ResolveGateError::Withheld { chosen, because },
+            Refusal::Withheld { withheld } => ResolveGateError::Withheld {
+                chosen: withheld.option.clone(),
+                withheld,
+            },
         })?;
     let resolution = GateResolvedPayload::Chosen(choice);
     let log = RunLog::new(storage, run_id, clock, redactor);
-    let waiting = EventPayload::Gates(GateEvent::Waiting(escalation.into_payload()));
+    let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
     log.record(Some(&node), waiting).await?;
     let resolved = EventPayload::Gates(GateEvent::Resolved(resolution));
     log.record(Some(&node), resolved).await?;
@@ -365,7 +362,9 @@ pub(super) async fn decided(
     };
     ctx.emit(
         Some(node),
-        EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
+        EventPayload::Gates(GateEvent::Waiting(Box::new(
+            escalation.clone().into_payload(),
+        ))),
     )
     .await?;
     let resolved = ctx
@@ -396,10 +395,13 @@ pub enum ResolveGateError {
     /// The option sends the run back to a session, and the words it asks for
     /// are the one thing that session would get.
     #[error("unsaid")]
-    Unsaid { chosen: OptionId, asks: String },
-    /// The gate does not offer the option, and `because` says why.
+    Unsaid { chosen: OptionId, asks: Asks },
+    /// The gate does not offer the option, and `withheld` says why.
     #[error("withheld")]
-    Withheld { chosen: OptionId, because: String },
+    Withheld {
+        chosen: OptionId,
+        withheld: Withheld,
+    },
     #[error("storage")]
     Storage(#[from] yunta_storage::StorageError),
     /// What the gate shows could not be read, so its menu cannot be

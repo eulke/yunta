@@ -23,6 +23,9 @@ use yunta_engine::{
 #[path = "check/confinement.rs"]
 mod confinement;
 
+#[path = "check/denied_command.rs"]
+mod denied_command;
+
 /// The rules under test here are about the workflow, not about which
 /// adapter would run it: these check against a binary that builds none,
 /// so a capability nothing declares is a capability nothing can refuse.
@@ -609,19 +612,6 @@ fn config_with_denied(patterns: &[&str]) -> ConfigLayer {
         }),
         ..Default::default()
     }
-}
-
-#[test]
-fn a_bash_command_matching_a_denied_pattern_is_a_check_error_citing_the_rule() {
-    let wf = workflow(vec![bash("escalate", "sudo make install", &[])]);
-    let errors = check(&wf, &config_with_denied(&["sudo *"]));
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::CommandDenied { node, rule } if node.as_str() == "escalate" && rule.contains("sudo *")
-        )),
-        "expected a CommandDenied error citing the pattern, got {errors:?}"
-    );
 }
 
 #[test]

@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EngineFact, EventPayload, Failure,
-    NodeOutcome, PauseReason, TerminalState, TokenUsage,
+    ChildEvent, ChildRunCreatedPayload, ChildRunFinishedPayload, EngineError, EngineFact,
+    EngineStep, EventPayload, Failure, NodeOutcome, PauseReason, TerminalState, TokenUsage,
 };
 use yunta_core::{Isolation, Manifest, ModeName, Node, RunId};
 
@@ -31,11 +31,12 @@ pub(super) async fn resume_child(
     let child_manifest: Manifest = match super::super::read_manifest(&manifest_path).await {
         Ok(manifest) => manifest.doc,
         Err(error) => {
-            let engine_error = format!(
-                "child run `{child_id}` cannot resume: {}",
-                yunta_core::describe(&error)
-            );
-            return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
+            return fail(
+                ctx,
+                node,
+                resume_failure(child_id, yunta_core::describe(&error)),
+            )
+            .await;
         }
     };
     let child_tree = match child_manifest.isolation {
@@ -63,10 +64,7 @@ pub(super) async fn resume_child(
             .await
             {
                 Ok(tree) => tree,
-                Err(e) => {
-                    let engine_error = format!("child run `{child_id}` cannot resume: {e}");
-                    return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
-                }
+                Err(e) => return fail(ctx, node, resume_failure(child_id, e.to_string())).await,
             }
         }
     };
@@ -82,6 +80,19 @@ pub(super) async fn resume_child(
         cancel,
     )
     .await
+}
+
+/// The failure of a child run that could not be resumed: the step names the
+/// child, and what the failing call reported is its report.
+fn resume_failure(child: &RunId, report: String) -> Failure {
+    Failure::EngineFailed {
+        engine_error: EngineError::Step {
+            step: EngineStep::ChildResume {
+                child: child.clone(),
+            },
+            report: Some(report),
+        },
+    }
 }
 
 /// A child run as its parent holds it: the frozen truth it was created
@@ -300,11 +311,13 @@ async fn promoted(
     let successor = match create_successor(ctx, member, &worked_in, suggested_mode).await {
         Ok(successor) => successor,
         Err(e) => {
-            let engine_error = format!(
-                "child run `{}` promoted toward `{suggested_mode}` \
-                 but its successor could not be created: {e}",
-                member.id
-            );
+            let engine_error = EngineError::Step {
+                step: EngineStep::ChildSuccessor {
+                    child: member.id.clone(),
+                    mode: suggested_mode.clone(),
+                },
+                report: Some(e.to_string()),
+            };
             return ended(fail(ctx, node, Failure::EngineFailed { engine_error }).await);
         }
     };

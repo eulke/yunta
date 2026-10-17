@@ -5,6 +5,8 @@
 use yunta_core::events::{Claim, ExhaustedReroute, FailureMenu};
 use yunta_core::{text, NodeId};
 
+use crate::found;
+
 /// The claim in the words a reader sees. `menu` is the failure menu the
 /// escalation carries: when its re-routes are used up, the node's claim
 /// names the re-route it closes.
@@ -18,6 +20,15 @@ pub fn sentence(claim: &Claim, menu: Option<&FailureMenu>) -> String {
         Claim::AwaitsReview { node, assignee } => awaits_review(node, assignee.as_deref()),
         Claim::ForgeUnreachable { node, assignee } => forge_unreachable(node, assignee),
         Claim::RecheckUnreachable { node, external_ref } => recheck_unreachable(node, external_ref),
+        Claim::TokensSpent { run } => format!("run `{run}` exhausted its token budget"),
+        Claim::LoopCapSpent { node } => {
+            format!("loop `{node}` needs another iteration and its cap is spent")
+        }
+        Claim::ScopeAsked { task, reason } => format!(
+            "task `{task}` requests scope expansion: {}",
+            found::stated_reason(reason.as_deref())
+        ),
+        Claim::Departs { task } => format!("task `{task}`'s session departs from the plan"),
         Claim::Written(said) => said.clone(),
     }
 }

@@ -13,11 +13,10 @@ use yunta_core::events::{Decider, EventPayload, Failure, OwedScope, ScopeEvent, 
 use yunta_core::expansion::Decision;
 use yunta_core::{Node, Seq};
 
-use super::scope_record::{self, Recording, Subject};
+use super::scope_record::{self, AskedFor, Recording, Subject};
 use super::{RunCtx, RunError};
 use crate::replay::NodeState;
 use crate::reserved::decision_of_choice;
-use crate::scope_expansion::ScopeExpansionRequest;
 
 /// Answers the scope requests `node`'s loop ended owing, when a person
 /// answered that failure: every request, with that answer. Once per
@@ -48,7 +47,7 @@ pub(super) async fn answer(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError
         // A grant has no finding to word. A refusal's finding keeps the
         // session's own reason, so the request it answers is passed for it.
         let asked = match &decision {
-            Decision::Deny(_) => Some(request_of(request)),
+            Decision::Deny(_) => Some(AskedFor::Owed(request)),
             Decision::Grant { .. } | Decision::Escalate { .. } => None,
         };
         scope_record::record(
@@ -58,7 +57,7 @@ pub(super) async fn answer(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError
                 subject: Subject::Task(&request.task_id),
                 mode: Some(super::loop_exec::mode_in_force(node)),
                 by: by.clone(),
-                asked: asked.as_ref(),
+                asked,
                 decision: &decision,
                 count: view.state.grants.granted(),
                 located: false,
@@ -78,18 +77,6 @@ fn finding_number(decided_at: Seq) -> Result<u32, RunError> {
     u32::try_from(decided_at.get()).map_err(|_| RunError::Broken {
         diagnostic: format!("the answer at event {decided_at} is past what a finding numbers"),
     })
-}
-
-/// The request an owed decision answers, as the failure keeps it: the paths
-/// and the reason. Its criterion stays on the log, where the request was
-/// first recorded.
-fn request_of(owed: &OwedScope) -> ScopeExpansionRequest {
-    ScopeExpansionRequest {
-        paths: owed.paths.clone(),
-        reason: owed.reason.clone(),
-        proposed_criterion: None,
-        evidence: None,
-    }
 }
 
 /// Whether the log answered `request` after `decided_at`.

@@ -2,15 +2,14 @@
 //! surface read a failure as.
 
 use yunta_core::diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode,
-    Subject,
+    ArtifactFailure, Diagnostic, DocumentRef, Fault, FileProblem, Named, Problem, Report, Subject,
 };
 use yunta_core::events::{
     AccountLimit, ArtifactId, CommandExit, CommandOrigin, Failure, HookPhase, LimitSource,
     RedCheck, RefusalCause, SessionRefusal, TaskCause, TaskStop, UnpassableTask,
 };
 use yunta_core::protected::Protection;
-use yunta_core::{AdapterId, ArtifactKind, NodeId, RunId, TaskId};
+use yunta_core::{AdapterId, ArtifactKind, NodeId, RunId, TaskFault, TaskId};
 
 use crate::failure::{detail, headline, sentence};
 
@@ -38,10 +37,10 @@ fn plan() -> DocumentRef {
     DocumentRef::new(ArtifactKind::Tasks, "artifacts/plan.yaml")
 }
 
-fn broke(code: RuleCode, detail: &str) -> Diagnostic {
+fn broke(fault: impl Into<Fault>) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(TaskId::from("t1"), 0)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }
 
@@ -139,17 +138,14 @@ fn a_failure_renders_one_block_per_failing_document() {
                 node: NodeId::from("plan"),
             },
         ),
-        ArtifactFailure::Content(Report::new(
-            plan(),
-            vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-        )),
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)])),
     ]);
     assert_eq!(
         sentence(&failure),
         "artifacts/notes.md: 1 error\n  \
          the document was declared by node `plan` and never produced\n\
          artifacts/plan.yaml: 1 error\n  \
-         task `t1`: no criteria declared"
+         task `t1`: no criteria declared; every task needs at least one command that verifies it"
     );
 }
 

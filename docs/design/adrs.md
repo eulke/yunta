@@ -169,7 +169,7 @@ lista.
 **D160 — La rama de un worktree de tarea nombra su run, y las dos familias de rama son hermanas bajo prefijos fijos.** `revised` *(Revisada por D234, D246.)* → [`adr/D160-la-rama-de-un-worktree-de-tarea-nombra-su-run.md`](adr/D160-la-rama-de-un-worktree-de-tarea-nombra-su-run.md)
 **D161 — Un resultado que el engine construye cumple la revisión más nueva que el servidor anuncia; un cliente anterior ignora lo que no entiende.** `accepted` → [`adr/D161-un-resultado-que-el-engine-construye-cumple.md`](adr/D161-un-resultado-que-el-engine-construye-cumple.md)
 **D162 — La vista viva es el default de `yunta run`, y no toma la terminal.** `revised` *(Revisada por D164, D211.)* → [`adr/D162-la-vista-viva-es-el-default-de-yunta-run.md`](adr/D162-la-vista-viva-es-el-default-de-yunta-run.md)
-**D163 — La `evidence` de una escalación son hechos etiquetados, no prosa.** `accepted` → [`adr/D163-la-evidence-de-una-escalacion-son-hechos.md`](adr/D163-la-evidence-de-una-escalacion-son-hechos.md)
+**D163 — La `evidence` de una escalación son hechos etiquetados, no prosa.** `revised` *(Revisada por D268.)* → [`adr/D163-la-evidence-de-una-escalacion-son-hechos.md`](adr/D163-la-evidence-de-una-escalacion-son-hechos.md)
 **D164 — El run se lee como una crónica derivada, y cada superficie la dispone.** `accepted` → [`adr/D164-cronica-derivada.md`](adr/D164-cronica-derivada.md)
 **D165 — El puerto de adapters lo define quien lo consume, en `yunta_core::port`.** `accepted` → [`adr/D165-el-puerto-vive-en-core.md`](adr/D165-el-puerto-vive-en-core.md)
 **D166 — Un kind de evento se declara donde vive su dominio, y se reestructura antes del primer tag.** `accepted` → [`adr/D166-eventos-por-dominio-antes-del-primer-tag.md`](adr/D166-eventos-por-dominio-antes-del-primer-tag.md)
@@ -274,3 +274,4 @@ lista.
 **D265 — A breach is filed where the recorded confinement leaves the checkout to the fence alone.** `accepted` → [`adr/D265-a-breach-is-filed-where-the-recorded-confinement-leaves-the-checkout-to-the-fence-alone.md`](adr/D265-a-breach-is-filed-where-the-recorded-confinement-leaves-the-checkout-to-the-fence-alone.md)
 **D266 — The rail owns its windows, its answers and its failures.** `accepted` → [`adr/D266-the-rail-owns-its-windows-answers-and-failures.md`](adr/D266-the-rail-owns-its-windows-answers-and-failures.md)
 **D267 — Las reglas de pureza pasan al ratchet, con base cero.** `accepted` → [`adr/D267-las-reglas-de-pureza-pasan-al-ratchet-con-base-cero.md`](adr/D267-las-reglas-de-pureza-pasan-al-ratchet-con-base-cero.md)
+**D268 — The log keeps what the engine knows as data; an error keeps its own report.** `accepted` → [`adr/D268-the-log-keeps-what-the-engine-knows-as-data.md`](adr/D268-the-log-keeps-what-the-engine-knows-as-data.md)

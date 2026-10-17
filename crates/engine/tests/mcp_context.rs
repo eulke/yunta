@@ -15,7 +15,7 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Failure, NodeEvent, PauseReason};
+use yunta_core::events::{EngineError, EngineStep, Failure, NodeEvent, PauseReason};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -162,12 +162,18 @@ async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
                 PauseReason::NodeFailed {
                     failure:
                         Failure::EngineFailed {
-                            engine_error: outcome,
+                            engine_error: EngineError::Step { step, report },
                         },
                     ..
                 },
         } => {
-            assert!(outcome.contains("toy"), "got: {outcome}");
+            assert_eq!(step, EngineStep::Context);
+            assert!(
+                report
+                    .as_deref()
+                    .is_some_and(|report| report.contains("toy")),
+                "got: {report:?}"
+            );
         }
         other => panic!("expected the run to pause citing the unknown server, got {other:?}"),
     }
@@ -195,14 +201,17 @@ async fn a_missing_auth_env_var_fails_the_node_before_any_connection_attempt() {
                 PauseReason::NodeFailed {
                     failure:
                         Failure::EngineFailed {
-                            engine_error: outcome,
+                            engine_error: EngineError::Step { step, report },
                         },
                     ..
                 },
         } => {
+            assert_eq!(step, EngineStep::Context);
             assert!(
-                outcome.contains("YUNTA_TEST_MCP_TOKEN_DOES_NOT_EXIST"),
-                "got: {outcome}"
+                report
+                    .as_deref()
+                    .is_some_and(|report| report.contains("YUNTA_TEST_MCP_TOKEN_DOES_NOT_EXIST")),
+                "got: {report:?}"
             );
         }
         other => panic!("expected the run to pause citing the missing env var, got {other:?}"),

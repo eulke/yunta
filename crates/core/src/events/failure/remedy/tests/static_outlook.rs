@@ -3,8 +3,9 @@
 //! offers the one retry that waits for what it names.
 
 use crate::events::{
-    Approval, ArtifactId, ChildRefusal, FindingSeverity, FrozenRead, Interruption, MountError,
-    NameProblem, ObjectProblem, RunnerRefusal, Timed,
+    Approval, ArtifactId, ChildRefusal, DeniedBy, DeniedCommand, DeniedRule, EngineError,
+    EngineStep, FindingSeverity, FrozenRead, Interruption, MountError, NameProblem, ObjectProblem,
+    RunnerRefusal, Timed,
 };
 use crate::ids::{FindingId, NodeId, OptionId, Responder, RunId, RunnerName, SkillName};
 use crate::shown::Flaw;
@@ -37,6 +38,7 @@ fn a_session_that_could_not_stop_offers_a_retry_that_waits_for_the_outside() {
     outlook_on(
         vec![Failure::SessionNotStopped {
             session_not_stopped: "kill refused".to_string(),
+            release_failed: None,
         }],
         retry_waiting_for(Precondition::OutsideTreeChanged),
     );
@@ -142,7 +144,10 @@ fn a_failure_the_outside_settles_waits_for_the_outside_to_change() {
                 }),
             },
             Failure::EngineFailed {
-                engine_error: "cannot read the run's log".into(),
+                engine_error: EngineError::Step {
+                    step: EngineStep::FrozenRead,
+                    report: Some("cannot read the run's log".into()),
+                },
             },
             Failure::RunnerUnresolved {
                 runner: RunnerName::from_static("local"),
@@ -235,7 +240,12 @@ fn a_loop_past_its_cap_waits_for_a_person_to_lift_the_cap() {
 fn a_denied_command_is_stuck_on_the_project_and_a_gate_choice_is_final() {
     outlook_on(
         vec![Failure::CommandDenied {
-            denied_rule: "commands.deny: rm".into(),
+            denied_rule: DeniedRule::Command(DeniedCommand {
+                command: "rm -rf x".into(),
+                by: DeniedBy::Deny {
+                    pattern: "rm *".into(),
+                },
+            }),
         }],
         Outlook::Stuck(Stuck::ProjectDenies),
     );

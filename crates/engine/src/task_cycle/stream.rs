@@ -18,7 +18,7 @@ use yunta_core::port::{Adapter, AgentEvent, AgentOutcome, AgentSession, Budget};
 use yunta_storage::StorageError;
 
 use super::dispatch::{DispatchError, Opening};
-use super::session::{note_summary, SessionObserver};
+use super::session::SessionObserver;
 use super::DispatchOutcome;
 use crate::run_tools::{Arrivals, RunToolError, SessionRails};
 
@@ -335,6 +335,7 @@ async fn tool_use(
                 input_tokens: None,
                 output_tokens: None,
                 cached_input_tokens: None,
+                note: None,
                 text: None,
             },
         )),
@@ -359,7 +360,8 @@ async fn note(ctx: &AgentEventCtx<'_>, text: String) -> Result<(), DispatchError
                 // A mechanical size+digest summary, never the content —
                 // the log must not be able to carry a secret the note
                 // contained.
-                text: Some(note_summary(&text)),
+                note: Some(yunta_core::events::NoteDigest::of(&text)),
+                text: None,
             },
         )),
     )
@@ -386,6 +388,7 @@ async fn usage(
                 input_tokens,
                 output_tokens,
                 cached_input_tokens,
+                note: None,
                 text: None,
             },
         )),

@@ -172,6 +172,25 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
 }
 
 #[test]
+fn resolve_gate_lists_the_words_an_option_asks_for() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = checkout(root.path());
+    let run = yunta_in!(&checkout.repo, &checkout.home, &RUN);
+    let run_id = run_id_from(&run);
+    let listed = yunta_in!(&checkout.repo, &checkout.home, &["resolve-gate", &run_id]);
+    assert!(!listed.status.success());
+    let said = stderr(&listed);
+    let adjust = said
+        .lines()
+        .find(|line| line.trim_end().contains(" adjust"))
+        .expect("the menu lists adjust");
+    assert!(
+        adjust.contains("--text"),
+        "the option asks for words, so its command carries them:\n{said}"
+    );
+}
+
+#[test]
 fn status_node_prints_a_plan_whole() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path());

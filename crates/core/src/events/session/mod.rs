@@ -4,8 +4,10 @@
 pub mod happening;
 pub mod kinds;
 pub mod ledger;
+pub mod note;
 pub mod payloads;
 
 pub use kinds::SessionEvent;
 pub use ledger::*;
+pub use note::NoteDigest;
 pub use payloads::*;

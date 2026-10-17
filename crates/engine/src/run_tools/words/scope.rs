@@ -37,7 +37,7 @@ pub(crate) fn denial(refused: &Denial) -> String {
         Denial::Chosen { note, .. } => note
             .clone()
             .unwrap_or_else(|| "denied by a human at the gate".to_string()),
-        Denial::Legacy { text } => text.clone(),
+        Denial::Legacy { text } => text.as_str().to_string(),
     }
 }
 

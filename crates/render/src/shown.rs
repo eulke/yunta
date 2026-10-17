@@ -271,7 +271,7 @@ pub fn denial(denial: &Denial) -> String {
         Denial::Chosen { note, .. } => note
             .clone()
             .unwrap_or_else(|| "denied by a human at the gate".to_string()),
-        Denial::Legacy { text: said } => said.clone(),
+        Denial::Legacy { text: said } => said.as_str().to_string(),
     }
 }
 

@@ -3,7 +3,7 @@
 //! request into a path another task of the batch may write escalates to a
 //! person instead of being granted.
 
-use yunta_core::events::{Decider, EventPayload, ScopeEvent};
+use yunta_core::events::{Decider, EventPayload, Finding, FindingCause, FindingSays, ScopeEvent};
 use yunta_core::expansion::{
     screen, settle, Ask, Bounds, Candidate, Decision, Denial, Precheck, Proposal, Screen, Waiting,
 };
@@ -38,6 +38,19 @@ fn open(screened: Screen) -> Candidate {
     match screened {
         Screen::Candidate(candidate) => candidate,
         Screen::Settled(decision) => panic!("the request settles as {decision:?}"),
+    }
+}
+
+/// The reason a scope denial's finding carries, when the session that asked
+/// gave one: a request a red criterion located the writes of carries none.
+fn denial_reason(finding: &Finding) -> Option<&str> {
+    match &finding.says {
+        FindingSays::Found {
+            cause: FindingCause::ScopeDenied {
+                asked: Some(asked), ..
+            },
+        } => asked.reason.as_deref(),
+        _ => None,
     }
 }
 
@@ -350,7 +363,7 @@ mod denied_by_a_human {
         let findings = findings_posted(&events);
         let finding = findings
             .iter()
-            .find(|f| f.detail.contains("adjacent fix in b.txt"))
+            .find(|f| denial_reason(f) == Some("adjacent fix in b.txt"))
             .expect("the denial must convert into a finding");
         assert_eq!(
             finding.proposed_criterion,

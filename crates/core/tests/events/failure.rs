@@ -74,6 +74,47 @@ fn a_failure_logged_as_a_sentence_before_commands_were_data_still_reads_as_one()
     );
 }
 
+#[test]
+fn an_older_log_sentence_for_an_engine_error_a_denial_or_a_stop_still_reads() {
+    let engine: Failure = serde_json::from_value(serde_json::json!({
+        "engine_error": "pushing `yunta/run/01` to `origin`: rejected",
+    }))
+    .expect("an engine error stored as a sentence reads back");
+    assert_eq!(
+        engine,
+        Failure::EngineFailed {
+            engine_error: EngineError::Logged(
+                "pushing `yunta/run/01` to `origin`: rejected".into()
+            ),
+        }
+    );
+
+    let denial = "command `rm -rf x` matches denied pattern `rm *` (permissions.commands.deny)";
+    let denied: Failure =
+        serde_json::from_value(serde_json::json!({ "denied_rule": denial })).expect("reads back");
+    assert_eq!(
+        denied,
+        Failure::CommandDenied {
+            denied_rule: DeniedRule::Logged(denial.into()),
+        }
+    );
+
+    let stopped: Failure = serde_json::from_value(serde_json::json!({
+        "session_not_stopped": "kill failed; taking back what the session set up failed too: busy",
+    }))
+    .expect("a stop stored as one sentence reads back");
+    assert_eq!(
+        stopped,
+        Failure::SessionNotStopped {
+            session_not_stopped:
+                "kill failed; taking back what the session set up failed too: busy".into(),
+            release_failed: None,
+        }
+    );
+    let written = serde_json::to_value(&stopped).unwrap();
+    assert!(written.get("release_failed").is_none(), "{written}");
+}
+
 /// The command a failure is about. Only a command that exited non-zero
 /// fails as `Exited`, and any other failure fails the test here.
 fn exited_command(failure: Failure) -> CommandExit {
@@ -199,7 +240,8 @@ fn every_failure_variant_reads_back_as_itself() {
         .chain(artifact_and_template_samples())
         .chain(mount_samples())
         .chain(confinement_and_frozen_samples())
-        .chain(engine_step_samples())
+        .chain(composed_capability_and_skill_samples())
+        .chain(engine_error_and_denial_samples())
         .chain(join_gate_and_review_samples())
         .chain(loop_and_runner_samples())
         .chain(refusal_samples());

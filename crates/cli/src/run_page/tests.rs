@@ -31,6 +31,7 @@ fn spend_log() -> Vec<StoredEvent> {
         input_tokens: Some(40),
         output_tokens: Some(0),
         cached_input_tokens: None,
+        note: None,
         text: None,
     };
     let settled = NodeFinishedPayload::new(

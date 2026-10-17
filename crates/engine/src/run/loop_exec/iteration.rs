@@ -138,11 +138,7 @@ pub(super) async fn past_cap(
         return Ok(None);
     }
     let (escalation, reason) =
-        crate::run::budget::loop_overrun_escalation(&node.id, state.iteration, prep.max_iterations)
-            .map_err(|source| RunError::Escalation {
-                context: format!("loop `{}`'s escalation", node.id),
-                source,
-            })?;
+        crate::run::budget::loop_overrun_escalation(&node.id, state.iteration, prep.max_iterations);
     match crate::run::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
         crate::run::budget::BudgetDecision::Continue => {
             state.iterations_lifted = true;

@@ -8,7 +8,7 @@ use yunta_core::events::FindingSeverity;
 use yunta_core::shown::{
     Answered, DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
 };
-use yunta_core::{FindingsFile, RunId, SpecFile, TasksFile};
+use yunta_core::{FindingsFile, HeldEntry, HeldFindings, RunId, SpecFile, TasksFile};
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 
 use crate::plan::{document, Form};
@@ -314,7 +314,10 @@ fn a_file_longer_than_a_card_holds_says_where_the_rest_is() {
 #[test]
 fn a_review_s_findings_match_their_golden() {
     let file: FindingsFile = yunta_core::yaml::parse(FINDINGS).unwrap();
-    let doc = crate::findings::document(&file, " of `review`");
+    let held = HeldFindings {
+        findings: file.findings.into_iter().map(HeldEntry::Written).collect(),
+    };
+    let doc = crate::findings::document(&held, " of `review`");
     for environment in &ENVIRONMENTS {
         assert_golden(
             &environment.golden(&goldens(), "findings"),

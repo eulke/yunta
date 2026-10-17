@@ -3,14 +3,17 @@
 
 use crate::events::*;
 
-pub(crate) fn gate_waiting() -> GateWaitingPayload {
-    Escalation::published_to(
-        "Ready to open the PR?",
-        vec![Fact::labelled("published at", "example/repo#1")].into(),
-        "https://github.com/example/repo/pull/1",
+pub(crate) fn gate_waiting() -> Box<GateWaitingPayload> {
+    Box::new(
+        Escalation::published_to(
+            Claim::Written("Ready to open the PR?".to_string()),
+            PublishedGate {
+                url: "https://github.com/example/repo/pull/1".to_string(),
+            },
+            "https://github.com/example/repo/pull/1",
+        )
+        .into_payload(),
     )
-    .expect("the summary states no fact the evidence holds")
-    .into_payload()
 }
 
 pub(crate) fn gate_resolved() -> GateResolvedPayload {

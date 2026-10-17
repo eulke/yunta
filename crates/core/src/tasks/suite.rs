@@ -45,17 +45,16 @@ impl Suite {
     pub fn command(&self) -> String {
         self.command.join(" ")
     }
+}
 
-    /// What is wrong with `command`, one of what [`Suite::outside`]
-    /// found, and how to write it instead.
-    pub fn outside_detail(&self, command: &str) -> String {
-        format!(
-            "`{command}` runs the project's tests outside the suite `{suite}`, so it builds them \
-             again beside the suite's build; extend the suite instead — `{suite} <selector>`, \
-             where `<selector>` picks this task's tests",
-            suite = self.command()
-        )
-    }
+/// What is wrong with `command`, one of the commands [`Suite::outside`]
+/// finds, given the suite's command: how to write it instead.
+pub(crate) fn outside_clause(command: &str, suite: &str) -> String {
+    format!(
+        "`{command}` runs the project's tests outside the suite `{suite}`, so it builds them \
+         again beside the suite's build; extend the suite instead — `{suite} <selector>`, \
+         where `<selector>` picks this task's tests"
+    )
 }
 
 /// The words of a shell command, past the variables it assigns.

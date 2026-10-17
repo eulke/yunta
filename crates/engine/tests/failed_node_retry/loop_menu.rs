@@ -58,8 +58,7 @@ async fn a_blocked_task_says_what_its_attempt_left_red() {
     .unwrap()
     .expect("a loop that failed on a blocked task is a decision");
     let menu = escalation
-        .failure
-        .as_ref()
+        .failure()
         .expect("the menu carries the failure it answers");
     let Failure::TasksStopped { stopped } = &menu.failure else {
         panic!("the decision names the stopped task: {:?}", menu.failure);

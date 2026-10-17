@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    ConfinementRecord, EventPayload, Finding, FindingEvent, FindingPostedPayload, FindingSeverity,
-    StoredEvent,
+    ConfinementRecord, EventPayload, Finding, FindingCause, FindingEvent, FindingPostedPayload,
+    FindingSays, FindingSeverity, StoredEvent,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::port::{Adapter, Forge};
@@ -326,15 +326,15 @@ impl<'a> RunCtx<'a> {
     /// its own bookkeeping file), on the run's log in the same
     /// vocabulary an agent's findings use — never a `tracing` warning
     /// that leaves the log silent. `node` is the node it concerns, or
-    /// `None` for a run-level degradation.
+    /// `None` for a run-level degradation. The finding keeps what the
+    /// engine found as data; its words are written where it is read.
     pub(crate) async fn engine_finding(
         &self,
         node: Option<&NodeId>,
         id: &str,
         severity: FindingSeverity,
-        title: String,
         location: Location,
-        detail: String,
+        cause: FindingCause,
     ) -> Result<(), RunError> {
         self.emit(
             node,
@@ -342,9 +342,8 @@ impl<'a> RunCtx<'a> {
                 finding: Finding {
                     id: FindingId::try_from(id.to_string())?,
                     severity,
-                    title,
+                    says: FindingSays::Found { cause },
                     location,
-                    detail,
                     proposed_criterion: None,
                 },
             })),
@@ -399,9 +398,8 @@ impl<'a> RunCtx<'a> {
             Some(node),
             crate::scope::Breach::ID,
             FindingSeverity::Major,
-            crate::scope::Breach::title(),
             breach.location(),
-            breach.detail(&adapter),
+            breach.cause(&adapter),
         )
         .await
     }

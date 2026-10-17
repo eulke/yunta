@@ -27,6 +27,10 @@ use yunta_engine::{
 };
 use yunta_testkit_core::{fixed_now, Log};
 
+#[path = "live_derivation/messages.rs"]
+mod messages;
+use messages::{tool_use, usage};
+
 /// The instant `offset_secs` from the origin every log here starts at.
 fn at(offset_secs: i64) -> DateTime<Utc> {
     fixed_now() + chrono::Duration::seconds(offset_secs)
@@ -93,34 +97,10 @@ fn finished(tokens_used: TokenUsage) -> EventPayload {
 fn failed(tokens_used: TokenUsage) -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
         Failure::Message {
-            outcome: "criteria still red".to_string(),
+            outcome: "criteria still red".into(),
         },
         tokens_used,
     )))
-}
-
-fn usage(input: u64, output: u64) -> EventPayload {
-    EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
-        message_type: AgentMessageType::Usage,
-        tool_name: None,
-        target: None,
-        input_tokens: Some(input),
-        output_tokens: Some(output),
-        cached_input_tokens: None,
-        text: None,
-    }))
-}
-
-fn tool_use(tool: &str, digest: &str) -> EventPayload {
-    EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
-        message_type: AgentMessageType::ToolUse,
-        tool_name: Some(tool.to_string()),
-        target: Some(yunta_core::events::ToolTarget::opaque(digest.as_bytes())),
-        input_tokens: None,
-        output_tokens: None,
-        cached_input_tokens: None,
-        text: None,
-    }))
 }
 
 fn session_opened(session: &str) -> EventPayload {

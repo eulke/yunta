@@ -62,11 +62,11 @@ pub(crate) fn withdraw_finding_description() -> &'static str {
 /// tool that answers one.
 pub(crate) fn findings_description(answer: &str) -> String {
     format!(
-        "Read the findings standing in this run: each with the `node` that reported it — \
-         none for one the engine reported about the run itself — its id, severity, title, \
-         location, detail and proposed criterion, and the `answers` other nodes gave it \
-         with `{answer}`. A finding taken back is not here. What a gate shows a person \
-         about the run's findings is this same view."
+        "Every finding the run holds, settled or not: the node that reported it, its id, \
+         severity and location, then either the title and detail a node wrote or, for one \
+         the engine reported, its `cause`, and the proposed criterion when there is one — \
+         the view a gate shows. Each lists the `answers` other nodes gave it with `{answer}`. \
+         A finding taken back is not here."
     )
 }
 

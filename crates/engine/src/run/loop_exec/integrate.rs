@@ -14,7 +14,7 @@ use yunta_core::protected::{Closing, Protected};
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task, TreeId};
 
 use crate::run::node_exec::NodeEnd;
-use crate::run::scope_record::{self, Recording, Subject};
+use crate::run::scope_record::{self, AskedFor, Recording, Subject};
 use crate::task_cycle::{
     judge, scope_in_force, JudgeEnv, Judgement, Memo, Refusals, Settle, Sitting, Work,
 };
@@ -110,7 +110,7 @@ async fn record_attempt(
             subject: Subject::Task(&task.id),
             mode: Some(super::mode_in_force(node)),
             by: Decider::Rule,
-            asked: outcome.asked.as_ref(),
+            asked: outcome.asked.as_ref().map(AskedFor::Request),
             decision: &outcome.decision,
             count: outcome.count,
             located: outcome.asked.is_none(),

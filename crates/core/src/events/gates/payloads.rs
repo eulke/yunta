@@ -4,30 +4,13 @@
 use serde::{Deserialize, Serialize};
 
 use super::escalation::{Claim, Refusal};
+use super::menu::Menu;
+use super::offer::GateOption;
 use crate::events::session::payloads::TokenUsage;
 use crate::events::tasks::DeviationDeclaredPayload;
 use crate::events::{Evidence, Failure, Remedy, Stuck};
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{ModeName, NodeId, OptionId, QuestionId, Responder};
-
-/// One choice in a gate's escalation: `id` is what
-/// `GateResolvedPayload.chosen_option` names back. `label` and `tradeoff`
-/// are the words a person reads beside it, when the option stores them.
-/// An option that stores neither has its words written when it is shown,
-/// from the data its escalation carries, so neither is required here.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GateOption {
-    pub id: OptionId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tradeoff: Option<String>,
-    /// What choosing this option has to say along with it, when an
-    /// answer without words would change nothing — a correction sent
-    /// back to the session that made the work is the words.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asks: Option<String>,
-}
 
 /// An artifact an escalation puts in front of the person deciding: the
 /// version they saw, by its hash, so a decision on it is a decision on
@@ -64,11 +47,11 @@ impl Channel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateWaitingPayload {
     /// The claim: what happened, as the engine states it or in the words of
-    /// whoever escalated. A written summary ends where the record begins — one
-    /// that quotes what `evidence` holds leaves every surface printing it twice.
+    /// whoever escalated.
     pub(super) summary: Claim,
-    /// The record `summary` is audited against, attached by the engine
-    /// straight from the log.
+    /// The facts an older log attached beside the claim. Nothing in the
+    /// workspace writes one, so a line written now carries none.
+    #[serde(default, skip_serializing_if = "Evidence::is_empty")]
     pub(super) evidence: Evidence,
     pub(super) options: Vec<GateOption>,
     /// The forge's own handle for this gate, such as a pull request's
@@ -86,17 +69,9 @@ pub struct GateWaitingPayload {
     /// against them is part of the decision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) withheld: Vec<super::Withheld>,
-    /// Why the loop waits on a scope request a person answers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) scope: Option<super::ScopeWait>,
-    /// The failure a node's escalation is about, with the menu that
-    /// failure offers. Absent on every other escalation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure: Option<Box<FailureMenu>>,
-    /// The departure from the plan a task's session declared, as the
-    /// question about it is written. Absent on every other escalation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub departure: Option<Box<DepartureMenu>>,
+    /// What the escalation is about; absent only on an older log.
+    #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
+    pub(super) menu: Option<Menu>,
 }
 
 impl GateWaitingPayload {
@@ -114,7 +89,8 @@ impl GateWaitingPayload {
         self
     }
 
-    /// The record the claim is audited against.
+    /// The facts an older log attached beside the claim: empty on a line
+    /// written now.
     pub fn evidence(&self) -> &Evidence {
         &self.evidence
     }
@@ -124,24 +100,27 @@ impl GateWaitingPayload {
         &self.options
     }
 
-    /// The payload with each option's label and tradeoff set from `words`,
-    /// the words a person reads beside it. A surface that shows the menu
-    /// applies this to its own copy: an option that stores no words is then
-    /// shown with the ones its escalation gives it.
-    pub fn worded(
-        mut self,
-        words: impl Fn(&Self, &GateOption) -> (String, Option<String>),
-    ) -> Self {
-        let filled: Vec<(String, Option<String>)> = self
-            .options
-            .iter()
-            .map(|option| words(&self, option))
-            .collect();
-        for (option, (label, tradeoff)) in self.options.iter_mut().zip(filled) {
-            option.label = Some(label);
-            option.tradeoff = tradeoff;
+    /// What the escalation is about, when its log carries a menu.
+    pub fn menu(&self) -> Option<&Menu> {
+        self.menu.as_ref()
+    }
+
+    /// The failure a node's escalation is about, with the menu that failure
+    /// offers. `None` on every other escalation.
+    pub fn failure(&self) -> Option<&FailureMenu> {
+        match &self.menu {
+            Some(Menu::Failure(menu)) => Some(menu),
+            _ => None,
         }
-        self
+    }
+
+    /// The departure from the plan a task's session declared, as the question
+    /// about it is written. `None` on every other escalation.
+    pub fn departure(&self) -> Option<&DepartureMenu> {
+        match &self.menu {
+            Some(Menu::Departure(menu)) => Some(menu),
+            _ => None,
+        }
     }
 
     /// The forge's own handle for this gate, when it has one.
@@ -169,25 +148,25 @@ impl GateWaitingPayload {
         let Some(option) = self.options.iter().find(|o| o.id == choice.option) else {
             return Err(Refusal::OffMenu {
                 chosen: choice.option.clone(),
-                offered: self.menu(),
+                offered: self.offered(),
             });
         };
         let said = choice
             .free_text
             .as_deref()
             .is_some_and(|text| !text.trim().is_empty());
-        match &option.asks {
+        match option.asks() {
             Some(asks) if !said => Err(Refusal::Unsaid {
                 chosen: choice.option.clone(),
-                asks: asks.clone(),
+                asks,
             }),
             _ => Ok(()),
         }
     }
 
-    /// The menu's option ids as one comma-separated line, for a message
-    /// that names what was offered.
-    pub fn menu(&self) -> String {
+    /// The menu's option ids as one comma-separated line, for a refusal that
+    /// names what was offered.
+    pub fn offered(&self) -> String {
         self.options
             .iter()
             .map(|o| o.id.as_str())

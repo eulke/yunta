@@ -7,9 +7,10 @@
 
 use yunta_core::events::tasks::{TaskCause, TaskStop};
 use yunta_core::events::{
-    AcceptedDeparture, CriteriaCheckedPayload, CriterionResult, DepartsFrom,
-    DeviationDeclaredPayload, DeviationResolvedPayload, EventMeta, NodeEvent, Phase, TaskEvent,
-    TaskLedger, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    AcceptedDeparture, CriteriaCheckedPayload, CriterionResult, DeniedBy, DeniedCommand,
+    DeniedRule, DepartsFrom, DeviationDeclaredPayload, DeviationResolvedPayload, EventMeta,
+    NodeEvent, Phase, TaskEvent, TaskLedger, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload,
 };
 use yunta_core::NodeId;
 
@@ -205,7 +206,12 @@ fn blocked(task: &str, cause: TaskCause) -> TaskEvent {
 fn stops_name_each_blocked_task_in_task_order_until_its_status_moves_on() {
     let first = TaskCause::ScopeDecisionOwed;
     let second = TaskCause::CommandDenied {
-        rule: "`cargo` is denied".to_string(),
+        rule: DeniedRule::Command(DeniedCommand {
+            command: "cargo test".to_string(),
+            by: DeniedBy::Deny {
+                pattern: "cargo *".to_string(),
+            },
+        }),
     };
     let ledger = fold(&[
         registered("T002"),

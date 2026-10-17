@@ -11,6 +11,9 @@ mod common;
 use common::*;
 use yunta_core::events::{ArtifactEvent, GateEvent, NodeEvent, PauseReason};
 
+#[path = "run_questions_close/failed_node.rs"]
+mod failed_node;
+
 /// One node that asks, and the node after it that reads the answers —
 /// the shape `packs/fragua` has once `grill` stops owing a brief.
 const ASK_THEN_BRIEF: &str = r#"
@@ -138,51 +141,6 @@ async fn a_node_that_asks_records_questions_asked_and_no_terminal_event() {
     assert!(
         matches!(state.nodes.state("grill"), Some(NodeState::Waiting { .. })),
         "got {:?}",
-        state.nodes.state("grill")
-    );
-}
-
-#[tokio::test]
-async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
-    // The log of the production failure: a node hands over its questions and
-    // then fails for an unrelated reason. The failure is a failure — a node
-    // waits because it asked, never because a `questions` artifact exists.
-    let bench = Bench::new();
-    let outcome = "scope violated: 1 file outside".to_string();
-    let events = Log::for_run(bench.run_id.as_str())
-        .node(
-            "grill",
-            EventPayload::Node(NodeEvent::Started(
-                yunta_core::events::NodeStartedPayload::attempt(1),
-            )),
-        )
-        .node(
-            "grill",
-            EventPayload::Artifacts(ArtifactEvent::Accepted(
-                yunta_core::events::ArtifactAcceptedPayload::new(
-                    yunta_core::events::ArtifactId::Interpreted {
-                        kind: yunta_core::ArtifactKind::Questions,
-                    },
-                    yunta_core::sha256_hex(b"questions"),
-                    yunta_core::events::RecordedOrigin::Submitted,
-                ),
-            )),
-        )
-        .node(
-            "grill",
-            EventPayload::Node(NodeEvent::Failed(
-                yunta_core::events::NodeFailedPayload::new(
-                    yunta_core::events::Failure::Message { outcome },
-                    Default::default(),
-                ),
-            )),
-        )
-        .build();
-
-    let state = derive(&events);
-    assert!(
-        matches!(state.nodes.state("grill"), Some(NodeState::Failed { .. })),
-        "a node that failed is failed, whatever artifacts it holds: got {:?}",
         state.nodes.state("grill")
     );
 }

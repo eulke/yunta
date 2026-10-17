@@ -21,20 +21,26 @@
 //! script and running it — the model stops accidents and careless packs,
 //! and leaves an auditable trail of the deliberate attempt.
 
+use yunta_core::events::{DeniedBy, DeniedCommand};
 use yunta_core::PermissionsConfig;
 
 /// Checks one rendered command against the effective (ceiling-merged)
-/// permissions. `None` = allowed; `Some(rule)` = blocked, with a
-/// diagnostic that cites the rule, ready to become the
-/// node's `node_failed.outcome`.
-pub fn command_violation(command: &str, permissions: Option<&PermissionsConfig>) -> Option<String> {
+/// permissions. `None` = allowed; `Some(denied)` = blocked, naming the
+/// command and the list that refused it.
+pub fn command_violation(
+    command: &str,
+    permissions: Option<&PermissionsConfig>,
+) -> Option<DeniedCommand> {
     let commands = permissions?.commands.as_ref()?;
 
     for pattern in &commands.deny {
         if glob_match(pattern, command) {
-            return Some(format!(
-                "command `{command}` matches denied pattern `{pattern}` (permissions.commands.deny)"
-            ));
+            return Some(DeniedCommand {
+                command: command.to_string(),
+                by: DeniedBy::Deny {
+                    pattern: pattern.clone(),
+                },
+            });
         }
     }
 
@@ -44,9 +50,10 @@ pub fn command_violation(command: &str, permissions: Option<&PermissionsConfig>)
             .iter()
             .any(|pattern| glob_match(pattern, command))
     {
-        return Some(format!(
-            "command `{command}` matches no pattern in the strict allowlist (permissions.commands.allow)"
-        ));
+        return Some(DeniedCommand {
+            command: command.to_string(),
+            by: DeniedBy::Allow,
+        });
     }
 
     None

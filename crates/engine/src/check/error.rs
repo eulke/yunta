@@ -2,7 +2,7 @@
 
 use super::*;
 use thiserror::Error;
-use yunta_core::events::NameProblem;
+use yunta_core::events::{DeniedCommand, NameProblem};
 use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
 /// What refuses a workflow: something its frozen inputs make certain to
@@ -160,7 +160,7 @@ pub enum CheckError {
     /// matches the *literal* text — a command assembled by template gets
     /// caught by the second moment, at runtime, right before execution.
     #[error("command_denied")]
-    CommandDenied { node: NodeId, rule: String },
+    CommandDenied { node: NodeId, denied: DeniedCommand },
 
     /// `context:` is resolved into a session's own
     /// prompt — `kind: prompt` (the node's one session) and `kind:

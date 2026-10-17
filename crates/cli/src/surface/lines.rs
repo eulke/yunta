@@ -85,7 +85,9 @@ impl Lines {
 /// same thing, for every reason a run can park on.
 #[cfg(test)]
 mod pause_reason_tests {
-    use yunta_core::events::{Escalation, Fact, Failure, PauseReason, RunEvent, RunPausedPayload};
+    use yunta_core::events::{
+        Claim, Escalation, Failure, PauseReason, PublishedGate, RunEvent, RunPausedPayload,
+    };
     use yunta_core::{NodeId, QuestionId, RunId};
     use yunta_engine::WaitingOn;
 
@@ -96,15 +98,45 @@ mod pause_reason_tests {
     /// One of every reason a run parks on. The `match` is what keeps it
     /// complete: a new variant stops compiling here until it is listed.
     fn every_reason() -> Vec<PauseReason> {
-        let all = vec![
-            PauseReason::Escalation(Box::new(
-                Escalation::published_to(
-                    "Ready to open the PR?",
-                    vec![Fact::labelled("published at", "example/repo#1")].into(),
-                    "https://example.invalid/pull/1",
-                )
-                .expect("the summary states no fact the evidence holds"),
-            )),
+        let mut all = gates_and_budgets();
+        all.extend(nodes_and_children());
+        all.extend(answers_and_older_logs());
+        for reason in &all {
+            match reason {
+                PauseReason::Escalation(_)
+                | PauseReason::Cancelled
+                | PauseReason::CancelledAfterCrash
+                | PauseReason::BudgetExhausted { .. }
+                | PauseReason::NoRoom { .. }
+                | PauseReason::LoopOverrun { .. }
+                | PauseReason::ExternalGate { .. }
+                | PauseReason::UncertainOrphans { .. }
+                | PauseReason::NodeFailed { .. }
+                | PauseReason::AwaitingReset { .. }
+                | PauseReason::Blocked { .. }
+                | PauseReason::GateAborted { .. }
+                | PauseReason::ChildPaused { .. }
+                | PauseReason::Questions { .. }
+                | PauseReason::AnswersRefused { .. }
+                | PauseReason::Recorded { .. } => {}
+            }
+        }
+        all
+    }
+
+    /// The reasons a person decides on, and the caps a run can reach.
+    fn gates_and_budgets() -> Vec<PauseReason> {
+        vec![
+            PauseReason::Escalation(Box::new(Escalation::published_to(
+                Claim::AwaitsReview {
+                    node: NodeId::from("pr"),
+                    assignee: Some("lead".to_string()),
+                },
+                PublishedGate {
+                    url: "https://example.invalid/pull/1".to_string(),
+                },
+                "https://example.invalid/pull/1",
+            ))),
             PauseReason::Cancelled,
             PauseReason::CancelledAfterCrash,
             PauseReason::BudgetExhausted {
@@ -126,6 +158,12 @@ mod pause_reason_tests {
             PauseReason::UncertainOrphans {
                 nodes: vec![NodeId::from("review")],
             },
+        ]
+    }
+
+    /// What the run waits on at its nodes and children.
+    fn nodes_and_children() -> Vec<PauseReason> {
+        vec![
             PauseReason::NodeFailed {
                 node: NodeId::from("lint"),
                 failure: Failure::Message {
@@ -153,6 +191,12 @@ mod pause_reason_tests {
                 node: NodeId::from("scope"),
                 pending: (QuestionId::from("q1"), Vec::new()).into(),
             },
+        ]
+    }
+
+    /// An answer the engine refused, and a sentence an older log stored.
+    fn answers_and_older_logs() -> Vec<PauseReason> {
+        vec![
             PauseReason::AnswersRefused {
                 node: NodeId::from("scope"),
                 report: yunta_core::diagnostic::Report::new(
@@ -167,38 +211,16 @@ mod pause_reason_tests {
                                 0,
                             ),
                         ),
-                        yunta_core::diagnostic::Problem::rule(
-                            yunta_core::diagnostic::RuleCode::MissingAnswer,
-                            "this question is `required` and nothing answers it",
+                        yunta_core::diagnostic::Problem::broke(
+                            yunta_core::QuestionFault::MissingAnswer,
                         ),
                     )],
                 ),
             },
             PauseReason::Recorded {
-                sentence: "a sentence an older log stored".to_string(),
+                sentence: "a sentence an older log stored".into(),
             },
-        ];
-        for reason in &all {
-            match reason {
-                PauseReason::Escalation(_)
-                | PauseReason::Cancelled
-                | PauseReason::CancelledAfterCrash
-                | PauseReason::BudgetExhausted { .. }
-                | PauseReason::NoRoom { .. }
-                | PauseReason::LoopOverrun { .. }
-                | PauseReason::ExternalGate { .. }
-                | PauseReason::UncertainOrphans { .. }
-                | PauseReason::NodeFailed { .. }
-                | PauseReason::AwaitingReset { .. }
-                | PauseReason::Blocked { .. }
-                | PauseReason::GateAborted { .. }
-                | PauseReason::ChildPaused { .. }
-                | PauseReason::Questions { .. }
-                | PauseReason::AnswersRefused { .. }
-                | PauseReason::Recorded { .. } => {}
-            }
-        }
-        all
+        ]
     }
 
     #[test]

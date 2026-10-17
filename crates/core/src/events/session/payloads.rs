@@ -5,8 +5,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::NoteDigest;
 use crate::best_effort::BestEffortStep;
 use crate::confinement::{Commands, Confinement, Worktree};
+use crate::events::LoggedWords;
 use crate::fence::Coverage;
 use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId, TaskId};
@@ -409,8 +411,13 @@ pub struct AgentMessagePayload {
     pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached_input_tokens: Option<u64>,
+    /// A note's size and digest: what the log keeps of a note's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
+    pub note: Option<NoteDigest>,
+    /// The words an older log stored as a note's text. A note written now
+    /// carries its digest instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<LoggedWords>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

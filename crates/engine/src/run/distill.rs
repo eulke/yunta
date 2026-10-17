@@ -31,7 +31,7 @@
 use serde::Serialize;
 use yunta_core::durable::{self, Durability};
 use yunta_core::events::findings::effective;
-use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
+use yunta_core::events::{DistillStep, EventPayload, FindingCause, FindingSeverity, StoredEvent};
 use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep, WorkflowName};
 
 use super::{RunCtx, RunError};
@@ -254,16 +254,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let supervision = ctx.root_supervision();
 
     if !ran(ctx.worktree, &["add", DISTILLED_DIR], supervision).await? {
-        return ctx
-            .engine_finding(
-                None,
-                "distill-add",
-                FindingSeverity::Minor,
-                "distill: `git add` failed".to_string(),
-                Location::work(RelativePath::of([DISTILLED_DIR]), None),
-                "the distilled files stay uncommitted in the run's worktree".to_string(),
-            )
-            .await;
+        return distill_failed(ctx, "distill-add", DistillStep::Add).await;
     }
     let message = yunta_core::commit_message::CommitMessage::new(
         format!("docs(knowledge): distill from {}", ctx.run_id.as_str()),
@@ -271,34 +262,29 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     )
     .text();
     if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await? {
-        return ctx
-            .engine_finding(
-                None,
-                "distill-commit",
-                FindingSeverity::Minor,
-                "distill: `git commit` failed".to_string(),
-                Location::work(RelativePath::of([DISTILLED_DIR]), None),
-                "the distilled files stay uncommitted in the run's worktree".to_string(),
-            )
-            .await;
+        return distill_failed(ctx, "distill-commit", DistillStep::Commit).await;
     }
     // Push only where an upstream already exists (a `pr` node's own
     // `push -u`); otherwise the commit rides the local branch, which
     // cleanup's `-d` refuses to delete unmerged.
     let upstream = has_upstream(ctx.worktree, supervision).await?;
     if upstream && !ran(ctx.worktree, &["push"], supervision).await? {
-        return ctx
-            .engine_finding(
-                None,
-                "distill-push",
-                FindingSeverity::Minor,
-                "distill: `git push` failed".to_string(),
-                Location::work(RelativePath::of([DISTILLED_DIR]), None),
-                "the distill commit stays on the run's local branch".to_string(),
-            )
-            .await;
+        return distill_failed(ctx, "distill-push", DistillStep::Push).await;
     }
     Ok(())
+}
+
+/// The finding a distill step git refused leaves, located at the distilled
+/// directory of the run's worktree.
+async fn distill_failed(ctx: &RunCtx<'_>, id: &str, step: DistillStep) -> Result<(), RunError> {
+    ctx.engine_finding(
+        None,
+        id,
+        FindingSeverity::Minor,
+        Location::work(RelativePath::of([DISTILLED_DIR]), None),
+        FindingCause::DistillFailed { step },
+    )
+    .await
 }
 
 /// Whether the branch HEAD names has an upstream. A git that cannot answer
@@ -334,7 +320,7 @@ async fn upstream_of_head(
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        CriteriaCheckedPayload, CriterionResult, Finding, FindingPostedPayload,
+        CriteriaCheckedPayload, CriterionResult, Finding, FindingPostedPayload, FindingSays,
         FindingUpdatedPayload, FindingWithdrawnPayload, Phase,
     };
     use yunta_core::events::{FindingEvent, NodeEvent};
@@ -346,9 +332,11 @@ mod tests {
         Finding {
             id: id.into(),
             severity,
-            title: format!("finding {id}"),
+            says: FindingSays::Written {
+                title: format!("finding {id}"),
+                detail: "detail".to_string(),
+            },
             location: format!("tasks/{id}").as_str().into(),
-            detail: "detail".to_string(),
             proposed_criterion: None,
         }
     }

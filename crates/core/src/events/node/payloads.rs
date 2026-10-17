@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
 use crate::events::session::payloads::TokenUsage;
-use crate::events::Failure;
+use crate::events::{Failure, LoggedWords};
 use crate::hash::{CommitSha, ContentHash, TreeId};
 use crate::ids::{NodeId, RunnerName, TaskId};
 
@@ -448,7 +448,9 @@ where
     }
     Ok(match Stored::deserialize(deserializer)? {
         Stored::Typed(failure) => failure,
-        Stored::Sentence(outcome) => Failure::Message { outcome },
+        Stored::Sentence(outcome) => Failure::Message {
+            outcome: LoggedWords::read(outcome),
+        },
     })
 }
 

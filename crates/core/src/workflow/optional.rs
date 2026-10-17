@@ -14,9 +14,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::read::about;
-use super::{Node, NodeKind, Workflow};
+use super::{Node, NodeKind, Workflow, WorkflowFault};
 use crate::config::{ConfigKey, ConfigLayer};
-use crate::diagnostic::{Diagnostic, RuleCode};
+use crate::diagnostic::Diagnostic;
 use crate::ids::NodeId;
 
 /// A top-level node a run leaves out, and why.
@@ -188,12 +188,10 @@ fn optional_in_groups(workflow: &Workflow) -> Vec<Diagnostic> {
             Some(about(
                 index,
                 &node.id,
-                RuleCode::IncoherentOptional,
-                format!(
-                    "`{}` is a child of the `parallel` group `{}` and declares `optional: \
-                     true`, which only a top-level node can honor; declare it on the group",
-                    node.id, group.id
-                ),
+                WorkflowFault::OptionalInParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                },
             ))
         })
         .collect()
@@ -217,21 +215,19 @@ fn needs_what_may_go(
         });
     let lost_reroutes = reroutes
         .filter(|target| optional.contains(*target))
-        .map(|target| {
-            format!("re-routes to `{target}`, which is optional: a run that leaves it out would have nowhere to go")
+        .map(|target| WorkflowFault::ReroutesToOptional {
+            target: target.clone(),
         });
     let lost_reads = super::reads::read_sources(node)
         .into_iter()
         .filter(|(_, source)| gone.contains(*source))
-        .map(|(field, source)| {
-            format!(
-                "`{field}` reads from `{source}`, which a run may leave out; make `{}` \
-                 optional too, or `{source}` required",
-                node.id
-            )
+        .map(|(field, source)| WorkflowFault::ReadsWhatMayGo {
+            field: field.to_string(),
+            source: source.clone(),
+            node: node.id.clone(),
         });
     lost_reroutes
         .chain(lost_reads)
-        .map(|detail| about(index, &node.id, RuleCode::IncoherentOptional, detail))
+        .map(|fault| about(index, &node.id, fault))
         .collect()
 }

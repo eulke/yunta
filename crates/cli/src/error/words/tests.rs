@@ -1,10 +1,28 @@
 use super::{check, close, inputs, project_view, refused_answer, resolve_gate};
-use yunta_core::events::{Claim, ObjectProblem, Refusal};
-use yunta_core::{sha256_hex, ArtifactSpec, ConfigKey, OptionId};
+use yunta_core::events::{Claim, ObjectProblem, Refusal, WhyWithheld, Withheld};
+use yunta_core::shown::Flaw;
+use yunta_core::{sha256_hex, ArtifactSpec, ConfigKey, NonEmpty, OptionId, TaskId};
 use yunta_engine::{
     CheckError, CloseRunError, Composition, InputsError, ResolveGateError, RunError, StoreError,
     Unanswerable, UntakenRoute,
 };
+
+/// `proceed`, withheld because the plan it would take the run past cannot be
+/// proven: its one flaw is a spec test that runs none of the spec's files.
+fn withheld_proceed() -> Withheld {
+    Withheld {
+        option: OptionId::from_static("proceed"),
+        because: WhyWithheld::Unprovable {
+            flaws: NonEmpty::from((
+                Flaw::HollowSpecTest {
+                    task: TaskId::from_static("T001"),
+                    cmd: "test -f a.txt".to_string(),
+                },
+                Vec::new(),
+            )),
+        },
+    }
+}
 
 #[test]
 fn every_error_message_names_its_rule() {
@@ -221,8 +239,7 @@ fn a_composed_refusal_names_the_use_and_its_problems() {
 fn a_refused_answer_names_the_refusal_and_the_claim_it_answered() {
     let said = refused_answer(
         &Refusal::Withheld {
-            chosen: OptionId::from_static("proceed"),
-            because: "the plan cannot be proven".to_string(),
+            withheld: withheld_proceed(),
         },
         &Claim::NeedsDecision {
             node: "gate".into(),
@@ -232,7 +249,8 @@ fn a_refused_answer_names_the_refusal_and_the_claim_it_answered() {
     assert_eq!(
         said,
         "the human surface's answer was refused: `proceed` is withheld: the plan cannot be \
-         proven, for: gate `gate` needs a decision"
+         proven as it is written: the spec's test of `T001`, `test -f a.txt`, runs none of the \
+         files the spec wrote, for: gate `gate` needs a decision"
     );
 }
 
@@ -309,9 +327,10 @@ fn a_decision_the_run_cannot_take_says_why_and_what_to_choose_instead() {
     assert_eq!(
         resolve_gate(&ResolveGateError::Withheld {
             chosen: OptionId::from_static("proceed"),
-            because: "the plan cannot be proven".to_string(),
+            withheld: withheld_proceed(),
         }),
-        "option `proceed` is withheld: the plan cannot be proven"
+        "option `proceed` is withheld: the plan cannot be proven as it is written: the spec's \
+         test of `T001`, `test -f a.txt`, runs none of the files the spec wrote"
     );
 }
 

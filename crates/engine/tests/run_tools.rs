@@ -37,6 +37,9 @@ mod rail_calls;
 #[path = "run_tools/session_end.rs"]
 mod session_end;
 
+#[path = "run_tools/no_node.rs"]
+mod no_node;
+
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: coordinated
 nodes:
@@ -71,9 +74,11 @@ fn seed_finding(host: &ToolsHost, node: &str, id: &str) {
                 finding: yunta_core::events::Finding {
                     id: id.into(),
                     severity: yunta_core::events::FindingSeverity::Minor,
-                    title: format!("seeded {id}"),
+                    says: yunta_core::events::FindingSays::Written {
+                        title: format!("seeded {id}"),
+                        detail: "seeded directly".to_string(),
+                    },
                     location: "src/lib.rs".into(),
-                    detail: "seeded directly".to_string(),
                     proposed_criterion: None,
                 },
             },
@@ -1139,35 +1144,6 @@ async fn every_session_reads_the_findings_standing_with_each_node_and_answer() {
         }] }),
         "a finding taken back is not there"
     );
-}
-
-#[tokio::test]
-async fn an_engine_finding_reads_with_no_node() {
-    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
-    host.record(
-        None,
-        EventPayload::Findings(FindingEvent::Posted(
-            yunta_core::events::FindingPostedPayload {
-                finding: yunta_core::events::Finding {
-                    id: "cleanup".into(),
-                    severity: yunta_core::events::FindingSeverity::Minor,
-                    title: "a cleanup did not finish".to_string(),
-                    location: "run:scratch".into(),
-                    detail: "left behind".to_string(),
-                    proposed_criterion: None,
-                },
-            },
-        )),
-    );
-    let session = host.session("fix", None).await;
-    let client = client_for(&session, None).await.unwrap();
-
-    let (_, text) = call(&client, "yunta_findings", json!({})).await;
-    client.cancel().await.unwrap();
-
-    let standing: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert!(standing["findings"][0].get("node").is_none(), "{text}");
-    assert_eq!(standing["findings"][0]["id"], "cleanup");
 }
 
 #[tokio::test]

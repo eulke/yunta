@@ -246,20 +246,23 @@ fn artifact_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::{Diagnostic, DocumentRef, Problem, Report, RuleCode, Subject};
+    use crate::diagnostic::{Diagnostic, DocumentRef, Fault, Problem, Report, Subject};
     use crate::events::ArtifactSubmittedPayload;
+    use crate::{RunFault, TaskFault};
 
-    fn submitted(codes: &[RuleCode]) -> ArtifactEvent {
-        let outcome = match codes {
+    fn submitted(faults: &[Fault]) -> ArtifactEvent {
+        let outcome = match faults {
             [] => SubmissionOutcome::Accepted {
                 content_hash: crate::hash::ContentHash::sha256(b"plan"),
             },
             _ => SubmissionOutcome::Refused {
                 report: Report::new(
                     DocumentRef::new(ArtifactKind::Tasks, "tasks.yaml"),
-                    codes
+                    faults
                         .iter()
-                        .map(|code| Diagnostic::new(Subject::Document, Problem::rule(*code, "x")))
+                        .map(|fault| {
+                            Diagnostic::new(Subject::Document, Problem::broke(fault.clone()))
+                        })
                         .collect(),
                 ),
             },
@@ -276,13 +279,23 @@ mod tests {
     fn each_handover_counts_once_and_each_rule_by_the_refusals_that_broke_it() {
         let plan = NodeId::from("plan");
         let mut ledger = ArtifactLedger::default();
-        let passes = RuleCode::CriterionAlreadyPasses;
-        let scope = RuleCode::ChangeOutsideScope;
-        for (seq, codes) in [vec![passes, passes, scope], vec![passes], vec![]]
-            .iter()
-            .enumerate()
+        let passes = Fault::from(RunFault::AlreadyPasses {
+            cmd: "test -f a.txt".to_string(),
+            said: None,
+        });
+        let scope = Fault::from(TaskFault::ChangeOutsideScope {
+            file: "b.txt".to_string(),
+            unreadable: None,
+        });
+        for (seq, faults) in [
+            vec![passes.clone(), passes.clone(), scope.clone()],
+            vec![passes.clone()],
+            vec![],
+        ]
+        .iter()
+        .enumerate()
         {
-            ledger.apply(Some(&plan), Seq::from(seq as u64 + 1), &submitted(codes));
+            ledger.apply(Some(&plan), Seq::from(seq as u64 + 1), &submitted(faults));
         }
         let handed = ledger.handed_over(&plan, ArtifactKind::Tasks).unwrap();
         assert_eq!(handed.submissions, 3);
@@ -290,8 +303,8 @@ mod tests {
         assert_eq!(
             handed.refused,
             vec![
-                (DiagnosticCode::Rule(passes), 2),
-                (DiagnosticCode::Rule(scope), 1)
+                (DiagnosticCode::Rule(passes.code()), 2),
+                (DiagnosticCode::Rule(scope.code()), 1)
             ]
         );
     }
@@ -300,7 +313,7 @@ mod tests {
     fn a_submission_handed_over_twice_counts_once() {
         let plan = NodeId::from("plan");
         let mut ledger = ArtifactLedger::default();
-        let refused = submitted(&[RuleCode::NoSummary]);
+        let refused = submitted(&[Fault::from(TaskFault::NoSummary)]);
         ledger.apply(Some(&plan), Seq::from(1), &refused);
         ledger.apply(Some(&plan), Seq::from(1), &refused);
         let handed = ledger.handed_over(&plan, ArtifactKind::Tasks).unwrap();

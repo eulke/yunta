@@ -25,6 +25,7 @@ fn checked_in_logs_replay_to_what_they_recorded() {
         "outcome-sentence",
         "scope-request",
         "codex-write-refused",
+        "claude-run",
     ] {
         assert_eq!(derive(&load(name)).broken, None, "{name}");
     }
@@ -32,7 +33,7 @@ fn checked_in_logs_replay_to_what_they_recorded() {
     assert_eq!(
         state.run.paused().map(|(pause, _)| pause),
         Some(&PauseReason::Recorded {
-            sentence: "node `grill` failed: Not logged in · Please run /login".to_string(),
+            sentence: "node `grill` failed: Not logged in · Please run /login".into(),
         })
     );
 }

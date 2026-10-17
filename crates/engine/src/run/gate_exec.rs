@@ -17,9 +17,9 @@
 //! [`flawed`](super::flawed) sends it back instead.
 
 use yunta_core::events::{
-    Approval, Claim, EngineFact, Escalation, EventPayload, Fact, Failure, Finding,
-    FindingPostedPayload, FindingSeverity, GateResolvedPayload, NodeOutcome, NodeStartedPayload,
-    PauseReason, Shown, TokenUsage,
+    Approval, Claim, EngineFact, Escalation, EventPayload, Failure, Finding, FindingCause,
+    FindingPostedPayload, FindingSays, FindingSeverity, GateResolvedPayload, NodeOutcome,
+    NodeStartedPayload, PauseReason, PublishedGate, Shown, TokenUsage,
 };
 use yunta_core::port::{
     Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewComment, ReviewOutcome,
@@ -135,18 +135,16 @@ async fn emit_waiting(
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(
+        EventPayload::Gates(GateEvent::Waiting(Box::new(
             Escalation::published_to(
                 summary,
-                vec![Fact::labelled("published at", published.url.clone())].into(),
+                PublishedGate {
+                    url: published.url.clone(),
+                },
                 encode_ref(published),
             )
-            .map_err(|source| RunError::Escalation {
-                context: format!("node `{}`'s external gate", node.id),
-                source,
-            })?
             .into_payload(),
-        )),
+        ))),
     )
     .await?;
     Ok(())
@@ -336,9 +334,13 @@ async fn resolve_changes_requested(
                 finding: Finding {
                     id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
                     severity: FindingSeverity::Major,
-                    title: format!("changes requested by {}", comment.author),
+                    says: FindingSays::Found {
+                        cause: FindingCause::ReviewComment {
+                            author: comment.author.clone(),
+                            body: comment.body.clone(),
+                        },
+                    },
                     location: Location::work(RelativePath::of(comment.path.as_deref()), None),
-                    detail: comment.body.clone(),
                     proposed_criterion: None,
                 },
             })),

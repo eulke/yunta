@@ -11,6 +11,7 @@
 //! for the run's own duration.
 
 use yunta_core::events::HumanChoice;
+use yunta_core::step::NextStep;
 use yunta_core::{OptionId, Responder, RunId};
 
 use crate::ask::{Console, Escape, NoAnswer};
@@ -231,7 +232,14 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
         let commands: Vec<String> = escalation
             .options()
             .iter()
-            .map(|option| format!("  yunta resolve-gate {called} {}", option.id))
+            .map(|option| {
+                let step = NextStep::ResolveGate {
+                    run: run_id.clone(),
+                    option: Some(option.id.clone()),
+                    text: option.asks().is_some(),
+                };
+                format!("  {}", advice::spell(&step))
+            })
             .collect();
         return Err(CliError::msg(format!(
             "run {called} waits on a decision, and no option was given — choose one:\n{}",

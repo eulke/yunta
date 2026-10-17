@@ -18,7 +18,7 @@
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::ArtifactId;
-use yunta_core::events::{Failure, MountError, StoredEvent};
+use yunta_core::events::{EngineError, EngineStep, Failure, MountError, StoredEvent};
 use yunta_core::{MountArtifact, MountSpec, NodeKind, RunId};
 
 use super::runs_root;
@@ -40,8 +40,8 @@ pub(super) enum NotMounted {
     /// the typed reason it cannot.
     Unreachable(MountError),
     /// The source run's store failed to read the bytes it names, an engine
-    /// step that failed on its own; `engine_error` is the sentence it states.
-    Engine(String),
+    /// step that failed on its own; `engine_error` names the step.
+    Engine(EngineError),
 }
 
 impl From<MountError> for NotMounted {
@@ -97,10 +97,14 @@ fn unreadable(source: StoreError, m: &MountArtifact, source_run: &RunId) -> NotM
             run: source_run.clone(),
             source: problem,
         }),
-        StoreError::Io { .. } => NotMounted::Engine(format!(
-            "mount of the {} from node `{}`: run `{}` cannot hand over its bytes",
-            m.id, m.node, source_run
-        )),
+        StoreError::Io { .. } => NotMounted::Engine(EngineError::Step {
+            step: EngineStep::MountRead {
+                artifact: m.id.clone(),
+                node: m.node.clone(),
+                run: source_run.clone(),
+            },
+            report: None,
+        }),
     }
 }
 

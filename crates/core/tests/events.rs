@@ -48,59 +48,6 @@ fn an_escalation_with_no_options_cannot_be_built() {
 }
 
 #[test]
-fn an_escalation_whose_summary_repeats_a_fact_is_refused() {
-    let menu = || {
-        NonEmpty::from((
-            GateOption {
-                id: "abort".into(),
-                label: Some("Abort the run".to_string()),
-                tradeoff: Some("Pauses here; nothing further executes".to_string()),
-                asks: None,
-            },
-            Vec::new(),
-        ))
-    };
-
-    // A fact that names itself, repeated word for word in the claim:
-    // every surface prints the two under separate headings, so this
-    // reads as the same sentence twice.
-    let refused = Escalation::new(
-        "node `lint` failed with exit 1",
-        vec![Fact::bare("exit 1")].into(),
-        menu(),
-    )
-    .expect_err("the claim states the record");
-    assert_eq!(
-        refused,
-        EscalationError::SummaryRepeatsEvidence {
-            fact: Fact::bare("exit 1")
-        }
-    );
-    assert_eq!(
-        refused.to_string(),
-        "the summary repeats what the evidence already states"
-    );
-
-    // A labelled fact is repeated when both halves are: the label is
-    // what makes a bare number mean anything.
-    assert!(Escalation::new(
-        "run `r1` spent past its limits.max_tokens_per_run of 400",
-        vec![Fact::labelled("limits.max_tokens_per_run", "400")].into(),
-        menu(),
-    )
-    .is_err());
-
-    // The same number without its label is a number the claim needed
-    // for its own reasons, and no repetition of the record.
-    assert!(Escalation::new(
-        "node `lint` failed on attempt 400",
-        vec![Fact::labelled("limits.max_tokens_per_run", "400")].into(),
-        menu(),
-    )
-    .is_ok());
-}
-
-#[test]
 fn a_done_task_carries_its_commit_and_nothing_else_does() {
     let commit = yunta_core::CommitSha::from("deadbeef");
     let done = TaskStatusChangedPayload::done("T001".into(), 1.into(), commit.clone());
@@ -255,7 +202,7 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
         node_id: None,
         body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
             &PauseReason::Recorded {
-                sentence: "gate waiting".to_string(),
+                sentence: "gate waiting".into(),
             },
         )))),
     };
@@ -404,7 +351,7 @@ fn a_known_kind_reads_as_its_payload_and_ignores_fields_it_does_not_know() {
             assert_eq!(
                 p.pause,
                 PauseReason::Recorded {
-                    sentence: "waiting on gate approve".to_string()
+                    sentence: "waiting on gate approve".into()
                 }
             )
         }
@@ -420,7 +367,7 @@ fn a_draft_names_what_happened_and_nothing_storage_assigns() {
         None,
         EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
             &PauseReason::Recorded {
-                sentence: "budget".to_string(),
+                sentence: "budget".into(),
             },
         ))),
     )

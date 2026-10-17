@@ -102,18 +102,10 @@ impl ArtifactIntegrity {
         ))
     }
 
-    /// What the verification could not check, as a sentence for a
-    /// person — `None` when it checked everything the log names.
-    pub fn unverifiable_detail(&self) -> Option<String> {
-        (self.unverifiable > 0).then(|| {
-            format!(
-                "left unchecked: {} of this run, named by `artifact_written` before a run kept \
-                 the bytes of its artifacts under `{}/` — no object answers for such an \
-                 artifact, and none ever did; verified: {} the log accepted",
-                yunta_core::text::counted(self.unverifiable, "artifact"),
-                yunta_core::OBJECTS_DIR,
-                yunta_core::text::counted(self.verified, "artifact"),
-            )
-        })
+    /// What the verification could not check: the artifacts it left
+    /// unchecked, and the ones it verified, as the counts a finding states.
+    /// `None` when it checked everything the log names.
+    pub fn unverified(&self) -> Option<(usize, usize)> {
+        (self.unverifiable > 0).then_some((self.unverifiable, self.verified))
     }
 }

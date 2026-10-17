@@ -32,6 +32,7 @@ pub mod evidence;
 pub mod failure;
 mod findings;
 mod fold;
+pub mod found;
 pub mod glyphs;
 pub mod ink;
 pub mod inputs;
@@ -39,6 +40,7 @@ mod latency;
 pub mod line_width;
 pub mod look;
 pub mod markdown;
+pub mod offers;
 pub mod outcome;
 pub mod paths;
 pub mod pause;
@@ -58,7 +60,7 @@ pub mod target;
 pub mod width;
 
 pub use bars::{bar, bar_cells, sparkline};
-pub use escalation::{evidence, label};
+pub use escalation::evidence;
 pub use glyphs::Glyphs;
 pub use latency::latency;
 pub use line_width::Width;
@@ -78,7 +80,9 @@ mod tests {
     mod documents;
     mod failure;
     mod failure_families;
+    mod found;
     mod grant;
     mod inputs;
+    mod offers;
     mod retry;
 }

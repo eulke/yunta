@@ -8,6 +8,8 @@ use yunta_core::events::{Failure, OwedScope, RequestedScope};
 use yunta_core::protected::Protection;
 use yunta_core::{listed_globs, text};
 
+use crate::found;
+
 /// Paths as a sentence lists them: comma-separated, each as its display.
 pub(crate) fn paths_listed(paths: &[PathBuf]) -> String {
     paths
@@ -77,7 +79,7 @@ pub(super) fn owed_line(owed: &OwedScope) -> String {
         "`{}` — {}: {}",
         owed.task_id,
         listed_globs(&owed.paths),
-        owed.reason
+        found::stated_reason(owed.reason.as_deref())
     )
 }
 

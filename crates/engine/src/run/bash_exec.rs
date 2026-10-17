@@ -2,7 +2,7 @@
 //! verdict and whose output `node-output:` can read back.
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EngineFact, Failure, NodeOutcome, TokenUsage};
+use yunta_core::events::{DeniedRule, EngineFact, Failure, NodeOutcome, TokenUsage};
 use yunta_core::{ConfigKey, Node, Resolved, RunCommand};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
@@ -44,10 +44,8 @@ pub(super) async fn execute_bash(
     // The runtime moment: the rendered command against the merged
     // model, right before spawn — a template can assemble what the static
     // scan in `check` never saw.
-    if let Some(denied_rule) =
-        crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
-    {
-        return fail(ctx, node, Failure::CommandDenied { denied_rule }).await;
+    if let Some(failure) = denied_by_permissions(ctx, &rendered) {
+        return fail(ctx, node, failure).await;
     }
 
     let command = GovernedCommand::shell(ctx.worktree, &rendered);
@@ -82,4 +80,14 @@ pub(super) async fn execute_bash(
 async fn close_succeeded(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeEnd, RunError> {
     let outcome = NodeOutcome::Fact(EngineFact::ExitStatus { code: 0 });
     close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
+}
+
+/// The failure a rendered command leaves on its node when the project's
+/// permissions refuse it; `None` when they allow it.
+fn denied_by_permissions(ctx: &RunCtx<'_>, rendered: &str) -> Option<Failure> {
+    let denied =
+        crate::permissions::command_violation(rendered, ctx.manifest.config.permissions.as_ref())?;
+    Some(Failure::CommandDenied {
+        denied_rule: DeniedRule::Command(denied),
+    })
 }

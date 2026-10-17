@@ -9,7 +9,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
+use super::TaskFault;
+use crate::diagnostic::{Diagnostic, Named, Problem, Subject};
 use crate::glob::scope_globset;
 use crate::{Task, TaskId, TasksFile};
 
@@ -30,25 +31,17 @@ fn duplicates(tasks: &TasksFile) -> Vec<Diagnostic> {
     let mut shapes = HashSet::new();
     for shape in &tasks.shapes {
         if !shapes.insert(shape.name.as_str()) {
-            broken.push(document(
-                RuleCode::DuplicateShape,
-                format!(
-                    "shape `{}` is declared twice; every shape is declared once",
-                    shape.name
-                ),
-            ));
+            broken.push(document(TaskFault::DuplicateShape {
+                shape: shape.name.clone(),
+            }));
         }
     }
     let mut decisions = HashSet::new();
     for decision in &tasks.decisions {
         if !decisions.insert(decision.id.as_str()) {
-            broken.push(document(
-                RuleCode::DuplicateDecision,
-                format!(
-                    "decision `{}` is declared twice; every decision has an id of its own",
-                    decision.id
-                ),
-            ));
+            broken.push(document(TaskFault::DuplicateDecision {
+                decision: decision.id.clone(),
+            }));
         }
     }
     broken
@@ -60,34 +53,23 @@ fn owners(tasks: &TasksFile) -> Vec<Diagnostic> {
     let mut broken = Vec::new();
     for shape in &tasks.shapes {
         let Some(owner) = tasks.tasks.iter().find(|task| task.id == shape.owner) else {
-            broken.push(document(
-                RuleCode::UnknownShapeOwner,
-                format!(
-                    "shape `{}` is owned by `{}`, which no task in this file declares",
-                    shape.name, shape.owner
-                ),
-            ));
+            broken.push(document(TaskFault::UnknownShapeOwner {
+                shape: shape.name.clone(),
+                owner: shape.owner.clone(),
+            }));
             continue;
         };
-        match covers(owner, &shape.file) {
-            Ok(true) => {}
-            Ok(false) => broken.push(document(
-                RuleCode::ShapeOutsideOwnerScope,
-                format!(
-                    "shape `{}` lives in `{}`, which its owner `{}`'s scope does not cover; \
-                     the task that builds a shape may write its file",
-                    shape.name, shape.file, shape.owner
-                ),
-            )),
-            Err(error) => broken.push(document(
-                RuleCode::ShapeOutsideOwnerScope,
-                format!(
-                    "shape `{}` lives in `{}`, but its owner `{}`'s scope does not compile into \
-                     one set of paths, so it cannot be shown to cover the file: {error}",
-                    shape.name, shape.file, shape.owner
-                ),
-            )),
-        }
+        let unreadable = match covers(owner, &shape.file) {
+            Ok(true) => continue,
+            Ok(false) => None,
+            Err(error) => Some(error.to_string()),
+        };
+        broken.push(document(TaskFault::ShapeOutsideOwnerScope {
+            shape: shape.name.clone(),
+            file: shape.file.clone(),
+            owner: shape.owner.clone(),
+            unreadable,
+        }));
     }
     broken
 }
@@ -108,18 +90,18 @@ fn uses(tasks: &TasksFile) -> Vec<Diagnostic> {
                 None => broken.push(of_task(
                     index,
                     task,
-                    RuleCode::UnknownShape,
-                    format!("`uses` names shape `{name}`, which `shapes` does not declare"),
+                    TaskFault::UnknownShape {
+                        shape: name.clone(),
+                    },
                 )),
                 Some(owner) if **owner != task.id && !waits_for.contains(&(&task.id, *owner)) => {
                     broken.push(of_task(
                         index,
                         task,
-                        RuleCode::ShapeUsedBeforeItsOwner,
-                        format!(
-                            "uses shape `{name}`, which `{owner}` builds, without waiting for \
-                             it; add `{owner}` to `depends_on`"
-                        ),
+                        TaskFault::ShapeUsedBeforeItsOwner {
+                            shape: name.clone(),
+                            owner: (*owner).clone(),
+                        },
                     ))
                 }
                 Some(_) => {}
@@ -136,18 +118,19 @@ fn changes(index: usize, task: &Task) -> Vec<Diagnostic> {
         .iter()
         .filter_map(|change| {
             let file = change.file();
-            let detail = match covers(task, file) {
+            let unreadable = match covers(task, file) {
                 Ok(true) => return None,
-                Ok(false) => format!(
-                    "changes `{file}`, which its scope does not cover; widen the scope, or leave \
-                     the change to the task that owns the file"
-                ),
-                Err(error) => format!(
-                    "changes `{file}`, but its scope does not compile into one set of paths, so \
-                     the change cannot be judged against it: {error}"
-                ),
+                Ok(false) => None,
+                Err(error) => Some(error.to_string()),
             };
-            Some(of_task(index, task, RuleCode::ChangeOutsideScope, detail))
+            Some(of_task(
+                index,
+                task,
+                TaskFault::ChangeOutsideScope {
+                    file: file.to_string(),
+                    unreadable,
+                },
+            ))
         })
         .collect()
 }
@@ -177,13 +160,13 @@ fn waits_for(tasks: &[Task]) -> HashSet<(&TaskId, &TaskId)> {
     pairs
 }
 
-fn document(code: RuleCode, detail: String) -> Diagnostic {
-    Diagnostic::new(Subject::Document, Problem::rule(code, detail))
+fn document(fault: TaskFault) -> Diagnostic {
+    Diagnostic::new(Subject::Document, Problem::broke(fault))
 }
 
-fn of_task(index: usize, task: &Task, code: RuleCode, detail: String) -> Diagnostic {
+fn of_task(index: usize, task: &Task, fault: TaskFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(task.id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }

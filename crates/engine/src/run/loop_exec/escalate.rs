@@ -3,14 +3,15 @@
 //! refusal the person's choice makes.
 
 use yunta_core::events::{
-    Decider, Escalation, EventPayload, Fact, Failure, GateEvent, GateResolvedPayload, HumanChoice,
-    OwedScope, ProposedCheck, ScopeWait, TaskEvent,
+    Claim, Decider, Escalation, EventPayload, Failure, GateEvent, GateOption, GateResolvedPayload,
+    HumanChoice, Menu, OwedScope, ProposedCheck, ScopeWait, TaskEvent,
 };
 use yunta_core::expansion::{Decision, Precheck, Waiting};
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{Node, NonEmpty, ScopeGlob, Seq};
 
-use crate::reserved::{decision_of_choice, offers};
-use crate::run::scope_record::{self, Recording, Subject};
+use crate::reserved::decision_of_choice;
+use crate::run::scope_record::{self, AskedFor, Recording, Subject};
 use crate::run::{RunCtx, RunError};
 use crate::scope_expansion::{GrantWindow, ScopeExpansionOutcome};
 
@@ -49,24 +50,21 @@ async fn resolve_one(
     grants: &GrantWindow,
 ) -> Result<Option<PendingEscalation>, RunError> {
     let (paths, because) = pending.escalated()?;
-    let granted = yunta_core::listed_globs(paths);
     let escalation = Escalation::new(
-        format!(
-            "task `{}` requests scope expansion: {}",
-            pending.task_id,
-            reason_of(&pending.outcome)
-        ),
-        vec![Fact::labelled("paths", granted.clone())].into(),
-        NonEmpty::from((offers::grant(&granted), vec![offers::deny()])),
-    )
-    .map_err(|source| RunError::Escalation {
-        context: format!("task `{}`'s expansion request", pending.task_id),
-        source,
-    })?
-    .with_scope(ScopeWait {
-        because,
-        proposed: proposed_of(&pending.outcome),
-    });
+        Claim::ScopeAsked {
+            task: pending.task_id.clone(),
+            reason: reason_of(&pending.outcome),
+        },
+        Menu::Scope(ScopeWait {
+            because,
+            paths: paths.to_vec(),
+            proposed: proposed_of(&pending.outcome),
+        }),
+        NonEmpty::from((
+            GateOption::reserved(ReservedOption::Grant),
+            vec![GateOption::reserved(ReservedOption::Deny)],
+        )),
+    );
     let Some(choice) = ctx
         .ask_human(Some(&node.id), Some(&pending.task_id), &escalation)
         .await?
@@ -78,7 +76,7 @@ async fn resolve_one(
     // re-asks on resume instead of remembering a decision nobody made.
     ctx.emit(
         Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
+        EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
     )
     .await?;
     let resolved_seq = ctx
@@ -113,7 +111,7 @@ async fn record_choice(
     let protected = ctx.protected();
     let decision = decision_of_choice(choice, paths, &protected, &by);
     let asked = match &decision {
-        Decision::Deny(_) => pending.outcome.asked.as_ref(),
+        Decision::Deny(_) => pending.outcome.asked.as_ref().map(AskedFor::Request),
         Decision::Grant { .. } | Decision::Escalate { .. } => None,
     };
     scope_record::record(
@@ -210,13 +208,11 @@ impl PendingEscalation {
     }
 }
 
-/// The reason a person reads for a request: the session's own words, or, for
-/// a refusal the session asked nothing about, the criterion that located it.
-fn reason_of(outcome: &ScopeExpansionOutcome) -> String {
-    match &outcome.asked {
-        Some(asked) => asked.reason.clone(),
-        None => "a red criterion of the task locates the refused writes".to_string(),
-    }
+/// The session's own reason for a request. `None` for a refusal the session
+/// asked nothing about: a red criterion of the task located those writes, and
+/// a surface says so.
+fn reason_of(outcome: &ScopeExpansionOutcome) -> Option<String> {
+    outcome.asked.as_ref().map(|asked| asked.reason.clone())
 }
 
 /// The criterion the session proposed for its request, with what the engine's

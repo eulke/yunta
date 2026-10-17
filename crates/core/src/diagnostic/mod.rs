@@ -20,11 +20,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 mod artifact;
+mod fault;
 mod problem;
+mod run_fault;
 mod subject;
 
 pub use artifact::{ArtifactCode, ArtifactFailure, FileCode, FileProblem};
-pub use problem::{DiagnosticCode, ParseCode, Problem, Rule, RuleCode};
+pub use fault::Fault;
+pub use problem::{DiagnosticCode, ParseCode, Problem, Rule, RuleCode, RuleWords};
+pub use run_fault::RunFault;
 pub use subject::{Named, Subject};
 
 use crate::yaml::{Location, Pointer, SourceMap};

@@ -9,7 +9,7 @@
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
-    GateResolvedPayload, TaskStatus, TokenUsage, ToolTarget,
+    GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage, ToolTarget,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::text::{detailed, one_line};
@@ -185,18 +185,16 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         H::Called { tool, target } => called(tool.as_deref(), target.as_ref()),
         H::Message {
             kind,
+            note,
             text,
             input_tokens,
             output_tokens,
-        } => message(*kind, text.as_deref(), (*input_tokens, *output_tokens), sep),
+        } => message(*kind, note, text, (input_tokens, output_tokens), sep),
         H::Degraded {
             capability,
             adapter,
             policy,
-        } => detailed(
-            format!("{} not declared by {adapter}", capability.as_str()),
-            &one_line(&yunta_render::policy::applied(policy)),
-        ),
+        } => super::capability_words::degraded(capability, adapter, policy),
         H::Refused(target) => format!("write refused: {}", yunta_render::target::line(target)),
         H::StopRefused(why) => stop_refused(why),
         H::Formatted {
@@ -295,8 +293,9 @@ fn called(tool: Option<&str>, target: Option<&ToolTarget>) -> String {
 /// spending, and what the log kept of it.
 fn message(
     kind: AgentMessageType,
-    text: Option<&str>,
-    (input_tokens, output_tokens): (Option<u64>, Option<u64>),
+    note: &Option<NoteDigest>,
+    text: &Option<LoggedWords>,
+    (input_tokens, output_tokens): (&Option<u64>, &Option<u64>),
     sep: char,
 ) -> String {
     let mut said = kind.as_str().to_string();
@@ -308,9 +307,10 @@ fn message(
         };
         said.push_str(&format!(" {sep} {}", Breakdown(&usage)));
     }
-    match text {
-        Some(text) => detailed(said, &one_line(text)),
-        None => said,
+    match (note, text) {
+        (Some(it), _) => detailed(said, &format!("{} bytes, sha256 {}", it.bytes, it.sha256)),
+        (None, Some(text)) => detailed(said, &one_line(text.as_str())),
+        (None, None) => said,
     }
 }
 
@@ -318,7 +318,7 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
     use tasks_happening::Happening as H;
     match happening {
         H::Registered { task } => format!("task {task} registered"),
-        H::Moved { task, to } => format!("{task} is {}", status(*to)),
+        H::Moved { task, to } => format!("{task} is {}", to.as_str()),
         H::Checking { task } => format!("{task} asked for a check"),
         H::Checked {
             task,
@@ -348,18 +348,12 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
     }
 }
 
-/// A task's status in the words the event schema publishes, never a
-/// Rust identifier.
-fn status(status: TaskStatus) -> &'static str {
-    status.as_str()
-}
-
 fn finding_words(happening: &findings::happening::Happening) -> String {
     use findings::happening::{Change, Happening as H};
     let H::Finding {
         id,
         severity,
-        title,
+        says,
         change,
     } = happening;
     let named = match id {
@@ -369,9 +363,12 @@ fn finding_words(happening: &findings::happening::Happening) -> String {
     let severity = severity
         .map(|severity| format!(" {}", severity.as_str()))
         .unwrap_or_default();
+    let title = says
+        .as_ref()
+        .map_or_else(String::new, |says| yunta_render::found::said(says).0);
     match change {
-        Change::Posted => detailed(format!("{named}{severity}"), &one_line(title)),
-        Change::Updated => detailed(format!("{named} updated{severity}"), &one_line(title)),
+        Change::Posted => detailed(format!("{named}{severity}"), &one_line(&title)),
+        Change::Updated => detailed(format!("{named} updated{severity}"), &one_line(&title)),
         Change::Withdrawn { reason } => detailed(format!("{named} withdrawn"), &one_line(reason)),
         Change::Answered { of, answer, why } => detailed(
             format!("{named} of `{of}` answered {}", answer.as_str()),
@@ -418,7 +415,7 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
     match happening {
         H::Escalated(payload) => (
             Some(Mark::NeedsYou),
-            yunta_render::claim::sentence(payload.summary(), payload.failure.as_deref()),
+            yunta_render::claim::sentence(payload.summary(), payload.failure()),
         ),
         H::Resolved(payload) => (Some(Mark::Done), resolution(payload)),
         // The node's own label, so the chronicle and `status` say a

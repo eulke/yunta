@@ -3,7 +3,7 @@
 //! claim is kept.
 
 use yunta_core::events::{Claim, ExhaustedReroute, Failure, FailureMenu};
-use yunta_core::NodeId;
+use yunta_core::{NodeId, RunId, TaskId};
 
 use crate::claim::sentence;
 
@@ -12,7 +12,7 @@ fn exhausted(max_reroutes: u32) -> FailureMenu {
     FailureMenu {
         attempt: max_reroutes + 1,
         failure: Failure::Message {
-            outcome: "exit 1".to_string(),
+            outcome: "exit 1".into(),
         },
         remedies: Vec::new(),
         stuck: None,
@@ -111,5 +111,59 @@ fn a_gate_that_cannot_be_checked_again_names_the_reference_it_was_published_at()
     assert_eq!(
         sentence(&claim, None),
         "node `approve`'s external gate (published at example/repo#1) needs re-checking, but no forge is reachable from this machine — resolve it here instead"
+    );
+}
+
+#[test]
+fn a_run_that_spent_its_token_budget_says_so() {
+    let claim = Claim::TokensSpent {
+        run: RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA"),
+    };
+    assert_eq!(
+        sentence(&claim, None),
+        "run `01AAAAAAAAAAAAAAAAAAAAAAAA` exhausted its token budget"
+    );
+}
+
+#[test]
+fn a_loop_that_needs_another_iteration_says_its_cap_is_spent() {
+    let claim = Claim::LoopCapSpent {
+        node: NodeId::from("implement"),
+    };
+    assert_eq!(
+        sentence(&claim, None),
+        "loop `implement` needs another iteration and its cap is spent"
+    );
+}
+
+#[test]
+fn a_scope_request_says_the_session_reason_or_that_a_red_criterion_located_the_writes() {
+    let asked = Claim::ScopeAsked {
+        task: TaskId::from("task-h"),
+        reason: Some("need b.txt".to_string()),
+    };
+    assert_eq!(
+        sentence(&asked, None),
+        "task `task-h` requests scope expansion: need b.txt"
+    );
+    let located = Claim::ScopeAsked {
+        task: TaskId::from("task-h"),
+        reason: None,
+    };
+    assert_eq!(
+        sentence(&located, None),
+        "task `task-h` requests scope expansion: a red criterion of the task locates the refused \
+         writes"
+    );
+}
+
+#[test]
+fn a_task_whose_session_departs_from_the_plan_says_so() {
+    let claim = Claim::Departs {
+        task: TaskId::from("greet"),
+    };
+    assert_eq!(
+        sentence(&claim, None),
+        "task `greet`'s session departs from the plan"
     );
 }

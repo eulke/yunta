@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::LoggedWords;
 use crate::Capability;
 
 /// What the engine does when an adapter does not declare a capability it
@@ -65,7 +66,7 @@ impl Policy {
 pub enum PolicyApplied {
     Known(Policy),
     /// A sentence, kept as the writer stored it.
-    Recorded(String),
+    Recorded(LoggedWords),
 }
 
 impl From<String> for PolicyApplied {
@@ -74,7 +75,7 @@ impl From<String> for PolicyApplied {
     fn from(text: String) -> Self {
         match serde_json::from_value::<Policy>(serde_json::Value::String(text.clone())) {
             Ok(policy) => PolicyApplied::Known(policy),
-            Err(_) => PolicyApplied::Recorded(text),
+            Err(_) => PolicyApplied::Recorded(LoggedWords::read(text)),
         }
     }
 }
@@ -83,7 +84,7 @@ impl From<PolicyApplied> for String {
     fn from(applied: PolicyApplied) -> Self {
         match applied {
             PolicyApplied::Known(policy) => policy.as_str().to_owned(),
-            PolicyApplied::Recorded(text) => text,
+            PolicyApplied::Recorded(text) => text.as_str().to_owned(),
         }
     }
 }
@@ -192,7 +193,7 @@ mod tests {
         let sentence = "post-check only — the session edits unguarded".to_string();
         assert_eq!(
             PolicyApplied::from(sentence.clone()),
-            PolicyApplied::Recorded(sentence)
+            PolicyApplied::Recorded(sentence.as_str().into())
         );
     }
 }

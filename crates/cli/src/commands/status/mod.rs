@@ -11,6 +11,7 @@
 //! JSONL to learn what the options are.
 
 pub(crate) mod decision;
+pub(crate) mod decision_json;
 mod node;
 mod page;
 pub(crate) mod progress;

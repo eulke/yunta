@@ -6,7 +6,10 @@
 use std::path::PathBuf;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{ChildEvent, ChildRefusal, ChildRunCreatedPayload, EventPayload, Failure};
+use yunta_core::events::{
+    ChildEvent, ChildRefusal, ChildRunCreatedPayload, EngineError, EngineStep, EventPayload,
+    Failure,
+};
 use yunta_core::{
     ConfigLayer, ContentHash, InputName, Isolation, Manifest, ModeName, Node, Redactor, RunId,
 };
@@ -107,10 +110,12 @@ async fn settle(
     manifest.paths = match yunta_core::FrozenPaths::new(runs_root(ctx), worktrees_root(ctx)) {
         Ok(paths) => Some(paths),
         Err(e) => {
-            let engine_error = format!(
-                "child run of `{}` cannot freeze its state roots: {e}",
-                call.use_name
-            );
+            let engine_error = EngineError::Step {
+                step: EngineStep::ChildRoots {
+                    workflow: call.use_name.to_string(),
+                },
+                report: Some(e.to_string()),
+            };
             return ended(fail(ctx, node, Failure::EngineFailed { engine_error }).await);
         }
     };
@@ -134,6 +139,19 @@ async fn settle(
         blobs,
         redactor,
     }))
+}
+
+/// The failure of a child manifest the engine could not freeze: the step names
+/// the child workflow, and what the freeze reported is its report.
+fn manifest_failure(use_name: &str, error: &impl std::fmt::Display) -> Failure {
+    Failure::EngineFailed {
+        engine_error: EngineError::Step {
+            step: EngineStep::ChildManifest {
+                workflow: use_name.to_string(),
+            },
+            report: Some(error.to_string()),
+        },
+    }
 }
 
 /// The child's frozen manifest, on the adapter its parent runs on, with the
@@ -170,11 +188,7 @@ async fn freeze(
             let refusal = ChildRefusal::Inputs { problem: error };
             return ended(fail(ctx, node, child_refused(use_name, refusal)).await);
         }
-        Err(e) => {
-            let engine_error =
-                format!("child workflow `{use_name}` cannot freeze its manifest: {e}");
-            return ended(fail(ctx, node, Failure::EngineFailed { engine_error }).await);
-        }
+        Err(e) => return ended(fail(ctx, node, manifest_failure(use_name, &e)).await),
     };
     // The mounts are the child's birth artifacts, and the documents its own
     // `inputs:` named join them: both are artifacts the child holds ahead of any
@@ -243,12 +257,28 @@ async fn open_tree(
                 // node being cut.
                 Err(e) if e.cancelled() => ended(cancelled_end(ctx, node).await),
                 Err(e) => {
-                    let engine_error = format!("child run `{id}` cannot prepare its worktree: {e}");
+                    let engine_error = EngineError::Step {
+                        step: EngineStep::ChildCheckout { child: id.clone() },
+                        report: Some(e.to_string()),
+                    };
                     ended(fail(ctx, node, Failure::EngineFailed { engine_error }).await)
                 }
             }
         }
     }
+}
+
+/// Records the child on the parent's log: its identity pair, ahead of its birth.
+async fn link_child(ctx: &RunCtx<'_>, node: &Node, ready: &Ready) -> Result<(), RunError> {
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
+            child_run_id: ready.id.clone(),
+            child_workflow_hash: ready.manifest.workflow_hash.clone(),
+        })),
+    )
+    .await?;
+    Ok(())
 }
 
 /// Writes the child's link on the parent's log, then creates its run directory.
@@ -269,14 +299,7 @@ async fn link_and_create(
     // exists, so no crash window can orphan a child the parent never
     // heard of — a link whose birth never completed has no run_created
     // and is superseded on resume.
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
-            child_run_id: ready.id.clone(),
-            child_workflow_hash: ready.manifest.workflow_hash.clone(),
-        })),
-    )
-    .await?;
+    link_child(ctx, node, ready).await?;
     let runs = runs_root(ctx);
     let created = super::super::create_run(
         CreateRunParams {
@@ -308,7 +331,12 @@ async fn link_and_create(
         // The child's frozen inputs could not be written: the node fails with
         // that, as a birth that cannot read its workflow does.
         Err(RunError::Frozen(e)) => {
-            let engine_error = format!("child workflow `{use_name}` cannot be born: {e}");
+            let engine_error = EngineError::Step {
+                step: EngineStep::ChildBirth {
+                    workflow: use_name.to_string(),
+                },
+                report: Some(e.to_string()),
+            };
             ended(fail(ctx, node, Failure::EngineFailed { engine_error }).await)
         }
         Err(other) => Err(other),

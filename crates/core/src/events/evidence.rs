@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::LoggedWords;
+
 /// One fact the engine read off the log: the label a reader scans for,
 /// and the value under it.
 ///
@@ -39,14 +41,13 @@ impl Fact {
     }
 }
 
-/// The facts behind an escalation's summary, attached by the engine
-/// straight from the log.
+/// The facts a record holds beside the claim it rests on, as the log keeps
+/// them.
 ///
-/// The pair is the point: the summary is a *claim* about what happened
-/// and this is the *record* it is audited against, so neither one
-/// repeats the other. A producer that writes the cause into both leaves
-/// every surface printing it twice, under a heading that promised
-/// something new.
+/// The pair is the point: the claim says what happened and these facts are
+/// the *record* it rests on, so neither one repeats the other. A producer
+/// that writes the cause into both leaves every surface printing it twice,
+/// under a heading that promised something new.
 ///
 /// Untagged, with `Prose` last: a payload carrying a list reads as
 /// [`Evidence::Facts`], and a log written before evidence was data
@@ -62,14 +63,27 @@ pub enum Evidence {
     Facts(Vec<Fact>),
     /// One string, as an older log recorded it. Only reading produces
     /// this; nothing in this workspace writes one.
-    Prose(String),
+    Prose(LoggedWords),
+}
+
+impl Default for Evidence {
+    /// No fact attached: what an escalation carries when nothing was attached.
+    fn default() -> Self {
+        Evidence::Facts(Vec::new())
+    }
 }
 
 impl Evidence {
     /// Nothing attached — the shape for an escalation whose summary is
     /// the whole of what the log says.
     pub fn none() -> Self {
-        Evidence::Facts(Vec::new())
+        Evidence::default()
+    }
+
+    /// Whether no fact is attached, so a line carries no evidence key at all.
+    /// An older log's prose is a fact, even when its words are empty.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Evidence::Facts(facts) if facts.is_empty())
     }
 
     /// The facts, with an older log's prose read as the one unlabelled
@@ -77,16 +91,8 @@ impl Evidence {
     pub fn facts(&self) -> Vec<Fact> {
         match self {
             Evidence::Facts(facts) => facts.clone(),
-            Evidence::Prose(text) => vec![Fact::bare(text.clone())],
+            Evidence::Prose(text) => vec![Fact::bare(text.as_str())],
         }
-    }
-
-    /// `fact`, after every fact already attached; an older log's prose
-    /// becomes the one fact it reads as.
-    pub(crate) fn push(&mut self, fact: Fact) {
-        let mut facts = self.facts();
-        facts.push(fact);
-        *self = Evidence::Facts(facts);
     }
 }
 
@@ -123,8 +129,16 @@ mod tests {
     #[test]
     fn a_log_that_recorded_evidence_as_one_string_still_reads() {
         let from_an_older_log: Evidence = serde_json::from_str(r#""exit 1""#).unwrap();
-        assert_eq!(from_an_older_log, Evidence::Prose("exit 1".to_string()));
+        assert_eq!(from_an_older_log, Evidence::Prose("exit 1".into()));
         assert_eq!(from_an_older_log.facts(), vec![Fact::bare("exit 1")]);
+    }
+
+    #[test]
+    fn evidence_with_no_fact_attached_is_empty_and_a_fact_or_prose_is_not() {
+        assert!(Evidence::default().is_empty());
+        assert!(Evidence::none().is_empty());
+        assert!(!Evidence::from(vec![Fact::bare("exit 1")]).is_empty());
+        assert!(!Evidence::Prose("exit 1".into()).is_empty());
     }
 
     #[test]

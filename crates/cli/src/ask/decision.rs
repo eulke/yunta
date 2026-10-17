@@ -42,9 +42,9 @@ pub(crate) fn decide(
         .options()
         .iter()
         .find(|offered| offered.id == option)
-        .and_then(|offered| offered.asks.as_deref());
+        .and_then(yunta_render::offers::asks);
     let said = match asks {
-        Some(asks) => Some(required(console, asks)?),
+        Some(asks) => Some(required(console, &asks)?),
         None => noted(console)?,
     };
     let by = attributed(console, env)?;
@@ -152,7 +152,7 @@ fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
         .options()
         .iter()
         .map(|option| {
-            let (words, detail) = yunta_render::escalation::option_words(escalation, option);
+            let (words, detail) = yunta_render::offers::option_words(escalation, option);
             // A label that says nothing beyond the id is left off the row, which names it.
             let label =
                 Some(words).filter(|words| !words.is_empty() && words != option.id.as_str());
@@ -168,53 +168,53 @@ fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yunta_core::events::Escalation;
-    use yunta_core::events::{Fact, GateOption};
-    use yunta_core::NonEmpty;
+    use yunta_core::events::{AuthorGate, Claim, Escalation, GateOption, Leads, Menu};
+    use yunta_core::reserved::ReservedOption;
+    use yunta_core::{NodeId, NonEmpty};
 
-    fn escalation() -> GateWaitingPayload {
-        escalation_with(GateOption {
-            id: "approve".into(),
-            label: Some("Add an in-memory session store".to_string()),
-            tradeoff: Some("Unblocks now; one more task in the document".to_string()),
-            asks: None,
-        })
-    }
-
+    /// A gate an author declared, offering `option` and nothing else.
     fn escalation_with(option: GateOption) -> GateWaitingPayload {
         Escalation::new(
-            "T007 failed three times",
-            vec![Fact::labelled("criteria_checked", "2/3 green")].into(),
+            Claim::NeedsDecision {
+                node: NodeId::from_static("approve"),
+            },
+            Menu::Gate(AuthorGate {
+                assignee: "lead".to_string(),
+            }),
             NonEmpty::from((option, Vec::new())),
         )
-        .expect("the summary states no fact the evidence holds")
         .into_payload()
+    }
+
+    /// An option that takes the run on past the gate, to `ship`.
+    fn leading() -> GateOption {
+        GateOption::leading(
+            OptionId::from_static("approve"),
+            Leads::On {
+                next: vec![NodeId::from_static("ship")],
+                settles: false,
+            },
+        )
     }
 
     #[test]
     fn an_option_is_named_by_its_id_and_carries_what_it_does_and_costs() {
-        let drawn = options(&escalation());
+        let drawn = options(&escalation_with(leading()));
         let first = drawn.first().expect("the menu offers the option");
         assert_eq!(first.name, "approve");
-        assert_eq!(
-            first.label.as_deref(),
-            Some("Add an in-memory session store")
-        );
+        assert_eq!(first.label.as_deref(), Some("On to `ship`"));
         assert_eq!(
             first.detail.as_deref(),
-            Some("Unblocks now; one more task in the document"),
+            Some("resolves this gate; `ship` runs next"),
             "every option declares what it trades off, and the menu shows it"
         );
     }
 
     #[test]
     fn a_label_that_only_repeats_the_id_is_left_off_the_row() {
-        let drawn = options(&escalation_with(GateOption {
-            id: "approve".into(),
-            label: Some("approve".to_string()),
-            tradeoff: None,
-            asks: None,
-        }));
+        let drawn = options(&escalation_with(GateOption::reserved(
+            ReservedOption::Approve,
+        )));
         let first = drawn.first().expect("the menu offers the option");
         assert_eq!(first.label, None, "the row already names the option");
     }

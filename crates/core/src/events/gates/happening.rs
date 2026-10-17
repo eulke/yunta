@@ -24,7 +24,7 @@ pub enum Happening {
 impl From<&GateEvent> for Happening {
     fn from(event: &GateEvent) -> Self {
         match event {
-            GateEvent::Waiting(p) => Happening::Escalated(Box::new(p.clone())),
+            GateEvent::Waiting(p) => Happening::Escalated(p.clone()),
             GateEvent::Resolved(p) => Happening::Resolved(Box::new(p.clone())),
             GateEvent::QuestionsAsked(p) => Happening::Asked {
                 questions: p.questions.clone(),

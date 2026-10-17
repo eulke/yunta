@@ -2,17 +2,18 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use yunta_core::events::{
-    BaselineCapturedPayload, BaselineOrigin, BaselineResults, CapabilityDegradedPayload,
-    CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Evidence, Failure, Finding,
-    FindingPostedPayload, FindingSeverity, NodeEvent, NodeFinishedPayload, NodeOutcome,
-    NodeReroutedPayload, Phase, PromotionCause, PromotionSignaledPayload, RerouteOrigin, RunEvent,
-    SessionEvent, StoredEvent,
+    AgentMessagePayload, BaselineCapturedPayload, BaselineOrigin, BaselineResults,
+    CapabilityDegradedPayload, CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload,
+    Evidence, Failure, Finding, FindingPostedPayload, FindingSays, FindingSeverity, NodeEvent,
+    NodeFinishedPayload, NodeOutcome, NodeReroutedPayload, Phase, PromotionCause,
+    PromotionSignaledPayload, RerouteOrigin, RunEvent, SessionEvent, StoredEvent,
 };
-use yunta_core::events::{Claim, Escalation, GateEvent, GateOption};
+use yunta_core::events::{Claim, Escalation, FailureMenu, GateEvent, GateOption, Menu};
 use yunta_core::events::{FindingEvent, RailFailedPayload, RailSummaryPayload, TokenUsage};
 use yunta_core::rail::hook::RailFailureCause;
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
+use yunta_core::reserved::ReservedOption;
 use yunta_core::NonEmpty;
 use yunta_engine::chronicle as derive_chronicle;
 
@@ -184,19 +185,21 @@ fn a_promotion_names_the_node_whose_reroutes_ran_out() {
 /// claim sentence gives.
 #[test]
 fn an_escalation_whose_claim_is_a_failed_node_reads_as_that_node_failed() {
-    let retry = GateOption {
-        id: "retry".into(),
-        label: None,
-        tradeoff: None,
-        asks: None,
+    let menu = FailureMenu {
+        attempt: 1,
+        failure: Failure::Message {
+            outcome: "exit 1".into(),
+        },
+        remedies: Vec::new(),
+        stuck: None,
+        reroute: None,
     };
     let escalation = Escalation::new(
         Claim::NodeFailed { node: "x".into() },
-        Evidence::none(),
-        NonEmpty::from((retry, Vec::new())),
-    )
-    .expect("a claim about a failed node repeats no evidence");
-    let waiting = EventPayload::Gates(GateEvent::Waiting(escalation.into_payload()));
+        Menu::Failure(Box::new(menu)),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Retry), Vec::new())),
+    );
+    let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
     assert_eq!(said_for(waiting), "run — node `x` failed");
 }
 
@@ -227,14 +230,7 @@ fn a_host_suspension_stays_above_the_live_region_and_says_how_long() {
         "run — host suspended for 38m00s — durations leave it out; new sessions wait \
          until it has been awake 2m00s"
     );
-    let events = vec![StoredEvent {
-        seq: 1.into(),
-        run_id: "01JQ0000000000000000000000".into(),
-        node_id: None,
-        timestamp: chrono::DateTime::UNIX_EPOCH,
-        body: EventBody::Known(payload),
-    }];
-    assert!(kept(&derive_chronicle(&events)[0].happening));
+    assert!(kept_from_event(payload));
 }
 
 #[test]
@@ -259,13 +255,36 @@ fn a_finding_with_no_title_reads_as_its_severity_alone() {
         finding: Finding {
             id: "f1".into(),
             severity: FindingSeverity::Minor,
-            title: String::new(),
+            says: FindingSays::Written {
+                title: String::new(),
+                detail: String::new(),
+            },
             location: "src/lib.rs".into(),
-            detail: String::new(),
             proposed_criterion: None,
         },
     }));
     assert_eq!(said_for(payload), "run — finding f1 minor");
+}
+
+/// A note reads as its size and the head of its digest, whether the log kept
+/// the digest or an older log kept the note's words.
+#[test]
+fn a_note_reads_its_size_and_its_digest() {
+    let read = |note: serde_json::Value| {
+        let payload: AgentMessagePayload = serde_json::from_value(note).expect("a note");
+        said_for(EventPayload::Session(SessionEvent::Message(payload)))
+    };
+    let digest = serde_json::json!({
+        "message_type": "note",
+        "note": { "bytes": 135, "sha256": "2eb6d565235b" },
+    });
+    let stored = serde_json::json!({
+        "message_type": "note",
+        "text": "135 bytes, sha256 2eb6d565235b",
+    });
+    let words = "run — note: 135 bytes, sha256 2eb6d565235b";
+    assert_eq!(read(digest), words);
+    assert_eq!(read(stored), words);
 }
 
 #[test]
@@ -285,7 +304,7 @@ fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
     let degraded = CapabilityDegradedPayload {
         capability: yunta_core::Capability::RunTools,
         adapter: "codex".into(),
-        policy: yunta_core::port::PolicyApplied::Recorded(String::new()),
+        policy: yunta_core::port::PolicyApplied::Recorded("".into()),
     };
     let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(degraded));
     assert_eq!(said_for(payload), "run — run_tools not declared by codex");

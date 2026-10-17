@@ -4,7 +4,40 @@
 use std::collections::BTreeMap;
 
 use yunta_core::events::{ArtifactId, EventPayload, Failure, NodeEvent, StoredEvent};
-use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, NodeId};
+use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, NodeId, Problem, RuleWords};
+
+/// One problem of a document as a program reads it: the diagnostic as the
+/// log holds it, and the clause of a broken rule, beside it.
+#[derive(serde::Serialize)]
+struct DiagnosticJson {
+    #[serde(flatten)]
+    diagnostic: Diagnostic,
+    /// The clause of a rule the log keeps as a fault. Absent on an older
+    /// log's rule, which carries its `detail` already, and on a parse
+    /// problem, whose `message` is the reader's own report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+impl From<&Diagnostic> for DiagnosticJson {
+    fn from(diagnostic: &Diagnostic) -> Self {
+        let detail = match &diagnostic.problem {
+            Problem::Rule {
+                words: RuleWords::Fault { fault },
+                ..
+            } => Some(fault.clause()),
+            Problem::Rule {
+                words: RuleWords::Logged { .. },
+                ..
+            }
+            | Problem::Parse { .. } => None,
+        };
+        DiagnosticJson {
+            diagnostic: diagnostic.clone(),
+            detail,
+        }
+    }
+}
 
 /// One artifact a node's failure names, with what is wrong with it. A
 /// node that failed on two artifacts produces two of these, so a reader
@@ -51,7 +84,7 @@ pub(crate) struct ArtifactProblems {
     artifact: Option<ArtifactId>,
     /// Every problem this document's content has, in document order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<DiagnosticJson>,
 }
 
 impl From<&ArtifactFailure> for ArtifactProblems {
@@ -73,7 +106,11 @@ impl From<&ArtifactFailure> for ArtifactProblems {
             ArtifactFailure::Content(report) => ArtifactProblems {
                 path: Some(report.document.path.clone()),
                 kind: Some(report.document.kind),
-                diagnostics: report.diagnostics.clone(),
+                diagnostics: report
+                    .diagnostics
+                    .iter()
+                    .map(DiagnosticJson::from)
+                    .collect(),
                 ..ArtifactProblems::default()
             },
             ArtifactFailure::Unheld {

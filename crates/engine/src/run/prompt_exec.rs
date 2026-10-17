@@ -8,7 +8,9 @@ use yunta_core::events::EventPayload;
 use yunta_core::events::Failure;
 use yunta_core::events::NodeOutcome;
 use yunta_core::events::OrphanedSession;
-use yunta_core::events::{AccountLimit, FailureCause, LimitSource, SessionRefusal};
+use yunta_core::events::{
+    AccountLimit, EngineError, EngineStep, FailureCause, LimitSource, SessionRefusal,
+};
 use yunta_core::port::{AgentError, SessionRequest};
 use yunta_core::{AdapterId, Node, PromptSource};
 
@@ -224,9 +226,12 @@ async fn open_node_session(
         }
         // A session that finds its staged record already taken is an engine
         // fault: the node closes naming it, with no token spent.
-        Err(error @ OpenSessionError::AlreadyStaged) => {
+        Err(OpenSessionError::AlreadyStaged) => {
             let failure = Failure::EngineFailed {
-                engine_error: error.to_string(),
+                engine_error: EngineError::Step {
+                    step: EngineStep::StagedTwice,
+                    report: None,
+                },
             };
             Ok(Err(super::node_close::fail(ctx, node, failure).await?))
         }

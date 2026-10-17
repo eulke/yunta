@@ -7,7 +7,7 @@
 //! it is read: see [`close_frozen`].
 
 use yunta_core::agent::AgentDefinition;
-use yunta_core::events::{Failure, FrozenRead, TokenUsage};
+use yunta_core::events::{EngineError, EngineStep, Failure, FrozenRead, TokenUsage};
 use yunta_core::Node;
 
 use super::node_exec::NodeEnd;
@@ -63,7 +63,8 @@ pub(super) async fn agent(
 /// - `UnreadableKey` comes from a frozen set that holds a knowledge key no
 ///   layer reads: an entry this binary cannot place, not a changed input.
 /// - `Io` comes from either. Both are steps of the engine that failed on their
-///   own, and close the node as `EngineFailed` with the error's own sentence.
+///   own, and close the node as `EngineFailed`, naming the step and what its
+///   error reported.
 pub(super) async fn close_frozen(
     ctx: &crate::run::RunCtx<'_>,
     node: &Node,
@@ -91,7 +92,10 @@ pub(super) async fn close_frozen(
         },
         other @ (FrozenError::UnreadableKey { .. } | FrozenError::Io { .. }) => {
             Failure::EngineFailed {
-                engine_error: other.to_string(),
+                engine_error: EngineError::Step {
+                    step: EngineStep::FrozenRead,
+                    report: Some(other.to_string()),
+                },
             }
         }
     };

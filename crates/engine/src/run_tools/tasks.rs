@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use yunta_core::events::{
     CriterionResult, CriterionType, EventPayload, ExecutionEnvironment, NodeEvent, Phase,
-    StoredEvent, TaskEvent, TaskStatus,
+    StoredEvent, TaskEvent, TaskStatus, Unanswered,
 };
 use yunta_core::{ScopeGlob, SessionId, TaskId, TreeId};
 
@@ -24,7 +24,6 @@ use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
 use crate::replay::RunView;
-use crate::run_tools::words::unanswered_words;
 use crate::task_cycle::{could_not_run, CriterionRun, Judgement, Settle};
 
 impl SessionTools {
@@ -311,7 +310,7 @@ impl Answered {
             cmd: result.cmd.clone(),
             guard: result.r#type == Some(CriterionType::Guard),
             exit_code: result.exit_code,
-            cannot_run: could_not_run(result.exit_code).map(unanswered_words),
+            cannot_run: could_not_run(result.exit_code).map(Unanswered::words),
             tail: result.tail.clone(),
         }
     }
@@ -330,7 +329,7 @@ impl Answered {
             cmd: run.cmd.clone(),
             guard: run.is_guard,
             exit_code: run.exit_code,
-            cannot_run: run.could_not_run().map(unanswered_words),
+            cannot_run: run.could_not_run().map(Unanswered::words),
             tail,
         }
     }

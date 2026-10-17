@@ -49,6 +49,7 @@ fn fact_sentence(fact: &EngineFact) -> String {
         EngineFact::QuestionsAnswered => "questions answered".to_string(),
         EngineFact::QuestionsAssumed => "questions assumed".to_string(),
         EngineFact::OptionChosen { option } => option.to_string(),
+        EngineFact::ExecutorExited { executor } => format!("executor `{executor}` exited 0"),
         EngineFact::Approved { by, on } => match on {
             Approval::Console => format!("approved from the console by {by}"),
             Approval::Review => format!("approved by {by}"),
@@ -138,6 +139,9 @@ mod tests {
     fn an_engine_fact_reads_in_the_words_its_check_uses() {
         let exit = NodeOutcome::Fact(EngineFact::ExitStatus { code: 0 });
         assert_eq!(sentence(&exit), "exit 0");
+        let executor = yunta_core::ExecutorName::from("probe");
+        let exited = NodeOutcome::Fact(EngineFact::ExecutorExited { executor });
+        assert_eq!(sentence(&exited), "executor `probe` exited 0");
         let done = NodeOutcome::Fact(EngineFact::TasksDone { count: 1 });
         assert_eq!(sentence(&done), "1 task done");
         let reused = NodeOutcome::Fact(EngineFact::NoRegression {
@@ -222,7 +226,7 @@ mod tests {
             node: NodeId::from("lint"),
             goto: NodeId::from("fix-lint"),
             failure: Some(yunta_core::events::Failure::Message {
-                outcome: "exit 1".to_string(),
+                outcome: "exit 1".into(),
             }),
         };
         assert_eq!(

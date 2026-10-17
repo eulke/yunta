@@ -77,14 +77,9 @@ impl DispatchError {
 /// kill's error, and the release's when that failed as well. Re-exported next
 /// to `DispatchError`.
 pub(crate) fn not_stopped_failure(detail: &str, release: Option<&AdapterError>) -> Failure {
-    let session_not_stopped = match release {
-        Some(release) => {
-            format!("{detail}; taking back what the session set up failed too: {release}")
-        }
-        None => detail.to_string(),
-    };
     Failure::SessionNotStopped {
-        session_not_stopped,
+        session_not_stopped: detail.to_string(),
+        release_failed: release.map(|release| release.to_string()),
     }
 }
 

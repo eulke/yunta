@@ -2,7 +2,9 @@
 //! gives it: as the project wrote it, under the run's permissions, and
 //! failing plainly when the run's frozen config does not declare it.
 
-use yunta_core::events::{EventPayload, Failure, NodeEvent, PauseReason, StoredEvent};
+use yunta_core::events::{
+    DeniedBy, DeniedCommand, DeniedRule, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
+};
 use yunta_core::{CommandName, ConfigKey};
 use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
@@ -152,7 +154,12 @@ async fn permissions_commands_govern_a_project_command() {
             assert_eq!(node.as_str(), "clean");
             assert_eq!(
                 outcome,
-                "command `rm -rf build` matches denied pattern `rm -rf*` (permissions.commands.deny)"
+                DeniedRule::Command(DeniedCommand {
+                    command: "rm -rf build".into(),
+                    by: DeniedBy::Deny {
+                        pattern: "rm -rf*".into(),
+                    },
+                })
             );
         }
         other => panic!("expected the run to pause, got {other:?}"),

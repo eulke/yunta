@@ -7,8 +7,8 @@
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{
-    AccountLimit, EngineFact, EventPayload, Failure, LimitSource, NodeEvent, NodeOutcome,
-    PullRequestOpenedPayload, TokenUsage,
+    AccountLimit, EngineError, EngineFact, EngineStep, EventPayload, Failure, LimitSource,
+    NodeEvent, NodeOutcome, PullRequestOpenedPayload, TokenUsage,
 };
 use yunta_core::port::{Forge, ForgeError, PullRequestRef, PullRequestRequest};
 use yunta_core::{ConfigKey, Node};
@@ -43,8 +43,7 @@ pub(super) async fn execute_pull_request(
         if error.cancelled() {
             return Err(error.into());
         }
-        let engine_error = format!("pushing `{head}` to `{remote}`: {}", error.detail());
-        return fail(ctx, node, Failure::EngineFailed { engine_error }).await;
+        return fail_push(ctx, node, &head, remote, error.detail()).await;
     }
     let opened = match forge.open_pull_request(&request).await {
         Ok(opened) => opened,
@@ -64,6 +63,25 @@ pub(super) async fn execute_pull_request(
     close_node(ctx, node, Close::new(outcome, TokenUsage::default())).await
 }
 
+/// The node fails on a push git refused: the step names the branch and the
+/// remote, and what git reported is its report.
+async fn fail_push(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    head: &str,
+    remote: &str,
+    report: String,
+) -> Result<NodeEnd, RunError> {
+    let engine_error = EngineError::Step {
+        step: EngineStep::Push {
+            head: head.to_string(),
+            remote: remote.to_string(),
+        },
+        report: Some(report),
+    };
+    fail(ctx, node, Failure::EngineFailed { engine_error }).await
+}
+
 /// The fact a pull request node closes with: the pull request it opened.
 fn opened_fact(opened: PullRequestRef) -> NodeOutcome {
     NodeOutcome::Fact(EngineFact::PullRequestOpened {
@@ -73,7 +91,7 @@ fn opened_fact(opened: PullRequestRef) -> NodeOutcome {
 }
 
 /// Fails the node with the forge's refusal to open the pull request: a spent
-/// rate limit is the account's limit, and any other refusal is its sentence.
+/// rate limit is the account's limit, and any other refusal is the step's report.
 async fn open_refused(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -82,7 +100,10 @@ async fn open_refused(
     if let Some(failure) = forge_limit(error, ctx.clock.now()) {
         return fail_with(ctx, node, failure, TokenUsage::default()).await;
     }
-    let engine_error = format!("opening the pull request: {}", yunta_core::describe(error));
+    let engine_error = EngineError::Step {
+        step: EngineStep::OpenPullRequest,
+        report: Some(yunta_core::describe(error)),
+    };
     fail(ctx, node, Failure::EngineFailed { engine_error }).await
 }
 
@@ -123,10 +144,11 @@ async fn prepared<'a>(
     // The config declares a forge; what the run could not build it from
     // is the token, which a person can set before the node runs again.
     let Some(forge) = ctx.forge else {
-        let engine_error = "the forge the config declares is not reachable from this \
-                            machine: the variable its `token_env` names is not set";
         let failure = Failure::EngineFailed {
-            engine_error: engine_error.to_string(),
+            engine_error: EngineError::Step {
+                step: EngineStep::ForgeToken,
+                report: None,
+            },
         };
         return Ok(Step::Ended(fail(ctx, node, failure).await?));
     };

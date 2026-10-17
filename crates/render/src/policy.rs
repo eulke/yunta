@@ -44,7 +44,7 @@ pub fn sentence(policy: &Policy) -> String {
 pub fn applied(applied: &PolicyApplied) -> String {
     match applied {
         PolicyApplied::Known(policy) => sentence(policy),
-        PolicyApplied::Recorded(text) => text.clone(),
+        PolicyApplied::Recorded(text) => text.as_str().to_string(),
     }
 }
 
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn a_sentence_an_older_log_stored_reads_as_it_was_written() {
         let stored =
-            PolicyApplied::Recorded("post-check only — the session edits unguarded".to_string());
+            PolicyApplied::Recorded("post-check only — the session edits unguarded".into());
         assert_eq!(
             applied(&stored),
             "post-check only — the session edits unguarded"

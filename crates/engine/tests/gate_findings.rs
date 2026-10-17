@@ -8,7 +8,7 @@
 mod common;
 
 use common::*;
-use yunta_core::events::{EventPayload, FindingAnswer, GateEvent};
+use yunta_core::events::{EventPayload, Finding, FindingAnswer, FindingSays, GateEvent};
 use yunta_engine::{RunReport, RunTerminal, ShownContent};
 use yunta_testkit::Bench;
 
@@ -75,6 +75,15 @@ fn shown_findings(interaction: &SequencedInteraction) -> yunta_core::events::fin
     view.clone()
 }
 
+/// The title a session wrote for a finding. Every finding these runs post is
+/// a session's, so a finding the engine reported has no title to read.
+fn written_title(finding: &Finding) -> &str {
+    match &finding.says {
+        FindingSays::Written { title, .. } => title.as_str(),
+        FindingSays::Found { .. } => panic!("a session wrote this finding: {finding:?}"),
+    }
+}
+
 #[tokio::test]
 async fn a_gate_that_shows_the_runs_findings_shows_each_reviewers_and_those_no_document_holds() {
     let interaction = SequencedInteraction::choosing(&["approve"]);
@@ -90,7 +99,7 @@ async fn a_gate_that_shows_the_runs_findings_shows_each_reviewers_and_those_no_d
         .map(|standing| {
             (
                 standing.node.as_ref().map(ToString::to_string),
-                standing.finding.title.clone(),
+                written_title(&standing.finding).to_string(),
             )
         })
         .collect();
@@ -210,7 +219,7 @@ async fn going_on_settles_each_finding_shown_and_the_run_succeeds() {
         .iter()
         .find_map(|event| match event.payload() {
             Some(EventPayload::Gates(GateEvent::Waiting(p))) => {
-                Some(yunta_render::escalation::option_words(p, &p.options()[0]).1)
+                Some(yunta_render::offers::option_words(p, &p.options()[0]).1)
             }
             _ => None,
         })

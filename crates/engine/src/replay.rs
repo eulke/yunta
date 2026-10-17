@@ -429,29 +429,20 @@ pub fn derive(events: &[StoredEvent]) -> RunState {
 }
 
 /// Query-side view of `RunState.findings`: findings across reviewers are
-/// deduplicated by `location` plus normalized title. The raw log (and
-/// `RunState.findings`) keeps every posting; this collapses duplicates
-/// for counting/display, keeping the first occurrence — the schema has
-/// no authors list to merge into, so authorship is preserved by the
-/// untouched event log, not by this derived view.
+/// deduplicated by `location` plus the complaint each makes
+/// ([`Finding::complaint`]). The raw log (and `RunState.findings`) keeps
+/// every posting; this collapses duplicates for counting/display, keeping
+/// the first occurrence — the schema has no authors list to merge into, so
+/// authorship is preserved by the untouched event log, not by this derived
+/// view.
 pub fn dedup_findings(findings: &[Finding]) -> Vec<Finding> {
     let mut seen = std::collections::HashSet::new();
     let mut deduped = Vec::new();
     for finding in findings {
-        let key = (finding.location.clone(), normalized_title(&finding.title));
+        let key = (finding.location.clone(), finding.complaint());
         if seen.insert(key) {
             deduped.push(finding.clone());
         }
     }
     deduped
-}
-
-/// Case- and whitespace-insensitive: "Scope  expansion DENIED" and
-/// "scope expansion denied" are the same complaint about the same place.
-fn normalized_title(title: &str) -> String {
-    title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
 }

@@ -3,7 +3,9 @@
 //! records that it woke, with the tree a failure waiting on a person found
 //! the run at.
 
-use yunta_core::events::{EventPayload, FindingSeverity, RunEvent, RunResumedPayload};
+use yunta_core::events::{
+    EventPayload, FindingCause, FindingSeverity, RunEvent, RunResumedPayload,
+};
 use yunta_core::{Location, RelativePath, TreeId};
 
 use crate::artifacts::ArtifactIntegrity;
@@ -25,14 +27,16 @@ use super::{schedule, shared_tree, steps, RunCtx, RunError};
 pub(super) async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
     let artifacts = verify_before_waking(ctx, view).await?;
     record_resume(ctx, view).await?;
-    if let Some(detail) = artifacts.unverifiable_detail() {
+    if let Some((unchecked, verified)) = artifacts.unverified() {
         ctx.engine_finding(
             None,
             "engine-artifact-store",
             FindingSeverity::Minor,
-            "the run holds artifacts this binary cannot verify".to_string(),
             Location::run(RelativePath::of([yunta_core::OBJECTS_DIR]), None),
-            detail,
+            FindingCause::ArtifactsUnverified {
+                unchecked,
+                verified,
+            },
         )
         .await?;
     }

@@ -24,16 +24,13 @@
 //! what they are waiting on, and what to do instead of choosing an
 //! option.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use yunta_core::events::GateWaitingPayload;
-use yunta_core::step::NextStep;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::ShownDocument;
 
 use crate::commands::advice;
-use crate::error::Reader;
 use crate::render::blocks::{Decision, DecisionOption, Drawn};
 use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, evidence, indent, wrap, Look, Width, INDENT};
@@ -142,8 +139,8 @@ pub(crate) fn account(
 
 /// The claim of a decision in the words a reader sees: what the escalation
 /// says happened, with the re-route a failed node has used up named in it.
-fn claim_words(escalation: &GateWaitingPayload) -> String {
-    yunta_render::claim::sentence(escalation.summary(), escalation.failure.as_deref())
+pub(crate) fn claim_words(escalation: &GateWaitingPayload) -> String {
+    yunta_render::claim::sentence(escalation.summary(), escalation.failure())
 }
 
 /// `text` in `tone`, wrapped `depth` steps in.
@@ -164,12 +161,12 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
         .options()
         .iter()
         .map(|option| {
-            let (label, tradeoff) = yunta_render::escalation::option_words(escalation, option);
+            let (label, tradeoff) = yunta_render::offers::option_words(escalation, option);
             DecisionOption {
                 id: option.id.to_string(),
                 label: Some(label),
                 tradeoff,
-                asks: option.asks.clone(),
+                asks: yunta_render::offers::asks(option),
             }
         })
         .collect();
@@ -229,116 +226,58 @@ fn paragraph(text: &str, depth: usize, width: usize) -> Vec<Line> {
         .collect()
 }
 
-/// A parked run's decision as the versioned JSON carries it: the node it
-/// belongs to, the escalation's own fields under the names the
-/// `gate_waiting` event writes them with, the claim as the words a person
-/// reads, and the commands that answer it.
-#[derive(serde::Serialize)]
-pub(crate) struct DecisionJson {
-    /// The node `resolve_gate` records the answer against.
-    node: String,
-    #[serde(flatten)]
-    escalation: GateWaitingPayload,
-    /// The command a person runs to answer, with `<option>` left for one
-    /// of the ids above it.
-    resolve_with: String,
-    /// The command that chooses each option, by its id.
-    commands: BTreeMap<String, String>,
-}
-
-impl DecisionJson {
-    pub(crate) fn new(run_id: &RunId, node: &NodeId, escalation: GateWaitingPayload) -> Self {
-        // The options carry the words the text menu draws, so a program reads
-        // what a person reads, including for an option that stores none.
-        let escalation = escalation.worded(yunta_render::escalation::option_words);
-        // The claim is a string here whatever kind of claim the log holds,
-        // so the document says it in the words a person reads.
-        let said = claim_words(&escalation);
-        let escalation = escalation.with_claim(said);
-        let commands = escalation
-            .options()
-            .iter()
-            .map(|option| {
-                let id = option.id.to_string();
-                // The command names the option, and carries the answer's flag
-                // when the option asks for words: a program that runs it as
-                // written is not refused for want of them.
-                let step = NextStep::ResolveGate {
-                    run: run_id.clone(),
-                    option: Some(option.id.clone()),
-                    text: option.asks.is_some(),
-                };
-                (id, advice::spell_for(&step, Reader::Agent))
-            })
-            .collect();
-        DecisionJson {
-            node: node.to_string(),
-            escalation,
-            resolve_with: advice::resolve_gate(run_id.as_str()),
-            commands,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::{Claim, Escalation, Evidence, Fact, GateOption};
+    use yunta_core::events::{
+        AuthorGate, Claim, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption, Menu,
+    };
+    use yunta_core::reserved::ReservedOption;
     use yunta_core::NonEmpty;
 
     use super::*;
     use crate::render::doc::{Block, Doc};
 
-    fn option(id: &'static str, label: &str, tradeoff: &str) -> GateOption {
-        GateOption {
-            id: yunta_core::OptionId::from_static(id),
-            label: Some(label.to_string()),
-            tradeoff: Some(tradeoff.to_string()),
-            asks: None,
-        }
-    }
-
-    fn escalation() -> GateWaitingPayload {
-        Escalation::new(
-            "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted",
-            vec![Fact::bare("exit 1")].into(),
-            NonEmpty::from((
-                option(
-                    "retry",
-                    "Re-route to `fix-lint` once more",
-                    "Uses one extra correction attempt beyond the declared max_reroutes (0); \
-                     escalates again if `fix-lint` doesn't fix it",
-                ),
-                vec![option(
-                    "abort",
-                    "Abort the run",
-                    "Pauses here; nothing further executes",
-                )],
-            )),
-        )
-        .expect("the summary states no fact the evidence holds")
-        .into_payload()
-    }
-
-    /// A gate whose option an older binary labelled with its own id.
-    fn gate() -> GateWaitingPayload {
-        Escalation::new(
-            "Approve the plan?",
-            vec![Fact::labelled("assignee", "lead")].into(),
-            NonEmpty::from((
-                option(
-                    "approve",
-                    "approve",
-                    "resolves this gate; the flow continues",
-                ),
-                Vec::new(),
-            )),
-        )
-        .expect("the summary states no fact the evidence holds")
-        .into_payload()
-    }
-
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const NODE: NodeId = NodeId::from_static("lint");
+
+    /// A failed node whose re-route to `fix-lint` is used up: its menu offers
+    /// the retry through `fix-lint` once more, and the abort every menu ends with.
+    fn escalation() -> GateWaitingPayload {
+        Escalation::new(
+            Claim::NodeFailed { node: NODE },
+            Menu::Failure(Box::new(FailureMenu {
+                attempt: 1,
+                failure: Failure::Message {
+                    outcome: "exit 1".into(),
+                },
+                remedies: Vec::new(),
+                stuck: None,
+                reroute: Some(ExhaustedReroute {
+                    goto: NodeId::from_static("fix-lint"),
+                    max_reroutes: 0,
+                    next_mode: None,
+                }),
+            })),
+            NonEmpty::from((
+                GateOption::reserved(ReservedOption::Retry),
+                vec![GateOption::reserved(ReservedOption::Abort)],
+            )),
+        )
+        .into_payload()
+    }
+
+    /// A gate an author declared, whose one option is labelled with its own
+    /// id: no words name the reserved approve on this menu.
+    fn gate() -> GateWaitingPayload {
+        Escalation::new(
+            Claim::NeedsDecision { node: NODE },
+            Menu::Gate(AuthorGate {
+                assignee: "lead".to_string(),
+            }),
+            NonEmpty::from((GateOption::reserved(ReservedOption::Approve), Vec::new())),
+        )
+        .into_payload()
+    }
 
     const NOTHING_BESIDE: Beside = Beside {
         claim: false,
@@ -423,51 +362,6 @@ mod tests {
             line.contains("/home/me/.yunta/worktrees/01J/tree"),
             "{line}"
         );
-    }
-
-    #[test]
-    fn the_json_carries_the_command_for_each_option() {
-        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, escalation())).unwrap();
-        assert_eq!(
-            json["commands"]["retry"],
-            "yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 retry"
-        );
-    }
-
-    #[test]
-    fn the_json_command_for_an_option_that_asks_for_words_carries_the_text_flag() {
-        let asking = GateOption {
-            asks: Some("say why".to_string()),
-            ..option("retry", "Retry", "runs it again")
-        };
-        let payload = Escalation::new(
-            Claim::NeedsDecision { node: NODE },
-            Evidence::none(),
-            NonEmpty::from((asking, Vec::new())),
-        )
-        .expect("an engine claim repeats no fact")
-        .into_payload();
-        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, payload)).unwrap();
-        assert_eq!(
-            json["commands"]["retry"],
-            "yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 retry --text \"<answer>\""
-        );
-    }
-
-    #[test]
-    fn the_json_says_an_engine_claim_in_the_words_a_person_reads() {
-        let payload = Escalation::new(
-            Claim::NeedsDecision { node: NODE },
-            Evidence::none(),
-            NonEmpty::from((
-                option("approve", "Approve", "lets the gate go on"),
-                Vec::new(),
-            )),
-        )
-        .expect("an engine claim repeats no fact")
-        .into_payload();
-        let json = serde_json::to_value(DecisionJson::new(&RUN, &NODE, payload)).unwrap();
-        assert_eq!(json["summary"], "gate `lint` needs a decision");
     }
 
     #[test]

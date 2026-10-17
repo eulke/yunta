@@ -74,7 +74,10 @@ pub struct AnswersFile {
 }
 
 mod answers;
+mod fault;
 mod rules;
+
+pub use fault::QuestionFault;
 
 /// The shape this document publishes, as the YAML it is.
 ///

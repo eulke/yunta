@@ -13,6 +13,7 @@
 //! `Debug`: a reader is owed a word, not a Rust identifier.
 
 mod baseline_words;
+mod capability_words;
 mod format_words;
 mod rail_words;
 mod scope_words;

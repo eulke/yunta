@@ -206,10 +206,11 @@ fn check_command_policy(workflow: &Workflow, config: &ConfigLayer, errors: &mut 
             .chain(&default_hooks.after)
             .filter_map(|step| step.run.text(config))
         {
-            if let Some(rule) = crate::permissions::command_violation(command, Some(permissions)) {
+            if let Some(denied) = crate::permissions::command_violation(command, Some(permissions))
+            {
                 errors.push(CheckError::CommandDenied {
                     node: NODE_DEFAULTS.clone(),
-                    rule,
+                    denied,
                 });
             }
         }

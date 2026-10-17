@@ -353,7 +353,7 @@ mod tests {
     fn node_failed(text: &str) -> EventPayload {
         EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
             Failure::Message {
-                outcome: text.to_string(),
+                outcome: text.into(),
             },
             TokenUsage::default(),
         )))

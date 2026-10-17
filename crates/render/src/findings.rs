@@ -5,30 +5,31 @@
 //! and what other nodes answered.
 
 use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
-use yunta_core::events::FindingSeverity;
-use yunta_core::{FindingEntry, FindingsFile};
+use yunta_core::events::{Finding, FindingSeverity};
+use yunta_core::HeldFindings;
 
 use crate::blocks::{Fields, Prose, Section};
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
-use crate::Mark;
+use crate::{found, Mark};
 
-pub fn document(file: &FindingsFile, of: &str) -> Doc<'static> {
-    let mut found: Vec<&FindingEntry> = file.findings.iter().collect();
-    found.sort_by_key(|finding| finding.severity);
-    let counts = counted(found.iter().map(|finding| finding.severity));
+pub fn document(held: &HeldFindings, of: &str) -> Doc<'static> {
+    let mut sorted: Vec<Finding> = held.findings.iter().cloned().map(Finding::from).collect();
+    sorted.sort_by_key(|finding| finding.severity);
+    let counts = counted(sorted.iter().map(|finding| finding.severity));
     let mut doc = Doc::new().with(Block::Title(heading(
         &format!("findings{of}"),
         &counts,
         String::new(),
     )));
-    for finding in found {
+    for finding in sorted {
+        let (title, detail) = found::said(&finding.says);
         doc = doc.with(Section {
             mark: Some(mark(finding.severity)),
-            title: titled(finding.severity, &finding.title),
+            title: titled(finding.severity, &title),
             blocks: vec![
                 Prose(format!("{}, at {}", finding.id, finding.location)).into(),
-                Block::Markdown(finding.detail.clone()),
+                Block::Markdown(detail),
             ],
         });
     }
@@ -36,14 +37,14 @@ pub fn document(file: &FindingsFile, of: &str) -> Doc<'static> {
 }
 
 pub fn run_document(view: &RunFindings) -> Doc<'static> {
-    let mut found: Vec<&StandingFinding> = view.findings.iter().collect();
-    found.sort_by_key(|standing| standing.finding.severity);
-    let counts = counted(found.iter().map(|standing| standing.finding.severity));
-    let answered = found
+    let mut sorted: Vec<&StandingFinding> = view.findings.iter().collect();
+    sorted.sort_by_key(|standing| standing.finding.severity);
+    let counts = counted(sorted.iter().map(|standing| standing.finding.severity));
+    let answered = sorted
         .iter()
         .filter(|standing| !standing.answers.is_empty())
         .count();
-    let settled = found
+    let settled = sorted
         .iter()
         .filter(|standing| standing.settled.is_some())
         .count();
@@ -52,7 +53,7 @@ pub fn run_document(view: &RunFindings) -> Doc<'static> {
         &counts,
         tally(answered, settled),
     )));
-    for standing in found {
+    for standing in sorted {
         doc = doc.with(standing_section(standing));
     }
     doc
@@ -70,6 +71,7 @@ fn heading(what: &str, counts: &[String], tally: String) -> Line {
 
 fn standing_section(standing: &StandingFinding) -> Section<'static> {
     let finding = &standing.finding;
+    let (title, detail) = found::said(&finding.says);
     let found_by = match &standing.node {
         Some(node) => format!("{} of `{node}`, at {}", finding.id, finding.location),
         None => format!("{}, the run's own, at {}", finding.id, finding.location),
@@ -98,10 +100,10 @@ fn standing_section(standing: &StandingFinding) -> Section<'static> {
     }
     Section {
         mark: Some(mark(finding.severity)),
-        title: titled(finding.severity, &finding.title),
+        title: titled(finding.severity, &title),
         blocks: vec![
             Prose(found_by).into(),
-            Block::Markdown(finding.detail.clone()),
+            Block::Markdown(detail),
             fields.into(),
         ],
     }

@@ -3,7 +3,7 @@
 //! posted, and a sequence the engine never writes leaves it unmoved.
 
 use proptest::prelude::*;
-use yunta_core::events::findings::{FindingLedger, Slot};
+use yunta_core::events::findings::{FindingLedger, FindingSays, Slot};
 use yunta_core::events::FindingEvent;
 use yunta_core::events::{
     EventPayload, Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
@@ -16,10 +16,21 @@ fn finding(id: &str, title: &str) -> Finding {
     Finding {
         id: FindingId::try_from(id.to_string()).expect("a well-formed id"),
         severity: FindingSeverity::Major,
-        title: title.to_string(),
+        says: FindingSays::Written {
+            title: title.to_string(),
+            detail: "d".to_string(),
+        },
         location: "src/a.rs:1".into(),
-        detail: "d".to_string(),
         proposed_criterion: None,
+    }
+}
+
+/// The title a session wrote the finding with. Every finding these tests
+/// fold comes from a session, so an engine's finding is a failed expectation.
+fn title_of(finding: &Finding) -> &str {
+    match &finding.says {
+        FindingSays::Written { title, .. } => title.as_str(),
+        FindingSays::Found { .. } => panic!("the fold here holds only findings a session wrote"),
     }
 }
 
@@ -50,7 +61,7 @@ fn an_update_replaces_the_state_and_keeps_the_place() {
         .node("review", updated("a", "sharper"))
         .build();
     let effective = FindingLedger::of(&log).effective();
-    let titles: Vec<&str> = effective.iter().map(|p| p.finding.title.as_str()).collect();
+    let titles: Vec<&str> = effective.iter().map(|p| title_of(&p.finding)).collect();
     assert_eq!(
         titles,
         vec!["sharper", "second"],
@@ -92,7 +103,7 @@ fn one_node_never_reaches_another_nodes_finding() {
     let effective = FindingLedger::of(&log).effective();
     assert_eq!(effective.len(), 1);
     assert_eq!(effective[0].node, Some(NodeId::from("reviewer-a")));
-    assert_eq!(effective[0].finding.title, "a's own");
+    assert_eq!(title_of(&effective[0].finding), "a's own");
 }
 
 #[test]
@@ -116,7 +127,7 @@ fn a_sequence_the_engine_never_writes_leaves_the_state_unmoved() {
         1,
         "only `b` stands, with the state of its first post: {effective:?}"
     );
-    assert_eq!(effective[0].finding.title, "second");
+    assert_eq!(title_of(&effective[0].finding), "second");
     assert!(matches!(
         ledger.status(
             &NodeId::from("review"),
@@ -216,7 +227,7 @@ proptest! {
             .collect();
         let got: Vec<(String, String)> = effective
             .iter()
-            .map(|p| (p.finding.id.to_string(), p.finding.title.clone()))
+            .map(|p| (p.finding.id.to_string(), title_of(&p.finding).to_string()))
             .collect();
 
         prop_assert_eq!(got, expected);

@@ -112,7 +112,7 @@ mod tests {
         let legacy = serde_json::json!({ "reason": "waiting" });
         let read: RunPausedPayload = serde_json::from_value(legacy).unwrap();
         let recorded = PauseReason::Recorded {
-            sentence: "waiting".to_string(),
+            sentence: "waiting".into(),
         };
         assert_eq!(
             Happening::from(&RunEvent::Paused(read)),

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::FindingSeverity;
-use crate::ids::{NodeId, OptionId, Responder, RunId};
+use crate::ids::{ExecutorName, NodeId, OptionId, Responder, RunId};
 
 /// What a node resolved to: a fact the engine checked, or the agent's
 /// own summary of its work.
@@ -69,6 +69,11 @@ pub enum EngineFact {
     Approved {
         by: Responder,
         on: Approval,
+    },
+    /// An external executor the node delegated its work to exited with status
+    /// zero, and wrote no summary of its own.
+    ExecutorExited {
+        executor: ExecutorName,
     },
 }
 

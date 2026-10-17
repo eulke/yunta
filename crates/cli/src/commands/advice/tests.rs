@@ -1,5 +1,6 @@
 use chrono::TimeZone;
-use yunta_core::events::{Escalation, Evidence, Failure, FailureMenu, GateOption, PauseReason};
+use yunta_core::events::{Claim, Escalation, Failure, FailureMenu, GateOption, Menu, PauseReason};
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{NodeId, NonEmpty, OptionId};
 
 use super::*;
@@ -28,25 +29,19 @@ fn decision_stuck_on(stuck: Stuck) -> GateWaitingPayload {
     let menu = FailureMenu {
         attempt: 1,
         failure: Failure::Message {
-            outcome: "exit 1".to_string(),
+            outcome: "exit 1".into(),
         },
         remedies: Vec::new(),
         stuck: Some(stuck),
         reroute: None,
     };
-    let abort = GateOption {
-        id: OptionId::from_static("abort"),
-        label: Some("Abort".to_string()),
-        tradeoff: None,
-        asks: None,
-    };
     Escalation::new(
-        "node `build` failed",
-        Evidence::none(),
-        NonEmpty::from((abort, Vec::new())),
+        Claim::NodeFailed {
+            node: NodeId::from_static("build"),
+        },
+        Menu::Failure(Box::new(menu)),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Abort), Vec::new())),
     )
-    .expect("the claim does not repeat its record")
-    .with_failure(menu)
     .into_payload()
 }
 

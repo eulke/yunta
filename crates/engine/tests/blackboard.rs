@@ -281,15 +281,17 @@ sessions:
 
 #[test]
 fn consolidate_blackboard_is_invariant_under_event_shuffling() {
-    use yunta_core::events::{Finding, FindingPostedPayload, FindingSeverity};
+    use yunta_core::events::{Finding, FindingPostedPayload, FindingSays, FindingSeverity};
     let posted = |id: &str| {
         EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
             finding: Finding {
                 id: id.into(),
                 severity: FindingSeverity::Minor,
-                title: format!("title {id}"),
+                says: FindingSays::Written {
+                    title: format!("title {id}"),
+                    detail: "detail".to_string(),
+                },
                 location: "src/x.rs".into(),
-                detail: "detail".to_string(),
                 proposed_criterion: None,
             },
         }))
@@ -319,15 +321,17 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
 /// back and rewrites `f2`.
 fn group_log() -> Vec<yunta_core::events::StoredEvent> {
     use yunta_core::events::{
-        Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
+        Finding, FindingPostedPayload, FindingSays, FindingSeverity, FindingUpdatedPayload,
         FindingWithdrawnPayload,
     };
     let finding = |id: &str, title: &str| Finding {
         id: id.into(),
         severity: FindingSeverity::Minor,
-        title: title.to_string(),
+        says: FindingSays::Written {
+            title: title.to_string(),
+            detail: "detail".to_string(),
+        },
         location: format!("src/{id}.rs").as_str().into(),
-        detail: "detail".to_string(),
         proposed_criterion: None,
     };
     Log::for_run("run-x")

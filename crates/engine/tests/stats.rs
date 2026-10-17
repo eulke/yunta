@@ -7,10 +7,11 @@ use yunta_core::caution::Caution;
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{
     ArtifactSubmittedPayload, EventBody, EventPayload, Failure, Finding, FindingOperation,
-    FindingPostedPayload, FindingRefusedPayload, FindingSeverity, FindingUpdatedPayload,
-    FindingWithdrawnPayload, NodeFailedPayload, NodeFinishedPayload, NodeOutcome,
-    NodeReroutedPayload, NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload, StoredEvent,
-    SubmissionOutcome, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    FindingPostedPayload, FindingRefusedPayload, FindingSays, FindingSeverity,
+    FindingUpdatedPayload, FindingWithdrawnPayload, NodeFailedPayload, NodeFinishedPayload,
+    NodeOutcome, NodeReroutedPayload, NodeStartedPayload, RunCreatedPayload, RunnerResolvedPayload,
+    StoredEvent, SubmissionOutcome, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage,
 };
 use yunta_core::{Node, NodeId, NodeKind, RunnerCandidate, Workflow};
 use yunta_engine::{
@@ -134,7 +135,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             "b",
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::Message {
-                    outcome: "criteria still red".to_string(),
+                    outcome: "criteria still red".into(),
                 },
                 tokens(80, 40, None),
             ))),
@@ -144,7 +145,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
                 "b".into(),
                 yunta_core::events::Failure::Message {
-                    outcome: "criteria still red".to_string(),
+                    outcome: "criteria still red".into(),
                 },
                 yunta_core::events::RerouteOrigin::OnFailure,
                 Some(2),
@@ -480,9 +481,11 @@ fn finding(id: &str) -> Finding {
     Finding {
         id: id.into(),
         severity: FindingSeverity::Major,
-        title: "the tasks document has no criteria".to_string(),
+        says: FindingSays::Written {
+            title: "the tasks document has no criteria".to_string(),
+            detail: "every task needs one".to_string(),
+        },
         location: "plan.yaml".into(),
-        detail: "every task needs one".to_string(),
         proposed_criterion: None,
     }
 }
@@ -495,10 +498,7 @@ fn report() -> yunta_core::diagnostic::Report {
         ),
         vec![yunta_core::diagnostic::Diagnostic::new(
             yunta_core::diagnostic::Subject::Document,
-            yunta_core::diagnostic::Problem::rule(
-                yunta_core::diagnostic::RuleCode::EmptyDetail,
-                "`detail` is empty",
-            ),
+            yunta_core::diagnostic::Problem::broke(yunta_core::FindingFault::EmptyDetail),
         )],
     )
 }

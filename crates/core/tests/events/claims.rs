@@ -1,6 +1,5 @@
-//! The claim an escalation states: a written summary reads back as written, an
-//! engine claim reads back as the object it was written as, and an engine claim
-//! is never refused for repeating its record.
+//! The claim an escalation states: a written summary reads back as written, and
+//! an engine claim reads back as the object it was written as.
 
 use super::*;
 
@@ -11,11 +10,12 @@ fn a_plain_string_summary_reads_back_as_a_written_claim() {
     assert_eq!(parsed, Claim::Written("Ready to open the PR?".to_string()));
 
     let payload = Escalation::published_to(
-        "Ready to open the PR?",
-        vec![Fact::labelled("published at", "example/repo#1")].into(),
+        Claim::Written("Ready to open the PR?".to_string()),
+        PublishedGate {
+            url: "https://example.test/pull/1".to_string(),
+        },
         "https://example.test/pull/1",
     )
-    .expect("the summary states no fact the evidence holds")
     .into_payload();
     let json = serde_json::to_value(&payload).unwrap();
     assert_eq!(json["summary"], "Ready to open the PR?", "{json}");
@@ -43,18 +43,14 @@ fn an_engine_claim_round_trips_as_the_tagged_object_it_is() {
         Claim::NodeFailed {
             node: yunta_core::NodeId::from_static("lint"),
         },
-        Evidence::none(),
+        Menu::Gate(AuthorGate {
+            assignee: "lead".into(),
+        }),
         NonEmpty::from((
-            GateOption {
-                id: "retry".into(),
-                label: None,
-                tradeoff: None,
-                asks: None,
-            },
+            GateOption::reserved(yunta_core::reserved::ReservedOption::Retry),
             Vec::new(),
         )),
-    )
-    .expect("an engine claim repeats no record");
+    );
     let payload = escalation.into_payload();
     let json = serde_json::to_value(&payload).unwrap();
     assert_eq!(
@@ -67,27 +63,84 @@ fn an_engine_claim_round_trips_as_the_tagged_object_it_is() {
 }
 
 #[test]
-fn an_engine_claim_is_never_refused_as_repeating_its_record() {
-    let menu = NonEmpty::from((
-        GateOption {
-            id: "retry".into(),
-            label: None,
-            tradeoff: None,
-            asks: None,
+fn an_escalation_writes_its_menu_beside_its_claim_and_its_options_as_data() {
+    let payload = Escalation::new(
+        Claim::NeedsDecision {
+            node: yunta_core::NodeId::from_static("review"),
         },
-        Vec::new(),
-    ));
-    let escalation = Escalation::new(
-        Claim::NodeFailed {
-            node: yunta_core::NodeId::from_static("exit"),
-        },
-        vec![Fact::bare("exit")].into(),
-        menu,
+        Menu::Gate(AuthorGate {
+            assignee: "lead".into(),
+        }),
+        NonEmpty::from((
+            GateOption::leading(
+                yunta_core::OptionId::from_static("proceed"),
+                Leads::On {
+                    next: vec![yunta_core::NodeId::from_static("ship")],
+                    settles: false,
+                },
+            ),
+            Vec::new(),
+        )),
+    )
+    .into_payload();
+    let json = serde_json::to_value(&payload).unwrap();
+    assert_eq!(
+        json["gate"],
+        serde_json::json!({"assignee": "lead"}),
+        "{json}"
     );
-    assert!(
-        escalation.is_ok(),
-        "an engine claim states no fact in words, so it repeats none"
+    assert_eq!(
+        json["options"],
+        serde_json::json!([
+            {"id": "proceed", "leads": {"on": {"next": ["ship"], "settles": false}}}
+        ]),
+        "{json}"
     );
+    assert!(json.get("evidence").is_none(), "{json}");
+    let read: GateWaitingPayload = serde_json::from_value(json).unwrap();
+    assert_eq!(read, payload);
+}
+
+#[test]
+fn the_budget_loop_scope_and_departure_claims_round_trip_as_their_objects() {
+    let task = TaskId::from_static("task-h");
+    let claims = [
+        (
+            Claim::TokensSpent {
+                run: RunId::from("run-1"),
+            },
+            serde_json::json!({"claim": "tokens_spent", "run": "run-1"}),
+        ),
+        (
+            Claim::LoopCapSpent {
+                node: yunta_core::NodeId::from_static("implement"),
+            },
+            serde_json::json!({"claim": "loop_cap_spent", "node": "implement"}),
+        ),
+        (
+            Claim::ScopeAsked {
+                task: task.clone(),
+                reason: None,
+            },
+            serde_json::json!({"claim": "scope_asked", "task": "task-h"}),
+        ),
+        (
+            Claim::ScopeAsked {
+                task: task.clone(),
+                reason: Some("need b.txt".to_string()),
+            },
+            serde_json::json!({"claim": "scope_asked", "task": "task-h", "reason": "need b.txt"}),
+        ),
+        (
+            Claim::Departs { task },
+            serde_json::json!({"claim": "departs", "task": "task-h"}),
+        ),
+    ];
+    for (claim, json) in claims {
+        assert_eq!(serde_json::to_value(&claim).unwrap(), json);
+        let parsed: Claim = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, claim);
+    }
 }
 
 #[test]
@@ -128,10 +181,11 @@ fn a_published_gate_keeps_its_awaiting_review_claim_on_the_log() {
     };
     let payload = Escalation::published_to(
         claim.clone(),
-        vec![Fact::labelled("published at", "example/repo#1")].into(),
+        PublishedGate {
+            url: "https://example.test/pull/1".to_string(),
+        },
         "https://example.test/pull/1",
     )
-    .expect("an engine claim repeats no record")
     .into_payload();
     let json = serde_json::to_value(&payload).unwrap();
     assert_eq!(

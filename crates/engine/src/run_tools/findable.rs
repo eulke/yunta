@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use yunta_core::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
+use yunta_core::diagnostic::{Diagnostic, Named, Problem, RunFault, Subject};
 use yunta_core::events::ExecutionEnvironment;
 use yunta_core::{Task, TasksFile};
 
@@ -50,20 +50,16 @@ pub(super) async fn unfindable(
                 .into_iter()
                 .find(|program| missing.contains(program));
             if let Some(program) = lacking {
-                let mut detail = format!(
-                    "`{}` starts `{program}`, which is on no directory of the PATH the engine runs \
-                     criteria with",
-                    criterion.cmd
-                );
-                if let Some(environment) = environment {
-                    detail.push_str(&format!(" — under {environment}"));
-                }
                 found.push(Diagnostic::new(
                     Subject::Criterion {
                         task: Named::new(task.id.clone(), index),
                         index: at,
                     },
-                    Problem::rule(RuleCode::CriterionCannotRun, detail),
+                    Problem::broke(RunFault::NotOnPath {
+                        cmd: criterion.cmd.clone(),
+                        program,
+                        environment: environment.cloned(),
+                    }),
                 ));
             }
         }

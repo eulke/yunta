@@ -1,5 +1,6 @@
 ␛[1mrun 7E5PH4␛[0m: ␛[1;35m◆␛[0m ␛[1;35mneeds you␛[0m
-  ␛[1;35mnode `lint` failed and its 0 re-routes to `fix-lint` are exhausted — exit 101␛[0m
+  ␛[1;35mnode `lint` failed and its 0 re-routes to `fix-lint` are exhausted — exit 101; error[E0425]:␛[0m
+  ␛[1;35mcannot find value `x` in this scope; --> src/lib.rs:3:5␛[0m
 
   ␛[1mlint␛[0m: ␛[31mexit 101␛[0m
   ␛[2m  │ ␛[0merror[E0425]: cannot find value `x` in this scope
@@ -8,7 +9,8 @@
 
   ␛[1mdecision on node `lint`␛[0m
     ␛[1mretry␛[0m — Re-route to `fix-lint` once more
-      ␛[2mUses one extra correction attempt beyond the declared max_reroutes (0)␛[0m
+      ␛[2mUses one extra correction attempt beyond the declared max_reroutes (0); escalates again if␛[0m
+      ␛[2m`fix-lint` doesn't fix it␛[0m
       ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
     ␛[1mabort␛[0m — Abort the run
       ␛[2mPauses here; nothing further executes␛[0m

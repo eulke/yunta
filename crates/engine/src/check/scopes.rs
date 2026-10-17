@@ -231,10 +231,11 @@ pub(crate) fn check_commands(
 ) {
     for node in nodes {
         for command in yunta_core::node_commands(node).filter_map(|run| run.text(config)) {
-            if let Some(rule) = crate::permissions::command_violation(command, Some(permissions)) {
+            if let Some(denied) = crate::permissions::command_violation(command, Some(permissions))
+            {
                 errors.push(CheckError::CommandDenied {
                     node: node.id.clone(),
-                    rule,
+                    denied,
                 });
             }
         }

@@ -14,7 +14,7 @@ mod console;
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{Failure, FindingEvent, GateEvent, NodeEvent};
+use yunta_core::events::{Failure, FindingCause, FindingSays, GateEvent, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::golden::assert_golden;
@@ -218,15 +218,15 @@ async fn changes_requested_posts_findings_and_fails_the_node() {
     assert!(yunta_render::failure::sentence(failure).starts_with("changes requested by person-b"));
 
     let events = bench.events();
-    let finding = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
-            Some(&p.finding)
-        }
-        _ => None,
-    });
-    assert_eq!(
-        finding.map(|f| f.detail.as_str()),
-        Some("please add a test")
+    let finding = common::findings_posted(&events).first().copied();
+    assert!(
+        matches!(
+            finding.map(|f| &f.says),
+            Some(FindingSays::Found {
+                cause: FindingCause::ReviewComment { body, .. },
+            }) if body.as_str() == "please add a test"
+        ),
+        "the finding's cause carries the review comment: {finding:?}"
     );
 }
 

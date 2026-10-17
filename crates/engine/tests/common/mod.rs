@@ -994,7 +994,7 @@ pub fn node_failed(node: &str) -> yunta_core::events::Claim {
 
 /// The claim an escalation makes in the words of whoever escalated.
 pub fn written(text: &str) -> yunta_core::events::Claim {
-    yunta_core::events::Claim::from(text)
+    yunta_core::events::Claim::Written(text.to_string())
 }
 
 /// The failure a node ends with when its lint command fails.
@@ -1006,7 +1006,7 @@ pub fn lint_failure() -> Failure {
 
 /// The node an exhausted re-route of a failed node goes to, when its menu names one.
 pub fn reroute_goto(escalation: &yunta_core::events::Escalation) -> Option<String> {
-    let menu = escalation.failure.as_ref()?;
+    let menu = escalation.failure()?;
     menu.reroute
         .as_ref()
         .map(|reroute| reroute.goto.as_str().to_owned())

@@ -61,7 +61,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{ContextAssembledPayload, ContextSourceRef, EventPayload, Failure};
+use yunta_core::events::{
+    ContextAssembledPayload, ContextSourceRef, EngineError, EngineStep, EventPayload, Failure,
+};
 use yunta_core::{sha256_hex, ContextSpec, Node};
 
 use super::node_close::fail;
@@ -178,7 +180,10 @@ async fn assemble(
         )),
         Err(error) => {
             let failure = Failure::EngineFailed {
-                engine_error: error.to_string(),
+                engine_error: EngineError::Step {
+                    step: EngineStep::Context,
+                    report: Some(error.to_string()),
+                },
             };
             Ok(Step::Ended(fail(ctx, node, failure).await?))
         }

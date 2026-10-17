@@ -1,14 +1,18 @@
 ---
 number: D163
 title: "La `evidence` de una escalación son hechos etiquetados, no prosa"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D268]
 ---
 
 # D163 — La `evidence` de una escalación son hechos etiquetados, no prosa
 
-El Contrato §5.3 y spec-events §5.18 la declaran desde siempre como estructura
+*(Revisada por D268: el engine ya no adjunta hechos al log. Los de una escalación los
+escribe render desde su menú y desde las opciones que retiene, y el campo `evidence`
+del log queda para lo que adjuntó un log anterior. Siguen en pie la forma
+`{label?, value}` y la regla de que la afirmación y el registro no se repiten.)* El
+Contrato §5.3 y spec-events §5.18 la declaran desde siempre como estructura
 que adjunta el engine desde el log; el código la llevaba como `String`. Pasa a
 ser una lista de `{label?, value}`: `label` es opcional porque un hecho como
 `exit 1` o `no forge reachable from this machine` ya se nombra solo, mientras

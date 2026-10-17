@@ -5,7 +5,8 @@
 
 use super::proof::{as_a_word, documentation};
 use super::rules::broke;
-use crate::diagnostic::{Diagnostic, RuleCode};
+use super::TaskFault;
+use crate::diagnostic::Diagnostic;
 use crate::{Change, Shape, Task};
 
 /// Each change of `task` whose code leaves out a symbol its `at` names —
@@ -26,48 +27,38 @@ pub(super) fn unshown(index: usize, task: &Task, shapes: &[Shape]) -> Vec<Diagno
             .filter(|shape| shape.owner == task.id && shape.file == change.file())
             .map(|shape| shape.code.as_str())
             .collect();
-        if let Some(missing) = missing(change, code, &shaped) {
+        if let Some(names) = missing(change, code, &shaped) {
             broken.push(broke(
                 index,
                 &task.id,
-                RuleCode::ChangeCodeMissesAName,
-                missing,
+                TaskFault::ChangeCodeMissesAName {
+                    at: change.at.clone(),
+                    names,
+                },
             ));
         }
         if !documentation(change.file()) && only_comments(code) {
             broken.push(broke(
                 index,
                 &task.id,
-                RuleCode::ChangeCodeIsAComment,
-                format!(
-                    "the change at `{}` has only a comment for its `code`; give the code it adds \
-                     or changes — a comment says what the code will do, and a person decides on \
-                     how it looks",
-                    change.at
-                ),
+                TaskFault::ChangeCodeIsAComment {
+                    at: change.at.clone(),
+                },
             ));
         }
     }
     broken
 }
 
-/// What `change` says it changes and neither its `code` nor a shape in
-/// its file shows, said as what to give; `None` when every name shows.
-fn missing(change: &Change, code: &str, shaped: &[&str]) -> Option<String> {
+/// The names `change` says it changes that neither its `code` nor a shape in
+/// its file shows, bare; `None` when every name shows.
+fn missing(change: &Change, code: &str, shaped: &[&str]) -> Option<Vec<String>> {
     let missing: Vec<String> = named(change)
         .into_iter()
         .filter(|name| !as_a_word(code, name) && !shaped.iter().any(|shape| as_a_word(shape, name)))
-        .map(|name| format!("`{name}`"))
+        .map(str::to_string)
         .collect();
-    (!missing.is_empty()).then(|| {
-        format!(
-            "the change at `{}` names {}, and its `code` does not show {}; give the declaration \
-             of each — its whole signature, or the type with the fields it adds",
-            change.at,
-            missing.join(", "),
-            if missing.len() == 1 { "it" } else { "them" }
-        )
-    })
+    (!missing.is_empty()).then_some(missing)
 }
 
 /// The symbols `change.at` names after its file: `pack.rs::add/update`

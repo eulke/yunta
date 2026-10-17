@@ -393,7 +393,7 @@ fn paused_draft(run_id: &str, reason: &str) -> EventDraft {
         None,
         EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
             &PauseReason::Recorded {
-                sentence: reason.to_string(),
+                sentence: reason.into(),
             },
         ))),
     )

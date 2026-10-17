@@ -245,10 +245,11 @@ The fields this release adds to a kind are additive. A `blocked` task carries th
 `stop` that says why it stopped, whose `type` names the cause; a result in
 `criteria_checked` carries the `conclusion` its command printed; a
 `promotion_signaled` that a failure asked for carries that failure as
-`cause.failure`; and a `gate_waiting` for a node's failure or a task's departure
-carries the menu it offers as data, where each option's `label` and `tradeoff` are
-optional. A log written before a field existed reads without it: a `blocked` task
-with no `stop` is one whose cause the log does not hold.
+`cause.failure`; and a `gate_waiting` carries the menu its escalation is about as
+data, under one of eight keys (`gate`, `failure`, `departure`, `scope`, `budget`,
+`loop_cap`, `console`, `published`), while its options carry where an author's option
+leads and no words. A log written before a field existed reads without it: a
+`blocked` task with no `stop` is one whose cause the log does not hold.
 
 `retryable` on `node_failed` is read from a log that wrote it and is never written
 again: what a retry can change is the failure's own cause. A binary from before
@@ -257,8 +258,9 @@ pause is `awaiting_reset`, as corrupt, like any payload that is not its kind's
 shape. This policy makes no promise about a log a newer binary wrote.
 
 An engine claim in a `gate_waiting` summary is an object tagged by `claim`:
-`needs_decision`, `node_failed`, `awaits_review`, `forge_unreachable` or
-`recheck_unreachable`, and so is the escalation that a `run_paused` carries when its
+`needs_decision`, `node_failed`, `awaits_review`, `forge_unreachable`,
+`recheck_unreachable`, `tokens_spent`, `loop_cap_spent`, `scope_asked` or `departs`,
+and so is the escalation that a `run_paused` carries when its
 pause is `escalation`. A binary from before those claims reads that payload as
 corrupt, as it reads the shapes above; this policy makes no promise about a log a
 newer binary wrote. A log written before them carries its summary as a plain string,
@@ -286,8 +288,11 @@ under `of`, names the entry the problem is about; for a workflow that is `node`.
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
 read (`tasks[1].scope`); its stable code is `parse`. `rule` carries a `code` from a
-closed set and the `detail` a reader acts on. A node that fails on an artifact
-is offered a retry only once the run's tree has moved since the failure, which a
+closed set and the `fault` its clause is written from: the family of the rule and the
+value it found, as in `{"tasks": "empty-title"}`. A reader writes the clause beside
+it, when it reads the log; a `rule` an older log wrote carries its `detail`, as it was
+written. A node that fails on an artifact is offered a retry only once the run's tree
+has moved since the failure, which a
 resume that finds the failure waiting records (`run_resumed.tree`): the failure, not
 a flag stored beside it, says what a retry can change.
 
@@ -537,6 +542,42 @@ owes. One no run holds carries `artifact` too, plus `run` — the run that was a
 recent failure is a plain message has no entry at all, so what the field shows is
 always the state the node is in now.
 
+Version 7 of `status --json` reads a parked run's decision as its log holds the
+escalation, with the words a person reads written beside it. `decision` carries the
+escalation's menu under one of the eight keys `gate`, `failure`, `departure`, `scope`,
+`budget`, `loop_cap`, `console` and `published`, and that key holds the data its words
+are written from. `decision.evidence` lists the facts a person is shown, written from
+the menu and from the options it withholds, so a failure, departure or scope menu
+lists its facts there too. `decision.failure.failure` is the failure as the log keeps
+it: `engine_error` and `denied_rule` are objects rather than sentences, and
+`release_failed` sits beside `session_not_stopped` when taking back what the session
+set up failed too. An owed scope request carries `reason` only when its session gave
+one. The stamp does not move for these: version 7 is not published, and no released
+binary has written it.
+
+Each problem of an artifact's `diagnostics` that is a broken rule carries `fault`, the
+value its clause is written from, and beside it `detail`, the clause a reader sees,
+written when the document is read. A rule an older log wrote carries its `detail` as it
+was written and gets no second clause; a parse problem carries its `message` and no
+`detail`.
+
+A findings document the run holds may carry an entry with `cause` in place of `title`
+and `detail`. Those are the documents a node's close derives, a gate shows, a child run
+hands up, and a promotion's successor inherits. An entry with a `cause` is a finding the
+engine reported: its cause is what the engine found, as data, and the words a reader
+sees are written from it. A document a session hands over has no such entry and reads
+as it did, with a `title` and a `detail` on each entry. A gate that shows an engine
+finding this binary wrote shows its `cause` in `artifacts/findings.yaml`, so that file,
+and the hash the gate records for it, change with it.
+
+A log an earlier binary wrote reads, shows and exports with its words. This binary
+writes no words into a log of its own. It reads the words an older log stored and
+writes each one back as it was read, so an export of an older run loses none: an
+option's `label`, `tradeoff` and `asks`; the facts of `evidence`; the sentence a
+withheld option's `because` holds; a finding's `title` and `detail`; a diagnostic's
+`detail`; a note's `text`; and `engine_error`, `denied_rule` and `session_not_stopped`
+as sentences.
+
 ## The MCP servers
 
 Yunta serves MCP in two places: the per-session tool server the engine starts on
@@ -626,10 +667,10 @@ secret and every session token replaced by `[redacted]`. `detail` says the same
 thing in a sentence. `diagnostics` gains no entry for it: a dead session names no
 document, the same as a failure stated in one sentence.
 
-A parked run's `decision.evidence` is a list of the facts the engine attached,
-each `{label?, value}` — the escalation as the log holds it, not the lines a
-reader was shown. A fact that names itself, like a failing command's `exit 1`,
-carries no `label`.
+A parked run's `decision.evidence` is a list of the facts a reader is shown, each
+`{label?, value}`, written from the escalation's menu and from the options it
+withholds, and from the facts an older log attached. A fact that names itself, like a
+failing command's `exit 1`, carries no `label`.
 
 In `status --json`, `diagnostics` maps a failed node to the documents its failure
 names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
@@ -642,11 +683,12 @@ recent failure is a plain message has no entry at all, so what the field shows i
 always the state the node is in now.
 
 In `status --json`, `decision` carries what a parked run is waiting on:
-`{node, summary, evidence, options: [{id, label, tradeoff}], external_ref?,
-withheld?, resolve_with, commands}` — the escalation under the same field names
-the `gate_waiting` event writes, plus the node it belongs to, the command that
-answers it with the option left as `<option>`, and `commands`, the command that
-chooses each option keyed by its id. `withheld` lists each option the gate does
+`{node, summary, evidence, options: [{id, label, tradeoff?, asks?}], external_ref?,
+shows?, withheld?, <menu>, resolve_with, commands}`: the node it belongs to, the claim
+and the options in the words a reader sees, the evidence and the withheld options as
+shown, the escalation's menu under the key its `gate_waiting` event writes it with, the
+command that answers it with the option left as `<option>`, and `commands`, the command
+that chooses each option keyed by its id. `withheld` lists each option the gate does
 not offer, as `{option, because}`, and is absent when it withholds none. An option a workflow declares on a gate is
 labelled with where it leads — ``Back to `fix` ``, ``On to `deploy` `` — rather
 than with its own id. Two pauses reconstruct one: a node whose

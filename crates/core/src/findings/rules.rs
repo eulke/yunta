@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 
+use super::fault::FindingFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{FindingId, FindingsFile};
 
@@ -95,19 +96,16 @@ pub(super) fn check_withdrawal(withdrawal: &crate::findings::Withdrawal) -> Vec<
     if withdrawal.reason.trim().is_empty() {
         return vec![Diagnostic::new(
             Subject::Finding(Named::new(withdrawal.id.clone(), 0)),
-            Problem::rule(
-                RuleCode::EmptyReason,
-                "say why it no longer stands, so the log keeps the reason",
-            ),
+            Problem::broke(FindingFault::EmptyReason),
         )];
     }
     Vec::new()
 }
 
-fn broke(index: usize, id: &FindingId, code: RuleCode, detail: &str) -> Diagnostic {
+fn broke(index: usize, id: &FindingId, fault: FindingFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Finding(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }
 
@@ -116,12 +114,12 @@ fn broke(index: usize, id: &FindingId, code: RuleCode, detail: &str) -> Diagnost
 /// for an entry that arrived alone, through the tool that posts one.
 pub(super) fn check_entry(entry: &crate::findings::FindingEntry, index: usize) -> Vec<Diagnostic> {
     [
-        (&entry.title, "title", RuleCode::EmptyTitle),
-        (&entry.detail, "detail", RuleCode::EmptyDetail),
+        (&entry.title, FindingFault::EmptyTitle),
+        (&entry.detail, FindingFault::EmptyDetail),
     ]
     .into_iter()
-    .filter(|(value, _, _)| value.trim().is_empty())
-    .map(|(_, key, code)| broke(index, &entry.id, code, &format!("`{key}` is empty")))
+    .filter(|(value, _)| value.trim().is_empty())
+    .map(|(_, fault)| broke(index, &entry.id, fault))
     .collect()
 }
 
@@ -133,12 +131,7 @@ pub(super) fn check(file: &FindingsFile) -> Vec<Diagnostic> {
 
     for (index, finding) in file.findings.iter().enumerate() {
         if !known_ids.insert(&finding.id) {
-            broken.push(broke(
-                index,
-                &finding.id,
-                RuleCode::DuplicateId,
-                "a second finding already carries this id; every id is declared once",
-            ));
+            broken.push(broke(index, &finding.id, FindingFault::DuplicateFinding));
         }
         broken.extend(check_entry(finding, index));
     }

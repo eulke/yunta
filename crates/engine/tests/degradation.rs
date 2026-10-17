@@ -5,7 +5,7 @@
 //! event back off storage.
 
 use yunta_core::events::FindingEvent;
-use yunta_core::events::{EventPayload, Finding, StoredEvent};
+use yunta_core::events::{EventPayload, Finding, FindingCause, FindingSays, StoredEvent};
 use yunta_core::port::{Policy, PolicyApplied};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, Bench, MOCK_CONFIG};
@@ -50,9 +50,14 @@ nodes:
     let finding = finding(&events, "engine-registry")
         .expect("the unwritable registry must be recorded as a finding");
     assert!(
-        finding.detail.contains("process tree"),
-        "the finding says what became invisible: {}",
-        finding.detail
+        matches!(
+            &finding.says,
+            FindingSays::Found {
+                cause: FindingCause::RegistryUnwritten { .. },
+            }
+        ),
+        "the finding says what became invisible: {:?}",
+        finding.says
     );
 }
 
@@ -392,21 +397,26 @@ on_finish:
         .collect();
     assert!(posted.len() >= 2, "this run posts both findings");
 
-    let document = yunta_core::FindingsFile::from_findings(posted.clone());
+    let document = yunta_core::HeldFindings::from_findings(posted.clone());
     let yaml = yunta_core::yaml::to_string(&document).expect("a findings document serializes");
-    let read = yunta_core::shape::read::<yunta_core::FindingsFile>(
+    let read = yunta_core::shape::read::<yunta_core::HeldFindings>(
         yaml.as_bytes(),
         "artifacts/findings.yaml",
     )
     .expect("every engine finding reads back through the door a successor inherits it by");
     assert_eq!(
-        read.findings
-            .iter()
-            .map(|entry| entry.location.clone())
-            .collect::<Vec<_>>(),
+        read.findings.iter().map(location_of).collect::<Vec<_>>(),
         posted
             .iter()
             .map(|finding| finding.location.clone())
             .collect::<Vec<_>>(),
     );
+}
+
+/// The location a held entry names, whichever way it says itself.
+fn location_of(entry: &yunta_core::HeldEntry) -> yunta_core::Location {
+    match entry {
+        yunta_core::HeldEntry::Written(written) => written.location.clone(),
+        yunta_core::HeldEntry::Found(found) => found.location.clone(),
+    }
 }

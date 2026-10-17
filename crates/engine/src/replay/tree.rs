@@ -70,7 +70,7 @@ mod tests {
     fn failed(node: &'static str, tree: &str) -> (Option<&'static str>, EventPayload) {
         let failure = NodeFailedPayload::new(
             Failure::Message {
-                outcome: "regression".to_string(),
+                outcome: "regression".into(),
             },
             TokenUsage::default(),
         );
@@ -170,7 +170,7 @@ mod tests {
     fn a_failure_that_named_no_tree_reads_no_movement() {
         let unnamed = NodeFailedPayload::new(
             Failure::Message {
-                outcome: "regression".to_string(),
+                outcome: "regression".into(),
             },
             TokenUsage::default(),
         );

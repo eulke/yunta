@@ -35,9 +35,29 @@ pub(crate) fn refused_answer(
     menu: Option<&FailureMenu>,
 ) -> String {
     format!(
-        "the human surface's answer was refused: {refused}, for: {}",
+        "the human surface's answer was refused: {}, for: {}",
+        refusal(refused),
         yunta_render::claim::sentence(claim, menu)
     )
+}
+
+/// Why an answer does not count as a decision on its escalation, in the words
+/// a person reads.
+fn refusal(refused: &Refusal) -> String {
+    match refused {
+        Refusal::OffMenu { chosen, offered } => {
+            format!("`{chosen}` is not one of the options offered ({offered})")
+        }
+        Refusal::Unsaid { chosen, asks } => format!(
+            "`{chosen}` asks \"{}\", and the answer says nothing",
+            yunta_render::offers::asked(asks)
+        ),
+        Refusal::Withheld { withheld } => format!(
+            "`{}` is withheld: {}",
+            withheld.option,
+            yunta_render::escalation::because(withheld)
+        ),
+    }
 }
 
 /// What an artifact view that cannot be written says: the artifact it is of,
@@ -67,12 +87,14 @@ pub(crate) fn resolve_gate(error: &ResolveGateError) -> String {
         ResolveGateError::UnknownOption { chosen, declared } => {
             format!("option `{chosen}` isn't valid here — declared options: {declared}")
         }
-        ResolveGateError::Unsaid { chosen, asks } => {
-            format!("option `{chosen}` asks \"{asks}\" — say it with the choice")
-        }
-        ResolveGateError::Withheld { chosen, because } => {
-            format!("option `{chosen}` is withheld: {because}")
-        }
+        ResolveGateError::Unsaid { chosen, asks } => format!(
+            "option `{chosen}` asks \"{}\" — say it with the choice",
+            yunta_render::offers::asked(asks)
+        ),
+        ResolveGateError::Withheld { chosen, withheld } => format!(
+            "option `{chosen}` is withheld: {}",
+            yunta_render::escalation::because(withheld)
+        ),
         ResolveGateError::Storage(error) => error.to_string(),
         ResolveGateError::Documents(run) => documents(run),
     }

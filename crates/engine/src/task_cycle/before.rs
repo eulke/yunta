@@ -1,7 +1,7 @@
 //! What a task cycle settles ahead of its first attempt: the gates that refuse
 //! or cut it, the work it carries or the session it resumes, and its pre-check.
 
-use yunta_core::events::{Phase, TaskLedger};
+use yunta_core::events::{DeniedRule, Phase, TaskLedger};
 use yunta_core::Task;
 
 use super::attempt::AttemptParams;
@@ -33,14 +33,16 @@ pub(super) async fn denied(
     recorder: Recorder<'_>,
 ) -> Result<Option<TaskCycleReport>, TaskCycleError> {
     for criterion in &task.criteria {
-        if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
+        if let Some(denied) = crate::permissions::command_violation(&criterion.cmd, permissions) {
             return Ok(Some(TaskCycleReport {
                 task_id: task.id.clone(),
                 staged: Vec::new(),
                 pre_check: Vec::new(),
                 attempts: Vec::new(),
                 outcome: TaskOutcome::Blocked {
-                    cause: TaskCause::CommandDenied { rule },
+                    cause: TaskCause::CommandDenied {
+                        rule: DeniedRule::Command(denied),
+                    },
                 },
                 needs_human_decision: false,
                 last_check: recorder.criteria(Phase::Pre, &[]).await?.seq,

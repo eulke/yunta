@@ -1,7 +1,9 @@
 //! The `kind: findings` artifact — what a reviewing session writes and
 //! the engine reads at node close. An agent wrote it, so every type
 //! here refuses a key it does not know; the log records each entry as
-//! [`events::Finding`], which reads what a later writer adds.
+//! [`events::Finding`], which reads what a later writer adds. What the run
+//! holds is a [`HeldFindings`]: the entries sessions wrote, and the findings
+//! the engine reports, each with its cause.
 //!
 //! The shape published to whoever writes one, and the rules that hold
 //! across the whole document, live alongside the types: they are one
@@ -9,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::findings::FindingSays;
 use crate::events::{self, FindingSeverity};
 use crate::ids::FindingId;
 
@@ -18,16 +21,6 @@ use crate::ids::FindingId;
 #[serde(deny_unknown_fields)]
 pub struct FindingsFile {
     pub findings: Vec<FindingEntry>,
-}
-
-impl FindingsFile {
-    /// The document that carries `findings` forward — what a run
-    /// writes for its successor to inherit.
-    pub fn from_findings(findings: Vec<events::Finding>) -> Self {
-        FindingsFile {
-            findings: findings.into_iter().map(FindingEntry::from).collect(),
-        }
-    }
 }
 
 /// One finding: where it is, how much it matters, and what goes wrong.
@@ -72,23 +65,12 @@ impl From<FindingEntry> for events::Finding {
         events::Finding {
             id: entry.id,
             severity: entry.severity,
-            title: entry.title,
+            says: FindingSays::Written {
+                title: entry.title,
+                detail: entry.detail,
+            },
             location: entry.location,
-            detail: entry.detail,
             proposed_criterion: entry.proposed_criterion.map(Into::into),
-        }
-    }
-}
-
-impl From<events::Finding> for FindingEntry {
-    fn from(finding: events::Finding) -> Self {
-        FindingEntry {
-            id: finding.id,
-            severity: finding.severity,
-            title: finding.title,
-            location: finding.location,
-            detail: finding.detail,
-            proposed_criterion: finding.proposed_criterion.map(Into::into),
         }
     }
 }
@@ -105,8 +87,12 @@ impl From<events::ProposedCriterion> for ProposedCriterionEntry {
     }
 }
 
+pub use fault::FindingFault;
+pub use held::{FoundEntry, HeldEntry, HeldFindings};
 pub use location::{InvalidLocation, LineRange, Location, RelativePath};
 
+pub mod fault;
+mod held;
 mod location;
 mod rules;
 

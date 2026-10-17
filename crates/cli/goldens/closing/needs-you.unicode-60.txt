@@ -1,6 +1,7 @@
 run 7E5PH4: ◆ needs you
   node `lint` failed and its 0 re-routes to `fix-lint` are
-  exhausted — exit 101
+  exhausted — exit 101; error[E0425]: cannot find value `x`
+  in this scope; --> src/lib.rs:3:5
 
   lint: exit 101
     │ error[E0425]: cannot find value `x` in this scope
@@ -10,7 +11,8 @@ run 7E5PH4: ◆ needs you
   decision on node `lint`
     retry — Re-route to `fix-lint` once more
       Uses one extra correction attempt beyond the declared
-      max_reroutes (0)
+      max_reroutes (0); escalates again if `fix-lint` doesn't
+      fix it
       yunta resolve-gate 7E5PH4 retry
     abort — Abort the run
       Pauses here; nothing further executes

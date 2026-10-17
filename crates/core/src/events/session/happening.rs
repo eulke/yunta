@@ -2,9 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use super::NoteDigest;
 use crate::best_effort::BestEffortStep;
 use crate::events::{
-    AgentMessageType, RailFailedPayload, RailSummaryPayload, RunToolFailedPayload,
+    AgentMessageType, LoggedWords, RailFailedPayload, RailSummaryPayload, RunToolFailedPayload,
     RunToolRefusedPayload, SessionEvent, ToolTarget,
 };
 use crate::fence::Coverage;
@@ -36,7 +37,9 @@ pub enum Happening {
     /// its words — and what it reported spending.
     Message {
         kind: AgentMessageType,
-        text: Option<String>,
+        note: Option<NoteDigest>,
+        /// The words an older log stored as a note's text.
+        text: Option<LoggedWords>,
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
     },
@@ -105,6 +108,7 @@ impl From<&SessionEvent> for Happening {
                 },
                 None => Happening::Message {
                     kind: p.message_type,
+                    note: p.note.clone(),
                     text: p.text.clone(),
                     input_tokens: p.input_tokens,
                     output_tokens: p.output_tokens,

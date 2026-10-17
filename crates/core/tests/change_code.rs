@@ -104,10 +104,10 @@ fn a_refusal_names_what_the_code_leaves_out() {
         .unexplained()
         .iter()
         .filter_map(|diagnostic| match &diagnostic.problem {
-            yunta_core::diagnostic::Problem::Rule { code, detail }
+            yunta_core::diagnostic::Problem::Rule { code, .. }
                 if code.to_string() == "change-code-misses-a-name" =>
             {
-                Some(detail.clone())
+                Some(diagnostic.problem.to_string())
             }
             _ => None,
         })

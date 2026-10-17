@@ -224,12 +224,16 @@ pub struct Task {
 }
 
 mod code;
+mod fault;
 mod order;
 mod owned;
 mod proof;
 mod rules;
 mod specified;
 mod suite;
+
+pub use fault::TaskFault;
+pub(crate) use suite::outside_clause;
 
 pub use proof::{names_file, passes_by_a_name};
 pub use suite::Suite;

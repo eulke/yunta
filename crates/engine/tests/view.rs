@@ -9,14 +9,15 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, Capabilities,
-    CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload, DiscardedCandidate,
-    Escalation, EventBody, EventPayload, Evidence, Fact, Failure, GateOption, NodeFailedPayload,
-    NodeFinishedPayload, NodeOutcome, NodeReroutedPayload, NodeStartedPayload, PauseReason,
-    PromotionCause, PromotionSignaledPayload, QuestionsAskedPayload, RerouteOrigin,
-    RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload, RunResumedPayload,
-    RunnerRejection, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
+    AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, AuthorGate,
+    Capabilities, CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload,
+    Claim, DiscardedCandidate, Escalation, EventBody, EventPayload, Fact, Failure, GateOption,
+    Leads, Menu, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeReroutedPayload,
+    NodeStartedPayload, PauseReason, PromotionCause, PromotionSignaledPayload, PublishedGate,
+    QuestionsAskedPayload, RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics,
+    RunPausedPayload, RunResumedPayload, RunnerRejection, RunnerResolvedPayload, StoredEvent,
+    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TerminalState, TokenUsage,
+    UnknownEvent,
 };
 use yunta_core::events::{
     ArtifactEvent, ChildEvent, GateEvent, NodeEvent, RunEvent, SessionEvent, TaskEvent,
@@ -135,7 +136,7 @@ fn finished() -> EventPayload {
 fn failed(outcome: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
         Failure::Message {
-            outcome: outcome.to_string(),
+            outcome: outcome.into(),
         },
         tokens(7, 3),
     )))
@@ -145,7 +146,7 @@ fn rerouted(to: &str) -> EventPayload {
     EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
         to.into(),
         Failure::Message {
-            outcome: "criteria still red".to_string(),
+            outcome: "criteria still red".into(),
         },
         RerouteOrigin::OnFailure,
         Some(1),
@@ -192,6 +193,7 @@ fn tool_use(tool: &str) -> EventPayload {
         input_tokens: None,
         output_tokens: None,
         cached_input_tokens: None,
+        note: None,
         text: None,
     }))
 }
@@ -205,37 +207,41 @@ fn usage_message(input: u64, output: u64) -> EventPayload {
         input_tokens: Some(input),
         output_tokens: Some(output),
         cached_input_tokens: None,
+        note: None,
         text: None,
     }))
 }
 
 /// The one option a locally-answered gate in these tests offers.
 fn approve_option() -> GateOption {
-    GateOption {
-        id: "approve".into(),
-        label: Some("Approve".to_string()),
-        tradeoff: Some("goes on".to_string()),
-        asks: None,
-    }
+    GateOption::leading(
+        "approve".into(),
+        Leads::On {
+            next: Vec::new(),
+            settles: false,
+        },
+    )
 }
 
 /// A node parked on a person, as `gate_waiting` records it.
 fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
     let escalation = match external_ref {
-        Some(reference) => {
-            Escalation::published_to("answer before going on", Evidence::none(), reference)
-        }
+        Some(reference) => Escalation::published_to(
+            Claim::Written("answer before going on".to_string()),
+            PublishedGate {
+                url: reference.to_string(),
+            },
+            reference,
+        ),
         None => Escalation::new(
-            "answer before going on",
-            Evidence::none(),
+            Claim::Written("answer before going on".to_string()),
+            Menu::Gate(AuthorGate {
+                assignee: "lead".to_string(),
+            }),
             NonEmpty::from((approve_option(), Vec::new())),
         ),
     };
-    EventPayload::Gates(GateEvent::Waiting(
-        escalation
-            .expect("the summary states no fact")
-            .into_payload(),
-    ))
+    EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())))
 }
 
 fn run_finished(terminal_state: TerminalState) -> EventPayload {
@@ -1118,25 +1124,13 @@ nodes:
     let events = log(vec![
         (0, None, created("alpha")),
         (1, Some("approve"), started(1)),
-        (
-            2,
-            Some("approve"),
-            EventPayload::Gates(GateEvent::Waiting(
-                Escalation::published_to(
-                    "approve it",
-                    vec![Fact::bare("the plan")].into(),
-                    "https://forge/pr/1",
-                )
-                .expect("the summary states no fact")
-                .into_payload(),
-            )),
-        ),
+        (2, Some("approve"), gate_waiting(Some("https://forge/pr/1"))),
         (
             3,
             None,
             EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
                 &PauseReason::Recorded {
-                    sentence: "waiting on external gate: https://forge/pr/1".to_string(),
+                    sentence: "waiting on external gate: https://forge/pr/1".into(),
                 },
             ))),
         ),
@@ -1152,7 +1146,7 @@ nodes:
                     external_ref: Some("https://forge/pr/1".to_string())
                 },
                 reason: Some(PauseReason::Recorded {
-                    sentence: "waiting on external gate: https://forge/pr/1".to_string(),
+                    sentence: "waiting on external gate: https://forge/pr/1".into(),
                 }),
             }
         }
@@ -1273,7 +1267,7 @@ fn a_node_open_when_its_run_paused_reads_paused() {
             None,
             EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
                 &PauseReason::Recorded {
-                    sentence: "a person stopped it".to_string(),
+                    sentence: "a person stopped it".into(),
                 },
             ))),
         ),

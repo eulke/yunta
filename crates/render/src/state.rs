@@ -280,7 +280,7 @@ mod tests {
     fn a_failed_node_reads_as_its_failure() {
         let state = NodeState::Failed {
             failure: Failure::Message {
-                outcome: "exit 1".to_string(),
+                outcome: "exit 1".into(),
             },
             tokens: TokenUsage::default(),
         };

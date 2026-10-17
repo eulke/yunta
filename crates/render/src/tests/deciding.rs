@@ -37,7 +37,9 @@ fn what_weighs_on_a_decision_matches_its_goldens() {
     let shown = [shown(review)];
     let withheld = [yunta_core::events::Withheld {
         option: "approve".into(),
-        because: "the plan cannot be proven as it is written".to_string(),
+        because: yunta_core::events::WhyWithheld::Logged(
+            "the plan cannot be proven as it is written".into(),
+        ),
     }];
     let before = crate::shown::before_you_decide(&withheld, &shown)
         .expect("a plan that cannot be proven weighs on the decision");

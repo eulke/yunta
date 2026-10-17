@@ -7,7 +7,7 @@
 //! back as its attempt ends, is kept instead while a session the engine could
 //! not stop still runs in it.
 
-use yunta_core::events::{Failure, FindingSeverity};
+use yunta_core::events::{Cleaned, Failure, FindingCause, FindingSeverity};
 use yunta_core::{Location, Node, NodeKind, RelativePath};
 
 use super::node_exec::NodeEnd;
@@ -114,11 +114,8 @@ pub(super) async fn worktrees(ctx: &RunCtx<'_>) -> Result<(), RunError> {
                     None,
                     "cleanup-not-a-worktree",
                     FindingSeverity::Minor,
-                    "on_finish.cleanup: worktree skipped".to_string(),
                     Location::work(RelativePath::here(), None),
-                    "the run's tree is not a linked git worktree, so removing it would delete a \
-                     primary checkout — nothing was touched"
-                        .to_string(),
+                    FindingCause::CleanupSkipped,
                 )
                 .await?;
             }
@@ -127,9 +124,11 @@ pub(super) async fn worktrees(ctx: &RunCtx<'_>) -> Result<(), RunError> {
                     None,
                     "cleanup-failed",
                     FindingSeverity::Minor,
-                    "on_finish.cleanup: worktree failed".to_string(),
                     Location::work(RelativePath::here(), None),
-                    format!("the run's linked worktree could not be removed: {e}"),
+                    FindingCause::CleanupFailed {
+                        what: Cleaned::Worktree,
+                        report: e.to_string(),
+                    },
                 )
                 .await?;
             }
@@ -158,9 +157,11 @@ async fn let_branch_go(ctx: &RunCtx<'_>) -> Result<(), RunError> {
             None,
             "cleanup-failed",
             FindingSeverity::Minor,
-            "on_finish.cleanup: worktree failed".to_string(),
             Location::work(RelativePath::here(), None),
-            format!("the run's branch could not be deleted: {e}"),
+            FindingCause::CleanupFailed {
+                what: Cleaned::Branch,
+                report: e.to_string(),
+            },
         )
         .await?;
     }

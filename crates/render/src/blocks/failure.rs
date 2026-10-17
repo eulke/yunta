@@ -65,8 +65,8 @@ impl FailureDetail<'_> {
                 denied_paths,
                 reasons,
             } if denied_paths.len() > 1 => denied_says(denied_paths, reasons),
-            Failure::Message { outcome } if outcome.contains('\n') => {
-                FailureSays::Text(lines_of(outcome))
+            Failure::Message { outcome } if outcome.as_str().contains('\n') => {
+                FailureSays::Text(lines_of(outcome.as_str()))
             }
             Failure::Unchanged { unchanged } => unchanged_says(unchanged.since, &unchanged.failure),
             Failure::ScopeOwed { .. }

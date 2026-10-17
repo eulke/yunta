@@ -268,11 +268,7 @@ pub(crate) fn named(run: &RunId, reader: Reader) -> &str {
 /// tree changes. The same check on the same tree answers the same, so the
 /// menu says that much and the way back is a resume once the tree moved.
 fn waits_for_tree(decision: &GateWaitingPayload) -> bool {
-    decision
-        .failure
-        .as_ref()
-        .and_then(|menu| menu.stuck.as_ref())
-        == Some(&Stuck::TreeUnchanged)
+    decision.failure().and_then(|menu| menu.stuck.as_ref()) == Some(&Stuck::TreeUnchanged)
 }
 
 /// The node a run paused on a limit's reset is held for, and the moment

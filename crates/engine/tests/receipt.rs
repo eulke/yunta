@@ -144,7 +144,7 @@ fn a_failed_run_s_receipt_says_what_failed() {
     receipt.failed = vec![yunta_engine::FailedNode {
         node: NodeId::from("build"),
         failure: Failure::Message {
-            outcome: "`cargo build` exited 101: cannot find value `x`".to_string(),
+            outcome: "`cargo build` exited 101: cannot find value `x`".into(),
         },
     }];
     assert_golden(&golden("failed"), &render_receipt_markdown(&receipt));

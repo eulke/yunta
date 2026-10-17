@@ -155,15 +155,6 @@ pub enum RunError {
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
 
-    /// An escalation the engine built could not be put together: its claim
-    /// repeats the record it is audited against. The error keeps the fact
-    /// that repeats as data, and the surface that shows the error draws it.
-    #[error("run is broken: {context}: {source}")]
-    Escalation {
-        context: String,
-        source: yunta_core::events::EscalationError,
-    },
-
     /// The invocation's token fired while the run was being born, or
     /// while it was preparing the tree a run works on. A birth has no
     /// log of its own to record a pause on, so it says so to its

@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::{EventPayload, Failure, NodeEvent, PauseReason, StoredEvent};
+use yunta_core::events::{
+    EngineError, EngineStep, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
+};
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
 use yunta_engine::{derive, CheckError, RunReport, RunTerminal};
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
@@ -190,19 +192,25 @@ async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
         )
         .await;
 
-    match terminal {
+    let failure = match terminal {
         RunTerminal::Paused {
-            reason:
-                PauseReason::NodeFailed {
-                    failure:
-                        Failure::EngineFailed {
-                            engine_error: outcome,
-                        },
-                    ..
-                },
-        } => assert!(outcome.contains("token_env"), "{outcome}"),
+            reason: PauseReason::NodeFailed { failure, .. },
+        } => failure,
         other => panic!("expected the run to pause, got {other:?}"),
-    }
+    };
+    assert_eq!(
+        failure,
+        Failure::EngineFailed {
+            engine_error: EngineError::Step {
+                step: EngineStep::ForgeToken,
+                report: None,
+            },
+        },
+    );
+    assert!(
+        yunta_render::failure::sentence(&failure).contains("token_env"),
+        "the failure says which variable to set: {failure:?}"
+    );
 }
 
 /// A forge that answers with a rate limit and a retry-after waits for the

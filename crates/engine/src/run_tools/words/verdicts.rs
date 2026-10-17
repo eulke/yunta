@@ -4,7 +4,7 @@
 //! [`Reply`] gives it.
 
 use yunta_core::diagnostic::Report;
-use yunta_core::events::{FindingOperation, Unanswered};
+use yunta_core::events::FindingOperation;
 use yunta_core::expansion::Denial;
 use yunta_core::text::counted;
 
@@ -106,16 +106,6 @@ pub(crate) fn departure_recorded(check_tool: &str) -> String {
         "finish the rest of the task as the plan says; `{check_tool}` tells you whether it closes"
     ))
     .text()
-}
-
-/// The words an agent reads for a criterion that never answered: what
-/// happened to its command, in the terms a person fixing it would use.
-pub(crate) fn unanswered_words(why: Unanswered) -> &'static str {
-    match why {
-        Unanswered::NotFound => "command not found",
-        Unanswered::NotExecutable => "command not executable",
-        Unanswered::Stopped => "stopped before it answered",
-    }
 }
 
 #[cfg(test)]

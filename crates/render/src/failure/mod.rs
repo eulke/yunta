@@ -6,6 +6,7 @@
 mod artifact;
 mod child;
 mod command;
+mod engine;
 mod gate;
 mod loops;
 mod scope;
@@ -15,7 +16,7 @@ mod setup;
 use yunta_core::events::{ChildRefusal, Fact, Failure, RedCheck};
 
 pub use artifact::{mount, name, object};
-pub use command::{command_exit, command_headline};
+pub use command::{command_exit, command_headline, denied};
 pub(crate) use scope::{paths_listed, protection_words};
 pub(crate) use session::{limit_sentence, refusal_sentence, unchanged_sentence};
 pub use session::{session_death, session_end};
@@ -104,7 +105,7 @@ pub fn cause(failure: &Failure) -> String {
 /// The failure in the words a reader sees.
 pub fn sentence(failure: &Failure) -> String {
     match failure {
-        Failure::Message { outcome } => outcome.clone(),
+        Failure::Message { outcome } => outcome.as_str().to_string(),
         Failure::Artifacts { artifacts } => artifact::artifacts_said(artifacts),
         Failure::SessionDied { died } => session_death(died),
         Failure::ScopeViolated { outside_scope } => scope::violated(outside_scope),
@@ -137,8 +138,8 @@ pub fn sentence(failure: &Failure) -> String {
             gate_artifact,
         } => artifact::gate_missing(node, gate_artifact),
         Failure::CapabilityMissing { .. } => setup::capability_missing(failure),
-        Failure::EngineFailed { engine_error } => engine_error.clone(),
-        Failure::CommandDenied { denied_rule } => denied_rule.clone(),
+        Failure::EngineFailed { engine_error } => engine::failed(engine_error),
+        Failure::CommandDenied { denied_rule } => command::denied(denied_rule),
         Failure::SkillMissing { .. } => setup::skill_missing(failure),
         Failure::LoopCapped { node, loop_cap } => loops::loop_capped(node, *loop_cap),
         Failure::Confinement { confinement } => confinement.to_string(),

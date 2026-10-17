@@ -42,6 +42,7 @@ pub(crate) fn agent_message() -> AgentMessagePayload {
         input_tokens: Some(100),
         output_tokens: Some(50),
         cached_input_tokens: None,
+        note: None,
         text: None,
     }
 }

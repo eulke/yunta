@@ -6,7 +6,10 @@
 //! its task leaves unanswered when the task closes is withdrawn instead:
 //! nobody decides it, and the loop owes nothing.
 
-use yunta_core::events::{EventPayload, Failure, ScopeEvent, SessionEvent, TaskEvent, TaskStatus};
+use yunta_core::events::{
+    EventPayload, Failure, Finding, FindingCause, FindingSays, ScopeEvent, SessionEvent, TaskEvent,
+    TaskStatus,
+};
 use yunta_core::SessionId;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
@@ -53,6 +56,19 @@ fn chosen(option: &str) -> ScriptedInteraction {
         by: "lead".into(),
         free_text: None,
     })
+}
+
+/// The reason a scope denial's finding carries, when the session that asked
+/// gave one: a request a red criterion located the writes of carries none.
+fn denial_reason(finding: &Finding) -> Option<&str> {
+    match &finding.says {
+        FindingSays::Found {
+            cause: FindingCause::ScopeDenied {
+                asked: Some(asked), ..
+            },
+        } => asked.reason.as_deref(),
+        _ => None,
+    }
 }
 
 #[tokio::test]
@@ -115,7 +131,7 @@ async fn retry_denies_with_a_finding() {
     assert!(denied, "any answer but a grant denies the request");
     let finding = findings_posted(&events)
         .into_iter()
-        .any(|finding| finding.detail.contains("adjacent fix in b.txt"));
+        .any(|finding| denial_reason(finding) == Some("adjacent fix in b.txt"));
     assert!(finding, "and the denial becomes a finding");
 }
 

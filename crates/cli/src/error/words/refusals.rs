@@ -1,5 +1,6 @@
 //! The sentences for what `check` refuses about a workflow.
 
+use yunta_core::events::DeniedRule;
 use yunta_core::{ArtifactKind, ArtifactSpec, ConfigKey, NodeId, ReservedIdentity};
 use yunta_engine::CheckError;
 
@@ -93,7 +94,10 @@ fn runner_words(error: &CheckError) -> Option<String> {
         CheckError::RunnerHasNoCandidates { node, runner } => format!(
             "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
         ),
-        CheckError::CommandDenied { node, rule } => format!("node `{node}`: {rule}"),
+        CheckError::CommandDenied { node, denied } => format!(
+            "node `{node}`: {}",
+            yunta_render::failure::denied(&DeniedRule::Command(denied.clone()))
+        ),
         _ => return None,
     })
 }

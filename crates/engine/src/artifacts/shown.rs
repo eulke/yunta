@@ -69,7 +69,7 @@ async fn held_documents(
             )?),
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Findings,
-            } => ShownContent::Findings(yunta_core::shape::read::<yunta_core::FindingsFile>(
+            } => ShownContent::Findings(yunta_core::shape::read::<yunta_core::HeldFindings>(
                 &bytes,
                 path.display().to_string(),
             )?),

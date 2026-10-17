@@ -3,7 +3,8 @@
 //! withheld and the reason it cannot be.
 
 use yunta_core::events::{
-    Approval, Claim, EventPayload, Failure, GateEvent, GateWaitingPayload, HumanChoice, PauseReason,
+    Approval, Claim, EventPayload, Failure, GateEvent, GateWaitingPayload, HumanChoice,
+    PauseReason, WhyWithheld,
 };
 use yunta_core::NodeId;
 use yunta_engine::{NodeState, RunReport, RunTerminal};
@@ -55,7 +56,7 @@ fn asked_payloads(bench: &Bench) -> Vec<GateWaitingPayload> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Gates(GateEvent::Waiting(payload))) => Some(payload.clone()),
+            Some(EventPayload::Gates(GateEvent::Waiting(payload))) => Some((**payload).clone()),
             _ => None,
         })
         .collect()
@@ -141,8 +142,12 @@ async fn a_console_gate_withholds_approval_of_a_plan_that_cannot_be_proven_and_s
     let withheld = asked.withheld();
     assert_eq!(withheld.len(), 1, "{withheld:?}");
     assert_eq!(withheld[0].option.as_str(), "approve");
+    assert!(
+        matches!(withheld[0].because, WhyWithheld::Unprovable { .. }),
+        "the record holds the flaws that withhold the option: {withheld:?}"
+    );
     assert_eq!(
-        withheld[0].because,
+        yunta_render::escalation::because(&withheld[0]),
         "the plan cannot be proven as it is written: `greet` plans to change `tests/greet.sh`, a test the spec wrote for `greet`"
     );
 }

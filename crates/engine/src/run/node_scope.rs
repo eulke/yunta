@@ -4,10 +4,12 @@
 //! request its session left and the audit of its diff — each of which
 //! can fail the node with what a person needs to decide.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use yunta_core::events::{Decider, EventPayload, Failure, NodeEvent, TokenUsage};
+use yunta_core::events::{
+    Decider, EngineError, EngineStep, EventPayload, Failure, NodeEvent, TokenUsage,
+};
 use yunta_core::expansion::{node_offer, Decision, Waiting};
 use yunta_core::protected::{Closing, Protected};
 use yunta_core::reserved::ReservedOption;
@@ -15,12 +17,14 @@ use yunta_core::{Node, ScopeGlob, TreeId};
 
 use super::node_close::{fail_with_staged, fail_with_tokens_staged};
 use super::node_exec::NodeEnd;
-use super::scope_record::{record, Recording, Subject};
+use super::scope_record::{record, AskedFor, Recording, Subject};
 use super::shared_tree::closing_of;
 use super::{RunCtx, RunError};
 use crate::replay::{NodeState, RunState};
 use crate::run_tools::NodeScopeAccess;
-use crate::scope_expansion::{consume_request, read_request, ScopeExpansionRequest};
+use crate::scope_expansion::{
+    consume_request, read_request, ScopeExpansionError, ScopeExpansionRequest,
+};
 use crate::task_cycle::{judge, JudgeEnv, Refusals, Settle, Sitting, Work};
 use crate::worktree::UnitId;
 
@@ -227,21 +231,10 @@ pub(super) async fn scope_request(
     if !crate::audits(node) {
         return Ok(None);
     }
-    let taken = match read_request(ctx.worktree).await {
-        Ok(Some(request)) => consume_request(ctx.worktree).await.map(|()| Some(request)),
-        other => other,
-    };
-    let request = match taken {
+    let request = match taken_request(ctx.worktree).await {
         Ok(Some(request)) => request,
         Ok(None) => return Ok(None),
-        Err(error) => {
-            let failure = Failure::EngineFailed {
-                engine_error: yunta_core::describe(&error),
-            };
-            return fail_with_tokens_staged(ctx, node, failure, tokens, staged)
-                .await
-                .map(Some);
-        }
+        Err(error) => return unreadable_request(ctx, node, &error, tokens, staged).await,
     };
     let decision = match node_offer(&request.paths, &ctx.protected(), widenable(ctx, node)) {
         Ok(paths) => Decision::Escalate {
@@ -251,7 +244,14 @@ pub(super) async fn scope_request(
         Err(denial) => Decision::Deny(denial),
     };
     let state = ctx.run_view().await?.state;
-    record_node_decision(ctx, node, &state, Some(&request), &decision).await?;
+    record_node_decision(
+        ctx,
+        node,
+        &state,
+        Some(AskedFor::Request(&request)),
+        &decision,
+    )
+    .await?;
     match decision {
         Decision::Escalate { paths, .. } => {
             let failure = Failure::scope_requested(paths, request.reason);
@@ -261,6 +261,37 @@ pub(super) async fn scope_request(
         }
         _ => Ok(None),
     }
+}
+
+/// The request a session left in its checkout, taken off it: the file is
+/// consumed once it has been read, so one request is answered once.
+async fn taken_request(
+    worktree: &Path,
+) -> Result<Option<ScopeExpansionRequest>, ScopeExpansionError> {
+    match read_request(worktree).await {
+        Ok(Some(request)) => consume_request(worktree).await.map(|()| Some(request)),
+        other => other,
+    }
+}
+
+/// The node fails on a request file the engine could not read: the step that
+/// failed is the request's, and what the read reported is its report.
+async fn unreadable_request(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    error: &impl std::error::Error,
+    tokens: TokenUsage,
+    staged: &[PathBuf],
+) -> Result<Option<NodeEnd>, RunError> {
+    let failure = Failure::EngineFailed {
+        engine_error: EngineError::Step {
+            step: EngineStep::ScopeRequest,
+            report: Some(yunta_core::describe(error)),
+        },
+    };
+    fail_with_tokens_staged(ctx, node, failure, tokens, staged)
+        .await
+        .map(Some)
 }
 
 /// The node's whole diff against its declared `scope:`, audited as
@@ -338,7 +369,7 @@ async fn record_node_decision(
     ctx: &RunCtx<'_>,
     node: &Node,
     state: &RunState,
-    asked: Option<&ScopeExpansionRequest>,
+    asked: Option<AskedFor<'_>>,
     decision: &Decision,
 ) -> Result<(), RunError> {
     let attempt = state

@@ -228,14 +228,6 @@ pub trait KeepsOutput: Sync {
     async fn kept_output(&self, hash: &yunta_core::ContentHash) -> Option<Vec<u8>>;
 }
 
-/// The only shape of a note the log ever carries: its size and
-/// a content-hash prefix — enough to audit a claimed note against,
-/// never enough to reconstruct or leak it.
-pub(super) fn note_summary(text: &str) -> String {
-    let hash = yunta_core::sha256_hex(text.as_bytes()).to_string();
-    format!("{} bytes, sha256 {}", text.len(), &hash[..12])
-}
-
 /// The most a session gets between `interrupt` and the follow-up `kill`
 /// once a budget has been exceeded — long enough for a session that
 /// closes cleanly on interrupt to actually do so, short enough that a

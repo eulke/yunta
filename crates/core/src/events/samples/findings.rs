@@ -1,6 +1,7 @@
 //! The samples of the finding kinds: a finding posted, updated, withdrawn,
 //! refused, answered, proved, and settled.
 
+use crate::events::findings::FindingSays;
 use crate::events::*;
 
 pub(crate) fn finding_posted() -> FindingPostedPayload {
@@ -8,9 +9,11 @@ pub(crate) fn finding_posted() -> FindingPostedPayload {
         finding: Finding {
             id: "f-1".into(),
             severity: FindingSeverity::Major,
-            title: "missing error handling".to_string(),
+            says: FindingSays::Written {
+                title: "missing error handling".to_string(),
+                detail: "unwrap on a fallible call".to_string(),
+            },
             location: "crates/cli/src/main.rs:10".into(),
-            detail: "unwrap on a fallible call".to_string(),
             proposed_criterion: None,
         },
     }
@@ -21,9 +24,11 @@ pub(crate) fn finding_updated() -> FindingUpdatedPayload {
         finding: Finding {
             id: "f-1".into(),
             severity: FindingSeverity::Blocking,
-            title: "missing error handling".to_string(),
+            says: FindingSays::Written {
+                title: "missing error handling".to_string(),
+                detail: "unwrap on a fallible call, reached on every run".to_string(),
+            },
             location: "crates/cli/src/main.rs:10-14".into(),
-            detail: "unwrap on a fallible call, reached on every run".to_string(),
             proposed_criterion: None,
         },
     }
@@ -55,10 +60,7 @@ pub(crate) fn finding_refused() -> FindingRefusedPayload {
                         crate::FindingId::from("f-3"),
                         0,
                     )),
-                    crate::diagnostic::Problem::rule(
-                        crate::diagnostic::RuleCode::EmptyDetail,
-                        "`detail` is empty",
-                    ),
+                    crate::diagnostic::Problem::broke(crate::findings::FindingFault::EmptyDetail),
                 ),
             ],
         ),

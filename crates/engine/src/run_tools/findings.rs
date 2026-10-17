@@ -12,13 +12,13 @@
 //! leaves a trace the run can be read back from.
 
 use serde_json::Value;
-use yunta_core::diagnostic::{Diagnostic, DocumentRef, Named, Problem, Report, RuleCode, Subject};
+use yunta_core::diagnostic::{Diagnostic, DocumentRef, Named, Problem, Report, Subject};
 use yunta_core::events::findings::{FindingLedger, Slot};
 use yunta_core::events::{
     EventPayload, Finding, FindingOperation, FindingPostedPayload, FindingRefusedPayload,
     FindingUpdatedPayload, FindingWithdrawnPayload,
 };
-use yunta_core::{ArtifactKind, FindingEntry, FindingId, Withdrawal};
+use yunta_core::{ArtifactKind, FindingEntry, FindingFault, FindingId, Withdrawal};
 
 use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
@@ -146,30 +146,20 @@ impl SessionTools {
         id: &FindingId,
         standing: Option<&Slot>,
     ) -> Option<Diagnostic> {
-        let broken = |code: RuleCode, detail: &str| {
+        let broken = |fault: FindingFault| {
             Some(Diagnostic::new(
                 Subject::Finding(Named::new(id.clone(), 0)),
-                Problem::rule(code, detail),
+                Problem::broke(fault),
             ))
         };
         match (operation, standing) {
             (FindingOperation::Post, None) => None,
-            (FindingOperation::Post, Some(Slot::Live(_))) => broken(
-                RuleCode::DuplicateId,
-                "this node already reported a finding under that id; report the new one \
-                 under an id of its own, or update the one that stands",
-            ),
-            (_, Some(Slot::Withdrawn { .. })) => broken(
-                RuleCode::WithdrawnId,
-                "this node withdrew that id, and a withdrawal is final; a finding that \
-                 comes back is a new id",
-            ),
+            (FindingOperation::Post, Some(Slot::Live(_))) => broken(FindingFault::PostedTwice),
+            (_, Some(Slot::Withdrawn { .. })) => broken(FindingFault::WithdrawnId),
             (_, Some(Slot::Live(_))) => None,
-            (FindingOperation::Update | FindingOperation::Withdraw, None) => broken(
-                RuleCode::UnknownId,
-                "this node never reported a finding under that id; only the node that \
-                 reported one can change it",
-            ),
+            (FindingOperation::Update | FindingOperation::Withdraw, None) => {
+                broken(FindingFault::NeverPosted)
+            }
         }
     }
 

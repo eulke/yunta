@@ -1,7 +1,7 @@
 //! What another node answered about a finding stands beside it while the
 //! finding does — never in it, and never counted as the finding gone.
 
-use yunta_core::events::findings::{AnswerGiven, FindingLedger};
+use yunta_core::events::findings::{AnswerGiven, FindingLedger, FindingSays};
 use yunta_core::events::{
     Finding, FindingAnswer, FindingAnsweredPayload, FindingEvent, FindingPostedPayload,
     FindingSeverity, FindingUpdatedPayload, FindingWithdrawnPayload,
@@ -12,9 +12,11 @@ fn finding(id: &str, title: &str) -> Finding {
     Finding {
         id: id.into(),
         severity: FindingSeverity::Blocking,
-        title: title.to_string(),
+        says: FindingSays::Written {
+            title: title.to_string(),
+            detail: "detail".to_string(),
+        },
         location: "src/lib.rs:10".into(),
-        detail: "detail".to_string(),
         proposed_criterion: None,
     }
 }

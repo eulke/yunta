@@ -6,21 +6,31 @@ use serde::{Deserialize, Serialize};
 
 use super::escalation::{Escalation, Refusal};
 use super::payloads::GateWaitingPayload;
-use crate::events::Fact;
+use crate::events::LoggedWords;
 use crate::ids::OptionId;
+use crate::shown::Flaw;
+use crate::NonEmpty;
 
-/// An option the gate withholds, and the reason it gives.
+/// An option the gate withholds, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Withheld {
     pub option: OptionId,
-    pub because: String,
+    pub because: WhyWithheld,
+}
+
+/// Why an option is withheld: the flaws of the plan it would take the run
+/// past, or the words an older log stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum WhyWithheld {
+    Unprovable { flaws: NonEmpty<Flaw> },
+    Logged(LoggedWords),
 }
 
 impl Escalation {
-    /// The same escalation, without the options `withheld` names: each
-    /// leaves the menu, is recorded with its reason, and the reason is a
-    /// fact of the record, so every surface that prints the escalation
-    /// says why. An option the menu never offered is ignored.
+    /// The same escalation, without the options `withheld` names: each leaves
+    /// the menu and is kept with its reason. An option the menu never offered
+    /// is ignored.
     pub fn withholding(mut self, withheld: Vec<Withheld>) -> Self {
         let payload: &mut GateWaitingPayload = &mut self.0;
         for gone in withheld {
@@ -32,10 +42,6 @@ impl Escalation {
                 continue;
             }
             payload.options.retain(|option| option.id != gone.option);
-            payload.evidence.push(Fact::labelled(
-                "withheld",
-                format!("`{}` — {}", gone.option, gone.because),
-            ));
             payload.withheld.push(gone);
         }
         self
@@ -54,8 +60,7 @@ impl GateWaitingPayload {
             .iter()
             .find(|gone| &gone.option == option)
             .map(|gone| Refusal::Withheld {
-                chosen: gone.option.clone(),
-                because: gone.because.clone(),
+                withheld: gone.clone(),
             })
     }
 }
@@ -63,47 +68,58 @@ impl GateWaitingPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{Evidence, GateOption, HumanChoice};
-    use crate::NonEmpty;
+    use crate::events::{AuthorGate, Claim, GateOption, HumanChoice, Leads, Menu};
+    use crate::ids::{NodeId, TaskId};
 
+    /// An author's option that takes the run on past the gate.
     fn option(id: &str) -> GateOption {
-        GateOption {
-            id: id.into(),
-            label: Some(id.to_string()),
-            tradeoff: None,
-            asks: None,
-        }
+        GateOption::leading(
+            id.into(),
+            Leads::On {
+                next: Vec::new(),
+                settles: false,
+            },
+        )
     }
 
     fn approve_or_abort() -> Escalation {
         Escalation::new(
-            "Approve?",
-            Evidence::Prose("assignee: lead".to_string()),
+            Claim::NeedsDecision {
+                node: NodeId::from_static("approve"),
+            },
+            Menu::Gate(AuthorGate {
+                assignee: "lead".into(),
+            }),
             NonEmpty::from((option("approve"), vec![option("abort")])),
         )
-        .unwrap()
     }
 
+    /// Withheld for a plan whose one flaw is a hollow test.
     fn withheld(option: &str) -> Withheld {
         Withheld {
             option: option.into(),
-            because: "the plan cannot be proven".to_string(),
+            because: WhyWithheld::Unprovable {
+                flaws: NonEmpty::from((
+                    Flaw::HollowSpecTest {
+                        task: TaskId::from_static("T001"),
+                        cmd: "test -f a.txt".to_string(),
+                    },
+                    Vec::new(),
+                )),
+            },
         }
     }
 
     #[test]
-    fn a_withheld_option_leaves_the_menu_and_its_reason_joins_the_record() {
+    fn a_withheld_option_leaves_the_menu_and_is_refused_with_its_reason() {
         let escalation = approve_or_abort().withholding(vec![withheld("approve")]);
 
         assert!(!escalation.offers(&"approve".into()));
         assert!(escalation.offers(&"abort".into()));
         assert_eq!(escalation.withheld(), [withheld("approve")]);
-        assert_eq!(
-            escalation.evidence().facts(),
-            [
-                Fact::bare("assignee: lead"),
-                Fact::labelled("withheld", "`approve` — the plan cannot be proven"),
-            ]
+        assert!(
+            escalation.evidence().facts().is_empty(),
+            "withholding adds no fact to the record"
         );
         assert_eq!(
             escalation.accepts(&HumanChoice {
@@ -112,8 +128,7 @@ mod tests {
                 free_text: None,
             }),
             Err(Refusal::Withheld {
-                chosen: "approve".into(),
-                because: "the plan cannot be proven".to_string(),
+                withheld: withheld("approve"),
             })
         );
     }
@@ -123,5 +138,18 @@ mod tests {
         let escalation = approve_or_abort().withholding(vec![withheld("ship")]);
 
         assert_eq!(escalation, approve_or_abort());
+    }
+
+    #[test]
+    fn a_log_that_stored_the_reason_as_words_reads_it_back() {
+        let stored: Withheld = serde_json::from_value(serde_json::json!({
+            "option": "approve",
+            "because": "the plan cannot be proven as it is written",
+        }))
+        .unwrap();
+        assert_eq!(
+            stored.because,
+            WhyWithheld::Logged("the plan cannot be proven as it is written".into())
+        );
     }
 }

@@ -430,6 +430,23 @@ from their person stops after 04:10 UTC (`f281105c`; `c61fef8e` and
   the title of the finding a scope denial posts. Failure and departure menus
   keep ids only; these still keep words.
 
+  Measured again against `e2944458`, after the engine kept these as data:
+  - a note is its size and digest;
+  - an option is its id and where it leads;
+  - an engine finding keeps its cause;
+  - a refused document's diagnostic keeps its fault.
+
+  The run used a workflow that produces each of these: a tasks document refused
+  for an empty title, a scope request under `deny`, notes, and an author gate
+  that shows the findings. It ran once on Claude Code (`claude-haiku-5-5`) and
+  once on Codex (`gpt-6-luna`).
+  - **The logs:** neither holds an engine word. What is left is the criterion
+    the planner wrote, the session's reason for its request, the gate's
+    `message:` and the planner's summary.
+  - **A run parked on the mock by the earlier binary:** the later binary shows
+    the same words in `status` and in the closing block. `status --json` only
+    gains the `gate` key.
+
 **Directed scenarios.** Each ran in a throwaway repository on `1430e120`, with
 the mock where the claim is the engine's and a real CLI where it is the CLI's,
 and a second agent re-read each log.

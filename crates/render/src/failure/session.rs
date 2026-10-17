@@ -114,13 +114,54 @@ pub(super) fn token_budget(used: u64, max: u64) -> String {
     format!("exceeded max_tokens {max} ({used} used)")
 }
 
-/// The engine could not stop a session it asked to stop.
+/// The engine could not stop a session it asked to stop: what the stop
+/// reported, and what taking back what the session set up reported too,
+/// when that failed as well.
 pub(super) fn not_stopped(failure: &Failure) -> String {
     let Failure::SessionNotStopped {
         session_not_stopped,
+        release_failed,
     } = failure
     else {
         unreachable!("routed here only for a session the engine could not stop")
     };
-    format!("the engine could not stop the session: {session_not_stopped}")
+    let said = format!("the engine could not stop the session: {session_not_stopped}");
+    match release_failed {
+        Some(release) => {
+            format!("{said}; taking back what the session set up failed too: {release}")
+        }
+        None => said,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::Failure;
+
+    use super::not_stopped;
+
+    /// A session the engine could not stop, with what its stop and its release reported.
+    fn stuck(release_failed: Option<&str>) -> Failure {
+        Failure::SessionNotStopped {
+            session_not_stopped: "kill failed".to_string(),
+            release_failed: release_failed.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_session_the_engine_could_not_stop_says_what_the_stop_reported() {
+        assert_eq!(
+            not_stopped(&stuck(None)),
+            "the engine could not stop the session: kill failed"
+        );
+    }
+
+    #[test]
+    fn a_failed_release_joins_what_taking_back_reported_to_the_stop() {
+        assert_eq!(
+            not_stopped(&stuck(Some("busy"))),
+            "the engine could not stop the session: kill failed; taking back what the session \
+             set up failed too: busy"
+        );
+    }
 }

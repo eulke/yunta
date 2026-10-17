@@ -23,7 +23,7 @@ use super::session::{RunToolError, SessionTools};
 use super::verdicts::json;
 use super::words;
 use crate::replay::RunView;
-use crate::run::scope_record::{self, Recording, Subject};
+use crate::run::scope_record::{self, AskedFor, Recording, Subject};
 use crate::scope_expansion::{
     standing_refusal, write_request, Recorded, RequestError, ScopeExpansionRequest,
 };
@@ -101,7 +101,7 @@ impl SessionTools {
                 subject: Subject::Task(&access.task.id),
                 mode: Some(access.expansion.mode),
                 by: Decider::Rule,
-                asked: Some(request),
+                asked: Some(AskedFor::Request(request)),
                 decision: &decision,
                 count,
                 located: false,

@@ -3,7 +3,7 @@
 //! writable except through the fence; under any other confinement the same
 //! write is a violation and nothing more.
 
-use yunta_core::events::{EventPayload, Finding, FindingEvent};
+use yunta_core::events::{EventPayload, Finding, FindingCause, FindingEvent, FindingSays};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -48,7 +48,12 @@ outcome: { type: completed, summary: "done" }
         breaches(&bench)
     );
     assert!(
-        breaches(&bench)[0].detail.contains("b.txt"),
+        matches!(
+            &breaches(&bench)[0].says,
+            FindingSays::Found {
+                cause: FindingCause::FenceBreached { paths, .. },
+            } if paths.iter().any(|path| path.ends_with("b.txt"))
+        ),
         "the finding names the path that reached the diff: {:?}",
         breaches(&bench)[0]
     );

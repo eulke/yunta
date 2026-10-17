@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::events::{Evidence, Failure};
+use crate::events::{Evidence, Failure, LoggedWords};
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{ModeName, NodeId, RunId};
 use crate::workflow::OnInterrupt;
@@ -257,9 +257,9 @@ pub struct PromotionSignaledPayload {
     pub evidence: Evidence,
     pub suggested_mode: ModeName,
     /// The sentence an older writer stored in place of `cause`. Read from
-    /// such a log, never written.
-    #[serde(default, skip_serializing)]
-    reason: Option<String>,
+    /// such a log and written back as read; this binary never sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<LoggedWords>,
 }
 
 impl PromotionSignaledPayload {
@@ -275,7 +275,7 @@ impl PromotionSignaledPayload {
 
     /// The sentence an older log stored in place of the cause, as written.
     pub fn legacy_reason(&self) -> Option<&str> {
-        self.reason.as_deref()
+        self.reason.as_ref().map(LoggedWords::as_str)
     }
 }
 
@@ -314,7 +314,9 @@ impl TryFrom<RunPausedWire> for RunPausedPayload {
     fn try_from(wire: RunPausedWire) -> Result<Self, Self::Error> {
         let pause = match (wire.pause, wire.reason) {
             (Some(pause), _) => pause,
-            (None, Some(sentence)) => PauseReason::Recorded { sentence },
+            (None, Some(sentence)) => PauseReason::Recorded {
+                sentence: LoggedWords::read(sentence),
+            },
             (None, None) => return Err("a run_paused names its pause or its reason".to_string()),
         };
         Ok(RunPausedPayload { pause })

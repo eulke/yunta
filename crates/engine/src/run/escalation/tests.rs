@@ -21,12 +21,11 @@ fn escalation_offering(remedies: Vec<Remedy>) -> GateWaitingPayload {
     build_failure_escalation(
         &NodeId::from("lint"),
         &Failure::Message {
-            outcome: "the linter failed".to_string(),
+            outcome: "the linter failed".into(),
         },
         2,
         &Outlook::Choose(remedies),
     )
-    .expect("the claim states no fact the record holds")
     .into_payload()
 }
 
@@ -48,8 +47,7 @@ fn two_remedies_that_name_the_same_option_offer_it_once() {
     let payload = escalation_offering(remedies.clone());
     assert_eq!(offered(&payload), ["retry", "abort"]);
     let menu = payload
-        .failure
-        .as_deref()
+        .failure()
         .expect("a failure's escalation carries its menu");
     assert_eq!(menu.remedies, remedies);
 }

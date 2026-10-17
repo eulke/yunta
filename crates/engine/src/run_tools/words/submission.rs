@@ -8,6 +8,7 @@
 //! a mistake only the session can fix.
 
 use yunta_core::diagnostic::{ArtifactFailure, Report};
+use yunta_core::events::Unanswered;
 use yunta_core::{Redactor, TaskId};
 
 use super::verdicts::failure_heading;
@@ -79,7 +80,7 @@ pub(crate) fn failing_now(failing: &[(TaskId, CriterionRun)], redactor: &Redacto
         text.push_str(&format!(
             "\n  `{}` (task `{task}`): exit {}{line}",
             run.cmd,
-            run.exit_described()
+            Unanswered::exit_described(run.exit_code)
         ));
     }
     text

@@ -22,7 +22,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
             None,
             EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
                 &PauseReason::Recorded {
-                    sentence: asked.to_string(),
+                    sentence: asked.into(),
                 },
             ))),
         ),
@@ -35,7 +35,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
                 node: "plan".into(),
                 on: NodeWait::Gate { external_ref: None },
                 reason: Some(PauseReason::Recorded {
-                    sentence: asked.to_string(),
+                    sentence: asked.into(),
                 }),
             }
         }
@@ -57,7 +57,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
             None,
             EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
                 &PauseReason::Recorded {
-                    sentence: "token budget exceeded".to_string(),
+                    sentence: "token budget exceeded".into(),
                 },
             ))),
         ),
@@ -98,7 +98,7 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
             None,
             EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
                 &PauseReason::Recorded {
-                    sentence: "token budget exceeded".to_string(),
+                    sentence: "token budget exceeded".into(),
                 },
             ))),
         ),
@@ -109,7 +109,7 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
         RunPhase::Waiting {
             on: WaitingOn::Run {
                 reason: PauseReason::Recorded {
-                    sentence: "token budget exceeded".to_string(),
+                    sentence: "token budget exceeded".into(),
                 },
             }
         }
@@ -130,7 +130,7 @@ fn a_failed_run_carries_the_failure_its_last_node_failed_recorded() {
         frame(&workflow, &events, 100).phase,
         RunPhase::Failed {
             failure: Some(Failure::Message {
-                outcome: "criteria still red".to_string()
+                outcome: "criteria still red".into()
             }),
         }
     );
@@ -151,7 +151,7 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
                     node: "build".into(),
                     goto: "fix".into(),
                     failure: Some(Failure::Message {
-                        outcome: "criteria still red".to_string(),
+                        outcome: "criteria still red".into(),
                     }),
                 },
                 vec![Fact::bare("criteria still red")].into(),

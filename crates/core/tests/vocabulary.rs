@@ -170,7 +170,8 @@ fn a_documents_kind_is_the_one_its_own_type_declares() {
 // Three assertions form one chain, and the chain is what makes "no rule
 // surprises a writer" a property of the build rather than of review:
 //
-//   1. a rule cannot exist without a `RuleCode` — `Problem::rule` takes one
+//   1. a rule cannot exist without a fault, and every fault names its
+//      `RuleCode` — `Problem::broke` takes one
 //   2. every `RuleCode` belongs to some document's `RULES` (below)
 //   3. every `RULES` entry is reachable by a document that breaks it (below)
 //

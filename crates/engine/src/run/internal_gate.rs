@@ -5,18 +5,18 @@
 use indexmap::IndexMap;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
-    ArtifactId, Claim, EngineFact, Escalation, EscalationError, EventPayload, Fact, Failure,
-    GateEvent, GateResolvedPayload, HumanChoice, NodeEvent, NodeOutcome, PauseReason, Shown,
-    TokenUsage, Withheld,
+    ArtifactId, AuthorGate, Claim, EngineFact, Escalation, EventPayload, Failure, GateEvent,
+    GateOption, GateResolvedPayload, HumanChoice, Leads, Menu, NodeEvent, NodeOutcome, PauseReason,
+    Shown, TokenUsage, WhyWithheld, Withheld,
 };
 use yunta_core::reserved::ReservedOption;
+use yunta_core::shown::Flaw;
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
 
 use super::gate_exec::{emit_started, GateStep};
 use super::node_close::{fail, finish_node};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
-use crate::reserved::offers;
 
 /// A gate a person answers here, read once out of its node.
 pub(crate) struct InternalGate<'a> {
@@ -31,8 +31,6 @@ pub(crate) struct InternalGate<'a> {
 /// Why a gate's escalation could not be put together.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GateEscalationError {
-    #[error(transparent)]
-    Escalation(#[from] EscalationError),
     /// What it shows is a read the gate waited for, so a run without it
     /// has a log that says otherwise.
     #[error("it shows the {artifact}{of}, which the run does not hold")]
@@ -92,39 +90,53 @@ impl<'a> InternalGate<'a> {
             .filter(|node| node.depends_on.contains(&self.node.id))
             .map(|node| &node.id)
             .collect();
-        let mut gate_options: Vec<_> = declared
+        let mut gate_options: Vec<GateOption> = declared
             .iter()
-            .map(|id| {
-                if aborts(id) {
-                    return offers::abort();
-                }
-                let target = self.on.get(id).and_then(|target| {
-                    workflow
-                        .iter_nodes()
-                        .find(|candidate| candidate.id == *target)
-                });
-                let mut option = offers::declared(id, target, &next);
-                if target.is_none() && self.shows_the_run_findings() {
-                    option.tradeoff = settling(option.tradeoff);
-                }
-                option
-            })
+            .map(|id| self.option(workflow, &next, id))
             .collect();
         if !declared.iter().any(aborts) {
-            gate_options.push(offers::abort());
+            gate_options.push(GateOption::reserved(ReservedOption::Abort));
         }
         let (first, rest) = gate_options
             .split_first()
             .map(|(first, rest)| (first.clone(), rest.to_vec()))
-            .unwrap_or_else(|| (offers::abort(), Vec::new()));
+            .unwrap_or_else(|| (GateOption::reserved(ReservedOption::Abort), Vec::new()));
         // An author's own `message:` is the claim; the assignee is the
         // record of who it is addressed to.
         Ok(Escalation::new(
             claim(self.node, self.message),
-            vec![Fact::labelled("assignee", self.assignee)].into(),
+            Menu::Gate(AuthorGate {
+                assignee: self.assignee.to_string(),
+            }),
             NonEmpty::from((first, rest)),
-        )?
+        )
         .showing(self.shown(state)?))
+    }
+
+    /// One declared option: `abort` when its spelling is the reserved one,
+    /// and otherwise where its `on:` mapping sends the run. A target the
+    /// workflow holds is a `Back`; without one the run goes on past the gate
+    /// to `next`, settling the findings the gate shows when it does.
+    fn option(&self, workflow: &Workflow, next: &[&NodeId], id: &OptionId) -> GateOption {
+        if aborts(id) {
+            return GateOption::reserved(ReservedOption::Abort);
+        }
+        let target = self.on.get(id).and_then(|target| {
+            workflow
+                .iter_nodes()
+                .find(|candidate| candidate.id == *target)
+        });
+        let leads = match target {
+            Some(target) => Leads::Back {
+                node: target.id.clone(),
+                resumes: target.kind.opens_resumable_session(),
+            },
+            None => Leads::On {
+                next: next.iter().map(|id| (*id).clone()).collect(),
+                settles: self.shows_the_run_findings(),
+            },
+        };
+        GateOption::leading(id.clone(), leads)
     }
 
     /// What the gate asks, read from the documents it shows as the run
@@ -155,16 +167,18 @@ impl<'a> InternalGate<'a> {
             .cloned()
             .collect();
         let documents = crate::artifacts::shown::documents(run_dir, &read, state).await?;
-        let flaws = super::flawed::unprovable(&documents);
-        let because = yunta_core::shown::withheld_because(flaws.iter().map(|(_, flaw)| flaw));
-        Ok(Ok(self.withholding(escalation, because)))
+        let flaws: Vec<Flaw> = super::flawed::unprovable(&documents)
+            .into_iter()
+            .map(|(_, flaw)| flaw)
+            .collect();
+        Ok(Ok(self.withholding(escalation, NonEmpty::new(flaws))))
     }
 
     /// `escalation` without the options that go on past the gate, when
-    /// what it shows cannot be proven, `because` says why: what is left
-    /// is each option `on:` sends back, and `abort`.
-    fn withholding(&self, escalation: Escalation, because: Option<String>) -> Escalation {
-        let Some(because) = because else {
+    /// what it shows cannot be proven: `flaws` says why, and none leaves it
+    /// whole. What is left is each option `on:` sends back, and `abort`.
+    fn withholding(&self, escalation: Escalation, flaws: Option<NonEmpty<Flaw>>) -> Escalation {
+        let Some(flaws) = flaws else {
             return escalation;
         };
         let withheld = escalation
@@ -173,7 +187,9 @@ impl<'a> InternalGate<'a> {
             .filter(|option| !aborts(&option.id) && !self.on.contains_key(&option.id))
             .map(|option| Withheld {
                 option: option.id.clone(),
-                because: because.clone(),
+                because: WhyWithheld::Unprovable {
+                    flaws: flaws.clone(),
+                },
             })
             .collect();
         escalation.withholding(withheld)
@@ -242,15 +258,6 @@ fn aborts(option: &OptionId) -> bool {
     ReservedOption::of(option) == Some(ReservedOption::Abort)
 }
 
-/// The tradeoff of an option that goes on past a gate which shows the run's
-/// findings: it settles every finding it showed.
-fn settling(tradeoff: Option<String>) -> Option<String> {
-    Some(match tradeoff {
-        Some(tradeoff) => format!("{tradeoff}, and settles every finding it shows"),
-        None => "settles every finding it shows".to_string(),
-    })
-}
-
 /// Resolves an internal gate: puts its escalation to the person, or
 /// takes the decision `resolve_gate` seeded onto the log while the run
 /// was parked. An option mapped in `on` re-routes exactly like
@@ -316,18 +323,10 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     Ok(GateStep::Resolved)
 }
 
-/// Why a gate's question could not be put together. A refused claim keeps
-/// the fact it repeats as data, for the surface that shows the error; any
-/// other way the question fails is said in words here.
+/// Why a gate's question could not be put together, said in words here.
 fn unbuilt(node: &Node, source: GateEscalationError) -> RunError {
-    match source {
-        GateEscalationError::Escalation(source) => RunError::Escalation {
-            context: format!("node `{}`'s gate", node.id),
-            source,
-        },
-        other => RunError::Broken {
-            diagnostic: format!("node `{}`'s gate: {other}", node.id),
-        },
+    RunError::Broken {
+        diagnostic: format!("node `{}`'s gate: {source}", node.id),
     }
 }
 
@@ -340,7 +339,7 @@ async fn record(
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
+        EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
     )
     .await?;
     ctx.emit(

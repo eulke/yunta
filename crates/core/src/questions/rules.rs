@@ -9,6 +9,7 @@
 
 use std::collections::HashSet;
 
+use super::QuestionFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{AnswerType, QuestionId, QuestionsFile};
 
@@ -35,10 +36,10 @@ pub(super) const RULES: &[Rule] = &[
     },
 ];
 
-fn broke(index: usize, id: &QuestionId, code: RuleCode, detail: &str) -> Diagnostic {
+fn broke(index: usize, id: &QuestionId, fault: QuestionFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Question(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }
 
@@ -50,37 +51,20 @@ pub(super) fn check(file: &QuestionsFile) -> Vec<Diagnostic> {
 
     for (index, question) in file.questions.iter().enumerate() {
         if !known_ids.insert(&question.id) {
-            broken.push(broke(
-                index,
-                &question.id,
-                RuleCode::DuplicateId,
-                "a second question already carries this id; every id is declared once",
-            ));
+            broken.push(broke(index, &question.id, QuestionFault::DuplicateQuestion));
         }
         if question.text.trim().is_empty() {
-            broken.push(broke(
-                index,
-                &question.id,
-                RuleCode::EmptyText,
-                "`text` is empty; a person has to be able to read the question",
-            ));
+            broken.push(broke(index, &question.id, QuestionFault::EmptyText));
         }
         if question.answer_type == AnswerType::Choice && question.values.is_empty() {
-            broken.push(broke(
-                index,
-                &question.id,
-                RuleCode::MissingValues,
-                "`answer_type` is `choice` but `values` is empty; list the answers allowed",
-            ));
+            broken.push(broke(index, &question.id, QuestionFault::MissingValues));
         }
         let assumed = question.assumes.as_deref().map(str::trim);
         if !question.required && assumed.is_none_or(str::is_empty) {
             broken.push(broke(
                 index,
                 &question.id,
-                RuleCode::UnstatedAssumption,
-                "the question is optional but says nothing in `assumes`; say what the work \
-                 takes as the answer when nobody gives one",
+                QuestionFault::UnstatedAssumption,
             ));
         }
     }

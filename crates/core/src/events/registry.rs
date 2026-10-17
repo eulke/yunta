@@ -124,7 +124,7 @@ event_kinds! {
         => Node(NodeEvent::Rerouted) sample samples::node_rerouted;
     PullRequestOpened(PullRequestOpenedPayload) = "pull_request_opened"
         => Node(NodeEvent::PullRequestOpened) sample samples::pull_request_opened;
-    GateWaiting(GateWaitingPayload) = "gate_waiting"
+    GateWaiting(Box<GateWaitingPayload>) = "gate_waiting"
         => Gates(GateEvent::Waiting) sample samples::gate_waiting;
     GateResolved(GateResolvedPayload) = "gate_resolved"
         => Gates(GateEvent::Resolved) sample samples::gate_resolved;

@@ -15,7 +15,7 @@ fn retry_menu(waits: Vec<Precondition>) -> FailureMenu {
     FailureMenu {
         attempt: 2,
         failure: Failure::Message {
-            outcome: "the linter failed".to_string(),
+            outcome: "the linter failed".into(),
         },
         remedies: waits
             .into_iter()

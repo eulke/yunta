@@ -10,7 +10,9 @@
 use std::path::PathBuf;
 
 use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, TokenUsage};
+use yunta_core::events::{
+    ArtifactId, EngineError, EngineStep, EventPayload, Failure, RecordedOrigin, TokenUsage,
+};
 use yunta_core::{ArtifactSpec, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
@@ -67,7 +69,10 @@ pub(super) async fn derive_findings(
         Ok(derived) => derived,
         Err(error) => {
             let failure = Failure::EngineFailed {
-                engine_error: error.to_string(),
+                engine_error: EngineError::Step {
+                    step: EngineStep::DeriveFindings,
+                    report: Some(error.to_string()),
+                },
             };
             return Ok(Some(
                 fail_with_tokens_staged(ctx, node, failure, tokens, staged).await?,
@@ -123,10 +128,10 @@ impl From<NotAcquired> for Failure {
             },
             // The store's own read failed: an engine step that failed on its own.
             NotAcquired::Unreachable { artifact, source } => Failure::EngineFailed {
-                engine_error: format!(
-                    "the {}: the child run cannot hand over its bytes: {source}",
-                    artifact.label()
-                ),
+                engine_error: EngineError::Step {
+                    step: EngineStep::ChildHandover { artifact },
+                    report: Some(source.to_string()),
+                },
             },
         }
     }

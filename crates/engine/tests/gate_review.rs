@@ -7,9 +7,9 @@
 //! what the planner's session picks its work back up with.
 
 use yunta_core::events::{
-    ArtifactId, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
+    ArtifactId, Asks, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
 };
-use yunta_core::ArtifactKind;
+use yunta_core::{ArtifactKind, HeldEntry};
 use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal, ShownContent};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
@@ -71,7 +71,7 @@ fn waiting(bench: &Bench) -> Vec<yunta_core::events::GateWaitingPayload> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::Gates(GateEvent::Waiting(waiting))) => Some(waiting.clone()),
+            Some(EventPayload::Gates(GateEvent::Waiting(waiting))) => Some((**waiting).clone()),
             _ => None,
         })
         .collect()
@@ -153,16 +153,29 @@ async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
     .await
     .unwrap()
     .expect("the run waits on the gate");
-    let asks: Vec<(&str, Option<&str>)> = escalation
+    let asks: Vec<(&str, Option<Asks>)> = escalation
         .options()
         .iter()
-        .map(|option| (option.id.as_str(), option.asks.as_deref()))
+        .map(|option| (option.id.as_str(), option.asks()))
         .collect();
     assert_eq!(
         asks,
         [
             ("approve", None),
-            ("adjust", Some("what should change?")),
+            ("adjust", Some(Asks::Change)),
+            ("abort", None)
+        ]
+    );
+    let words: Vec<(&str, Option<String>)> = escalation
+        .options()
+        .iter()
+        .map(|option| (option.id.as_str(), yunta_render::offers::asks(option)))
+        .collect();
+    assert_eq!(
+        words,
+        [
+            ("approve", None),
+            ("adjust", Some("what should change?".to_string())),
             ("abort", None)
         ]
     );
@@ -414,5 +427,8 @@ async fn a_gate_that_shows_a_review_shows_its_findings() {
     let ShownContent::Findings(file) = &shown[0][0].content else {
         panic!("a findings document is shown as its findings: {shown:?}");
     };
-    assert_eq!(file.findings[0].title, "It stops halfway");
+    let HeldEntry::Written(entry) = &file.findings[0] else {
+        panic!("a session's finding is shown as its own words: {file:?}");
+    };
+    assert_eq!(entry.title, "It stops halfway");
 }

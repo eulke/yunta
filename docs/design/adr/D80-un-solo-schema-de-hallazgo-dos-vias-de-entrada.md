@@ -8,7 +8,10 @@ revised_by: []
 
 # D80 — Un solo schema de hallazgo, dos vías de entrada; toda denegación de scope deja finding
 
-(a) El formato de §4.1 rige tanto para findings producidos como artifact al
+*(Nota de D268: un hallazgo que reporta el engine lleva su causa como dato, en lugar
+de un título y un detalle escritos, y render escribe ese título y ese detalle. El
+formato de §4.1 rige para lo que escribe una sesión.)* (a) El formato de §4.1 rige
+tanto para findings producidos como artifact al
 cerrar un nodo como para los reportados en caliente vía `yunta_post_finding`:
 no hay dos calidades según el momento — se cuentan, deduplican y consultan
 juntos, y la vía en caliente valida contra el mismo schema (reportar

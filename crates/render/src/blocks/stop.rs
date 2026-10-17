@@ -41,7 +41,7 @@ pub fn sentence(cause: &TaskCause) -> String {
              {}); run it again from scratch once the run's tree changes",
             failure::paths_listed(paths)
         ),
-        TaskCause::CommandDenied { rule } => rule.clone(),
+        TaskCause::CommandDenied { rule } => failure::denied(rule),
         TaskCause::ScopeDecisionOwed => {
             "a scope expansion request needs a human decision".to_string()
         }
@@ -73,26 +73,8 @@ fn surprise(surprise: &Surprise) -> String {
         Surprise::Unrunnable { cmd, exit_code } => format!(
             "criterion `{cmd}` could not run: exit {} — the criteria need fixing, or the \
              environment the engine runs them in does",
-            exit_described(*exit_code)
+            Unanswered::exit_described(*exit_code)
         ),
-    }
-}
-
-/// An exit code as a person reads it: the code, and what it means when the
-/// command never answered.
-fn exit_described(exit_code: i32) -> String {
-    match Unanswered::of(exit_code) {
-        Some(why) => format!("{exit_code} ({})", unanswered_words(why)),
-        None => exit_code.to_string(),
-    }
-}
-
-/// What a command that never answered is called, in a person's words.
-fn unanswered_words(why: Unanswered) -> &'static str {
-    match why {
-        Unanswered::NotFound => "command not found",
-        Unanswered::NotExecutable => "command not executable",
-        Unanswered::Stopped => "stopped before it answered",
     }
 }
 
@@ -103,7 +85,11 @@ fn exits(runs: &[CriterionResult], verb: &str) -> String {
     runs.iter()
         .map(|run| {
             text::aside(
-                format!("`{}` {verb} {}", run.cmd, exit_described(run.exit_code)),
+                format!(
+                    "`{}` {verb} {}",
+                    run.cmd,
+                    Unanswered::exit_described(run.exit_code)
+                ),
                 run.conclusion.as_deref().unwrap_or_default(),
             )
         })

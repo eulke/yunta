@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn a_record_stored_as_one_string_still_reads_as_its_one_fact() {
-        let stored = Evidence::Prose("exit 1".to_string());
+        let stored = Evidence::Prose("exit 1".into());
         assert_eq!(one_line(&stored), "exit 1");
         assert_eq!(lines(&stored), vec!["exit 1"]);
         assert_eq!(one_line(&Evidence::none()), "");

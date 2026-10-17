@@ -17,7 +17,7 @@ let_underscore_in_prod 0
 numeric_const_without_reason 0
 parenthesized_plural_in_prod_strings 0
 prod_fns_over_100_lines 0
-prod_fns_over_50_lines 34
+prod_fns_over_50_lines 33
 reason_built_by_format 0
 run_tool_named_outside_vocabulary 0
 separator_literal_outside_glyphs 0
@@ -29,7 +29,7 @@ src_files_over_500_lines 0
 sync_fs_in_async 0
 system_clock_outside_boundary 0
 tense_markers 0
-test_files_over_500_lines 35
-test_fns_over_50_lines 125
+test_files_over_500_lines 34
+test_fns_over_50_lines 119
 token_count_formatted_outside_units 0
 wildcard_in_ledger_apply 0

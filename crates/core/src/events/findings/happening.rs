@@ -1,5 +1,6 @@
 //! What a finding event says happened, read as a person reads it.
 
+use super::cause::FindingSays;
 use crate::events::{FindingAnswer, FindingEvent, FindingOperation, FindingSeverity};
 use crate::{FindingId, NodeId};
 
@@ -11,7 +12,9 @@ pub enum Happening {
         /// refused before it could name one.
         id: Option<FindingId>,
         severity: Option<FindingSeverity>,
-        title: String,
+        /// What the finding says; `None` when the change names the finding
+        /// by its id alone.
+        says: Option<FindingSays>,
         change: Change,
     },
 }
@@ -47,12 +50,12 @@ pub enum Change {
 }
 
 impl Happening {
-    /// What happened to `finding`, said with its severity and title.
+    /// What happened to `finding`, said with its severity and what it says.
     fn of(finding: &crate::events::Finding, change: Change) -> Self {
         Happening::Finding {
             id: Some(finding.id.clone()),
             severity: Some(finding.severity),
-            title: finding.title.clone(),
+            says: Some(finding.says.clone()),
             change,
         }
     }
@@ -62,7 +65,7 @@ impl Happening {
         Happening::Finding {
             id: id.cloned(),
             severity: None,
-            title: String::new(),
+            says: None,
             change,
         }
     }

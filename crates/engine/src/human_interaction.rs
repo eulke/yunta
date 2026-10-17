@@ -1,7 +1,9 @@
 //! `HumanInteraction` — the trait a gate's escalation
-//! resolves through. The same object is rendered on every surface
-//! (console, the MCP `resolve_gate` tool) — never a per-surface
-//! reinterpretation. One trait, one method, the log's own types in
+//! resolves through. Every surface offers the same menu: the console draws
+//! it, and an MCP client reads it as data through `workflow_status` and
+//! answers through `resolve_gate`, which records the answer and returns the
+//! sentence the CLI prints. Never a per-surface reinterpretation. One trait,
+//! one method, the log's own types in
 //! and out (`GateWaitingPayload` is the escalation as persisted;
 //! `HumanChoice` is the content of the `gate_resolved` the log records)
 //! is what makes "no duplicated logic" true by construction: there is

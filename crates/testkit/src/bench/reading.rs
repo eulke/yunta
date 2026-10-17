@@ -141,7 +141,9 @@ impl Bench {
             .manifest
     }
 
-    /// Every finding `node` posted on this run's log, in log order.
+    /// Every finding `node` posted on this run's log, in log order. Each
+    /// carries what it says: the title and detail a session wrote, or the
+    /// cause the engine found.
     pub fn findings_by(&self, node: &str) -> Vec<yunta_core::events::Finding> {
         self.events()
             .into_iter()

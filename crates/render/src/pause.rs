@@ -84,7 +84,7 @@ pub fn sentence(pause: &PauseReason) -> String {
         PauseReason::AnswersRefused { node, report } => {
             format!("node `{node}`'s answers were refused: {report}")
         }
-        PauseReason::Recorded { sentence: said } => said.clone(),
+        PauseReason::Recorded { sentence: said } => said.as_str().to_string(),
     }
 }
 
@@ -172,7 +172,7 @@ mod tests {
         let failed = PauseReason::NodeFailed {
             node: NodeId::from("lint"),
             failure: Failure::Message {
-                outcome: "exit 1".to_string(),
+                outcome: "exit 1".into(),
             },
         };
         assert_eq!(sentence(&failed), "node `lint` failed: exit 1");

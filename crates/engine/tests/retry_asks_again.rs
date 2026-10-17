@@ -141,8 +141,7 @@ async fn a_red_guard_offers_a_retry_that_waits_for_something_outside_the_tree() 
         .collect();
     assert_eq!(offered, ["retry", "abort"]);
     let failure = escalation
-        .failure
-        .as_ref()
+        .failure()
         .expect("a failed node's menu names its failure");
     assert_eq!(
         failure.remedies,

@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(
             ledger.answer_for(&TaskId::from_static("task-h")),
             Some(&ScopeAnswer::Denied(Some(Denial::Legacy {
-                text: "outside the declared `within` ceiling".to_string(),
+                text: "outside the declared `within` ceiling".into(),
             })))
         );
     }

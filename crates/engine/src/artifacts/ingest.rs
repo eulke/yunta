@@ -29,11 +29,11 @@ use std::path::{Path, PathBuf};
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem, Report};
 use yunta_core::events::{ArtifactId, Finding, StoredEvent};
 use yunta_core::shape::read;
-use yunta_core::FindingsFile;
 use yunta_core::NodeId;
 use yunta_core::{
     sha256_hex, ArtifactKind, ArtifactSpec, ContentHash, Node, Question, QuestionsFile, TasksFile,
 };
+use yunta_core::{FindingsFile, HeldFindings};
 
 use super::RunArtifacts;
 
@@ -220,7 +220,8 @@ pub(crate) async fn verify_one(
     let path = relative.display().to_string();
 
     let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes).await?;
-    let content = interpret(spec.kind(), &bytes, &path).map_err(ArtifactFailure::Content)?;
+    let content = interpret(spec.kind(), &bytes, &path, FindingsFormat::Entering)
+        .map_err(ArtifactFailure::Content)?;
 
     Ok(VerifiedArtifact {
         artifact,
@@ -245,8 +246,13 @@ pub(crate) fn interpreted(
 ) -> Result<VerifiedArtifact, ArtifactFailure> {
     let artifact = ArtifactId::from(spec);
     let path = super::store::view_path(node, &artifact.view_name());
-    let content = interpret(spec.kind(), bytes, &path.display().to_string())
-        .map_err(ArtifactFailure::Content)?;
+    let content = interpret(
+        spec.kind(),
+        bytes,
+        &path.display().to_string(),
+        FindingsFormat::Held,
+    )
+    .map_err(ArtifactFailure::Content)?;
     Ok(VerifiedArtifact {
         artifact,
         path,
@@ -302,13 +308,26 @@ async fn read_file(
     Ok(bytes)
 }
 
+/// The format a findings document is read in. What enters the run from a
+/// file is a session's own words, every entry carrying them; what the run
+/// already holds may carry a finding the engine made, as its cause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FindingsFormat {
+    /// A file a session wrote and handed over.
+    Entering,
+    /// A document the run holds: the engine's own rendering, or a child run's.
+    Held,
+}
+
 /// Reads one artifact's bytes as whatever its declared kind says they
 /// are. An artifact with no declared kind is [`ArtifactContent::Opaque`]
-/// without touching the bytes at all.
+/// without touching the bytes at all. `findings` is the format a findings
+/// document is read in.
 pub(super) fn interpret(
     kind: Option<ArtifactKind>,
     bytes: &[u8],
     path: &str,
+    findings: FindingsFormat,
 ) -> Result<ArtifactContent, Report> {
     Ok(match kind {
         None => ArtifactContent::Opaque,
@@ -316,10 +335,18 @@ pub(super) fn interpret(
         Some(ArtifactKind::Spec) => {
             ArtifactContent::Spec(read::<yunta_core::SpecFile>(bytes, path)?)
         }
-        Some(ArtifactKind::Findings) => {
-            let file = read::<FindingsFile>(bytes, path)?;
-            ArtifactContent::Findings(file.findings.into_iter().map(Finding::from).collect())
-        }
+        Some(ArtifactKind::Findings) => ArtifactContent::Findings(match findings {
+            FindingsFormat::Entering => read::<FindingsFile>(bytes, path)?
+                .findings
+                .into_iter()
+                .map(Finding::from)
+                .collect(),
+            FindingsFormat::Held => read::<HeldFindings>(bytes, path)?
+                .findings
+                .into_iter()
+                .map(Finding::from)
+                .collect(),
+        }),
         Some(ArtifactKind::Questions) => {
             let file = read::<QuestionsFile>(bytes, path)?;
             ArtifactContent::Questions(file.questions)

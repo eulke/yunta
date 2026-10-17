@@ -62,6 +62,17 @@
         "message_type": {
           "$ref": "#/$defs/AgentMessageType"
         },
+        "note": {
+          "description": "A note's size and digest: what the log keeps of a note's words.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NoteDigest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "output_tokens": {
           "type": [
             "integer",
@@ -82,9 +93,14 @@
           ]
         },
         "text": {
-          "type": [
-            "string",
-            "null"
+          "description": "The words an older log stored as a note's text. A note written now\ncarries its digest instead.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LoggedWords"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "tool_name": {
@@ -575,6 +591,27 @@
         "content_hash"
       ]
     },
+    "AskedScope": {
+      "description": "What a session asked for: the paths, and its own reason, absent when a\nred criterion located the refused writes.",
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "paths"
+      ]
+    },
     "AskingOpenedPayload": {
       "description": "A person at the engine's terminal is being asked something: a gate's\nchoice, an escalation, a round of questions. The answer lands as the\nevent that resolves what was asked; this one says when the asking\nbegan, which only the engine that put the question knows. Audit: no\nledger moves.",
       "type": "object",
@@ -591,6 +628,18 @@
           ]
         }
       }
+    },
+    "AuthorGate": {
+      "description": "Who an author's gate addresses, as its workflow names them.",
+      "type": "object",
+      "properties": {
+        "assignee": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignee"
+      ]
     },
     "BaselineCapturedPayload": {
       "description": "What the suite a run's lineage declared did on the tree the run\nopens on, and whose measurement it is.",
@@ -762,6 +811,26 @@
           "type": "string",
           "const": "mcp_client_close"
         }
+      ]
+    },
+    "BudgetCap": {
+      "description": "`limits.max_tokens_per_run`, and the input and output tokens the log\nsays the run spent against it.",
+      "type": "object",
+      "properties": {
+        "cap": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "spent": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "cap",
+        "spent"
       ]
     },
     "Capabilities": {
@@ -1046,7 +1115,7 @@
       ]
     },
     "Claim": {
-      "description": "What an escalation says happened: a claim the engine states about a node,\nor a summary whoever escalated wrote.\n\nOn the log an engine claim is an object tagged by `claim`, and a plain\nstring reads back as a summary the escalating party wrote.",
+      "description": "What an escalation says happened: a claim the engine states about a node\nor the run, or a summary whoever escalated wrote.\n\nOn the log an engine claim is an object tagged by `claim`, and a plain\nstring reads back as a summary the escalating party wrote.",
       "anyOf": [
         {
           "type": "string"
@@ -1054,6 +1123,14 @@
         {
           "$ref": "#/$defs/StatedClaim"
         }
+      ]
+    },
+    "Cleaned": {
+      "description": "What `on_finish.cleanup` could not take away: the run's worktree, or the\nbranch it ran on.",
+      "type": "string",
+      "enum": [
+        "worktree",
+        "branch"
       ]
     },
     "CommandExit": {
@@ -1284,6 +1361,10 @@
         "worktree",
         "network"
       ]
+    },
+    "ConsoleGate": {
+      "description": "An external gate answered at the console: its claim says why no forge\nanswers, so it carries nothing more.",
+      "type": "object"
     },
     "ContentHash": {
       "description": "A content hash: 64 lowercase hex digits, the SHA-256 of the content",
@@ -1759,7 +1840,7 @@
           "type": "object",
           "properties": {
             "text": {
-              "type": "string"
+              "$ref": "#/$defs/LoggedWords"
             },
             "type": {
               "type": "string",
@@ -1770,6 +1851,69 @@
             "type",
             "text"
           ]
+        }
+      ]
+    },
+    "DeniedBy": {
+      "description": "The list of `permissions.commands` that refused a command.",
+      "oneOf": [
+        {
+          "description": "`permissions.commands.deny` holds a pattern the command matches.",
+          "type": "object",
+          "properties": {
+            "list": {
+              "type": "string",
+              "const": "deny"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "list",
+            "pattern"
+          ]
+        },
+        {
+          "description": "`permissions.commands.allow` is a strict allowlist, and no pattern matches.",
+          "type": "object",
+          "properties": {
+            "list": {
+              "type": "string",
+              "const": "allow"
+            }
+          },
+          "required": [
+            "list"
+          ]
+        }
+      ]
+    },
+    "DeniedCommand": {
+      "description": "What the project's permissions refused: the command, and the pattern of\nthe list that refused it.",
+      "type": "object",
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/DeniedBy"
+        },
+        "command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "by"
+      ]
+    },
+    "DeniedRule": {
+      "description": "What a denial records: the command, or the sentence an older log stored.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeniedCommand"
+        },
+        {
+          "description": "The sentence an older log stored, kept as written.",
+          "$ref": "#/$defs/LoggedWords"
         }
       ]
     },
@@ -2081,24 +2225,44 @@
               ]
             },
             {
-              "description": "A rule the document broke once it was readable — the tasks document's own\nregistration rules and their siblings. `code` is what a receipt\ncounts; `detail` is the clause a reader acts on.",
+              "description": "A rule the document broke once it was readable — the tasks document's own\nregistration rules and their siblings. `code` is what a receipt\ncounts; `words` says what the rule found.",
               "type": "object",
               "properties": {
                 "code": {
                   "$ref": "#/$defs/RuleCode"
-                },
-                "detail": {
-                  "type": "string"
                 },
                 "problem": {
                   "type": "string",
                   "const": "rule"
                 }
               },
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "fault": {
+                      "$ref": "#/$defs/Fault"
+                    }
+                  },
+                  "required": [
+                    "fault"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "$ref": "#/$defs/LoggedWords"
+                    }
+                  },
+                  "required": [
+                    "detail"
+                  ]
+                }
+              ],
               "required": [
                 "problem",
-                "code",
-                "detail"
+                "code"
               ]
             }
           ]
@@ -2118,6 +2282,15 @@
       "required": [
         "candidate",
         "reason"
+      ]
+    },
+    "DistillStep": {
+      "description": "The step of `on_finish.distill` that git refused.",
+      "type": "string",
+      "enum": [
+        "add",
+        "commit",
+        "push"
       ]
     },
     "DocumentKind": {
@@ -2159,6 +2332,343 @@
         "medium",
         "high",
         "xhigh"
+      ]
+    },
+    "EngineError": {
+      "description": "What a failed engine step records: the step, and what its failing call\nreported of itself, or the sentence an older log stored.",
+      "anyOf": [
+        {
+          "description": "The engine step that failed on its own, with what names it.",
+          "type": "object",
+          "properties": {
+            "report": {
+              "description": "What the failing call reported, absent when the step has no error to report.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "oneOf": [
+            {
+              "description": "The stdin an executor reads could not be serialized.",
+              "type": "object",
+              "properties": {
+                "executor": {
+                  "$ref": "#/$defs/ExecutorName"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "executor_stdin"
+                }
+              },
+              "required": [
+                "step",
+                "executor"
+              ]
+            },
+            {
+              "description": "The node's context could not be resolved.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "context"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "A session found its staged record already taken.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "staged_twice"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "A child run's state roots could not be frozen.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "child_roots"
+                },
+                "workflow": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step",
+                "workflow"
+              ]
+            },
+            {
+              "description": "A child workflow's manifest could not be frozen.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "child_manifest"
+                },
+                "workflow": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step",
+                "workflow"
+              ]
+            },
+            {
+              "description": "A child run's worktree could not be prepared.",
+              "type": "object",
+              "properties": {
+                "child": {
+                  "$ref": "#/$defs/RunId"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "child_checkout"
+                }
+              },
+              "required": [
+                "step",
+                "child"
+              ]
+            },
+            {
+              "description": "A child workflow could not be born: its frozen inputs could not be written.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "child_birth"
+                },
+                "workflow": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step",
+                "workflow"
+              ]
+            },
+            {
+              "description": "A child run could not be resumed.",
+              "type": "object",
+              "properties": {
+                "child": {
+                  "$ref": "#/$defs/RunId"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "child_resume"
+                }
+              },
+              "required": [
+                "step",
+                "child"
+              ]
+            },
+            {
+              "description": "A promoted child run's successor could not be created toward `mode`.",
+              "type": "object",
+              "properties": {
+                "child": {
+                  "$ref": "#/$defs/RunId"
+                },
+                "mode": {
+                  "$ref": "#/$defs/ModeName"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "child_successor"
+                }
+              },
+              "required": [
+                "step",
+                "child",
+                "mode"
+              ]
+            },
+            {
+              "description": "A child run could not hand over the bytes a mount of its artifact names.",
+              "type": "object",
+              "properties": {
+                "artifact": {
+                  "$ref": "#/$defs/ArtifactRefId"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "run": {
+                  "$ref": "#/$defs/RunId"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "mount_read"
+                }
+              },
+              "required": [
+                "step",
+                "artifact",
+                "node",
+                "run"
+              ]
+            },
+            {
+              "description": "The findings a node's artifacts declare could not be derived.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "derive_findings"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "A child run's store could not hand over the bytes an artifact names.",
+              "type": "object",
+              "properties": {
+                "artifact": {
+                  "$ref": "#/$defs/ArtifactId"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "child_handover"
+                }
+              },
+              "required": [
+                "step",
+                "artifact"
+              ]
+            },
+            {
+              "description": "The frozen state a session reads could not be read.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "frozen_read"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "A branch could not be pushed to its remote.",
+              "type": "object",
+              "properties": {
+                "head": {
+                  "type": "string"
+                },
+                "remote": {
+                  "type": "string"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "push"
+                }
+              },
+              "required": [
+                "step",
+                "head",
+                "remote"
+              ]
+            },
+            {
+              "description": "The pull request could not be opened on the forge.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "open_pull_request"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "The variable the forge's `token_env` names is not set.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "forge_token"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "A session's request for more scope could not be read from its checkout.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "scope_request"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "The listener that carries a node's run tools did not start.",
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "const": "run_tools"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            },
+            {
+              "description": "A node's changes could not be landed on the run's tree: git could not\nreplay them over `conflicts` paths.",
+              "type": "object",
+              "properties": {
+                "conflicts": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "step": {
+                  "type": "string",
+                  "const": "land"
+                }
+              },
+              "required": [
+                "step",
+                "node",
+                "conflicts"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "The sentence an older log stored, kept as written.",
+          "$ref": "#/$defs/LoggedWords"
+        }
       ]
     },
     "EngineFact": {
@@ -2414,6 +2924,23 @@
             "by",
             "on"
           ]
+        },
+        {
+          "description": "An external executor the node delegated its work to exited with status\nzero, and wrote no summary of its own.",
+          "type": "object",
+          "properties": {
+            "executor": {
+              "$ref": "#/$defs/ExecutorName"
+            },
+            "type": {
+              "type": "string",
+              "const": "executor_exited"
+            }
+          },
+          "required": [
+            "type",
+            "executor"
+          ]
         }
       ]
     },
@@ -2458,22 +2985,11 @@
       ]
     },
     "Escalation": {
-      "description": "An escalation on its way to a person: the claim, the record it is\naudited against, and the menu of answers.\n\nThe one way a `gate_waiting` payload comes to exist: which half of the\nstory goes into the summary and which into the evidence is decided\nhere, once, and the menu cannot be empty by type, since an escalation\nwith no options refuses every answer it is given.",
+      "description": "An escalation on its way to a person: the claim, the menu of answers it\nis about, and the options it offers.\n\nThe one way a `gate_waiting` payload comes to exist: its claim and its\nmenu are given here, once, and the options cannot be empty by type, since\nan escalation with no options refuses every answer it is given.",
       "type": "object",
       "properties": {
-        "departure": {
-          "description": "The departure from the plan a task's session declared, as the\nquestion about it is written. Absent on every other escalation.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DepartureMenu"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "evidence": {
-          "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
+          "description": "The facts an older log attached beside the claim. Nothing in the\nworkspace writes one, so a line written now carries none.",
           "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
@@ -2483,33 +2999,11 @@
             "null"
           ]
         },
-        "failure": {
-          "description": "The failure a node's escalation is about, with the menu that\nfailure offers. Absent on every other escalation.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FailureMenu"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "options": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/GateOption"
           }
-        },
-        "scope": {
-          "description": "Why the loop waits on a scope request a person answers.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ScopeWait"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "shows": {
           "description": "The artifacts the decision is about, as the person was shown\nthem. Empty for an escalation about something that happened.",
@@ -2519,7 +3013,7 @@
           }
         },
         "summary": {
-          "description": "The claim: what happened, as the engine states it or in the words of\nwhoever escalated. A written summary ends where the record begins — one\nthat quotes what `evidence` holds leaves every surface printing it twice.",
+          "description": "The claim: what happened, as the engine states it or in the words of\nwhoever escalated.",
           "$ref": "#/$defs/Claim"
         },
         "withheld": {
@@ -2530,9 +3024,111 @@
           }
         }
       },
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "description": "A gate an author declared.",
+              "type": "object",
+              "properties": {
+                "gate": {
+                  "$ref": "#/$defs/AuthorGate"
+                }
+              },
+              "required": [
+                "gate"
+              ]
+            },
+            {
+              "description": "A node's failure and the remedies it offers, or the re-route it exhausted.",
+              "type": "object",
+              "properties": {
+                "failure": {
+                  "$ref": "#/$defs/FailureMenu"
+                }
+              },
+              "required": [
+                "failure"
+              ]
+            },
+            {
+              "description": "A departure from the plan a task's session declared.",
+              "type": "object",
+              "properties": {
+                "departure": {
+                  "$ref": "#/$defs/DepartureMenu"
+                }
+              },
+              "required": [
+                "departure"
+              ]
+            },
+            {
+              "description": "A scope request of a loop's task, which a person answers.",
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "$ref": "#/$defs/ScopeWait"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            },
+            {
+              "description": "The run's token cap, spent.",
+              "type": "object",
+              "properties": {
+                "budget": {
+                  "$ref": "#/$defs/BudgetCap"
+                }
+              },
+              "required": [
+                "budget"
+              ]
+            },
+            {
+              "description": "A loop's iteration cap, spent.",
+              "type": "object",
+              "properties": {
+                "loop_cap": {
+                  "$ref": "#/$defs/LoopCap"
+                }
+              },
+              "required": [
+                "loop_cap"
+              ]
+            },
+            {
+              "description": "An external gate answered here, because no forge answers.",
+              "type": "object",
+              "properties": {
+                "console": {
+                  "$ref": "#/$defs/ConsoleGate"
+                }
+              },
+              "required": [
+                "console"
+              ]
+            },
+            {
+              "description": "An external gate whose pull request a forge reviews.",
+              "type": "object",
+              "properties": {
+                "published": {
+                  "$ref": "#/$defs/PublishedGate"
+                }
+              },
+              "required": [
+                "published"
+              ]
+            }
+          ]
+        },
+        {}
+      ],
       "required": [
         "summary",
-        "evidence",
         "options"
       ]
     },
@@ -3348,7 +3944,7 @@
       ]
     },
     "Evidence": {
-      "description": "The facts behind an escalation's summary, attached by the engine\nstraight from the log.\n\nThe pair is the point: the summary is a *claim* about what happened\nand this is the *record* it is audited against, so neither one\nrepeats the other. A producer that writes the cause into both leaves\nevery surface printing it twice, under a heading that promised\nsomething new.\n\nUntagged, with `Prose` last: a payload carrying a list reads as\n[`Evidence::Facts`], and a log written before evidence was data\ncarries one string and reads back as [`Evidence::Prose`], which\nreads as the single unlabelled fact it always was. That tolerance\nis the rule for what is persisted and versioned, and it is why no\nreader needs to know which version wrote the line it is looking at.",
+      "description": "The facts a record holds beside the claim it rests on, as the log keeps\nthem.\n\nThe pair is the point: the claim says what happened and these facts are\nthe *record* it rests on, so neither one repeats the other. A producer\nthat writes the cause into both leaves every surface printing it twice,\nunder a heading that promised something new.\n\nUntagged, with `Prose` last: a payload carrying a list reads as\n[`Evidence::Facts`], and a log written before evidence was data\ncarries one string and reads back as [`Evidence::Prose`], which\nreads as the single unlabelled fact it always was. That tolerance\nis the rule for what is persisted and versioned, and it is why no\nreader needs to know which version wrote the line it is looking at.",
       "anyOf": [
         {
           "description": "What this binary writes: the labelled facts, in the order a\nreader meets them.",
@@ -3359,7 +3955,7 @@
         },
         {
           "description": "One string, as an older log recorded it. Only reading produces\nthis; nothing in this workspace writes one.",
-          "type": "string"
+          "$ref": "#/$defs/LoggedWords"
         }
       ]
     },
@@ -3664,9 +4260,15 @@
           ]
         },
         {
-          "description": "The engine cannot end a session it asked to stop; its process group may still run.",
+          "description": "The engine cannot end a session it asked to stop; its process group may\nstill run. `session_not_stopped` is what the stop reported; `release_failed`,\nwhat taking back what the session set up reported, when that failed too.",
           "type": "object",
           "properties": {
+            "release_failed": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "session_not_stopped": {
               "type": "string"
             }
@@ -3919,11 +4521,11 @@
           ]
         },
         {
-          "description": "An engine step failed on its own; `engine_error` is the step's error as it reported itself.",
+          "description": "An engine step failed on its own; `engine_error` names the step, and\nwhat its failing call reported of itself.",
           "type": "object",
           "properties": {
             "engine_error": {
-              "type": "string"
+              "$ref": "#/$defs/EngineError"
             }
           },
           "required": [
@@ -3931,11 +4533,11 @@
           ]
         },
         {
-          "description": "A command the project's permissions deny; `denied_rule` is the rule that denies it.",
+          "description": "A command the project's permissions deny; `denied_rule` is the command and\nthe list that denies it.",
           "type": "object",
           "properties": {
             "denied_rule": {
-              "type": "string"
+              "$ref": "#/$defs/DeniedRule"
             }
           },
           "required": [
@@ -4173,11 +4775,11 @@
           ]
         },
         {
-          "description": "Reads a log line that carries `outcome:` alone; no writer creates it.",
+          "description": "Reads a log line that carries `outcome:` alone; no writer creates it.\nThe words are the sentence an older log stored, kept as written.",
           "type": "object",
           "properties": {
             "outcome": {
-              "type": "string"
+              "$ref": "#/$defs/LoggedWords"
             }
           },
           "required": [
@@ -4232,6 +4834,84 @@
         "attempt",
         "failure",
         "remedies"
+      ]
+    },
+    "Fault": {
+      "description": "What a rule found wrong with a document, as the values its clause names.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "tasks": {
+              "$ref": "#/$defs/TaskFault"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "tasks"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "spec": {
+              "$ref": "#/$defs/SpecFault"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "spec"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "questions": {
+              "$ref": "#/$defs/QuestionFault"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "questions"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "findings": {
+              "$ref": "#/$defs/FindingFault"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "findings"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflow": {
+              "$ref": "#/$defs/WorkflowFault"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "workflow"
+          ]
+        },
+        {
+          "description": "What the engine found running a document's commands where it runs them.",
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/RunFault"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run"
+          ]
+        }
       ]
     },
     "FenceLevel": {
@@ -4321,10 +5001,24 @@
       ]
     },
     "Finding": {
+      "description": "A finding as the run holds it. Its log form keeps a session's title and\ndetail in the order a session always wrote them, or the engine's cause\nin their place.",
       "type": "object",
       "properties": {
+        "cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingCause"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "detail": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "$ref": "#/$defs/FindingId"
@@ -4346,15 +5040,16 @@
           "$ref": "#/$defs/FindingSeverity"
         },
         "title": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
         "severity",
-        "title",
-        "location",
-        "detail"
+        "location"
       ]
     },
     "FindingAnswer": {
@@ -4387,6 +5082,259 @@
         "id",
         "answer",
         "why"
+      ]
+    },
+    "FindingCause": {
+      "description": "What the engine found: the data its title and detail are written from.",
+      "oneOf": [
+        {
+          "description": "A request for scope a rule or a person refused: who asked, why it was\nrefused, and what was asked, when the session asked.",
+          "type": "object",
+          "properties": {
+            "scope_denied": {
+              "type": "object",
+              "properties": {
+                "asked": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AskedScope"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asker": {
+                  "$ref": "#/$defs/ScopeAsker"
+                },
+                "denial": {
+                  "$ref": "#/$defs/Denial"
+                }
+              },
+              "required": [
+                "asker",
+                "denial"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "scope_denied"
+          ]
+        },
+        {
+          "description": "Writes the fence should have stopped reached the diff.",
+          "type": "object",
+          "properties": {
+            "fence_breached": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "$ref": "#/$defs/AdapterId"
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "adapter",
+                "paths"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fence_breached"
+          ]
+        },
+        {
+          "description": "One comment of a review that requested changes, in its author's words.",
+          "type": "object",
+          "properties": {
+            "review_comment": {
+              "type": "object",
+              "properties": {
+                "author": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "author",
+                "body"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "review_comment"
+          ]
+        },
+        {
+          "description": "What keeps the plan from being proven as it is written.",
+          "type": "object",
+          "properties": {
+            "unprovable": {
+              "type": "object",
+              "properties": {
+                "flaw": {
+                  "$ref": "#/$defs/Flaw"
+                }
+              },
+              "required": [
+                "flaw"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unprovable"
+          ]
+        },
+        {
+          "description": "Artifacts this binary cannot verify, and those it verified.",
+          "type": "object",
+          "properties": {
+            "artifacts_unverified": {
+              "type": "object",
+              "properties": {
+                "unchecked": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                },
+                "verified": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "unchecked",
+                "verified"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "artifacts_unverified"
+          ]
+        },
+        {
+          "description": "The process registry this invocation could not write, and what the\nwrite reported.",
+          "type": "object",
+          "properties": {
+            "registry_unwritten": {
+              "type": "object",
+              "properties": {
+                "report": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "report"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "registry_unwritten"
+          ]
+        },
+        {
+          "description": "`on_finish.cleanup` left the run's tree alone: it is not a linked\nworktree.",
+          "type": "string",
+          "const": "cleanup_skipped"
+        },
+        {
+          "description": "`on_finish.cleanup` could not take the worktree or the branch away,\nand what git reported.",
+          "type": "object",
+          "properties": {
+            "cleanup_failed": {
+              "type": "object",
+              "properties": {
+                "report": {
+                  "type": "string"
+                },
+                "what": {
+                  "$ref": "#/$defs/Cleaned"
+                }
+              },
+              "required": [
+                "what",
+                "report"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "cleanup_failed"
+          ]
+        },
+        {
+          "description": "A step of `on_finish.distill` git refused.",
+          "type": "object",
+          "properties": {
+            "distill_failed": {
+              "type": "object",
+              "properties": {
+                "step": {
+                  "$ref": "#/$defs/DistillStep"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "distill_failed"
+          ]
+        },
+        {
+          "description": "An artifact `on_finish.distill` names that no node produced in this\nrun.",
+          "type": "object",
+          "properties": {
+            "distill_missing": {
+              "type": "object",
+              "properties": {
+                "artifact": {
+                  "$ref": "#/$defs/ArtifactRefId"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "node",
+                "artifact"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "distill_missing"
+          ]
+        }
+      ]
+    },
+    "FindingFault": {
+      "description": "What a rule of a findings document, or of a finding a node handed over,\nfound wrong.",
+      "type": "string",
+      "enum": [
+        "duplicate-finding",
+        "empty-title",
+        "empty-detail",
+        "empty-reason",
+        "posted-twice",
+        "withdrawn-id",
+        "never-posted"
       ]
     },
     "FindingId": {
@@ -4734,29 +5682,51 @@
       ]
     },
     "GateOption": {
-      "description": "One choice in a gate's escalation: `id` is what\n`GateResolvedPayload.chosen_option` names back. `label` and `tradeoff`\nare the words a person reads beside it, when the option stores them.\nAn option that stores neither has its words written when it is shown,\nfrom the data its escalation carries, so neither is required here.",
+      "description": "One choice in a gate's escalation: `id` is what `chosen_option` names\nback, and `leads` is where an author's option takes the run. The words a\nperson reads beside it are written where it is shown.",
       "type": "object",
       "properties": {
         "asks": {
-          "description": "What choosing this option has to say along with it, when an\nanswer without words would change nothing — a correction sent\nback to the session that made the work is the words.",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LoggedWords"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "id": {
           "$ref": "#/$defs/OptionId"
         },
         "label": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LoggedWords"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leads": {
+          "description": "Where an author's option takes the run. Absent on an option the\nengine reserves, whose menu says what it does.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Leads"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "tradeoff": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LoggedWords"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -4811,21 +5781,11 @@
       }
     },
     "GateWaitingPayload": {
+      "description": "What an escalation is about, with the data its words are written from.\nOne per escalation, so a menu reads one way.",
       "type": "object",
       "properties": {
-        "departure": {
-          "description": "The departure from the plan a task's session declared, as the\nquestion about it is written. Absent on every other escalation.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DepartureMenu"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "evidence": {
-          "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
+          "description": "The facts an older log attached beside the claim. Nothing in the\nworkspace writes one, so a line written now carries none.",
           "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
@@ -4835,33 +5795,11 @@
             "null"
           ]
         },
-        "failure": {
-          "description": "The failure a node's escalation is about, with the menu that\nfailure offers. Absent on every other escalation.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FailureMenu"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "options": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/GateOption"
           }
-        },
-        "scope": {
-          "description": "Why the loop waits on a scope request a person answers.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ScopeWait"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "shows": {
           "description": "The artifacts the decision is about, as the person was shown\nthem. Empty for an escalation about something that happened.",
@@ -4871,7 +5809,7 @@
           }
         },
         "summary": {
-          "description": "The claim: what happened, as the engine states it or in the words of\nwhoever escalated. A written summary ends where the record begins — one\nthat quotes what `evidence` holds leaves every surface printing it twice.",
+          "description": "The claim: what happened, as the engine states it or in the words of\nwhoever escalated.",
           "$ref": "#/$defs/Claim"
         },
         "withheld": {
@@ -4882,9 +5820,111 @@
           }
         }
       },
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "description": "A gate an author declared.",
+              "type": "object",
+              "properties": {
+                "gate": {
+                  "$ref": "#/$defs/AuthorGate"
+                }
+              },
+              "required": [
+                "gate"
+              ]
+            },
+            {
+              "description": "A node's failure and the remedies it offers, or the re-route it exhausted.",
+              "type": "object",
+              "properties": {
+                "failure": {
+                  "$ref": "#/$defs/FailureMenu"
+                }
+              },
+              "required": [
+                "failure"
+              ]
+            },
+            {
+              "description": "A departure from the plan a task's session declared.",
+              "type": "object",
+              "properties": {
+                "departure": {
+                  "$ref": "#/$defs/DepartureMenu"
+                }
+              },
+              "required": [
+                "departure"
+              ]
+            },
+            {
+              "description": "A scope request of a loop's task, which a person answers.",
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "$ref": "#/$defs/ScopeWait"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            },
+            {
+              "description": "The run's token cap, spent.",
+              "type": "object",
+              "properties": {
+                "budget": {
+                  "$ref": "#/$defs/BudgetCap"
+                }
+              },
+              "required": [
+                "budget"
+              ]
+            },
+            {
+              "description": "A loop's iteration cap, spent.",
+              "type": "object",
+              "properties": {
+                "loop_cap": {
+                  "$ref": "#/$defs/LoopCap"
+                }
+              },
+              "required": [
+                "loop_cap"
+              ]
+            },
+            {
+              "description": "An external gate answered here, because no forge answers.",
+              "type": "object",
+              "properties": {
+                "console": {
+                  "$ref": "#/$defs/ConsoleGate"
+                }
+              },
+              "required": [
+                "console"
+              ]
+            },
+            {
+              "description": "An external gate whose pull request a forge reviews.",
+              "type": "object",
+              "properties": {
+                "published": {
+                  "$ref": "#/$defs/PublishedGate"
+                }
+              },
+              "required": [
+                "published"
+              ]
+            }
+          ]
+        },
+        {}
+      ],
       "required": [
         "summary",
-        "evidence",
         "options"
       ]
     },
@@ -5315,6 +6355,64 @@
         "any"
       ]
     },
+    "Leads": {
+      "description": "Where an author's gate option takes the run once a person picks it.",
+      "oneOf": [
+        {
+          "description": "Back to `node`, which runs again before the gate asks again;\n`resumes` when its session picks the work back up with what the\nperson says.",
+          "type": "object",
+          "properties": {
+            "back": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "resumes": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "node",
+                "resumes"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "back"
+          ]
+        },
+        {
+          "description": "On past the gate, to the nodes that wait on it (none when nothing\ndoes); `settles` when going on settles the run's findings it shows.",
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "object",
+              "properties": {
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/NodeId"
+                  }
+                },
+                "settles": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "next",
+                "settles"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "on"
+          ]
+        }
+      ]
+    },
     "LeftOut": {
       "description": "A top-level node a run leaves out, and why.",
       "type": "object",
@@ -5421,6 +6519,30 @@
       "description": "where a finding is: a path relative to the work, with its lines when they are known (`src/lib.rs`, `src/lib.rs:10`, `src/lib.rs:10-14`), or one relative to the run's own directory under the `run:` prefix (`run:objects`). Never absolute",
       "type": "string",
       "minLength": 1
+    },
+    "LoggedWords": {
+      "description": "Words an older log stored where the field now holds data: read, shown as\nwritten, and written back as read, so an export of an older run keeps\nevery word it had. Production code only gets one by reading a log, so\nno code of the workspace writes words into a log through it.",
+      "type": "string"
+    },
+    "LoopCap": {
+      "description": "`limits.max_loop_iterations`, and the iterations this invocation ran.",
+      "type": "object",
+      "properties": {
+        "cap": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "ran": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "cap",
+        "ran"
+      ]
     },
     "LoopIterationPayload": {
       "type": "object",
@@ -5979,9 +7101,15 @@
           ]
         },
         {
-          "description": "The engine cannot end a session it asked to stop; its process group may still run.",
+          "description": "The engine cannot end a session it asked to stop; its process group may\nstill run. `session_not_stopped` is what the stop reported; `release_failed`,\nwhat taking back what the session set up reported, when that failed too.",
           "type": "object",
           "properties": {
+            "release_failed": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "session_not_stopped": {
               "type": "string"
             }
@@ -6234,11 +7362,11 @@
           ]
         },
         {
-          "description": "An engine step failed on its own; `engine_error` is the step's error as it reported itself.",
+          "description": "An engine step failed on its own; `engine_error` names the step, and\nwhat its failing call reported of itself.",
           "type": "object",
           "properties": {
             "engine_error": {
-              "type": "string"
+              "$ref": "#/$defs/EngineError"
             }
           },
           "required": [
@@ -6246,11 +7374,11 @@
           ]
         },
         {
-          "description": "A command the project's permissions deny; `denied_rule` is the rule that denies it.",
+          "description": "A command the project's permissions deny; `denied_rule` is the command and\nthe list that denies it.",
           "type": "object",
           "properties": {
             "denied_rule": {
-              "type": "string"
+              "$ref": "#/$defs/DeniedRule"
             }
           },
           "required": [
@@ -6488,11 +7616,11 @@
           ]
         },
         {
-          "description": "Reads a log line that carries `outcome:` alone; no writer creates it.",
+          "description": "Reads a log line that carries `outcome:` alone; no writer creates it.\nThe words are the sentence an older log stored, kept as written.",
           "type": "object",
           "properties": {
             "outcome": {
-              "type": "string"
+              "$ref": "#/$defs/LoggedWords"
             }
           },
           "required": [
@@ -6661,8 +7789,33 @@
       "description": "A `Vec<T>` with at least one element.\n\nBuilt through [`NonEmpty::new`], which answers `None` for an empty\none, or from a first element and the rest. Reads as a slice. On the\nwire it is the plain array, and an empty array does not read.",
       "type": "array",
       "items": {
+        "$ref": "#/$defs/Flaw"
+      }
+    },
+    "NonEmpty4": {
+      "description": "A `Vec<T>` with at least one element.\n\nBuilt through [`NonEmpty::new`], which answers `None` for an empty\none, or from a first element and the rest. Reads as a slice. On the\nwire it is the plain array, and an empty array does not read.",
+      "type": "array",
+      "items": {
         "$ref": "#/$defs/QuestionId"
       }
+    },
+    "NoteDigest": {
+      "description": "A note a session wrote, as the log keeps it: its size and the head of its digest.",
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bytes",
+        "sha256"
+      ]
     },
     "ObjectProblem": {
       "description": "Why the bytes an artifact names cannot be handed over: the run's store\nholds no object under the hash, or the object holds other bytes.",
@@ -6730,7 +7883,7 @@
       "minLength": 1
     },
     "OwedScope": {
-      "description": "One task's request for scope, owed a person's decision: what it asked\nto be allowed to write, and why, in its session's own words.",
+      "description": "One task's request for scope, owed a person's decision: what it asked\nto be allowed to write, and why, in its session's own words. `reason` is\nabsent when a red criterion of the task located the refused writes, rather\nthan its session.",
       "type": "object",
       "properties": {
         "paths": {
@@ -6740,7 +7893,10 @@
           }
         },
         "reason": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "task_id": {
           "$ref": "#/$defs/TaskId"
@@ -6748,8 +7904,7 @@
       },
       "required": [
         "task_id",
-        "paths",
-        "reason"
+        "paths"
       ]
     },
     "PauseReason": {
@@ -7034,7 +8189,7 @@
               "$ref": "#/$defs/NodeId"
             },
             "pending": {
-              "$ref": "#/$defs/NonEmpty3"
+              "$ref": "#/$defs/NonEmpty4"
             },
             "type": {
               "type": "string",
@@ -7073,7 +8228,7 @@
           "type": "object",
           "properties": {
             "sentence": {
-              "type": "string"
+              "$ref": "#/$defs/LoggedWords"
             },
             "type": {
               "type": "string",
@@ -7390,6 +8545,18 @@
         }
       ]
     },
+    "PublishedGate": {
+      "description": "Where the forge published the pull request a gate waits on.",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
     "PullRequestOpenedPayload": {
       "description": "A pull request a `pull_request` node opened — or found open, carrying\nthis run's marker, when it ran again — on the project's forge.",
       "type": "object",
@@ -7416,6 +8583,70 @@
         "number",
         "head",
         "base"
+      ]
+    },
+    "QuestionFault": {
+      "description": "What a rule of a questions document, or of the answers to one, found\nwrong.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "duplicate-question",
+            "empty-text",
+            "missing-values",
+            "unstated-assumption",
+            "duplicate-answer",
+            "missing-answer",
+            "unknown-question"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "not-a-value": {
+              "type": "object",
+              "properties": {
+                "allowed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "allowed"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "not-a-value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "not-a-boolean": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "not-a-boolean"
+          ]
+        }
       ]
     },
     "QuestionId": {
@@ -8222,6 +9453,250 @@
         "base_commit"
       ]
     },
+    "RunFault": {
+      "description": "What the run found when it ran a document's commands, or read a spec\nagainst the plan and the tree the run holds.",
+      "oneOf": [
+        {
+          "description": "A command that never answered: `said` is the line it concluded with,\nand `environment` the shell and `PATH` it ran under.",
+          "type": "object",
+          "properties": {
+            "cannot-run": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "environment": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ExecutionEnvironment"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "exit_code": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "said": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "cmd",
+                "exit_code"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "cannot-run"
+          ]
+        },
+        {
+          "description": "A program a criterion starts that is on no directory of the run's `PATH`.",
+          "type": "object",
+          "properties": {
+            "not-on-path": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "environment": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ExecutionEnvironment"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "program": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd",
+                "program"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "not-on-path"
+          ]
+        },
+        {
+          "description": "A criterion that passes before the work: `said` is the line it concluded with.",
+          "type": "object",
+          "properties": {
+            "already-passes": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "said": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "already-passes"
+          ]
+        },
+        {
+          "description": "A guard that is red before the work: `said` is the line it concluded with.",
+          "type": "object",
+          "properties": {
+            "guard-already-red": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "exit_code": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "said": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "cmd",
+                "exit_code"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "guard-already-red"
+          ]
+        },
+        {
+          "description": "A finding's proposed criterion that already passes on the run's tree.",
+          "type": "object",
+          "properties": {
+            "proposed-passes": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "proposed-passes"
+          ]
+        },
+        {
+          "description": "`planned` is the plan's tasks; absent when the run holds no plan.",
+          "type": "object",
+          "properties": {
+            "unplanned-task": {
+              "type": "object",
+              "properties": {
+                "planned": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/$defs/TaskId"
+                  }
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unplanned-task"
+          ]
+        },
+        {
+          "description": "A test file a spec writes at a path the run's tree already holds.",
+          "type": "object",
+          "properties": {
+            "file-held": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "file-held"
+          ]
+        },
+        {
+          "description": "A spec written again for a departure gives the departed task the tests it had.",
+          "type": "string",
+          "const": "departed-unchanged"
+        },
+        {
+          "description": "A spec written again for a departure changes the tests of another task.",
+          "type": "string",
+          "const": "other-changed"
+        },
+        {
+          "description": "A spec written again for a departure leaves out a task's spec the run holds.",
+          "type": "object",
+          "properties": {
+            "left-out": {
+              "type": "object",
+              "properties": {
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "left-out"
+          ]
+        }
+      ]
+    },
     "RunFinishedPayload": {
       "type": "object",
       "properties": {
@@ -8518,7 +9993,7 @@
       ]
     },
     "RunnerRejection": {
-      "description": "Why a runner candidate was not used. A log written before the typed\nreason stored the sentence, which reads back as `Recorded { sentence: String }`.",
+      "description": "Why a runner candidate was not used. A log written before the typed\nreason stored the sentence, which reads back as `Recorded { sentence }`.",
       "oneOf": [
         {
           "description": "The run's `--adapter` flag pinned another adapter.",
@@ -8555,7 +10030,7 @@
           "type": "object",
           "properties": {
             "sentence": {
-              "type": "string"
+              "$ref": "#/$defs/LoggedWords"
             },
             "type": {
               "type": "string",
@@ -8596,6 +10071,35 @@
       "description": "a schema range: whitespace-separated comparators (`>=`, `<=`, `>`, `<`, `=`) over whole schema majors, e.g. `>=1 <2`",
       "type": "string",
       "minLength": 1
+    },
+    "ScopeAsker": {
+      "description": "Who asked for the scope a denial refused.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "node"
+          ]
+        }
+      ]
     },
     "ScopeCheckedPayload": {
       "description": "`task_id` is present for a task's scope check within a loop node;\nabsent for a node-level scope check — either way the envelope's own\n`node_id` already names the node, so it is not repeated here.",
@@ -8867,6 +10371,13 @@
           "description": "Why the request is not decided without a person.",
           "$ref": "#/$defs/Waiting"
         },
+        "paths": {
+          "description": "The paths the request asks to be allowed. Empty on an older log, whose\nrecord named them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
         "proposed": {
           "description": "The criterion the session proposed for the request, if it proposed one.",
           "anyOf": [
@@ -9067,6 +10578,142 @@
       "type": "string",
       "minLength": 1
     },
+    "SpecFault": {
+      "description": "What a rule of a spec document found wrong with it.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "duplicate-spec",
+            "no-spec-test"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unexplained-test": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unexplained-test"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "test-file-escapes": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "test-file-escapes"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "duplicate-test-file": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "duplicate-test-file"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unrun-spec-file": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unrun-spec-file"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "spec-test-runs-no-spec-file": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "spec-test-runs-no-spec-file"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outside-the-suite": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "suite": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "command",
+                "suite"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "outside-the-suite"
+          ]
+        }
+      ]
+    },
     "StatedClaim": {
       "description": "An engine claim as the log holds it, tagged by `claim`.",
       "oneOf": [
@@ -9162,6 +10809,76 @@
             "claim",
             "node",
             "external_ref"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "tokens_spent"
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "claim",
+            "run"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "loop_cap_spent"
+            },
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "claim",
+            "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "scope_asked"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "claim",
+            "task"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "departs"
+            },
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "claim",
+            "task"
           ]
         }
       ]
@@ -9520,11 +11237,11 @@
           ]
         },
         {
-          "description": "A criterion's own command is one the run's permissions refuse, so\nthe task cannot be verified at all. `rule` is the refusal the\npermission check wrote, naming the pattern and the field.",
+          "description": "A criterion's own command is one the run's permissions refuse, so\nthe task cannot be verified at all. `rule` is the command and the\nlist that refused it.",
           "type": "object",
           "properties": {
             "rule": {
-              "type": "string"
+              "$ref": "#/$defs/DeniedRule"
             },
             "type": {
               "type": "string",
@@ -9646,6 +11363,551 @@
       },
       "required": [
         "task_id"
+      ]
+    },
+    "TaskFault": {
+      "description": "What a rule of a tasks document found wrong with it.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "no-summary",
+            "no-plan-description",
+            "no-task-description",
+            "no-outcome",
+            "no-changes",
+            "duplicate-task",
+            "empty-title",
+            "empty-scope",
+            "no-criteria",
+            "all-criteria-are-guards"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unexplained-decision": {
+              "type": "object",
+              "properties": {
+                "choice": {
+                  "type": "string"
+                },
+                "decision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "decision",
+                "choice"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unexplained-decision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "change-without-code": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "change-without-code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unexplained-criterion": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unexplained-criterion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown-dependency": {
+              "type": "object",
+              "properties": {
+                "dependency": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "dependency"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-dependency"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dependency-cycle": {
+              "type": "object",
+              "properties": {
+                "cycle": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/TaskId"
+                  }
+                }
+              },
+              "required": [
+                "cycle"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "dependency-cycle"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "overlapping-scope": {
+              "type": "object",
+              "properties": {
+                "glob": {
+                  "$ref": "#/$defs/ScopeGlob"
+                },
+                "other": {
+                  "$ref": "#/$defs/TaskId"
+                },
+                "other_glob": {
+                  "$ref": "#/$defs/ScopeGlob"
+                }
+              },
+              "required": [
+                "glob",
+                "other",
+                "other_glob"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "overlapping-scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "changes-a-spec-test": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "at",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "changes-a-spec-test"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown-answer": {
+              "type": "object",
+              "properties": {
+                "answered": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/QuestionId"
+                  }
+                },
+                "decision": {
+                  "type": "string"
+                },
+                "question": {
+                  "$ref": "#/$defs/QuestionId"
+                }
+              },
+              "required": [
+                "decision",
+                "question",
+                "answered"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-answer"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "criterion-checks-presence": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cmd",
+                "file"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "criterion-checks-presence"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "outside-the-suite": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "suite": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "command",
+                "suite"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "outside-the-suite"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uses-its-own-shape": {
+              "type": "object",
+              "properties": {
+                "shape": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "shape"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "uses-its-own-shape"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "task-writes-its-test": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "cmd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "cmd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task-writes-its-test"
+          ]
+        },
+        {
+          "description": "`cmd` is the criterion's command with its surrounding space trimmed,\nas the clause names it.",
+          "type": "object",
+          "properties": {
+            "shared-criterion": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "cmd",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "shared-criterion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "duplicate-shape": {
+              "type": "object",
+              "properties": {
+                "shape": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "shape"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "duplicate-shape"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "duplicate-decision": {
+              "type": "object",
+              "properties": {
+                "decision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "duplicate-decision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown-shape-owner": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                },
+                "shape": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "shape",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-shape-owner"
+          ]
+        },
+        {
+          "description": "`unreadable` is the report of a scope that does not compile, when that\nis why the file cannot be shown to be covered.",
+          "type": "object",
+          "properties": {
+            "shape-outside-owner-scope": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                },
+                "shape": {
+                  "type": "string"
+                },
+                "unreadable": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "shape",
+                "file",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "shape-outside-owner-scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown-shape": {
+              "type": "object",
+              "properties": {
+                "shape": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "shape"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-shape"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "shape-used-before-its-owner": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "$ref": "#/$defs/TaskId"
+                },
+                "shape": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "shape",
+                "owner"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "shape-used-before-its-owner"
+          ]
+        },
+        {
+          "description": "`unreadable` is the report of a scope that does not compile, when that\nis why the change cannot be judged against it.",
+          "type": "object",
+          "properties": {
+            "change-outside-scope": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "unreadable": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "file"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "change-outside-scope"
+          ]
+        },
+        {
+          "description": "`names` are the bare identifiers; the clause puts the backticks around them.",
+          "type": "object",
+          "properties": {
+            "change-code-misses-a-name": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "at",
+                "names"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "change-code-misses-a-name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "change-code-is-a-comment": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "change-code-is-a-comment"
+          ]
+        }
       ]
     },
     "TaskId": {
@@ -10164,6 +12426,25 @@
         }
       ]
     },
+    "WhyWithheld": {
+      "description": "Why an option is withheld: the flaws of the plan it would take the run\npast, or the words an older log stored.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "flaws": {
+              "$ref": "#/$defs/NonEmpty3"
+            }
+          },
+          "required": [
+            "flaws"
+          ]
+        },
+        {
+          "$ref": "#/$defs/LoggedWords"
+        }
+      ]
+    },
     "WithdrawalCause": {
       "description": "Why a request left without an answer.",
       "oneOf": [
@@ -10175,11 +12456,11 @@
       ]
     },
     "Withheld": {
-      "description": "An option the gate withholds, and the reason it gives.",
+      "description": "An option the gate withholds, and why.",
       "type": "object",
       "properties": {
         "because": {
-          "type": "string"
+          "$ref": "#/$defs/WhyWithheld"
         },
         "option": {
           "$ref": "#/$defs/OptionId"
@@ -10188,6 +12469,281 @@
       "required": [
         "option",
         "because"
+      ]
+    },
+    "WorkflowFault": {
+      "description": "What a rule of a workflow found wrong with it.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "duplicate-node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invariant-in-parallel": {
+              "type": "object",
+              "properties": {
+                "group": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "node",
+                "group"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "invariant-in-parallel"
+          ]
+        },
+        {
+          "description": "`nearest` is the id the typed one most likely misspells, among the\nworkflow's ids other than the node's own.",
+          "type": "object",
+          "properties": {
+            "unknown-reference": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "nearest": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/NodeId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "field",
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-reference"
+          ]
+        },
+        {
+          "description": "`node` and `other` are the two children whose scopes overlap; the\ndiagnostic's subject is their group.",
+          "type": "object",
+          "properties": {
+            "overlapping-parallel-scope": {
+              "type": "object",
+              "properties": {
+                "glob": {
+                  "$ref": "#/$defs/ScopeGlob"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "other": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "other_glob": {
+                  "$ref": "#/$defs/ScopeGlob"
+                }
+              },
+              "required": [
+                "node",
+                "glob",
+                "other",
+                "other_glob"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "overlapping-parallel-scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown-mode-node": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "$ref": "#/$defs/ModeName"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "mode",
+                "node"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-mode-node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invariant-left-out": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "$ref": "#/$defs/ModeName"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "invariant-left-out"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reroute-left-out": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "mode": {
+                  "$ref": "#/$defs/ModeName"
+                },
+                "target": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "field",
+                "target",
+                "mode"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reroute-left-out"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source-left-out": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "mode": {
+                  "$ref": "#/$defs/ModeName"
+                },
+                "source": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "field",
+                "source",
+                "mode"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "source-left-out"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "optional-in-parallel": {
+              "type": "object",
+              "properties": {
+                "group": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "node",
+                "group"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "optional-in-parallel"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reroutes-to-optional": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reroutes-to-optional"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reads-what-may-go": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "node": {
+                  "$ref": "#/$defs/NodeId"
+                },
+                "source": {
+                  "$ref": "#/$defs/NodeId"
+                }
+              },
+              "required": [
+                "field",
+                "source",
+                "node"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reads-what-may-go"
+          ]
+        }
       ]
     },
     "Worktree": {

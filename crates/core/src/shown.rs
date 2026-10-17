@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::artifacts::HandedOver;
 use crate::events::findings::RunFindings;
 use crate::events::{AcceptedDeparture, Shown};
-use crate::{FindingsFile, QuestionId, SpecFile, TaskId, TasksFile};
+use crate::{HeldFindings, QuestionId, SpecFile, TaskId, TasksFile};
 
 /// One document an escalation shows, as the run holds it: what the log
 /// names, where its view sits, and what it says.
@@ -26,8 +26,9 @@ pub enum ShownContent {
     Tasks(Box<PlanReview>),
     /// The tests a plan's tasks are held to, read into its specs.
     Spec(SpecFile),
-    /// What a review found, read into its findings.
-    Findings(FindingsFile),
+    /// What a review found, read into its findings: the findings the run
+    /// holds, the entries a session wrote beside the ones the engine found.
+    Findings(HeldFindings),
     /// Every finding standing in the run, each with the node that
     /// reported it and how other nodes answered it.
     RunFindings(RunFindings),

@@ -18,6 +18,9 @@ use yunta_core::events::{
 #[path = "run/failures.rs"]
 mod failures;
 
+#[path = "run/broken_log.rs"]
+mod broken_log;
+
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(
@@ -1373,43 +1376,4 @@ async fn a_run_records_what_its_commands_run_with_when_it_is_born() {
         "the shell is the one found on that PATH: {}",
         born_in.shell
     );
-}
-
-/// A log whose replay breaks before its `run_finished` is broken, not closed:
-/// the replay never reaches the close the log carries.
-#[tokio::test]
-async fn a_log_that_breaks_before_its_close_is_broken_not_finished() {
-    let bench = Bench::new();
-    bench
-        .create(
-            "name: broken\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
-            "dialect: claude-code\nsessions: []\n",
-            MOCK_CONFIG,
-        )
-        .await;
-    let outcome = "no start".to_string();
-    let failed = NodeFailedPayload::new(Failure::Message { outcome }, TokenUsage::default());
-    let close = RunFinishedPayload {
-        terminal_state: TerminalState::Done,
-        metrics: RunMetrics {
-            cptv: None,
-            tokens: TokenUsage::default(),
-        },
-        closed_by: None,
-    };
-    let run_id = bench.run_id.clone();
-    let node_failed = EventDraft::new(
-        run_id.clone(),
-        Some("only".into()),
-        EventPayload::Node(NodeEvent::Failed(failed)),
-    )
-    .expect("a node's failure names its node");
-    let run_closed = EventDraft::new(run_id, None, EventPayload::Run(RunEvent::Finished(close)))
-        .expect("a close names no subject");
-    bench.storage.append(&node_failed, &FixedClock).unwrap();
-    bench.storage.append(&run_closed, &FixedClock).unwrap();
-    assert!(matches!(
-        bench.try_wake().await,
-        Err(RunError::Broken { .. })
-    ));
 }

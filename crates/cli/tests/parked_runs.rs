@@ -17,6 +17,9 @@ use yunta_testkit::{
 #[path = "parked_runs/checkout.rs"]
 mod checkout;
 
+#[path = "parked_runs/menu.rs"]
+mod menu;
+
 /// A node that fails with its one re-route already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
 const EXHAUSTED_REROUTE: &str = r#"
@@ -303,63 +306,6 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
             "and the same words the sentence carries: {state:#}"
         );
     }
-}
-
-#[test]
-fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = repo_with(root.path(), &[("hopeless", EXHAUSTED_REROUTE)]);
-    let home = root.path().join("state");
-
-    let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
-    let run_id = run_id_from(&run);
-    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
-    let state: serde_json::Value = serde_json::from_slice(&status.stdout)
-        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}\n{}", stdout(&status)));
-
-    let decision = &state["decision"];
-    assert_eq!(decision["node"], "lint", "{state:#}");
-    let options = decision["options"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the menu is data, not a sentence: {state:#}"));
-    let ids: Vec<&str> = options.iter().filter_map(|o| o["id"].as_str()).collect();
-    assert_eq!(ids, ["retry", "abort"], "{state:#}");
-    assert!(
-        options
-            .iter()
-            .all(|option| !option["tradeoff"].as_str().unwrap_or_default().is_empty()),
-        "every option carries its tradeoff: {state:#}"
-    );
-    assert_eq!(
-        decision["resolve_with"],
-        serde_json::Value::String(format!("yunta resolve-gate {run_id} <option>")),
-        "{state:#}"
-    );
-    // A failure's menu carries the failure as data, and no evidence beside
-    // it: the exit code is read from the failure, never from a fact.
-    let facts = decision["evidence"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the record is data, not a sentence: {state:#}"));
-    assert!(facts.is_empty(), "{state:#}");
-    assert_eq!(
-        decision["failure"]["failure"]["exited"]["code"], 1,
-        "{state:#}"
-    );
-
-    assert_eq!(state["schema_version"], 7, "{state:#}");
-    assert!(
-        state["summary"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("needs you — node `lint` failed"),
-        "{state:#}"
-    );
-    assert!(
-        state["nodes"]
-            .as_array()
-            .is_some_and(|nodes| nodes.iter().any(|node| node["id"] == "lint")),
-        "{state:#}"
-    );
 }
 
 #[test]

@@ -8,14 +8,15 @@
 //! [`withdraw`]: nobody decided it, so it is the module's only other write.
 
 use yunta_core::events::{
-    Decider, EventPayload, Finding, FindingEvent, FindingPostedPayload, FindingSeverity,
-    ProposedCriterionPrecheck, ScopeEvent, ScopeExpansionDeniedPayload,
-    ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload, ScopeExpansionWithdrawnPayload,
-    WithdrawalCause,
+    AskedScope, Decider, EventPayload, Finding, FindingCause, FindingEvent, FindingPostedPayload,
+    FindingSays, FindingSeverity, OwedScope, ProposedCriterionPrecheck, ScopeAsker, ScopeEvent,
+    ScopeExpansionDeniedPayload, ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload,
+    ScopeExpansionWithdrawnPayload, WithdrawalCause,
 };
 use yunta_core::expansion::{Decision, Denial, Precheck};
 use yunta_core::{
-    FindingId, Location, NodeId, RelativePath, ScopeExpansionMode, ScopeGlob, TaskId,
+    FindingId, Location, NodeId, ProposedCriterionEntry, RelativePath, ScopeExpansionMode,
+    ScopeGlob, TaskId,
 };
 
 use super::RunError;
@@ -39,6 +40,41 @@ impl Subject<'_> {
     }
 }
 
+/// What a decision was asked: a request a session made, or one a failed loop
+/// owes a person's answer to. Its reason is absent when a red criterion of
+/// the task located the refused writes, rather than its session.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AskedFor<'a> {
+    Request(&'a ScopeExpansionRequest),
+    Owed(&'a OwedScope),
+}
+
+impl AskedFor<'_> {
+    /// The paths the request asks to be allowed.
+    fn paths(&self) -> &[ScopeGlob] {
+        match self {
+            AskedFor::Request(request) => request.paths.as_slice(),
+            AskedFor::Owed(owed) => owed.paths.as_slice(),
+        }
+    }
+
+    /// The session's own reason, when it gave one.
+    fn reason(&self) -> Option<&str> {
+        match self {
+            AskedFor::Request(request) => Some(request.reason.as_str()),
+            AskedFor::Owed(owed) => owed.reason.as_deref(),
+        }
+    }
+
+    /// The criterion a session proposed; an owed request keeps none.
+    fn proposed(&self) -> Option<&ProposedCriterionEntry> {
+        match self {
+            AskedFor::Request(request) => request.proposed_criterion.as_ref(),
+            AskedFor::Owed(_) => None,
+        }
+    }
+}
+
 /// One decision and what its caller knows of it, for [`record`].
 pub(crate) struct Recording<'a> {
     pub subject: Subject<'a>,
@@ -46,9 +82,9 @@ pub(crate) struct Recording<'a> {
     pub mode: Option<ScopeExpansionMode>,
     /// Who decided a refusal: the engine, or a person.
     pub by: Decider,
-    /// What the session asked. `None` for a grant the engine made from a
+    /// What the decision was asked. `None` for a grant the engine made from a
     /// red criterion's output, whose request the session never made.
-    pub asked: Option<&'a ScopeExpansionRequest>,
+    pub asked: Option<AskedFor<'a>>,
     pub decision: &'a Decision,
     /// The grants the engine has made this run, this one included.
     pub count: u32,
@@ -79,7 +115,7 @@ pub(crate) async fn record(
     // A person answers a request the engine logged when it arrived, so only
     // the engine's own decision writes the request. The refusal's finding
     // reads the session's reason from `what.asked` below either way.
-    if let Some(asked) = what
+    if let Some(AskedFor::Request(asked)) = what
         .asked
         .filter(|_| what.new_request && !matches!(what.by, Decider::Person { .. }))
     {
@@ -183,44 +219,45 @@ async fn refuse(
 }
 
 /// The finding a refusal leaves: `Minor`, located at the first path asked
-/// for, numbered by the attempt, and carrying the session's own reason and
-/// paths when it asked. A refusal is routine control flow, not evidence the
-/// run is broken, so it never carries a higher severity.
+/// for, numbered by the attempt, and carrying what was asked, with the
+/// session's own reason when it gave one. A refusal is routine control flow,
+/// not evidence the run is broken, so it never carries a higher severity.
 fn denial_finding(
     node: &NodeId,
     subject: &Subject<'_>,
     attempt: u32,
     denial: &Denial,
-    asked: Option<&ScopeExpansionRequest>,
+    asked: Option<AskedFor<'_>>,
 ) -> Result<Finding, RunError> {
-    let (kind, name) = match subject {
-        Subject::Task(task) => ("task", task.to_string()),
-        Subject::Node => ("node", node.to_string()),
+    let (asker, name) = match subject {
+        Subject::Task(task) => (ScopeAsker::Task(TaskId::clone(task)), task.to_string()),
+        Subject::Node => (ScopeAsker::Node(node.clone()), node.to_string()),
     };
-    let words = crate::run_tools::words::denial(denial);
-    let detail = match asked {
-        Some(request) => format!(
-            "{words} — paths asked for: {}; agent's stated reason: {}",
-            yunta_core::listed_globs(&request.paths),
-            request.reason
-        ),
-        None => words,
-    };
+    let asked = asked.as_ref();
     Ok(Finding {
         id: FindingId::try_from(format!("scope-expansion-{name}-{attempt}"))?,
         severity: FindingSeverity::Minor,
-        title: format!("scope expansion denied for {kind} `{name}`"),
+        says: FindingSays::Found {
+            cause: FindingCause::ScopeDenied {
+                asker,
+                denial: denial.clone(),
+                asked: asked.map(|asked| AskedScope {
+                    paths: asked.paths().to_vec(),
+                    reason: asked.reason().map(str::to_string),
+                }),
+            },
+        },
         location: Location::work(
             RelativePath::of(
                 asked
-                    .and_then(|request| request.paths.first())
+                    .and_then(|asked| asked.paths().first())
                     .map(ScopeGlob::as_str),
             ),
             None,
         ),
-        detail,
         proposed_criterion: asked
-            .and_then(|request| request.proposed_criterion.clone())
+            .and_then(|asked| asked.proposed())
+            .cloned()
             .map(Into::into),
     })
 }

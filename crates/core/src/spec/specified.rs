@@ -6,6 +6,7 @@
 //! Like the plan's, these rules are asked of a spec when it is handed
 //! over, never when one is read back.
 
+use super::SpecFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{SpecFile, SpecTest, Suite};
 
@@ -43,29 +44,17 @@ impl SpecFile {
             for file in spec.unrun_files() {
                 broken.push(Diagnostic::new(
                     subject(),
-                    Problem::rule(
-                        RuleCode::UnrunSpecFile,
-                        format!(
-                            "`{}` is run by none of this task's tests; name it in the command \
-                             that runs it",
-                            file.path
-                        ),
-                    ),
+                    Problem::broke(SpecFault::UnrunSpecFile {
+                        path: file.path.clone(),
+                    }),
                 ));
             }
             for test in spec.hollow_tests() {
                 broken.push(Diagnostic::new(
                     subject(),
-                    Problem::rule(
-                        RuleCode::SpecTestRunsNoSpecFile,
-                        format!(
-                            "`{}` runs none of the files this spec writes, so it judges the task \
-                             by tests the task writes itself; run a file of the spec — and if no \
-                             test can observe the change through what the plan declares, give \
-                             the task no spec and say so",
-                            test.cmd
-                        ),
-                    ),
+                    Problem::broke(SpecFault::SpecTestRunsNoSpecFile {
+                        cmd: test.cmd.clone(),
+                    }),
                 ));
             }
         }
@@ -86,7 +75,10 @@ fn outside_the_suite(
         .map(|command| {
             Diagnostic::new(
                 subject(),
-                Problem::rule(RuleCode::OutsideTheSuite, suite.outside_detail(&command)),
+                Problem::broke(SpecFault::OutsideTheSuite {
+                    command,
+                    suite: suite.command(),
+                }),
             )
         })
         .collect()

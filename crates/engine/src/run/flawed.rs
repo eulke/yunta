@@ -4,7 +4,7 @@
 //! forge is never published, and sends the plan back the way a request
 //! for changes does.
 
-use yunta_core::events::{Failure, FindingSeverity, Shown};
+use yunta_core::events::{Failure, FindingCause, FindingSeverity, Shown};
 use yunta_core::shown::{Flaw, ShownContent, ShownDocument};
 use yunta_core::{Location, Node, RelativePath};
 
@@ -50,12 +50,11 @@ pub(super) async fn send_back(
             Some(&node.id),
             &format!("{}-unprovable-{attempt}-{at}", node.id),
             FindingSeverity::Blocking,
-            flaw.to_string(),
             Location::run(
                 RelativePath::of([crate::artifacts::shown::view_of(plan)]),
                 None,
             ),
-            format!("{} — {}", flaw.so(), flaw.fix()),
+            FindingCause::Unprovable { flaw: flaw.clone() },
         )
         .await?;
     }

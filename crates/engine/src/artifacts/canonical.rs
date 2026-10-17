@@ -19,9 +19,9 @@ use yunta_core::diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Problem, Report, Subject,
 };
 use yunta_core::events::{ArtifactId, Finding};
-use yunta_core::{ArtifactKind, ArtifactSpec, FindingsFile, NodeId, QuestionsFile, TasksFile};
+use yunta_core::{ArtifactKind, ArtifactSpec, HeldFindings, NodeId, QuestionsFile, TasksFile};
 
-use super::ingest::{interpret, ArtifactContent, VerifiedArtifact};
+use super::ingest::{interpret, ArtifactContent, FindingsFormat, VerifiedArtifact};
 
 /// Why a document a session handed over did not become a file.
 #[derive(Debug)]
@@ -142,8 +142,8 @@ pub(crate) fn derive_findings(
         kind: ArtifactKind::Findings,
     };
     let path = document_path(node, &artifact);
-    let file = FindingsFile::from_findings(posted.clone());
-    let yaml = render(&file, &path)?;
+    let held = HeldFindings::from_findings(posted.clone());
+    let yaml = render(&held, &path)?;
     rendered_document(
         artifact,
         path,
@@ -222,7 +222,7 @@ pub(crate) fn canonical_document(
     bytes: &[u8],
     path: &str,
 ) -> Result<Vec<u8>, Report> {
-    let content = interpret(Some(kind), bytes, path)?;
+    let content = interpret(Some(kind), bytes, path, FindingsFormat::Entering)?;
     let document = VerifiedArtifact {
         artifact: ArtifactId::Interpreted { kind },
         path: PathBuf::from(path),
@@ -259,7 +259,7 @@ pub(crate) fn canonical(artifact: &VerifiedArtifact) -> Result<Vec<u8>, SubmitEr
         ArtifactContent::Tasks(tasks) => render(tasks, &path)?.into_bytes(),
         ArtifactContent::Spec(spec) => render(spec, &path)?.into_bytes(),
         ArtifactContent::Findings(findings) => {
-            render(&FindingsFile::from_findings(findings.clone()), &path)?.into_bytes()
+            render(&HeldFindings::from_findings(findings.clone()), &path)?.into_bytes()
         }
         ArtifactContent::Questions(questions) => render(
             &QuestionsFile {

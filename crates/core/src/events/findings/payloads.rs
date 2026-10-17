@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::cause::{FindingCause, FindingSays};
 use crate::events::scope::payloads::ProposedCriterion;
 use crate::findings::Location;
 use crate::ids::{FindingId, NodeId};
@@ -40,15 +41,79 @@ impl FindingSeverity {
     }
 }
 
+/// A finding as the run holds it. Its log form keeps a session's title and
+/// detail in the order a session always wrote them, or the engine's cause
+/// in their place.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(try_from = "FindingWire", into = "FindingWire")]
+#[schemars(with = "FindingWire")]
 pub struct Finding {
     pub id: FindingId,
     pub severity: FindingSeverity,
-    pub title: String,
+    /// What it says: a session's own words, or what the engine found.
+    pub says: FindingSays,
     pub location: Location,
-    pub detail: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterion>,
+}
+
+/// A finding as the log holds it: a session's title and detail in today's
+/// order, or the engine's cause, never both.
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
+struct FindingWire {
+    id: FindingId,
+    severity: FindingSeverity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    location: Location,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cause: Option<FindingCause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proposed_criterion: Option<ProposedCriterion>,
+}
+
+/// A log line that says neither a session's title and detail nor the
+/// engine's cause, or says both.
+#[derive(Debug, thiserror::Error)]
+#[error("a finding says its title and detail, or its cause")]
+pub struct UnsaidFinding;
+
+impl From<Finding> for FindingWire {
+    fn from(finding: Finding) -> Self {
+        let (title, detail, cause) = match finding.says {
+            FindingSays::Written { title, detail } => (Some(title), Some(detail), None),
+            FindingSays::Found { cause } => (None, None, Some(cause)),
+        };
+        FindingWire {
+            id: finding.id,
+            severity: finding.severity,
+            title,
+            location: finding.location,
+            detail,
+            cause,
+            proposed_criterion: finding.proposed_criterion,
+        }
+    }
+}
+
+impl TryFrom<FindingWire> for Finding {
+    type Error = UnsaidFinding;
+
+    fn try_from(wire: FindingWire) -> Result<Self, UnsaidFinding> {
+        let says = match (wire.title, wire.detail, wire.cause) {
+            (Some(title), Some(detail), None) => FindingSays::Written { title, detail },
+            (None, None, Some(cause)) => FindingSays::Found { cause },
+            _ => return Err(UnsaidFinding),
+        };
+        Ok(Finding {
+            id: wire.id,
+            severity: wire.severity,
+            says,
+            location: wire.location,
+            proposed_criterion: wire.proposed_criterion,
+        })
+    }
 }
 
 /// The finding's author is the envelope's own `node_id` — not repeated
@@ -161,4 +226,63 @@ pub struct FindingRefusedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<FindingId>,
     pub report: crate::diagnostic::Report,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn written() -> Finding {
+        Finding {
+            id: "f-1".into(),
+            severity: FindingSeverity::Major,
+            says: FindingSays::Written {
+                title: "t".to_string(),
+                detail: "d".to_string(),
+            },
+            location: "src/a.rs:1".into(),
+            proposed_criterion: None,
+        }
+    }
+
+    /// A session's finding writes the keys it always wrote, in the order it
+    /// always wrote them.
+    #[test]
+    fn a_session_finding_writes_the_keys_it_always_wrote() {
+        assert_eq!(
+            serde_json::to_string(&written()).expect("a finding serializes"),
+            r#"{"id":"f-1","severity":"major","title":"t","location":"src/a.rs:1","detail":"d"}"#,
+        );
+    }
+
+    /// An engine's finding writes its cause where a session's words go, and
+    /// reads back as it was written.
+    #[test]
+    fn an_engine_finding_writes_its_cause_and_reads_back() {
+        let found = Finding {
+            says: FindingSays::Found {
+                cause: FindingCause::CleanupSkipped,
+            },
+            ..written()
+        };
+        let text = serde_json::to_string(&found).expect("a finding serializes");
+        assert_eq!(
+            text,
+            r#"{"id":"f-1","severity":"major","location":"src/a.rs:1","cause":"cleanup_skipped"}"#,
+        );
+        assert_eq!(
+            serde_json::from_str::<Finding>(&text).expect("it reads back"),
+            found
+        );
+    }
+
+    /// A line that says both its words and its cause, or neither, is not a
+    /// finding.
+    #[test]
+    fn a_finding_says_its_words_or_its_cause_and_never_both() {
+        let both = r#"{"id":"f-1","severity":"major","title":"t","location":"src/a.rs:1","detail":"d","cause":"cleanup_skipped"}"#;
+        let neither = r#"{"id":"f-1","severity":"major","location":"src/a.rs:1"}"#;
+        assert!(serde_json::from_str::<Finding>(both).is_err());
+        assert!(serde_json::from_str::<Finding>(neither).is_err());
+    }
 }

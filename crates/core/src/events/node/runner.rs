@@ -5,9 +5,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::RunnerCandidate;
+use crate::events::LoggedWords;
 
 /// Why a runner candidate was not used. A log written before the typed
-/// reason stored the sentence, which reads back as `Recorded { sentence: String }`.
+/// reason stored the sentence, which reads back as `Recorded { sentence }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunnerRejection {
@@ -18,7 +19,7 @@ pub enum RunnerRejection {
     /// A sentence an older log stored, kept as written. The field is
     /// named: a newtype variant of `String` does not serialize under an
     /// internal tag.
-    Recorded { sentence: String },
+    Recorded { sentence: LoggedWords },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -41,6 +42,8 @@ where
     }
     Ok(match Stored::deserialize(deserializer)? {
         Stored::Typed(reason) => reason,
-        Stored::Sentence(sentence) => RunnerRejection::Recorded { sentence },
+        Stored::Sentence(sentence) => RunnerRejection::Recorded {
+            sentence: LoggedWords::read(sentence),
+        },
     })
 }

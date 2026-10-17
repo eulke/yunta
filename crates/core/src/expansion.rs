@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::events::Decider;
+use crate::events::{Decider, LoggedWords};
 use crate::glob::{reaches_any, scope_globset, ScopeGlob};
 use crate::policy::ScopeExpansionMode;
 use crate::protected::{Protected, Protection};
@@ -143,7 +143,7 @@ pub enum Denial {
     },
     /// A refusal read from its text, from logs written before reasons were typed.
     Legacy {
-        text: String,
+        text: LoggedWords,
     },
 }
 

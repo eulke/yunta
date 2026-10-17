@@ -134,4 +134,53 @@ impl Unanswered {
             _ => None,
         }
     }
+
+    /// The words a command that never answered is called by.
+    pub fn words(self) -> &'static str {
+        match self {
+            Unanswered::NotFound => "command not found",
+            Unanswered::NotExecutable => "command not executable",
+            Unanswered::Stopped => "stopped before it answered",
+        }
+    }
+
+    /// An exit code as a reader reads it: the code, and what it means when
+    /// the command never answered.
+    pub fn exit_described(exit_code: i32) -> String {
+        match Unanswered::of(exit_code) {
+            Some(why) => format!("{exit_code} ({})", why.words()),
+            None => exit_code.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_that_never_answered_is_called_by_its_words() {
+        assert_eq!(Unanswered::NotFound.words(), "command not found");
+        assert_eq!(Unanswered::NotExecutable.words(), "command not executable");
+        assert_eq!(Unanswered::Stopped.words(), "stopped before it answered");
+    }
+
+    #[test]
+    fn an_exit_code_says_what_it_means_when_the_command_never_answered() {
+        assert_eq!(Unanswered::exit_described(127), "127 (command not found)");
+        assert_eq!(
+            Unanswered::exit_described(126),
+            "126 (command not executable)"
+        );
+        assert_eq!(
+            Unanswered::exit_described(STOPPED_EXIT_CODE),
+            "-2 (stopped before it answered)"
+        );
+    }
+
+    #[test]
+    fn an_exit_code_of_the_command_itself_is_written_as_the_code() {
+        assert_eq!(Unanswered::exit_described(1), "1");
+        assert_eq!(Unanswered::exit_described(0), "0");
+    }
 }

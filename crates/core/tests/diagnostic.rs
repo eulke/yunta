@@ -4,11 +4,11 @@
 //! reaches either rendering.
 
 use yunta_core::diagnostic::{
-    ArtifactFailure, Diagnostic, DiagnosticCode, DocumentRef, FileProblem, Named, Problem, Report,
-    RuleCode, Subject,
+    ArtifactFailure, Diagnostic, DiagnosticCode, DocumentRef, Fault, FileProblem, Named, Problem,
+    Report, RuleCode, Subject,
 };
 use yunta_core::events::{ArtifactId, Failure};
-use yunta_core::{ArtifactKind, NodeId, RunId, TaskId};
+use yunta_core::{ArtifactKind, FindingFault, NodeId, RunId, TaskFault, TaskId};
 
 fn plan() -> DocumentRef {
     DocumentRef::new(ArtifactKind::Tasks, "artifacts/plan.yaml")
@@ -18,8 +18,8 @@ fn task(id: &str, index: usize) -> Subject {
     Subject::Task(Named::new(TaskId::from(id), index))
 }
 
-fn broke(code: RuleCode, detail: &str) -> Diagnostic {
-    Diagnostic::new(task("t1", 0), Problem::rule(code, detail))
+fn broke(fault: impl Into<Fault>) -> Diagnostic {
+    Diagnostic::new(task("t1", 0), Problem::broke(fault))
 }
 
 #[test]
@@ -75,29 +75,21 @@ fn a_criterion_carries_its_task_s_position_as_one_value_with_its_id() {
 fn a_report_for_a_person_lists_every_violation_on_its_own_line() {
     let report = Report::new(
         plan(),
-        vec![
-            broke(
-                RuleCode::EmptyScope,
-                "`scope` is empty; every task must declare at least one glob",
-            ),
-            broke(
-                RuleCode::NoCriteria,
-                "no criteria declared; every task needs at least one",
-            ),
-        ],
+        vec![broke(TaskFault::EmptyScope), broke(TaskFault::NoCriteria)],
     );
 
     assert_eq!(
         report.to_string(),
         "artifacts/plan.yaml: 2 errors\n  \
-         task `t1`: `scope` is empty; every task must declare at least one glob\n  \
-         task `t1`: no criteria declared; every task needs at least one"
+         task `t1`: `scope` is empty; every task declares at least one glob, the only paths it \
+         may touch\n  \
+         task `t1`: no criteria declared; every task needs at least one command that verifies it"
     );
 }
 
 #[test]
 fn one_violation_is_reported_in_the_singular() {
-    let report = Report::new(plan(), vec![broke(RuleCode::NoCriteria, "no criteria")]);
+    let report = Report::new(plan(), vec![broke(TaskFault::NoCriteria)]);
     assert!(report
         .to_string()
         .starts_with("artifacts/plan.yaml: 1 error\n"));
@@ -105,7 +97,7 @@ fn one_violation_is_reported_in_the_singular() {
 
 #[test]
 fn a_diagnostic_survives_the_event_log_as_data() {
-    let diagnostic = broke(RuleCode::EmptyScope, "`scope` is empty");
+    let diagnostic = broke(TaskFault::EmptyScope);
     let json = serde_json::to_string(&diagnostic).expect("a diagnostic serializes");
     let back: Diagnostic = serde_json::from_str(&json).expect("and reads back identical");
     assert_eq!(back, diagnostic);
@@ -117,7 +109,7 @@ fn every_diagnostic_has_a_stable_code_for_counting() {
     let cases = [
         (Problem::parse("tasks[0].id", "invalid type"), "parse"),
         (
-            Problem::rule(RuleCode::DependencyCycle, ""),
+            Problem::broke(TaskFault::DependencyCycle { cycle: Vec::new() }),
             "dependency-cycle",
         ),
     ];
@@ -139,10 +131,8 @@ fn a_file_that_was_never_written_is_a_different_failure_from_one_written_wrong()
             node: NodeId::from("plan"),
         },
     );
-    let malformed = ArtifactFailure::Content(Report::new(
-        plan(),
-        vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-    ));
+    let malformed =
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)]));
 
     assert!(
         missing.report().is_none(),
@@ -161,15 +151,12 @@ fn a_file_that_was_never_written_is_a_different_failure_from_one_written_wrong()
 fn a_failure_keeps_the_document_every_problem_came_from() {
     let findings = DocumentRef::new(ArtifactKind::Findings, "artifacts/findings.yaml");
     let failure = Failure::artifacts(vec![
-        ArtifactFailure::Content(Report::new(
-            plan(),
-            vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-        )),
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)])),
         ArtifactFailure::Content(Report::new(
             findings,
             vec![Diagnostic::new(
                 Subject::Finding(Named::new(None, 0)),
-                Problem::rule(RuleCode::EmptyDetail, "`detail` is empty"),
+                Problem::broke(FindingFault::EmptyDetail),
             )],
         )),
     ]);
@@ -206,10 +193,7 @@ fn a_failure_keeps_one_entry_per_failing_document() {
                 node: NodeId::from("plan"),
             },
         ),
-        ArtifactFailure::Content(Report::new(
-            plan(),
-            vec![broke(RuleCode::NoCriteria, "no criteria declared")],
-        )),
+        ArtifactFailure::Content(Report::new(plan(), vec![broke(TaskFault::NoCriteria)])),
     ]);
     assert_eq!(
         failure.failures().count(),

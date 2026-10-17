@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use yunta_core::commit_message::CommitMessage;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Failure, HookPhase, Interruption, PauseReason};
+use yunta_core::events::{DeniedRule, Failure, HookPhase, Interruption, PauseReason};
 use yunta_core::port::PermissionProfile;
 use yunta_core::{HookFailurePolicy, Node, NodeKind};
 
@@ -197,7 +197,8 @@ async fn execute_in_its_tree(
     let hooks = effective_hooks(ctx, node);
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
-            HookRun::Violation(denied_rule) => {
+            HookRun::Violation(denied) => {
+                let denied_rule = DeniedRule::Command(denied);
                 return fail(ctx, node, Failure::CommandDenied { denied_rule }).await;
             }
             HookRun::Unset(key) => return super::check_exec::unset(ctx, node, key).await,

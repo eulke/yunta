@@ -5,15 +5,20 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::escalation::Escalation;
+use super::menu::Menu;
 use super::payloads::GateWaitingPayload;
 use crate::expansion::{Precheck, Waiting};
+use crate::glob::ScopeGlob;
 
 /// What a loop waits on in one scope request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeWait {
     /// Why the request is not decided without a person.
     pub because: Waiting,
+    /// The paths the request asks to be allowed. Empty on an older log, whose
+    /// record named them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<ScopeGlob>,
     /// The criterion the session proposed for the request, if it proposed one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed: Option<ProposedCheck>,
@@ -28,17 +33,12 @@ pub struct ProposedCheck {
     pub precheck: Precheck,
 }
 
-impl Escalation {
-    /// The same escalation, saying why the loop waits on it.
-    pub fn with_scope(mut self, scope: ScopeWait) -> Self {
-        self.0.scope = Some(scope);
-        self
-    }
-}
-
 impl GateWaitingPayload {
     /// Why the loop waits on this request, when a scope rule holds it for a person.
     pub fn scope(&self) -> Option<&ScopeWait> {
-        self.scope.as_ref()
+        match self.menu() {
+            Some(Menu::Scope(wait)) => Some(wait),
+            _ => None,
+        }
     }
 }

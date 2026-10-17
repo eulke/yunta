@@ -13,6 +13,7 @@
 //! alone — so each answers on its own line, and either one failing is a
 //! failing verdict.
 
+use yunta_core::events::FindingCause;
 use yunta_core::RunId;
 use yunta_engine::{ArtifactIntegrity, StoreError};
 use yunta_storage::{ChainVerification, Storage};
@@ -215,8 +216,16 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
             }
         }
     }
-    if let Some(detail) = integrity.unverifiable_detail() {
-        checks.push(Found::Caution, "objects", detail);
+    if let Some((unchecked, verified)) = integrity.unverified() {
+        let cause = FindingCause::ArtifactsUnverified {
+            unchecked,
+            verified,
+        };
+        checks.push(
+            Found::Caution,
+            "objects",
+            yunta_render::found::detail(&cause),
+        );
     }
 }
 

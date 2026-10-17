@@ -19,6 +19,12 @@ mod confinement;
 #[path = "run_sessions/frozen.rs"]
 mod frozen;
 
+#[path = "run_sessions/messages.rs"]
+mod messages;
+
+#[path = "run_sessions/distill.rs"]
+mod distill;
+
 /// Whether a pause is the failure of `node`, and the headline its failure states.
 fn node_failed(pause: &PauseReason, node: &str, headline: &str) -> bool {
     matches!(
@@ -54,68 +60,6 @@ sessions:
     assert_eq!(
         opened.1.model.as_ref().map(|model| model.as_str()),
         Some("mock-model")
-    );
-}
-
-#[tokio::test]
-async fn agent_messages_are_bounded_summaries_that_never_carry_note_content() {
-    let bench = Bench::new();
-    let fixture = r#"
-dialect: claude-code
-sessions:
-  - steps:
-      - { type: note, text: "thinking about SECRET-TOKEN-123 carefully" }
-      - { type: usage, input_tokens: 40, output_tokens: 10 }
-      - { type: tool_use, name: edit, target: abc123 }
-    outcome: { type: completed, summary: "done" }
-"#;
-    let RunReport { terminal, state: _ } = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
-    let events = bench.events();
-    let messages: Vec<&yunta_core::events::AgentMessagePayload> = events
-        .iter()
-        .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Session(SessionEvent::Message(p))) => Some(p),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(messages.len(), 3, "one agent_message per adapter event");
-
-    // Never the content — a mechanical size+digest summary only.
-    let jsonl = serde_json::to_string(&messages).unwrap();
-    assert!(
-        !jsonl.contains("SECRET-TOKEN-123"),
-        "note content must never be persisted: {jsonl}"
-    );
-    let note = messages
-        .iter()
-        .find(|m| m.message_type == yunta_core::events::AgentMessageType::Note)
-        .unwrap();
-    let summary = note.text.as_deref().unwrap_or_default();
-    assert_eq!(summary, "41 bytes, sha256 052f9656f4d7");
-
-    let usage = messages
-        .iter()
-        .find(|m| m.message_type == yunta_core::events::AgentMessageType::Usage)
-        .unwrap();
-    assert_eq!(usage.input_tokens, Some(40));
-    assert_eq!(usage.output_tokens, Some(10));
-
-    let tool = messages
-        .iter()
-        .find(|m| m.message_type == yunta_core::events::AgentMessageType::ToolUse)
-        .unwrap();
-    assert_eq!(tool.tool_name.as_deref(), Some("edit"));
-    assert_eq!(
-        tool.target.as_ref().map(|target| target.digest().clone()),
-        Some(yunta_core::sha256_hex(b"abc123")),
-        "the mock hands over what the fixture scripted, identified by its hash"
-    );
-    assert_eq!(
-        tool.target.as_ref().and_then(|target| target.display()),
-        None,
-        "and never shown: a tool's argument is the session's own text"
     );
 }
 
@@ -255,89 +199,6 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
         subjects.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
         "got: {subjects:?}"
     );
-}
-
-#[tokio::test]
-async fn a_distill_path_never_produced_becomes_a_finding_and_the_rest_lands() {
-    // Run in `alpha` mode: `notes` never runs, its artifact never
-    // exists, but distill declares it.
-    let bench = Bench::new().in_mode("alpha");
-    let workflow = r#"
-name: distiller
-nodes:
-  - id: plan
-    kind: prompt
-    runner: executor
-    prompt: "Write the plan to {{node.artifacts}}/plan.md."
-    artifacts:
-      produces: [plan.md]
-  - id: notes
-    kind: prompt
-    runner: executor
-    depends_on: [plan]
-    prompt: "Maybe write notes."
-    artifacts:
-      produces: [notes.md]
-on_finish:
-  - distill: [{ node: plan, name: plan.md }, { node: notes, name: notes.md }]
-"#;
-    // `notes` fails before producing its artifact — but with a re-route
-    // budget of zero the run pauses... instead: notes produces, then we
-    // delete it? Simpler: notes' fixture writes the artifact and the run
-    // finishes, then this test only covers the produced path. The
-    // missing-path case uses a workflow whose declared artifact the
-    // session legitimately produced but distill names one more — which
-    // check would refuse. So: simulate runtime-missing by removing the
-    // file after the run? No — distill runs inside execute_run. The
-    // honest runtime-missing case: `notes` is mode-excluded.
-    let workflow = workflow.replace(
-        "on_finish:",
-        "modes:\n  alpha: { include: [plan] }\n  beta: { include: all }\non_finish:",
-    );
-    let fixture = format!(
-        r#"
-dialect: claude-code
-sessions:
-  - effects:
-      - {{ path: "{artifacts}/plan.md", content: "plan\n" }}
-    outcome: {{ type: completed, summary: "planned" }}
-"#,
-        artifacts = bench.staging("plan").display()
-    );
-    let RunReport { terminal, .. } = bench.run(&workflow, &fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
-    let dest = bench
-        .worktree
-        .join(".yunta/knowledge/distilled/distiller")
-        .join(bench.run_id.as_str());
-    assert!(dest.join("plan.md").exists(), "the produced path lands");
-    assert!(!dest.join("notes.md").exists());
-
-    let events = bench.events();
-    let finding = events
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
-                Some(&p.finding)
-            }
-            _ => None,
-        })
-        .expect("the missing path must become a finding, never be lost");
-    assert!(finding.title.contains("notes.md"), "got: {finding:?}");
-    assert_eq!(finding.severity, yunta_core::events::FindingSeverity::Minor);
-
-    let provenance: yunta_core::yaml::Value =
-        yunta_core::yaml::parse(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
-            .unwrap();
-    let listed: Vec<&str> = provenance["artifacts"]
-        .as_sequence()
-        .unwrap()
-        .iter()
-        .map(|a| a["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(listed, vec!["plan.md", "notes.md"]);
-    assert_eq!(provenance["artifacts"][1]["missing"].as_bool(), Some(true));
 }
 
 #[tokio::test]

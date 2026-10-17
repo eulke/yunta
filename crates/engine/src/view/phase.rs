@@ -9,7 +9,7 @@
 //! frame answers *what* a person is being asked for and not only *which*
 //! node is asking. No surface goes back to the log for it.
 
-use yunta_core::events::{Failure, PauseReason, TerminalState};
+use yunta_core::events::{Failure, LoggedWords, PauseReason, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 use crate::replay::{NodeState, NodeWait, RunState};
@@ -118,7 +118,7 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState) -> RunPhase {
                     // Replay sets the paused phase together with its pause,
                     // so this empty fallback is never read.
                     reason: reason.cloned().unwrap_or(PauseReason::Recorded {
-                        sentence: String::new(),
+                        sentence: LoggedWords::default(),
                     }),
                 }),
             }

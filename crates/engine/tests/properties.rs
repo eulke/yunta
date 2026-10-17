@@ -30,10 +30,11 @@ use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::node::happening::Happening as NodeHappening;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, ChildRunFinishedPayload,
-    EngineFact, EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity,
-    HostSuspendedPayload, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload,
-    PauseReason, RecordedOrigin, RunPausedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
-    TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
+    EngineFact, EventBody, EventPayload, Failure, Finding, FindingPostedPayload, FindingSays,
+    FindingSeverity, HostSuspendedPayload, NodeFailedPayload, NodeFinishedPayload, NodeOutcome,
+    NodeStartedPayload, PauseReason, RecordedOrigin, RunPausedPayload, StoredEvent,
+    TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TerminalState, TokenUsage,
+    UnknownEvent,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{ChildEvent, EventDraft, SessionEvent};
@@ -44,6 +45,10 @@ use yunta_engine::{
 };
 use yunta_testkit::Bench;
 use yunta_testkit_core::{all_kinds, FixedClock, Log};
+
+#[path = "properties/kinds.rs"]
+mod kinds;
+use kinds::parameterized;
 
 const RUN: &str = "run-prop";
 
@@ -115,101 +120,6 @@ fn task_id() -> impl Strategy<Value = &'static str> {
 /// needs to see repeat still repeat.
 fn payload() -> impl Strategy<Value = EventPayload> {
     prop_oneof![prop::sample::select(all_kinds()), parameterized(),]
-}
-
-/// The kinds a property varies deliberately: an attempt counter, ids
-/// drawn from pools small enough that a log revisits the same task and
-/// the same artifact identity, and both shapes a task status has on the
-/// wire.
-fn parameterized() -> impl Strategy<Value = EventPayload> {
-    prop_oneof![
-        (1u32..4).prop_map(|attempt| EventPayload::Node(NodeEvent::Started(
-            NodeStartedPayload::attempt(attempt)
-        ))),
-        ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| EventPayload::Node(
-            NodeEvent::Finished(NodeFinishedPayload::new(
-                NodeOutcome::Summary(outcome),
-                tokens_used,
-            ))
-        )),
-        ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| {
-            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                Failure::Message { outcome },
-                tokens_used,
-            )))
-        }),
-        task_id().prop_map(|id| EventPayload::Tasks(TaskEvent::Registered(
-            TaskRegisteredPayload {
-                task_id: id.into(),
-                criteria: Vec::new(),
-                scope: Vec::new(),
-                depends_on: Vec::new(),
-            }
-        ))),
-        (task_id(), task_status(), any::<bool>()).prop_map(|(id, new_status, placed)| {
-            // Both shapes a status has on the wire: a `done` naming where
-            // the work landed, and any other naming no commit at all.
-            let changed = match placed {
-                true => TaskStatusChangedPayload::done(id.into(), 1u64.into(), "deadbeef".into()),
-                false => TaskStatusChangedPayload::to(id.into(), new_status, 1u64.into()),
-            };
-            EventPayload::Tasks(TaskEvent::StatusChanged(changed))
-        }),
-        (severity(), "[a-z]{0,6}", "[a-z]{1,6}").prop_map(|(severity, title, location)| {
-            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
-                finding: Finding {
-                    id: "f1".into(),
-                    severity,
-                    title,
-                    location: yunta_core::Location::work(
-                        yunta_core::RelativePath::of([location]),
-                        None,
-                    ),
-                    detail: "d".to_string(),
-                    proposed_criterion: None,
-                },
-            }))
-        }),
-        (artifact_id(), "[a-z]{1,4}").prop_map(|(artifact, content)| {
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
-                artifact,
-                yunta_core::sha256_hex(content.as_bytes()),
-                RecordedOrigin::Submitted,
-            )))
-        }),
-        "[a-z ]{0,10}".prop_map(|reason| EventPayload::Run(RunEvent::Paused(
-            RunPausedPayload::new(&PauseReason::Recorded { sentence: reason })
-        ))),
-        ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::Gates(
-            GateEvent::QuestionsAsked(
-                yunta_core::events::QuestionsAskedPayload::new(
-                    yunta_core::sha256_hex(content.as_bytes()),
-                    vec!["q1".into()],
-                    tokens_used,
-                )
-                .expect("one question is a question")
-            )
-        )),
-        "[a-z]{1,4}".prop_map(|content| EventPayload::Gates(GateEvent::QuestionsAnswered(
-            yunta_core::events::QuestionsAnsweredPayload {
-                answers_hash: yunta_core::sha256_hex(content.as_bytes()),
-                channel: yunta_core::events::Channel::Tty,
-                responder: None,
-            }
-        ))),
-        // A child run closes with the usage it spent, and replay adds it to
-        // the parent's total: the monotone check sees it only if drawn.
-        (tokens(), prop::sample::select(vec!["child-a", "child-b"])).prop_map(
-            |(tokens_used, child)| {
-                EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
-                    RunId::from(child),
-                    yunta_core::sha256_hex(child.as_bytes()),
-                    TerminalState::Done,
-                    tokens_used,
-                )))
-            }
-        ),
-    ]
 }
 
 /// An artifact identity drawn from a tiny pool, so generated logs

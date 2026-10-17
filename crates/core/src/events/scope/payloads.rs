@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::LoggedWords;
 use crate::expansion::Denial;
 use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
@@ -86,11 +87,16 @@ pub struct ScopeExpansionDeniedPayload {
     /// before reasons were typed is read by `why()` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub why: Option<Denial>,
-    /// The text a denial logged before reasons were typed carried. Read,
-    /// never written: `why()` reads it as `Denial::Legacy`.
-    #[serde(default, rename = "denial_reason", skip_serializing)]
+    /// The text a denial logged before reasons were typed carried. Read from
+    /// such a log and written back as read; `why()` reads it as
+    /// `Denial::Legacy`.
+    #[serde(
+        default,
+        rename = "denial_reason",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schemars(skip)]
-    pub legacy_text: Option<String>,
+    pub legacy_text: Option<LoggedWords>,
 }
 
 impl ScopeExpansionDeniedPayload {

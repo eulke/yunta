@@ -14,7 +14,7 @@ use std::pin::Pin;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventPayload, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
+    EventPayload, FindingCause, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
 };
 use yunta_core::{Clock, ContentHash, ModeName, NodeId, Redactor, RunId};
 use yunta_storage::AsyncStorage;
@@ -374,6 +374,24 @@ async fn goes_on(
     step.await.map(|()| None)
 }
 
+/// The finding a process registry the invocation could not write leaves,
+/// located at the registry's file.
+async fn registry_unwritten(
+    ctx: &RunCtx<'_>,
+    error: impl std::fmt::Display,
+) -> Result<(), RunError> {
+    ctx.engine_finding(
+        None,
+        "engine-registry",
+        FindingSeverity::Minor,
+        Location::run(crate::process_registry::registry_file(), None),
+        FindingCause::RegistryUnwritten {
+            report: error.to_string(),
+        },
+    )
+    .await
+}
+
 /// Wakes the run: builds its context, refuses a run with no log, returns
 /// early for one whose log already ends, verifies that the run still
 /// holds the artifacts its log accepted and still has the worktree its
@@ -419,15 +437,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // only ever rechecked, while the run still has unresolved work of its
     // own keeping it open.
     if let Some(error) = registry_error {
-        ctx.engine_finding(
-            None,
-            "engine-registry",
-            FindingSeverity::Minor,
-            "the process registry could not be written".to_string(),
-            Location::run(crate::process_registry::registry_file(), None),
-            format!("nothing outside this invocation can see its process tree: {error}"),
-        )
-        .await?;
+        registry_unwritten(&ctx, error).await?;
     }
 
     gate_exec::recheck_approved_gates(&ctx, ctx.forge).await?;

@@ -13,12 +13,13 @@ use yunta_core::FindingId;
 /// own log: every finding the log leaves standing and nothing settled —
 /// the content of its latest posting, nothing its node took back, and
 /// nothing a proof or a person settled — each under its node's name
-/// before its id, deduplicated by
-/// location + title normalized for case and whitespace. The first
-/// standing occurrence's full record wins, so no authorship or detail is
-/// lost to the collapse. Deterministic: same log, same output — the
-/// promotion close accepts exactly this as the run's own findings
-/// artifact.
+/// before its id, deduplicated by location and by the complaint each
+/// finding makes ([`Finding::complaint`]): a session's title compared
+/// case- and whitespace-insensitively, or the cause an engine finding
+/// names. The first standing occurrence's full record wins, so no
+/// authorship or detail is lost to the collapse. Deterministic: same log,
+/// same output — the promotion close accepts exactly this as the run's own
+/// findings artifact.
 pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
     let standing: Vec<Finding> = yunta_core::events::findings::FindingLedger::of(events)
         .unsettled()
@@ -47,9 +48,10 @@ fn qualified(posted: PostedFinding) -> Finding {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        EventPayload, Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
-        FindingWithdrawnPayload,
+        AskedScope, EventPayload, Finding, FindingCause, FindingPostedPayload, FindingSays,
+        FindingSeverity, FindingUpdatedPayload, FindingWithdrawnPayload, ScopeAsker,
     };
+    use yunta_core::expansion::Denial;
     use yunta_testkit_core::Log;
 
     use super::*;
@@ -59,9 +61,11 @@ mod tests {
         Finding {
             id: id.into(),
             severity: FindingSeverity::Major,
-            title: title.to_string(),
+            says: FindingSays::Written {
+                title: title.to_string(),
+                detail: "detail".to_string(),
+            },
             location: location.into(),
-            detail: "detail".to_string(),
             proposed_criterion: None,
         }
     }
@@ -114,7 +118,10 @@ mod tests {
                 "review",
                 EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: Finding {
-                        detail: "the denial was narrowed to one file".to_string(),
+                        says: FindingSays::Written {
+                            title: "Scope expansion narrowed".to_string(),
+                            detail: "the denial was narrowed to one file".to_string(),
+                        },
                         ..finding("f1", "Scope expansion narrowed", "tasks/T001")
                     },
                 })),
@@ -123,8 +130,13 @@ mod tests {
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "one id, one inherited finding");
-        assert_eq!(inherited[0].title, "Scope expansion narrowed");
-        assert_eq!(inherited[0].detail, "the denial was narrowed to one file");
+        assert_eq!(
+            inherited[0].says,
+            FindingSays::Written {
+                title: "Scope expansion narrowed".to_string(),
+                detail: "the denial was narrowed to one file".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -213,5 +225,42 @@ mod tests {
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");
         assert_eq!(inherited[0].id, "review/f2");
+    }
+
+    /// Refusals of one task are one complaint whatever the case of the
+    /// task's name, and a refusal of another task is another: four refusals
+    /// at one place leave two findings, the first refusal of each complaint.
+    #[test]
+    fn repeated_refusals_of_one_task_are_one_complaint() {
+        let refused = |id: &str, task: &str, reason: &str| {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: Finding {
+                    id: id.into(),
+                    severity: FindingSeverity::Minor,
+                    says: FindingSays::Found {
+                        cause: FindingCause::ScopeDenied {
+                            asker: ScopeAsker::Task(task.into()),
+                            denial: Denial::ModeDeny,
+                            asked: Some(AskedScope {
+                                paths: vec!["b.txt".into()],
+                                reason: Some(reason.to_string()),
+                            }),
+                        },
+                    },
+                    location: "tasks/T001".into(),
+                    proposed_criterion: None,
+                },
+            }))
+        };
+        let events = Log::for_run("run-1")
+            .event(refused("scope-expansion-T001-1", "T001", "first"))
+            .event(refused("scope-expansion-T001-2", "T001", "second"))
+            .event(refused("scope-expansion-t001-3", "t001", "third"))
+            .event(refused("scope-expansion-T002-1", "T002", "fourth"))
+            .build();
+
+        let inherited = inherited_findings(&events);
+        let ids: Vec<&str> = inherited.iter().map(|found| found.id.as_str()).collect();
+        assert_eq!(ids, ["scope-expansion-T001-1", "scope-expansion-T002-1"]);
     }
 }

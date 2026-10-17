@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{
     EventDraft, EventPayload, Failure, FindingEvent, FindingSeverity, GateEvent,
-    GateResolvedPayload, GateWaitingPayload, HumanChoice, NodeEvent, SessionEvent,
+    GateResolvedPayload, GateWaitingPayload, HumanChoice, NodeEvent, SessionEvent, WhyWithheld,
 };
 use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunTerminal};
 use yunta_testkit::Bench;
@@ -224,11 +224,15 @@ async fn a_gate_withholds_going_on_with_a_plan_that_changes_its_own_spec_test() 
     assert_eq!(withheld.len(), 1, "{withheld:?}");
     assert_eq!(withheld[0].option.as_str(), "approve");
     assert!(
-        withheld[0].because.contains("`tests/greet.sh`"),
-        "the reason names what keeps the plan from being proven: {}",
-        withheld[0].because
+        matches!(withheld[0].because, WhyWithheld::Unprovable { .. }),
+        "the record holds the flaws that withhold the option: {withheld:?}"
     );
-    let lines = yunta_render::evidence::lines(asked[0].evidence());
+    let because = yunta_render::escalation::because(&withheld[0]);
+    assert!(
+        because.contains("`tests/greet.sh`"),
+        "the reason names what keeps the plan from being proven: {because}"
+    );
+    let lines = yunta_render::escalation::evidence(&asked[0]);
     assert!(
         lines
             .iter()
@@ -248,10 +252,11 @@ async fn a_withheld_option_is_refused_with_why_when_it_is_answered_from_elsewher
 
     let refused = answer_parked(&bench, "approve").await;
 
-    let Err(ResolveGateError::Withheld { chosen, because }) = refused else {
+    let Err(ResolveGateError::Withheld { chosen, withheld }) = refused else {
         panic!("approving a plan that cannot be proven is refused: {refused:?}");
     };
     assert_eq!(chosen.as_str(), "approve");
+    let because = yunta_render::escalation::because(&withheld);
     assert!(because.contains("`tests/greet.sh`"), "{because}");
 }
 
@@ -262,7 +267,7 @@ async fn an_approval_seeded_before_the_plan_was_found_unprovable_is_asked_again(
     // person who approved while the run was parked.
     let waiting = rebuilt(&bench).await;
     for payload in [
-        GateEvent::Waiting(waiting),
+        GateEvent::Waiting(Box::new(waiting)),
         GateEvent::Resolved(GateResolvedPayload::Chosen(HumanChoice {
             option: "approve".into(),
             by: "mcp".into(),
@@ -325,7 +330,8 @@ async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
     let flaws = posted(&events, "approve-plan");
     assert_eq!(flaws.len(), 1, "one finding per flaw: {flaws:?}");
     assert_eq!(flaws[0].severity, FindingSeverity::Blocking);
-    assert!(flaws[0].title.contains("`tests/greet.sh`"), "{flaws:?}");
+    let title = yunta_render::found::said(&flaws[0].says).0;
+    assert!(title.contains("`tests/greet.sh`"), "{flaws:?}");
     assert!(
         flaws[0]
             .location
@@ -352,6 +358,12 @@ async fn a_forge_gate_sends_an_unprovable_plan_back_without_publishing_it() {
         sent_back_with_one_flaw(&gate),
         "the plan goes back with its one flaw"
     );
+    only_the_corrected_plan_is_published(&forge);
+}
+
+/// Only the corrected plan reached the forge: its one pull request carries
+/// the tasks document without the check the flaw named.
+fn only_the_corrected_plan_is_published(forge: &MockForgeState) {
     let prs = forge.pull_requests();
     assert_eq!(prs.len(), 1, "only the corrected plan is published");
     let tasks = String::from_utf8(prs[0].files["tasks.yaml"].clone()).unwrap();

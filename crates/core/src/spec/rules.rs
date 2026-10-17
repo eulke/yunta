@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use std::path::{Component, Path};
 
+use super::SpecFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::protected::is_register;
 use crate::{RelativePath, Spec, SpecFile};
@@ -79,32 +80,25 @@ pub(super) fn check(file: &SpecFile) -> Vec<Diagnostic> {
     for (index, spec) in file.specs.iter().enumerate() {
         let mut problems = Vec::new();
         if !tasks.insert(&spec.task) {
-            problems.push((
-                RuleCode::DuplicateSpec,
-                "a second spec already names this task; give each task one".to_string(),
-            ));
+            problems.push(SpecFault::DuplicateSpec);
         }
         if spec.tests.is_empty() {
-            problems.push((
-                RuleCode::NoSpecTest,
-                "lists no test; a spec is the tests its task is held to".to_string(),
-            ));
+            problems.push(SpecFault::NoSpecTest);
         }
         for test in spec
             .tests
             .iter()
             .filter(|test| test.proves.trim().is_empty())
         {
-            problems.push((
-                RuleCode::UnexplainedTest,
-                format!("`{}` does not say what passing it proves", test.cmd),
-            ));
+            problems.push(SpecFault::UnexplainedTest {
+                cmd: test.cmd.clone(),
+            });
         }
         problems.extend(files(spec, &mut paths));
-        broken.extend(problems.into_iter().map(|(code, detail)| {
+        broken.extend(problems.into_iter().map(|fault| {
             Diagnostic::new(
                 Subject::Spec(Named::new(spec.task.clone(), index)),
-                Problem::rule(code, detail),
+                Problem::broke(fault),
             )
         }));
     }
@@ -114,27 +108,18 @@ pub(super) fn check(file: &SpecFile) -> Vec<Diagnostic> {
 /// What `spec`'s files break: a path outside the repository, or one an
 /// earlier file of the document already has, however it is spelled —
 /// `seen` holds those as git names them.
-fn files(spec: &Spec, seen: &mut HashSet<String>) -> Vec<(RuleCode, String)> {
+fn files(spec: &Spec, seen: &mut HashSet<String>) -> Vec<SpecFault> {
     let mut problems = Vec::new();
     for test_file in &spec.files {
         if !inside(&test_file.path) {
-            problems.push((
-                RuleCode::TestFileEscapes,
-                format!(
-                    "`{}` is not a file of the repository: a path is relative, never climbs \
-                     out, and never reaches into `.git`",
-                    test_file.path
-                ),
-            ));
+            problems.push(SpecFault::TestFileEscapes {
+                path: test_file.path.clone(),
+            });
         }
         if !seen.insert(test_file.in_repo()) {
-            problems.push((
-                RuleCode::DuplicateTestFile,
-                format!(
-                    "`{}` is named by a second file; each file is named once",
-                    test_file.path
-                ),
-            ));
+            problems.push(SpecFault::DuplicateTestFile {
+                path: test_file.path.clone(),
+            });
         }
     }
     problems

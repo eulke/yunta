@@ -5,9 +5,9 @@
 //! made on its menu is no choice about the failure at all.
 
 use yunta_core::events::{
-    Escalation, EventPayload, Evidence, Failure, FailureMenu, GateEvent, GateOption,
-    GateResolvedPayload, HumanChoice, NodeEvent, NodeFailedPayload, NodeStartedPayload, ScopeWait,
-    TokenUsage,
+    Claim, Escalation, EventPayload, Failure, FailureMenu, GateEvent, GateOption,
+    GateResolvedPayload, HumanChoice, Menu, NodeEvent, NodeFailedPayload, NodeStartedPayload,
+    ScopeWait, TokenUsage,
 };
 use yunta_core::expansion::Waiting;
 use yunta_core::reserved::ReservedOption;
@@ -17,12 +17,7 @@ use yunta_testkit_core::Log;
 
 /// An option of a menu, with no words of its own.
 fn option(choice: ReservedOption) -> GateOption {
-    GateOption {
-        id: choice.id(),
-        label: None,
-        tradeoff: None,
-        asks: None,
-    }
+    GateOption::reserved(choice)
 }
 
 /// A menu of two options, `first` and then `second`.
@@ -37,7 +32,7 @@ fn started(attempt: u32) -> EventPayload {
 fn failed() -> EventPayload {
     EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
         Failure::Message {
-            outcome: "criteria still red".to_string(),
+            outcome: "criteria still red".into(),
         },
         TokenUsage::default(),
     )))
@@ -48,35 +43,37 @@ fn failure_menu() -> EventPayload {
     let menu = FailureMenu {
         attempt: 1,
         failure: Failure::Message {
-            outcome: "criteria still red".to_string(),
+            outcome: "criteria still red".into(),
         },
         remedies: Vec::new(),
         stuck: None,
         reroute: None,
     };
     let escalation = Escalation::new(
-        "node `loop` failed",
-        Evidence::none(),
+        Claim::NodeFailed {
+            node: "loop".into(),
+        },
+        Menu::Failure(Box::new(menu)),
         two_options(ReservedOption::Retry, ReservedOption::Abort),
-    )
-    .expect("a claim with no evidence repeats none")
-    .with_failure(menu);
-    EventPayload::Gates(GateEvent::Waiting(escalation.into_payload()))
+    );
+    EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())))
 }
 
 /// The gate a task's scope request opens on its loop: grant, or deny.
 fn scope_request() -> EventPayload {
     let escalation = Escalation::new(
-        "task `write` requests scope expansion",
-        Evidence::none(),
+        Claim::ScopeAsked {
+            task: "write".into(),
+            reason: None,
+        },
+        Menu::Scope(ScopeWait {
+            because: Waiting::ModeAsk,
+            paths: Vec::new(),
+            proposed: None,
+        }),
         two_options(ReservedOption::Grant, ReservedOption::Deny),
-    )
-    .expect("a claim with no evidence repeats none")
-    .with_scope(ScopeWait {
-        because: Waiting::ModeAsk,
-        proposed: None,
-    });
-    EventPayload::Gates(GateEvent::Waiting(escalation.into_payload()))
+    );
+    EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())))
 }
 
 /// A person's answer to the gate written just before it.

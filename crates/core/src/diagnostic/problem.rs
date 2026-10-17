@@ -5,7 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ArtifactCode, FileCode};
+use super::{ArtifactCode, Fault, FileCode};
+use crate::events::LoggedWords;
 
 /// The stable name of a rule that only holds across a whole document.
 ///
@@ -243,8 +244,21 @@ pub enum Problem {
     },
     /// A rule the document broke once it was readable — the tasks document's own
     /// registration rules and their siblings. `code` is what a receipt
-    /// counts; `detail` is the clause a reader acts on.
-    Rule { code: RuleCode, detail: String },
+    /// counts; `words` says what the rule found.
+    Rule {
+        code: RuleCode,
+        #[serde(flatten)]
+        words: RuleWords,
+    },
+}
+
+/// What a broken rule found: the values its clause names, or the clause an
+/// older log stored. Exactly one, so a rule always has its words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum RuleWords {
+    Fault { fault: Fault },
+    Logged { detail: LoggedWords },
 }
 
 impl Problem {
@@ -256,10 +270,12 @@ impl Problem {
         }
     }
 
-    pub fn rule(code: RuleCode, detail: impl Into<String>) -> Self {
+    /// The rule `fault` breaks, under the code the fault names.
+    pub fn broke(fault: impl Into<Fault>) -> Self {
+        let fault = fault.into();
         Problem::Rule {
-            code,
-            detail: detail.into(),
+            code: fault.code(),
+            words: RuleWords::Fault { fault },
         }
     }
 
@@ -359,7 +375,10 @@ impl std::fmt::Display for Problem {
                 "" | "." => write!(f, "does not parse: {message}"),
                 path => write!(f, "does not parse at `{path}`: {message}"),
             },
-            Problem::Rule { detail, .. } => f.write_str(detail),
+            Problem::Rule { words, .. } => match words {
+                RuleWords::Fault { fault } => f.write_str(&fault.clause()),
+                RuleWords::Logged { detail } => f.write_str(detail.as_str()),
+            },
         }
     }
 }

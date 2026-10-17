@@ -4,6 +4,7 @@
 //! asked of a document read back later. A plan an older run accepted
 //! stays readable; a plan handed over now is held to them.
 
+use super::TaskFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::{QuestionId, SpecFile, Suite, Task, TaskId, TasksFile};
 
@@ -45,12 +46,11 @@ pub(super) const SPECIFIED_RULES: &[Rule] = &[
 ];
 
 impl TasksFile {
-    /// Every rule the plan breaks that it can tell on its own: a criterion
-    /// that passes by a name, two tasks judged by one command, a task that
-    /// uses its own shape — and, when the run's workflow writes a spec, a
-    /// task that changes the test its criterion runs; when the run
-    /// measures a `suite`, a criterion that runs the project's tests
-    /// without extending it.
+    /// Every rule the plan breaks that it can tell on its own: a criterion that
+    /// passes by a name, two tasks judged by one command, a task that uses its
+    /// own shape — and, when the run's workflow writes a spec, a task that
+    /// changes the test its criterion runs; when the run measures a `suite`, a
+    /// criterion that runs the project's tests without extending it.
     pub fn unspecifiable(&self, spec_planned: bool, suite: Option<&Suite>) -> Vec<Diagnostic> {
         let mut broken = Vec::new();
         for (index, task) in self.tasks.iter().enumerate() {
@@ -81,13 +81,10 @@ impl TasksFile {
                     broken.push(of_task(
                         index,
                         &task.id,
-                        RuleCode::ChangesASpecTest,
-                        format!(
-                            "`changes` names `{}`, a test the spec wrote for `{}`; no session may \
-                             write it — drop the change, or adjust the plan so the test asks for \
-                             what it needs",
-                            change.at, owner.task
-                        ),
+                        TaskFault::ChangesASpecTest {
+                            at: change.at.clone(),
+                            owner: owner.task.clone(),
+                        },
                     ));
                 }
             }
@@ -104,29 +101,15 @@ impl TasksFile {
                 (!answered.contains(question)).then(|| {
                     Diagnostic::new(
                         Subject::Document,
-                        Problem::rule(
-                            RuleCode::UnknownAnswer,
-                            format!(
-                                "decision `{}` answers `{question}`, which is no question a \
-                                 person answered in this run{}",
-                                decision.id,
-                                listed(answered)
-                            ),
-                        ),
+                        Problem::broke(TaskFault::UnknownAnswer {
+                            decision: decision.id.clone(),
+                            question: question.clone(),
+                            answered: answered.to_vec(),
+                        }),
                     )
                 })
             })
             .collect()
-    }
-}
-
-fn listed(answered: &[QuestionId]) -> String {
-    match answered {
-        [] => String::new(),
-        _ => format!(
-            "; it answered {}",
-            crate::text::listed(answered.iter().map(QuestionId::as_str))
-        ),
     }
 }
 
@@ -138,18 +121,17 @@ fn by_a_name(index: usize, task: &Task) -> Vec<Diagnostic> {
                 index,
                 task,
                 &cmd,
-                RuleCode::CriterionChecksPresence,
-                format!(
-                    "`{cmd}` passes once a name is written in `{file}`, whatever the code does; \
-                     run the test that observes the behavior"
-                ),
+                TaskFault::CriterionChecksPresence {
+                    cmd: cmd.clone(),
+                    file,
+                },
             )
         })
         .collect()
 }
 
-/// Each criterion of `task` that runs the project's tests without
-/// extending `suite`, which builds them again beside the suite's build.
+/// Each criterion of `task` that runs the project's tests without extending
+/// `suite`, which builds them again beside the suite's build.
 fn outside_the_suite(index: usize, task: &Task, suite: &Suite) -> Vec<Diagnostic> {
     task.criteria
         .iter()
@@ -159,8 +141,10 @@ fn outside_the_suite(index: usize, task: &Task, suite: &Suite) -> Vec<Diagnostic
                     index,
                     task,
                     &criterion.cmd,
-                    RuleCode::OutsideTheSuite,
-                    suite.outside_detail(&command),
+                    TaskFault::OutsideTheSuite {
+                        command,
+                        suite: suite.command(),
+                    },
                 )
             })
         })
@@ -179,11 +163,9 @@ fn own_shapes(index: usize, task: &Task, plan: &TasksFile) -> Vec<Diagnostic> {
             of_task(
                 index,
                 &task.id,
-                RuleCode::UsesItsOwnShape,
-                format!(
-                    "`uses` names `{name}`, which this task builds; a task's own shapes are in \
-                     its `changes`, and `uses` names those another task builds"
-                ),
+                TaskFault::UsesItsOwnShape {
+                    shape: name.clone(),
+                },
             )
         })
         .collect()
@@ -202,13 +184,10 @@ fn writes_its_test(index: usize, task: &Task) -> Vec<Diagnostic> {
             Some(of_task(
                 index,
                 &task.id,
-                RuleCode::TaskWritesItsTest,
-                format!(
-                    "`changes` names `{}`, the test its criterion `{}` runs; the spec writes a \
-                     task's tests — keep the file in `scope`, out of `changes`, and name a test \
-                     the spec will write",
-                    change.at, cmd.cmd
-                ),
+                TaskFault::TaskWritesItsTest {
+                    at: change.at.clone(),
+                    cmd: cmd.cmd.clone(),
+                },
             ))
         })
         .collect()
@@ -241,11 +220,10 @@ fn shared(plan: &TasksFile) -> Vec<Diagnostic> {
                     index,
                     task,
                     &criterion.cmd,
-                    RuleCode::SharedCriterion,
-                    format!(
-                        "`{cmd}` also judges `{owner}`: once `{owner}` lands it passes, and \
-                         this task is blocked before any work — give it a test of its own"
-                    ),
+                    TaskFault::SharedCriterion {
+                        cmd: cmd.to_string(),
+                        owner: (**owner).clone(),
+                    },
                 )),
                 None => first.push((cmd, &task.id)),
             }
@@ -254,13 +232,9 @@ fn shared(plan: &TasksFile) -> Vec<Diagnostic> {
     broken
 }
 
-fn criterion_of(
-    index: usize,
-    task: &Task,
-    cmd: &str,
-    code: RuleCode,
-    detail: String,
-) -> Diagnostic {
+/// The diagnostic about the first criterion of `task` whose command is `cmd`,
+/// or the task's first criterion when none is.
+fn criterion_of(index: usize, task: &Task, cmd: &str, fault: TaskFault) -> Diagnostic {
     let at = task
         .criteria
         .iter()
@@ -271,13 +245,13 @@ fn criterion_of(
             task: Named::new(task.id.clone(), index),
             index: at,
         },
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }
 
-fn of_task(index: usize, id: &TaskId, code: RuleCode, detail: String) -> Diagnostic {
+fn of_task(index: usize, id: &TaskId, fault: TaskFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }

@@ -49,7 +49,7 @@ impl RunCtx<'_> {
             .map_err(|refused| RunError::RefusedAnswer {
                 refused,
                 summary: Box::new(escalation.summary().clone()),
-                failure: escalation.failure.clone(),
+                failure: escalation.failure().cloned().map(Box::new),
             })?;
         Ok(Some(choice))
     }

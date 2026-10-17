@@ -1,7 +1,10 @@
-//! The words of a command that ran and of a red check: the line that names
-//! what ran and how it ended, and the lines it printed last.
+//! The words of a command that ran, of a red check, and of a command the
+//! project's permissions refused: the line that names what ran and how it
+//! ended, the lines it printed last, and what refused it.
 
-use yunta_core::events::{CommandExit, CommandOrigin, RedCheck};
+use yunta_core::events::{
+    CommandExit, CommandOrigin, DeniedBy, DeniedCommand, DeniedRule, RedCheck,
+};
 use yunta_core::text;
 
 /// The line that names a command and how it ended, without what it printed.
@@ -22,6 +25,23 @@ pub fn command_headline(exit: &CommandExit) -> String {
 /// reads as its headline alone.
 pub fn command_exit(exit: &CommandExit) -> String {
     text::detailed(command_headline(exit), &exit.tail.join("\n"))
+}
+
+/// The words of a command the project's permissions refused: the command,
+/// and the list that refused it. A refusal an older log stored reads as the
+/// sentence it stored.
+pub fn denied(rule: &DeniedRule) -> String {
+    match rule {
+        DeniedRule::Command(DeniedCommand { command, by }) => match by {
+            DeniedBy::Deny { pattern } => format!(
+                "command `{command}` matches denied pattern `{pattern}` (permissions.commands.deny)"
+            ),
+            DeniedBy::Allow => format!(
+                "command `{command}` matches no pattern in the strict allowlist (permissions.commands.allow)"
+            ),
+        },
+        DeniedRule::Logged(said) => said.as_str().to_string(),
+    }
 }
 
 /// The sentence of a red check: its headline, and under it what the check
@@ -54,5 +74,47 @@ pub(super) fn red_headline(red: &RedCheck) -> String {
         RedCheck::Regression { cmd, exit_code, .. } => {
             format!("regression: `{cmd}` passed at baseline (exit 0) but now exits {exit_code}")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::{DeniedBy, DeniedCommand, DeniedRule};
+
+    use super::denied;
+
+    #[test]
+    fn a_command_the_deny_list_refuses_says_the_pattern_that_matched() {
+        let rule = DeniedRule::Command(DeniedCommand {
+            command: "echo forbidden-marker".into(),
+            by: DeniedBy::Deny {
+                pattern: "*forbidden-marker*".into(),
+            },
+        });
+        assert_eq!(
+            denied(&rule),
+            "command `echo forbidden-marker` matches denied pattern `*forbidden-marker*` \
+             (permissions.commands.deny)"
+        );
+    }
+
+    #[test]
+    fn a_command_the_allowlist_leaves_out_says_no_pattern_of_it_matched() {
+        let rule = DeniedRule::Command(DeniedCommand {
+            command: "rm -rf x".into(),
+            by: DeniedBy::Allow,
+        });
+        assert_eq!(
+            denied(&rule),
+            "command `rm -rf x` matches no pattern in the strict allowlist \
+             (permissions.commands.allow)"
+        );
+    }
+
+    #[test]
+    fn a_refusal_an_older_log_stored_reads_as_it_was_written() {
+        let sentence =
+            "command `rm -rf x` matches denied pattern `rm *` (permissions.commands.deny)";
+        assert_eq!(denied(&DeniedRule::Logged(sentence.into())), sentence);
     }
 }

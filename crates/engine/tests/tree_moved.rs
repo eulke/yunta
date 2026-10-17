@@ -47,7 +47,8 @@ async fn retries_wait_for(bench: &Bench) -> Vec<Precondition> {
     .expect("a parked run is a decision");
     let menu = escalation
         .into_payload()
-        .failure
+        .failure()
+        .cloned()
         .expect("a failure's escalation carries its menu");
     menu.remedies
         .into_iter()

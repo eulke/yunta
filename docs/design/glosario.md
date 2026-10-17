@@ -250,23 +250,22 @@ _Evitar_: intervalo, lapso, periodo.
 ## Gates
 
 **Escalación** (`Escalation`):
-Lo que un gate publica cuando detiene el run: la afirmación de quien escala, la
-evidencia contra la que se audita —hechos que el engine adjunta derecho del
-log— y un menú de opciones que no puede estar vacío. Es la única forma en que
-nace un `gate_waiting`: el corte entre la afirmación y la evidencia se decide
-en un solo lugar, una afirmación que repite un hecho del registro se rechaza al
-construirla, y un menú vacío —una escalación que rechaza toda respuesta que
-recibe— es imposible por tipo.
+Lo que un gate publica cuando detiene el run: la afirmación de quien escala, el
+menú que dice de qué trata —uno solo, con los datos de los que se escriben sus
+palabras— y un menú de opciones que no puede estar vacío. Es la única forma en que
+nace un `gate_waiting`. El log guarda datos y no palabras: los hechos contra los que
+se audita la escalación los escribe render desde el menú, así que una afirmación no
+puede repetir un hecho del registro, porque no hay registro en palabras que repetir.
+Un menú vacío —una escalación que rechaza toda respuesta que recibe— es imposible
+por tipo.
 _Evitar_: pregunta del gate, pedido de ayuda, pausa.
 
-**Tradeoff** (`GateOption.tradeoff`):
-Qué cuesta tomar una opción del menú, escrito por quien escribió la opción y
-obligatorio en las opciones que el engine escribe con sus palabras: toda opción que
-amplía el trabajo declara contra qué lo cambia, y elegirla autoriza esa ampliación
-(D50). Las opciones de un menú de falla o de desvío no traen palabras: la superficie
-que dibuja el menú las escribe desde sus datos. Viaja con la opción y se
-muestra como la línea debajo de su etiqueta, así que quien decide lee el costo
-donde elige.
+**Tradeoff** (`render::offers`):
+Qué cuesta tomar una opción del menú. Render lo escribe desde los datos de la opción
+y de su escalación, y se muestra como la línea debajo de su etiqueta, así que quien
+decide lee el costo donde elige. Toda opción que amplía el trabajo dice contra qué lo
+cambia, y elegirla autoriza esa ampliación (D50). En el log solo aparece en un log
+anterior, que lo guardó con la opción.
 _Evitar_: nota de la opción, advertencia, consecuencia.
 
 ## Documentos y su lectura

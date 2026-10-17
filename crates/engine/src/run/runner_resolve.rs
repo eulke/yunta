@@ -2,7 +2,8 @@
 //! its per-run tools, and recording what the adapter cannot enforce.
 
 use yunta_core::events::{
-    CapabilityUse, EventPayload, Failure, RunnerRefusal, RunnerResolvedPayload,
+    CapabilityUse, EngineError, EngineStep, EventPayload, Failure, RunnerRefusal,
+    RunnerResolvedPayload,
 };
 use yunta_core::{AdapterId, Node, NodeId, RunAdapter};
 
@@ -176,7 +177,10 @@ impl RunToolsSetupError {
                 capability_missing(node, adapter, CapabilityUse::LoopTasks)
             }
             listener => Failure::EngineFailed {
-                engine_error: listener.to_string(),
+                engine_error: EngineError::Step {
+                    step: EngineStep::RunTools,
+                    report: Some(listener.to_string()),
+                },
             },
         }
     }

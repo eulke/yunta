@@ -84,14 +84,15 @@ pub use config::{
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
-    Subject,
+    ArtifactFailure, Diagnostic, DocumentRef, Fault, FileProblem, Named, Problem, Report, Rule,
+    RuleCode, RuleWords, RunFault, Subject,
 };
 pub use error::{describe, with_causes, AdapterError, Result, Unbuildable};
 pub use events::Unredactable;
+pub use findings::fault::FindingFault;
 pub use findings::{
-    FindingEntry, FindingsFile, InvalidLocation, LineRange, Location, ProposedCriterionEntry,
-    RelativePath, Withdrawal,
+    FindingEntry, FindingsFile, FoundEntry, HeldEntry, HeldFindings, InvalidLocation, LineRange,
+    Location, ProposedCriterionEntry, RelativePath, Withdrawal,
 };
 pub use glob::{
     listed_globs, might_overlap, reaches_any, scope_globset, InvalidScopeGlob, ScopeGlob,
@@ -115,13 +116,14 @@ pub use pack::{
     PackManifestError, PackRequires, RequiredRunner,
 };
 pub use policy::{ScopeCeiling, ScopeExpansionMode};
-pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionFault, QuestionsFile};
 pub use run_tool::RunTool;
 pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
-pub use spec::{in_repo, Spec, SpecFile, SpecTest, TestFile};
+pub use spec::{in_repo, Spec, SpecFault, SpecFile, SpecTest, TestFile};
 pub use tasks::{
-    names_file, passes_by_a_name, Change, Criterion, Decision, Shape, Suite, Task, TasksFile,
+    names_file, passes_by_a_name, Change, Criterion, Decision, Shape, Suite, Task, TaskFault,
+    TasksFile,
 };
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
@@ -132,7 +134,7 @@ pub use workflow::{
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
     RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind,
-    Workflow, ARTIFACTS_DIR, OBJECTS_DIR,
+    Workflow, WorkflowFault, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

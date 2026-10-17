@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::node::payloads::CriterionResult;
 use crate::events::tasks::payloads::{CriterionUnpassablePayload, DeviationDeclaredPayload};
-use crate::events::{AccountLimit, SessionDeath, SessionRefusal};
+use crate::events::{AccountLimit, DeniedRule, SessionDeath, SessionRefusal};
 use crate::ids::TaskId;
 use crate::NonEmpty;
 
@@ -46,9 +46,9 @@ pub enum TaskCause {
     /// the paths it conflicts on.
     CarriedWorkNoLongerApplies { paths: Vec<PathBuf> },
     /// A criterion's own command is one the run's permissions refuse, so
-    /// the task cannot be verified at all. `rule` is the refusal the
-    /// permission check wrote, naming the pattern and the field.
-    CommandDenied { rule: String },
+    /// the task cannot be verified at all. `rule` is the command and the
+    /// list that refused it.
+    CommandDenied { rule: DeniedRule },
     /// A scope-expansion request is owed a human decision, and no further
     /// session spends budget while one is owed.
     ScopeDecisionOwed,
@@ -91,17 +91,22 @@ pub enum Surprise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{LimitSource, RefusalCause};
+    use crate::events::{DeniedBy, DeniedCommand, LimitSource, RefusalCause};
     use crate::ids::AdapterId;
 
-    /// One cause of every shape a task can stop on.
-    fn every_cause() -> Vec<TaskCause> {
-        let refusal = SessionRefusal {
-            adapter: AdapterId::from_static("mock"),
-            cause: RefusalCause::Authentication,
-            message: "Invalid API key".to_string(),
-        };
-        let unrunnable = CriterionResult {
+    /// The command a permission refused, and the pattern of the list that refused it.
+    fn denied_rule() -> DeniedRule {
+        DeniedRule::Command(DeniedCommand {
+            command: "cargo test".to_string(),
+            by: DeniedBy::Deny {
+                pattern: "cargo *".to_string(),
+            },
+        })
+    }
+
+    /// A criterion whose command was never found: its run answered with 127.
+    fn unrunnable_criterion() -> CriterionResult {
+        CriterionResult {
             cmd: "yunta-no-such-tool".to_string(),
             exit_code: 127,
             r#type: None,
@@ -112,7 +117,17 @@ mod tests {
             tree: None,
             head: None,
             conclusion: None,
+        }
+    }
+
+    /// One cause of every shape a task can stop on.
+    fn every_cause() -> Vec<TaskCause> {
+        let refusal = SessionRefusal {
+            adapter: AdapterId::from_static("mock"),
+            cause: RefusalCause::Authentication,
+            message: "Invalid API key".to_string(),
         };
+        let unrunnable = unrunnable_criterion();
         vec![
             TaskCause::PreCheck {
                 found: NonEmpty::from((
@@ -145,7 +160,7 @@ mod tests {
                 paths: vec![PathBuf::from("src/lib.rs")],
             },
             TaskCause::CommandDenied {
-                rule: "`cargo` is denied".to_string(),
+                rule: denied_rule(),
             },
             TaskCause::ScopeDecisionOwed,
         ]

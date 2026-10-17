@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    CommandExit, Escalation, Fact, Failure, GateOption, NodeOutcome, NodeState, NodeWait,
-    PauseReason, TokenUsage,
+    Claim, CommandExit, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption, Menu,
+    NodeOutcome, NodeState, NodeWait, PauseReason, TokenUsage,
 };
+use yunta_core::reserved::ReservedOption;
 use yunta_core::{ContentHash, NonEmpty};
 use yunta_engine::{Counter, NodeStanding, WaitingOn};
 use yunta_testkit::{assert_golden, node_frame, run_frame, ENVIRONMENTS};
@@ -89,31 +90,30 @@ fn frame(phase: RunPhase, nodes: Vec<NodeFrame>) -> RunFrame {
     }
 }
 
-/// The escalation a node parks on once its re-routes are spent.
+/// The escalation a node parks on once its re-routes are spent: the failure
+/// of `lint`, whose re-route to `fix-lint` allows no further attempt.
 fn exhausted_escalation() -> Escalation {
-    let option = |id: &'static str, label: &str, tradeoff: &str| GateOption {
-        id: yunta_core::OptionId::from_static(id),
-        label: Some(label.to_string()),
-        tradeoff: Some(tradeoff.to_string()),
-        asks: None,
+    let menu = FailureMenu {
+        attempt: 1,
+        failure: lint_failure(),
+        remedies: Vec::new(),
+        stuck: None,
+        reroute: Some(ExhaustedReroute {
+            goto: NodeId::from("fix-lint"),
+            max_reroutes: 0,
+            next_mode: None,
+        }),
     };
     Escalation::new(
-        "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted",
-        vec![Fact::bare("exit 101")].into(),
+        Claim::NodeFailed {
+            node: NodeId::from("lint"),
+        },
+        Menu::Failure(Box::new(menu)),
         NonEmpty::from((
-            option(
-                "retry",
-                "Re-route to `fix-lint` once more",
-                "Uses one extra correction attempt beyond the declared max_reroutes (0)",
-            ),
-            vec![option(
-                "abort",
-                "Abort the run",
-                "Pauses here; nothing further executes",
-            )],
+            GateOption::reserved(ReservedOption::Retry),
+            vec![GateOption::reserved(ReservedOption::Abort)],
         )),
     )
-    .expect("the summary states no fact the evidence holds")
 }
 
 fn exhausted() -> GateWaitingPayload {

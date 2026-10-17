@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 
 use yunta_core::events::{
-    CommandExit, CommandOrigin, EventPayload, Failure, HookExecutedPayload, HookPhase, TokenUsage,
+    CommandExit, CommandOrigin, DeniedCommand, DeniedRule, EventPayload, Failure,
+    HookExecutedPayload, HookPhase, TokenUsage,
 };
 use yunta_core::{ConfigKey, HookFailurePolicy, HookStep, Hooks, Node, Resolved};
 
@@ -25,7 +26,7 @@ use yunta_core::events::NodeEvent;
 pub(super) enum HookRun {
     Passed,
     Failed(CommandExit),
-    Violation(String),
+    Violation(DeniedCommand),
     /// It names a command the run's frozen config does not declare.
     Unset(ConfigKey),
 }
@@ -101,10 +102,10 @@ pub(super) async fn run_hook(
 
     // The runtime moment: the *rendered* command, right before it runs
     // — a template can assemble what the YAML never showed.
-    if let Some(rule) =
+    if let Some(denied) =
         crate::permissions::command_violation(&rendered, ctx.manifest.config.permissions.as_ref())
     {
-        return Ok(HookRun::Violation(rule));
+        return Ok(HookRun::Violation(denied));
     }
 
     // What a hook prints is the run's, never the terminal's: it lands in
@@ -186,8 +187,10 @@ pub(super) async fn after_hooks(
 ) -> Result<Option<NodeEnd>, RunError> {
     for step in &effective_hooks(ctx, node).after {
         let end = match run_hook(ctx, node, HookPhase::After, step).await? {
-            HookRun::Violation(denied_rule) => {
-                let failure = Failure::CommandDenied { denied_rule };
+            HookRun::Violation(denied) => {
+                let failure = Failure::CommandDenied {
+                    denied_rule: DeniedRule::Command(denied),
+                };
                 fail_with_tokens_staged(ctx, node, failure, tokens, staged).await?
             }
             HookRun::Unset(key) => {

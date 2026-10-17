@@ -5,6 +5,7 @@
 
 use yunta_core::events::{Decider, EventPayload, GateEvent, ProposedCheck, ScopeEvent, TaskStatus};
 use yunta_core::expansion::{Precheck, Waiting};
+use yunta_core::ScopeGlob;
 use yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE;
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, ApproveEverything, Bench, MOCK_CONFIG};
@@ -421,12 +422,14 @@ async fn a_gate_for_an_undecided_request_records_why_the_loop_waits() {
             _ => None,
         })
         .expect("the gate a person answered");
-    // The record carries the paths alone as facts: why the loop waits is the
-    // typed value above, and no sentence about it is stored in the evidence.
-    let facts = waiting.evidence().facts();
-    let labels: Vec<Option<&str>> = facts.iter().map(|fact| fact.label.as_deref()).collect();
-    assert_eq!(labels, vec![Some("paths")]);
+    // The paths and the reason are typed values on the scope, and the record
+    // attaches no facts beside them.
     let scope = waiting.scope().expect("the gate says why the loop waits");
+    assert_eq!(
+        scope.paths,
+        [ScopeGlob::from("b.rs"), ScopeGlob::from("c.rs")]
+    );
+    assert!(waiting.evidence().is_empty(), "{:?}", waiting.evidence());
     assert_eq!(scope.because, Waiting::ModeAsk);
     assert_eq!(
         scope.proposed,

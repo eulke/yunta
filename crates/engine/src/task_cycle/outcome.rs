@@ -53,19 +53,6 @@ impl CriterionRun {
     pub fn conclusion(&self) -> Option<String> {
         self.output.as_ref().and_then(Printed::concluded)
     }
-
-    /// How its exit code reads to an agent: the code, and what it means
-    /// when the command never answered.
-    pub fn exit_described(&self) -> String {
-        match self.could_not_run() {
-            Some(why) => format!(
-                "{} ({})",
-                self.exit_code,
-                crate::run_tools::words::unanswered_words(why)
-            ),
-            None => self.exit_code.to_string(),
-        }
-    }
 }
 
 /// The pre-check's findings, read from what the criteria ran: a non-guard

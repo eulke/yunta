@@ -27,7 +27,7 @@ fn owed(task: &str, paths: &[&str]) -> OwedScope {
     OwedScope {
         task_id: TaskId::from(task),
         paths: paths.iter().map(|path| ScopeGlob::from(*path)).collect(),
-        reason: "the call sites are there".to_string(),
+        reason: Some("the call sites are there".to_string()),
     }
 }
 
@@ -55,5 +55,20 @@ fn a_grant_of_what_several_tasks_owe_counts_them() {
     assert_eq!(
         label,
         "Allow each of 2 tasks to also write what it asked for and run them again (attempt 2)"
+    );
+}
+
+#[test]
+fn an_owed_request_a_red_criterion_located_says_so_in_its_line() {
+    let failure = Failure::ScopeOwed {
+        owed: vec![OwedScope {
+            task_id: TaskId::from("resolve"),
+            paths: vec![ScopeGlob::from("src/a.rs")],
+            reason: None,
+        }],
+    };
+    assert_eq!(
+        crate::failure::detail(&failure),
+        vec!["`resolve` — src/a.rs: a red criterion of the task locates the refused writes"]
     );
 }

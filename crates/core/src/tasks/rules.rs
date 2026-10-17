@@ -15,6 +15,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use super::TaskFault;
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
 use crate::events::CriterionType;
 use crate::{Task, TaskId, TasksFile};
@@ -167,31 +168,20 @@ pub(super) const REVIEW_RULES: &[Rule] = &[
 /// Every way the plan leaves a person reviewing it without an
 /// explanation, collected rather than stopped at the first.
 pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
-    let document = |code: RuleCode, detail: &str| {
-        Diagnostic::new(Subject::Document, Problem::rule(code, detail))
-    };
+    let document = |fault: TaskFault| Diagnostic::new(Subject::Document, Problem::broke(fault));
     let mut broken = Vec::new();
     if !said(&tasks.summary) {
-        broken.push(document(
-            RuleCode::NoSummary,
-            "`summary` is missing; say what the plan changes, in one line",
-        ));
+        broken.push(document(TaskFault::NoSummary));
     }
     if !said(&tasks.description) {
-        broken.push(document(
-            RuleCode::NoDescription,
-            "`description` is missing; say what changes, why and how the work is approached",
-        ));
+        broken.push(document(TaskFault::NoPlanDescription));
     }
     for decision in &tasks.decisions {
         if !said(&decision.why) {
-            broken.push(document(
-                RuleCode::UnexplainedDecision,
-                &format!(
-                    "decision `{}` does not say `why` it chose `{}`",
-                    decision.id, decision.choice
-                ),
-            ));
+            broken.push(document(TaskFault::UnexplainedDecision {
+                decision: decision.id.clone(),
+                choice: decision.choice.clone(),
+            }));
         }
     }
     for (index, task) in tasks.tasks.iter().enumerate() {
@@ -217,13 +207,9 @@ fn codeless(index: usize, task: &Task, shapes: &[crate::Shape]) -> Vec<Diagnosti
             broke(
                 index,
                 &task.id,
-                RuleCode::ChangeWithoutCode,
-                format!(
-                    "the change at `{}` shows no `code`; give the declarations it adds or \
-                     changes — each type with its fields, each signature whole — so a person \
-                     sees how the work will look",
-                    change.at
-                ),
+                TaskFault::ChangeWithoutCode {
+                    at: change.at.clone(),
+                },
             )
         })
         .collect()
@@ -234,24 +220,12 @@ fn codeless(index: usize, task: &Task, shapes: &[crate::Shape]) -> Vec<Diagnosti
 fn task_reviewed(index: usize, task: &Task) -> Vec<Diagnostic> {
     let mut broken = Vec::new();
     let missing = [
-        (
-            !said(&task.description),
-            RuleCode::NoDescription,
-            "`description` is missing; say what the task does and why",
-        ),
-        (
-            !said(&task.outcome),
-            RuleCode::NoOutcome,
-            "`outcome` is missing; say what a person will observe once the task is done",
-        ),
-        (
-            task.changes.is_empty(),
-            RuleCode::NoChanges,
-            "`changes` is empty; say what the task changes, place by place",
-        ),
+        (!said(&task.description), TaskFault::NoTaskDescription),
+        (!said(&task.outcome), TaskFault::NoOutcome),
+        (task.changes.is_empty(), TaskFault::NoChanges),
     ];
-    for (_, code, detail) in missing.into_iter().filter(|(lacks, _, _)| *lacks) {
-        broken.push(broke(index, &task.id, code, detail));
+    for (_, fault) in missing.into_iter().filter(|(lacks, _)| *lacks) {
+        broken.push(broke(index, &task.id, fault));
     }
     for (at, criterion) in task.criteria.iter().enumerate() {
         if !said(&criterion.proves) {
@@ -260,10 +234,9 @@ fn task_reviewed(index: usize, task: &Task) -> Vec<Diagnostic> {
                     task: Named::new(task.id.clone(), index),
                     index: at,
                 },
-                Problem::rule(
-                    RuleCode::UnexplainedCriterion,
-                    format!("`{}` does not say what it `proves`", criterion.cmd),
-                ),
+                Problem::broke(TaskFault::UnexplainedCriterion {
+                    cmd: criterion.cmd.clone(),
+                }),
             ));
         }
     }
@@ -275,15 +248,10 @@ fn said(text: &Option<String>) -> bool {
     text.as_deref().is_some_and(|t| !t.trim().is_empty())
 }
 
-pub(super) fn broke(
-    index: usize,
-    id: &TaskId,
-    code: RuleCode,
-    detail: impl Into<String>,
-) -> Diagnostic {
+pub(super) fn broke(index: usize, id: &TaskId, fault: TaskFault) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(id.clone(), index)),
-        Problem::rule(code, detail),
+        Problem::broke(fault),
     )
 }
 
@@ -310,14 +278,7 @@ fn duplicate_ids(tasks: &TasksFile) -> Vec<Diagnostic> {
         .iter()
         .enumerate()
         .filter(|(_, task)| !seen.insert(&task.id))
-        .map(|(index, task)| {
-            broke(
-                index,
-                &task.id,
-                RuleCode::DuplicateId,
-                "a second task already carries this id; every id is declared once",
-            )
-        })
+        .map(|(index, task)| broke(index, &task.id, TaskFault::DuplicateTask))
         .collect()
 }
 
@@ -329,27 +290,17 @@ fn task_rules(index: usize, task: &Task, known_ids: &HashSet<TaskId>) -> Vec<Dia
             broken.push(broke(
                 index,
                 &task.id,
-                RuleCode::UnknownDependency,
-                format!("`depends_on` names `{dep}`, which no task in this file declares"),
+                TaskFault::UnknownDependency {
+                    dependency: dep.clone(),
+                },
             ));
         }
     }
     if task.title.trim().is_empty() {
-        broken.push(broke(
-            index,
-            &task.id,
-            RuleCode::EmptyTitle,
-            "`title` is empty",
-        ));
+        broken.push(broke(index, &task.id, TaskFault::EmptyTitle));
     }
     if task.scope.is_empty() {
-        broken.push(broke(
-            index,
-            &task.id,
-            RuleCode::EmptyScope,
-            "`scope` is empty; every task declares at least one glob, the only paths it \
-             may touch",
-        ));
+        broken.push(broke(index, &task.id, TaskFault::EmptyScope));
     }
     broken.extend(criteria_rules(index, task));
     broken
@@ -360,26 +311,13 @@ fn task_rules(index: usize, task: &Task, known_ids: &HashSet<TaskId>) -> Vec<Dia
 /// work starts.
 fn criteria_rules(index: usize, task: &Task) -> Option<Diagnostic> {
     if task.criteria.is_empty() {
-        return Some(broke(
-            index,
-            &task.id,
-            RuleCode::NoCriteria,
-            "no criteria declared; every task needs at least one command that verifies it",
-        ));
+        return Some(broke(index, &task.id, TaskFault::NoCriteria));
     }
     let all_guards = task
         .criteria
         .iter()
         .all(|c| c.r#type == Some(CriterionType::Guard));
-    all_guards.then(|| {
-        broke(
-            index,
-            &task.id,
-            RuleCode::AllCriteriaAreGuards,
-            "every criterion is a `guard`; at least one must be able to fail before the work, \
-             or there is nothing the work has to make pass",
-        )
-    })
+    all_guards.then(|| broke(index, &task.id, TaskFault::AllCriteriaAreGuards))
 }
 
 /// A cycle is a property of the whole graph, so the document carries it
@@ -390,17 +328,10 @@ fn cycle(tasks: &TasksFile) -> Option<Diagnostic> {
         .iter()
         .map(|t| (t.id.clone(), t.depends_on.clone()))
         .collect();
-    let path = crate::graph::find_cycle(&adjacency)?
-        .iter()
-        .map(TaskId::as_str)
-        .collect::<Vec<_>>()
-        .join(" -> ");
+    let cycle = crate::graph::find_cycle(&adjacency)?;
     Some(Diagnostic::new(
         Subject::Document,
-        Problem::rule(
-            RuleCode::DependencyCycle,
-            format!("`depends_on` forms a cycle: {path}"),
-        ),
+        Problem::broke(TaskFault::DependencyCycle { cycle }),
     ))
 }
 
@@ -450,13 +381,11 @@ fn overlapping_scopes(tasks: &[Task]) -> Vec<Diagnostic> {
                         broken.push(broke(
                             i,
                             &a.id,
-                            RuleCode::OverlappingScope,
-                            format!(
-                                "`{glob_a}` overlaps task `{}`'s `{glob_b}`, and neither \
-                                 depends on the other; give them disjoint scopes or declare \
-                                 the dependency",
-                                b.id
-                            ),
+                            TaskFault::OverlappingScope {
+                                glob: glob_a.clone(),
+                                other: b.id.clone(),
+                                other_glob: glob_b.clone(),
+                            },
                         ));
                     }
                 }

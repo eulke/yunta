@@ -106,12 +106,12 @@ pub(super) async fn hold_inherited_findings(
             )
     });
     for artifact in run_level {
-        let file = yunta_core::shape::read::<yunta_core::FindingsFile>(
+        let held = yunta_core::shape::read::<yunta_core::HeldFindings>(
             &artifact.bytes,
             "the inherited findings",
         )
         .map_err(crate::artifacts::HeldError::from)?;
-        for entry in file.findings {
+        for entry in held.findings {
             let finding = yunta_core::events::Finding::from(entry);
             log.record(
                 None,

@@ -10,11 +10,11 @@ use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    AgentMessagePayload, AgentMessageType, Escalation, EventBody, EventPayload, Evidence, Failure,
-    GateEvent, GateOption, GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice,
-    NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Outlook,
-    Precondition, RedCheck, Remedy, RunCreatedPayload, RunEvent, RunResumedPayload, SessionEvent,
-    StoredEvent, Stuck, TokenUsage,
+    AgentMessagePayload, AgentMessageType, Escalation, EventBody, EventPayload, Failure, GateEvent,
+    GateOption, GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice, NodeEvent,
+    NodeFailedPayload, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Outlook, Precondition,
+    RedCheck, Remedy, RunCreatedPayload, RunEvent, RunResumedPayload, SessionEvent, StoredEvent,
+    Stuck, TokenUsage,
 };
 use yunta_core::protected::Protected;
 use yunta_core::reserved::ReservedOption;
@@ -97,7 +97,8 @@ fn audit() -> EventPayload {
         input_tokens: None,
         output_tokens: None,
         cached_input_tokens: None,
-        text: Some("thinking".to_string()),
+        note: None,
+        text: Some("thinking".into()),
     }))
 }
 
@@ -203,23 +204,25 @@ nodes:
 /// question they were shown, and `option`.
 fn chose(option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
     let escalation = Escalation::new(
-        "node `plan` failed",
-        Evidence::none(),
-        NonEmpty::from((
-            GateOption {
-                id: "retry".into(),
-                label: Some("Run `plan` again (attempt 2)".to_string()),
-                tradeoff: Some("a fresh attempt".to_string()),
-                asks: None,
+        yunta_core::events::Claim::Written("node `plan` failed".to_string()),
+        yunta_core::events::Menu::Failure(Box::new(yunta_core::events::FailureMenu {
+            attempt: 2,
+            failure: Failure::Message {
+                outcome: "exit 1".into(),
             },
-            Vec::new(),
-        )),
-    )
-    .expect("the escalation is well-formed");
+            remedies: vec![Remedy {
+                option: ReservedOption::Retry,
+                precondition: Some(Precondition::OutsideTreeChanged),
+            }],
+            stuck: None,
+            reroute: None,
+        })),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Retry), Vec::new())),
+    );
     vec![
         (
             Some("plan"),
-            EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
+            EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload()))),
         ),
         (
             Some("plan"),
@@ -239,7 +242,7 @@ fn chose(option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
 /// node's next attempt.
 #[test]
 fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
-    let outcome = "exit 1".to_string();
+    let outcome = "exit 1".into();
     let failure = Failure::Message { outcome };
     let failed = vec![
         (None, created()),
@@ -356,7 +359,7 @@ fn a_scope_failure_offers_a_grant_only_where_a_person_may_widen_it() {
         other => panic!("a failed node is a decision, got {other:?}"),
     };
 
-    let outcome = "exit 1".to_string();
+    let outcome = "exit 1".into();
     assert!(offers(grantable("fix", outside(), &policy())));
     assert!(
         !offers(grantable("fix", Failure::Message { outcome }, &policy())),

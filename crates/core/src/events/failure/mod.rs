@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::diagnostic::ArtifactFailure;
-use crate::events::{Approval, ArtifactId, FindingSeverity, TaskStop};
+use crate::events::{Approval, ArtifactId, FindingSeverity, LoggedWords, TaskStop};
 use crate::ids::{
     AdapterId, AgentName, FindingId, InputName, NodeId, OptionId, Responder, RunId, RunnerName,
     SkillName, TaskId,
@@ -24,11 +24,14 @@ use crate::{Capability, CommitSha, Unbuildable};
 
 mod accessors;
 mod cause;
+mod denied;
 mod exit;
 mod records;
 mod remedy;
+mod step;
 
 pub use cause::{FailureCause, RefusalCause, SessionRefusal};
+pub use denied::{DeniedBy, DeniedCommand, DeniedRule};
 pub use exit::{
     AccountLimit, CommandExit, CommandOrigin, LimitSource, SessionDeath, SessionEnd, SessionExit,
     Unanswered, STOPPED_EXIT_CODE, TAIL_LINES,
@@ -38,6 +41,7 @@ pub use records::{
     OwedScope, RedCheck, RequestedScope, RunnerRefusal, Timed, Unchanged, UnpassableTask,
 };
 pub use remedy::{Facts, Outlook, Precondition, Remedy, Stuck};
+pub use step::{EngineError, EngineStep};
 
 /// Why a node failed.
 ///
@@ -114,8 +118,14 @@ pub enum Failure {
     },
     /// A frozen input no longer matches the hash the run was born with.
     FrozenInput { frozen_input: String },
-    /// The engine cannot end a session it asked to stop; its process group may still run.
-    SessionNotStopped { session_not_stopped: String },
+    /// The engine cannot end a session it asked to stop; its process group may
+    /// still run. `session_not_stopped` is what the stop reported; `release_failed`,
+    /// what taking back what the session set up reported, when that failed too.
+    SessionNotStopped {
+        session_not_stopped: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        release_failed: Option<String>,
+    },
     /// A session or an executor past its wall-clock budget: `after_ms` is the
     /// budget, and `timed` says whose it was.
     TimedOut {
@@ -186,10 +196,12 @@ pub enum Failure {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent: Option<AgentName>,
     },
-    /// An engine step failed on its own; `engine_error` is the step's error as it reported itself.
-    EngineFailed { engine_error: String },
-    /// A command the project's permissions deny; `denied_rule` is the rule that denies it.
-    CommandDenied { denied_rule: String },
+    /// An engine step failed on its own; `engine_error` names the step, and
+    /// what its failing call reported of itself.
+    EngineFailed { engine_error: EngineError },
+    /// A command the project's permissions deny; `denied_rule` is the command and
+    /// the list that denies it.
+    CommandDenied { denied_rule: DeniedRule },
     /// A skill the node names that the run does not hold; `searched` lists the roots it looked in.
     SkillMissing {
         missing_skill: SkillName,
@@ -248,7 +260,8 @@ pub enum Failure {
         runner_refusal: RunnerRefusal,
     },
     /// Reads a log line that carries `outcome:` alone; no writer creates it.
-    Message { outcome: String },
+    /// The words are the sentence an older log stored, kept as written.
+    Message { outcome: LoggedWords },
 }
 
 /// Reads a field the wire always names, `null` included. It is the one way a
