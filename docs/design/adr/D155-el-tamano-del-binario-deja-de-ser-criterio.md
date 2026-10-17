@@ -37,6 +37,6 @@ cero); seguir derivando el techo de la medición más un margen (es la regla que
 produjo esta misma discusión dos veces, D142 y esta).
 
 Nota 2026-10-17. El techo pasa a 40 MiB (41.943.040 bytes). El binario musl
-estático mide 35,6 MiB, y cargo-bloat no encuentra peso de más: cerca de un
+estático mide 36,1 MiB, y cargo-bloat no encuentra peso de más: cerca de un
 tercio del código de máquina es del propio sistema, y el resto son las
 dependencias que usa, sin ninguna que lo explique sola.
