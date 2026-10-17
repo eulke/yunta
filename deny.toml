@@ -19,7 +19,6 @@ allow = [
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
@@ -43,19 +42,11 @@ multiple-versions = "deny"
 wildcards = "deny"
 allow-workspace = true
 skip = [
-    # hyper-util and reqwest are on 0.22 while rmcp already moved to 0.23.
-    { crate = "base64:0.22.1", reason = "hyper-util/reqwest lag rmcp" },
-    # sha2 (via cpufeatures 0.2) and rand's chacha20 (via cpufeatures 0.3).
-    { crate = "cpufeatures:0.2.17", reason = "sha2 lags rand's chacha20" },
-    # rusqlite's hashlink pins hashbrown 0.14 while indexmap is on 0.17.
-    { crate = "hashbrown:0.14.5", reason = "rusqlite's hashlink lags indexmap" },
     # Proc-macro crates in the tree still split between syn 2 and syn 3.
     { crate = "syn:2.0.119", reason = "derive macros split between syn 2 and 3" },
-    # tempfile (a dev-dependency) is on getrandom 0.3 while rmcp's rand 0.10
-    # is on 0.4.
-    { crate = "getrandom:0.3.4", reason = "tempfile lags rmcp's rand" },
-    # getrandom 0.3 and 0.4 each bring their own r-efi.
-    { crate = "r-efi:5.3.0", reason = "carried by the two getrandom majors" },
+    # bindgen, a build dependency of libproc, still requires shlex 1 while cc
+    # requires 2.
+    { crate = "shlex:1.3.0", reason = "libproc's bindgen lags cc on shlex" },
 ]
 
 [sources]

@@ -312,7 +312,7 @@ mod quiet_session_tests {
 
     use rmcp::model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ServerCapabilities,
-        ServerInfo,
+        ServerConfig,
     };
     use rmcp::service::{RequestContext, RunningService};
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -333,8 +333,8 @@ mod quiet_session_tests {
     }
 
     impl ServerHandler for Held {
-        fn get_info(&self) -> ServerInfo {
-            ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        fn get_info(&self) -> ServerConfig {
+            ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
         }
 
         async fn call_tool(

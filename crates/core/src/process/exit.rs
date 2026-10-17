@@ -103,7 +103,13 @@ impl Signal {
     }
 }
 
+/// The pidfd is owned by the registration, so the descriptor stays open and
+/// unchanged for as long as the watch holds it.
 #[cfg(target_os = "linux")]
+#[expect(
+    deprecated,
+    reason = "the replacement constructor is unsafe, which this workspace forbids"
+)]
 fn pidfd(pid: Pid) -> Option<tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>> {
     let pid = rustix::process::Pid::from_raw(pid.as_i32())?;
     let fd = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::NONBLOCK).ok()?;
@@ -159,6 +165,13 @@ mod kqueue {
     /// A queue registered for `pid`'s exit. `None` when the queue cannot
     /// be made or the kernel refuses the registration — a process that
     /// already exited is refused — and the caller looks instead.
+    ///
+    /// The queue is owned by the registration, so its descriptor stays open
+    /// and unchanged for as long as the watch holds it.
+    #[expect(
+        deprecated,
+        reason = "the replacement constructor is unsafe, which this workspace forbids"
+    )]
     pub(super) fn watching(pid: Pid) -> Option<AsyncFd<Queue>> {
         let queue = Kqueue::new().ok()?;
         let watched = usize::try_from(pid.as_i32()).ok()?;

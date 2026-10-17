@@ -115,12 +115,13 @@ async fn a_live_owner_s_lock_still_refuses() {
     init_repo(&repo);
     let base_commit = head(&repo);
 
-    // This test process itself is the live owner.
-    std::fs::write(
-        lock_file(&repo),
-        owner_record(std::process::id(), fixed_now()),
-    )
-    .unwrap();
+    // This test process itself is the live owner. Its record names the start
+    // the host reports for it, since a process that started after its record
+    // reads as a reused pid; a host that reports no start reads it as alive.
+    let started = yunta_core::process::process_start::process_start(Pid::current())
+        .map(DateTime::<Utc>::from)
+        .unwrap_or_else(fixed_now);
+    std::fs::write(lock_file(&repo), owner_record(std::process::id(), started)).unwrap();
 
     let err = prepare_worktree(
         &repo,

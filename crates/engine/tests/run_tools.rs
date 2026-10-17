@@ -1352,9 +1352,10 @@ async fn a_plan_proven_by_a_name_is_refused_when_it_is_handed_over() {
 /// no spec is planned, the same criterion cannot run and is.
 #[tokio::test]
 async fn a_specified_plan_is_not_run_before_its_tests_exist() {
+    // bash, not sh: a missing script exits 127 under bash but 2 under dash, which reads as red.
     let tasks = json!([
         { "id": "t1", "title": "First", "scope": ["tests/first.sh"],
-          "criteria": [{ "cmd": "sh tests/first.sh" }] },
+          "criteria": [{ "cmd": "bash tests/first.sh" }] },
     ]);
 
     let specified = ToolsHost::over(PLANNED_THEN_SPECIFIED);

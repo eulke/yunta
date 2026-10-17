@@ -36,7 +36,7 @@ yunta-testkit = { path = "crates/testkit", version = "0.0.5" }
 yunta-testkit-core = { path = "crates/testkit-core", version = "0.0.5" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4"
 clap = "4"
 clap_complete = "4"
@@ -54,18 +54,20 @@ libproc = "0.14.11"
 proptest = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false }
-rmcp = { version = "3.3", default-features = false }
-rusqlite = "0.32"
+rmcp = { version = "3.4", default-features = false }
+# Storage names the features it uses: the defaults add a wasm SQLite
+# backend, for a target this project never builds.
+rusqlite = { version = "0.40", default-features = false }
 schemars = "1"
 serde = "1"
 serde_json = "1"
 serde_path_to_error = "0.1"
-serde-saphyr = "1.3"
+serde-saphyr = "2"
 strsim = "0.11"
 subtle = { version = "2", default-features = false }
-# The 0.10 line shares digest 0.10 with sha2 0.10.
-sha1 = "0.10"
-sha2 = "0.10"
+# Each 0.11 line builds on digest 0.11, so sha1 and sha2 move together.
+sha1 = "0.11"
+sha2 = "0.11"
 tempfile = "3"
 toml = { version = "1", default-features = false, features = ["display", "serde"] }
 thiserror = "2"
