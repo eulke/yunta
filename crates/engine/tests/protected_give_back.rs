@@ -90,3 +90,33 @@ async fn a_give_back_removes_an_ignored_link_at_a_config_root() {
     assert_eq!(second.worktree, first.worktree);
     assert!(std::fs::symlink_metadata(second.worktree.join(".codex")).is_err());
 }
+
+/// What git ignores under `.agents/` stays for the next unit, as any of the
+/// project's files does, except under the skills root a CLI loads.
+#[tokio::test]
+async fn a_give_back_keeps_an_ignored_note_under_agents_and_cleans_an_ignored_skill() {
+    let world = World::new();
+    world
+        .pool
+        .protect(Protected::new(&[], &[]).unwrap().pathspecs());
+    let (first, held) = world.open("T001").await;
+    let exclude = yunta_testkit::git_output(
+        &first.worktree,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "info/exclude",
+        ],
+    );
+    write(std::path::Path::new(exclude.trim()), "/.agents/\n");
+    write(&first.worktree.join(".agents/notes.md"), "the project's");
+    write(&first.worktree.join(".agents/skills/x/SKILL.md"), "planted");
+    world.give_back(&first, held).await;
+
+    let (second, _held) = world.open("T002").await;
+
+    assert_eq!(second.worktree, first.worktree);
+    assert!(second.worktree.join(".agents/notes.md").exists());
+    assert!(!second.worktree.join(".agents/skills/x/SKILL.md").exists());
+}

@@ -112,8 +112,9 @@ leaves it with only what the run mounts (`--setting-sources ""` and
 for `codex`). A tool of an MCP server the session loads that way writes without
 asking the rail, and the files it writes are not formatted as they are written: the
 close judges them like any other write. The trees a CLI loads that configuration from inside a checkout —
-`.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/**` for
-`codex` — are never written by any session of any run. The instruction files,
+`.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/skills/**`
+for `codex` — are never written by any session of any run; the rest of
+`.agents/` is the project's, since no CLI loads it. The instruction files,
 `AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. A link
 committed at one of these paths holds what it points to inside the checkout to
 the same rule, since the CLI reads through it. The
@@ -122,7 +123,10 @@ files included, so a write the fence let through is still refused. No CLI sandbo
 covers a protected file, a pattern that covers part of a directory, or a glob
 that names no directory of its own, such as `**/AGENTS.md` or `**/CLAUDE.md`:
 the sandbox settings take only whole trees, `dir/**`. The rail judges those for
-the file tools. The close finds them through git: a pattern that names its
+the file tools. `claude-code`'s sandbox also refuses a command that creates a
+missing directory above a tree it denies, such as `.agents` above
+`.agents/skills`; the session's file tools create it, and a command writes under
+it once it exists. The close finds them through git: a pattern that names its
 directory, such as `config/secrets.yaml`, is looked for inside that directory even
 when the project ignores it; a pattern that names no directory is not looked for
 inside a directory the project ignores whole, such as a build output or a

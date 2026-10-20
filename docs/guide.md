@@ -170,14 +170,16 @@ one, so no workflow fails for lacking it.
 Once a run holds a [spec](#artifacts-the-engine-reads), every file of it is denied the same way to
 every session of the run — the tests a person approved stay as approved through
 the pull request. A lint command that rewrites files fails over one of them like
-over any denied path. The trees an agent's CLI loads its own settings, hooks and
-MCP servers from — `.claude/**` and `.mcp.json` for Claude Code, `.codex/**` and
-`.agents/**` for Codex — are denied the same way to every run, whichever CLI it
-uses: a checkout outlives the session that writes one, and the next session to
-open there would run what it says outside its sandbox. `AGENTS.md` and
-`CLAUDE.md`, at any depth, are denied to every session too, because an agent
-reads them as its instructions. A person can grant those two, for the scope they
-are asked for, and nothing else that is protected. A link the project commits at
+over any denied path. The trees an agent's CLI loads its own settings, hooks,
+skills and MCP servers from — `.claude/**` and `.mcp.json` for Claude Code,
+`.codex/**` and `.agents/skills/**` for Codex — are denied the same way to every
+run, whichever CLI it uses: a checkout outlives the session that writes one, and
+the next session to open there would run what it says outside its sandbox. The
+rest of `.agents/` is your project's: a run writes it when a task's scope names
+it. `AGENTS.md` and `CLAUDE.md`, at any depth, are denied to every session too,
+because an agent reads them as its instructions. A person can grant those two,
+for the scope they are asked for, unless they sit inside one of the trees above,
+and nothing else that is protected. A link the project commits at
 one of these paths protects what it points to inside the checkout the same way,
 since the CLI reads through it. Git-ignored files under these
 trees, or an instruction file, count as written: a `.gitignore` entry does not

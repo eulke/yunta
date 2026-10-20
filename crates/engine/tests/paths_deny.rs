@@ -199,6 +199,33 @@ async fn a_link_git_ignores_at_a_cli_s_config_root_still_fails_the_node() {
     );
 }
 
+/// The project's own files under `.agents/` are written like any others: a
+/// node that writes a note there lands it, and one that writes a skill Codex
+/// would load fails without a grant.
+#[tokio::test]
+async fn a_note_under_agents_lands_and_a_skill_there_fails_without_a_grant() {
+    let bench = Bench::new();
+    let notes = "name: w\nnodes:\n  - { id: notes, kind: bash, scope: [\".agents/**\"], run: \"mkdir -p .agents && echo x > .agents/notes.md\" }\n";
+    let fixture = "dialect: codex\nsessions: []\n";
+    let RunReport { terminal, .. } = bench.run_with_config(notes, fixture, MOCK_CONFIG).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let landed = git_output(&bench.worktree, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(landed.contains(".agents/notes.md"), "{landed}");
+
+    let bench = Bench::new();
+    let skill = "name: w\nnodes:\n  - { id: skill, kind: bash, scope: [\".agents/**\"], run: \"mkdir -p .agents/skills/x && echo x > .agents/skills/x/SKILL.md\" }\n";
+    bench.run_with_config(skill, fixture, MOCK_CONFIG).await;
+    let failed = failures(&bench.events(), "skill");
+    assert_eq!(
+        failed,
+        vec![Failure::paths_denied(
+            vec![".agents/skills/x/SKILL.md".into()],
+            vec![Protection::AgentConfig]
+        )]
+    );
+    assert!(!failed[0].wants_scope(), "no grant widens it");
+}
+
 /// The planner's plan and one task scoped to `scope` whose session writes
 /// `writes`, under a `rules` expansion mode.
 fn one_task(scope: &str, writes: &str, request: Option<&str>) -> (String, String) {

@@ -154,12 +154,7 @@ fn a_link_at_the_root_of_a_tree_a_cli_loads_carries_the_tree_to_its_target() {
 /// link's target: the rest of the target is not loaded through it.
 #[test]
 fn a_link_above_a_tree_a_cli_loads_carries_only_that_tree() {
-    let skills = Entry::of(
-        Protection::AgentConfig,
-        ScopeGlob::from(".agents/skills/**"),
-    );
-    let set = Protected::try_from(vec![skills]).unwrap();
-    let set = grown(set, &tree(&[(".agents", "shared/agents")], &[]));
+    let set = grown(fixed(), &tree(&[(".agents", "shared/agents")], &[]));
     assert_eq!(
         reason(&set, "shared/agents/skills/x/SKILL.md"),
         Some(Protection::AgentConfig)

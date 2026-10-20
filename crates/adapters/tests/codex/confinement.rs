@@ -227,3 +227,43 @@ async fn a_read_only_sandbox_from_the_settings_leaves_the_commands_no_checkout()
         })
     );
 }
+
+/// The profile names `.agents` writable, which Codex would hold read-only
+/// otherwise, and keeps the skills root it scans read-only beneath it.
+#[tokio::test]
+async fn the_profile_lets_a_session_write_agents_but_not_its_skills_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let mut req = request(dir.path().to_path_buf());
+    confine(
+        &mut req,
+        PermissionProfile::Edit,
+        EditSandbox::default(),
+        false,
+        true,
+    )
+    .unwrap();
+    req.confinement.protected =
+        std::sync::Arc::new(yunta_core::protected::Protected::new(&[], &[]).unwrap());
+    req.env.plain.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+
+    let filesystem = filesystem_of(&args);
+    let skills = dir.path().join(".agents/skills").display().to_string();
+    assert_eq!(
+        filesystem[skills.as_str()],
+        toml::Value::String("read".to_string()),
+        "{args}"
+    );
+    let agents = dir.path().join(".agents").display().to_string();
+    assert_eq!(
+        filesystem[agents.as_str()],
+        toml::Value::String("write".to_string()),
+        "{args}"
+    );
+}

@@ -212,5 +212,10 @@ mod tests {
             set.reason_of(Path::new(".codex/state/cache.json")),
             Some(Protection::AgentConfig)
         );
+        assert_eq!(
+            set.reason_of(Path::new(".agents/skills/grill/SKILL.md")),
+            Some(Protection::AgentConfig)
+        );
+        assert_eq!(set.reason_of(Path::new(".agents/notes.md")), None);
     }
 }
