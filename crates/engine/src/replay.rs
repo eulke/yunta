@@ -378,7 +378,7 @@ impl RunState {
 }
 
 /// A run's log read once and its [`RunState`] derived once — the pair
-/// almost every read site needs together. The read and the [`derive`]
+/// almost every read site needs together. The read and the [`derive`](fn@derive)
 /// call live here, in one place, instead of being repeated at each site.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RunView {

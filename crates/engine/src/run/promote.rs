@@ -65,7 +65,7 @@ pub struct Predecessor<'a> {
 ///
 /// Grouped because they travel together and none of them is a decision
 /// this function makes: it is handed the caller's infrastructure and
-/// trail, exactly as [`create_run`](crate::create_run) is.
+/// trail, exactly as [`create_run`] is.
 pub struct CallerInfra<'a> {
     pub storage: &'a AsyncStorage,
     pub ids: &'a dyn IdSource,

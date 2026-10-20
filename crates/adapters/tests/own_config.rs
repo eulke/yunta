@@ -42,7 +42,7 @@ fn of_agents_codex_owns_only_the_skills_root() {
     let trees = yunta_core::scope_globset(&codex().own_config()).unwrap();
     assert!(trees.is_match(".agents/skills/grill/SKILL.md"));
     assert!(!trees.is_match(".agents/notes.md"));
-    assert!(!trees.is_match(".agents/architecture.md"));
+    assert!(!trees.is_match(".agents/style.md"));
 }
 
 /// Every tree an adapter declares as its own is one every run protects, and

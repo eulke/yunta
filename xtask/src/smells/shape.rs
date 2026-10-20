@@ -28,6 +28,23 @@ pub fn production_only(text: &str) -> String {
         .join("\n")
 }
 
+/// The lines of the module doc a file opens with: its `//!` lines before the
+/// first item, past the blank lines, inner attributes and plain comments
+/// around them.
+pub fn module_doc_lines(source: &str) -> usize {
+    let aside = |line: &&str| {
+        line.is_empty()
+            || line.starts_with("#![")
+            || (line.starts_with("//") && !line.starts_with("//!"))
+    };
+    source
+        .lines()
+        .map(str::trim_start)
+        .take_while(|line| line.starts_with("//!") || aside(line))
+        .filter(|line| line.starts_with("//!"))
+        .count()
+}
+
 /// One flag per line: whether it sits inside a `#[cfg(test)]` module (the
 /// attribute line, the `mod … {` header, and the body through its matching
 /// `}`). Braces inside strings and comments are ignored via [`blanked_lines`],
@@ -314,6 +331,19 @@ pub fn has_debug_format(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_module_doc_is_the_run_of_inner_doc_lines_a_file_opens_with() {
+        assert_eq!(
+            module_doc_lines("\n//! one\n//!\n//! two\nuse x;\n//! later\n"),
+            3
+        );
+        assert_eq!(module_doc_lines("use x;\n//! not a module doc\n"), 0);
+        assert_eq!(
+            module_doc_lines("#![deny(x)]\n// a note\n//! one\n// aside\n//! two\nmod m;\n"),
+            2
+        );
+    }
 
     #[test]
     fn inner_space_runs_are_the_trace_of_a_lost_continuation() {

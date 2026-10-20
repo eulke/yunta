@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # The whole history: the smell check reads the baseline of the merge
+      # base, so a change cannot raise a count and the baseline together.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # Installs the toolchain `rust-toolchain.toml` pins, with its
       # components, and caches the build.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
@@ -50,8 +54,10 @@ jobs:
       - name: the decisions and their index agree
         run: cargo xtask adr --check
 
+      # Private items too: a module's `//!` and an item's `///` are where
+      # this repository explains its code, and a link in one must resolve.
       - name: rustdoc has no warnings
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --locked
 
       - name: test (workspace)
         run: cargo test --workspace --locked --no-fail-fast

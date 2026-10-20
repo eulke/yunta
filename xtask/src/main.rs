@@ -3,11 +3,12 @@
 //! `schema` writes the JSON Schema of every authored document and of
 //! one event of the log under `crates/core/schemas/`, generated from the types that
 //! read them; `schema --check` verifies the committed files are exactly
-//! what the types emit, which is what CI runs. `smells` measures the
-//! rebuild's ratchet counts against `xtask/smells.baseline`; `smells
-//! --check` fails when one rises. `adr` derives the index of
-//! `docs/design/adrs.md` from the decision files and proves what they
-//! say about each other; `adr --check` fails when the two disagree. All
+//! what the types emit, which is what CI runs. `smells` lowers the
+//! ratchet's counts in `xtask/smells.baseline` to what the tree counts and
+//! refuses a rise; `smells --check` fails when a count rises above that
+//! baseline or above the one of the branch's merge base. `adr` derives the index of the
+//! decision records from the decision files and proves what they say
+//! about each other; `adr --check` fails when the two disagree. All
 //! three run in CI.
 
 mod adr;

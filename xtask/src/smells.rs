@@ -20,6 +20,7 @@
 //! the rebuild's own acceptance commands used, so a contributor and CI see
 //! the same number `grep -c` would.
 
+mod baseline;
 mod cli;
 mod corpus;
 mod disk;
@@ -39,7 +40,7 @@ use disk::{count_engine_fs_outside_runtime, count_sync_fs_in_async, discarded_re
 use scan::blanked_lines;
 use shape::{
     functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
-    production_only,
+    module_doc_lines, production_only,
 };
 use thresholds::numeric_consts_without_reason;
 
@@ -220,6 +221,12 @@ fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize
         prose::banned_vocabulary(root),
     );
     counts.insert("tense_markers".to_string(), prose::tense_markers(root));
+    // The repository writes English; the design records it still keeps are
+    // the one place Spanish stands.
+    counts.insert(
+        "spanish_prose_lines".to_string(),
+        prose::spanish_prose_lines(root),
+    );
 }
 
 /// The counters over test code kept outside the support crate.
@@ -253,7 +260,42 @@ const COUNTERS: &[sites::Counter] = &[
         count_numeric_const_without_reason,
     ),
     ("engine_fs_outside_runtime", count_engine_fs_outside_runtime),
+    ("module_docs_over_60_lines", count_module_docs_over_60_lines),
+    ("mode_name_in_prod", count_mode_name_in_prod),
 ];
+
+/// A module doc past 60 lines. A `//!` says how its module works and what a
+/// change to it touches; a rule other code can break lives in the test that
+/// holds it, and a module whose working needs more is two modules.
+fn count_module_docs_over_60_lines(root: &Path) -> usize {
+    crate_src_dirs(root)
+        .iter()
+        .chain([root.join("xtask/src")].iter())
+        .flat_map(|dir| rs_files(dir))
+        .filter(|path| !is_test_source(path))
+        .filter(|path| module_doc_lines(&read_corpus(path)) > 60)
+        .count()
+}
+
+/// A mode named by its word in the engine's production code. A workflow
+/// declares its modes and the engine reads what the run's mode declares:
+/// `quick` and `standard` are a pack's words for its own.
+fn count_mode_name_in_prod(root: &Path) -> usize {
+    rs_files(&root.join("crates/engine/src"))
+        .iter()
+        .filter(|path| !is_test_source(path))
+        .map(|path| production_only(&read_corpus(path)))
+        .map(|text| {
+            text.lines()
+                .filter(|line| {
+                    ["\"quick\"", "\"standard\""]
+                        .iter()
+                        .any(|word| line.contains(word))
+                })
+                .count()
+        })
+        .sum()
+}
 
 /// A test file past the budget a source file has. What a reader scrolls
 /// to understand a failure is the test as well as the code it drives.
@@ -303,22 +345,6 @@ fn test_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn render(counts: &BTreeMap<String, usize>) -> String {
-    counts
-        .iter()
-        .map(|(name, count)| format!("{name} {count}\n"))
-        .collect()
-}
-
-fn parse_baseline(text: &str) -> BTreeMap<String, usize> {
-    text.lines()
-        .filter_map(|line| {
-            let (name, count) = line.rsplit_once(' ')?;
-            Some((name.to_string(), count.trim().parse().ok()?))
-        })
-        .collect()
-}
-
 /// Wildcard match arms inside the functions that fold the log: every
 /// `ledger.rs` under `crates/core/src/events/`, plus the engine's own
 /// derivation. A `_ =>` there is a kind that derives nothing with
@@ -363,47 +389,66 @@ fn wildcards_in_apply(source: &str) -> usize {
     count
 }
 
-/// `cargo xtask smells`: measure and write the baseline.
+/// `cargo xtask smells`: measure and lower the baseline to what the tree
+/// counts. A count only falls: a rise is refused here as `--check` refuses
+/// it, so a bare run never hides one in the baseline.
 pub fn write() -> Result<(), String> {
     let counts = measure();
     let path = baseline_path();
-    durable::replace(&path, render(&counts).as_bytes(), Durability::Atomic)
-        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
-    print!("{}", render(&counts));
+    let merge_base = baseline::at_merge_base(&workspace_root())?;
+    let allowed = baseline::ceiling(&read_baseline(&path)?, merge_base.as_ref());
+    let risen = baseline::rises(&allowed, &counts);
+    if !risen.is_empty() {
+        return Err(baseline::refusal(&path, &risen));
+    }
+    durable::replace(
+        &path,
+        baseline::render(&counts).as_bytes(),
+        Durability::Atomic,
+    )
+    .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
+    print!("{}", baseline::render(&counts));
     println!("wrote {}", path.display());
     Ok(())
 }
 
-/// `cargo xtask smells --check`: fail if any count rose above the baseline,
-/// or if the baseline is missing a counter the tree now measures.
+/// `cargo xtask smells --check`: fail if any count rose above the committed
+/// baseline or above the merge base's, or if the tree measures a counter the
+/// baseline holds no number for.
 pub fn check() -> Result<(), String> {
     let counts = measure();
     let path = baseline_path();
-    let baseline = parse_baseline(&std::fs::read_to_string(&path).map_err(|e| {
-        format!(
-            "cannot read `{}` — run `cargo xtask smells`: {e}",
-            path.display()
-        )
-    })?);
+    let committed = read_baseline(&path)?;
+    let merge_base = baseline::at_merge_base(&workspace_root())?;
+    if merge_base.is_none() {
+        println!("smells: no merge base with the branch it merges into; read the committed baseline alone");
+    }
+    let allowed = baseline::ceiling(&committed, merge_base.as_ref());
+    let risen = baseline::rises(&allowed, &counts);
+    if !risen.is_empty() {
+        return Err(baseline::refusal(&path, &risen));
+    }
+    let unlisted: Vec<String> = counts
+        .keys()
+        .filter(|name| !committed.contains_key(*name))
+        .map(|name| format!("`{name}`"))
+        .collect();
+    if !unlisted.is_empty() {
+        return Err(format!(
+            "`{}` holds no line for {} — `cargo xtask smells` writes one for a counter at zero",
+            path.display(),
+            unlisted.join(", ")
+        ));
+    }
+    println!("smells: no count rose above the baseline");
+    Ok(())
+}
 
-    let mut risen = Vec::new();
-    for (name, &count) in &counts {
-        match baseline.get(name) {
-            Some(&allowed) if count <= allowed => {}
-            Some(&allowed) => risen.push(format!("  {name}: {allowed} -> {count}")),
-            None => risen.push(format!("  {name}: (new) -> {count}")),
-        }
-    }
-    if risen.is_empty() {
-        println!("smells: no count rose above the baseline");
-        return Ok(());
-    }
-    Err(format!(
-        "these smell counts rose above `{}` — fix them, or lower the baseline in the same \
-         change if the rise is deliberate:\n{}",
-        path.display(),
-        risen.join("\n")
-    ))
+/// The committed baseline at `path`.
+fn read_baseline(path: &Path) -> Result<baseline::Counts, String> {
+    std::fs::read_to_string(path)
+        .map(|text| baseline::parse(&text))
+        .map_err(|e| format!("cannot read `{}`: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -434,7 +479,22 @@ mod tests {
         "doc_reference",
         "cli_word_outside_cli",
         "cli_print_outside_output",
+        "spanish_prose_lines",
+        "module_docs_over_60_lines",
+        "mode_name_in_prod",
     ];
+
+    /// Every counter a rise can name says how to bring it down.
+    #[test]
+    fn every_counter_says_how_to_bring_it_down() {
+        for name in measure().keys() {
+            assert_ne!(
+                baseline::fix(name),
+                baseline::UNNAMED_FIX,
+                "`{name}` names no fix"
+            );
+        }
+    }
 
     #[test]
     fn the_ratchet_measures_the_vocabulary_and_the_tense_the_repository_rules_on() {
@@ -451,7 +511,7 @@ mod tests {
     #[test]
     fn the_baseline_holds_a_number_for_every_counter_the_ratchet_measures() {
         let counts = measure();
-        let baseline = parse_baseline(
+        let baseline = baseline::parse(
             &std::fs::read_to_string(baseline_path()).expect("the baseline is committed"),
         );
         let measured: Vec<&String> = counts.keys().collect();

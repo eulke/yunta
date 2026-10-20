@@ -13,7 +13,7 @@
 //! document the session submits, findings the engine accumulates from
 //! what the session reports, and a plain file the session writes itself.
 //! A node that declares nothing of a kind hears nothing about it. The
-//! sentences themselves are written in [`words`](super::words); this module
+//! sentences themselves are written in [`words`]; this module
 //! decides which of them a session is told.
 
 use std::path::PathBuf;

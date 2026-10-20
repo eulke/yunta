@@ -305,10 +305,10 @@ fn execute_kind<'a>(
             cancel,
         )),
         // A gate's resolution is a forge round-trip, not a
-        // session — `schedule::next_step` intercepts a ready/orphaned
+        // session — `schedule::decide` intercepts a ready/orphaned
         // gate before it ever becomes an `Execute` step (its own
-        // `ScheduleStep::PublishGate`/`PollGate`, handled in
-        // `run/mod.rs`), and `check::check_no_gate_in_parallel` refuses
+        // `Decision::PublishGate`/`PollGate`, handled in
+        // `run/exec.rs`), and `check::check_no_gate_in_parallel` refuses
         // the only other way a node reaches this function without going
         // through the top-level scheduler (`parallel`'s own children).
         NodeKind::Gate { .. } => {

@@ -19,7 +19,7 @@ pub(super) fn ready_batch(board: &Board<'_>) -> Decision {
 /// resolution is a forge round-trip, one at a time, same as every other
 /// gate decision. A stateless ready gate is always unpublished
 /// (external) or never-asked (internal); a published one carries
-/// `Waiting` and [`waiting_step`] took it.
+/// `Waiting` and [`waiting_step`](super::waiting_step) took it.
 fn ready_gate(board: &Board<'_>) -> Option<Decision> {
     let node = board.nodes.iter().copied().find(|node| {
         is_gate(node)

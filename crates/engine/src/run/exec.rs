@@ -104,7 +104,7 @@ struct Scheduling {
     spec: Option<ContentHash>,
 }
 
-/// [`execute_run`] with an explicit composition depth:
+/// [`execute_run`](super::execute_run) with an explicit composition depth:
 /// `workflow_exec` re-enters here for each child run, one level deeper —
 /// the recursion "a parent's resume recursively resumes orphaned
 /// children" is made of.

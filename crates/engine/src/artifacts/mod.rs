@@ -17,7 +17,7 @@
 //! opens an artifact by file name.
 //!
 //! [`store`] holds the bytes and writes the view; [`ingest`] judges what
-//! a node produced; [`canonical`] turns a document into the bytes the
+//! a node produced; [`canonical`](mod@canonical) turns a document into the bytes the
 //! run stores for it, whoever wrote it; [`integrity`] asks the store
 //! whether it still answers for the log.
 

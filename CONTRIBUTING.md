@@ -12,7 +12,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
 cargo xtask schema                     # regenerates crates/core/schemas/ after a change to a document type
-cargo run -p xtask -- smells --check   # the measured smell counts have not risen
+cargo run -p xtask -- smells --check   # no smell count rose above the baseline or the merge base's
+cargo run -p xtask -- smells           # lowers the baseline to what the tree counts; refuses a rise
 ```
 
 A golden test compares a surface's whole output with a file under the crate's

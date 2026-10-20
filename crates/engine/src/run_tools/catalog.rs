@@ -8,7 +8,7 @@
 //! second description written by hand. A tool whose schema drifts from
 //! the document the close validates is a promise the engine breaks, so
 //! there is one source for both. The words a tool is described in are
-//! written in [`words`](super::words).
+//! written in [`words`].
 
 use rmcp::model::Tool;
 use serde_json::{json, Value};

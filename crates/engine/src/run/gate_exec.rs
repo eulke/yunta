@@ -1,5 +1,6 @@
 //! `kind: gate` dispatch — the imperative half of what
-//! `schedule::ScheduleStep::PublishGate`/`PollGate` name. Reads the
+//! [`Decision::PublishGate`](super::schedule::Decision::PublishGate) and
+//! [`Decision::PollGate`](super::schedule::Decision::PollGate) name. Reads the
 //! declared artifacts off disk, asks the forge to publish/poll, and
 //! translates its answer into the same event vocabulary every other
 //! node kind already uses (`node_started`/`node_finished`/
