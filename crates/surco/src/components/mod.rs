@@ -2,8 +2,9 @@
 //!
 //! A surface says, in order, what happened, what needs a person, the
 //! evidence, the detail and what to type next. Each of those is a block
-//! here — what it says, as data — and laid out once for a terminal's
-//! [`Look`]: two surfaces that show a decision show the same block, so a
+//! here — what it says and the role each part plays, as data, never a
+//! width, an escape or a glyph — and each surface lays it out its own
+//! way: two surfaces that show a decision show the same block, so a
 //! reader who learned it on one reads it on the next. A block with
 //! nothing to say draws nothing — no heading over an empty list, no row
 //! with an empty value.
@@ -32,16 +33,7 @@ pub use node_table::{NodeRow, NodeTable};
 pub use said::{PathNote, Paths, Said};
 pub use table::{Cell, Column, Holds, Row, Table};
 
-use crate::line::Line;
-use crate::look::Look;
-
-/// How a block is laid out on a terminal: the lines it takes on a stream
-/// with `look`. The [`Terminal`](crate::surface::Terminal) surface draws a
-/// [`Doc`](crate::doc::Doc) through it; another medium draws the same
-/// blocks its own way.
-pub trait Drawn {
-    fn lines(&self, look: &Look) -> Vec<Line>;
-}
-
+#[cfg(test)]
+mod catalog;
 #[cfg(test)]
 mod tests;

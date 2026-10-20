@@ -25,7 +25,7 @@ use yunta_engine::{Happening, Moment};
 
 use super::view;
 use crate::commands::advice;
-use surco::components::{Drawn, Whole};
+use surco::components::Whole;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::look::Look;
@@ -163,7 +163,7 @@ pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
             None => advice::status(run),
         })
     });
-    FailureDetail { failure, whole }.lines(look)
+    crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)
 }
 
 #[cfg(test)]

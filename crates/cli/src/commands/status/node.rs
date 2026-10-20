@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use surco::components::{Drawn, Fields, Headline, Next, Whole};
+use surco::components::{Fields, Headline, Next, Whole};
 use surco::doc::Doc;
 use surco::figures::duration;
 use surco::line::{Line, Tone};
@@ -81,9 +81,9 @@ impl NodePage<'_> {
         }
         let doc = section(Doc::new().with(headline), self.said(look));
         let doc = section(doc, self.evidence(look));
-        let doc = section(doc, self.fields().lines(look));
+        let doc = section(doc, crate::render::block_lines(self.fields(), look));
         let doc = section(doc, documents);
-        section(doc, self.next().lines(look))
+        section(doc, crate::render::block_lines(self.next(), look))
     }
 
     /// The whole of what the node's state says: its failure, every line
@@ -125,7 +125,7 @@ impl NodePage<'_> {
                 self.home,
             )
         });
-        FailureDetail { failure, whole }.lines(look)
+        crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)
     }
 
     /// What the node is and what it took.

@@ -13,7 +13,7 @@
 //! surface that judged by its own rules would be telling a person
 //! something the engine might refuse.
 
-use surco::components::{Drawn, Headline};
+use surco::components::Headline;
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::width::INDENT;
@@ -48,7 +48,7 @@ pub(crate) fn answer(
         said: Standing::NeedsYou.word().to_string(),
     };
     console.say("")?;
-    for line in headline.lines(&look) {
+    for line in crate::render::block_lines(headline, &look) {
         console.say(&look.ink.paint(&line))?;
     }
     console.say(&look.ink.paint(&Line::new().plain(INDENT).plain(format!(

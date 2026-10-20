@@ -8,7 +8,7 @@
 //! person, a budget or loop cap — they differ in what they say, never
 //! in how they are answered.
 
-use surco::components::{Drawn, Headline};
+use surco::components::Headline;
 use surco::words::Standing;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, OptionId, RunId};
@@ -126,12 +126,14 @@ fn present(
             }
         }
     }
-    let mut lines = Headline {
-        subject: "decision".to_string(),
-        mark: Standing::NeedsYou.mark(),
-        said: Standing::NeedsYou.word().to_string(),
-    }
-    .lines(&look);
+    let mut lines = crate::render::block_lines(
+        Headline {
+            subject: "decision".to_string(),
+            mark: Standing::NeedsYou.mark(),
+            said: Standing::NeedsYou.word().to_string(),
+        },
+        &look,
+    );
     let nothing_beside = Beside {
         claim: false,
         evidence: false,

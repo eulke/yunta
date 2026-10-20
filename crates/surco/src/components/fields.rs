@@ -1,16 +1,13 @@
 //! Labelled facts, one to a row, the label in a column of its own.
 
-use crate::components::Drawn;
-use crate::line::{Line, Tone};
-use crate::look::Look;
-use crate::width::{cell_width, command_lines, wrap_unbroken, INDENT, LABEL_WIDTH};
+use crate::line::Tone;
 
 /// Labelled rows. A fact with nothing to say is not a row: a label over
 /// an empty value tells a reader to look for something that is not
 /// there.
 #[derive(Default)]
 pub struct Fields {
-    rows: Vec<(&'static str, String, Tone)>,
+    pub(crate) rows: Vec<(&'static str, String, Tone)>,
 }
 
 impl Fields {
@@ -43,32 +40,5 @@ impl Fields {
         self.rows
             .iter()
             .map(|(label, value, tone)| (*label, value.as_str(), *tone))
-    }
-}
-
-impl Drawn for Fields {
-    /// Each value wrapped to what the label column leaves of the line,
-    /// its later lines under its first.
-    fn lines(&self, look: &Look) -> Vec<Line> {
-        let under = " ".repeat(cell_width(INDENT) + LABEL_WIDTH + 1);
-        let room = look.width.cells().saturating_sub(cell_width(&under));
-        let mut lines = Vec::new();
-        for (label, value, tone) in &self.rows {
-            let parts = match tone {
-                Tone::Command => command_lines(value, room),
-                _ => wrap_unbroken(value, room),
-            };
-            for (at, part) in parts.into_iter().enumerate() {
-                lines.push(match at {
-                    0 => Line::new()
-                        .plain(INDENT)
-                        .push(Tone::Muted, format!("{label:<LABEL_WIDTH$}"))
-                        .plain(" ")
-                        .push(*tone, part),
-                    _ => Line::new().plain(under.as_str()).push(*tone, part),
-                });
-            }
-        }
-        lines
     }
 }

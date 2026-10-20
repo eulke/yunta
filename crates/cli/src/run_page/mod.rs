@@ -13,7 +13,7 @@
 //! it stands. Each page's sections live beside the command that shows it,
 //! and this module holds what both share.
 
-use surco::components::{Drawn, Headline};
+use surco::components::Headline;
 use surco::doc::{Block, Doc};
 use surco::line::{Line, Tone};
 use surco::look::Look;
@@ -85,7 +85,7 @@ impl RunPage<'_> {
         let doc = section(doc, self.closing_evidence(look));
         let doc = section(doc, self.decided_lines());
         let doc = section(doc, self.closing_facts(look));
-        section(doc, self.closing_next().lines(look))
+        section(doc, crate::render::block_lines(self.closing_next(), look))
     }
 
     /// The page `yunta status` prints for a run.
@@ -102,9 +102,12 @@ impl RunPage<'_> {
         nodes.extend(self.status_calls());
         let doc = section(doc, nodes);
         let doc = section(doc, self.status_evidence(look));
-        let doc = section(doc, self.status_fields(look.glyphs).lines(look));
+        let doc = section(
+            doc,
+            crate::render::block_lines(self.status_fields(look.glyphs), look),
+        );
         let doc = section(doc, self.decided_lines());
-        section(doc, self.status_next().lines(look))
+        section(doc, crate::render::block_lines(self.status_next(), look))
     }
 
     /// The decision a parked run waits on, as the lines a page places.

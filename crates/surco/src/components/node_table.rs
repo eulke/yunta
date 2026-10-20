@@ -1,10 +1,9 @@
 //! A run's nodes, one to a row: the mark and word for where each stands,
 //! its id, and a note.
 
-use crate::components::{Cell, Column, Drawn, Holds, Row, Table};
+use crate::components::{Cell, Column, Holds, Row, Table};
 use crate::glyphs::Mark;
-use crate::line::{Line, Tone};
-use crate::look::Look;
+use crate::line::Tone;
 
 /// One node's row.
 pub struct NodeRow {
@@ -56,11 +55,5 @@ impl NodeTable {
                 })
                 .collect(),
         }
-    }
-}
-
-impl Drawn for NodeTable {
-    fn lines(&self, look: &Look) -> Vec<Line> {
-        self.table().lines(look)
     }
 }

@@ -1,19 +1,25 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::doc::Doc;
+use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
 use crate::golden::{assert_golden, ENVIRONMENTS};
 use crate::line::Tone;
-use crate::look::Width;
+use crate::look::{Look, Width};
 use crate::paint::{strip_sgr, Ink};
 use crate::surface::{Markdown, Surface, Terminal};
 use crate::width::{cell_width, INDENT, LABEL_WIDTH};
 
-fn plain(block: &dyn Drawn) -> Vec<String> {
-    let look = Look::plain();
-    block
-        .lines(&look)
+/// `block` with nothing but its words: ASCII, unpainted, at the width a
+/// line has off a terminal.
+fn plain(block: impl Into<Block>) -> Vec<String> {
+    draw_with(block, &Look::plain())
+}
+
+/// `block` as a terminal with `look` draws it, each line painted.
+fn draw_with(block: impl Into<Block>, look: &Look) -> Vec<String> {
+    Terminal::on(*look)
+        .block(&block.into())
         .iter()
         .map(|line| look.ink.paint(line))
         .collect()
@@ -75,13 +81,13 @@ fn a_field_with_nothing_to_say_is_not_drawn() {
         .push_if("tokens", "20.2k spent")
         .push_if("branch", "")
         .push_if("artifacts", "  ");
-    assert_eq!(plain(&fields), ["  tokens       20.2k spent"]);
+    assert_eq!(plain(fields), ["  tokens       20.2k spent"]);
 }
 
 #[test]
 fn a_long_value_hangs_under_its_first_line() {
     let fields = Fields::new().push_if("branch", "word ".repeat(30));
-    let drawn = plain(&fields);
+    let drawn = plain(fields);
     assert!(drawn.len() > 1, "{drawn:?}");
     let column = "  branch       ".len();
     for line in drawn.iter().skip(1) {
@@ -91,7 +97,7 @@ fn a_long_value_hangs_under_its_first_line() {
 
 #[test]
 fn evidence_shows_at_most_six_lines_and_says_where_the_rest_is() {
-    let drawn = plain(&evidence(20));
+    let drawn = plain(evidence(20));
     let quoted: Vec<&String> = drawn
         .iter()
         .filter(|line| line.starts_with("  | "))
@@ -105,7 +111,7 @@ fn evidence_shows_at_most_six_lines_and_says_where_the_rest_is() {
         "{drawn:?}"
     );
 
-    let short = plain(&Evidence {
+    let short = plain(Evidence {
         tail: vec!["exit 1".to_string()],
         whole: None,
     });
@@ -134,7 +140,7 @@ fn a_node_id_keeps_its_column_and_a_note_is_cut_to_the_line() {
             },
         ],
     };
-    let drawn = plain(&table);
+    let drawn = plain(table);
     assert!(
         drawn
             .iter()
@@ -221,11 +227,7 @@ fn a_table_fits_its_line_and_cuts_what_the_line_leaves_first() {
             width: Width::of(Some(100), None).within(cells),
             ..Look::plain()
         };
-        let drawn: Vec<String> = tasks()
-            .lines(&look)
-            .iter()
-            .map(|line| look.ink.paint(line))
-            .collect();
+        let drawn = draw_with(tasks(), &look);
         assert!(
             drawn.iter().all(|line| cell_width(line) <= cells),
             "{cells}: {drawn:?}"
@@ -340,8 +342,9 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
         "codex/codex-model (executor, planner fallback, reviewer)",
         "session died",
     );
+    let holds = list.holds();
     assert_eq!(
-        plain(&list),
+        plain(list),
         [
             "  + git    commits as Ada <ada@example.com>",
             "  ^ forge  github acme/web — reachable",
@@ -349,7 +352,7 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
             "           session died",
         ]
     );
-    assert!(!list.holds(), "a problem on the list is one a run stops on");
+    assert!(!holds, "a problem on the list is one a run stops on");
 }
 
 /// A command long enough to be cut, with a quoted stretch a cut inside
@@ -387,11 +390,7 @@ fn a_cut_command_copies_as_one_command() {
         ..Look::plain()
     };
     let fields = Fields::new().push_command("checked by", LONG);
-    let drawn: Vec<String> = fields
-        .lines(&look)
-        .iter()
-        .map(|line| look.ink.paint(line))
-        .collect();
+    let drawn = draw_with(fields, &look);
     assert!(drawn.len() > 1, "{drawn:?}");
     assert!(drawn.iter().all(|line| cell_width(line) <= 48), "{drawn:?}");
     let command = copied(&drawn, cell_width(INDENT) + LABEL_WIDTH + 1);
@@ -405,11 +404,7 @@ fn a_cut_command_copies_as_one_command() {
     let next = Next {
         steps: vec![(LONG.to_string(), "runs the case")],
     };
-    let drawn: Vec<String> = next
-        .lines(&look)
-        .iter()
-        .map(|line| look.ink.paint(line))
-        .collect();
+    let drawn = draw_with(next, &look);
     let command = copied(&drawn, cell_width(INDENT));
     let command = command.trim_end_matches("runs the case").trim_end();
     assert!(parses(command), "{command}");

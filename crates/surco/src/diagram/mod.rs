@@ -7,16 +7,11 @@ mod down;
 pub mod flowchart;
 mod grid;
 mod layer;
-mod outline;
-mod place;
+pub(crate) mod outline;
+pub(crate) mod place;
 pub mod split;
 
 pub use flowchart::{flowchart, Direction, Flowchart, Link, Node, Shape, Stroke};
-
-use crate::components::{Code, Drawn};
-use crate::line::{Line, Tone};
-use crate::look::Look;
-use crate::width::{wrap, INDENT};
 
 /// A diagram as an author wrote it, and the flowchart it reads as.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,63 +32,13 @@ impl Diagram {
     }
 }
 
-impl Drawn for Diagram {
-    /// A chart this reads in boxes, the way its author wrote it when it
-    /// fits the line, turned when only that fits, and one line per chain
-    /// when neither does; any other diagram as its source, saying it is
-    /// not drawn here. A chart that reads up or left is drawn reading
-    /// down or right: the same boxes and links, the other way up.
-    fn lines(&self, look: &Look) -> Vec<Line> {
-        let Some(chart) = &self.chart else {
-            return Code::whole(
-                "diagram",
-                Some(
-                    "a diagram this terminal does not draw; it is drawn where Markdown is read"
-                        .to_string(),
-                ),
-                &self.source,
-            )
-            .lines(look);
-        };
-        let room = look.width.cells().saturating_sub(INDENT.len());
-        let across = chart.direction.across();
-        let boxed = place::drawn(chart, across, room, look.glyphs)
-            .or_else(|| place::drawn(chart, !across, room, look.glyphs));
-        match boxed {
-            Some(rows) => rows
-                .into_iter()
-                .map(|row| Line::new().plain(INDENT).plain(row))
-                .collect(),
-            None => chains(chart, look),
-        }
-    }
-}
-
-/// `chart` as one line per chain, each wrapped under itself.
-fn chains(chart: &Flowchart, look: &Look) -> Vec<Line> {
-    let under = format!("{INDENT}  ");
-    let room = look.width.cells().saturating_sub(under.len());
-    outline::outline(chart, look.glyphs)
-        .iter()
-        .flat_map(|chain| {
-            wrap(chain, room)
-                .into_iter()
-                .enumerate()
-                .map(|(at, part)| match at {
-                    0 => Line::new().plain(INDENT).push(Tone::Strong, part),
-                    _ => Line::new().plain(under.as_str()).push(Tone::Strong, part),
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::split::{parts, Part};
     use super::*;
     use crate::doc::{Block, Doc};
     use crate::glyphs::Glyphs;
+    use crate::look::Look;
     use crate::surface::{Markdown, Surface, Terminal};
 
     /// Markdown with a paragraph, a flowchart in a list item, and a
@@ -148,8 +93,8 @@ mod tests {
     fn a_diagram_a_terminal_does_not_draw_is_shown_as_written() {
         let diagram = Diagram::of("sequenceDiagram\n  A->>B: hi");
         let look = plain(80, Glyphs::Unicode);
-        let drawn: Vec<String> = diagram
-            .lines(&look)
+        let drawn: Vec<String> = Terminal::on(look)
+            .block(&Block::Diagram(diagram))
             .iter()
             .map(|line| look.ink.paint(line))
             .collect();

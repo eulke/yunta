@@ -1,12 +1,24 @@
 //! A document on a terminal: each block laid out in columns at the
 //! stream's width, with its glyph set, painted by its ink.
 
-use crate::components::{Drawn, Section};
+use crate::components::Section;
 use crate::doc::{Block, Doc};
 use crate::line::{Line, Tone};
 use crate::look::Look;
 use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
+
+mod checklist;
+mod concern;
+mod decision;
+mod diagram;
+mod document;
+mod evidence;
+mod fields;
+mod headline;
+mod markdown;
+mod next;
+mod table;
 
 /// A terminal stream, by how its lines look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +40,11 @@ impl Terminal {
             .flat_map(|block| self.block(block))
             .skip_while(|line| line.text().is_empty())
             .collect()
+    }
+
+    /// Each of `blocks` laid out for this stream, in order.
+    pub fn blocks(&self, blocks: &[Block]) -> Vec<Line> {
+        blocks.iter().flat_map(|block| self.block(block)).collect()
     }
 
     /// One block laid out for this stream.
@@ -76,7 +93,7 @@ impl Terminal {
                 };
                 lines.extend(match part {
                     Part::Text(text) => {
-                        crate::markdown::markdown(&text, INDENT, look.width.cells(), look.glyphs)
+                        markdown::markdown(&text, INDENT, look.width.cells(), look.glyphs)
                             .into_iter()
                             .map(|line| Line::new().plain(line))
                             .collect()

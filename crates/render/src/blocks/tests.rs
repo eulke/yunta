@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use surco::components::{DecisionOption, Drawn};
+use surco::components::DecisionOption;
 use surco::golden::assert_golden;
 use surco::look::Look;
 use yunta_core::RunId;
@@ -28,8 +28,8 @@ fn a_decision_prints_one_command_per_option_with_the_handle() {
     ];
     let decision = super::decision::here(&RunId::from_static("7E5PH4"), options, &*spell());
     let look = Look::plain();
-    let drawn: Vec<String> = decision
-        .lines(&look)
+    let drawn: Vec<String> = surco::surface::Terminal::on(look)
+        .block(&decision.into())
         .iter()
         .map(|line| look.ink.paint(line))
         .collect();

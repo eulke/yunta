@@ -6,11 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::{Drawn, Evidence, PathNote, Paths, Said, Whole};
+use surco::components::{Evidence, PathNote, Paths, Said, Whole};
 use surco::doc::Block;
-use surco::line::Line;
-use surco::look::Look;
-use surco::surface::Terminal;
 use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, OwedScope, Precondition, Stuck};
 use yunta_core::protected::Protection;
 use yunta_core::reserved::ReservedOption;
@@ -182,16 +179,6 @@ fn listed(heading: &str, paths: Vec<PathNote>) -> FailureSays {
 /// The lines of `said`, without the line breaks that would split a row.
 fn lines_of(said: &str) -> Vec<String> {
     said.lines().map(str::to_string).collect()
-}
-
-impl Drawn for FailureDetail<'_> {
-    fn lines(&self, look: &Look) -> Vec<Line> {
-        let terminal = Terminal::on(*look);
-        self.blocks()
-            .iter()
-            .flat_map(|block| terminal.block(block))
-            .collect()
-    }
 }
 
 /// How a retry starts, which is the same whatever input it waits for.

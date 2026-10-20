@@ -1,0 +1,44 @@
+␛[1mplan of run 7E5PH4␛[0m
+␛[1mrun 7E5PH4␛[0m: ␛[1;35m◆␛[0m ␛[1;35mneeds you on a decision␛[0m
+  The run plans the change, asks before it builds, and builds what you approve.
+
+  ␛[1mwhat it found␛[0m
+  ␛[32m✓␛[0m ␛[1mgit␛[0m     commits as Ada <ada@example.com>
+  ␛[33m▲␛[0m ␛[1mforge␛[0m   github acme/web, reachable
+  ␛[2m◌␛[0m ␛[1mreview␛[0m  no fan-out review
+  ␛[33m▲␛[0m A name with a newline in it breaks the line it is printed on.
+  ␛[33m▲␛[0m the budget sits under this workflow's usual spend
+    ␛[2mso          ␛[0m the run may stop before it finishes
+    ␛[2mfix         ␛[0m raise `limits.max_tokens_per_run`
+
+  ␛[31m✗␛[0m ␛[1mnode `lint`␛[0m: exit 101
+  ␛[2m  │ ␛[0mline 1
+  ␛[2m  │ ␛[0mline 2
+  ␛[2m  │ ␛[0mline 3
+    ␛[2mwhole output: ␛[0m␛[1myunta status 7E5PH4 --node lint␛[0m
+    error: unused import
+      --> src/lib.rs:3:5
+  outside the declared globs:
+    src/main.rs
+    Cargo.lock — the lock file
+  A change **in Markdown**, with `code`.
+
+  - an item
+  ┌──────┐   ┌───────┐
+  │ plan │──▶│ build │
+  └──────┘   └───────┘
+  ␛[1msrc/lib.rs␛[0m                                                                                  ␛[2m1 line␛[0m
+    the change
+    ␛[2m│ ␛[0mpub fn greet() {}
+  ␛[36m●␛[0m 1  cli-global  Global and project flags
+  ␛[32m✓␛[0m ␛[32mfinished ␛[0m plan  ␛[2m4 tasks␛[0m
+  a line a page composed itself
+  ␛[1mapprove␛[0m — builds the plan
+    ␛[2mthe four tasks run in three steps␛[0m
+    ␛[1myunta resolve-gate 7E5PH4 approve␛[0m
+  ␛[1madjust␛[0m
+    ␛[2mthe plan is written again with what you say␛[0m
+    ␛[2masks: what to change␛[0m
+    ␛[1myunta resolve-gate 7E5PH4 adjust --text "<answer>"␛[0m
+  ␛[2mtokens      ␛[0m 20.2k spent
+  ␛[1myunta status 7E5PH4␛[0m   ␛[2mwhere it stands␛[0m

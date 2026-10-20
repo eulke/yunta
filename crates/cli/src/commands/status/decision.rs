@@ -26,7 +26,7 @@
 
 use std::path::Path;
 
-use surco::components::{DecisionOption, Drawn};
+use surco::components::DecisionOption;
 use surco::line::{Line, Tone};
 use surco::look::{Look, Width};
 use surco::width::{cell_width, indent, wrap, INDENT};
@@ -177,7 +177,7 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
         width: Width::of(Some(look.width.cells().saturating_sub(INDENT.len())), None),
         ..*look
     };
-    menu.lines(&within)
+    crate::render::block_lines(menu, &within)
         .into_iter()
         .map(|line| line.under(INDENT))
         .collect()

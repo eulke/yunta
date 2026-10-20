@@ -29,7 +29,6 @@ pub mod glyphs;
 pub mod golden;
 pub mod line;
 pub mod look;
-pub mod markdown;
 pub mod paint;
 pub mod paths;
 pub mod prose;

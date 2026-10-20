@@ -2,7 +2,7 @@
 //! nodes, the evidence of what failed, the facts a reader checks, and what
 //! to type next. The page that holds them is composed in [`crate::run_page`].
 
-use surco::components::{Drawn, Fields, Next, NodeRow, NodeTable, Whole};
+use surco::components::{Fields, Next, NodeRow, NodeTable, Whole};
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::look::Look;
@@ -49,7 +49,7 @@ impl RunPage<'_> {
                 }
             })
             .collect();
-        NodeTable { rows }.lines(look)
+        crate::render::block_lines(NodeTable { rows }, look)
     }
 
     /// The last call of a run tool each node's attempt made that failed,
@@ -147,7 +147,7 @@ impl RunPage<'_> {
                 self.paths.home,
             )
         });
-        FailureDetail { failure, whole }.lines(look)
+        crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look)
     }
 
     /// The facts a reader checks once they know where the run stands.

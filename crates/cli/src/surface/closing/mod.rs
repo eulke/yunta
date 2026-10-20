@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use surco::components::{Drawn, Fields, Next, Whole};
+use surco::components::{Fields, Next, Whole};
 use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
@@ -230,7 +230,8 @@ impl RunPage<'_> {
                     self.paths.home,
                 )
             });
-            let detail = FailureDetail { failure, whole }.lines(look);
+            let detail =
+                crate::render::blocks_lines(&FailureDetail { failure, whole }.blocks(), look);
             if detail.is_empty() && held.contains(&format!("`{}`", node.id)) {
                 continue;
             }
@@ -249,7 +250,7 @@ impl RunPage<'_> {
     /// The facts a reader checks once they know how the run stopped, and
     /// the runs it composed, each under the node that bore it.
     pub(crate) fn closing_facts(&self, look: &Look) -> Vec<Line> {
-        let mut lines = self.closing_fields(look.glyphs).lines(look);
+        let mut lines = crate::render::block_lines(self.closing_fields(look.glyphs), look);
         lines.extend(self.closing_children(look));
         lines
     }
