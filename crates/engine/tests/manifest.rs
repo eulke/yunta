@@ -654,3 +654,44 @@ async fn a_manifest_records_the_repository_it_was_frozen_in() {
         Some(expected)
     );
 }
+
+/// The links the base commit holds where an agent CLI loads travel in the
+/// manifest, each resolved inside the checkout. A link a CLI does not load
+/// through, and one the commit does not hold yet, are left out.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_manifest_records_the_committed_links_a_cli_loads_through() {
+    let owner = Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    yunta_testkit::write(&repo.path().join("tools/hooks/run.sh"), "true\n");
+    std::fs::create_dir_all(repo.path().join(".claude")).unwrap();
+    std::os::unix::fs::symlink("../tools/hooks", repo.path().join(".claude/hooks")).unwrap();
+    std::os::unix::fs::symlink("tools", repo.path().join("scripts")).unwrap();
+    git_output(repo.path(), &["add", "-A"]);
+    git_output(repo.path(), &["commit", "-q", "-m", "links"]);
+    std::os::unix::fs::symlink("tools", repo.path().join(".codex")).unwrap();
+
+    let manifest = build_manifest(
+        &workflow(WORKFLOW),
+        &config(CONFIG),
+        repo.path(),
+        repo.path(),
+        &HashMap::new(),
+        owner.supervision(),
+        None,
+    )
+    .await
+    .unwrap()
+    .manifest;
+
+    assert_eq!(
+        manifest.loaded_links,
+        vec![yunta_core::protected::LoadedLink {
+            path: ".claude/hooks".into(),
+            target: "tools/hooks".into(),
+            passed: vec!["tools".into()],
+            tree: true,
+        }]
+    );
+}

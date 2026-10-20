@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hash::{sha256_hex, CommitSha, ContentHash};
 use crate::ids::{AgentName, ExecutorName, InputName, SkillName};
+use crate::protected::LoadedLink;
 use crate::{AdapterId, ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
@@ -236,14 +237,20 @@ pub struct Manifest {
     /// empty when every file was read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provenance_gaps: Vec<ProvenanceGap>,
+    /// The links the base commit holds where an agent CLI loads its
+    /// configuration or its instructions, each resolved inside the
+    /// checkout: the run protects what they resolve to. Empty on a
+    /// manifest written before runs read them, whose set follows no link.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaded_links: Vec<LoadedLink>,
 }
 
 impl crate::persisted::Persisted for Manifest {
-    /// 5 since `frozen` joined it, 4 since `adapter` joined it, 3 since
-    /// `project` did, 2 since `paths` and `pack` did. A manifest stamped
-    /// lower is read as it is: every field a later version added is
-    /// optional, and a run born without one still resumes.
-    const SCHEMA_VERSION: u32 = 5;
+    /// 6 since `loaded_links` joined it, 5 since `frozen` did, 4 since
+    /// `adapter` did, 3 since `project` did, 2 since `paths` and `pack`
+    /// did. A manifest stamped lower is read as it is: every field a later
+    /// version added is optional, and a run born without one still resumes.
+    const SCHEMA_VERSION: u32 = 6;
     const NAME: &'static str = "run manifest";
 
     /// A manifest frozen while `inherit` was still a word reads as what

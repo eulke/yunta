@@ -1,6 +1,7 @@
 //! What no session of a run may write, as one wake of the run reads it:
 //! the project's deny and the tests of the spec the run accepted last,
-//! which a person approved, besides what every run protects.
+//! which a person approved, besides what every run protects and what the
+//! links its base commit holds where an agent CLI loads resolve to.
 //!
 //! A wake reads the set once, from the events it already loads. It reads
 //! again only when it accepts a spec, the one event that changes the set.
@@ -52,11 +53,16 @@ pub(crate) fn accepted_spec(artifacts: &ArtifactLedger) -> Option<&ArtifactRef> 
     artifacts.of_kind(ArtifactKind::Spec).last()
 }
 
-/// Compiles the parts into one set. A set that does not compile is the
-/// run's diagnostic: no decision is taken from a partial set.
+/// Compiles the parts into one set, grown by the links the run's base commit
+/// holds where an agent CLI loads its configuration or its instructions. A
+/// set that does not compile is the run's diagnostic: no decision is taken
+/// from a partial set.
 fn build(manifest: &Manifest, approved: &[ScopeGlob]) -> Result<Protected, RunError> {
-    Protected::new(manifest.config.denied_paths(), approved).map_err(|error| RunError::Broken {
-        diagnostic: error.to_string(),
+    let links = &manifest.loaded_links;
+    Protected::of_run(manifest.config.denied_paths(), approved, links).map_err(|error| {
+        RunError::Broken {
+            diagnostic: error.to_string(),
+        }
     })
 }
 
@@ -117,6 +123,7 @@ mod tests {
             adapter: None,
             frozen: None,
             provenance_gaps: Vec::new(),
+            loaded_links: Vec::new(),
         }
     }
 
@@ -148,6 +155,43 @@ mod tests {
         );
         assert!(
             covered.loose.contains(&":(glob)**/AGENTS.md".to_string()),
+            "{covered:?}"
+        );
+    }
+
+    /// What a committed link at a CLI's configuration resolves to is
+    /// protected for that reason by every read of the set, and the run's
+    /// pool cleans it from its first take.
+    #[tokio::test]
+    async fn a_link_a_cli_loads_through_protects_its_target_in_the_set_and_the_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manifest = manifest();
+        manifest.loaded_links = vec![yunta_core::protected::LoadedLink {
+            path: ".claude/hooks".into(),
+            target: "tools/hooks".into(),
+            passed: vec!["tools".into()],
+            tree: true,
+        }];
+        let set = of_state(&manifest, dir.path(), &RunState::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            set.reason_of(Path::new("tools/hooks/run.sh")),
+            Some(Protection::AgentConfig)
+        );
+        let clock: Arc<dyn yunta_core::Clock> = Arc::new(yunta_testkit_core::FixedClock);
+        let pool = crate::worktree::CheckoutPool::of_run(
+            dir.path(),
+            dir.path(),
+            dir.path(),
+            &manifest,
+            clock,
+        );
+        let covered = pool.pathspecs();
+        assert!(
+            covered
+                .rooted
+                .contains(&":(glob)tools/hooks/**".to_string()),
             "{covered:?}"
         );
     }

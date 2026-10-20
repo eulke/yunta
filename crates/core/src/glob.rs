@@ -5,7 +5,7 @@
 //! interpretation its syntax allows.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
@@ -32,9 +32,37 @@ impl ScopeGlob {
 
     /// The pattern that selects exactly `path`: every character globset
     /// reads as syntax is escaped, so a file named `a[1].rs` is that file
-    /// rather than a character class.
+    /// rather than a character class, and `{draft}.md` is not `draft.md`.
     pub fn exact(path: &Path) -> Result<Self, InvalidScopeGlob> {
-        globset::escape(&path.to_string_lossy()).parse()
+        literal_text(path).parse()
+    }
+
+    /// The path an [`ScopeGlob::exact`] glob selects, read back from its
+    /// escapes; `None` for a glob that can select more than one path.
+    pub fn exact_path(&self) -> Option<PathBuf> {
+        let mut path = String::new();
+        let mut chars = self.as_str().chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '[' => {
+                    let inner = chars.next()?;
+                    (chars.next()? == ']').then_some(())?;
+                    path.push(inner);
+                }
+                '\\' => path.push(chars.next()?),
+                '*' | '?' | ']' | '{' | '}' => return None,
+                c => path.push(c),
+            }
+        }
+        Some(PathBuf::from(path))
+    }
+
+    /// The pattern that selects every path under the directory `path`,
+    /// escaped as [`ScopeGlob::exact`] escapes it. A sandbox denies it as a
+    /// tree only when `path` holds no character that needs escaping, since
+    /// [`ScopeGlob::whole_tree`] reads no escape.
+    pub fn under(path: &Path) -> Result<Self, InvalidScopeGlob> {
+        format!("{}/**", literal_text(path)).parse()
     }
 
     /// The directory every path the glob selects lies under: its text
@@ -187,6 +215,24 @@ impl From<&str> for ScopeGlob {
     }
 }
 
+/// `path` as glob text that selects only itself: each character globset reads
+/// as syntax stands in a class of its own, and a backslash is escaped.
+fn literal_text(path: &Path) -> String {
+    let mut text = String::new();
+    for c in path.to_string_lossy().chars() {
+        match c {
+            '?' | '*' | '[' | ']' | '{' | '}' => {
+                text.push('[');
+                text.push(c);
+                text.push(']');
+            }
+            '\\' => text.push_str("\\\\"),
+            c => text.push(c),
+        }
+    }
+    text
+}
+
 /// Compiles one scope pattern.
 fn scope_glob(pattern: &str) -> Result<Glob, globset::Error> {
     GlobBuilder::new(pattern).literal_separator(true).build()
@@ -295,6 +341,14 @@ mod tests {
         let set = scope_globset(&[exact]).unwrap();
         assert!(set.is_match("src/a[1].rs"));
         assert!(!set.is_match("src/a1.rs"));
+        let named = Path::new("docs/{draft}\\x.md");
+        let exact = ScopeGlob::exact(named).unwrap();
+        assert_eq!(exact.exact_path().as_deref(), Some(named));
+        assert_eq!(ScopeGlob::from("src/*.rs").exact_path(), None);
+        let set = scope_globset(&[exact]).unwrap();
+        assert!(set.is_match("docs/{draft}\\x.md"));
+        assert!(!set.is_match("docs/draftx.md"));
+        assert!(!set.is_match("docs/draft\\x.md"));
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub use mutation::{mutation_lock, MutationLock};
 pub use repo::{committer, common_dir, files_naming, push_branch, remote_url, run_branches};
 pub use status::{tree_state, Status};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use yunta_core::CommitSha;
@@ -83,6 +83,22 @@ pub async fn read_bytes(
     sup: Supervision<'_>,
 ) -> Result<Vec<u8>, GitError> {
     let output = run(dir, args, sup).await?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(exit_error(dir, args, &output))
+    }
+}
+
+/// Raw stdout bytes on exit 0 of a git that reads what it is asked from its
+/// stdin, such as `cat-file --batch`: `input` is written whole, then closed.
+pub async fn read_batch(
+    dir: &Path,
+    args: &[&str],
+    input: Vec<u8>,
+    sup: Supervision<'_>,
+) -> Result<Vec<u8>, GitError> {
+    let output = fed(dir, args, Some(input), sup).await?;
     if output.status.success() {
         Ok(output.stdout)
     } else {
@@ -193,24 +209,19 @@ pub async fn attempt_held(
 /// that stopped reading is an error too, since what git wrote may not be
 /// all there.
 async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, GitError> {
+    fed(dir, args, None, sup).await
+}
+
+/// [`run`], with `input` written to git's stdin when there is any.
+async fn fed(
+    dir: &Path,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    sup: Supervision<'_>,
+) -> Result<Output, GitError> {
     let fail = |cause| error_for(dir, args, cause);
     let program = program::program(sup.env, sup).await.map_err(&fail)?;
-    // The repository's upkeep is left to the person's own git. An automatic
-    // `gc` or `maintenance` a commit starts detaches into the background, out
-    // of the process group the engine supervises, and works on in the run's
-    // repository beside its commits and suites, holding the pipes the engine
-    // reads git through.
-    let mut command = GovernedCommand::new(program, dir)
-        .arg("-c")
-        .arg("gc.auto=0")
-        .arg("-c")
-        .arg("maintenance.auto=false")
-        .stdout(Capture::Collect)
-        .stderr(Capture::Collect);
-    for arg in args {
-        command = command.arg(*arg);
-    }
-    let ran = match spawn_governed(command, sup).await {
+    let ran = match spawn_governed(command(program, dir, args, input), sup).await {
         Ok(Outcome::Exited {
             status,
             stdout,
@@ -235,6 +246,30 @@ async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, 
         Err(error) => return Err(fail(Cause::Spawn(spawn_io(error)))),
     };
     Ok(ran)
+}
+
+/// The command one git call runs: `args` after the settings every call
+/// carries, and `input` on its stdin when there is any.
+fn command(program: PathBuf, dir: &Path, args: &[&str], input: Option<Vec<u8>>) -> GovernedCommand {
+    // The repository's upkeep is left to the person's own git. An automatic
+    // `gc` or `maintenance` a commit starts detaches into the background, out
+    // of the process group the engine supervises, and works on in the run's
+    // repository beside its commits and suites, holding the pipes the engine
+    // reads git through.
+    let mut command = GovernedCommand::new(program, dir)
+        .arg("-c")
+        .arg("gc.auto=0")
+        .arg("-c")
+        .arg("maintenance.auto=false")
+        .stdout(Capture::Collect)
+        .stderr(Capture::Collect);
+    for arg in args {
+        command = command.arg(*arg);
+    }
+    match input {
+        Some(input) => command.stdin(input),
+        None => command,
+    }
 }
 
 /// The yes-or-no an exit gives: `exits.yes` is true and `exits.no` is false.

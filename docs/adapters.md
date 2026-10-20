@@ -114,7 +114,9 @@ asking the rail, and the files it writes are not formatted as they are written: 
 close judges them like any other write. The trees a CLI loads that configuration from inside a checkout —
 `.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/**` for
 `codex` — are never written by any session of any run. The instruction files,
-`AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. The
+`AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. A link
+committed at one of these paths holds what it points to inside the checkout to
+the same rule, since the CLI reads through it. The
 close judges what each session wrote against these trees and files, git-ignored
 files included, so a write the fence let through is still refused. No CLI sandbox
 covers a protected file, a pattern that covers part of a directory, or a glob

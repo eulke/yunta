@@ -177,7 +177,9 @@ uses: a checkout outlives the session that writes one, and the next session to
 open there would run what it says outside its sandbox. `AGENTS.md` and
 `CLAUDE.md`, at any depth, are denied to every session too, because an agent
 reads them as its instructions. A person can grant those two, for the scope they
-are asked for, and nothing else that is protected. Git-ignored files under these
+are asked for, and nothing else that is protected. A link the project commits at
+one of these paths protects what it points to inside the checkout the same way,
+since the CLI reads through it. Git-ignored files under these
 trees, or an instruction file, count as written: a `.gitignore` entry does not
 hide one from the check. The check does not enter a directory your project ignores
 whole, such as a build output or a dependency tree, to look for an instruction

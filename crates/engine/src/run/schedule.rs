@@ -398,6 +398,7 @@ mod tests {
             adapter: None,
             frozen: None,
             provenance_gaps: Vec::new(),
+            loaded_links: Vec::new(),
         };
         let bytes = PersistedDoc::of(manifest).write().expect("manifest writes");
         let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("manifest reads");

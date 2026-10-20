@@ -140,6 +140,16 @@ async fn successor_manifest(
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
     manifest.base_commit = crate::worktree::head_commit(predecessor.worktree, supervision).await?;
+    // The links it protects through are those of the tree it builds on.
+    manifest.loaded_links =
+        crate::manifest::loaded_links(predecessor.worktree, &manifest.base_commit, supervision)
+            .await
+            .map_err(|error| match error {
+                crate::manifest::ManifestError::Links(git) => RunError::from(git),
+                other => RunError::Broken {
+                    diagnostic: other.to_string(),
+                },
+            })?;
     // Resolved ahead of the checkout's handover: a short declared secret
     // refuses the successor with nothing taken.
     let redactor = run_redactor(&manifest, secrets)?;

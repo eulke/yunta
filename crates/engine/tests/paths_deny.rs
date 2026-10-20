@@ -127,6 +127,78 @@ async fn a_run_on_one_cli_refuses_a_write_to_another_cli_s_config() {
     );
 }
 
+/// What a committed link at a CLI's configuration resolves to is that
+/// configuration: a node that writes it there fails without a grant, as a
+/// write through the link would, and never lands.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_node_writing_what_a_cli_loads_through_a_link_fails_without_a_grant() {
+    let bench = Bench::new();
+    yunta_testkit::write(&bench.worktree.join("tools/hooks/run.sh"), "true\n");
+    std::fs::create_dir_all(bench.worktree.join(".claude")).unwrap();
+    std::os::unix::fs::symlink("../tools/hooks", bench.worktree.join(".claude/hooks")).unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "hooks"]);
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"echo x > tools/hooks/run.sh && echo y > tools/notes.txt\" }\n";
+    let fixture = "dialect: claude-code\nsessions: []\n";
+    bench.run_with_config(workflow, fixture, MOCK_CONFIG).await;
+
+    let failed = failures(&bench.events(), "tidy");
+    assert_eq!(
+        failed,
+        vec![Failure::paths_denied(
+            vec!["tools/hooks/run.sh".into()],
+            vec![Protection::AgentConfig]
+        )]
+    );
+    assert!(!failed[0].wants_scope(), "no grant widens it");
+    let landed = git_output(&bench.worktree, &["show", "HEAD:tools/hooks/run.sh"]);
+    assert_eq!(landed, "true");
+}
+
+/// The root of a tree a CLI loads is held as itself: a node that points a
+/// committed link there elsewhere, or puts a link where none stood, fails
+/// without a grant.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_node_pointing_a_cli_s_config_root_elsewhere_fails_without_a_grant() {
+    let bench = Bench::new();
+    yunta_testkit::write(&bench.worktree.join("config/claude/settings.json"), "{}\n");
+    std::os::unix::fs::symlink("config/claude", bench.worktree.join(".claude")).unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "config"]);
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"mkdir -p evil && echo {} > evil/settings.json && ln -sfn evil .claude && ln -s tools .codex\" }\n";
+    let fixture = "dialect: claude-code\nsessions: []\n";
+    bench.run_with_config(workflow, fixture, MOCK_CONFIG).await;
+
+    assert_eq!(
+        failures(&bench.events(), "tidy"),
+        vec![Failure::paths_denied(
+            vec![".claude".into(), ".codex".into()],
+            vec![Protection::AgentConfig, Protection::AgentConfig]
+        )]
+    );
+}
+
+/// A link a node puts at the root of a tree a CLI loads is judged though git
+/// ignores it: the close looks at what stands there, never under it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_git_ignores_at_a_cli_s_config_root_still_fails_the_node() {
+    let bench = Bench::new();
+    let workflow = "name: w\nnodes:\n  - { id: tidy, kind: bash, scope: [\"**\"], run: \"echo /.codex >> .gitignore && mkdir -p tools && echo x > tools/config.toml && ln -s tools .codex\" }\n";
+    let fixture = "dialect: codex\nsessions: []\n";
+    bench.run_with_config(workflow, fixture, MOCK_CONFIG).await;
+
+    assert_eq!(
+        failures(&bench.events(), "tidy"),
+        vec![Failure::paths_denied(
+            vec![".codex".into()],
+            vec![Protection::AgentConfig]
+        )]
+    );
+}
+
 /// The planner's plan and one task scoped to `scope` whose session writes
 /// `writes`, under a `rules` expansion mode.
 fn one_task(scope: &str, writes: &str, request: Option<&str>) -> (String, String) {
