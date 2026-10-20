@@ -1277,7 +1277,7 @@ nodes:
     let called = yunta_testkit::handle(&run_id);
     assert!(
         text.lines()
-            .any(|l| l.starts_with(&format!("run {called}: ")) && l.contains("needs you")),
+            .any(|l| l.contains("· needs you ·") && l.trim_end().ends_with(called)),
         "a gate with no TTY degrades to a paused run instead of hanging: {text}"
     );
     assert!(

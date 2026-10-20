@@ -157,6 +157,55 @@ fn a_moving_run_whose_engine_is_gone_is_stalled() {
     assert_eq!(node(&frame, "plan").standing, Standing::Running);
 }
 
+/// The pause a gate nobody answered leaves on the log: the run's own, its
+/// escalation naming the gate it asks for — the gate has written nothing.
+fn parked_on_gate(gate: &str) -> EventPayload {
+    let escalation = Escalation::new(
+        Claim::Written("Approve the plan?".to_string()),
+        Menu::Gate(AuthorGate {
+            assignee: "lead".to_string(),
+            node: Some(gate.into()),
+        }),
+        NonEmpty::from((approve_option(), Vec::new())),
+    );
+    paused(PauseReason::Escalation(Box::new(escalation)))
+}
+
+#[test]
+fn the_gate_a_run_is_parked_on_needs_you_before_it_writes_anything() {
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), finished()),
+        (3, None, parked_on_gate("build")),
+    ]);
+    let frame = frame(&chain(), &events, 10);
+    assert_eq!(node(&frame, "build").standing, Standing::NeedsYou);
+    assert!(
+        matches!(
+            &frame.phase,
+            RunPhase::Waiting { on: WaitingOn::Node { node, .. } } if node.as_str() == "build"
+        ),
+        "{:?}",
+        frame.phase
+    );
+    assert_eq!(frame.standing, Standing::NeedsYou);
+    assert_eq!(frame.flow.of(Standing::NeverRan), 1, "fix never ran");
+}
+
+#[test]
+fn a_gate_a_run_left_reads_as_never_run_again_once_the_run_closes() {
+    let events = log(vec![
+        (0, None, created("alpha")),
+        (1, Some("plan"), started(1)),
+        (2, Some("plan"), finished()),
+        (3, None, parked_on_gate("build")),
+        (4, None, run_finished(TerminalState::Cancelled)),
+    ]);
+    let frame = frame(&chain(), &events, 10);
+    assert_eq!(node(&frame, "build").standing, Standing::NeverRan);
+}
+
 #[test]
 fn every_node_this_run_will_do_is_counted_once_under_its_word() {
     let events = log(vec![

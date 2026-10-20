@@ -222,6 +222,12 @@ impl Escalation {
     }
 
     /// The payload, for the event that carries it.
+    /// The author's gate this escalation asks for, by its node, when its
+    /// menu names one.
+    pub fn gate(&self) -> Option<&NodeId> {
+        self.0.gate()
+    }
+
     pub fn into_payload(self) -> GateWaitingPayload {
         self.0
     }

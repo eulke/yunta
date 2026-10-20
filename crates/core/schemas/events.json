@@ -630,11 +630,22 @@
       }
     },
     "AuthorGate": {
-      "description": "Who an author's gate addresses, as its workflow names them.",
+      "description": "Who an author's gate addresses, as its workflow names them, and the\ngate itself.",
       "type": "object",
       "properties": {
         "assignee": {
           "type": "string"
+        },
+        "node": {
+          "description": "The gate's own node: a run parked on a gate nobody answered names\nit here, since the gate has written nothing of its own. Absent on a\nlog written before gates named themselves.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

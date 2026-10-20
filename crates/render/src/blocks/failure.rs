@@ -55,6 +55,10 @@ impl FailureDetail<'_> {
     fn says(&self) -> FailureSays {
         let failure = self.failure;
         match failure {
+            // A command that printed nothing has nothing to quote.
+            Failure::Exited { exited } if exited.tail.is_empty() && self.whole.is_none() => {
+                FailureSays::Nothing
+            }
             Failure::Exited { exited } => FailureSays::Evidence(Evidence {
                 tail: exited.tail.clone(),
                 whole: self.whole.clone(),

@@ -13,6 +13,7 @@ use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
 use crate::paint::Ink;
 use crate::surface::{Markdown, Surface, Terminal};
+use crate::words::Standing;
 
 fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens")
@@ -47,6 +48,7 @@ fn decision() -> Decision {
     Decision {
         chosen: Chosen::Here { commands },
         options,
+        otherwise: vec![("yunta close 7E5PH4".to_string(), "closes it for good")],
     }
 }
 
@@ -59,12 +61,21 @@ fn opening() -> Vec<Block> {
     checks.push(Found::NotApplicable, "review", "no fan-out review");
     vec![
         Block::Title(Line::new().push(Tone::Strong, "plan of run 7E5PH4")),
-        Headline {
-            subject: "run 7E5PH4".to_string(),
-            mark: Mark::NeedsYou,
-            said: "needs you on a decision".to_string(),
-        }
+        Headline::new(Mark::NeedsYou, "fragua (standard)", "needs you")
+            .fact("for 32m10s")
+            .edge("7E5PH4")
+            .into(),
+        Furrow(vec![
+            Standing::Finished,
+            Standing::Finished,
+            Standing::Rerouted,
+            Standing::NeedsYou,
+            Standing::Skipped,
+            Standing::NeverRan,
+        ])
         .into(),
+        Gist("approve-plan asks you to approve the plan before anything is built.".to_string())
+            .into(),
         Prose(
             "The run plans the change, asks before it builds, and builds what you approve."
                 .to_string(),
@@ -155,6 +166,8 @@ fn closing() -> Vec<Block> {
             word: "finished",
             id: "plan".to_string(),
             note: "4 tasks".to_string(),
+            took: "1m31s".to_string(),
+            spent: "1.94M".to_string(),
         }],
     };
     vec![
@@ -170,6 +183,7 @@ fn closing() -> Vec<Block> {
         nodes.into(),
         Block::Lines(vec![Line::new().plain("  a line a page composed itself")]),
         decision().into(),
+        Note("the run holds its own state on disk.".to_string()).into(),
         Fields::new().push_if("tokens", "20.2k spent").into(),
         Next {
             steps: vec![("yunta status 7E5PH4".to_string(), "where it stands")],
@@ -204,7 +218,7 @@ fn every_block_matches_its_goldens_in_every_environment() {
 /// are gone: what carries the meaning, whichever medium drew it.
 fn words(text: &str) -> std::collections::BTreeSet<String> {
     text.split_whitespace()
-        .map(|token| token.trim_matches(|c| matches!(c, '*' | '`' | '|' | ':' | ',' | '.')))
+        .map(|token| token.trim_matches(|c| matches!(c, '*' | '_' | '`' | '|' | ':' | ',' | '.')))
         .filter(|token| token.chars().any(char::is_alphanumeric))
         .map(str::to_string)
         .collect()

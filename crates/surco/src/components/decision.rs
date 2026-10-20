@@ -31,6 +31,11 @@ impl DecisionOption {
 pub struct Decision {
     pub chosen: Chosen,
     pub options: Vec<DecisionOption>,
+    /// What moves the run without choosing any option — closing it,
+    /// handing it back once what stopped it is settled elsewhere — each
+    /// command with what it does: the other ways out, said after the
+    /// options.
+    pub otherwise: Vec<(String, &'static str)>,
 }
 
 /// Where a decision's options are chosen.

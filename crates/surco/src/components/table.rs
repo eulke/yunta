@@ -6,8 +6,9 @@ use crate::line::Tone;
 
 /// Rows of cells under named columns.
 ///
-/// A file heads each column with its title. A terminal draws no header:
-/// a row is read by its mark and its id, and each cell says what it is.
+/// A file heads each column with its title. A terminal heads only a table
+/// that holds figures: a row is read by its mark and its id, and a word
+/// says what it is, but a figure needs saying what it counts.
 pub struct Table {
     pub columns: Vec<Column>,
     pub rows: Vec<Row>,
@@ -31,6 +32,10 @@ pub enum Holds {
     Id,
     /// Words read whole, as wide as the widest of them.
     Words,
+    /// A figure read against the ones above and below it — a duration, an
+    /// amount: as wide as the widest, flush right, and never cut, since a
+    /// cut figure reads as another one.
+    Figure,
     /// What the line leaves once every other column is whole: a cell
     /// longer than that is cut at its end.
     Rest,

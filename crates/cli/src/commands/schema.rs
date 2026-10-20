@@ -14,7 +14,6 @@
 
 use surco::components::{Fields, Next};
 use surco::doc::{Block, Doc};
-use surco::line::Line;
 use surco::look::Look;
 use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
@@ -70,13 +69,10 @@ fn list() -> Doc {
             ),
         ],
     };
-    // The blank line that separates the kinds from the commands is a
-    // block of its own: the two blocks around it draw none.
     Doc::new()
-        .with(Block::Title(
-            Line::new().plain("Documents Yunta reads and validates:"),
+        .with(Block::Heading(
+            "documents Yunta reads and validates".to_string(),
         ))
         .with(kinds)
-        .with(Block::Lines(vec![Line::new()]))
         .with(next)
 }

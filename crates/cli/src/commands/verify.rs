@@ -66,11 +66,11 @@ impl Answer for VerifyAnswer {
             true => (Mark::Done, "intact"),
             false => (Mark::Failed, "broken"),
         };
-        let headline = Headline {
-            subject: format!("run {}", self.run_id.handle()),
+        let headline = Headline::new(
             mark,
-            said: said.to_string(),
-        };
+            format!("run {}", self.run_id.handle()),
+            said.to_string(),
+        );
         Doc::new().with(headline).with(checklist(&self.checks))
     }
 

@@ -42,11 +42,11 @@ pub(crate) fn answer(
 ) -> Answered<QuestionsReply> {
     let total = questions.questions.len();
     let look = console.look();
-    let headline = Headline {
-        subject: format!("node `{node}`"),
-        mark: Standing::NeedsYou.mark(),
-        said: Standing::NeedsYou.word().to_string(),
-    };
+    let headline = Headline::new(
+        Standing::NeedsYou.mark(),
+        format!("node `{node}`"),
+        Standing::NeedsYou.word().to_string(),
+    );
     console.say("")?;
     for line in crate::render::block_lines(headline, &look) {
         console.say(&look.ink.paint(&line))?;

@@ -45,6 +45,7 @@ fn an_engine_claim_round_trips_as_the_tagged_object_it_is() {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         NonEmpty::from((
             GateOption::reserved(yunta_core::reserved::ReservedOption::Retry),
@@ -70,6 +71,7 @@ fn an_escalation_writes_its_menu_beside_its_claim_and_its_options_as_data() {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         NonEmpty::from((
             GateOption::leading(

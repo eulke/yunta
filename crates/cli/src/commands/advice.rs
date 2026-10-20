@@ -17,7 +17,7 @@
 //! is ever one that run's own menu does not offer.
 
 use surco::words::Standing;
-use yunta_core::events::{GateWaitingPayload, Stuck};
+use yunta_core::events::{GateWaitingPayload, PauseReason, Stuck};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
 use yunta_engine::{NodeWait, RunFrame, RunPhase, WaitingOn};
@@ -29,17 +29,25 @@ pub(crate) const STALLED: &str = "no process is driving it: the engine that ran 
 
 /// What holds a run whose engine is asking a person at its terminal: a
 /// question asked live is on no log until it is answered, so the only
-/// place to answer it is where it is asked.
-pub(crate) fn asking(prompt: &yunta_engine::Prompt, at: chrono::DateTime<chrono::Utc>) -> String {
+/// place to answer it is where it is asked. With `at`, the sentence says
+/// how long it has been asking; a page whose headline says it leaves it
+/// out.
+pub(crate) fn asking(
+    prompt: &yunta_engine::Prompt,
+    at: Option<chrono::DateTime<chrono::Utc>>,
+) -> String {
     let who = prompt
         .node
         .as_ref()
         .map_or_else(|| "the run".to_string(), |node| format!("node `{node}`"));
-    let waited = (at - prompt.since).to_std().unwrap_or_default();
+    let waited = at.map(|at| {
+        let waited = (at - prompt.since).to_std().unwrap_or_default();
+        format!(" for {}", surco::figures::duration(waited))
+    });
     format!(
-        "{who} is asking at its terminal (pid {}) for {}; answer it there",
+        "{who} is asking at its terminal (pid {}){}; answer it there",
         prompt.pid,
-        surco::figures::duration(waited)
+        waited.unwrap_or_default()
     )
 }
 
@@ -80,18 +88,22 @@ pub(crate) fn parked_on(on: &WaitingOn) -> String {
     }
 }
 
-/// Whether [`parked_in_full`] says the sentence the engine recorded —
-/// a decision's claim with the record beside it — rather than only the
-/// node it waits on: a surface that printed it never prints that record
-/// twice.
-pub(crate) fn parked_says_why(on: &WaitingOn) -> bool {
-    matches!(
-        on,
+/// What a parked run is waiting on, as a page that quotes the record
+/// beside it says it: an escalation's claim alone — the page quotes its
+/// record as a failed node's evidence or in the decision's account — and
+/// the sentence the engine recorded for any other pause.
+pub(crate) fn parked_claim(on: &WaitingOn) -> String {
+    let escalation = match on {
         WaitingOn::Node {
-            reason: Some(_),
+            reason: Some(PauseReason::Escalation(escalation)),
             ..
-        } | WaitingOn::Run { .. }
-    )
+        }
+        | WaitingOn::Run {
+            reason: PauseReason::Escalation(escalation),
+        } => escalation,
+        WaitingOn::Node { .. } | WaitingOn::Run { .. } => return parked_in_full(on),
+    };
+    crate::commands::status::decision::claim_words(&(**escalation).clone().into_payload())
 }
 
 /// What a parked run is waiting on, at the length a page has room for:

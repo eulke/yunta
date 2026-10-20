@@ -297,7 +297,7 @@ fn held(
             engine
                 .prompt
                 .as_ref()
-                .map(|prompt| advice::asking(prompt, engine.at)),
+                .map(|prompt| advice::asking(prompt, Some(engine.at))),
             None,
         ),
         (_, RunPhase::Waiting { on }) => (

@@ -111,7 +111,11 @@ async fn a_gate_answered_at_the_terminal_keeps_ids_and_where_they_lead() {
             { "id": "abort" },
         ])
     );
-    assert_eq!(waiting["gate"], json!({ "assignee": "lead" }));
+    assert_eq!(
+        waiting["gate"],
+        json!({ "assignee": "lead", "node": "approve" }),
+        "the gate names itself, so a run parked on it says which node waits"
+    );
     assert!(waiting.get("evidence").is_none(), "{waiting}");
     assert_eq!(engine_words(&events, &[GATED]), Vec::<String>::new());
 }

@@ -158,20 +158,26 @@ fn closed(terminal: &TerminalState, state: &RunState) -> RunPhase {
 }
 
 /// The first node parked on a person, in the workflow's own declaration
-/// order, carrying the run's standing pause.
+/// order, carrying the run's standing pause: a node whose log says it
+/// waits, or the gate the pause names, which has said nothing of its own
+/// yet.
 fn waiting_node(
     workflow: &Workflow,
     state: &RunState,
     reason: Option<&PauseReason>,
 ) -> Option<WaitingOn> {
-    workflow
-        .iter_nodes()
-        .find_map(|node| match state.nodes.state(&node.id) {
-            Some(NodeState::Waiting { on }) => Some(WaitingOn::Node {
-                node: node.id.clone(),
-                on: on.clone(),
-                reason: reason.cloned(),
+    workflow.iter_nodes().find_map(|node| {
+        match state.nodes.state(&node.id) {
+            Some(NodeState::Waiting { on }) => Some(on.clone()),
+            None if reason.and_then(PauseReason::gate) == Some(&node.id) => Some(NodeWait::Gate {
+                external_ref: state.gates.last_external_ref(&node.id).map(str::to_string),
             }),
             _ => None,
+        }
+        .map(|on| WaitingOn::Node {
+            node: node.id.clone(),
+            on,
+            reason: reason.cloned(),
         })
+    })
 }

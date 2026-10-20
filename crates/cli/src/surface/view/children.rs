@@ -26,7 +26,7 @@ const NO_NODE: &str = "under no node on this run's log";
 /// terminal still says a child is open and loses only which one. What
 /// it never becomes is a number: heterogeneous children averaged into
 /// one figure is the lying percentage under another name.
-pub(in crate::surface) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
+pub(crate) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
     let standing = child_standing(child.terminal);
     format!(
         "{} {} {} child run {}",
@@ -39,7 +39,7 @@ pub(in crate::surface) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String
 
 /// Every child this run bore, grouped under the node that bore it, each
 /// group in the order the parent's log recorded it.
-pub(in crate::surface) fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>)> {
+pub(crate) fn children_by_node(frame: &RunFrame) -> Vec<(String, Vec<&ChildLink>)> {
     let mut groups: Vec<(String, Vec<&ChildLink>)> = Vec::new();
     for child in &frame.children {
         let parent = match &child.node {

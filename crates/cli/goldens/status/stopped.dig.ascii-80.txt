@@ -1,0 +1,20 @@
+# fragua (quick) ; stopped ; for 32m10s                                   7E5PH4
+--------------------------------------------------------------------------------
+  cancelled by user.
+
+              node                                                          time
+  + finished  plan   exit 0                                                  12s
+  . never ran build
+  . never ran test
+
+  progress     1 of 3 nodes done
+  tokens       18k in / 2.2k out
+  slowest      plan 12s
+  branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+  id           01K3W48MFW7H0ZZA5PZ07E5PH4
+  kept in      ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+next
+  yunta resume 7E5PH4   continues it where it stopped
+  yunta close 7E5PH4    closes it for good

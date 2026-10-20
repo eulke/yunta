@@ -11,6 +11,7 @@
         `greet`
         so           it passes once `greet` is done, whatever this task does
         fix          judge the task by a test of its own
+
     . handed over 16 times; refused 15: criterion-already-passes ×12,
       shared-criterion ×3
     . 2 of 3 changes show no code

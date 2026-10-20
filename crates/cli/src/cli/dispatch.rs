@@ -50,8 +50,11 @@ pub(super) async fn dispatch(
             )
             .await
         }
-        Command::Status { run, node, .. } => {
-            commands::status::status(&run.named().await?, output, node.as_ref(), look).await
+        Command::Status {
+            run, node, depth, ..
+        } => {
+            let page = (node.as_ref(), depth.depth());
+            commands::status::status(&run.named().await?, output, page, look).await
         }
         Command::Resume { run, .. } => {
             commands::resume::resume(&run.named().await?, output, look).await

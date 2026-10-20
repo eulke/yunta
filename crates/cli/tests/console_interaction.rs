@@ -16,8 +16,8 @@ use surco::text::indent;
 use yunta_core::events::{EventPayload, GateEvent, GateResolvedPayload, HumanChoice};
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
 
-/// What a decision put to a person opens with.
-const DECISION: &str = "decision: ";
+/// What a decision put to a person opens with: its headline.
+const DECISION: &str = "decision · needs you";
 
 /// What settles an option that asks for nothing.
 const SETTLE: &str = "enter records it, n adds a note";
@@ -711,7 +711,7 @@ fn the_questions_say_which_node_asks_and_how_many_answers_it_needs() {
     let drawn = terminal.drawn();
     let headline = drawn
         .lines()
-        .find(|line| line.contains(": ◆ needs you") && line.starts_with("node `"))
+        .find(|line| line.contains("◆ node `ask` · needs you"))
         .unwrap_or_else(|| panic!("the round is headed by the node that asks it:\n{drawn}"));
     assert!(
         drawn[drawn.find(headline).unwrap_or_default()..].contains("1 answer before it goes on"),

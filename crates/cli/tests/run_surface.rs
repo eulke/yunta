@@ -260,9 +260,11 @@ fn a_finished_run_closes_without_empty_rows() {
     let run_id = run_id_from(&run);
     let text = stdout(&run);
 
+    let handle = handle(&run_id);
     assert!(
-        text.contains(&format!("run {run_id}: ")) && text.contains("finished"),
-        "the outcome comes first, as a word: {text}"
+        text.lines()
+            .any(|line| line.contains("· finished ·") && line.trim_end().ends_with(handle)),
+        "the outcome heads the block, as a word: {text}"
     );
     for label in ["progress", "slowest", "branch"] {
         assert!(text.contains(label), "no `{label}` row in: {text}");
@@ -273,17 +275,17 @@ fn a_finished_run_closes_without_empty_rows() {
         assert!(!text.contains(label), "an empty `{label}` row in: {text}");
     }
     assert!(
-        text.contains(&format!("yunta receipt {}", handle(&run_id))),
+        text.contains(&format!("yunta receipt {handle}")),
         "a finished run's next command certifies it: {text}"
     );
     assert!(
-        text.contains("nodes 2/2"),
+        text.contains("2 of 2 nodes done"),
         "counters, never a percentage: {text}"
     );
 }
 
 #[test]
-fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
+fn the_closing_block_ends_with_the_decision_a_parked_run_waits_on() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), EXHAUSTED);
 
@@ -313,11 +315,11 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
         "the run holds its own state, and says so: {text}"
     );
 
-    // The decision is above the counters: the most actionable thing is
-    // the most prominent thing.
+    // The decision is the last thing the block says: the last lines a
+    // terminal prints are the ones in front of the reader when it stops.
     let decision = text.find("decision on node").expect("the decision block");
     let counters = text.find("progress ").expect("the counters row");
-    assert!(decision < counters, "{text}");
+    assert!(counters < decision, "{text}");
 }
 
 /// A run parked on a decision exits 3 from every way of running it: the
@@ -370,7 +372,7 @@ fn status_and_the_closing_block_print_one_counter_for_one_run() {
         .map(str::trim)
         .expect("the counters row")
         .to_string();
-    assert!(counters.starts_with("nodes 0/2 · 1 failed"), "{closing}");
+    assert_eq!(counters, "0 of 2 nodes done", "{closing}");
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let page = stdout(&status);
@@ -737,8 +739,12 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
         .lines()
         .find_map(|line| line.strip_prefix("run ")?.split(':').next())
         .expect("the run named itself as it started");
+    let handle = yunta_testkit::handle(id);
     assert!(
-        drawn.contains(&format!("run {}: ◆ needs you", yunta_testkit::handle(id))),
+        drawn
+            .lines()
+            .any(|line| line.contains("◆ hopeless (default) · needs you ·")
+                && line.trim_end().ends_with(handle)),
         "{drawn}"
     );
 }
@@ -798,7 +804,7 @@ fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
     );
     let text = stdout(&run);
     assert!(
-        text.contains("reported\n  finished holding 1 blocking finding"),
+        text.contains("· reported ·") && text.contains("\n  finished holding 1 blocking finding."),
         "the block says what is holding it: {text}\nstderr: {}",
         stderr(&run)
     );

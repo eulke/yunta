@@ -1,4 +1,5 @@
 plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
+
   Greet a person by name, and say goodbye too.
 
   tasks
@@ -107,4 +108,5 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
                    the same command as the spec test of
                    `greet`
 
+next
   yunta status 7E5PH4 --node plan   the whole plan, every file whole

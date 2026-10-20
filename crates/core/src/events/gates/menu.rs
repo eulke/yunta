@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::payloads::{DepartureMenu, FailureMenu};
 use super::scope_wait::ScopeWait;
+use crate::NodeId;
 
 /// What an escalation is about, with the data its words are written from.
 /// One per escalation, so a menu reads one way.
@@ -29,10 +30,16 @@ pub enum Menu {
     Published(PublishedGate),
 }
 
-/// Who an author's gate addresses, as its workflow names them.
+/// Who an author's gate addresses, as its workflow names them, and the
+/// gate itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AuthorGate {
     pub assignee: String,
+    /// The gate's own node: a run parked on a gate nobody answered names
+    /// it here, since the gate has written nothing of its own. Absent on a
+    /// log written before gates named themselves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
 }
 
 /// `limits.max_tokens_per_run`, and the input and output tokens the log

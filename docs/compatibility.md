@@ -499,7 +499,7 @@ budget says about its cap against its history. `resume --json` and the control p
 `budget_warning` and `context_warnings` keep their names and carry the words of the same
 cautions, on the documents that carry them.
 
-`tokens` in these documents is the figure the closing block and `status` print: the
+`tokens` in these documents is the figure the closing block and `status --full` print: the
 settled spend plus the usage an open attempt has reported, so the three readings agree.
 
 `run --json`, `resume --json`, `status --json` and the control plane's
@@ -769,8 +769,9 @@ node `plan` declares no artifacts, so there is nothing to check
 
 A run the binary could only interpret in part counts the same way on both surfaces
 that report it: `2 unknown event kinds, interpreted partially: <kind> ×<count>, …`,
-and `1 unknown event kind` for one. `yunta status` folds that into its
-`·`-separated summary; `yunta stats` gives it a line of its own.
+and `1 unknown event kind` for one. `yunta status` gives it a row of its own,
+`unread`, and so does `yunta stats`; the one line a listing's row and the JSON
+`summary` have fold it in, `·`-separated.
 
 `yunta test` gives each case a row — its mark, its name, and what it found:
 `failed: 2 errors`, `could not run: 1 error`, or `ok` — with each problem on the

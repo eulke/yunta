@@ -17,7 +17,8 @@ use yunta_render::spend::Breakdown;
 mod children;
 
 use children::children_of;
-pub(super) use children::{child_row, child_standing, children_by_node, closed_as};
+pub(crate) use children::{child_row, children_by_node};
+pub(super) use children::{child_standing, closed_as};
 
 use crate::commands::advice;
 use surco::figures::duration;

@@ -51,6 +51,7 @@ pub(crate) use closing::{Closing, ClosingEnv, Outline};
 pub(crate) use feed::Diagnostics;
 pub(crate) use terminal::TerminalEnv;
 pub(crate) use turns::Curtain;
+pub(crate) use view::{child_row, children_by_node};
 
 /// Why the live region stood down, in the words the reader is given.
 /// Each one names a property of the environment this process was handed,

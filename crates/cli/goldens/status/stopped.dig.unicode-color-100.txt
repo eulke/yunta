@@ -1,0 +1,20 @@
+␛[2m■␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[2mstopped␛[0m␛[2m · for 32m10s␛[0m                                                       7E5PH4
+␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+  cancelled by user.
+
+␛[2m              node                                                                              time␛[0m
+  ␛[32m✓␛[0m ␛[32mfinished ␛[0m plan   ␛[2mexit 0                                                                   ␛[0m   12s
+  ␛[2m◌␛[0m ␛[2mnever ran␛[0m build
+  ␛[2m◌␛[0m ␛[2mnever ran␛[0m test
+
+  ␛[2mprogress    ␛[0m 1 of 3 nodes done
+  ␛[2mtokens      ␛[0m 18k in / 2.2k out
+  ␛[2mslowest     ␛[0m plan 12s
+  ␛[2mbranch      ␛[0m yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+  ␛[2mid          ␛[0m 01K3W48MFW7H0ZZA5PZ07E5PH4
+  ␛[2mkept in     ␛[0m ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+␛[2mnext␛[0m
+  ␛[1myunta resume 7E5PH4␛[0m   ␛[2mcontinues it where it stopped␛[0m
+  ␛[1myunta close 7E5PH4 ␛[0m   ␛[2mcloses it for good␛[0m

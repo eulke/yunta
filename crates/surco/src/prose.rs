@@ -1,16 +1,14 @@
-//! Prose a session wrote, cut to the one line a row has for it.
+//! Prose a session wrote, as the one sentence a row says of it.
 //!
 //! What an agent says comes as Markdown, and a row in a table has room
 //! for its first sentence and nothing that only means something once
 //! rendered: a heading's `#`, emphasis, a list's bullet. The sentence is
 //! what a reader scans a column of; the whole of it is a command away.
 
-use crate::glyphs::Glyphs;
-use crate::width::truncate;
-
 /// The first sentence of `markdown`, its markup dropped and its
-/// whitespace collapsed, cut to `room` cells.
-pub fn first_sentence(markdown: &str, room: usize, glyphs: Glyphs) -> String {
+/// whitespace collapsed. Whole: the column that shows it cuts it to its
+/// room.
+pub fn first_sentence(markdown: &str) -> String {
     // A heading names what follows rather than saying it, so the
     // sentence is the first one after it.
     let text: Vec<String> = markdown
@@ -25,7 +23,7 @@ pub fn first_sentence(markdown: &str, room: usize, glyphs: Glyphs) -> String {
     let sentence = sentence_end(&text)
         .and_then(|end| text.get(..end))
         .unwrap_or(&text);
-    truncate(sentence, room, glyphs).trim_end().to_string()
+    sentence.trim_end().to_string()
 }
 
 /// `line` without the markup that opens it — a quote, a bullet — or
@@ -59,23 +57,20 @@ mod tests {
     #[test]
     fn a_row_gets_the_first_sentence_without_markup() {
         let said = "## Summary\n\n**Fixed** the lint in `src/lib.rs`. Then ran the suite.\n\nMore.";
-        assert_eq!(
-            first_sentence(said, 80, Glyphs::Ascii),
-            "Fixed the lint in `src/lib.rs`."
-        );
+        assert_eq!(first_sentence(said), "Fixed the lint in `src/lib.rs`.");
     }
 
     #[test]
     fn a_dot_inside_a_path_does_not_end_the_sentence() {
         assert_eq!(
-            first_sentence("- edited v1.2 of a.rs and stopped", 80, Glyphs::Ascii),
+            first_sentence("- edited v1.2 of a.rs and stopped"),
             "edited v1.2 of a.rs and stopped"
         );
     }
 
     #[test]
-    fn a_long_sentence_is_cut_to_its_room() {
-        let cut = first_sentence("a very long sentence that does not fit", 12, Glyphs::Ascii);
-        assert_eq!(cut, "a very lo...");
+    fn a_long_sentence_is_said_whole() {
+        let said = "a very long sentence that no column is narrow enough to change";
+        assert_eq!(first_sentence(said), said);
     }
 }

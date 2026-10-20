@@ -51,6 +51,7 @@ mod node_scope;
 mod node_start;
 mod owed_scope;
 mod parallel_exec;
+mod pause;
 mod promote;
 mod prompt_exec;
 pub(crate) mod protected;
@@ -92,8 +93,9 @@ pub use create::{create_run, run_redactor, BirthArtifact, BirthOrigin, CreateRun
 pub(crate) use ctx::RunCtx;
 pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
-pub use exec::record_pause_after_crash;
-pub(in crate::run) use exec::{find_node, pause};
+pub(in crate::run) use exec::find_node;
+pub(in crate::run) use pause::pause;
+pub use pause::record_pause_after_crash;
 pub use promote::{
     create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
 };

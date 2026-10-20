@@ -120,7 +120,7 @@ fn repo_with(root: &Path, workflows: &[(&str, &str)]) -> PathBuf {
 /// up to the blank line that closes the block.
 fn decision_block(text: &str) -> Vec<&str> {
     text.lines()
-        .skip_while(|line| !line.trim_start().starts_with("decision on node"))
+        .skip_while(|line| !line.contains("decision on node"))
         .take_while(|line| !line.is_empty())
         .collect()
 }
@@ -130,7 +130,7 @@ fn decision_block(text: &str) -> Vec<&str> {
 fn closing_decision(text: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = text
         .lines()
-        .skip_while(|line| !line.trim_start().starts_with("decision on node"))
+        .skip_while(|line| !line.contains("decision on node"))
         .take_while(|line| !line.trim_start().starts_with("progress "))
         .collect();
     while lines
@@ -169,7 +169,7 @@ fn status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it() {
 
     let block = decision_block(&text).join("\n");
     assert!(
-        block.starts_with("  decision on node `lint`"),
+        block.starts_with("  ◆ decision on node `lint`"),
         "the page says which node the decision belongs to: {text}"
     );
     // The option ids a person types, each with what choosing it does and
@@ -268,9 +268,8 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
 /// carries its counters. A program acting on the pause needs the pause,
 /// so the document carries it apart — tagged, because a node parked on
 /// a person and a run that stopped on its own are different shapes and
-/// only one of them has a node to name. (The node shape needs a node in
-/// `NodeState::Waiting` — an external gate, unanswered questions — and
-/// is covered where it is derived, in the engine's `view` tests.)
+/// only one of them has a node to name: an exhausted re-route stops the
+/// run, and a gate is the node the run waits on.
 #[test]
 fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
     let root = tempfile::tempdir().unwrap();
@@ -280,7 +279,10 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
     );
     let home = root.path().join("state");
 
-    for workflow in ["hopeless.yaml", "approval.yaml"] {
+    for (workflow, on, node) in [
+        ("hopeless.yaml", "run", None),
+        ("approval.yaml", "gate", Some("approve")),
+    ] {
         let run = yunta_in!(&repo, &home, &["run", workflow]);
         let run_id = run_id_from(&run);
         let state: serde_json::Value =
@@ -289,9 +291,10 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
         let waiting = &state["waiting_on"];
 
         assert_eq!(
-            waiting["on"], "run",
+            waiting["on"], on,
             "the shape is read off a tag, never guessed from which fields are set: {state:#}"
         );
+        assert_eq!(waiting["node"].as_str(), node, "{state:#}");
         let reason = waiting["reason"]
             .as_str()
             .unwrap_or_else(|| panic!("a parked run says what it is parked on: {state:#}"));
@@ -299,10 +302,11 @@ fn a_program_reads_what_a_parked_run_waits_on_without_parsing_a_sentence() {
             !reason.contains("nodes ·"),
             "the pause alone, not the summary's counters around it: {reason}"
         );
+        // The one line a summary has names the node a run waits on, and
+        // says the pause of a run that stopped on its own.
+        let said = node.map_or_else(|| reason.to_string(), |node| format!("node `{node}`"));
         assert!(
-            state["summary"]
-                .as_str()
-                .is_some_and(|s| s.contains(reason)),
+            state["summary"].as_str().is_some_and(|s| s.contains(&said)),
             "and the same words the sentence carries: {state:#}"
         );
     }
@@ -323,7 +327,7 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
     let text = stdout(&status);
 
     assert!(
-        text.contains("  decision on node `boom`"),
+        text.contains("  ◆ decision on node `boom`"),
         "the page says which node the decision belongs to: {text}"
     );
     assert!(
@@ -443,9 +447,9 @@ fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
 
-    assert!(text.contains("waiting on:"), "{text}");
+    assert!(text.contains("budget: run spent 100 tokens"), "{text}");
     assert!(
-        text.contains("no options to choose"),
+        text.contains("no option answers this pause here"),
         "the absent menu is named, not silently missing: {text}"
     );
     assert!(
@@ -576,14 +580,13 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     let lines: Vec<&str> = text.lines().collect();
     assert!(
-        lines[0].ends_with("needs you") && lines[1] == "  node `ask` asked 1 question: `summary`",
+        lines[0].contains("· needs you ·")
+            && lines[2] == "  node `ask` asked 1 question: `summary`.",
         "the page opens with what the run waits on — the question still unanswered, not \
          only the node: {text}"
     );
-    assert!(
-        text.contains("progress     nodes 0/1 · 1 needs you"),
-        "and counts the parked node: {text}"
-    );
+    let counted = "progress     0 of 1 node done\n  nodes        ◆ 1 needs you: ask";
+    assert!(text.contains(counted), "and counts the parked node: {text}");
     assert!(
         text.contains(&format!("yunta resume {}", handle(&run_id))),
         "the way back into the run is on the page: {text}"

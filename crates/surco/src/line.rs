@@ -138,6 +138,73 @@ impl Line {
         line
     }
 
+    /// The line as lines inside `cells`, broken between words, each part
+    /// of a word in the tone and link of the span it came from. A word
+    /// wider than the line is a line of its own, whole: a path or a
+    /// command cut in two reads as two. What the lines start with is left
+    /// to the caller, which knows the margin they stand at.
+    pub fn wrap(&self, cells: usize) -> Vec<Line> {
+        if cell_width(&self.text()) <= cells {
+            return vec![self.clone()];
+        }
+        let mut lines = Vec::new();
+        let mut line = Line::new();
+        let mut used = 0;
+        for word in self.words() {
+            let width: usize = word.iter().map(|part| cell_width(&part.text)).sum();
+            if used > 0 && used + 1 + width > cells {
+                lines.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            if used > 0 {
+                line = line.plain(" ");
+                used += 1;
+            }
+            line.0.extend(word);
+            used += width;
+        }
+        if used > 0 {
+            lines.push(line);
+        }
+        lines
+    }
+
+    /// The line's words, in order, each as the parts of the spans it is
+    /// made of: a word runs on across spans until whitespace ends it.
+    fn words(&self) -> Vec<Vec<Span>> {
+        let mut words: Vec<Vec<Span>> = Vec::new();
+        let mut in_word = false;
+        for span in &self.0 {
+            let mut part = String::new();
+            for c in span.text.chars() {
+                match (c.is_whitespace(), in_word) {
+                    (true, _) => {
+                        if let Some(word) = words.last_mut().filter(|_| !part.is_empty()) {
+                            word.push(Span {
+                                text: std::mem::take(&mut part),
+                                ..span.clone()
+                            });
+                        }
+                        in_word = false;
+                    }
+                    (false, false) => {
+                        words.push(Vec::new());
+                        in_word = true;
+                        part.push(c);
+                    }
+                    (false, true) => part.push(c),
+                }
+            }
+            if let Some(word) = words.last_mut().filter(|_| !part.is_empty()) {
+                word.push(Span {
+                    text: part,
+                    ..span.clone()
+                });
+            }
+        }
+        words
+    }
+
     pub fn spans(&self) -> &[Span] {
         &self.0
     }
@@ -158,6 +225,21 @@ impl Line {
 mod tests {
     use super::*;
     use crate::paint::Ink;
+
+    #[test]
+    fn a_line_wrapped_breaks_between_words_and_keeps_their_tones() {
+        let line = Line::new()
+            .push(Tone::Strong, "lint")
+            .plain(": ")
+            .push(Tone::Failed, "exit 101 after the suite ran");
+        let wrapped = line.wrap(14);
+        let said: Vec<String> = wrapped.iter().map(Line::text).collect();
+        assert_eq!(said, ["lint: exit 101", "after the", "suite ran"]);
+        assert_eq!(wrapped[0].spans()[0].tone, Tone::Strong);
+        assert_eq!(wrapped[0].spans()[1].text, ":");
+        assert_eq!(wrapped[2].spans()[0].tone, Tone::Failed);
+        assert_eq!(line.wrap(80), vec![line.clone()]);
+    }
 
     #[test]
     fn a_line_cut_to_fit_keeps_the_tone_of_every_span_it_keeps() {

@@ -16,6 +16,8 @@ Gate `approve-plan` of run `run-gate-1` waits on this pull request, for lead.
 
 ### on the machine that holds the run
 
+**next**
+
 - `yunta resume gate-1` — reads the review and goes on from it
 - `yunta cancel gate-1` — stops the run instead
 

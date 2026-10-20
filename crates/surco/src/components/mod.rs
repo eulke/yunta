@@ -18,18 +18,20 @@ mod fields;
 mod headline;
 mod next;
 mod node_table;
+mod page;
 mod said;
 mod table;
 
 pub use checklist::{Check, Checklist, Found};
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
-pub use document::{Code, Marked, Prose, Section};
+pub use document::{Code, Marked, Note, Prose, Section};
 pub use evidence::{Evidence, Whole};
 pub use fields::Fields;
 pub use headline::Headline;
 pub use next::Next;
 pub use node_table::{NodeRow, NodeTable};
+pub use page::{Furrow, Gist};
 pub use said::{PathNote, Paths, Said};
 pub use table::{Cell, Column, Holds, Row, Table};
 

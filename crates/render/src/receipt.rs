@@ -57,11 +57,11 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
     let word = receipt.terminal_state.map_or(Standing::Running, |state| {
         standing(state, receipt.blocking_findings)
     });
-    let mut doc = Doc::new().with(Headline {
-        subject: format!("receipt for run {handle}"),
-        mark: word.mark(),
-        said: word.word().to_string(),
-    });
+    let mut doc = Doc::new().with(Headline::new(
+        word.mark(),
+        format!("receipt for run {handle}"),
+        word.word().to_string(),
+    ));
     if receipt.terminal_state.is_none() {
         doc = doc.with(Prose(
             "the run is still open: this is its last step".to_string(),

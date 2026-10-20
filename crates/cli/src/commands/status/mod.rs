@@ -13,16 +13,15 @@
 pub(crate) mod decision;
 pub(crate) mod decision_json;
 mod node;
-mod page;
 pub(crate) mod progress;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use yunta_core::caution::Caution;
-use yunta_core::events::{Escalation, GateWaitingPayload, StoredEvent};
+use yunta_core::events::{Escalation, StoredEvent};
 use yunta_core::{Clock, Manifest, NodeId, RunId};
-use yunta_engine::{RunFrame, RunPhase, RunState, ShownDocument};
+use yunta_engine::{RunFrame, RunState, ShownDocument};
 
 use crate::commands::{advice, stats};
 use crate::context::Context;
@@ -33,19 +32,17 @@ use crate::output::{emit, Answer, Mode};
 use crate::run_page::{cautions, Decided, RunPage, Scope};
 use crate::surface::Outline;
 use node::NodePage;
-use surco::doc::Doc;
-use surco::line::Line;
+use surco::doc::{Depth, Doc};
 use surco::look::Look;
-use surco::width::INDENT;
 use yunta_engine::Engine;
 
-/// Prints where `run_id` stands — or, with `node`, that one node whole. A
-/// program reads the run's document under `Mode::Json`, whatever `node`
-/// names.
+/// Prints where `run_id` stands, as deep as `depth` asks — or, with
+/// `node`, that one node whole. A program reads the run's document under
+/// `Mode::Json`, whatever `node` names.
 pub async fn status(
     run_id: &RunId,
     output: Mode,
-    node: Option<&NodeId>,
+    (node, depth): (Option<&NodeId>, Depth),
     look: &Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -56,7 +53,7 @@ pub async fn status(
         }
         _ => Vec::new(),
     };
-    let body = page_body(&ctx, run_id, &reading, &documents, (output, node), look).await?;
+    let body = page_body(&ctx, run_id, &reading, &documents, (output, node, depth)).await?;
     let answer = StatusAnswer {
         body,
         document: DocumentInputs::of(run_id, &reading),
@@ -134,8 +131,7 @@ async fn page_body<'a>(
     run_id: &'a RunId,
     reading: &'a Reading,
     documents: &'a [ShownDocument],
-    (output, node): (Mode, Option<&NodeId>),
-    look: &Look,
+    (output, node, depth): (Mode, Option<&NodeId>, Depth),
 ) -> Result<Body<'a>, CliError> {
     match (output, node) {
         (Mode::Human, Some(id)) => Ok(Body::Node(NodePage {
@@ -148,26 +144,26 @@ async fn page_body<'a>(
             state: &reading.state,
         })),
         _ => Ok(Body::Run(Box::new(
-            run_page_for(ctx, run_id, reading, output, look).await?,
+            run_page_for(ctx, run_id, reading, (output, depth)).await?,
         ))),
     }
 }
 
-/// The run's own page. A person reading it also gets the decision the run
-/// waits on, laid out for their look.
+/// The run's own page, as deep as `depth` asks. A person reading it also
+/// gets the decision the run waits on.
 async fn run_page_for<'a>(
     ctx: &'a Context,
     run_id: &'a RunId,
     reading: &'a Reading,
-    output: Mode,
-    look: &Look,
+    (output, depth): (Mode, Depth),
 ) -> Result<RunPage<'a>, CliError> {
     let decided = match output {
-        Mode::Human => decided(run_id, reading, look).await?,
+        Mode::Human => decided(reading).await?,
         _ => None,
     };
     Ok(RunPage {
         scope: Scope::Status,
+        depth,
         run_id,
         engine: reading.engine.clone(),
         frame: &reading.frame,
@@ -184,95 +180,32 @@ async fn run_page_for<'a>(
     })
 }
 
-/// The decision a parked run waits on, read with what the page already says
-/// beside it. `None` for a run that is not parked.
-async fn decided(
-    run_id: &RunId,
-    reading: &Reading,
-    look: &Look,
-) -> Result<Option<Decided>, CliError> {
-    let shown = match &reading.decision {
-        Some((_, escalation)) => {
-            crate::json::shown_of(&reading.run_dir, escalation, &reading.state).await?
-        }
-        None => Vec::new(),
+/// The decision a parked run waits on, with what the page already says
+/// beside it. `None` for a run that is not parked, and for a pause that
+/// rebuilds no menu: the page's ask says what that one waits on.
+async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
+    if advice::parked(&reading.frame.phase).is_none() {
+        return Ok(None);
+    }
+    let Some((node, escalation)) = &reading.decision else {
+        return Ok(None);
     };
-    Ok(decision_page(
-        (run_id, reading.tree.as_path()),
-        &reading.state,
-        &reading.frame.phase,
-        reading.decision.clone(),
-        &shown,
-        look,
-    ))
-}
-
-/// The decision a parked run waits on, as the page draws it: the node's menu
-/// under the tree the run works in, or — for a pause that reconstructs no
-/// menu — what the run waits on. `None` for a run that is not parked.
-fn decision_page(
-    (run_id, tree): (&RunId, &Path),
-    state: &RunState,
-    phase: &RunPhase,
-    decision: Option<(NodeId, Escalation)>,
-    shown: &[ShownDocument],
-    look: &Look,
-) -> Option<Decided> {
-    let waiting = advice::parked(phase)?;
-    Some(match decision {
-        Some((node, escalation)) => {
-            // The page's second line made the claim, with the record
-            // beside it when it said the run's own sentence, and a failed
-            // node's evidence is quoted above.
-            let beside = decision::Beside {
-                claim: true,
-                evidence: advice::parked_says_why(waiting)
-                    || matches!(
-                        state.nodes.state(&node),
-                        Some(yunta_engine::NodeState::Failed { .. })
-                    ),
-            };
-            let payload = escalation.into_payload();
-            Decided {
-                lines: menu_lines((run_id, tree), &node, &payload, shown, beside, look),
-                escalation: Some(payload),
-            }
-        }
-        None => Decided {
-            lines: decision::without_menu(
-                run_id,
-                &advice::parked_in_full(waiting),
-                advice::reset_pause(phase).is_some(),
-                look.width.cells(),
-            ),
-            escalation: None,
-        },
-    })
-}
-
-/// The lines of a decision that has a menu: where the run works, said
-/// whole and once above the decision, then the decision itself.
-fn menu_lines(
-    (run_id, tree): (&RunId, &Path),
-    node: &NodeId,
-    payload: &GateWaitingPayload,
-    shown: &[ShownDocument],
-    beside: decision::Beside,
-    look: &Look,
-) -> Vec<Line> {
-    // Where a person acts to answer, said once above the decision
-    // and whole, so it can be copied into another terminal.
-    let mut lines = vec![Line::new()
-        .plain(INDENT)
-        .plain(decision::run_tree_line(tree))];
-    lines.extend(decision::lines(
-        (run_id, node),
-        payload,
+    let shown = crate::json::shown_of(&reading.run_dir, escalation, &reading.state).await?;
+    // The page's ask made the claim, and a failed node's evidence is
+    // quoted above it.
+    let beside = decision::Beside {
+        claim: true,
+        evidence: matches!(
+            reading.state.nodes.state(node),
+            Some(yunta_engine::NodeState::Failed { .. })
+        ),
+    };
+    Ok(Some(Decided {
+        node: node.clone(),
+        escalation: escalation.clone().into_payload(),
         shown,
         beside,
-        look,
-    ));
-    lines
+    }))
 }
 
 /// What `yunta status` answers: the run's document for a program, and the

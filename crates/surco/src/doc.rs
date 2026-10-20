@@ -10,14 +10,51 @@
 //! surface already builds, and changes none of them.
 
 use crate::components::{
-    Checklist, Code, Concern, Decision, Evidence, Fields, Headline, Marked, Next, NodeTable, Paths,
-    Prose, Said, Section, Table,
+    Checklist, Code, Concern, Decision, Evidence, Fields, Furrow, Gist, Headline, Marked, Next,
+    NodeTable, Note, Paths, Prose, Said, Section, Table,
 };
 use crate::line::Line;
+
+/// How much of a page its reader asked for. A page opens at a glance —
+/// where the thing stands, what it asks, what failed — and what the
+/// glance leaves out is one step away: the whole story, then every trace
+/// kept. No fact is only at a depth nothing reaches.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Depth {
+    /// What a reader needs to act on: the page a command opens on.
+    #[default]
+    Glance,
+    /// The whole story: every part with what it said, took and spent.
+    Full,
+    /// Every trace kept: whole ids, the paths things live at, whole
+    /// outputs.
+    Dig,
+}
+
+impl Depth {
+    /// The depth of a reader who asked for the whole story (`full`) or for
+    /// every trace (`dig`): digging tells the whole story too.
+    pub fn of(full: bool, dig: bool) -> Self {
+        match (full, dig) {
+            (_, true) => Depth::Dig,
+            (true, false) => Depth::Full,
+            (false, false) => Depth::Glance,
+        }
+    }
+
+    /// Whether a page at this depth says what a page at `depth` says.
+    pub fn reaches(self, depth: Depth) -> bool {
+        self >= depth
+    }
+}
 
 /// One part of a document.
 pub enum Block {
     Headline(Headline),
+    /// Where each node of the run stands, under the headline.
+    Furrow(Furrow),
+    /// The page's gist, under the headline.
+    Gist(Gist),
     Fields(Fields),
     /// Rows under named columns; a run's nodes are one.
     Table(Table),
@@ -35,6 +72,8 @@ pub enum Block {
     Heading(String),
     Section(Section),
     Prose(Prose),
+    /// A remark beside what the page says.
+    Note(Note),
     /// Text already written as Markdown — a planner's description, a
     /// reviewer's detail — which a file keeps as written and a terminal
     /// reads as prose and code.
@@ -61,6 +100,8 @@ macro_rules! block_from {
 
 block_from!(
     Headline(Headline),
+    Furrow(Furrow),
+    Gist(Gist),
     Fields(Fields),
     Table(Table),
     Evidence(Evidence),
@@ -71,6 +112,7 @@ block_from!(
     Next(Next),
     Section(Section),
     Prose(Prose),
+    Note(Note),
     Marked(Marked),
     Concern(Concern),
     Diagram(crate::diagram::Diagram),
@@ -101,7 +143,18 @@ impl Doc {
         self
     }
 
+    /// This document with each of `blocks` after what it says so far.
+    pub fn with_all(mut self, blocks: impl IntoIterator<Item = Block>) -> Self {
+        self.blocks.extend(blocks);
+        self
+    }
+
     pub fn blocks(&self) -> &[Block] {
         &self.blocks
+    }
+
+    /// What this document says, as blocks another document can hold.
+    pub fn into_blocks(self) -> Vec<Block> {
+        self.blocks
     }
 }

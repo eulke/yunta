@@ -18,6 +18,8 @@ mod fields;
 mod headline;
 mod markdown;
 mod next;
+pub(in crate::surface) use next::{NEXT, OR};
+mod page;
 mod table;
 
 /// A terminal stream, by how its lines look.
@@ -31,15 +33,38 @@ impl Terminal {
         Terminal { look }
     }
 
-    /// `doc` laid out for this stream, unpainted. It opens on what it
-    /// says: the blank line a section keeps above itself is room between
-    /// two things, and there is nothing above the first.
+    /// `doc` laid out for this stream, unpainted, in the rhythm a page
+    /// keeps: a blank line between two blocks, except the furrow and the
+    /// gist, which hang from the headline, and a block under a heading,
+    /// which hangs from it. It opens on what it says: there is nothing
+    /// above the first line, and no blank line is doubled.
     pub fn lines(&self, doc: &Doc) -> Vec<Line> {
-        doc.blocks()
+        let mut lines: Vec<Line> = Vec::new();
+        let mut headed = false;
+        for block in doc.blocks() {
+            let mut drawn = self.block(block);
+            // What hangs from a heading starts on the line under it.
+            if headed && drawn.first().is_some_and(|line| line.text().is_empty()) {
+                drawn.remove(0);
+            }
+            let Some(first) = drawn.first() else {
+                continue;
+            };
+            let hangs = headed || matches!(block, Block::Furrow(_) | Block::Gist(_));
+            let spaced =
+                first.text().is_empty() || lines.last().is_none_or(|line| line.text().is_empty());
+            if !hangs && !spaced {
+                lines.push(Line::new());
+            }
+            lines.extend(drawn);
+            headed = matches!(block, Block::Heading(_));
+        }
+        let opens = lines
             .iter()
-            .flat_map(|block| self.block(block))
-            .skip_while(|line| line.text().is_empty())
-            .collect()
+            .position(|line| !line.text().is_empty())
+            .unwrap_or(lines.len());
+        lines.drain(..opens);
+        lines
     }
 
     /// Each of `blocks` laid out for this stream, in order.
@@ -52,6 +77,8 @@ impl Terminal {
         let look = &self.look;
         match block {
             Block::Headline(block) => block.lines(look),
+            Block::Furrow(block) => block.lines(look),
+            Block::Gist(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
             Block::Table(block) => block.lines(look),
             Block::Evidence(block) => block.lines(look),
@@ -60,13 +87,13 @@ impl Terminal {
             Block::Decision(block) => block.lines(look),
             Block::Checklist(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
-            Block::Heading(title) => vec![
-                Line::new(),
-                Line::new().plain(INDENT).push(Tone::Strong, title.as_str()),
-            ],
+            Block::Heading(title) => {
+                vec![Line::new(), Line::new().push(Tone::Muted, title.as_str())]
+            }
             Block::Title(title) => vec![title.clone()],
             Block::Section(section) => self.section(section),
             Block::Prose(block) => block.lines(look),
+            Block::Note(block) => block.lines(look),
             Block::Markdown(text) => self.markdown(text),
             Block::Marked(block) => block.lines(look),
             Block::Concern(block) => block.lines(look),
@@ -115,26 +142,42 @@ impl Terminal {
                 .within(self.look.width.cells().saturating_sub(cell_width(INDENT))),
             ..self.look
         });
-        let title = match section.mark {
+        // A title wider than the line goes on under itself, past its mark.
+        let lead = match section.mark {
             Some(mark) => Line::new()
                 .push(Tone::of(mark), self.look.glyphs.mark(mark).to_string())
-                .plain(" ")
-                .then(section.title.clone()),
-            None => section.title.clone(),
+                .plain(" "),
+            None => Line::new(),
         };
-        let mut lines = vec![Line::new(), title.under(INDENT)];
-        lines.extend(
-            section
-                .blocks
-                .iter()
-                .flat_map(|block| inner.block(block))
-                // A blank line stays blank: a margin on it is trailing
-                // space a reader cannot see and a diff can.
-                .map(|line| match line.text().is_empty() {
-                    true => line,
-                    false => line.under(INDENT),
-                }),
-        );
+        let hang = " ".repeat(cell_width(&lead.text()));
+        let room = inner.look.width.cells().saturating_sub(cell_width(&hang));
+        let mut lines = vec![Line::new()];
+        for (at, part) in section.title.wrap(room).into_iter().enumerate() {
+            let part = match at {
+                0 => lead.clone().then(part),
+                _ => part.under(&hang),
+            };
+            lines.push(part.under(INDENT));
+        }
+        let mut after_section = false;
+        for block in &section.blocks {
+            let drawn = inner.block(block);
+            let Some(first) = drawn.first() else {
+                continue;
+            };
+            // A section inside this one ends a block of its own: what
+            // follows it stands apart from it.
+            if after_section && !first.text().is_empty() {
+                lines.push(Line::new());
+            }
+            // A blank line stays blank: a margin on it is trailing space a
+            // reader cannot see and a diff can.
+            lines.extend(drawn.into_iter().map(|line| match line.text().is_empty() {
+                true => line,
+                false => line.under(INDENT),
+            }));
+            after_section = matches!(block, Block::Section(_));
+        }
         lines
     }
 }

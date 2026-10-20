@@ -24,6 +24,8 @@ impl Table {
                 Holds::State => Standing::WIDEST,
                 Holds::Id => id_column(held(at)).min(width / 3),
                 Holds::Words => id_column(held(at)),
+                // A figure stands under its title, which says what it counts.
+                Holds::Figure => id_column(held(at)).max(cell_width(column.title)),
                 Holds::Rest => 0,
             })
             .collect();
@@ -103,6 +105,11 @@ impl Table {
             let width = widths[at];
             let fitted = match column.holds {
                 Holds::Id => middle_cut(&cell.text, width, look.glyphs),
+                Holds::Figure => format!(
+                    "{}{}",
+                    " ".repeat(width.saturating_sub(cell_width(&cell.text))),
+                    cell.text
+                ),
                 Holds::State | Holds::Words | Holds::Rest => {
                     truncate(&cell.text, width, look.glyphs)
                 }
@@ -120,9 +127,32 @@ impl Table {
 impl Table {
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let widths = self.widths(look.width.cells());
-        self.rows
+        let mut lines: Vec<Line> = self.header(&widths).into_iter().collect();
+        lines.extend(self.rows.iter().map(|row| self.row(row, &widths, look)));
+        lines
+    }
+
+    /// The titles over a table of figures, each over its column: what a
+    /// figure counts is not in the figure. `None` for a table of words.
+    fn header(&self, widths: &[usize]) -> Option<Line> {
+        if !self
+            .columns
             .iter()
-            .map(|row| self.row(row, &widths, look))
-            .collect()
+            .any(|column| column.holds == Holds::Figure)
+        {
+            return None;
+        }
+        let mut header = " ".repeat(cell_width(INDENT) + self.mark_width());
+        for (at, (column, width)) in self.columns.iter().zip(widths).enumerate() {
+            if at > 0 {
+                header.push_str(&" ".repeat(self.gap(at)));
+            }
+            let room = width.saturating_sub(cell_width(column.title));
+            header.push_str(&match column.holds {
+                Holds::Figure => format!("{}{}", " ".repeat(room), column.title),
+                _ => format!("{}{}", column.title, " ".repeat(room)),
+            });
+        }
+        Some(Line::new().push(Tone::Muted, header.trim_end()))
     }
 }

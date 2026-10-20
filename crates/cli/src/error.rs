@@ -28,6 +28,18 @@ pub enum Outcome {
     Code(u8),
 }
 
+impl Outcome {
+    /// The code the process exits with: 0 for a job done, 1 for a failing
+    /// verdict, and a code the outcome names as itself.
+    pub(crate) fn code(self) -> u8 {
+        match self {
+            Outcome::Success => 0,
+            Outcome::Reported => 1,
+            Outcome::Code(code) => code,
+        }
+    }
+}
+
 /// Everything a subcommand can fail with, phrased so its `Display` names
 /// what went wrong and what to do. `main` turns it into one line on
 /// stderr and a failing exit code — the only place the CLI writes an

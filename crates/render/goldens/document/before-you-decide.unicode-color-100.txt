@@ -7,6 +7,7 @@
       ␛[33m▲␛[0m `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
         ␛[2mso          ␛[0m it passes once `greet` is done, whatever this task does
         ␛[2mfix         ␛[0m judge the task by a test of its own
+
     ␛[2m◌␛[0m handed over 16 times; refused 15: criterion-already-passes ×12, shared-criterion ×3
     ␛[2m◌␛[0m 2 of 3 changes show no code
     ␛[2m◌␛[0m nothing but the suite checks 1 promise the tasks keep

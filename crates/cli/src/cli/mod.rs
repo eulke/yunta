@@ -27,8 +27,10 @@ pub struct Cli {
     pub(crate) color: surco::paint::ColorWhen,
 }
 
+mod depth;
 mod dispatch;
 
+use depth::DepthArg;
 use dispatch::dispatch;
 
 impl Cli {
@@ -111,13 +113,15 @@ enum Command {
         /// Prints the derived state as one versioned JSON document
         /// instead of the human view — the same DTO the control plane's
         /// `workflow_status` returns.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["full", "dig"])]
         json: bool,
         /// Shows one node whole: its whole failure or what its agent said,
         /// the end of what it printed and where all of it is, and what it
         /// produced.
-        #[arg(long, value_name = "id", conflicts_with = "json")]
+        #[arg(long, value_name = "id", conflicts_with_all = ["json", "full", "dig"])]
         node: Option<yunta_core::NodeId>,
+        #[command(flatten)]
+        depth: DepthArg,
     },
     /// Resume a run from its event log.
     ///

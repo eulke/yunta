@@ -1,0 +1,9 @@
+␛[33m▲␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[33mreported␛[0m␛[2m · in 7m41s␛[0m␛[2m · 32m10s ago␛[0m                                           7E5PH4
+␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
+  finished holding 1 blocking finding.
+
+  ␛[2mprogress    ␛[0m 2 of 2 nodes done
+
+␛[2mnext␛[0m
+  ␛[1myunta receipt 7E5PH4      ␛[0m   ␛[2mcertifies what it did␛[0m
+  ␛[1myunta status 7E5PH4 --full␛[0m   ␛[2mthe whole story, node by node␛[0m

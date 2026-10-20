@@ -175,6 +175,7 @@ mod tests {
             Claim::NeedsDecision { node: NODE },
             Menu::Gate(AuthorGate {
                 assignee: "lead".to_string(),
+                node: None,
             }),
             NonEmpty::from((
                 proceed,

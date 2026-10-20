@@ -7,10 +7,122 @@
 //! it said `nodes 0/2 · 1 fail` left a reader to work out which was
 //! right.
 
-use surco::glyphs::Glyphs;
+use std::collections::BTreeMap;
+
+use surco::glyphs::{Glyphs, Mark};
 use surco::text::counted;
 use surco::words::Standing;
+use yunta_core::events::{TaskLedger, TaskStatus};
 use yunta_engine::{Counter, RunFrame, TaskCounter};
+
+/// How many names a row of a page says before it counts the rest: enough
+/// to recognise a place by, few enough that the row stays one row. Every
+/// name is in the table `--full` draws.
+const NAMES: usize = 3;
+
+/// How far a run has come, as its page's `progress` row says it: the
+/// nodes done of the ones this run will do, what narrowed that total, and
+/// the re-routes that grew it. Where each other node stands is said by
+/// [`places`], with its name.
+pub(crate) fn progress(frame: &RunFrame, glyphs: Glyphs) -> String {
+    let sep = glyphs.sep();
+    let flow = &frame.flow;
+    let mut text = format!(
+        "{} of {} done",
+        flow.of(Standing::Finished),
+        counted(flow.total, "node")
+    );
+    if let Some(mode) = &flow.skipped_by {
+        text.push_str(&format!(" {sep} {} skipped by `{mode}`", flow.skipped));
+    }
+    if flow.left_out > 0 {
+        text.push_str(&format!(" {sep} {} left out", flow.left_out));
+    }
+    if frame.reroutes > 0 {
+        text.push_str(&format!(" {sep} {}", counted(frame.reroutes, "reroute")));
+    }
+    text
+}
+
+/// Every place the run's nodes stand in, as a page's `nodes` rows say
+/// them: the mark, how many stand there, the word, and the first of their
+/// names. In the furrow's order: what the run left behind, where it is
+/// now, what is ahead of it. Nothing when every node finished, which the
+/// progress row already says.
+pub(crate) fn places(frame: &RunFrame) -> Vec<(Mark, String)> {
+    let mut places: BTreeMap<(u8, Standing), Vec<&str>> = BTreeMap::new();
+    // What the run's mode or project leaves out is not work this run will
+    // do: the progress row counts it apart.
+    for node in frame
+        .nodes
+        .iter()
+        .filter(|node| node.standing != Standing::Skipped)
+    {
+        let ahead = match node.standing {
+            Standing::Finished => 0,
+            Standing::NeverRan => 2,
+            _ => 1,
+        };
+        places
+            .entry((ahead, node.standing))
+            .or_default()
+            .push(node.id.as_str());
+    }
+    if places
+        .keys()
+        .all(|(_, standing)| *standing == Standing::Finished)
+    {
+        return Vec::new();
+    }
+    places
+        .into_iter()
+        .map(|((_, standing), names)| {
+            (
+                standing.mark(),
+                format!("{} {standing}: {}", names.len(), named(&names)),
+            )
+        })
+        .collect()
+}
+
+/// The run's tasks, as a page's `tasks` row says them: done of the total,
+/// then each status that stops or holds a task, with the tasks it holds
+/// named. `None` for a run with no tasks.
+pub(crate) fn tasks_row(frame: &RunFrame, ledger: &TaskLedger, glyphs: Glyphs) -> Option<String> {
+    let counter = frame.tasks.as_ref()?;
+    let sep = glyphs.sep();
+    let mut text = format!("{} of {} done", counter.done, counter.total);
+    for status in [TaskStatus::Failed, TaskStatus::Blocked, TaskStatus::Running] {
+        let mut held: Vec<&str> = ledger
+            .iter()
+            .filter(|(_, record)| record.status == status)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        held.sort_unstable();
+        if !held.is_empty() {
+            text.push_str(&format!(
+                " {sep} {} {}: {}",
+                held.len(),
+                status.as_str(),
+                named(&held)
+            ));
+        }
+    }
+    Some(text)
+}
+
+/// The first [`NAMES`] of `names`, and how many more there are.
+fn named(names: &[&str]) -> String {
+    let mut said: Vec<String> = names
+        .iter()
+        .take(NAMES)
+        .map(|name| name.to_string())
+        .collect();
+    if names.len() > NAMES {
+        said.push(format!("+{}", names.len() - NAMES));
+    }
+    said.join(", ")
+}
 
 /// The counters, at both levels the run has: the DAG's nodes and the
 /// run's tasks, each as finished over what this run will do, with

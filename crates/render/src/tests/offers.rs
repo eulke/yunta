@@ -43,6 +43,7 @@ fn gate(option: GateOption) -> Escalation {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         vec![option, GateOption::reserved(ReservedOption::Abort)],
     )
@@ -277,6 +278,7 @@ fn an_option_an_older_log_wrote_reads_as_the_words_it_stored() {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         vec![stored.clone()],
     )
@@ -302,6 +304,7 @@ fn an_option_no_menu_words_keeps_its_id_as_its_label() {
         },
         Menu::Gate(AuthorGate {
             assignee: "lead".into(),
+            node: None,
         }),
         vec![
             GateOption::reserved(ReservedOption::Retry),

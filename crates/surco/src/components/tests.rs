@@ -72,6 +72,7 @@ fn decision() -> Decision {
     Decision {
         chosen: Chosen::Here { commands },
         options,
+        otherwise: Vec::new(),
     }
 }
 
@@ -131,12 +132,16 @@ fn a_node_id_keeps_its_column_and_a_note_is_cut_to_the_line() {
                 word: "failed",
                 id: "review@claude-code".to_string(),
                 note: "exit 101 ".repeat(20),
+                took: String::new(),
+                spent: String::new(),
             },
             NodeRow {
                 mark: Mark::Done,
                 word: "finished",
                 id: "lint".to_string(),
                 note: String::new(),
+                took: String::new(),
+                spent: String::new(),
             },
         ],
     };
@@ -243,11 +248,11 @@ fn a_table_fits_its_line_and_cuts_what_the_line_leaves_first() {
 
 /// Every block with something to say, as one surface would put them.
 fn every_block() -> Doc {
-    let headline = Headline {
-        subject: "run 7E5PH4".to_string(),
-        mark: Mark::NeedsYou,
-        said: "needs you on a decision".to_string(),
-    };
+    let headline = Headline::new(
+        Mark::NeedsYou,
+        "run 7E5PH4".to_string(),
+        "needs you on a decision".to_string(),
+    );
     let fields = Fields::new()
         .push_if("progress", "nodes 1/2 · 1 failed")
         .push_if("tokens", "20.2k spent · 3 past runs, median 18k tokens");
@@ -258,12 +263,16 @@ fn every_block() -> Doc {
                 word: "failed",
                 id: "lint".to_string(),
                 note: "exit 101".to_string(),
+                took: String::new(),
+                spent: String::new(),
             },
             NodeRow {
                 mark: Mark::Absent,
                 word: "never ran",
                 id: "fix-lint".to_string(),
                 note: String::new(),
+                took: String::new(),
+                spent: String::new(),
             },
         ],
     };
@@ -405,7 +414,8 @@ fn a_cut_command_copies_as_one_command() {
         steps: vec![(LONG.to_string(), "runs the case")],
     };
     let drawn = draw_with(next, &look);
-    let command = copied(&drawn, cell_width(INDENT));
+    assert_eq!(drawn[0], "next", "the steps stand under their title");
+    let command = copied(&drawn[1..], cell_width(INDENT));
     let command = command.trim_end_matches("runs the case").trim_end();
     assert!(parses(command), "{command}");
     assert_eq!(command.replace(" \\\n  ", " "), LONG);

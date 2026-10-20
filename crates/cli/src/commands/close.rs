@@ -4,11 +4,9 @@
 //! settles one. Its checkouts go back to the project's pool; its branches
 //! stay for a person to read and for `gc` to remove.
 
-use surco::components::Headline;
-use surco::doc::{Block, Doc};
-use surco::line::Line;
+use surco::components::{Gist, Headline};
+use surco::doc::Doc;
 use surco::look::Look;
-use surco::width::{wrap, INDENT};
 use surco::words::Standing;
 use yunta_core::{Redactor, Responder, RunId};
 use yunta_engine::EngineLiveness;
@@ -66,22 +64,18 @@ pub(crate) struct CloseAnswer {
 }
 
 impl Answer for CloseAnswer {
-    fn document(&self, look: &Look) -> Doc {
-        let headline = Headline {
-            subject: format!("run {}", self.run_id.handle()),
-            mark: self.word.mark(),
-            said: self.word.to_string(),
-        };
-        let detail = format!(
+    fn document(&self, _look: &Look) -> Doc {
+        let headline = Headline::new(
+            self.word.mark(),
+            format!("run {}", self.run_id.handle()),
+            self.word.to_string(),
+        );
+        let gist = format!(
             "closed by {} — its checkouts went back to the project, and its branch stays until \
              `yunta gc` removes it",
             self.by
         );
-        let lines: Vec<Line> = wrap(&detail, look.width.cells().saturating_sub(INDENT.len()))
-            .into_iter()
-            .map(|line| Line::new().plain(INDENT).plain(line))
-            .collect();
-        Doc::new().with(headline).with(Block::Lines(lines))
+        Doc::new().with(headline).with(Gist::new(gist))
     }
 
     fn outcome(&self) -> Outcome {

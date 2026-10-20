@@ -247,6 +247,7 @@ fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
             Claim::Written("answer before going on".to_string()),
             Menu::Gate(AuthorGate {
                 assignee: "lead".to_string(),
+                node: None,
             }),
             NonEmpty::from((approve_option(), Vec::new())),
         ),

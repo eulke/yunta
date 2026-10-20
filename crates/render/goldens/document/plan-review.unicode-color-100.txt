@@ -1,4 +1,5 @@
 ␛[1mplan of `plan`␛[0m: 2 tasks in 2 steps, held to 1 test from its spec
+
   Greet a person by name, and say goodbye too.
 
   ␛[1mtasks␛[0m
@@ -95,4 +96,5 @@
       ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
       ␛[2m            ␛[0m the same command as the spec test of `greet`
 
+␛[2mnext␛[0m
   ␛[1myunta status 7E5PH4 --node plan␛[0m   ␛[2mthe whole plan, every file whole␛[0m

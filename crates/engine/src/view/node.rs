@@ -231,13 +231,17 @@ impl Reading<'_> {
     /// failed it would alarm a reader about a correction the workflow
     /// planned for. A node the run waits on a reset for is `waiting`, which
     /// a clock ends. A node a person is being asked about at a terminal
-    /// needs them, whatever its log says.
+    /// needs them, whatever its log says, and so does the gate a run is
+    /// parked on.
     fn word(&self, node: &NodeId, state: &NodeStanding, correcting: bool) -> Standing {
         let reset = self.pause().and_then(PauseReason::reset_wait);
         match state {
             NodeStanding::Skipped | NodeStanding::LeftOut(_) => state.word(),
             // A gate asks before its log says anything of it.
             _ if self.engine.asks_about(node) => Standing::NeedsYou,
+            NodeStanding::ToGo if self.pause().and_then(PauseReason::gate) == Some(node) => {
+                Standing::NeedsYou
+            }
             NodeStanding::Paused { .. } if reset.is_some() => Standing::Waiting,
             NodeStanding::Reached(NodeState::Failed { .. }) if correcting => Standing::Rerouted,
             NodeStanding::Reached(NodeState::Failed { .. })

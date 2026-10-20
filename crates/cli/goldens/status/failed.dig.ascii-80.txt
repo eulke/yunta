@@ -1,0 +1,21 @@
+! fragua (quick) ; failed ; after 7m41s ; 32m10s ago                      7E5PH4
+--------------------------------------------------------------------------------
+  node `lint` failed: exit 101.
+
+  ! lint
+    | error[E0425]: cannot find value `x` in this scope
+    |  --> src/lib.rs:3:5
+    whole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da
+
+              node                                                          time
+  + finished  plan  exit 0                                                   12s
+  ! failed    lint  exit 101                                                 12s
+  . never ran test
+
+  progress     1 of 3 nodes done
+  tokens       18k in / 2.2k out
+  slowest      plan 12s ; lint 12s
+  branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+  id           01K3W48MFW7H0ZZA5PZ07E5PH4
+  kept in      ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4

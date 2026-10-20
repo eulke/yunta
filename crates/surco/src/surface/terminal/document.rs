@@ -1,18 +1,30 @@
 //! Prose, marked items, code, and what a message says whole.
 
-use crate::components::{Code, Marked, Paths, Prose, Said};
+use crate::components::{Code, Marked, Note, Paths, Prose, Said};
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, indent, wrap, INDENT};
+use crate::width::{cell_width, indent, wrap, wrap_unbroken, INDENT};
 
 impl Prose {
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
-        let room = look.width.cells().saturating_sub(cell_width(INDENT));
-        wrap(&self.0, room)
-            .into_iter()
-            .map(|part| Line::new().plain(INDENT).plain(part))
-            .collect()
+        paragraph(&self.0, Tone::Plain, look)
     }
+}
+
+impl Note {
+    pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
+        paragraph(&self.0, Tone::Muted, look)
+    }
+}
+
+/// `text` in `tone`, wrapped one step in. A word is never cut: a path or a
+/// command cut in two is two things nobody can copy.
+fn paragraph(text: &str, tone: Tone, look: &Look) -> Vec<Line> {
+    let room = look.width.cells().saturating_sub(cell_width(INDENT));
+    wrap_unbroken(text, room)
+        .into_iter()
+        .map(|part| Line::new().plain(INDENT).push(tone, part))
+        .collect()
 }
 
 impl Marked {
@@ -22,7 +34,7 @@ impl Marked {
         let room = look.width.cells().saturating_sub(cell_width(&under));
         let mut lines = Vec::new();
         for item in &self.items {
-            for (at, part) in wrap(item, room).into_iter().enumerate() {
+            for (at, part) in wrap_unbroken(item, room).into_iter().enumerate() {
                 lines.push(match at {
                     0 => Line::new()
                         .plain(INDENT)

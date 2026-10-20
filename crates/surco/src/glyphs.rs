@@ -53,6 +53,17 @@ pub const ALL_MARKS: [Mark; 9] = [
 /// sets: the way a shell writes it.
 pub const HOME: char = '~';
 
+/// How far the plow has come along one node's stretch of a run's furrow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plow {
+    /// The node has stood somewhere: it ran, finished, failed or waits.
+    Plowed,
+    /// The node never ran: the stretch is still ahead.
+    Ahead,
+    /// The run leaves the node out.
+    Skipped,
+}
+
 /// The set of decorative characters a surface draws with.
 ///
 /// Nothing a reader needs rides on a glyph. Every line reads with the
@@ -250,6 +261,29 @@ impl Glyphs {
         }
     }
 
+    /// A node's stretch of a run's furrow. In ASCII each stroke means what
+    /// the same character means elsewhere: a bar's fill, the mark of what
+    /// never ran, the mark of what a run leaves out.
+    pub fn furrow(self, plow: Plow) -> char {
+        match (self, plow) {
+            (Self::Unicode, Plow::Plowed) => '━',
+            (Self::Unicode, Plow::Ahead) => '┄',
+            (Self::Unicode, Plow::Skipped) => '╌',
+            (Self::Ascii, Plow::Plowed) => '=',
+            (Self::Ascii, Plow::Ahead) => '.',
+            (Self::Ascii, Plow::Skipped) => 'o',
+        }
+    }
+
+    /// A rule across the line: the furrow where a stream has neither
+    /// color nor Unicode to tell one node's stretch from another's.
+    pub fn rule(self) -> char {
+        match self {
+            Self::Unicode => '─',
+            Self::Ascii => '-',
+        }
+    }
+
     /// The eight steps a sparkline climbs, lightest first.
     pub fn ramp(self) -> &'static [char; 8] {
         match self {
@@ -430,6 +464,7 @@ mod tests {
                 glyphs.bar_filled(),
                 glyphs.bar_empty(),
                 glyphs.continued(),
+                glyphs.rule(),
                 HOME,
             ]
             .map(String::from),

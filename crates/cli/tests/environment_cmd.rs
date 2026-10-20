@@ -40,7 +40,7 @@ fn status_says_when_a_wake_runs_commands_in_another_environment() {
     resume_with_path_gaining(&repo, &home, &run, &extra);
     // The row wraps a long sentence; what it says is read without the
     // breaks.
-    let status = stdout(&yunta_in!(&repo, &home, &["status", &run]))
+    let status = stdout(&yunta_in!(&repo, &home, &["status", &run, "--full"]))
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");

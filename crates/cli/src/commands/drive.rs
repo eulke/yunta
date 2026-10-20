@@ -356,7 +356,7 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
             home: closed.home,
         },
     });
-    let page = closing.page(closed.look);
+    let page = closing.page();
     crate::output::document(closed.look, page.document(closed.look));
     Ok(closing.outcome())
 }

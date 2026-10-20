@@ -217,7 +217,7 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
     let drawn = terminal.drawn();
     let plan = drawn.find("plan of `plan`").expect("the plan was shown");
     let question = drawn
-        .find("decision: ◆ needs you")
+        .find("◆ decision · needs you")
         .expect("the decision was put");
     assert!(
         plan < question,

@@ -85,7 +85,7 @@ fn phase_label(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
         return format!("{word} — no process is driving it");
     }
     if let (Standing::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
-        return format!("{word} — {}", advice::asking(prompt, engine.at));
+        return format!("{word} — {}", advice::asking(prompt, Some(engine.at)));
     }
     match &frame.phase {
         // A parked run is waiting on a person, not stuck, and what it is

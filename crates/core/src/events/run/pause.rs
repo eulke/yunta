@@ -87,6 +87,16 @@ impl PauseReason {
         }
     }
 
+    /// The gate a run parked on this pause waits on, when the pause names
+    /// one: a gate nobody answered has written nothing of its own, so its
+    /// pause is where the log names it.
+    pub fn gate(&self) -> Option<&NodeId> {
+        match self {
+            PauseReason::Escalation(escalation) => escalation.gate(),
+            _ => None,
+        }
+    }
+
     /// Whether a person stopped the run: a cancel, before or after the
     /// engine that drove it died, a gate answered with a pause, or a child
     /// run stopped that way. Nobody owes an answer; a resume continues it.
@@ -122,6 +132,7 @@ mod tests {
             Claim::Written("the gate waits".to_string()),
             Menu::Gate(AuthorGate {
                 assignee: "lead".into(),
+                node: None,
             }),
             crate::NonEmpty::from((option, Vec::new())),
         );

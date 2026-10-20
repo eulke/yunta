@@ -106,7 +106,7 @@ fn a_gate_that_withholds_says_why_between_its_question_and_what_is_left() {
         "the menu offers only what sends the plan back or stops the run:\n{drawn}"
     );
     let question = drawn
-        .rfind("decision: ◆ needs you")
+        .rfind("◆ decision · needs you")
         .expect("the decision was put");
     let before = &drawn[question..];
     assert!(

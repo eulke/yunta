@@ -31,6 +31,8 @@ impl Surface for Markdown {
             .map(|(at, drawn)| match (at, drawn) {
                 // A document's first headline is its title.
                 (0, Block::Headline(headline)) => format!("# {}", said(headline)),
+                // The furrow is a picture of what the facts below say in words.
+                (_, Block::Furrow(_)) => String::new(),
                 (_, Block::Title(title)) => format!("# {}", title.text().trim()),
                 _ => block(drawn, 0),
             })
@@ -46,24 +48,27 @@ impl Surface for Markdown {
 /// One block, `depth` sections deep.
 fn block(block: &Block, depth: usize) -> String {
     match block {
-        Block::Headline(headline) => crate::surface::markdown::headline(headline),
-        Block::Fields(fields) => crate::surface::markdown::fields(fields),
-        Block::Table(table) => crate::surface::markdown::table(table),
-        Block::Evidence(evidence) => crate::surface::markdown::evidence(evidence),
+        Block::Headline(headline) => self::headline(headline),
+        Block::Furrow(_) => String::new(),
+        Block::Gist(gist) => gist.0.clone(),
+        Block::Fields(fields) => self::fields(fields),
+        Block::Table(table) => self::table(table),
+        Block::Evidence(evidence) => self::evidence(evidence),
         Block::Said(said) => said.0.join("  \n"),
-        Block::Paths(paths) => crate::surface::markdown::paths(paths),
-        Block::Decision(decision) => crate::surface::markdown::decision(decision),
-        Block::Checklist(list) => crate::surface::markdown::checklist(list),
-        Block::Next(next) => crate::surface::markdown::next(next),
+        Block::Paths(paths) => self::paths(paths),
+        Block::Decision(decision) => self::decision(decision),
+        Block::Checklist(list) => self::checklist(list),
+        Block::Next(next) => self::next(next),
         Block::Heading(title) => format!("{} {title}", "#".repeat(3 + depth)),
         Block::Title(title) => format!("# {}", title.text().trim()),
-        Block::Section(section) => crate::surface::markdown::section(section, depth),
+        Block::Section(section) => self::section(section, depth),
         Block::Prose(prose) => prose.0.clone(),
+        Block::Note(note) => format!("_{}_", note.0),
         Block::Markdown(text) => text.trim().to_string(),
-        Block::Marked(marked) => crate::surface::markdown::marked(marked),
-        Block::Concern(concern) => crate::surface::markdown::concern(concern),
+        Block::Marked(marked) => self::marked(marked),
+        Block::Concern(concern) => self::concern(concern),
         Block::Diagram(diagram) => format!("```mermaid\n{}\n```", diagram.source),
-        Block::Code(code) => crate::surface::markdown::code(code),
+        Block::Code(code) => self::code(code),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
 }
@@ -72,27 +77,41 @@ fn headline(headline: &Headline) -> String {
     format!("## {}", said(headline))
 }
 
-/// What a headline says: its subject, and its mark beside its word.
+/// What a headline says: its mark, its subject, its word and the facts
+/// beside it, and what names it.
 fn said(headline: &Headline) -> String {
-    format!(
-        "{}: {} {}",
-        headline.subject,
+    let sep = GLYPHS.sep();
+    let mut said = format!(
+        "{} {} {sep} {}",
         GLYPHS.mark(headline.mark),
+        headline.subject,
         headline.said
-    )
+    );
+    for fact in headline.facts.iter().chain(&headline.edge) {
+        said.push_str(&format!(" {sep} {fact}"));
+    }
+    said
 }
 
 fn fields(fields: &Fields) -> String {
     let mut items: Vec<String> = Vec::new();
-    for (label, value, tone) in fields.rows() {
-        let value = match tone {
-            Tone::Command => format!("`{value}`"),
-            _ => value.to_string(),
+    let mut above = None;
+    for field in fields.rows() {
+        let value = match field.tone {
+            Tone::Command => format!("`{}`", field.value),
+            _ => field.value.clone(),
         };
-        // A row with no label goes on saying what the row above it says.
-        match (label.is_empty(), items.last_mut()) {
+        let value = match field.mark {
+            Some(mark) => format!("{} {value}", GLYPHS.mark(mark)),
+            None => value,
+        };
+        // A row with no label, or the label of the row above it, goes on
+        // saying what that row says.
+        let goes_on = field.label.is_empty() || above == Some(field.label);
+        above = Some(field.label);
+        match (goes_on, items.last_mut()) {
             (true, Some(item)) => item.push_str(&format!("  \n  {value}")),
-            _ => items.push(format!("- {label}: {value}")),
+            _ => items.push(format!("- {}: {value}", field.label)),
         }
     }
     items.join("\n")
@@ -168,7 +187,7 @@ fn table(table: &Table) -> String {
         for (at, (said, column)) in row.cells.iter().zip(&table.columns).enumerate() {
             let mut said = match column.holds {
                 Holds::Id => format!("`{}`", said.text),
-                Holds::State | Holds::Words | Holds::Rest => cell(&said.text),
+                Holds::State | Holds::Words | Holds::Figure | Holds::Rest => cell(&said.text),
             };
             if let (0, Some(mark)) = (at, row.mark) {
                 said = format!("{} {said}", GLYPHS.mark(mark));
@@ -212,7 +231,7 @@ fn paths(paths: &Paths) -> String {
 }
 
 fn decision(decision: &Decision) -> String {
-    decision
+    let options = decision
         .options
         .iter()
         .map(|option| {
@@ -232,7 +251,15 @@ fn decision(decision: &Decision) -> String {
             out
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    match decision.otherwise.is_empty() {
+        true => options,
+        false => format!(
+            "{options}\n\n{}\n\n{}",
+            crate::surface::terminal::OR,
+            steps(&decision.otherwise)
+        ),
+    }
 }
 
 fn checklist(list: &Checklist) -> String {
@@ -249,7 +276,19 @@ fn checklist(list: &Checklist) -> String {
 }
 
 fn next(next: &Next) -> String {
-    next.steps
+    if next.steps.is_empty() {
+        return String::new();
+    }
+    format!(
+        "**{}**\n\n{}",
+        crate::surface::terminal::NEXT,
+        steps(&next.steps)
+    )
+}
+
+/// Each command beside what it does, one to an item.
+fn steps(steps: &[(String, &'static str)]) -> String {
+    steps
         .iter()
         .map(|(command, gloss)| format!("- `{command}` — {gloss}"))
         .collect::<Vec<_>>()

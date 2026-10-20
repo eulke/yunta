@@ -1,6 +1,8 @@
 # plan of run 7E5PH4
 
-## run 7E5PH4: ◆ needs you on a decision
+## ◆ fragua (standard) · needs you · for 32m10s · 7E5PH4
+
+approve-plan asks you to approve the plan before anything is built.
 
 The run plans the change, asks before it builds, and builds what you approve.
 
@@ -52,9 +54,9 @@ pub fn greet() {}
 |---|---|---|
 | ● 1 | `cli-global` | Global and project flags |
 
-| | node | |
-|---|---|---|
-| ✓ finished | `plan` | 4 tasks |
+| | node | | time | tokens |
+|---|---|---|---|---|
+| ✓ finished | `plan` | 4 tasks | 1m31s | 1.94M |
 
 a line a page composed itself
 
@@ -66,6 +68,14 @@ a line a page composed itself
   asks: what to change  
   `yunta resolve-gate 7E5PH4 adjust --text "<answer>"`
 
+or
+
+- `yunta close 7E5PH4` — closes it for good
+
+_the run holds its own state on disk._
+
 - tokens: 20.2k spent
+
+**next**
 
 - `yunta status 7E5PH4` — where it stands

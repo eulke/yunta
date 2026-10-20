@@ -1,4 +1,4 @@
-# run 7E5PH4: ◆ needs you on a decision
+# ◆ run 7E5PH4 · needs you on a decision
 
 | | node | |
 |---|---|---|
@@ -31,6 +31,8 @@ error[E0425]: cannot find value `undefined_variable_name` in this scope, reporte
 
 - progress: nodes 1/2 · 1 failed
 - tokens: 20.2k spent · 3 past runs, median 18k tokens
+
+**next**
 
 - `yunta status 7E5PH4` — where it stands
 - `yunta close 7E5PH4` — closes it for good

@@ -87,9 +87,7 @@ fn exit_status(
     look: &surco::look::Look,
 ) -> ExitCode {
     match outcome {
-        Ok(Outcome::Success) => ExitCode::SUCCESS,
-        Ok(Outcome::Code(code)) => ExitCode::from(code),
-        Ok(Outcome::Reported) => FAILED,
+        Ok(outcome) => ExitCode::from(outcome.code()),
         Err(error) => {
             output::refused(&error, mode, look);
             FAILED

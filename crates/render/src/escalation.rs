@@ -241,6 +241,7 @@ mod tests {
             },
             Menu::Gate(AuthorGate {
                 assignee: "lead".to_string(),
+                node: None,
             }),
         );
         assert_eq!(evidence(&gate), vec!["assignee: lead"]);
@@ -314,6 +315,7 @@ mod tests {
             },
             Menu::Gate(AuthorGate {
                 assignee: "lead".to_string(),
+                node: None,
             }),
             NonEmpty::from((
                 GateOption::reserved(ReservedOption::Abort),

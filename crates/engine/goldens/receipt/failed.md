@@ -1,4 +1,4 @@
-# receipt for run 1-0001: ✗ failed
+# ✗ receipt for run 1-0001 · failed
 
 - workflow: release-cycle
 - mode: default
@@ -18,5 +18,7 @@
 - ✓ **T001** `test -f hello.txt` exits 0
 - ✓ **T002** `cargo test -p yunta-core` exits 0
 - ✓ **T002** `cargo clippy --workspace -- -D warnings` exits 0
+
+**next**
 
 - `yunta verify 1-0001` — checks this run's evidence again

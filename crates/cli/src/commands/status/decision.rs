@@ -26,20 +26,20 @@
 
 use std::path::Path;
 
-use surco::components::DecisionOption;
+use surco::components::{Decision, DecisionOption, Gist, Note, Prose, Section};
+use surco::doc::Block;
+use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
-use surco::look::{Look, Width};
-use surco::width::{cell_width, indent, wrap, INDENT};
 use yunta_core::events::GateWaitingPayload;
-use yunta_core::{NodeId, RunId};
-use yunta_engine::ShownDocument;
+use yunta_core::RunId;
 use yunta_render::escalation;
 
 use crate::commands::advice;
+use crate::run_page::Decided;
 
 /// Where a run works, as the page says it above a decision: the path
-/// whole — it is copied into another terminal, never wrapped — and what
-/// it means for a decision about the run.
+/// whole — it is copied into another terminal, never cut — and what it
+/// means for a decision about the run.
 pub(crate) fn run_tree_line(tree: &Path) -> String {
     surco::text::detailed(
         "the run works in",
@@ -51,92 +51,66 @@ pub(crate) fn run_tree_line(tree: &Path) -> String {
 }
 
 /// What the surface showing a decision says beside it already.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Beside {
-    /// The claim the escalation makes — a page whose second line is the
-    /// run's pause already said it.
+    /// The claim the escalation makes — a page that asks with the run's
+    /// pause already said it.
     pub(crate) claim: bool,
     /// The record the engine attached — a page that quotes a failed
     /// node's evidence already shows it.
     pub(crate) evidence: bool,
 }
 
-/// The lines a decision reads as: what it is on, what it is about, what
-/// weighs on it, and every option with what it costs and the command that
-/// chooses it.
-pub(crate) fn lines(
-    (run_id, node): (&RunId, &NodeId),
-    escalation: &GateWaitingPayload,
-    shown: &[ShownDocument],
-    beside: Beside,
-    look: &Look,
-) -> Vec<Line> {
-    let mut lines = vec![Line::new()
-        .plain(INDENT)
-        .push(Tone::Strong, format!("decision on node `{node}`"))];
-    lines.extend(account(escalation, beside, 2, look));
+/// The decision a parked run waits on, as the section a page ends on:
+/// what the decision says happened and what it is about — less what the
+/// page says beside it — what weighs on it, every option with the command
+/// that chooses it, and `otherwise`: what moves the run without choosing
+/// one.
+pub(crate) fn section(
+    run_id: &RunId,
+    decided: &Decided,
+    otherwise: Vec<(String, &'static str)>,
+) -> Section {
+    let escalation = &decided.escalation;
+    let mut blocks = account(escalation, decided.beside);
     for shown in escalation.shows() {
         let about = format!("about: {}", yunta_engine::view_of(shown).display());
-        lines.extend(under(&about, Tone::Plain, 2, look));
+        blocks.push(Prose(about).into());
     }
     if let Some(external_ref) = escalation.external_ref() {
-        lines.extend(under(
-            &format!("published at {external_ref}"),
-            Tone::Plain,
-            2,
-            look,
-        ));
+        blocks.push(Prose(format!("published at {external_ref}")).into());
     }
-    let before = before_you_decide(escalation, shown, look);
-    if !before.is_empty() {
-        // What weighs on the decision ends a block of its own, apart from
-        // the options it weighs on.
-        lines.extend(before);
-        lines.push(Line::new());
+    if let Some(before) =
+        yunta_render::shown::before_you_decide(escalation.withheld(), &decided.shown)
+    {
+        blocks.push(before.into());
     }
-    lines.extend(menu(run_id, escalation, look));
-    lines
+    let mut menu = menu(run_id, escalation);
+    menu.otherwise = otherwise;
+    blocks.push(menu.into());
+    Section {
+        mark: Some(Mark::NeedsYou),
+        title: Line::new().push(Tone::Strong, format!("decision on node `{}`", decided.node)),
+        blocks,
+    }
 }
 
-/// What weighs on a decision, said between its question and its options:
-/// what the gate does not offer and why, and what a person should know
-/// of what it shows. Nothing, with a blank line above it, when there is
-/// nothing to say.
-pub(crate) fn before_you_decide(
-    escalation: &GateWaitingPayload,
-    shown: &[ShownDocument],
-    look: &Look,
-) -> Vec<Line> {
-    let Some(before) = yunta_render::shown::before_you_decide(escalation.withheld(), shown) else {
-        return Vec::new();
-    };
-    let mut lines = vec![Line::new()];
-    lines.extend(crate::render::surface_lines(
-        surco::doc::Doc::new().with(before),
-        look,
-    ));
-    lines
-}
-
-/// What a decision says happened, `depth` steps under its heading: the
-/// claim, and the record the engine attached to audit it against — less
-/// what the surface already says beside it.
-pub(crate) fn account(
-    escalation: &GateWaitingPayload,
-    beside: Beside,
-    depth: usize,
-    look: &Look,
-) -> Vec<Line> {
-    let mut lines = Vec::new();
+/// What a decision says happened, less what the surface showing it says
+/// beside it: the claim, and the record the engine attached to audit it
+/// against.
+pub(crate) fn account(escalation: &GateWaitingPayload, beside: Beside) -> Vec<Block> {
+    let mut blocks: Vec<Block> = Vec::new();
     if !beside.claim {
-        lines.extend(under(&claim_words(escalation), Tone::Plain, depth, look));
+        blocks.push(Gist::new(claim_words(escalation)).into());
     }
     if !beside.evidence {
-        for fact in escalation::evidence(escalation) {
-            lines.extend(under(&fact, Tone::Muted, depth, look));
-        }
+        blocks.extend(
+            escalation::evidence(escalation)
+                .into_iter()
+                .map(|fact| Note(fact).into()),
+        );
     }
-    lines
+    blocks
 }
 
 /// The claim of a decision in the words a reader sees: what the escalation
@@ -145,20 +119,9 @@ pub(crate) fn claim_words(escalation: &GateWaitingPayload) -> String {
     yunta_render::claim::sentence(escalation.summary(), escalation.failure())
 }
 
-/// `text` in `tone`, wrapped `depth` steps in.
-fn under(text: &str, tone: Tone, depth: usize, look: &Look) -> Vec<Line> {
-    let margin = indent(depth);
-    let room = look.width.cells().saturating_sub(cell_width(&margin));
-    wrap(text, room)
-        .into_iter()
-        .filter(|line| !line.is_empty())
-        .map(|line| Line::new().plain(margin.as_str()).push(tone, line))
-        .collect()
-}
-
-/// Every option of a decision, one step in: what it costs and the
-/// command that chooses it.
-fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Line> {
+/// Every option of a decision: what it costs and the command that
+/// chooses it.
+fn menu(run_id: &RunId, escalation: &GateWaitingPayload) -> Decision {
     let options = escalation
         .options()
         .iter()
@@ -172,60 +135,7 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
             }
         })
         .collect();
-    let menu = yunta_render::blocks::decision::here(run_id, options, &advice::spell);
-    let within = Look {
-        width: Width::of(Some(look.width.cells().saturating_sub(INDENT.len())), None),
-        ..*look
-    };
-    crate::render::block_lines(menu, &within)
-        .into_iter()
-        .map(|line| line.under(INDENT))
-        .collect()
-}
-
-/// The lines `yunta status` shows for a run parked on something with no
-/// menu: what it waits on, that nothing here is answerable by choosing
-/// an option, and what moves the run instead, wrapped to `width` cells.
-/// A run waiting on a limit's reset moves on its own, so the lines say
-/// that and name no command.
-pub(crate) fn without_menu(
-    run_id: &RunId,
-    reason: &str,
-    awaits_reset: bool,
-    width: usize,
-) -> Vec<Line> {
-    let mut lines = vec![Line::new().plain("waiting on:")];
-    lines.extend(paragraph(reason, 1, width));
-    if awaits_reset {
-        lines.extend(paragraph(
-            "nothing here needs a choice: the run resumes on its own once the limit resets.",
-            1,
-            width,
-        ));
-        return lines;
-    }
-    lines.extend(paragraph(
-        "no options to choose here: a menu is reconstructed for a failed node, \
-         an exhausted re-route and an unresolved gate node, and this pause is \
-         none of them. Resolve it where it was raised — a budget, a scope, an \
-         answers file, a review on the forge — then hand the run back with:",
-        1,
-        width,
-    ));
-    lines.push(Line::new().plain(format!("{}{}", indent(2), advice::resume(run_id.handle()))));
-    lines
-}
-
-/// `text` as whole lines `depth` steps in, each one inside `width`
-/// cells. Text with no words in it draws nothing.
-fn paragraph(text: &str, depth: usize, width: usize) -> Vec<Line> {
-    let margin = indent(depth);
-    let room = width.saturating_sub(cell_width(&margin));
-    wrap(text, room)
-        .into_iter()
-        .filter(|line| !line.is_empty())
-        .map(|line| Line::new().plain(format!("{margin}{line}")))
-        .collect()
+    yunta_render::blocks::decision::here(run_id, options, &advice::spell)
 }
 
 #[cfg(test)]
@@ -237,7 +147,10 @@ mod tests {
     use yunta_core::NonEmpty;
 
     use super::*;
-    use surco::doc::{Block, Doc};
+    use surco::doc::Doc;
+    use surco::look::Look;
+    use surco::width::cell_width;
+    use yunta_core::NodeId;
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const NODE: NodeId = NodeId::from_static("lint");
@@ -275,6 +188,7 @@ mod tests {
             Claim::NeedsDecision { node: NODE },
             Menu::Gate(AuthorGate {
                 assignee: "lead".to_string(),
+                node: None,
             }),
             NonEmpty::from((GateOption::reserved(ReservedOption::Approve), Vec::new())),
         )
@@ -288,13 +202,14 @@ mod tests {
 
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
         let look = Look::plain();
-        let doc = Doc::new().with(Block::Lines(lines(
-            (&RUN, &NODE),
-            escalation,
-            &[],
+        let decided = Decided {
+            node: NODE,
+            escalation: escalation.clone(),
+            shown: Vec::new(),
             beside,
-            &look,
-        )));
+        };
+        let close = (advice::close(RUN.handle()), "closes it for good");
+        let doc = Doc::new().with(section(&RUN, &decided, vec![close]));
         crate::render::surface_lines(doc, &look)
             .iter()
             .map(Line::text)
@@ -332,9 +247,11 @@ mod tests {
 
     #[test]
     fn what_a_page_already_says_beside_a_decision_is_not_said_twice() {
+        // The record is said under the claim, a fact to a line.
+        let quoted = |line: &String| line.trim() == "exit 1";
         let all = drawn(&escalation(), NOTHING_BESIDE);
         assert!(all.iter().any(|line| line.contains("are exhausted")));
-        assert!(all.iter().any(|line| line.trim() == "exit 1"));
+        assert!(all.iter().any(quoted), "{all:#?}");
         let page = drawn(
             &escalation(),
             Beside {
@@ -345,7 +262,7 @@ mod tests {
         assert!(
             !page
                 .iter()
-                .any(|line| line.contains("are exhausted") || line.trim() == "exit 1"),
+                .any(|line| line.contains("are exhausted") || quoted(line)),
             "{page:#?}"
         );
     }
@@ -367,17 +284,18 @@ mod tests {
     }
 
     #[test]
-    fn a_reset_pause_with_no_menu_says_the_run_resumes_on_its_own() {
-        let run = RunId::from_static("run-1");
-        let lines = without_menu(&run, "node `build` waits for its limit to reset", true, 80);
-        let text: String = lines
+    fn what_moves_the_run_without_an_option_comes_after_every_option() {
+        let drawn = drawn(&escalation(), NOTHING_BESIDE);
+        let or = drawn.iter().position(|line| line.trim() == "or");
+        let abort = drawn
             .iter()
-            .map(|line| format!("{}\n", line.text()))
-            .collect();
-        assert!(text.contains("resumes on its own"), "{text}");
+            .position(|line| line.trim() == "yunta resolve-gate T1Y0P5 abort");
+        assert!(or > abort && abort.is_some(), "{drawn:#?}");
         assert!(
-            !text.contains("yunta resume"),
-            "no command is asked of the person: {text}"
+            drawn
+                .last()
+                .is_some_and(|line| line.contains("yunta close T1Y0P5")),
+            "{drawn:#?}"
         );
     }
 }

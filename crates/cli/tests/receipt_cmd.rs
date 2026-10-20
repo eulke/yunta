@@ -46,7 +46,7 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     let drawn = stdout(&receipt_out);
     let handle = yunta_testkit::handle(&run_id);
     assert!(
-        drawn.starts_with(&format!("receipt for run {handle}: ✓ finished")),
+        drawn.starts_with(&format!("✓ receipt for run {handle} · finished")),
         "{drawn}"
     );
     // A bash-only workflow has no tasks at all, and nothing to prove is
@@ -69,7 +69,7 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     let run_dir = home.join("runs").join(&run_id);
     let written_md = std::fs::read_to_string(run_dir.join("receipt.md")).unwrap();
     assert!(
-        written_md.starts_with(&format!("# receipt for run {handle}: ✓ finished")),
+        written_md.starts_with(&format!("# ✓ receipt for run {handle} · finished")),
         "{written_md}"
     );
     assert!(

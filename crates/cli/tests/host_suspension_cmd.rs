@@ -55,7 +55,7 @@ fn status_says_how_long_the_host_slept_in_all() {
     let repo = root.path().join("repo");
     let home = root.path().join("state");
 
-    let status = yunta_in!(&repo, &home, &["status", &run_id]);
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--full"]);
 
     assert!(
         stdout(&status)

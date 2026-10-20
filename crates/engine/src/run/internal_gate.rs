@@ -107,6 +107,7 @@ impl<'a> InternalGate<'a> {
             claim(self.node, self.message),
             Menu::Gate(AuthorGate {
                 assignee: self.assignee.to_string(),
+                node: Some(self.node.id.clone()),
             }),
             NonEmpty::from((first, rest)),
         )

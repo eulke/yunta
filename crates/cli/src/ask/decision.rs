@@ -9,6 +9,7 @@
 //! in how they are answered.
 
 use surco::components::Headline;
+use surco::doc::{Block, Doc};
 use surco::words::Standing;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, OptionId, RunId};
@@ -19,7 +20,7 @@ use super::keys::{Stroke, Strokes};
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
 use crate::commands::advice;
-use crate::commands::status::decision::{account, before_you_decide, Beside};
+use crate::commands::status::decision::{account, Beside};
 
 /// What settles an option that asks for nothing: the decision as it
 /// stands, or a note sent with it.
@@ -126,23 +127,22 @@ fn present(
             }
         }
     }
-    let mut lines = crate::render::block_lines(
-        Headline {
-            subject: "decision".to_string(),
-            mark: Standing::NeedsYou.mark(),
-            said: Standing::NeedsYou.word().to_string(),
-        },
-        &look,
-    );
     let nothing_beside = Beside {
         claim: false,
         evidence: false,
     };
-    lines.extend(account(escalation, nothing_beside, 1, &look));
-    lines.extend(before_you_decide(escalation, documents, &look));
+    let before = yunta_render::shown::before_you_decide(escalation.withheld(), documents);
+    let doc = Doc::new()
+        .with(Headline::new(
+            Standing::NeedsYou.mark(),
+            "decision",
+            Standing::NeedsYou.word(),
+        ))
+        .with_all(account(escalation, nothing_beside))
+        .with_all(before.map(Block::from));
     console.say("")?;
-    for line in &lines {
-        console.say(&look.ink.paint(line))?;
+    for line in crate::render::draw(doc, &look).lines() {
+        console.say(line)?;
     }
     console.say("")
 }
@@ -182,6 +182,7 @@ mod tests {
             },
             Menu::Gate(AuthorGate {
                 assignee: "lead".to_string(),
+                node: None,
             }),
             NonEmpty::from((option, Vec::new())),
         )

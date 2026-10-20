@@ -31,6 +31,7 @@ pub fn here(
     Decision {
         chosen: Chosen::Here { commands },
         options,
+        otherwise: Vec::new(),
     }
 }
 

@@ -40,6 +40,7 @@ pub fn gate(request: &PublishRequest, spell: &dyn Fn(&NextStep) -> String) -> Do
         .with(Decision {
             chosen: Chosen::OnTheForge,
             options: answers(decision),
+            otherwise: Vec::new(),
         })
         .with(Block::Heading("what it decides on".to_string()))
         .with(Block::Lines(published))

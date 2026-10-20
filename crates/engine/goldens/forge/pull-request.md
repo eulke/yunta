@@ -2,7 +2,7 @@ What the run did.
 
 ---
 
-# receipt for run golden: ● running
+# ● receipt for run golden · running
 
 the run is still open: this is its last step
 
@@ -16,6 +16,8 @@ the run is still open: this is its last step
 - ✓ **scope** 0 files touched, none outside it
 - ◌ **review** 0 runners used, no fan-out review
 - ✓ **event chain** 4 events, hash-linked, replayable
+
+**next**
 
 - `yunta verify golden` — checks this run's evidence again
 

@@ -1,4 +1,5 @@
 run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
+
   ␛[2mCPTV        ␛[0m 500 tokens per verified task · 1 task done
   ␛[2mrework      ␛[0m 12% of tokens went to retries and re-routes
   ␛[2mcache       ␛[0m 1.4× cached tokens per input token

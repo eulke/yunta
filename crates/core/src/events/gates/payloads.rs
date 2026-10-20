@@ -105,6 +105,15 @@ impl GateWaitingPayload {
         self.menu.as_ref()
     }
 
+    /// The author's gate this escalation asks for, by its node, when its
+    /// menu names one. `None` on every other escalation.
+    pub fn gate(&self) -> Option<&NodeId> {
+        match &self.menu {
+            Some(Menu::Gate(gate)) => gate.node.as_ref(),
+            _ => None,
+        }
+    }
+
     /// The failure a node's escalation is about, with the menu that failure
     /// offers. `None` on every other escalation.
     pub fn failure(&self) -> Option<&FailureMenu> {

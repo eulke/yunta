@@ -1,19 +1,138 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use surco::doc::{Block, Depth};
+use surco::golden::{assert_golden, ENVIRONMENTS};
+use surco::look::Look;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, EventPayload, NodeEvent, NodeFinishedPayload,
     NodeOutcome, NodeStartedPayload, SessionEvent, StoredEvent, TokenUsage,
 };
-use yunta_core::{Isolation, RunId, Workflow};
+use yunta_core::{RunId, Workflow};
 use yunta_engine::{derive, run_frame_of, RunFrame, RunState};
 use yunta_testkit_core::{fixed_now, Log};
 
+use super::fixtures::{cases, outline, Case, RUN};
 use super::{RunPage, Scope};
-use crate::surface::Outline;
 
-const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
+/// Every depth a page is read at, by the name its golden carries.
+const DEPTHS: [(Depth, &str); 3] = [
+    (Depth::Glance, "glance"),
+    (Depth::Full, "full"),
+    (Depth::Dig, "dig"),
+];
 
-/// The workflow the fixture run follows: two nodes, neither of them parked.
+fn goldens() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/status")
+}
+
+/// The page as a terminal draws it for `look`.
+fn draw(page: &RunPage<'_>, look: &Look) -> String {
+    crate::render::draw(page.document(look), look)
+}
+
+#[test]
+fn the_status_page_matches_its_goldens_at_every_depth() {
+    for case in &cases() {
+        for (depth, named) in DEPTHS {
+            for environment in &ENVIRONMENTS {
+                let look = Look::of(environment);
+                assert_golden(
+                    &environment.golden(&goldens(), &format!("{}.{named}", case.name)),
+                    &draw(&case.page(Scope::Status, depth), &look),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_page_opens_on_its_headline() {
+    for case in &cases() {
+        for scope in [Scope::Status, Scope::Closing] {
+            let drawn = draw(&case.page(scope, Depth::Glance), &Look::plain());
+            let first = drawn.lines().next().unwrap_or_default();
+            assert!(
+                first.contains("fragua (quick)") && first.trim_end().ends_with(RUN.handle()),
+                "{}: {drawn}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn a_decision_that_waits_is_the_last_thing_on_the_page() {
+    for case in cases().iter().filter(|case| case.decision.is_some()) {
+        for (depth, _) in DEPTHS {
+            let page = case.page(Scope::Status, depth);
+            let doc = page.document(&Look::plain());
+            let Some(Block::Section(last)) = doc.blocks().last() else {
+                panic!("{}: the page ends on something else", case.name);
+            };
+            assert!(
+                last.title.text().starts_with("decision on node"),
+                "{}: {}",
+                case.name,
+                last.title.text()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_glance_at_sixty_columns_fits_twenty_rows_beside_its_decision() {
+    let narrow = ENVIRONMENTS
+        .iter()
+        .find(|environment| environment.width == 60)
+        .expect("an environment sixty columns wide");
+    for case in &cases() {
+        let drawn = draw(&case.page(Scope::Status, Depth::Glance), &Look::of(narrow));
+        // A decision is as long as its menu: what the glance owes is the
+        // run above it.
+        let above = drawn
+            .lines()
+            .take_while(|line| !line.contains("decision on node"))
+            .count();
+        assert!(above <= 20, "{}:\n{drawn}", case.name);
+    }
+}
+
+/// What a page says at `depth`, laid out wide enough that no row wraps.
+fn said(case: &Case, depth: Depth) -> String {
+    draw(&case.page(Scope::Status, depth), &Look::plain())
+}
+
+#[test]
+fn what_a_glance_leaves_out_is_one_depth_away() {
+    let cases = cases();
+    let parked = cases
+        .iter()
+        .find(|case| case.name == "needs-you")
+        .expect("a parked case");
+    let glance = said(parked, Depth::Glance);
+    let full = said(parked, Depth::Full);
+    let dig = said(parked, Depth::Dig);
+    for (fact, at) in [
+        ("tokens", &full),
+        ("branch", &full),
+        ("slowest", &full),
+        ("global-pack-docs", &full),
+        ("time", &full),
+        ("kept in", &dig),
+        ("objects/", &dig),
+    ] {
+        assert!(!glance.contains(fact), "a glance says `{fact}`: {glance}");
+        assert!(at.contains(fact), "no depth says `{fact}`:\n{full}\n{dig}");
+    }
+    for fact in ["progress", "nodes", "tasks", "global-pack-storage"] {
+        assert!(
+            glance.contains(fact),
+            "a glance leaves out `{fact}`: {glance}"
+        );
+    }
+}
+
+/// The workflow the spending run follows: two nodes, neither of them parked.
 fn workflow() -> Workflow {
     yunta_core::yaml::parse(
         "name: running\nnodes:\n  - { id: plan, kind: bash, run: \"true\" }\n  - { id: build, kind: bash, run: \"true\" }\n",
@@ -71,23 +190,13 @@ fn running_page(scope: Scope) -> RunPage<'static> {
     let run_id: &'static RunId = Box::leak(Box::new(RUN));
     RunPage {
         scope,
+        depth: Depth::Glance,
         run_id,
         engine: yunta_engine::Engine::this(fixed_now()),
         frame,
         state,
         paths: outline(),
         decision: None,
-    }
-}
-
-fn outline() -> Outline<'static> {
-    Outline {
-        run_dir: Path::new("/home/me/.yunta/runs/01JBZ5X8K3N7Q2W6E4R9T1Y0P5"),
-        worktree: Path::new("/home/me/.yunta/worktrees/01JBZ5X8K3N7Q2W6E4R9T1Y0P5"),
-        base_branch: "main",
-        isolation: Isolation::Worktree,
-        cwd: Path::new("/home/me/project"),
-        home: Some(Path::new("/home/me")),
     }
 }
 

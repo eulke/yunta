@@ -251,7 +251,7 @@ async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
     let handle = bench.run_id.handle();
     assert!(
         body.starts_with("What the run did.")
-            && body.contains(&format!("# receipt for run {handle}: ● running"))
+            && body.contains(&format!("# ● receipt for run {handle} · running"))
             && body.contains("the run is still open: this is its last step")
             && body.contains("**event chain**"),
         "the author's words, then the receipt read as the run's last step: {body}"

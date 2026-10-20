@@ -1,0 +1,13 @@
+● fragua (quick) · waiting · for 32m10s               7E5PH4
+━━━━━━━━━━━━━━━━━━━ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+  node `build` waits for its limit to reset at 2026-01-01
+  02:00 UTC, and the run resumes on its own then.
+
+  progress     1 of 3 nodes done
+  nodes        ✓ 1 finished: plan
+               ◌ 2 never ran: build, test
+
+next
+  yunta resume 7E5PH4          waits for the reset, then drives on
+  yunta close 7E5PH4           closes it for good
+  yunta status 7E5PH4 --full   the whole story, node by node

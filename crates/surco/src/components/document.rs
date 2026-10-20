@@ -21,6 +21,10 @@ pub struct Section {
 /// A paragraph, wrapped to the line by whoever draws it.
 pub struct Prose(pub String);
 
+/// A remark beside what a page says: true and worth saying, and not what
+/// its reader came for. A terminal says it muted, a file in italics.
+pub struct Note(pub String);
+
 /// Items that each carry the same mark: the risks a plan runs, what it
 /// leaves out.
 pub struct Marked {

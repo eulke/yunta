@@ -494,7 +494,7 @@ arguments it lists what each kind is for:
 
 ```console
 $ yunta schema
-Documents Yunta reads and validates:
+documents Yunta reads and validates
   tasks        the plan: one task per independently verifiable unit of work
   spec         the tests a plan's tasks are held to, written before any task is
                built
@@ -503,6 +503,7 @@ Documents Yunta reads and validates:
   questions    what a node needs a person to decide
   answers      what a person replied, as the engine records it
 
+next
   yunta schema <kind>          the shape to write
   yunta schema <kind> --json   the JSON Schema an editor validates against
 ```
