@@ -21,8 +21,9 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::PreRunWarnings;
 use crate::output::Mode;
-use crate::render::{Glyphs, Look};
 use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
+use surco::glyphs::Glyphs;
+use surco::look::Look;
 
 // The one call into the engine is `registry::execute`; this module keeps the
 // path its callers already name.

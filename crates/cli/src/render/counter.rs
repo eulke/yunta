@@ -7,9 +7,8 @@
 //! it said `nodes 0/2 · 1 fail` left a reader to work out which was
 //! right.
 
+use surco::glyphs::Glyphs;
 use yunta_engine::{Counter, RunFrame};
-
-use super::Glyphs;
 
 /// The counters, at both levels the run has: the DAG's nodes and the
 /// run's tasks, each as finished over what this run will do, with
@@ -31,7 +30,7 @@ pub(crate) fn line(frame: &RunFrame, glyphs: Glyphs) -> String {
     if frame.reroutes > 0 {
         line.push_str(&format!(
             " {sep} {}",
-            yunta_core::text::counted(frame.reroutes, "reroute")
+            surco::text::counted(frame.reroutes, "reroute")
         ));
     }
     line

@@ -12,7 +12,7 @@
 //! is at fault, [`Problem`] is what is wrong, [`ArtifactFailure`] is why
 //! one declared artifact did not close. Layout — how a surface wraps,
 //! indents or counts what it is told — is not here; it is
-//! [`crate::text`].
+//! [`surco::text`].
 
 use std::fmt;
 
@@ -260,7 +260,7 @@ impl fmt::Display for Report {
     /// The problems block: the file and the count, then
     /// one violation per line.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&crate::text::problems(
+        f.write_str(&surco::text::problems(
             &self.document.path,
             &self.diagnostics,
         ))

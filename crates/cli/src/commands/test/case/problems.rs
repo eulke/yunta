@@ -22,7 +22,7 @@ pub(super) fn unclaimed_problems(
     vec![format!(
         "fixture `{}`: {} nothing opened — {}",
         fixture_path.display(),
-        yunta_core::text::counted(unclaimed.len(), "scripted session"),
+        surco::text::counted(unclaimed.len(), "scripted session"),
         unclaimed
             .iter()
             .map(|index| format!("#{}", index + 1))

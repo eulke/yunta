@@ -12,19 +12,19 @@
 //! same way, each with the node that found it and how others answered
 //! it. What weighs on the decision is said last, beside its menu.
 
+use surco::components::{Marked, Section};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::text::{agreeing, counted};
 use yunta_core::events::{ArtifactId, Withheld};
 use yunta_core::expansion::Denial;
 use yunta_core::protected::Protection;
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
-use yunta_core::text::{agreeing, counted};
 use yunta_core::RunId;
 
-use crate::blocks::{Marked, Section};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
 pub use crate::plan::{Form, CODE_SHOWN};
-use crate::Mark;
 
 /// What `document` says, for the run `run`, in `form`. Each command it names
 /// is written by `spell`.
@@ -33,7 +33,7 @@ pub fn document(
     run: &RunId,
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Doc<'static> {
+) -> Doc {
     let of = document
         .shown
         .producer
@@ -87,11 +87,8 @@ fn headed(text: &str) -> Option<(&str, &str)> {
 /// being proven; how its planner got it accepted, when it took more than
 /// one handover; what of it shows no code, or is checked by nothing but
 /// the suite; and the risks it names. `None` when there is nothing to say.
-pub fn before_you_decide(
-    withheld: &[Withheld],
-    shown: &[ShownDocument],
-) -> Option<Section<'static>> {
-    let mut blocks: Vec<Block<'static>> = Vec::new();
+pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Option<Section> {
+    let mut blocks: Vec<Block> = Vec::new();
     for review in shown.iter().filter_map(|document| match &document.content {
         ShownContent::Tasks(review) => Some(&**review),
         _ => None,
@@ -132,7 +129,7 @@ pub fn before_you_decide(
 
 /// What keeps `review` from being proven, under what the gate withholds
 /// because of it.
-fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block<'static>> {
+fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block> {
     let flaws = review.flaws();
     if flaws.is_empty() {
         return Vec::new();

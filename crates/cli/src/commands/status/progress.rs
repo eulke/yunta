@@ -11,10 +11,9 @@
 //! Counters with context, never percentages: a percentage lies the moment
 //! a re-route grows the denominator.
 
-use crate::render::state::RunWord;
-use crate::render::Glyphs;
 use chrono::{DateTime, Utc};
-
+use surco::glyphs::Glyphs;
+use surco::words::RunWord;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
 use yunta_engine::{RunFrame, RunPhase, RunState};
@@ -91,7 +90,7 @@ fn phase_label(frame: &RunFrame, engine: &crate::render::Engine) -> String {
         // parked on is the thing a reader acts on next.
         RunPhase::Waiting { on } => format!("{word} — {}", advice::parked_on(on)),
         RunPhase::Broken { diagnostic } => {
-            format!("{word} — {}", yunta_core::text::one_line(diagnostic))
+            format!("{word} — {}", surco::text::one_line(diagnostic))
         }
         RunPhase::Created
         | RunPhase::Running

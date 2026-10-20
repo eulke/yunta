@@ -10,7 +10,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::render::blocks::Found;
+use surco::components::Found;
 
 /// How much more than its second run a new binary's first run may cost
 /// before a suite of them slows a run: a tenth of a second, which two

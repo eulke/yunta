@@ -4,17 +4,17 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::golden::{assert_golden, ENVIRONMENTS};
+use surco::look::Look;
+use surco::surface::{Markdown, Surface, Terminal};
 use yunta_core::events::FindingSeverity;
 use yunta_core::shown::{
     Answered, DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
 };
 use yunta_core::{FindingsFile, HeldEntry, HeldFindings, RunId, SpecFile, TasksFile};
-use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
+use yunta_testkit_core::spell;
 
 use crate::plan::{document, Form};
-use crate::surface::{Markdown, Surface, Terminal};
-use crate::Look;
-use yunta_testkit_core::spell;
 
 pub(super) fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/document")
@@ -327,7 +327,7 @@ fn a_review_s_findings_match_their_golden() {
     assert_golden(&goldens().join("findings.md"), &Markdown.draw(&doc));
     assert_eq!(
         crate::findings::mark(FindingSeverity::Blocking),
-        crate::Mark::Failed
+        surco::glyphs::Mark::Failed
     );
 }
 
@@ -337,7 +337,7 @@ fn a_task_whose_spec_no_test_runs_is_marked_on_the_plan_s_map() {
     review.tasks[0].files[0].run_by.clear();
     let look = Look::of(&ENVIRONMENTS[0]);
     let drawn = Terminal::on(Look {
-        ink: crate::ink::Ink::Plain,
+        ink: surco::paint::Ink::Plain,
         ..look
     })
     .draw(&document(
@@ -355,7 +355,7 @@ fn a_task_whose_spec_no_test_runs_is_marked_on_the_plan_s_map() {
     assert!(row.contains("no test runs its spec"), "{row}");
     assert!(
         row.trim_start()
-            .starts_with(look.glyphs.mark(crate::Mark::Caution)),
+            .starts_with(look.glyphs.mark(surco::glyphs::Mark::Caution)),
         "{row}"
     );
 }
@@ -363,7 +363,7 @@ fn a_task_whose_spec_no_test_runs_is_marked_on_the_plan_s_map() {
 /// `review` as a reader at a wide, plain terminal sees it.
 fn read(review: &PlanReview) -> String {
     let look = Look {
-        ink: crate::ink::Ink::Plain,
+        ink: surco::paint::Ink::Plain,
         ..Look::of(&ENVIRONMENTS[0])
     };
     Terminal::on(look).draw(&document(

@@ -14,6 +14,8 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
+use surco::look::Look;
+use surco::words::RunWord;
 use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
 use yunta_core::{Clock, Manifest, RunId};
@@ -26,8 +28,6 @@ use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::{progress, Mode};
-use crate::render::state::RunWord;
-use crate::render::Look;
 
 /// A run this invocation is about to pick up, as its own frozen manifest
 /// describes it: where its state lives and the tree it works in.

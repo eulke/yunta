@@ -7,12 +7,12 @@
 
 use std::path::Path;
 
+use surco::look::Look;
 use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::{blank, document};
-use crate::render::Look;
 use crate::{load_yaml, project};
 
 pub async fn check(

@@ -6,22 +6,22 @@
 //! derivation is what makes "the receipt IS the evidence" checkable: the
 //! engine reads the log, this reads the receipt.
 
+use surco::components::{Checklist, Fields, Found, Headline, Next, Prose, Section, Whole};
+use surco::doc::{Block, Doc};
+use surco::figures::Tokens;
+use surco::glyphs::{Glyphs, Mark};
+use surco::line::{Line, Tone};
+use surco::text::counted;
+use surco::words::RunWord;
 use yunta_core::events::{BaselineOrigin, TerminalState};
 use yunta_core::receipt::{
     BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
 };
 use yunta_core::step::NextStep;
-use yunta_core::text::counted;
-use yunta_core::units::Tokens;
 use yunta_core::{NodeId, RunId};
 
-use crate::blocks::{
-    Checklist, FailureDetail, Fields, Found, Headline, Next, Prose, Section, Whole,
-};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
+use crate::blocks::FailureDetail;
 use crate::spend::Breakdown;
-use crate::{Glyphs, Mark, RunWord};
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
 /// `manifest.rs`) — grouped here purely for the receipt's review check; the JSON receipt exposes the flat
@@ -50,11 +50,7 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// `·` for what was never asked for — then each criterion and each path
 /// outside the scope, and the command that checks it all again. `glyphs`
 /// draws the separators between the facts a line states.
-pub fn document<'a>(
-    receipt: &'a Receipt,
-    spell: &dyn Fn(&NextStep) -> String,
-    glyphs: Glyphs,
-) -> Doc<'a> {
+pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: Glyphs) -> Doc {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -103,11 +99,7 @@ pub fn document<'a>(
 
 /// A node that stands failed: its id and the sentence its failure is
 /// told in, then what it printed and the command that shows the rest.
-fn failed_node<'a>(
-    failed: &'a FailedNode,
-    run: &RunId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Section<'a> {
+fn failed_node(failed: &FailedNode, run: &RunId, spell: &dyn Fn(&NextStep) -> String) -> Section {
     let node = &failed.node;
     Section {
         mark: Some(Mark::Failed),
@@ -115,13 +107,14 @@ fn failed_node<'a>(
             .push(Tone::Strong, format!("node `{node}`"))
             .plain(" — ")
             .plain(crate::failure::headline(&failed.failure)),
-        blocks: vec![Block::Failure(FailureDetail {
+        blocks: FailureDetail {
             failure: &failed.failure,
             whole: Some(Whole::Command(spell(&NextStep::Status {
                 run: run.clone(),
                 node: Some(node.clone()),
             }))),
-        })],
+        }
+        .blocks(),
     }
 }
 
@@ -297,7 +290,7 @@ fn event_chain_check(checks: &mut Checklist, receipt: &Receipt) {
         EventChainStatus::Broken { seq, detail } => checks.push(
             Found::Problem,
             "event chain",
-            yunta_core::text::detailed(format!("broken at seq {seq}"), detail),
+            surco::text::detailed(format!("broken at seq {seq}"), detail),
         ),
     }
 }

@@ -10,15 +10,15 @@
 
 use std::path::Path;
 
+use surco::components::{Checklist, Fields, Found, Next};
+use surco::doc::Doc;
+use surco::line::{Line, Tone};
+use surco::look::Look;
 use yunta_engine::process::Supervision;
 
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
 use crate::interrupt::Interrupt;
-use crate::render::blocks::{Checklist, Fields, Found, Next};
-use crate::render::doc::Doc;
-use crate::render::ink::{Line, Tone};
-use crate::render::Look;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -387,7 +387,7 @@ fn report(init: &Wrote<'_>, look: &Look) -> String {
         Some(ecosystem) => format!(
             "{} — wrote {}{}",
             ecosystem.name,
-            yunta_core::text::counted(detected.commands.len(), "project command"),
+            surco::text::counted(detected.commands.len(), "project command"),
             match detected.suite {
                 Some(_) => " and the suite a run measures",
                 None => "",

@@ -3,10 +3,9 @@
 //! sits in the graph, and — for a node waiting or one whose session
 //! died — the shape a program acts on instead of parsing a sentence.
 
+use surco::words::StateWord;
 use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd, TaskStop};
 use yunta_engine::{NodeFrame, NodeStanding, NodeState, NodeWait};
-
-use crate::render::state::StateWord;
 
 /// What one waiting node waits on — the same vocabulary the run-level
 /// `waiting_on` uses, so the document says "waiting" one way.

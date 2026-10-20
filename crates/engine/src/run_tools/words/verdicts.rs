@@ -3,10 +3,10 @@
 //! refused finding: what each scope or departure answer says, in the shape
 //! [`Reply`] gives it.
 
+use surco::text::counted;
 use yunta_core::diagnostic::Report;
 use yunta_core::events::FindingOperation;
 use yunta_core::expansion::Denial;
-use yunta_core::text::counted;
 
 use super::scope::denial;
 use crate::run_tools::verdicts::Reply;

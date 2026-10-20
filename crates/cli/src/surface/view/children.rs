@@ -2,11 +2,10 @@
 //! under the node that bore it, saying where it stands and which run it
 //! is — a tree, never a number.
 
+use surco::glyphs::{Glyphs, Mark};
 use yunta_core::events::TerminalState;
 use yunta_core::NodeId;
 use yunta_engine::{ChildLink, RunFrame};
-
-use crate::render::{Glyphs, Mark};
 
 /// What a child run whose link the log recorded under no node is filed
 /// under: what the log does not say, rather than a node it might not
@@ -85,7 +84,7 @@ pub(in crate::surface) fn child_standing(terminal: Option<TerminalState>) -> (Ma
 /// records either.
 ///
 /// A run's terminal state is its own vocabulary, beside the one a
-/// node's state is read in ([`crate::render::StateWord`]) — a run
+/// node's state is read in ([`surco::words::StateWord`]) — a run
 /// promotes and a node never does — so it is said here, once, for every
 /// surface that says it.
 pub(in crate::surface) fn closed_as(state: TerminalState) -> &'static str {

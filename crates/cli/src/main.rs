@@ -84,7 +84,7 @@ const FAILED: ExitCode = ExitCode::FAILURE;
 fn exit_status(
     outcome: Result<Outcome, CliError>,
     mode: output::Mode,
-    look: &render::Look,
+    look: &surco::look::Look,
 ) -> ExitCode {
     match outcome {
         Ok(Outcome::Success) => ExitCode::SUCCESS,
@@ -115,8 +115,8 @@ fn set_var<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
 
 /// What decides whether a stream gets color: the command line, and the
 /// variables the convention reads, as this process was started with them.
-fn color_policy(env: &Env, when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
-    render::ink::ColorPolicy {
+fn color_policy(env: &Env, when: surco::paint::ColorWhen) -> surco::paint::ColorPolicy {
+    surco::paint::ColorPolicy {
         when,
         no_color: set_var(env, "NO_COLOR").is_some(),
         force: set_var(env, "CLICOLOR_FORCE").is_some_and(|value| value != "0"),
@@ -129,8 +129,8 @@ fn color_policy(env: &Env, when: render::ink::ColorWhen) -> render::ink::ColorPo
 /// Whether a path is a link on a stream with color: what
 /// `YUNTA_HYPERLINKS` says outright, or what the terminal announced about
 /// itself.
-fn links(env: &Env) -> render::ink::Links {
-    use render::ink::Links;
+fn links(env: &Env) -> surco::paint::Links {
+    use surco::paint::Links;
     match set_var(env, "YUNTA_HYPERLINKS") {
         Some("1") => return Links::Forced,
         Some("0") => return Links::Refused,
@@ -150,10 +150,10 @@ fn links(env: &Env) -> render::ink::Links {
 
 /// The three values the glyph policy reads, as this process was started
 /// with them.
-fn glyph_env(env: &Env) -> render::glyphs::GlyphEnv {
-    render::glyphs::GlyphEnv {
+fn glyph_env(env: &Env) -> surco::glyphs::GlyphEnv {
+    surco::glyphs::GlyphEnv {
         explicit: env
-            .terminal_var(render::glyphs::OVERRIDE_VAR)
+            .terminal_var(surco::glyphs::OVERRIDE_VAR)
             .map(str::to_string),
         locale: ["LC_ALL", "LC_CTYPE", "LANG"]
             .iter()
@@ -194,7 +194,7 @@ fn drive(
     cli: cli::Cli,
     started: Instant,
     mode: output::Mode,
-    look: &render::Look,
+    look: &surco::look::Look,
 ) -> Result<Outcome, CliError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

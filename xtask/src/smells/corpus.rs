@@ -115,7 +115,7 @@ impl Corpus {
             .iter()
             .flat_map(|dir| rs_files(dir))
             .collect();
-        let drawn: Vec<PathBuf> = ["crates/cli/src", "crates/render/src"]
+        let drawn: Vec<PathBuf> = ["crates/cli/src", "crates/render/src", "crates/surco/src"]
             .iter()
             .flat_map(|dir| rs_files(&root.join(dir)))
             .collect();

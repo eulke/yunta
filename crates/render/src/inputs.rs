@@ -2,8 +2,9 @@
 //! name it was given, what it said, and what the workflow declares. The
 //! engine names each problem by its kind and its fields; the words are here.
 
+use surco::text;
 use yunta_core::inputs::InputsProblem;
-use yunta_core::{text, InputName};
+use yunta_core::InputName;
 
 /// The problem an input has, in the words a reader sees.
 pub fn problem(problem: &InputsProblem) -> String {

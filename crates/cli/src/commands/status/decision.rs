@@ -26,20 +26,22 @@
 
 use std::path::Path;
 
+use surco::components::{DecisionOption, Drawn};
+use surco::line::{Line, Tone};
+use surco::look::{Look, Width};
+use surco::width::{cell_width, indent, wrap, INDENT};
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::ShownDocument;
+use yunta_render::escalation;
 
 use crate::commands::advice;
-use crate::render::blocks::{Decision, DecisionOption, Drawn};
-use crate::render::ink::{Line, Tone};
-use crate::render::{cell_width, evidence, indent, wrap, Look, Width, INDENT};
 
 /// Where a run works, as the page says it above a decision: the path
 /// whole — it is copied into another terminal, never wrapped — and what
 /// it means for a decision about the run.
 pub(crate) fn run_tree_line(tree: &Path) -> String {
-    yunta_core::text::detailed(
+    surco::text::detailed(
         "the run works in",
         &format!(
             "{} — a node run again starts from what is there",
@@ -105,12 +107,12 @@ pub(crate) fn before_you_decide(
     shown: &[ShownDocument],
     look: &Look,
 ) -> Vec<Line> {
-    let Some(before) = crate::render::shown::before_you_decide(escalation.withheld(), shown) else {
+    let Some(before) = yunta_render::shown::before_you_decide(escalation.withheld(), shown) else {
         return Vec::new();
     };
     let mut lines = vec![Line::new()];
     lines.extend(crate::render::surface_lines(
-        crate::render::doc::Doc::new().with(before),
+        surco::doc::Doc::new().with(before),
         look,
     ));
     lines
@@ -130,7 +132,7 @@ pub(crate) fn account(
         lines.extend(under(&claim_words(escalation), Tone::Plain, depth, look));
     }
     if !beside.evidence {
-        for fact in evidence(escalation) {
+        for fact in escalation::evidence(escalation) {
             lines.extend(under(&fact, Tone::Muted, depth, look));
         }
     }
@@ -170,7 +172,7 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
             }
         })
         .collect();
-    let menu = Decision::here(run_id, options, &advice::spell);
+    let menu = yunta_render::blocks::decision::here(run_id, options, &advice::spell);
     let within = Look {
         width: Width::of(Some(look.width.cells().saturating_sub(INDENT.len())), None),
         ..*look
@@ -235,7 +237,7 @@ mod tests {
     use yunta_core::NonEmpty;
 
     use super::*;
-    use crate::render::doc::{Block, Doc};
+    use surco::doc::{Block, Doc};
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const NODE: NodeId = NodeId::from_static("lint");

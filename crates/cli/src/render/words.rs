@@ -2,8 +2,9 @@
 //! invocation that drove a run exits for the word it ended on.
 
 use chrono::{DateTime, Utc};
+use surco::words::RunWord;
 use yunta_engine::{EngineLiveness, NodeStanding, Prompt, RunFrame, RunPhase, WaitingOn};
-use yunta_render::{NodeDisplay, RunWord};
+use yunta_render::state::NodeDisplay;
 
 use crate::error::Outcome;
 

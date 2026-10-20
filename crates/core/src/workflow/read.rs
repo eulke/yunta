@@ -19,13 +19,12 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+pub use super::expand::{expand_implicit_dependencies, expand_runner_fanout};
+use super::WorkflowFault;
 use crate::diagnostic::{
     Diagnostic, DocumentKind, DocumentRef, Named, Problem, Report, RuleCode, Subject,
 };
 use crate::glob::might_overlap;
-
-pub use super::expand::{expand_implicit_dependencies, expand_runner_fanout};
-use super::WorkflowFault;
 use crate::ids::ModeName;
 use crate::{ModeInclude, Node, NodeId, NodeKind, Workflow};
 
@@ -227,7 +226,7 @@ fn declared_once(workflow: &Workflow) -> Declared<'_> {
 /// not a slip.
 fn nearest_other(ids: &HashSet<&NodeId>, own: &NodeId, target: &NodeId) -> Option<NodeId> {
     let others: Vec<&NodeId> = ids.iter().copied().filter(|id| *id != own).collect();
-    crate::text::nearest(target.as_str(), others.iter().map(|id| id.as_str()))
+    surco::text::nearest(target.as_str(), others.iter().map(|id| id.as_str()))
         .and_then(|near| others.iter().find(|id| id.as_str() == near))
         .map(|id| (**id).clone())
 }

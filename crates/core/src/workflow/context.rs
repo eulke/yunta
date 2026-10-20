@@ -154,7 +154,7 @@ impl<'de> Deserialize<'de> for ContextFile {
             return Err(D::Error::custom(format!(
                 "unknown key `{key}` for a `files:` entry; one of {}{}",
                 super::parse::list(KEYS),
-                crate::text::did_you_mean(key, KEYS.iter().copied())
+                surco::text::did_you_mean(key, KEYS.iter().copied())
             )));
         }
         let path = path.ok_or_else(|| {

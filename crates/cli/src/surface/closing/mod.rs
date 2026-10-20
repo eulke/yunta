@@ -22,22 +22,26 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use surco::components::{Drawn, Fields, Next, Whole};
+use surco::figures::duration;
+use surco::glyphs::Glyphs;
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::paths;
+use surco::text::counted;
+use surco::width::{indent, wrap, INDENT};
 use yunta_core::events::GateWaitingPayload;
-use yunta_core::text::counted;
 use yunta_core::{Isolation, NodeId, RunId, Workflow};
 use yunta_engine::{
     run_frame_of, NodeFrame, PriorEstimation, RunFrame, RunPhase, RunState, ShownDocument,
 };
+use yunta_render::blocks::FailureDetail;
 
+use super::view;
 use crate::commands::status::decision;
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
-use crate::render::blocks::{Drawn, FailureDetail, Fields, Next, Whole};
-use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, paths, wrap, Glyphs, Look, INDENT};
 use crate::run_page::{caution_row, failed, Decided, RunPage, Scope};
-
-use super::view;
 
 /// How many of the run's longest nodes the block names. Enough to point
 /// at where the time went, few enough that the row stays one row.

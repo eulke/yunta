@@ -8,8 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use yunta_core::events::EventShapeError;
-use yunta_core::events::*;
+use yunta_core::events::{EventShapeError, *};
 use yunta_core::{
     AdapterId, Capability, ConfigKey, NonEmpty, QuestionId, Redactor, RunId, ScopeExpansionMode,
     ScopeGlob, Secret, TaskId,
@@ -550,23 +549,6 @@ fn a_node_that_asked_waits_on_its_questions_in_its_own_state() {
     assert_ne!(
         gate, waiting,
         "a published gate and an unanswered question are two different waits"
-    );
-}
-
-/// The one sentence every surface says a node's unanswered questions
-/// with — the node's own label, the run's pause, the chronicle.
-#[test]
-fn questions_awaiting_an_answer_are_said_one_way() {
-    assert_eq!(
-        yunta_core::text::asked_questions(&[QuestionId::from("q-scope")]),
-        "asked 1 question: `q-scope`"
-    );
-    assert_eq!(
-        yunta_core::text::asked_questions(&[
-            QuestionId::from("q-scope"),
-            QuestionId::from("q-api")
-        ]),
-        "asked 2 questions: `q-scope`, `q-api`"
     );
 }
 

@@ -53,9 +53,9 @@ pub(super) async fn tool_list_workflows(
     // An agent reads the catalog as Markdown: no terminal's width or
     // locale decides what it is told.
     let catalog =
-        super::super::list::catalog(cwd, ctx.as_ref(), crate::render::Glyphs::Unicode).await;
-    Ok(yunta_render::surface::Surface::draw(
-        &yunta_render::surface::Markdown,
+        super::super::list::catalog(cwd, ctx.as_ref(), surco::glyphs::Glyphs::Unicode).await;
+    Ok(surco::surface::Surface::draw(
+        &surco::surface::Markdown,
         &catalog,
     ))
 }

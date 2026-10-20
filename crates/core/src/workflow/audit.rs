@@ -9,13 +9,13 @@
 //! taken out, or renamed to the key meant when that key is missing, so
 //! that what the document says next is judged as the person meant it.
 
-use crate::diagnostic::{Diagnostic, Problem, Subject};
-use crate::text::{did_you_mean, nearest};
-use crate::yaml::{Mapping, Pointer, SourceMap, Value};
-use crate::NodeKind;
+use surco::text::{did_you_mean, nearest};
 
 use super::node::{NODE_KEYS, RETIRED_NODE_KEYS};
 use super::parse::list;
+use crate::diagnostic::{Diagnostic, Problem, Subject};
+use crate::yaml::{Mapping, Pointer, SourceMap, Value};
+use crate::NodeKind;
 
 /// The keys a workflow accepts at its top.
 pub(super) const WORKFLOW_KEYS: &[&str] = &[

@@ -13,13 +13,13 @@
 //! surface that judged by its own rules would be telling a person
 //! something the engine might refuse.
 
+use surco::components::{Drawn, Headline};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::width::INDENT;
 use yunta_core::events::Channel;
 use yunta_core::{Answer, AnswerType, Env, Question, QuestionsFile};
 use yunta_engine::QuestionsReply;
-
-use crate::render::blocks::{Drawn, Headline};
-use crate::render::ink::{Line, Tone};
-use crate::render::{Mark, INDENT};
 
 use super::field::ask_line;
 use super::menu::{choose, Choice};
@@ -52,7 +52,7 @@ pub(crate) fn answer(
     }
     console.say(&look.ink.paint(&Line::new().plain(INDENT).plain(format!(
         "{} before it goes on",
-        yunta_core::text::counted(total, "answer")
+        surco::text::counted(total, "answer")
     ))))?;
     console.say(
         &look.ink.paint(

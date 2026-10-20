@@ -6,15 +6,17 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::components::{Drawn, Evidence, PathNote, Paths, Said, Whole};
+use surco::doc::Block;
+use surco::line::Line;
+use surco::look::Look;
+use surco::surface::Terminal;
 use yunta_core::events::{ExhaustedReroute, Failure, FailureMenu, OwedScope, Precondition, Stuck};
 use yunta_core::protected::Protection;
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{listed_globs, ModeName};
 
-use super::{Drawn, Evidence, Whole};
 use crate::failure as words;
-use crate::ink::Line;
-use crate::{indent, Look, INDENT};
 
 /// One failure's detail, as every surface that quotes it quotes it.
 pub struct FailureDetail<'a> {
@@ -24,15 +26,8 @@ pub struct FailureDetail<'a> {
     pub whole: Option<Whole>,
 }
 
-/// A path a failure names, and the reason it is named for, when the
-/// failure gives one.
-pub struct PathNote {
-    pub path: PathBuf,
-    pub reason: Option<String>,
-}
-
 /// What a failure's detail says, whatever medium draws it.
-pub enum FailureSays {
+enum FailureSays {
     /// The end of what a command printed, and where the rest is.
     Evidence(Evidence),
     /// Lines that say it whole.
@@ -47,8 +42,20 @@ pub enum FailureSays {
 }
 
 impl FailureDetail<'_> {
+    /// The blocks this failure says itself in beyond its node's row, on
+    /// every surface: the end of what a command printed, lines said whole,
+    /// or a heading and the paths it names.
+    pub fn blocks(&self) -> Vec<Block> {
+        match self.says() {
+            FailureSays::Evidence(evidence) => vec![Block::Evidence(evidence)],
+            FailureSays::Text(lines) => vec![Block::Said(Said(lines))],
+            FailureSays::Listed { heading, paths } => vec![Block::Paths(Paths { heading, paths })],
+            FailureSays::Nothing => Vec::new(),
+        }
+    }
+
     /// What this failure says beyond its node's row.
-    pub fn says(&self) -> FailureSays {
+    fn says(&self) -> FailureSays {
         let failure = self.failure;
         match failure {
             Failure::Exited { exited } => FailureSays::Evidence(Evidence {
@@ -179,23 +186,11 @@ fn lines_of(said: &str) -> Vec<String> {
 
 impl Drawn for FailureDetail<'_> {
     fn lines(&self, look: &Look) -> Vec<Line> {
-        let text = |said: &str| Line::new().plain(INDENT).plain(said.to_string());
-        match self.says() {
-            FailureSays::Evidence(evidence) => evidence.lines(look),
-            FailureSays::Text(lines) => lines.iter().map(|said| text(said)).collect(),
-            FailureSays::Listed { heading, paths } => std::iter::once(text(&heading))
-                .chain(paths.iter().map(|note| {
-                    let line = Line::new()
-                        .plain(indent(2))
-                        .plain(note.path.display().to_string());
-                    match &note.reason {
-                        Some(reason) => line.plain(" — ").plain(reason.as_str()),
-                        None => line,
-                    }
-                }))
-                .collect(),
-            FailureSays::Nothing => Vec::new(),
-        }
+        let terminal = Terminal::on(*look);
+        self.blocks()
+            .iter()
+            .flat_map(|block| terminal.block(block))
+            .collect()
     }
 }
 

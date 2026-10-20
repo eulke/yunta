@@ -13,18 +13,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
+use surco::words::RunWord;
 use yunta_core::events::PauseReason;
 use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, sandboxed_checkout};
-use crate::commands::advice;
 use crate::commands::registry::{adapters_and_script, execute, Executing, ScriptedPaths};
-use crate::commands::Adapters;
+use crate::commands::{advice, Adapters};
 use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
-use crate::render::state::RunWord;
 
 mod problems;
 
@@ -82,7 +81,7 @@ pub(super) fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
     match terminal {
         RunTerminal::Paused { reason } => format!(
             "{word}\n    {}",
-            yunta_core::text::hanging(&yunta_render::pause::sentence(reason), "    ")
+            surco::text::hanging(&yunta_render::pause::sentence(reason), "    ")
         ),
         RunTerminal::Failed { node, failure } => {
             let said = PauseReason::NodeFailed {
@@ -91,7 +90,7 @@ pub(super) fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
             };
             format!(
                 "{word}\n    {}",
-                yunta_core::text::hanging(&yunta_render::pause::sentence(&said), "    ")
+                surco::text::hanging(&yunta_render::pause::sentence(&said), "    ")
             )
         }
         RunTerminal::Finished | RunTerminal::Promoted { .. } => word.to_string(),

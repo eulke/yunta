@@ -77,9 +77,9 @@ pub enum WorktreeError {
     /// pool may empty emptied.
     #[error(
         "the disk has {} free and the checkout needs about {} more, where {} stays free",
-        yunta_core::units::Bytes(.room.available),
-        yunta_core::units::Bytes(.room.need),
-        yunta_core::units::Bytes(.room.keep_free)
+        surco::figures::Bytes(.room.available),
+        surco::figures::Bytes(.room.need),
+        surco::figures::Bytes(.room.keep_free)
     )]
     NoRoom { room: Room },
     /// A checkout of the project's pool a unit went back to is held by

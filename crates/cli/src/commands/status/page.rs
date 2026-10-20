@@ -2,14 +2,18 @@
 //! nodes, the evidence of what failed, the facts a reader checks, and what
 //! to type next. The page that holds them is composed in [`crate::run_page`].
 
+use surco::components::{Drawn, Fields, Next, NodeRow, NodeTable, Whole};
+use surco::glyphs::Glyphs;
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::prose;
+use surco::width::{indent, INDENT};
+use surco::words::{RunWord, StateWord};
 use yunta_core::events::Failure;
 use yunta_engine::{NodeState, RunState};
+use yunta_render::blocks::FailureDetail;
 
 use crate::commands::advice;
-use crate::render::blocks::{Drawn, FailureDetail, Fields, Next, NodeRow, NodeTable, Whole};
-use crate::render::ink::{Line, Tone};
-use crate::render::state::{RunWord, StateWord};
-use crate::render::{indent, prose, Glyphs, Look, INDENT};
 use crate::run_page::{caution_row, RunPage};
 
 impl RunPage<'_> {
@@ -124,19 +128,19 @@ impl RunPage<'_> {
         ) {
             return Vec::new();
         }
-        let claim = crate::render::failure::headline(failure);
+        let claim = yunta_render::failure::headline(failure);
         // What a row leaves its note: the indent, the mark, the word and
         // an id column as wide as the longest id.
-        let ids = crate::render::id_column(self.frame.nodes.iter().map(|node| node.id.as_str()));
+        let ids = surco::width::id_column(self.frame.nodes.iter().map(|node| node.id.as_str()));
         let room = look
             .width
             .cells()
-            .saturating_sub(INDENT.len() + 2 + crate::render::STATE_WIDTH + 1 + ids + 2);
-        if crate::render::cell_width(&claim) <= room {
+            .saturating_sub(INDENT.len() + 2 + surco::words::STATE_WIDTH + 1 + ids + 2);
+        if surco::width::cell_width(&claim) <= room {
             return Vec::new();
         }
         let under = INDENT.len() * 2;
-        crate::render::wrap(&claim, look.width.cells().saturating_sub(under))
+        surco::width::wrap(&claim, look.width.cells().saturating_sub(under))
             .into_iter()
             .map(|line| Line::new().plain(INDENT).plain(line))
             .collect()
@@ -173,8 +177,8 @@ impl RunPage<'_> {
             .map(|(times, slept)| {
                 format!(
                     "suspended {} for {} in all — durations leave it out",
-                    yunta_core::text::counted(times, "time"),
-                    crate::render::duration(slept)
+                    surco::text::counted(times, "time"),
+                    surco::figures::duration(slept)
                 )
             });
         Fields::new()
@@ -226,7 +230,7 @@ pub(super) fn handed(state: &RunState, id: &yunta_core::NodeId) -> Option<String
         .max_by_key(|handed| handed.submissions)?;
     Some(format!(
         "accepted on its {} handover ({} refused)",
-        yunta_core::text::ordinal(refused.submissions),
+        surco::text::ordinal(refused.submissions),
         refused.refusals
     ))
 }

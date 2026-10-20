@@ -5,10 +5,10 @@
 //! checked. The fact is what the log holds; its sentence is produced here,
 //! once, for every surface that shows how a node ended.
 
+use surco::text;
 use yunta_core::events::{
     Approval, EngineFact, EnvironmentDrift, Evidence, NodeOutcome, PromotionCause,
 };
-use yunta_core::text;
 
 use crate::evidence;
 

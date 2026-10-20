@@ -5,13 +5,14 @@
 
 use std::path::Path;
 
+use surco::look::Look;
+use surco::width::INDENT;
 use yunta_core::{ConfigKey, NodeId, PackManifest, Workflow};
 
 use crate::context::Context;
 use crate::detect::Detected;
 use crate::error::CliError;
 use crate::output::{blank, say};
-use crate::render::{Look, INDENT};
 
 /// Prints what `manifest`'s workflows, vendored at `pack_dir`, need and
 /// the project lacks; nothing when they need nothing.

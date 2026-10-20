@@ -3,18 +3,19 @@
 
 use std::collections::BTreeMap;
 
-use yunta_core::units::DURATION_WIDEST;
+use surco::bars::{bar, bar_cells};
+use surco::components::Fields;
+use surco::doc::{Block, Doc};
+use surco::figures::{duration, Ratio, Tokens, DURATION_WIDEST};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT};
+use surco::words::STATE_WIDTH;
 use yunta_core::RunId;
 use yunta_engine::{NodeStat, RunState, RunStats};
-use yunta_render::spend::Breakdown;
+use yunta_render::state::NodeDisplay;
 
-use crate::render::blocks::Fields;
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::{
-    bar, bar_cells, cell_width, duration, id_column, middle_cut, truncate, Glyphs, Look,
-    NodeDisplay, Ratio, Tokens, INDENT, STATE_WIDTH,
-};
+use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
 /// the state its nodes are read from, and what its model is priced at.
@@ -34,7 +35,7 @@ impl RunStatsPage<'_> {
     /// A block rather than a run of `println!`s: what this command says
     /// about a run is one thing a test reads whole, and a number nobody can
     /// assert is a number nobody is holding to anything.
-    pub(super) fn document(&self, look: &Look) -> Doc<'static> {
+    pub(super) fn document(&self, look: &Look) -> Doc {
         let stats = self.stats;
         let asleep = match stats.asleep.is_zero() {
             true => String::new(),
@@ -71,98 +72,6 @@ impl RunStatsPage<'_> {
             .with(Block::Lines(nodes_lines(stats, self.state, look)))
             .with(Block::Lines(runner_lines(stats, look)))
     }
-}
-
-/// What a verified task cost — the rate a run is read by first, and the
-/// one its acronym names.
-fn cptv(stats: &RunStats, glyphs: Glyphs) -> String {
-    match stats.cptv {
-        Some(cptv) => format!(
-            "{} per verified task {} {}",
-            Tokens::rounded(cptv),
-            glyphs.sep(),
-            yunta_core::text::counted(stats.tasks_done, "task done")
-        ),
-        None => "n/a — no task is done, so no cost per verified task".to_string(),
-    }
-}
-
-/// The share of tokens retries and re-routes took. Nothing for a run
-/// with nothing to divide.
-fn rework(stats: &RunStats, glyphs: Glyphs) -> String {
-    stats
-        .rework_rate
-        .map(|rate| {
-            format!(
-                "{} of tokens went to retries and re-routes",
-                Ratio(rate).reads(glyphs.times())
-            )
-        })
-        .unwrap_or_default()
-}
-
-/// Cached tokens per input token — past one when a cache serves more
-/// than a session sends. Said unknown only for a run that spent tokens
-/// its adapter never broke down.
-fn cache(stats: &RunStats, glyphs: Glyphs) -> String {
-    match stats.cache_rate {
-        Some(rate) => format!(
-            "{} cached tokens per input token",
-            Ratio(rate).reads(glyphs.times())
-        ),
-        None if stats.total_tokens.total() > 0 => "n/a — the adapter never reported it".to_string(),
-        None => String::new(),
-    }
-}
-
-/// What the run spent, in tokens. Nothing for a run that spent none.
-fn spent(stats: &RunStats) -> String {
-    let tokens = &stats.total_tokens;
-    match tokens.total() {
-        0 => String::new(),
-        _ => Breakdown(tokens).to_string(),
-    }
-}
-
-/// What the run handed over, by what the engine answered — the other
-/// half of what a run cost, beside the tokens it spent.
-fn submissions(submissions: &yunta_engine::Submissions) -> String {
-    match submissions.accepted + submissions.refused {
-        0 => String::new(),
-        _ => format!(
-            "{} accepted, {} refused",
-            submissions.accepted, submissions.refused
-        ),
-    }
-}
-
-/// What the run found, by what the engine answered, and how many of
-/// those findings stand now.
-///
-/// The calls and the standing count are two different facts and are
-/// said as two: a log carrying five posts, one update and one
-/// withdrawal stands at four, and a reader shown only one of those
-/// numbers draws the wrong conclusion from either.
-fn findings(activity: &yunta_engine::FindingActivity, effective: u64) -> String {
-    let calls = activity.posted + activity.updated + activity.withdrawn + activity.refused;
-    if calls == 0 && effective == 0 {
-        return String::new();
-    }
-    format!(
-        "{} posted, {} updated, {} withdrawn, {} refused — {effective} standing",
-        activity.posted, activity.updated, activity.withdrawn, activity.refused,
-    )
-}
-
-/// The answers given to the run's findings, and how many settled one.
-fn answers(activity: &yunta_engine::FindingActivity, settled: u64) -> String {
-    if activity.answered + activity.proved == 0 && settled == 0 {
-        return String::new();
-    }
-    format!(
-        "{} given, {} proved — {settled} settled",
-        activity.answered, activity.proved
-    )
 }
 
 /// One row per node that started, each opening with the state it is in:
@@ -267,11 +176,11 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
+    use surco::golden::{assert_golden, ENVIRONMENTS};
     use yunta_core::events::{
         EventPayload, NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, Spend,
         TokenUsage,
     };
-    use yunta_testkit::{assert_golden, ENVIRONMENTS};
 
     use super::*;
     use crate::render::surface_lines;
@@ -492,7 +401,7 @@ mod tests {
                     &run,
                     &state,
                     None,
-                    &crate::render::look_of(environment),
+                    &surco::look::Look::of(environment),
                 ),
             );
         }

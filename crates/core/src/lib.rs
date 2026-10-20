@@ -65,7 +65,6 @@ mod spec;
 pub mod step;
 mod tasks;
 pub mod template;
-pub mod text;
 pub mod units;
 pub mod workflow;
 pub mod yaml;

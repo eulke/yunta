@@ -4,16 +4,17 @@
 //! run's findings read the same way, each with the node that found it
 //! and what other nodes answered.
 
+use surco::components::{Fields, Prose, Section};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
 use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
 use yunta_core::events::{Finding, FindingSeverity};
 use yunta_core::HeldFindings;
 
-use crate::blocks::{Fields, Prose, Section};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
-use crate::{found, Mark};
+use crate::found;
 
-pub fn document(held: &HeldFindings, of: &str) -> Doc<'static> {
+pub fn document(held: &HeldFindings, of: &str) -> Doc {
     let mut sorted: Vec<Finding> = held.findings.iter().cloned().map(Finding::from).collect();
     sorted.sort_by_key(|finding| finding.severity);
     let counts = counted(sorted.iter().map(|finding| finding.severity));
@@ -36,7 +37,7 @@ pub fn document(held: &HeldFindings, of: &str) -> Doc<'static> {
     doc
 }
 
-pub fn run_document(view: &RunFindings) -> Doc<'static> {
+pub fn run_document(view: &RunFindings) -> Doc {
     let mut sorted: Vec<&StandingFinding> = view.findings.iter().collect();
     sorted.sort_by_key(|standing| standing.finding.severity);
     let counts = counted(sorted.iter().map(|standing| standing.finding.severity));
@@ -69,7 +70,7 @@ fn heading(what: &str, counts: &[String], tally: String) -> Line {
     Line::new().push(Tone::Strong, what).plain(said)
 }
 
-fn standing_section(standing: &StandingFinding) -> Section<'static> {
+fn standing_section(standing: &StandingFinding) -> Section {
     let finding = &standing.finding;
     let (title, detail) = found::said(&finding.says);
     let found_by = match &standing.node {

@@ -73,7 +73,7 @@ impl std::str::FromStr for DiskShare {
 impl std::fmt::Display for DiskShare {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DiskShare::Bytes(bytes) => write!(f, "{}", crate::units::Bytes(*bytes)),
+            DiskShare::Bytes(bytes) => write!(f, "{}", surco::figures::Bytes(*bytes)),
             DiskShare::Percent(percent) => write!(f, "{percent}%"),
         }
     }

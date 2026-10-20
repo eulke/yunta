@@ -1,10 +1,9 @@
 //! A problem quoted from the text it is about: where, the line, and a
 //! mark under the place — the way a compiler points at a line.
 
+use surco::width::cell_width;
 use yunta_core::diagnostic::Report;
 use yunta_core::yaml::Location;
-
-use crate::cell_width;
 
 /// The lines that place a problem at `at` in `text`, read from `path`:
 /// the place, the line as written, and carets under the part at fault.
@@ -43,7 +42,7 @@ pub fn located(
 ) -> String {
     let mut out = format!(
         "{heading}: {}",
-        yunta_core::text::counted(problems.len(), "error")
+        surco::text::counted(problems.len(), "error")
     );
     for (said, at) in problems {
         out.push_str(&format!("\n  {said}"));

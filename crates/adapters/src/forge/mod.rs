@@ -14,10 +14,10 @@ mod mock;
 pub use github::GitHubForge;
 pub use mock::{MockForge, MockForgeState, MockPullRequest};
 
+use surco::glyphs::Glyphs;
+use surco::surface::{Markdown, Surface};
 use yunta_core::port::{PublishRequest, PullRequestRequest};
 use yunta_core::step::NextStep;
-use yunta_render::surface::{Markdown, Surface};
-use yunta_render::Glyphs;
 
 /// What ties a pull request's body to its run: a comment a forge's page
 /// does not show, so the marker never sits in what a reviewer reads.

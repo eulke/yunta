@@ -134,7 +134,7 @@ fn invariant_in_parallel(node: &NodeId, group: &NodeId) -> String {
 fn unknown_reference(field: &str, target: &NodeId, nearest: Option<&NodeId>) -> String {
     format!(
         "`{field}` names `{target}`, and no node carries that id{}",
-        crate::text::did_you_mean(target.as_str(), nearest.map(NodeId::as_str))
+        surco::text::did_you_mean(target.as_str(), nearest.map(NodeId::as_str))
     )
 }
 

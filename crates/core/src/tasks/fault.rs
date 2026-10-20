@@ -275,7 +275,7 @@ fn answered_list(answered: &[QuestionId]) -> String {
         [] => String::new(),
         _ => format!(
             "; it answered {}",
-            crate::text::listed(answered.iter().map(QuestionId::as_str))
+            surco::text::listed(answered.iter().map(QuestionId::as_str))
         ),
     }
 }

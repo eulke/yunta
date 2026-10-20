@@ -21,12 +21,11 @@ use std::io::Write;
 
 use indicatif::style::TemplateError;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
-
+use surco::glyphs::Glyphs;
+use surco::line::Line;
+use surco::paint::Ink;
 use yunta_core::RunId;
 use yunta_engine::RunFrame;
-
-use crate::render::ink::{Ink, Line};
-use crate::render::Glyphs;
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -184,8 +183,8 @@ impl Region {
 
     /// The look of the rows this region draws, at the width they have
     /// now.
-    pub(super) fn look(&self) -> crate::render::Look {
-        crate::render::Look {
+    pub(super) fn look(&self) -> surco::look::Look {
+        surco::look::Look {
             glyphs: self.glyphs,
             ink: self.ink,
             width: crate::render::row_width(usize::from(self.screen.width())),
@@ -250,7 +249,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
-            crate::render::ink::Ink::Plain,
+            surco::paint::Ink::Plain,
             Box::new(scrollback.clone()),
         )
         .expect("the region's row template parses")
@@ -406,9 +405,9 @@ mod tests {
             );
             for row in &drawn {
                 assert!(
-                    crate::render::cell_width(row) <= room,
+                    surco::width::cell_width(row) <= room,
                     "a row {} cells wide where {room} fit, on a terminal {columns} wide: {row:?}",
-                    crate::render::cell_width(row)
+                    surco::width::cell_width(row)
                 );
             }
             assert!(
@@ -466,7 +465,7 @@ mod tests {
         );
         for row in &drawn {
             assert!(
-                crate::render::cell_width(row) <= usize::from(NARROW),
+                surco::width::cell_width(row) <= usize::from(NARROW),
                 "{row:?}"
             );
         }

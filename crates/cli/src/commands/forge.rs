@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
+use surco::components::{Check, Found};
 use yunta_adapters::GitHubForge;
 use yunta_core::port::Forge;
 use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
 
 use crate::commands::advice;
 use crate::error::{warn, CliError};
-use crate::render::blocks::{Check, Found};
 
 /// The forge a real invocation can offer — `None` when either
 /// `forge.github` isn't configured, or the named `token_env` isn't
@@ -90,8 +90,8 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> C
         Found::Problem,
         format!(
             "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
-            yunta_core::text::listed(opening.iter().map(String::as_str)),
-            yunta_core::text::agreeing(opening.len(), "opens", "open"),
+            surco::text::listed(opening.iter().map(String::as_str)),
+            surco::text::agreeing(opening.len(), "opens", "open"),
         ),
     )
 }

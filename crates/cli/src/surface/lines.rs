@@ -15,10 +15,11 @@
 
 use std::io::Write;
 
+use surco::figures::duration;
+use surco::glyphs::Glyphs;
+use surco::look::Look;
+use surco::paint::Ink;
 use yunta_engine::Moment;
-
-use crate::render::ink::Ink;
-use crate::render::{duration, Glyphs, Look};
 
 use super::{chronicle, write_line};
 
@@ -239,7 +240,7 @@ mod pause_reason_tests {
                     None,
                     yunta_engine::Happening::Run((&RunEvent::Paused(payload.clone())).into()),
                 ),
-                crate::render::Glyphs::Unicode,
+                surco::glyphs::Glyphs::Unicode,
             );
             // A limit's reset is nobody's to answer, so its line reads waiting.
             let word = if matches!(reason, PauseReason::AwaitingReset { .. }) {
@@ -249,16 +250,16 @@ mod pause_reason_tests {
             };
             assert_eq!(
                 said.text,
-                yunta_core::text::aside(
+                surco::text::aside(
                     "run",
-                    &yunta_core::text::one_line(&format!("{word} — {sentence}"))
+                    &surco::text::one_line(&format!("{word} — {sentence}"))
                 )
             );
 
             let waiting = WaitingOn::Run {
                 reason: payload.pause.clone(),
             };
-            let one_line = yunta_core::text::one_line(&sentence);
+            let one_line = surco::text::one_line(&sentence);
             assert_eq!(advice::parked_on(&waiting), one_line);
             assert_eq!(advice::parked_in_full(&waiting), one_line);
         }
@@ -283,7 +284,7 @@ mod promotion_tests {
         });
         let said = chronicle::say(
             &yunta_testkit::moment(None, promoted),
-            crate::render::Glyphs::Unicode,
+            surco::glyphs::Glyphs::Unicode,
         );
         assert_eq!(said.text, "run — promotion to `ship`");
     }
@@ -307,7 +308,7 @@ mod promotion_tests {
         });
         let said = chronicle::say(
             &yunta_testkit::moment(None, promoted),
-            crate::render::Glyphs::Unicode,
+            surco::glyphs::Glyphs::Unicode,
         );
         assert_eq!(
             said.text,

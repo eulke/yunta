@@ -58,7 +58,6 @@ pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
 pub use tools::{tools_environment, ToolsHost};
 pub use wait::{after, wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
-pub use yunta_testkit_core::golden::{assert_golden, visible, Environment, ENVIRONMENTS};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that
 /// checkout says about its state root and its org layer:

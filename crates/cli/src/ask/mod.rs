@@ -266,8 +266,8 @@ impl Console {
 
     /// How a line drawn on this terminal looks: the paint stderr gets,
     /// and rows no wider than [`Console::width`].
-    pub(crate) fn look(&self) -> crate::render::Look {
-        crate::render::Look {
+    pub(crate) fn look(&self) -> surco::look::Look {
+        surco::look::Look {
             glyphs: crate::render::glyphs(),
             ink: crate::render::stderr_ink(),
             width: crate::render::row_width(usize::from(self.term.size().1)),

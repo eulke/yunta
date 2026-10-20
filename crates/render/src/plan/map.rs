@@ -2,13 +2,12 @@
 //! in, what proves it, how much of what it changes shows its code, and
 //! a mark on each task that cannot be proven as it is written.
 
+use surco::components::{Cell, Column, Holds, Row, Table};
+use surco::glyphs::Mark;
+use surco::line::Tone;
+use surco::text::counted;
 use yunta_core::shown::{HeldTo, PlanReview, TaskReview};
-use yunta_core::text::counted;
 use yunta_core::Task;
-
-use crate::blocks::{Cell, Column, Holds, Row, Table};
-use crate::ink::Tone;
-use crate::Mark;
 
 /// Every task of `review`, step by step.
 pub(super) fn map(review: &PlanReview, steps: &[Vec<&Task>]) -> Table {

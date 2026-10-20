@@ -6,10 +6,10 @@
 //! can say a different thing. The fact is stored as data; the words are
 //! produced here, where a reader is told.
 
+use surco::figures::{Bytes, Tokens};
+use surco::text;
 use yunta_core::events::PauseReason;
-use yunta_core::text;
-use yunta_core::units::{Bytes, Tokens};
-use yunta_core::{NodeId, RunId};
+use yunta_core::{NodeId, QuestionId, RunId};
 
 use crate::escalation;
 
@@ -27,6 +27,20 @@ pub const PAST_THE_CAP: &str =
 /// both read it, so a parked run names the limit to whichever surface reads it.
 pub(crate) fn exceeded_loop_cap(cap: u32) -> String {
     format!("exceeded `limits.max_loop_iterations` ({cap}) — {PAST_THE_CAP}")
+}
+
+/// The one sentence for questions awaiting an answer: `asked 2
+/// questions: `q-scope`, `q-api``.
+///
+/// Every surface that says a node asked says it with these bytes — the
+/// chronicle, the node's own label, the reason a run parked — so a
+/// reader never meets the same fact spelled two ways.
+pub fn asked_questions(asked: &[QuestionId]) -> String {
+    format!(
+        "asked {}: {}",
+        text::counted(asked.len(), "question"),
+        text::listed(asked.iter().map(QuestionId::as_str))
+    )
 }
 
 /// The chronicle's words for a pause: `waiting` for a limit's reset, which
@@ -76,10 +90,7 @@ pub fn sentence(pause: &PauseReason) -> String {
         PauseReason::GateAborted { node, free_text } => gate_aborted(node, free_text.as_deref()),
         PauseReason::ChildPaused { node, run, child } => child_paused(node, run, child),
         PauseReason::Questions { node, pending } => {
-            format!(
-                "node `{node}` {}",
-                text::asked_questions(pending.as_slice())
-            )
+            format!("node `{node}` {}", asked_questions(pending.as_slice()))
         }
         PauseReason::AnswersRefused { node, report } => {
             format!("node `{node}`'s answers were refused: {report}")
@@ -150,7 +161,7 @@ fn child_paused(node: &NodeId, run: &RunId, child: &PauseReason) -> String {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{Failure, PauseReason};
-    use yunta_core::{NodeId, RunId};
+    use yunta_core::{NodeId, QuestionId, RunId};
 
     use super::sentence;
 
@@ -220,6 +231,20 @@ mod tests {
             sentence(&parked),
             "node `grill`'s child run is parked: child run `child` paused, and resuming this \
              run resumes it:\n  cancelled by user"
+        );
+    }
+
+    /// The one sentence every surface says a node's unanswered questions
+    /// with — the node's own label, the run's pause, the chronicle.
+    #[test]
+    fn questions_awaiting_an_answer_are_said_one_way() {
+        assert_eq!(
+            super::asked_questions(&[QuestionId::from("q-scope")]),
+            "asked 1 question: `q-scope`"
+        );
+        assert_eq!(
+            super::asked_questions(&[QuestionId::from("q-scope"), QuestionId::from("q-api")]),
+            "asked 2 questions: `q-scope`, `q-api`"
         );
     }
 }

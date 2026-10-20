@@ -5,12 +5,12 @@
 
 use std::path::Path;
 
-use yunta_core::text::problems;
+use surco::look::Look;
+use surco::text::problems;
 use yunta_core::{ConfigLayer, PackManifest, PackRef, Workflow};
 
 use crate::error::{note, CliError, Outcome};
 use crate::output::say;
-use crate::render::Look;
 
 // Written as literal templates (not built from the typed values) so the
 // generated files read exactly as an author would write them; `{{name}}`

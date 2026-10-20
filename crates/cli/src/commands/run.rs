@@ -32,8 +32,8 @@ use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::json::PreRunWarnings;
 use crate::output::Mode;
-use crate::render::Look;
 use mode::resolve_mode;
+use surco::look::Look;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -242,7 +242,7 @@ pub(super) async fn preflight(
 /// person reads.
 fn check_refusal(errors: &[CheckError]) -> CliError {
     let words: Vec<String> = errors.iter().map(crate::error::words::check).collect();
-    CliError::msg(yunta_core::text::problems(
+    CliError::msg(surco::text::problems(
         "the workflow fails `yunta check`",
         &words,
     ))
@@ -381,7 +381,7 @@ pub(super) async fn create_run_from(
             return Err(CliError::msg(format!(
                 "{} still active and `limits.max_concurrent_runs` is {cap} — resume or \
                  cancel one (`yunta list` names them) before starting another",
-                yunta_core::text::counted(active, "run")
+                surco::text::counted(active, "run")
             )));
         }
     }

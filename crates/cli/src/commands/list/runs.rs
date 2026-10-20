@@ -7,8 +7,13 @@
 //! Which runs it lists, and in which group, is the [`Inbox`]'s answer;
 //! this module lays it out.
 
-use yunta_core::text::counted;
-use yunta_core::units::DURATION_WIDEST;
+use surco::doc::{Block, Doc};
+use surco::figures::{duration, DURATION_WIDEST};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::text::counted;
+use surco::width::{cell_width, indent, truncate, wrap, INDENT};
+use surco::words::RunWord;
 use yunta_core::RunId;
 
 use super::inbox::{Inbox, RunRow, Standing, Unreadable};
@@ -16,10 +21,6 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::state::RunWord;
-use crate::render::{cell_width, duration, indent, truncate, wrap, Look, INDENT};
 
 /// The cells a run's handle gets: what a reader copies into the next
 /// command, so the column pads a shorter one and never cuts one.
@@ -61,7 +62,7 @@ pub(crate) struct ListRunsAnswer {
 }
 
 impl Answer for ListRunsAnswer {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         Doc::new().with(Block::Lines(self.lines(look)))
     }
 
@@ -240,7 +241,7 @@ mod tests {
     use yunta_core::{ModeName, RunId};
 
     use super::*;
-    use crate::render::state::RunWord;
+    use surco::words::RunWord;
 
     fn row(id: &'static str, standing: Standing, age_secs: u64) -> RunRow {
         let word = match standing {

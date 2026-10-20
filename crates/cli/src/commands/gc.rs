@@ -24,6 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::look::Look;
 use yunta_core::{Isolation, Manifest, RunId};
 use yunta_storage::Storage;
 
@@ -31,7 +32,6 @@ use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::output::say;
 use crate::project::Project;
-use crate::render::Look;
 
 pub async fn gc(dry_run: bool, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -114,8 +114,7 @@ async fn forget_units(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: 
 async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
     match yunta_engine::adopt_unit_branches(pool, &ctx.cwd, None, ctx.supervision()).await {
         Ok(taken) if !taken.is_empty() => {
-            let branches =
-                yunta_core::text::counted_as(taken.len(), "unit branch", "unit branches");
+            let branches = surco::text::counted_as(taken.len(), "unit branch", "unit branches");
             say(look, format!("kept the work of {branches} by refs"));
         }
         Ok(_) => {}
@@ -128,8 +127,7 @@ async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
 async fn would_adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
     match yunta_engine::adoptable_unit_branches(pool, &ctx.cwd, ctx.supervision()).await {
         Ok(branches) if !branches.is_empty() => {
-            let branches =
-                yunta_core::text::counted_as(branches.len(), "unit branch", "unit branches");
+            let branches = surco::text::counted_as(branches.len(), "unit branch", "unit branches");
             say(look, format!("would keep the work of {branches} by refs"));
         }
         Ok(_) => {}
@@ -157,7 +155,7 @@ async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool, look: &Look) {
                     format!(
                         "emptied the build of {} ({})",
                         checkout.display(),
-                        yunta_core::units::Bytes(*bytes)
+                        surco::figures::Bytes(*bytes)
                     ),
                 );
             }
@@ -298,13 +296,13 @@ async fn reclaim(
 /// answers whether they went; under `dry_run` they only would.
 fn purge_rows(storage: &Storage, run: &RunId, events: usize, dry_run: bool, look: &Look) -> bool {
     if dry_run {
-        let count = yunta_core::text::counted(events, "event");
+        let count = surco::text::counted(events, "event");
         say(look, format!("would purge {count} of run {}", run.handle()));
         return true;
     }
     match storage.purge_run(run) {
         Ok(purged) => {
-            let count = yunta_core::text::counted(purged.rows, "event");
+            let count = surco::text::counted(purged.rows, "event");
             say(look, format!("purged {count} of run {}", run.handle()));
             true
         }
@@ -325,13 +323,13 @@ fn tally(look: &Look, reclaimed: usize, dry_run: bool) {
             look,
             format!(
                 "{} would be reclaimed",
-                yunta_core::text::counted(reclaimed, "run")
+                surco::text::counted(reclaimed, "run")
             ),
         );
     } else {
         say(
             look,
-            format!("{} reclaimed", yunta_core::text::counted(reclaimed, "run")),
+            format!("{} reclaimed", surco::text::counted(reclaimed, "run")),
         );
     }
 }
@@ -370,7 +368,7 @@ async fn pool_owns(pool: &yunta_engine::CheckoutPool, ctx: &Context, tree: &Path
     match pool.owns(tree, ctx.supervision()).await {
         Ok(owned) => Some(owned),
         Err(e) => {
-            let shown = crate::render::paths::shown(tree, &ctx.cwd, ctx.env.home.as_deref());
+            let shown = surco::paths::shown(tree, &ctx.cwd, ctx.env.home.as_deref());
             warn(format!("left {shown} alone: {e}"));
             None
         }
@@ -415,7 +413,7 @@ async fn remove_run(
     dry_run: bool,
     look: &Look,
 ) -> bool {
-    let shown = |dir: &Path| crate::render::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
+    let shown = |dir: &Path| surco::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
     let (mut removed_any, mut all_removed) = (false, true);
     // The worktree goes through git, which unregisters it as well. A
     // checkout of the project's pool is given back, never taken away.

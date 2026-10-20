@@ -5,17 +5,21 @@
 
 use std::path::Path;
 
+use surco::components::{Drawn, Fields, Headline, Next, Whole};
+use surco::doc::Doc;
+use surco::figures::duration;
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::paths;
+use surco::width::{wrap, INDENT};
 use yunta_core::events::NodeState;
 use yunta_core::{NodeId, RunId};
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame, RunState};
+use yunta_render::blocks::FailureDetail;
 use yunta_render::spend::Breakdown;
 
 use crate::commands::advice;
 use crate::error::CliError;
-use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
-use crate::render::doc::Doc;
-use crate::render::ink::{Line, Tone};
-use crate::render::{duration, paths, wrap, Look, INDENT};
 use crate::run_page::section;
 
 /// What the page is drawn from.
@@ -49,7 +53,7 @@ pub(super) fn find<'a>(
             CliError::msg(format!(
                 "run {} has no node `{id}`{}",
                 run_id.handle(),
-                yunta_core::text::did_you_mean(id.as_str(), declared)
+                surco::text::did_you_mean(id.as_str(), declared)
             ))
         })
 }
@@ -58,7 +62,7 @@ impl NodePage<'_> {
     /// The page for the node, as one document: where it stands, what it
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
-    pub(super) fn document(&self, look: &Look) -> Doc<'_> {
+    pub(super) fn document(&self, look: &Look) -> Doc {
         let display = crate::render::standing(&self.node.state);
         let headline = Headline {
             subject: format!("node {} of run {}", self.node.id, self.run_id.handle()),
@@ -67,10 +71,10 @@ impl NodePage<'_> {
         };
         let mut documents = Vec::new();
         for document in self.documents {
-            let doc = crate::render::shown::document(
+            let doc = yunta_render::shown::document(
                 document,
                 self.run_id,
-                crate::render::shown::Form::Whole,
+                yunta_render::shown::Form::Whole,
                 &advice::spell,
             );
             documents.extend(crate::render::surface_lines(doc, look));
@@ -87,7 +91,7 @@ impl NodePage<'_> {
     fn said(&self, look: &Look) -> Vec<Line> {
         let (tone, text) = match &self.node.state {
             NodeStanding::Reached(NodeState::Failed { failure, .. }) => {
-                (Tone::Failed, crate::render::failure::headline(failure))
+                (Tone::Failed, yunta_render::failure::headline(failure))
             }
             NodeStanding::Reached(NodeState::Finished { outcome, .. }) => {
                 (Tone::Plain, yunta_render::outcome::sentence(outcome))

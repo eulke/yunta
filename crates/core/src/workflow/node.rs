@@ -305,7 +305,7 @@ impl<'de> Deserialize<'de> for Node {
             return Err(D::Error::custom(format!(
                 "{subject}: unknown kind `{kind_name}`; one of {}{}",
                 list(NodeKind::KINDS),
-                crate::text::did_you_mean(kind_name, NodeKind::KINDS.iter().copied())
+                surco::text::did_you_mean(kind_name, NodeKind::KINDS.iter().copied())
             )));
         };
         let unknown: Vec<&str> = kind_part
@@ -322,7 +322,7 @@ impl<'de> Deserialize<'de> for Node {
                 .collect();
             let mut message = format!(
                 "{subject}: unknown {} {} for a `{kind_name}` node; valid keys: {}",
-                crate::text::agreeing(unknown.len(), "key", "keys"),
+                surco::text::agreeing(unknown.len(), "key", "keys"),
                 list(&unknown),
                 list(&valid)
             );
@@ -333,7 +333,7 @@ impl<'de> Deserialize<'de> for Node {
             }
             for key in &unknown {
                 let retired = RETIRED_NODE_KEYS.iter().any(|(old, _)| old == key);
-                if let Some(near) = crate::text::nearest(key, valid.iter().copied()) {
+                if let Some(near) = surco::text::nearest(key, valid.iter().copied()) {
                     if !retired {
                         message.push_str(&format!("; `{key}`: did you mean `{near}`?"));
                     }

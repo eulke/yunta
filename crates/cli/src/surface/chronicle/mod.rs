@@ -7,7 +7,7 @@
 //! followed a run on a terminal and a reader who read the same run out
 //! of a CI log met the same sentences.
 //!
-//! Every state word comes from `render::state::NodeDisplay`, every
+//! Every state word comes from `yunta_render::state::NodeDisplay`, every
 //! run or child close from `view::closed_as`, every capability from
 //! `Capability::as_str`. Nothing here formats a domain type with
 //! `Debug`: a reader is owed a word, not a Rust identifier.
@@ -19,16 +19,19 @@ mod rail_words;
 mod scope_words;
 mod words;
 
+use surco::text::{aside, one_line};
 use yunta_core::events::{children, findings, gates, node, run, session};
-use yunta_core::text::{aside, one_line};
 use yunta_engine::{Happening, Moment};
 
 use super::view;
 use crate::commands::advice;
-use crate::render::blocks::{Drawn, FailureDetail, Whole};
-use crate::render::ink::{Line, Tone};
-use crate::render::{indent, Glyphs, Look, Mark, CHILD_DEPTH};
+use surco::components::{Drawn, Whole};
+use surco::glyphs::{Glyphs, Mark};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::width::{indent, CHILD_DEPTH};
 use words::carried;
+use yunta_render::blocks::FailureDetail;
 
 /// One moment as a surface says it, before any layout decides where it
 /// goes.

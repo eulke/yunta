@@ -160,7 +160,7 @@ pub enum CliError {
 
     /// A document that does not read, or breaks its own rules: every
     /// problem it has, each quoted from the text it was read from.
-    #[error("{}", crate::render::blocks::diagnostic::report(.report, .text.as_deref()))]
+    #[error("{}", yunta_render::blocks::diagnostic::report(.report, .text.as_deref()))]
     Document {
         report: yunta_core::diagnostic::Report,
         text: Option<String>,
@@ -405,5 +405,5 @@ impl CliError {
 
 /// `warning`, as stderr is painted.
 pub(crate) fn warning_word() -> String {
-    crate::render::stderr_ink().word(crate::render::ink::Tone::Caution, "warning")
+    crate::render::stderr_ink().word(surco::line::Tone::Caution, "warning")
 }

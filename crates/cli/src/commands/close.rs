@@ -4,6 +4,12 @@
 //! settles one. Its checkouts go back to the project's pool; its branches
 //! stay for a person to read and for `gc` to remove.
 
+use surco::components::Headline;
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
+use surco::width::{wrap, INDENT};
+use surco::words::RunWord;
 use yunta_core::{Redactor, Responder, RunId};
 use yunta_engine::EngineLiveness;
 
@@ -12,11 +18,6 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::blocks::Headline;
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::state::RunWord;
-use crate::render::{wrap, Look, INDENT};
 
 pub async fn close(
     run_id: &RunId,
@@ -65,7 +66,7 @@ pub(crate) struct CloseAnswer {
 }
 
 impl Answer for CloseAnswer {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         let headline = Headline {
             subject: format!("run {}", self.run_id.handle()),
             mark: self.word.mark(),

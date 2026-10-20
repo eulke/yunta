@@ -2,8 +2,9 @@
 //! gate says happened or is asked. An engine claim is data, and the words
 //! a reader sees are written here; a claim someone wrote is its own words.
 
+use surco::text;
 use yunta_core::events::{Claim, ExhaustedReroute, FailureMenu};
-use yunta_core::{text, NodeId};
+use yunta_core::NodeId;
 
 use crate::found;
 

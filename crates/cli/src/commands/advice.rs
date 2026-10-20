@@ -16,13 +16,13 @@
 //! id printed as an example gets pasted, and no id printed beside a run
 //! is ever one that run's own menu does not offer.
 
+use surco::words::RunWord;
 use yunta_core::events::{GateWaitingPayload, Stuck};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
 use yunta_engine::{NodeWait, RunPhase, WaitingOn};
 
 use crate::error::Reader;
-use crate::render::state::RunWord;
 
 /// What holds a run whose log says it is moving and whose engine is gone.
 pub(crate) const STALLED: &str = "no process is driving it: the engine that ran it is gone";
@@ -39,7 +39,7 @@ pub(crate) fn asking(prompt: &yunta_engine::Prompt, at: chrono::DateTime<chrono:
     format!(
         "{who} is asking at its terminal (pid {}) for {}; answer it there",
         prompt.pid,
-        yunta_core::units::duration(waited)
+        surco::figures::duration(waited)
     )
 }
 
@@ -76,9 +76,7 @@ pub(crate) fn parked_on(on: &WaitingOn) -> String {
                 format!("node `{node}`")
             }
         },
-        WaitingOn::Run { reason } => {
-            yunta_core::text::one_line(&yunta_render::pause::sentence(reason))
-        }
+        WaitingOn::Run { reason } => surco::text::one_line(&yunta_render::pause::sentence(reason)),
     }
 }
 
@@ -110,7 +108,7 @@ pub(crate) fn parked_in_full(on: &WaitingOn) -> String {
             ..
         }
         | WaitingOn::Run { reason } => {
-            yunta_core::text::one_line(&yunta_render::pause::sentence(reason))
+            surco::text::one_line(&yunta_render::pause::sentence(reason))
         }
         WaitingOn::Node { reason: None, .. } => parked_on(on),
     }

@@ -1,9 +1,9 @@
 //! The sentences a session reads when its stop is refused: what stands
 //! between its work and its close, numbered, and how to go on.
 
+use surco::text::listed;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::expansion::Decision;
-use yunta_core::text::listed;
 
 use super::scope::denial;
 use super::verdicts::failure_heading;

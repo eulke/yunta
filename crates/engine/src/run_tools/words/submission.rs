@@ -136,10 +136,10 @@ fn counted_names(
     let ids: Vec<String> = ids.collect();
     let listed = match ids.is_empty() {
         true => "none".to_string(),
-        false => yunta_core::text::listed(ids.iter().map(String::as_str)),
+        false => surco::text::listed(ids.iter().map(String::as_str)),
     };
     format!(
         "{} {happened}: {listed}",
-        yunta_core::text::counted(how_many, noun)
+        surco::text::counted(how_many, noun)
     )
 }

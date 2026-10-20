@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-
 use yunta_core::caution::Caution;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
@@ -33,7 +32,7 @@ use crate::commands::status::decision_json::DecisionJson;
 use crate::commands::status::progress;
 use crate::error::Outcome;
 pub use crate::output::print_json;
-use crate::render::state::RunWord;
+use surco::words::RunWord;
 
 /// What the invocation that creates a run says before the first token —
 /// on stderr for the person watching, and carried here so the document
@@ -189,7 +188,7 @@ impl RunDocument {
             handle: run_id.handle().to_string(),
             outcome: crate::render::observed_word(&frame, engine),
             // A document reads the same whichever terminal asked for it.
-            summary: progress::summary(&frame, engine, crate::render::Glyphs::Unicode),
+            summary: progress::summary(&frame, engine, surco::glyphs::Glyphs::Unicode),
             reason: reason(&frame.phase),
             cautions: Vec::new(),
             budget_warning: None,
@@ -249,8 +248,8 @@ fn reason(phase: &RunPhase) -> Option<String> {
     match phase {
         RunPhase::Failed { failure } => failure
             .as_ref()
-            .map(|failure| yunta_core::text::one_line(&crate::render::failure::sentence(failure))),
-        RunPhase::Broken { diagnostic } => Some(yunta_core::text::one_line(diagnostic)),
+            .map(|failure| surco::text::one_line(&yunta_render::failure::sentence(failure))),
+        RunPhase::Broken { diagnostic } => Some(surco::text::one_line(diagnostic)),
         RunPhase::Created
         | RunPhase::Running
         | RunPhase::Waiting { .. }

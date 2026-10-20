@@ -2,15 +2,15 @@
 //! keeps and waits on; each change it makes with the code the plan writes
 //! for it; what proves it done, with the code of the test that does.
 
+use surco::components::{Code, Fields, Marked, Section};
+use surco::doc::Block;
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
 use yunta_core::shown::{HeldTo, JudgedCriterion, PlanReview, TaskReview};
 use yunta_core::step::NextStep;
 use yunta_core::{Change, RunId, Shape, Task, TasksFile};
 
 use super::{blank, grouped, said, Form, CODE_SHOWN};
-use crate::blocks::{Code, Fields, Marked, Section};
-use crate::doc::Block;
-use crate::ink::{Line, Tone};
-use crate::Mark;
 
 /// One task: what a person sees once it is done, what it touches, keeps
 /// and waits on; then each change it makes with the code the plan writes
@@ -21,9 +21,9 @@ pub(super) fn card(
     form: Form,
     run: &RunId,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Section<'static> {
+) -> Section {
     let judged = review.tasks.iter().find(|judged| judged.task == task.id);
-    let mut blocks: Vec<Block<'static>> = vec![facts(task, &review.plan, judged).into()];
+    let mut blocks: Vec<Block> = vec![facts(task, &review.plan, judged).into()];
     for change in changes(task, &review.plan, judged) {
         blocks.push(blank());
         blocks.push(change);
@@ -128,7 +128,7 @@ fn checked(mut fields: Fields, task: &Task, judged: Option<&TaskReview>) -> Fiel
 /// of its file otherwise, and first of all when no change touches its
 /// file. A shape is the interface the task adds; a change's code is often
 /// one line of it, and neither stands in for the other.
-fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Block<'static>> {
+fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Block> {
     let owned: Vec<&Shape> = plan
         .shapes
         .iter()
@@ -147,7 +147,7 @@ fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Bl
             Some(owned[at])
         })
         .collect();
-    let mut blocks: Vec<Block<'static>> = Vec::new();
+    let mut blocks: Vec<Block> = Vec::new();
     for (at, shape) in owned.iter().enumerate() {
         if !task
             .changes
@@ -171,7 +171,7 @@ fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Bl
 }
 
 /// A shape the task builds, whole.
-fn built(shape: &Shape) -> Block<'static> {
+fn built(shape: &Shape) -> Block {
     Code::whole(
         format!("{} › {}", shape.file, shape.name),
         Some("the shape this task builds".to_string()),
@@ -182,11 +182,7 @@ fn built(shape: &Shape) -> Block<'static> {
 
 /// One change: where, what for, and its own code — or the code of the
 /// shape `attached` to it, when it brings none.
-fn changed(
-    change: &Change,
-    attached: Option<&Shape>,
-    judged: Option<&TaskReview>,
-) -> Block<'static> {
+fn changed(change: &Change, attached: Option<&Shape>, judged: Option<&TaskReview>) -> Block {
     let at = change.at.replace("::", " › ");
     let denied = judged
         .into_iter()
@@ -228,7 +224,7 @@ fn proved(
     form: Form,
     run: &RunId,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Vec<Block<'static>> {
+) -> Vec<Block> {
     let mut fields = Fields::new();
     if let Some(proves) = criterion.proves.as_deref() {
         fields = fields.push_if("done when", proves);
@@ -241,7 +237,7 @@ fn proved(
         },
         format!("$ {}", criterion.cmd),
     );
-    let mut blocks: Vec<Block<'static>> = Vec::new();
+    let mut blocks: Vec<Block> = Vec::new();
     match &criterion.from {
         HeldTo::Spec => {
             blocks.push(fields.into());
@@ -267,7 +263,7 @@ fn tests_run(
     form: Form,
     run: &RunId,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Vec<Block<'static>> {
+) -> Vec<Block> {
     judged
         .files
         .iter()

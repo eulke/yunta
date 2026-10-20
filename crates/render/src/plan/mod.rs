@@ -11,16 +11,15 @@
 //! test drawn in a second document after every task is a screen away
 //! from the task it explains.
 
+use surco::components::{Fields, Marked, Next, Prose, Section};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::text::{agreeing, counted};
 use yunta_core::events::AcceptedDeparture;
 use yunta_core::shown::{Answered, HeldTo, PlanReview, TaskReview};
 use yunta_core::step::NextStep;
-use yunta_core::text::{agreeing, counted};
 use yunta_core::{Decision, RunId, ScopeGlob, Task, TasksFile};
-
-use crate::blocks::{Fields, Marked, Next, Prose, Section};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
-use crate::Mark;
 
 mod card;
 mod flawed;
@@ -55,7 +54,7 @@ pub fn document(
     run: &RunId,
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Doc<'static> {
+) -> Doc {
     let plan = &review.plan;
     let steps = plan.steps();
     let mut doc = Doc::new().with(Block::Title(
@@ -101,7 +100,7 @@ pub fn document(
 
 /// What the plan risks and leaves out, and the suite every task keeps
 /// passing.
-fn bounded(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
+fn bounded(mut doc: Doc, review: &PlanReview) -> Doc {
     let plan = &review.plan;
     for (title, mark, items) in [
         ("risks", Mark::Caution, &plan.risks),
@@ -167,7 +166,7 @@ fn sized(plan: &TasksFile, steps: usize, review: &PlanReview) -> String {
 
 /// Every departure from the plan a person accepted: what the plan says,
 /// what was built instead and why.
-fn departures(departed: &[AcceptedDeparture]) -> Section<'static> {
+fn departures(departed: &[AcceptedDeparture]) -> Section {
     let blocks = departed
         .iter()
         .map(|departure| {
@@ -195,10 +194,10 @@ fn departures(departed: &[AcceptedDeparture]) -> Section<'static> {
 
 /// The description: its first paragraph and each diagram where a
 /// decision is made; all of it otherwise.
-fn described(doc: Doc<'static>, description: &str, form: Form) -> Doc<'static> {
+fn described(doc: Doc, description: &str, form: Form) -> Doc {
     match form {
         Form::Whole => doc.with(Block::Markdown(description.to_string())),
-        Form::Review => crate::diagram::split::reviewed(description)
+        Form::Review => surco::diagram::split::reviewed(description)
             .into_iter()
             .fold(doc, Doc::with),
     }
@@ -206,13 +205,13 @@ fn described(doc: Doc<'static>, description: &str, form: Form) -> Doc<'static> {
 
 /// What the plan decided: what a person answered, and what the plan
 /// decided for them.
-fn decisions(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
+fn decisions(mut doc: Doc, review: &PlanReview) -> Doc {
     let plan = &review.plan;
     let answer_of = |decision: &Decision| {
         let id = decision.answers.as_ref()?;
         review.answered.iter().find(|answered| answered.id == *id)
     };
-    let yours: Vec<Block<'static>> = plan
+    let yours: Vec<Block> = plan
         .decisions
         .iter()
         .filter_map(|decision| Some((decision, answer_of(decision)?)))
@@ -222,7 +221,7 @@ fn decisions(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
     if !yours.is_empty() {
         doc = doc.with(titled("you answered", yours));
     }
-    let ours: Vec<Block<'static>> = plan
+    let ours: Vec<Block> = plan
         .decisions
         .iter()
         .filter(|decision| answer_of(decision).is_none())
@@ -236,11 +235,11 @@ fn decisions(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
 }
 
 /// How the plan is built: the design, and where each shape's code is.
-fn designed(doc: Doc<'static>, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc<'static> {
+fn designed(doc: Doc, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc {
     if said(&plan.design).is_none() && plan.shapes.is_empty() {
         return doc;
     }
-    let mut blocks: Vec<Block<'static>> = Vec::new();
+    let mut blocks: Vec<Block> = Vec::new();
     if let Some(design) = said(&plan.design) {
         blocks.push(Block::Markdown(design.to_string()));
     }
@@ -276,7 +275,7 @@ fn designed(doc: Doc<'static>, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc<'s
 
 /// One decision: what was open, what the plan chose and why, and what it
 /// did not choose.
-fn decided(at: usize, decision: &Decision) -> Section<'static> {
+fn decided(at: usize, decision: &Decision) -> Section {
     let mut fields = Fields::new().push_if("chose", decision.choice.as_str());
     if let Some(why) = said(&decision.why) {
         fields = fields.push_if("because", why);
@@ -293,7 +292,7 @@ fn decided(at: usize, decision: &Decision) -> Section<'static> {
 
 /// A decision that restates what a person answered: their words, and
 /// what the plan does with them.
-fn restated(at: usize, decision: &Decision, answered: &Answered) -> Section<'static> {
+fn restated(at: usize, decision: &Decision, answered: &Answered) -> Section {
     Section {
         mark: None,
         title: Line::new().push(Tone::Strong, format!("{at}  {}", answered.question)),
@@ -327,12 +326,12 @@ pub(super) fn grouped(scope: &[ScopeGlob]) -> Vec<String> {
 }
 
 /// A blank line between two blocks a reader takes apart.
-pub(super) fn blank() -> Block<'static> {
+pub(super) fn blank() -> Block {
     Block::Lines(vec![Line::new()])
 }
 
 /// A section titled `title`, in the plan's own heading tone.
-fn titled(title: &str, blocks: Vec<Block<'static>>) -> Section<'static> {
+fn titled(title: &str, blocks: Vec<Block>) -> Section {
     Section {
         mark: None,
         title: Line::new().push(Tone::Strong, title),

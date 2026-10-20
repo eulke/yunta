@@ -83,7 +83,7 @@ fn ordinal(noun: &str, index: usize) -> String {
         1 => "first".to_string(),
         2 => "second".to_string(),
         3 => "third".to_string(),
-        n => crate::text::ordinal(n),
+        n => surco::text::ordinal(n),
     };
     format!("the {word} {noun}")
 }

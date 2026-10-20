@@ -2,8 +2,8 @@
 //! capability its adapter must declare, the skill it mounts, and the frozen
 //! inputs and reads the run was born with.
 
+use surco::text;
 use yunta_core::events::{CapabilityUse, Failure, FrozenRead, RunnerRefusal};
-use yunta_core::text;
 
 /// A runner that did not resolve: no entry defines it, or none of its
 /// candidates is available.

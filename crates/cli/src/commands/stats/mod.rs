@@ -9,6 +9,7 @@
 //! words and glyphs all come from `crate::render`, which is where both
 //! rules live.
 
+mod facts;
 mod json;
 mod run;
 mod time;
@@ -28,10 +29,11 @@ use yunta_engine::{
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::Doc;
-use crate::render::{duration, Look, Tokens};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::RunStatsPage;
+use surco::doc::Doc;
+use surco::figures::{duration, Tokens};
+use surco::look::Look;
 pub(crate) use workflow::verification_findings;
 use workflow::WorkflowPage;
 
@@ -77,7 +79,7 @@ fn currency_line(
     let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
     Some(format!(
         "~{estimate:.2} (avg of {}, never authoritative)",
-        yunta_core::text::counted(pricing.len(), "priced model")
+        surco::text::counted(pricing.len(), "priced model")
     ))
 }
 
@@ -92,7 +94,7 @@ struct RunStatsAnswer<'a> {
 }
 
 impl Answer for RunStatsAnswer<'_> {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         self.page.document(look)
     }
 
@@ -135,7 +137,7 @@ struct WorkflowAnswer<'a> {
 }
 
 impl Answer for WorkflowAnswer<'_> {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         self.page.document(look)
     }
 
@@ -307,7 +309,7 @@ pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<
 /// so the three surfaces never phrase the same numbers differently.
 pub(crate) fn format_estimation_line(
     estimation: &yunta_engine::PriorEstimation,
-    glyphs: crate::render::Glyphs,
+    glyphs: surco::glyphs::Glyphs,
 ) -> String {
     let sep = glyphs.sep();
     let wall_clock = match estimation.wall_clock_secs {
@@ -316,7 +318,7 @@ pub(crate) fn format_estimation_line(
     };
     format!(
         "{} {sep} median {}, p90 {} {sep} median wall-clock {}",
-        yunta_core::text::counted(estimation.sample_count, "past run"),
+        surco::text::counted(estimation.sample_count, "past run"),
         Tokens::rounded(estimation.tokens.median),
         Tokens::rounded(estimation.tokens.p90).figure(),
         wall_clock,

@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::text::LINE_WIDTH;
+use surco::width::LINE_WIDTH;
 use yunta_testkit::{
     git, handle, run_id_from, stderr, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
 };

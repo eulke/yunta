@@ -2,7 +2,7 @@
 //! run can answer, a `use:` reference that refuses, and a gate route no
 //! answer follows.
 
-use yunta_core::text::counted;
+use surco::text::counted;
 use yunta_core::ModeName;
 use yunta_engine::{Composition, Unanswerable, UntakenRoute};
 

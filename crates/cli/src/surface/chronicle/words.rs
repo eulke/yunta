@@ -6,20 +6,23 @@
 //! `view::closed_as`, every enum its own published word — nothing here
 //! formats a domain type with `Debug`.
 
+use surco::figures::duration;
+use surco::glyphs::Mark;
+use surco::text::{detailed, one_line};
+use surco::words::StateWord;
+use tasks::happening as tasks_happening;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
     GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage, ToolTarget,
 };
 use yunta_core::fence::Coverage;
-use yunta_core::text::{detailed, one_line};
 use yunta_core::NonEmpty;
 use yunta_engine::{Happening, NodeState, NodeWait};
 use yunta_render::spend::Breakdown;
+use yunta_render::state::NodeDisplay;
 
 use super::super::view;
-use crate::render::{duration, Mark, NodeDisplay, StateWord};
-use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
 /// marked with.
@@ -48,10 +51,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
         H::Paused { pause } => yunta_render::pause::said(pause),
         H::Resumed { policies } => match policies.len() {
             0 => "resumed".to_string(),
-            n => format!(
-                "resumed — {} settled",
-                yunta_core::text::counted(n, "orphan")
-            ),
+            n => format!("resumed — {} settled", surco::text::counted(n, "orphan")),
         },
         H::BaselineCaptured { origin, red } => {
             return super::baseline_words::measured(origin, *red)
@@ -126,10 +126,7 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
         } => (None, criteria_checked(task, (*phase, *checked), red, sep)),
         H::ScopeChecked { violations } => (
             None,
-            format!(
-                "{} out of scope",
-                yunta_core::text::counted(*violations, "path")
-            ),
+            format!("{} out of scope", surco::text::counted(*violations, "path")),
         ),
         H::PullRequestOpened { url, number } => (None, format!("pull request #{number} — {url}")),
     }
@@ -142,7 +139,7 @@ fn context_assembled(absent: &[String], sep: char) -> String {
     }
     format!(
         "context assembled {sep} {} absent (optional)",
-        yunta_core::text::listed(absent.iter().map(String::as_str))
+        surco::text::listed(absent.iter().map(String::as_str))
     )
 }
 
@@ -159,7 +156,7 @@ fn criteria_checked(
     let mut said = format!(
         "{task} {}: {}",
         phase.as_str(),
-        yunta_core::text::counted_as(checked, "criterion", "criteria")
+        surco::text::counted_as(checked, "criterion", "criteria")
     );
     if !red.is_empty() {
         let named: Vec<String> = red
@@ -272,7 +269,7 @@ fn service_words(lost: Option<&str>, waited: Option<std::time::Duration>) -> Str
         ),
         (None, waited) => format!(
             "its service answers again after {}; the session goes on",
-            yunta_core::units::duration(waited.unwrap_or_default())
+            surco::figures::duration(waited.unwrap_or_default())
         ),
     }
 }
@@ -389,7 +386,7 @@ fn finding_words(happening: &findings::happening::Happening) -> String {
         } => format!(
             "{named} {} refused: {}",
             operation.as_str(),
-            yunta_core::text::counted(*problems, "problem")
+            surco::text::counted(*problems, "problem")
         ),
     }
 }
@@ -473,7 +470,7 @@ fn fence_covered(coverage: &Coverage) -> String {
         Coverage::Exact => "fence exact".to_string(),
         Coverage::WidenedToRoots { roots } => format!(
             "fence widened to {}",
-            yunta_core::text::counted(roots.len(), "root")
+            surco::text::counted(roots.len(), "root")
         ),
         Coverage::ToolsOnly => "fence on tool calls".to_string(),
     }

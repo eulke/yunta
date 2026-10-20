@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use surco::components::{Check, Found};
 use yunta_core::events::{ArtifactId, Failure, PauseReason, SessionDeath};
 use yunta_core::{
     AdapterId, ArtifactKind, NodeId, RunTool, RunnerCandidate, RunnerName, ToolNaming,
@@ -25,7 +26,6 @@ use yunta_core::{
 use crate::commands::test::{init_git, sandboxed_checkout, SandboxedCheckout};
 use crate::context::Context;
 use crate::error::CliError;
-use crate::render::blocks::{Check, Found};
 
 /// The workflow every probe run drives: one node, one prompt, the run
 /// tools a real node is given. The verdict requires the submission to be
@@ -129,13 +129,13 @@ impl SessionProbe {
         let (found, said) = match &self.outcome {
             Outcome::Ok { tokens } => (
                 Found::Holds,
-                format!("ok — {}", yunta_core::units::Tokens(*tokens)),
+                format!("ok — {}", surco::figures::Tokens(*tokens)),
             ),
             Outcome::Died(died) => (
                 Found::Problem,
                 format!(
                     "session died — {}",
-                    crate::render::failure::session_death(died)
+                    yunta_render::failure::session_death(died)
                 ),
             ),
             Outcome::NoDelivery(why) => (
@@ -236,9 +236,9 @@ fn verdict(report: &yunta_engine::RunReport) -> Outcome {
         Some(Failure::SessionDied { died }) => Outcome::Died(Box::new(died)),
         other if facts.opened && !facts.accepted => Outcome::NoDelivery(other.map_or_else(
             || "the run ended without artifact_accepted".to_string(),
-            |failure| crate::render::failure::sentence(&failure),
+            |failure| yunta_render::failure::sentence(&failure),
         )),
-        Some(other) => Outcome::Refused(crate::render::failure::sentence(&other)),
+        Some(other) => Outcome::Refused(yunta_render::failure::sentence(&other)),
         None => match &report.terminal {
             yunta_engine::RunTerminal::Finished
                 if facts.accepted && facts.node_finished && facts.run_finished =>

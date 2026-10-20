@@ -59,9 +59,9 @@ mod tests {
     use yunta_testkit::{node_frame, run_frame};
     use yunta_testkit_core::Captured;
 
-    use crate::render::Glyphs;
     use crate::surface::region::Region;
     use crate::surface::{Screen, Watched};
+    use surco::glyphs::Glyphs;
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
 
@@ -71,7 +71,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
-            crate::render::ink::Ink::Plain,
+            surco::paint::Ink::Plain,
             Box::new(out.clone()),
         )
         .expect("the region's row template parses")
@@ -106,7 +106,7 @@ mod tests {
         // What closed is put here by the chronicle, not deduced by
         // comparing frames: the region shows what is open, and this is
         // what left it.
-        region.record(&[crate::render::ink::Line::new().plain("+ plan — finished — exit 0")]);
+        region.record(&[surco::line::Line::new().plain("+ plan — finished — exit 0")]);
         region.show(&frame(vec![running("build")]), &RUN, false);
         assert!(
             !term.shown().contains("plan"),

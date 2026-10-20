@@ -10,6 +10,9 @@
 //! mechanism as `run --detach`: a control-plane operation never blocks
 //! for the run's own duration.
 
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
 use yunta_core::events::HumanChoice;
 use yunta_core::step::NextStep;
 use yunta_core::{OptionId, Responder, RunId};
@@ -20,9 +23,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::{Look, RunExit};
+use crate::render::RunExit;
 use crate::surface::Diagnostics;
 
 /// Records the decision and hands the run back, returning the sentence
@@ -189,7 +190,7 @@ fn answer(run_id: &RunId, state: GateState) -> ResolveGateAnswer {
 }
 
 impl Answer for ResolveGateAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+    fn document(&self, _look: &Look) -> Doc {
         let said = match &self.state {
             GateState::Resolved { option } => sentence(&self.run_id, option),
             GateState::Declined => format!(
@@ -269,7 +270,8 @@ mod tests {
 
     use super::{answer, GateState};
     use crate::output::Answer;
-    use crate::render::{draw, Look};
+    use crate::render::draw;
+    use surco::look::Look;
 
     #[test]
     fn each_gate_answer_keeps_the_words_it_has_always_had() {

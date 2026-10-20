@@ -4,9 +4,10 @@
 
 use std::path::PathBuf;
 
+use surco::text;
 use yunta_core::events::{Failure, OwedScope, RequestedScope};
+use yunta_core::listed_globs;
 use yunta_core::protected::Protection;
-use yunta_core::{listed_globs, text};
 
 use crate::found;
 

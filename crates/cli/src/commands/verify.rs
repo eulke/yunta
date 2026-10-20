@@ -13,6 +13,10 @@
 //! alone — so each answers on its own line, and either one failing is a
 //! failing verdict.
 
+use surco::components::{Check, Checklist, Found, Headline};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
+use surco::look::Look;
 use yunta_core::events::FindingCause;
 use yunta_core::RunId;
 use yunta_engine::{ArtifactIntegrity, StoreError};
@@ -22,9 +26,6 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::blocks::{Check, Checklist, Found, Headline};
-use crate::render::doc::Doc;
-use crate::render::{Look, Mark};
 
 pub async fn verify(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -60,7 +61,7 @@ impl VerifyAnswer {
 }
 
 impl Answer for VerifyAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+    fn document(&self, _look: &Look) -> Doc {
         let (mark, said) = match self.holds {
             true => (Mark::Done, "intact"),
             false => (Mark::Failed, "broken"),
@@ -128,7 +129,7 @@ fn chain(run_id: &RunId, storage: &Storage, checks: &mut Checklist) -> Result<()
             "chain",
             format!(
                 "intact — {} verified",
-                yunta_core::text::counted(events, "event")
+                surco::text::counted(events, "event")
             ),
         ),
         // A broken chain is the `broken` reading of the run: the log can
@@ -191,7 +192,7 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
             "objects",
             format!(
                 "intact — {} verified",
-                yunta_core::text::counted(integrity.verified, "artifact")
+                surco::text::counted(integrity.verified, "artifact")
             ),
         ),
         false => {
@@ -201,10 +202,7 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
                 format!(
                     "broken — {} of {} are not the bytes the run accepted",
                     integrity.faults.len(),
-                    yunta_core::text::counted(
-                        integrity.verified + integrity.faults.len(),
-                        "artifact"
-                    )
+                    surco::text::counted(integrity.verified + integrity.faults.len(), "artifact")
                 ),
             );
             for fault in &integrity.faults {
@@ -242,9 +240,10 @@ fn fault_said(error: &StoreError) -> String {
 #[cfg(test)]
 mod tests {
     use super::{checklist, CheckRow};
-    use crate::render::blocks::{Checklist, Found};
-    use crate::render::doc::Doc;
-    use crate::render::{draw, Look};
+    use crate::render::draw;
+    use surco::components::{Checklist, Found};
+    use surco::doc::Doc;
+    use surco::look::Look;
 
     #[test]
     fn a_rebuilt_checklist_draws_as_the_one_it_came_from() {

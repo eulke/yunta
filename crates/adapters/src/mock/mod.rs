@@ -376,7 +376,7 @@ impl MockAdapter {
                         "fixture exhausted: {}, none left unconsumed and matching this \
                          request — add a session to the fixture for every session the run \
                          opens",
-                        yunta_core::text::counted(self.fixture.sessions.len(), "scripted session"),
+                        surco::text::counted(self.fixture.sessions.len(), "scripted session"),
                     ),
                 })?,
         };

@@ -37,7 +37,7 @@ fn a_kind_prints_the_shape_a_writer_copies() {
     // And every rule the engine holds a tasks document to — asserted against the
     // list that enforces them, so this cannot pass on wording that drifted.
     for rule in yunta_core::shape::rules(yunta_core::ArtifactKind::Tasks) {
-        let demand = yunta_core::text::one_line(rule.demand);
+        let demand = surco::text::one_line(rule.demand);
         assert!(
             text.contains(&demand),
             "`{}` never reaches the writer: {text}",

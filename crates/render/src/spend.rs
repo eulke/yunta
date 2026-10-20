@@ -3,8 +3,8 @@
 
 use std::fmt;
 
+use surco::figures::Tokens;
 use yunta_core::events::{Spend, TokenUsage};
-use yunta_core::units::Tokens;
 
 /// A count read as its breakdown: `1.86M in / 20.2k out (9k cached)`.
 pub struct Breakdown<'a>(pub &'a TokenUsage);

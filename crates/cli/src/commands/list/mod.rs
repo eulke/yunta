@@ -21,10 +21,11 @@ use yunta_core::{InputSpec, Workflow};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::document;
-use crate::render::blocks::{Fields, Marked, Prose, Section};
-use crate::render::doc::Doc;
-use crate::render::ink::{Line, Tone};
-use crate::render::{Look, Mark};
+use surco::components::{Fields, Marked, Prose, Section};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::look::Look;
 
 pub use runs::list_runs;
 
@@ -57,8 +58,8 @@ pub async fn list_workflows(look: &Look) -> Result<Outcome, CliError> {
 pub(crate) async fn catalog(
     cwd: &Path,
     history_source: Option<&Context>,
-    glyphs: crate::render::Glyphs,
-) -> Doc<'static> {
+    glyphs: surco::glyphs::Glyphs,
+) -> Doc {
     let mut entries = repo_catalog_entries(cwd);
     let shadowed: HashSet<String> = entries.iter().map(|e| e.display_name.clone()).collect();
     let (pack_entries, broken_packs) = pack_catalog_entries(cwd);
@@ -96,8 +97,8 @@ pub(crate) async fn catalog(
 async fn listed(
     entry: &CatalogEntry,
     history_source: Option<&Context>,
-    glyphs: crate::render::Glyphs,
-) -> Section<'static> {
+    glyphs: surco::glyphs::Glyphs,
+) -> Section {
     let name = &entry.display_name;
     let workflow = match read_entry(entry).await {
         Ok(workflow) => workflow,
@@ -168,7 +169,7 @@ async fn estimation_field(
     mut fields: Fields,
     ctx: &Context,
     workflow: &Workflow,
-    glyphs: crate::render::Glyphs,
+    glyphs: surco::glyphs::Glyphs,
 ) -> Fields {
     let history = super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
     if let Some(estimation) = yunta_engine::prior_estimation(&history) {

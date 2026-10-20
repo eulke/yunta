@@ -12,15 +12,15 @@
 //! rendering four texts drift apart at the first schema change; four
 //! doors rendering one do not.
 
+use surco::components::{Fields, Next};
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
 use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
 use crate::output::{document, raw, Mode};
-use crate::render::blocks::{Fields, Next};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::Look;
 
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, CliError> {
@@ -55,7 +55,7 @@ pub fn schema(kind: Option<&str>, output: Mode, look: &Look) -> Result<Outcome, 
 
 /// The catalog, one kind per row with what it is for, and the two
 /// commands that show a kind's shape.
-fn list() -> Doc<'static> {
+fn list() -> Doc {
     let kinds = ArtifactKind::ALL
         .into_iter()
         .fold(Fields::new(), |fields, kind| {

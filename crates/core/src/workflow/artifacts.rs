@@ -143,7 +143,7 @@ impl ArtifactRefId {
             D::Error::custom(format!(
                 "unknown key `{key}` for {what}; one of {}{}",
                 list(&valid),
-                crate::text::did_you_mean(&key, valid.iter().copied())
+                surco::text::did_you_mean(&key, valid.iter().copied())
             ))
         };
         let mut id: Option<ArtifactRefId> = None;

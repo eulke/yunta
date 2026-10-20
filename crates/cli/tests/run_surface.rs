@@ -660,7 +660,7 @@ fn the_budget_warning_survives_quiet_and_the_distribution_does_not() {
 #[test]
 fn a_parked_run_is_called_the_same_thing_on_every_surface() {
     // One stop, five surfaces, one word. The vocabulary lives in
-    // `render::state::RunWord`, and this is what holds every surface to
+    // `surco::words::RunWord`, and this is what holds every surface to
     // it: a reader who met `paused` on the block that closed the run
     // meets `paused` again on the status page, in both documents a
     // program reads, and in the listing's own grouping.

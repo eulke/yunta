@@ -76,7 +76,7 @@ pub(crate) fn runner_step(
             first.to_string(),
             format!(
                 "this machine answers for {}",
-                yunta_core::text::listed(healthy.iter().map(AdapterId::as_str))
+                surco::text::listed(healthy.iter().map(AdapterId::as_str))
             ),
         ),
         None => (

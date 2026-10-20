@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/surco",
     "crates/core",
     "crates/storage",
     "crates/adapters",
@@ -24,6 +25,7 @@ repository = "https://github.com/eulke/yunta"
 # crates carry `version` because crates.io rejects a path dependency
 # without one.
 [workspace.dependencies]
+yunta-surco = { path = "crates/surco", version = "0.0.5" }
 yunta-core = { path = "crates/core", version = "0.0.5" }
 yunta-storage = { path = "crates/storage", version = "0.0.5" }
 yunta-adapters = { path = "crates/adapters", version = "0.0.5" }

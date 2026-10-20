@@ -1,9 +1,9 @@
 ---
 number: D133
 title: "`node_failed` lleva la falla como dato; la prosa se produce al leer"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D269]
 ---
 
 # D133 — `node_failed` lleva la falla como dato; la prosa se produce al leer

@@ -3,9 +3,10 @@
 //! rejected, a plan sent back unpublished, findings open on a gate, a
 //! request for changes and a closed pull request.
 
+use surco::text;
 use yunta_core::events::{Approval, Failure};
 use yunta_core::shown::{withheld_because, Flaw};
-use yunta_core::{text, FindingId, NodeId, OptionId, TaskId};
+use yunta_core::{FindingId, NodeId, OptionId, TaskId};
 
 /// The line a choice that routes the run back states: which option, and the
 /// node it routes to.

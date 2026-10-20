@@ -13,11 +13,11 @@ mod console;
 
 use std::sync::Arc;
 
+use surco::golden::assert_golden;
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{Failure, FindingCause, FindingSays, GateEvent, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
-use yunta_testkit_core::golden::assert_golden;
 
 /// A claude-code fixture that scripts no session, so a run reaches only its gates.
 const NO_SESSIONS: &str = "dialect: claude-code\nsessions: []\n";

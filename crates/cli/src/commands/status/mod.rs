@@ -30,12 +30,14 @@ use crate::error::note;
 use crate::error::{CliError, Outcome};
 use crate::json::{PreRunWarnings, RunDocument};
 use crate::output::{emit, Answer, Mode};
-use crate::render::doc::Doc;
-use crate::render::ink::Line;
-use crate::render::{Engine, Look, INDENT};
+use crate::render::Engine;
 use crate::run_page::{cautions, Decided, RunPage, Scope};
 use crate::surface::Outline;
 use node::NodePage;
+use surco::doc::Doc;
+use surco::line::Line;
+use surco::look::Look;
+use surco::width::INDENT;
 
 /// Prints where `run_id` stands — or, with `node`, that one node whole. A
 /// program reads the run's document under `Mode::Json`, whatever `node`
@@ -90,7 +92,7 @@ impl Reading {
             note(format!(
                 "this run's manifest carries {} this binary does not know: {} — a newer yunta \
                  wrote it, and what it recorded there is not read here",
-                yunta_core::text::counted(open.manifest.unknown.len(), "key"),
+                surco::text::counted(open.manifest.unknown.len(), "key"),
                 open.manifest.unknown_keys().join(", ")
             ));
         }
@@ -327,7 +329,7 @@ impl serde::Serialize for StatusAnswer<'_> {
 }
 
 impl Answer for StatusAnswer<'_> {
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a> {
+    fn document(&self, look: &Look) -> Doc {
         match &self.body {
             Body::Run(page) => page.document(look),
             Body::Node(page) => page.document(look),

@@ -7,10 +7,9 @@ use std::io::IsTerminal;
 use std::sync::OnceLock;
 
 use dialoguer::console::Term;
-use yunta_render::color::{ColorPolicy, ColorWhen};
-use yunta_render::glyphs::{parse_choice, GlyphEnv, OVERRIDE_VAR};
-use yunta_render::ink::Ink;
-use yunta_render::{Glyphs, Look, Width};
+use surco::glyphs::{parse_choice, GlyphEnv, Glyphs, OVERRIDE_VAR};
+use surco::look::{Look, Width};
+use surco::paint::{ColorPolicy, ColorWhen, Ink};
 
 static POLICY: OnceLock<ColorPolicy> = OnceLock::new();
 static COLUMNS: OnceLock<Option<usize>> = OnceLock::new();

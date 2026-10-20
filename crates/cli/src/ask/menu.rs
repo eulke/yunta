@@ -32,9 +32,9 @@
 //! characters.
 
 use dialoguer::FuzzySelect;
+use surco::width::{wrap, INDENT, INDENT_WIDTH};
 
 use super::{Answered, Console, NoAnswer};
-use crate::render::{wrap, INDENT, INDENT_WIDTH};
 
 /// The keys a list answers to, named above every one of them.
 const KEYS: &str = "arrows move, type to filter, enter chooses";
@@ -204,7 +204,7 @@ impl Drop for Cursor<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::LINE_WIDTH;
+    use surco::width::LINE_WIDTH;
 
     /// The cells an option's text has once the marker, the position and
     /// the gap after it are drawn.
@@ -255,7 +255,7 @@ mod tests {
             "the tradeoff did not break: {block:?}"
         );
         for (at, line) in block.lines().enumerate() {
-            let drawn = crate::render::cell_width(line);
+            let drawn = surco::width::cell_width(line);
             assert!(
                 drawn <= LINE_WIDTH,
                 "line {at} takes {drawn} cells: {line:?}"

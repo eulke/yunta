@@ -12,17 +12,18 @@
 
 use std::path::Path;
 
+use surco::components::{Code, Fields, Marked, Section};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use yunta_core::PackRef;
 use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
 
 use super::test::{discover_case_paths, run_case};
 use crate::error::{CliError, Outcome};
 use crate::output::{blank, document, say};
 use crate::pack::{packs_root, read_manifest, vendor_dir};
-use crate::render::blocks::{Code, Fields, Marked, Section};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::{Look, Mark};
-use yunta_core::PackRef;
 
 pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let ctx = crate::context::Context::load()?;
@@ -51,7 +52,7 @@ pub fn print_report(report: &PackAudit, look: &Look) {
 
 /// The inventory as a document: what the pack is and declares, then each
 /// workflow, node by node.
-fn inventory(report: &PackAudit) -> Doc<'static> {
+fn inventory(report: &PackAudit) -> Doc {
     let m = &report.manifest;
     let runners: Vec<String> = m
         .requires
@@ -90,7 +91,7 @@ fn inventory(report: &PackAudit) -> Doc<'static> {
     doc
 }
 
-fn workflow_section(workflow: &WorkflowAudit) -> Section<'static> {
+fn workflow_section(workflow: &WorkflowAudit) -> Section {
     let blocks = match &workflow.error {
         Some(error) => vec![Marked {
             mark: Mark::Failed,
@@ -143,9 +144,9 @@ fn node_fields(node: &NodeAudit) -> Fields {
     fields
 }
 
-fn node_section(node: &NodeAudit) -> Section<'static> {
+fn node_section(node: &NodeAudit) -> Section {
     let fields = node_fields(node);
-    let mut blocks: Vec<Block<'static>> = vec![fields.into()];
+    let mut blocks: Vec<Block> = vec![fields.into()];
     match &node.prompt {
         None => {}
         Some(Ok(text)) => blocks.push(
@@ -261,7 +262,7 @@ pub fn print_test_summary(summary: &PackTestSummary, look: &Look) {
             look,
             format!(
                 "tests: {} shipped, not run (pass --run-tests)",
-                yunta_core::text::counted(summary.total, "case")
+                surco::text::counted(summary.total, "case")
             ),
         );
     } else {
@@ -273,14 +274,14 @@ pub fn print_test_summary(summary: &PackTestSummary, look: &Look) {
             look,
             format!(
                 "tests: {}, {} failed",
-                yunta_core::text::counted(summary.total, "case"),
+                surco::text::counted(summary.total, "case"),
                 summary.failed
             ),
         );
         if !summary.failures.is_empty() {
             say(
                 look,
-                yunta_core::text::indent(&summary.failures.join("\n"), "  "),
+                surco::text::indent(&summary.failures.join("\n"), "  "),
             );
         }
     }

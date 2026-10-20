@@ -44,7 +44,7 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
         return Err(D::Error::custom(format!(
             "unknown key `{key}` for {what}; one of {}{}",
             list(keys),
-            crate::text::did_you_mean(key, keys.iter().copied())
+            surco::text::did_you_mean(key, keys.iter().copied())
         )));
     }
     Ok((key.to_string(), value))

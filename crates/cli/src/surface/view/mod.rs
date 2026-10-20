@@ -9,9 +9,8 @@
 
 use std::time::Duration;
 
-use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
-
 use yunta_core::RunId;
+use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
 
 mod children;
@@ -20,8 +19,10 @@ use children::children_of;
 pub(super) use children::{child_row, child_standing, children_by_node, closed_as};
 
 use crate::commands::advice;
-use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, Glyphs, Mark, CHILD_DEPTH};
+use surco::figures::duration;
+use surco::glyphs::{Glyphs, Mark};
+use surco::line::{Line, Tone};
+use surco::width::{indent, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -239,7 +240,7 @@ mod tests {
     use yunta_testkit::run_frame;
 
     use super::*;
-    use crate::render::ink::Ink;
+    use surco::paint::Ink;
 
     fn drawn(rows: Vec<Line>) -> Vec<String> {
         rows.iter().map(|row| Ink::Plain.paint(row)).collect()

@@ -3053,6 +3053,7 @@ dependencies = [
  "yunta-engine",
  "yunta-render",
  "yunta-storage",
+ "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
 ]
@@ -3078,6 +3079,7 @@ dependencies = [
  "tracing",
  "yunta-core",
  "yunta-render",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3104,13 +3106,13 @@ dependencies = [
  "serde_path_to_error",
  "sha1",
  "sha2",
- "strsim",
  "tempfile",
  "thiserror",
  "tokio",
  "tracing",
  "ulid",
  "yunta-core",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3143,6 +3145,7 @@ dependencies = [
  "yunta-core",
  "yunta-render",
  "yunta-storage",
+ "yunta-surco",
  "yunta-testkit",
  "yunta-testkit-core",
 ]
@@ -3151,11 +3154,10 @@ dependencies = [
 name = "yunta-render"
 version = "0.0.5"
 dependencies = [
- "clap",
  "serde",
  "serde_json",
- "unicode-width",
  "yunta-core",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 
@@ -3173,6 +3175,17 @@ dependencies = [
  "yunta-core",
  "yunta-storage",
  "yunta-testkit-core",
+]
+
+[[package]]
+name = "yunta-surco"
+version = "0.0.5"
+dependencies = [
+ "clap",
+ "serde",
+ "strsim",
+ "tempfile",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3200,7 +3213,6 @@ dependencies = [
  "chrono",
  "futures",
  "serde_json",
- "tempfile",
  "tokio",
  "yunta-core",
 ]

@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use surco::glyphs::Glyphs;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
-
 use yunta_core::events::{StoredEvent, TerminalState};
 use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{derive, run_frame_of, PriorEstimation, RunState};
@@ -18,7 +18,6 @@ use super::feed::Beat;
 use super::fold::Folded;
 use super::turns::{Standby, Standing};
 use super::SurfaceEnv;
-use crate::render::Glyphs;
 
 /// How often the surface redraws on its own. The durations it shows are
 /// counted in whole seconds, so a beat of one second is exactly as often

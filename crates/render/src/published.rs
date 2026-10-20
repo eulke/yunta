@@ -3,21 +3,21 @@
 //! each answer does to the run, what was published for it, and what the machine that holds the
 //! run is told to do next.
 
+use surco::components::{Chosen, Decision, DecisionOption, Next, Prose};
+use surco::doc::{Block, Doc};
+use surco::line::{Line, Tone};
+use surco::surface::{Markdown, Surface};
 use yunta_core::events::ArtifactId;
 use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::{ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
 use yunta_core::NodeId;
 
-use crate::blocks::{Chosen, Decision, DecisionOption, Next, Prose};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
 use crate::plan::Form;
-use crate::surface::{Markdown, Surface};
 
 /// What the pull request of `request` says under its title, which is the
 /// gate's question. The commands a reader copies are written by `spell`.
-pub fn gate(request: &PublishRequest, spell: &dyn Fn(&NextStep) -> String) -> Doc<'static> {
+pub fn gate(request: &PublishRequest, spell: &dyn Fn(&NextStep) -> String) -> Doc {
     let decision = &request.decision;
     let published = files(request)
         .into_iter()

@@ -18,9 +18,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::DiagnosticCode;
-
-use super::Report;
+use super::{DiagnosticCode, Report};
 use crate::events::ArtifactId;
 use crate::{NodeId, RunId};
 
@@ -127,7 +125,7 @@ impl ArtifactFailure {
 impl fmt::Display for ArtifactFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ArtifactFailure::File { path, problem } => f.write_str(&crate::text::problems(
+            ArtifactFailure::File { path, problem } => f.write_str(&surco::text::problems(
                 path,
                 &[format!("the document {problem}")],
             )),
@@ -136,7 +134,7 @@ impl fmt::Display for ArtifactFailure {
             // what a reader has to go instruct, and the remedy is the
             // same shape as `Unheld`'s, since either the node produces
             // it or nothing here may declare it.
-            ArtifactFailure::Undelivered { node, artifact } => f.write_str(&crate::text::problems(
+            ArtifactFailure::Undelivered { node, artifact } => f.write_str(&surco::text::problems(
                 format!("node `{node}`"),
                 &[format!(
                     "handed over no {} — produce it before the node ends, or stop declaring it here",
@@ -156,7 +154,7 @@ impl fmt::Display for ArtifactFailure {
                     Some(node) => format!("node `{node}` of run `{run}`"),
                     None => format!("run `{run}`"),
                 };
-                f.write_str(&crate::text::problems(
+                f.write_str(&surco::text::problems(
                     asked,
                     &[format!(
                         "holds no {} — produce it there, or stop declaring it here",

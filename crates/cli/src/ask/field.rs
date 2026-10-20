@@ -13,12 +13,12 @@
 //! own text. The line scrolls under the row instead: [`Field::row`] is
 //! the part of it the row has space for, taken around the cursor.
 
-use yunta_core::text::one_line;
+use surco::text::one_line;
+use surco::width::cell_width;
 
 use super::keys::{Stroke, Strokes, PASTE_OFF, PASTE_ON};
 use super::{Answered, Console, NoAnswer};
 use crate::error::warn;
-use crate::render::cell_width;
 
 /// Said once, when the answer being recorded came from text that
 /// spanned more than one line: a question takes one line, and the

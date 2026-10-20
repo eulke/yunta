@@ -9,13 +9,14 @@
 //! field by field rather than as one giant string so a fixture tweak
 //! doesn't need to reprint an entire golden blob.
 
-use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::diagnostic::{ArtifactCode, DiagnosticCode, FileCode, ParseCode, RuleCode};
-use yunta_core::events::{
-    ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, NodeStartedPayload,
-    RunFinishedPayload, RunMetrics, StoredEvent, TerminalState, TokenUsage,
+use surco::golden::assert_golden;
+use yunta_core::diagnostic::{
+    ArtifactCode, ArtifactFailure, DiagnosticCode, FileCode, ParseCode, RuleCode,
 };
-use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::events::{
+    ArtifactId, EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeStartedPayload,
+    RunEvent, RunFinishedPayload, RunMetrics, StoredEvent, TerminalState, TokenUsage,
+};
 use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::{
@@ -24,7 +25,6 @@ use yunta_engine::{
     RunnerUsage, ScopeSummary,
 };
 use yunta_testkit::Bench;
-use yunta_testkit_core::golden::assert_golden;
 use yunta_testkit_core::FixedClock;
 
 // --- formatters: golden output over a hand-built Receipt --------------------
@@ -101,11 +101,11 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
 
 /// The receipt as a file holds it.
 fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
-    use yunta_render::surface::Surface;
-    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(
+    use surco::surface::Surface;
+    surco::surface::Markdown.draw(&yunta_render::receipt::document(
         receipt,
         &spell,
-        yunta_render::Glyphs::Unicode,
+        surco::glyphs::Glyphs::Unicode,
     ))
 }
 

@@ -20,6 +20,7 @@ yunta-core.workspace = true
 # A pull request's body is drawn for a person, in the words and blocks
 # every other reader of Yunta is told things in.
 yunta-render.workspace = true
+yunta-surco.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 tracing.workspace = true

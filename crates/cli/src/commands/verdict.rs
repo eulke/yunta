@@ -7,16 +7,16 @@
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
+use surco::look::Look;
 use yunta_core::caution::Caution;
 use yunta_core::yaml::{Location, SourceMap};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::CheckError;
+use yunta_render::blocks::diagnostic::located;
 
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 use crate::output::say;
-use crate::render::blocks::diagnostic::located;
-use crate::render::Look;
 
 /// How much of the project a verdict reads beyond the workflow itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

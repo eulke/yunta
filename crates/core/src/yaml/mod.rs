@@ -128,7 +128,7 @@ impl serde_saphyr::MessageFormatter for Said {
 /// make: with one name expected, the refusal already names it.
 fn near(typed: &str, expected: &[&str]) -> String {
     match expected {
-        [_, _, ..] => crate::text::did_you_mean(typed, expected.iter().copied()),
+        [_, _, ..] => surco::text::did_you_mean(typed, expected.iter().copied()),
         _ => String::new(),
     }
 }

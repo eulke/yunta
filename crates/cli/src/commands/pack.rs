@@ -12,6 +12,9 @@
 //! the install, and every write goes through a staging directory or a
 //! temporary file so a failure leaves the repository as it was.
 
+use surco::components::{Checklist, Fields, Found};
+use surco::doc::Doc;
+use surco::look::Look;
 use yunta_core::{
     ConfigLayer, PackExecutorPolicy, PackLockEntry, PackManifest, PackRef, Publisher,
 };
@@ -26,9 +29,6 @@ use crate::pack::{
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
     vendor_into_place, with_cleanup, PackError, Swap,
 };
-use crate::render::blocks::{Checklist, Fields, Found};
-use crate::render::doc::Doc;
-use crate::render::Look;
 
 mod scaffold;
 
@@ -137,7 +137,7 @@ fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &Publisher) -> Resu
          (declared by the {} config {}) — allowed: {}. Add the publisher there, or \
          install a pack from an allowed publisher.",
         declared_by.join("/"),
-        yunta_core::text::agreeing(declared_by.len(), "layer", "layers"),
+        surco::text::agreeing(declared_by.len(), "layer", "layers"),
         allow
             .iter()
             .map(ToString::to_string)
@@ -167,9 +167,9 @@ fn enforce_executor_policy(
              is `deny` (declared by the {} config {}) — `--yes` cannot override a \
              permissions ceiling. Change the policy there, or {verb} a pack \
              without executors.",
-            yunta_core::text::counted(manifest.declares.executors.len(), "executor"),
+            surco::text::counted(manifest.declares.executors.len(), "executor"),
             policy.executors_declared_by.join("/"),
-            yunta_core::text::agreeing(policy.executors_declared_by.len(), "layer", "layers"),
+            surco::text::agreeing(policy.executors_declared_by.len(), "layer", "layers"),
         ))),
         PackExecutorPolicy::Prompt => {
             if confirmed {
@@ -179,7 +179,7 @@ fn enforce_executor_policy(
                 "this pack declares {} — executable code, not just \
                  declarative YAML. Review the inventory above, then re-run with `--yes` to \
                  confirm the {verb}.",
-                yunta_core::text::counted(manifest.declares.executors.len(), "executor")
+                surco::text::counted(manifest.declares.executors.len(), "executor")
             )))
         }
     }
@@ -282,7 +282,7 @@ pub async fn add(
             manifest.version,
             commit.abbreviated(),
             look.glyphs.arrow(),
-            crate::render::paths::shown(&dest, &cwd, None)
+            surco::paths::shown(&dest, &cwd, None)
         ),
     );
     super::pack_needs::report(&ctx, &dest, &manifest, look).await?;
@@ -450,7 +450,7 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
             look,
             format!(
                 "no packs installed under {}",
-                crate::render::paths::shown(&packs_root(&cwd), &cwd, None)
+                surco::paths::shown(&packs_root(&cwd), &cwd, None)
             ),
         );
         return Ok(Outcome::Success);
@@ -467,7 +467,7 @@ pub fn list(look: &Look) -> Result<Outcome, CliError> {
         let (found, said) = vendored_verdict(&dest, entry, &installed);
         checks.push(found, key.to_string(), said);
     }
-    let lock_file = crate::render::paths::shown(&lock_path(&cwd), &cwd, None);
+    let lock_file = surco::paths::shown(&lock_path(&cwd), &cwd, None);
     document(
         look,
         Doc::new()

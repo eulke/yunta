@@ -5,10 +5,11 @@
 
 use std::path::PathBuf;
 
+use surco::text;
 use yunta_core::events::{
     CriterionResult, DeviationDeclaredPayload, Surprise, TaskCause, Unanswered,
 };
-use yunta_core::{text, NonEmpty};
+use yunta_core::NonEmpty;
 
 use crate::failure;
 

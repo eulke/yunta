@@ -219,7 +219,7 @@ pub(crate) fn unknown_tool(name: &str) -> String {
 pub(crate) fn known_list(known: &[&str]) -> String {
     match known {
         [] => "nothing of that kind".to_string(),
-        _ => yunta_core::text::listed(known.iter().copied()),
+        _ => surco::text::listed(known.iter().copied()),
     }
 }
 

@@ -13,6 +13,12 @@
 //! it stands. Each page's sections live beside the command that shows it,
 //! and this module holds what both share.
 
+use surco::components::{Drawn, Headline};
+use surco::doc::{Block, Doc};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::width::{truncate, wrap, INDENT};
+use surco::words::RunWord;
 use yunta_core::caution::Caution;
 use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::RunId;
@@ -20,11 +26,6 @@ use yunta_engine::{NodeFrame, NodeStanding, RunFrame, RunPhase, RunState, Waitin
 use yunta_render::spend::Breakdown;
 
 use crate::commands::advice;
-use crate::render::blocks::{Drawn, Headline};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::state::RunWord;
-use crate::render::{truncate, wrap, Look, INDENT};
 use crate::surface::Outline;
 
 /// Which page a run is drawn as.
@@ -64,7 +65,7 @@ pub(crate) struct RunPage<'a> {
 
 impl RunPage<'_> {
     /// The page as one document. Nothing here paints: `render::draw` does.
-    pub(crate) fn document(&self, look: &Look) -> Doc<'_> {
+    pub(crate) fn document(&self, look: &Look) -> Doc {
         match self.scope {
             Scope::Closing => self.closing_document(look),
             Scope::Status => self.status_document(look),
@@ -72,7 +73,7 @@ impl RunPage<'_> {
     }
 
     /// The block a stopped run leaves on the terminal.
-    fn closing_document(&self, look: &Look) -> Doc<'_> {
+    fn closing_document(&self, look: &Look) -> Doc {
         let word = crate::render::run_word(self.frame);
         let doc = Doc::new()
             .with(Headline {
@@ -88,7 +89,7 @@ impl RunPage<'_> {
     }
 
     /// The page `yunta status` prints for a run.
-    fn status_document(&self, look: &Look) -> Doc<'_> {
+    fn status_document(&self, look: &Look) -> Doc {
         let word = crate::render::observed_word(self.frame, &self.engine);
         let doc = Doc::new()
             .with(Headline {
@@ -156,15 +157,13 @@ impl RunPage<'_> {
             RunPhase::Failed {
                 failure: Some(failure),
             } => (Tone::Failed, self.failed_claim(failure)),
-            RunPhase::Broken { diagnostic } => {
-                (Tone::Failed, yunta_core::text::one_line(diagnostic))
-            }
+            RunPhase::Broken { diagnostic } => (Tone::Failed, surco::text::one_line(diagnostic)),
             // The work is done and nobody has accepted it.
             RunPhase::Finished if blocking > 0 => (
                 Tone::Caution,
                 format!(
                     "finished holding {}",
-                    yunta_core::text::counted(blocking, "blocking finding")
+                    surco::text::counted(blocking, "blocking finding")
                 ),
             ),
             RunPhase::Promoted { to: Some(mode) } => (Tone::Muted, format!("promoted to `{mode}`")),
@@ -216,7 +215,7 @@ impl RunPage<'_> {
             }
             (_, RunPhase::Waiting { on }) => (Tone::NeedsYou, advice::parked_in_full(on)),
             (_, RunPhase::Broken { diagnostic }) => {
-                (Tone::Failed, yunta_core::text::one_line(diagnostic))
+                (Tone::Failed, surco::text::one_line(diagnostic))
             }
             (
                 _,
@@ -225,7 +224,7 @@ impl RunPage<'_> {
                 },
             ) => (
                 Tone::Failed,
-                yunta_core::text::one_line(&crate::render::failure::sentence(failure)),
+                surco::text::one_line(&yunta_render::failure::sentence(failure)),
             ),
             (_, RunPhase::Created | RunPhase::Running) => {
                 (Tone::Muted, "nothing needs you: it is moving".to_string())
@@ -271,7 +270,7 @@ pub(crate) fn caution_row(frame: &RunFrame) -> String {
 
 /// `lines` as a section of a document: a blank line above it, and nothing at
 /// all when there is nothing to say.
-pub(crate) fn section(doc: Doc<'_>, lines: Vec<Line>) -> Doc<'_> {
+pub(crate) fn section(doc: Doc, lines: Vec<Line>) -> Doc {
     if lines.is_empty() {
         return doc;
     }

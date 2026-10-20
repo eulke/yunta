@@ -128,7 +128,7 @@ async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
         several => Err(CliError::AmbiguousRun {
             said: format!(
                 "{} of this repository need you",
-                yunta_core::text::counted(several.len(), "run")
+                surco::text::counted(several.len(), "run")
             ),
             candidates: several
                 .iter()

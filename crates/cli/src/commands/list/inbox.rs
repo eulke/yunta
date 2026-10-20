@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use surco::words::RunWord;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
 use yunta_engine::{RunFrame, RunPhase, RunState};
 use yunta_storage::Storage;
@@ -19,7 +20,6 @@ use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::CliError;
 use crate::project::Project;
-use crate::render::state::RunWord;
 
 /// The part of a listing a run belongs in — the inbox's own grouping,
 /// derived from the run's phase so a heading can never disagree with the
@@ -291,7 +291,7 @@ fn held(
             }),
         ),
         (_, RunPhase::Broken { diagnostic }) => (
-            Some(yunta_core::text::one_line(diagnostic)),
+            Some(surco::text::one_line(diagnostic)),
             Some(advice::verify(handle)),
         ),
         (_, RunPhase::Created | RunPhase::Running) => (
@@ -303,7 +303,7 @@ fn held(
             RunPhase::Failed {
                 failure: Some(failure),
             },
-        ) => (Some(crate::render::failure::headline(failure)), None),
+        ) => (Some(yunta_render::failure::headline(failure)), None),
         (
             _,
             RunPhase::Finished

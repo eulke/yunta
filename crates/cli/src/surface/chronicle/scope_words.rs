@@ -2,8 +2,8 @@
 //! declared scope and its answer, and what a task may reach beyond it
 //! because a shape it owns is named there.
 
+use surco::text::{detailed, one_line};
 use yunta_core::events::scope;
-use yunta_core::text::{detailed, one_line};
 
 pub(super) fn scope_words(happening: &scope::happening::Happening) -> String {
     use scope::happening::{Happening as H, Step};
@@ -23,7 +23,7 @@ pub(super) fn scope_words(happening: &scope::happening::Happening) -> String {
             &one_line(
                 &reason
                     .as_ref()
-                    .map(crate::render::shown::denial)
+                    .map(yunta_render::shown::denial)
                     .unwrap_or_default(),
             ),
         ),

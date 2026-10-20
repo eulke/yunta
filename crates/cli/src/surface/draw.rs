@@ -5,12 +5,12 @@
 //! What a surface chooses is what to keep and where to put it, and
 //! those are the two answers here.
 
+use surco::glyphs::Glyphs;
 use yunta_engine::Moment;
 
 use super::chronicle;
 use super::lines::Lines;
 use super::region::Region;
-use crate::render::Glyphs;
 
 /// Where the folded run goes.
 pub(super) enum Draw {
@@ -48,8 +48,8 @@ mod chronicle_tests {
     use yunta_testkit_core::Log;
 
     use super::super::chronicle;
-    use crate::render::ink::Ink;
-    use crate::render::Look;
+    use surco::look::Look;
+    use surco::paint::Ink;
 
     #[test]
     fn what_a_watched_terminal_keeps_above_its_region_is_what_the_append_only_surface_writes() {
@@ -92,7 +92,7 @@ mod chronicle_tests {
         let moments = yunta_engine::chronicle(&events);
         let written: Vec<String> = moments
             .iter()
-            .map(|moment| chronicle::say(moment, crate::render::Glyphs::Ascii).text)
+            .map(|moment| chronicle::say(moment, surco::glyphs::Glyphs::Ascii).text)
             .collect();
         let history: Vec<String> = moments
             .iter()

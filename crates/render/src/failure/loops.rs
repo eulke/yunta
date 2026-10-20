@@ -2,8 +2,8 @@
 //! a plan no work can pass, a loop with no task ready, a run that holds no
 //! tasks document for its loop, and a loop that reached its iteration cap.
 
+use surco::text;
 use yunta_core::events::{TaskStop, UnpassableTask};
-use yunta_core::text;
 use yunta_core::NodeId;
 
 use crate::pause::exceeded_loop_cap;

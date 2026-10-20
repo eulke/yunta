@@ -251,7 +251,7 @@ fn refuse_unchecked(manifest: &Manifest, reach: &Reach<'_>) -> Result<(), CliErr
     if errors.is_empty() {
         return Ok(());
     }
-    Err(CliError::msg(yunta_core::text::problems(
+    Err(CliError::msg(surco::text::problems(
         "the workflow fails `yunta check`",
         &errors,
     )))

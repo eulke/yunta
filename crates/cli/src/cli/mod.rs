@@ -6,14 +6,13 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
+use surco::look::Look;
 use yunta_core::{AdapterId, ModeName, OptionId, PackRef, Responder};
 
 use crate::commands::run_ref::{RunArg, RunRef};
-
 use crate::error::{CliError, Outcome};
 use crate::graph;
 use crate::output::Mode;
-use crate::render::Look;
 
 /// Yunta — a deterministic workflow engine for code agents.
 #[derive(Parser)]
@@ -25,7 +24,7 @@ pub struct Cli {
     /// (`auto`, honoring `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE`),
     /// `always`, or `never`.
     #[arg(long, global = true, value_enum, default_value_t)]
-    pub(crate) color: crate::render::ink::ColorWhen,
+    pub(crate) color: surco::paint::ColorWhen,
 }
 
 mod dispatch;

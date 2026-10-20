@@ -32,10 +32,11 @@ use crate::error::words;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use crate::render::blocks::{Checklist, Found, Next};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::{Look, INDENT};
+use surco::components::{Checklist, Found, Next};
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
+use surco::width::INDENT;
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
 use yunta_render::caution;
@@ -96,7 +97,7 @@ impl DoctorAnswer {
 }
 
 impl Answer for DoctorAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+    fn document(&self, _look: &Look) -> Doc {
         let mut doc = Doc::new().with(checklist(&self.checks));
         if !self.steps.is_empty() {
             // The lines to paste open under a blank line of their own.
@@ -228,8 +229,8 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut V
             "runners",
             format!(
                 "none declared, and {} {} one",
-                yunta_core::text::listed(names.iter().copied()),
-                yunta_core::text::agreeing(names.len(), "needs", "need")
+                surco::text::listed(names.iter().copied()),
+                surco::text::agreeing(names.len(), "needs", "need")
             ),
         ),
     }

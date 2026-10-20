@@ -221,7 +221,7 @@ fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
 
 fn describe_context(spec: &ContextSpec) -> String {
     match spec {
-        ContextSpec::Files { files } => yunta_core::text::detailed(
+        ContextSpec::Files { files } => surco::text::detailed(
             "files",
             &files
                 .iter()

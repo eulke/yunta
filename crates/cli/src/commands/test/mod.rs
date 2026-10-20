@@ -39,9 +39,11 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{CliError, Outcome};
 use crate::output::{document, say};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::{Look, Mark, INDENT};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::width::INDENT;
 
 pub(crate) use case::run_case;
 
@@ -71,7 +73,7 @@ pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> 
     // verdicts line up in one column as each case finishes.
     let column = case_paths
         .iter()
-        .map(|path| crate::render::cell_width(&case_name(path)))
+        .map(|path| surco::width::cell_width(&case_name(path)))
         .max()
         .unwrap_or(0);
     let mut failures = 0usize;
@@ -85,7 +87,7 @@ pub async fn test(dir: Option<&Path>, look: &Look) -> Result<Outcome, CliError> 
         look,
         format!(
             "{}, {failures} failed",
-            yunta_core::text::counted(case_paths.len(), "case")
+            surco::text::counted(case_paths.len(), "case")
         ),
     );
     if failures == 0 {
@@ -210,17 +212,14 @@ async fn report(
     root: &Path,
     case_path: &Path,
     interrupt: crate::interrupt::Interrupt,
-    (column, look): (usize, &crate::render::Look),
+    (column, look): (usize, &surco::look::Look),
 ) -> bool {
     let name = case_name(case_path);
     let (mark, said, problems) = match run_case(root, case_path, interrupt).await {
         Ok(problems) if problems.is_empty() => (Mark::Done, "ok".to_string(), Vec::new()),
         Ok(problems) => (
             Mark::Failed,
-            format!(
-                "failed: {}",
-                yunta_core::text::counted(problems.len(), "error")
-            ),
+            format!("failed: {}", surco::text::counted(problems.len(), "error")),
             problems,
         ),
         Err(error) => (
@@ -229,7 +228,7 @@ async fn report(
             vec![error.to_string()],
         ),
     };
-    let gap = " ".repeat(column.saturating_sub(crate::render::cell_width(&name)) + 2);
+    let gap = " ".repeat(column.saturating_sub(surco::width::cell_width(&name)) + 2);
     let row = Line::new()
         .plain(INDENT)
         .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
@@ -240,7 +239,7 @@ async fn report(
     document(look, Doc::new().with(Block::Lines(vec![row])));
     let margin = format!("{INDENT}{INDENT}{INDENT}");
     for problem in &problems {
-        say(look, yunta_core::text::indent(problem, &margin));
+        say(look, surco::text::indent(problem, &margin));
     }
     problems.is_empty()
 }

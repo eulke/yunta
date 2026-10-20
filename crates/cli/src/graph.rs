@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_core::{Clock, NodeId, RunId, Workflow};
+use yunta_engine::RunFrame;
 
 use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use yunta_engine::RunFrame;
 
 type Labels = HashMap<NodeId, String>;
 
@@ -136,7 +136,7 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
             format!(
                 "{indent}{}[\"{}\"]\n",
                 node.id,
-                yunta_core::text::escape_mermaid(&labelled(node, labels))
+                surco::text::escape_mermaid(&labelled(node, labels))
             )
         };
         match children_of(node) {
@@ -146,7 +146,7 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
                 out.push_str(&format!(
                     "  subgraph {}[\"{}\"]\n",
                     node.id,
-                    yunta_core::text::escape_mermaid(&labelled(node, labels))
+                    surco::text::escape_mermaid(&labelled(node, labels))
                 ));
                 for child in children {
                     out.push_str(&declared(child, "    "));
@@ -244,7 +244,7 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
 /// Escapes a DOT quoted-string label: backslash and double quote are the
 /// two characters DOT reads specially inside `"..."`.
 fn escape_dot(text: &str) -> String {
-    let text = yunta_core::text::one_line(text);
+    let text = surco::text::one_line(text);
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
@@ -259,7 +259,7 @@ fn escape_dot(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::escape_dot;
-    use yunta_core::text::escape_mermaid;
+    use surco::text::escape_mermaid;
 
     #[test]
     fn mermaid_escaping_covers_every_html_significant_character() {

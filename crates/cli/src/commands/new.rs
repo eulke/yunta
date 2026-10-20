@@ -11,13 +11,13 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::look::Look;
 use yunta_core::{ConfigLayer, Workflow};
 
 use crate::ask::{choose, Choice, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
 use crate::output::say;
 use crate::project;
-use crate::render::Look;
 use crate::surface::Diagnostics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

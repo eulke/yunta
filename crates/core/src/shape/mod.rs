@@ -234,7 +234,7 @@ fn rendered<T: Document>() -> String {
     }
     text.push_str("\n\n# The engine also refuses the document, and fails the node, unless:\n");
     for rule in T::RULES {
-        text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
     }
     if !T::RUN_RULES.is_empty() {
         text.push_str(
@@ -243,7 +243,7 @@ fn rendered<T: Document>() -> String {
              the document unless:\n",
         );
         for rule in T::RUN_RULES {
-            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+            text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
         }
     }
     if !T::REVIEW_RULES.is_empty() {
@@ -252,7 +252,7 @@ fn rendered<T: Document>() -> String {
              refuses it unless:\n",
         );
         for rule in T::REVIEW_RULES {
-            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+            text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
         }
     }
     if !T::SPECIFIED_RULES.is_empty() {
@@ -262,7 +262,7 @@ fn rendered<T: Document>() -> String {
              unless:\n",
         );
         for rule in T::SPECIFIED_RULES {
-            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+            text.push_str(&format!("#   - {}\n", surco::text::one_line(rule.demand)));
         }
     }
     text
@@ -339,7 +339,7 @@ mod tests {
             let contract = contract(kind);
             for rule in rules(kind) {
                 assert!(
-                    contract.contains(&crate::text::one_line(rule.demand)),
+                    contract.contains(&surco::text::one_line(rule.demand)),
                     "`{kind}`'s contract states `{}`",
                     rule.code
                 );

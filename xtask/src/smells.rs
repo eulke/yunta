@@ -192,7 +192,7 @@ fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize
         corpus
             .drawn
             .iter()
-            .filter(|path| !path.ends_with("render/src/glyphs.rs") && !is_test_source(path))
+            .filter(|path| !path.ends_with("surco/src/glyphs.rs") && !is_test_source(path))
             .map(|path| read_corpus(path))
             .map(|text| {
                 production_only(&text)

@@ -14,63 +14,33 @@
 //! terminal, how wide it measures, what the environment asked for — is
 //! the caller's to settle and pass in.
 //!
-//! How a *problem* looks is not decided here. One line, a hanging block,
-//! an indented block and the block that lists what is wrong with a
-//! document all live in [`yunta_core::text`], which is the single place
-//! that decides it; this crate calls into it and never writes a second
-//! version of one.
+//! How anything is drawn is not decided here: the words of a state, the
+//! marks, the figures, the blocks a document is made of and the surfaces
+//! that draw them are Surco's ([`surco`]). This crate says Yunta's own
+//! facts with them, and never writes a second version of one.
 
-pub mod bars;
 pub mod blocks;
 pub mod caution;
 pub mod claim;
-pub mod color;
-pub mod diagram;
-pub mod doc;
 pub mod escalation;
 pub mod evidence;
 pub mod failure;
 mod findings;
-mod fold;
 pub mod found;
-pub mod glyphs;
-pub mod ink;
 pub mod inputs;
-mod latency;
-pub mod line_width;
-pub mod look;
-pub mod markdown;
 pub mod offers;
 pub mod outcome;
-pub mod paths;
 pub mod pause;
 pub mod place;
 mod plan;
 pub mod policy;
-pub mod prose;
 pub mod published;
 pub mod receipt;
-mod run_word;
 pub mod shown;
 mod spec;
 pub mod spend;
 pub mod state;
-pub mod surface;
 pub mod target;
-pub mod width;
-
-pub use bars::{bar, bar_cells, sparkline};
-pub use escalation::evidence;
-pub use glyphs::Glyphs;
-pub use latency::latency;
-pub use line_width::Width;
-pub use look::Look;
-pub use state::{Mark, NodeDisplay, RunWord, StateWord, STATE_WIDTH};
-pub use width::{
-    cell_width, cut, id_column, indent, middle_cut, truncate, wrap, CHILD_DEPTH, INDENT,
-    INDENT_WIDTH, LABEL_WIDTH, LINE_WIDTH,
-};
-pub use yunta_core::units::{duration, Ratio, Tokens};
 
 #[cfg(test)]
 mod tests {

@@ -3,8 +3,9 @@
 //! last stopped, the loser of a join-any race, and a composed workflow that
 //! could not start, nested too deep, or whose run failed.
 
+use surco::text;
 use yunta_core::events::{ChildRefusal, Failure, Interruption};
-use yunta_core::{text, JoinPolicy, NodeId, RunId};
+use yunta_core::{JoinPolicy, NodeId, RunId};
 
 use super::headline;
 use crate::inputs;

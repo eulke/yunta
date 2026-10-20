@@ -4,14 +4,14 @@
 
 use std::path::PathBuf;
 
+use surco::golden::{assert_golden, ENVIRONMENTS};
+use surco::look::Look;
+use surco::surface::{Markdown, Surface, Terminal};
 use yunta_core::shown::PlanReview;
-use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
+use yunta_testkit_core::spell;
 
 use super::documents::{goldens, review, run};
 use crate::plan::Form;
-use crate::surface::{Markdown, Surface, Terminal};
-use crate::Look;
-use yunta_testkit_core::spell;
 
 #[test]
 fn what_weighs_on_a_decision_matches_its_goldens() {
@@ -43,7 +43,7 @@ fn what_weighs_on_a_decision_matches_its_goldens() {
     }];
     let before = crate::shown::before_you_decide(&withheld, &shown)
         .expect("a plan that cannot be proven weighs on the decision");
-    let doc = crate::doc::Doc::new().with(before);
+    let doc = surco::doc::Doc::new().with(before);
     for environment in &ENVIRONMENTS {
         assert_golden(
             &environment.golden(&goldens(), "before-you-decide"),

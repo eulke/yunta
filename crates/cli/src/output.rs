@@ -15,11 +15,13 @@
 
 use std::fmt::Display;
 
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
+
 use crate::error::{warning_word, CliError, Outcome, Reader};
 use crate::json::to_json_string;
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::{self, Look};
+use crate::render;
 
 /// How a command's output is written, decided once from its flags: a
 /// person's terminal, one JSON document, or the bare run id.
@@ -45,7 +47,7 @@ impl Mode {
 pub(crate) trait Answer: serde::Serialize {
     /// The answer as the document a person reads, drawn on a stream that
     /// looks like `look`.
-    fn document<'a>(&'a self, look: &Look) -> Doc<'a>;
+    fn document(&self, look: &Look) -> Doc;
     /// The verdict the answer carries, which the exit code reports.
     fn outcome(&self) -> Outcome;
 }
@@ -73,7 +75,7 @@ pub(crate) fn progress(mode: Mode, look: &Look, text: String) {
 }
 
 /// A document drawn for a stream that looks like `look`, and written.
-pub(crate) fn document(look: &Look, doc: Doc<'_>) {
+pub(crate) fn document(look: &Look, doc: Doc) {
     print!("{}", render::draw(doc, look));
 }
 
@@ -201,15 +203,15 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
     let ink = render::stderr_ink();
     eprintln!(
         "{}: {}",
-        ink.word(render::ink::Tone::Failed, "error"),
+        ink.word(surco::line::Tone::Failed, "error"),
         error.said_to(Reader::Person)
     );
     let (detail, next) = error.advice();
     if let Some(detail) = detail {
         eprintln!(
             "{}{}",
-            render::INDENT,
-            ink.word(render::ink::Tone::Muted, &detail)
+            surco::width::INDENT,
+            ink.word(surco::line::Tone::Muted, &detail)
         );
     }
     if !next.is_empty() {
@@ -221,7 +223,7 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
         eprint!(
             "\n{}",
             render::draw(
-                Doc::new().with(render::blocks::Next { steps: next }),
+                Doc::new().with(surco::components::Next { steps: next }),
                 &stderr
             )
         );

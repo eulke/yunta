@@ -46,7 +46,7 @@ use yunta_engine::{RunState, UnknownKindCount};
 
 use crate::error::CliError;
 use crate::output::Mode;
-use crate::render::Look;
+use surco::look::Look;
 
 /// A detached `yunta resume` that never started, and the run it was
 /// for. Recover by running that command yourself: the run is on disk
@@ -301,15 +301,15 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
             // An adapter that reports itself unhealthy without saying
             // why is listed by name alone.
             Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                unhealthy.push(yunta_core::text::detailed(name, &diagnostic));
+                unhealthy.push(surco::text::detailed(name, &diagnostic));
             }
-            Err(e) => unhealthy.push(yunta_core::text::detailed(name, &e.to_string())),
+            Err(e) => unhealthy.push(surco::text::detailed(name, &e.to_string())),
         }
     }
     if unhealthy.is_empty() {
         return Ok(());
     }
-    Err(CliError::msg(yunta_core::text::problems(
+    Err(CliError::msg(surco::text::problems(
         "adapter health check failed (run `yunta doctor` for detail)",
         &unhealthy,
     )))
@@ -325,7 +325,7 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
 /// on either surface.
 pub(crate) fn unknown_kinds_note(
     counts: &[UnknownKindCount],
-    glyphs: crate::render::Glyphs,
+    glyphs: surco::glyphs::Glyphs,
 ) -> Option<String> {
     if counts.is_empty() {
         return None;
@@ -336,7 +336,7 @@ pub(crate) fn unknown_kinds_note(
         .collect();
     Some(format!(
         "{}, interpreted partially: {}",
-        yunta_core::text::counted(counts.len(), "unknown event kind"),
+        surco::text::counted(counts.len(), "unknown event kind"),
         kinds.join(", ")
     ))
 }

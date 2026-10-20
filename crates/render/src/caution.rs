@@ -3,9 +3,9 @@
 //! the run would get through regardless. Every surface that says one calls
 //! [`line()`], so none of them can say a different thing.
 
+use surco::figures::Tokens;
+use surco::text::counted;
 use yunta_core::caution::{Caution, MissingContextFile, PromotedRead};
-use yunta_core::text::counted;
-use yunta_core::units::Tokens;
 use yunta_core::workflow::Place;
 use yunta_core::{ModeName, NodeId};
 

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use surco::golden::{assert_golden, ENVIRONMENTS};
 use yunta_core::events::{
     Claim, CommandExit, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption, Menu,
     NodeOutcome, NodeState, NodeWait, PauseReason, TokenUsage,
@@ -7,7 +8,7 @@ use yunta_core::events::{
 use yunta_core::reserved::ReservedOption;
 use yunta_core::{ContentHash, NonEmpty};
 use yunta_engine::{Counter, NodeStanding, WaitingOn};
-use yunta_testkit::{assert_golden, node_frame, run_frame, ENVIRONMENTS};
+use yunta_testkit::{node_frame, run_frame};
 use yunta_testkit_core::fixed_now;
 
 use super::*;
@@ -219,7 +220,7 @@ fn cases() -> Vec<(&'static str, Closing)> {
 fn the_closing_block_matches_its_goldens() {
     for (case, closing) in &cases() {
         for environment in &ENVIRONMENTS {
-            let look = crate::render::look_of(environment);
+            let look = surco::look::Look::of(environment);
             assert_golden(
                 &environment.golden(&goldens(), case),
                 &draw_closing(closing, &look),

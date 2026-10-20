@@ -8,6 +8,8 @@
 //! person, a budget or loop cap — they differ in what they say, never
 //! in how they are answered.
 
+use surco::components::{Drawn, Headline};
+use surco::glyphs::Mark;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, OptionId, RunId};
 use yunta_engine::ShownDocument;
@@ -18,8 +20,6 @@ use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
 use crate::commands::advice;
 use crate::commands::status::decision::{account, before_you_decide, Beside};
-use crate::render::blocks::{Drawn, Headline};
-use crate::render::Mark;
 
 /// What settles an option that asks for nothing: the decision as it
 /// stands, or a note sent with it.
@@ -115,10 +115,10 @@ fn present(
     if let Some((run, _)) = shown {
         for document in documents {
             console.say("")?;
-            let doc = crate::render::shown::document(
+            let doc = yunta_render::shown::document(
                 document,
                 run,
-                crate::render::shown::Form::Review,
+                yunta_render::shown::Form::Review,
                 &advice::spell,
             );
             for line in crate::render::draw(doc, &look).lines() {

@@ -1,9 +1,9 @@
 //! The sentences a request for scope reads: why the project settled it in
 //! the call, and what a session does next while a request it made waits.
 
+use surco::text::counted;
 use yunta_core::expansion::Denial;
 use yunta_core::protected::Protection;
-use yunta_core::text::counted;
 
 /// The sentence a request's denial reads as to an agent: a reached path is
 /// named with the reason it is protected, and a legacy denial reads back as

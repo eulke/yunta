@@ -12,8 +12,8 @@
 
 use std::path::Path;
 
+use surco::text::indent;
 use yunta_core::events::{EventPayload, GateEvent, GateResolvedPayload, HumanChoice};
-use yunta_core::text::indent;
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
 
 /// What a decision put to a person opens with.

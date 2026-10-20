@@ -13,10 +13,11 @@
 
 use std::path::Path;
 
+use Mark::{Macro, Spelled, StructNamed, Text};
+
 use super::cli::{count_cli_print_outside_output, count_exit_failure_in_cli};
 use super::corpus::ratchet_corpus;
 use super::read_corpus;
-use Mark::{Macro, Spelled, StructNamed, Text};
 
 /// A counter: the name it carries in the baseline, and the function that
 /// measures it against a workspace root.
@@ -152,13 +153,13 @@ fn count_sgr_outside_ink(root: &Path) -> usize {
         root,
         &[Text("\\x1b[")],
         &[
-            "crates/render/src/ink.rs",
+            "crates/surco/src/paint.rs",
             "crates/cli/src/ask/keys.rs",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
             // A golden writes the paint a surface printed where a
             // reviewer can read it, and its test paints to prove that.
-            "crates/testkit-core/src/golden.rs",
+            "crates/surco/src/golden.rs",
         ],
     )
 }
@@ -168,13 +169,13 @@ fn count_sgr_outside_ink(root: &Path) -> usize {
 ///
 /// `1859898 tokens` is a number a reader has to count the digits of, and
 /// two surfaces that each format their own say the same count two ways.
-/// The units module reads it as `1.86M tokens` everywhere, and exactly
+/// Surco's figures read it as `1.86M tokens` everywhere, and exactly
 /// where the count stands beside a limit.
 fn count_token_count_formatted_outside_units(root: &Path) -> usize {
     outside(
         root,
         &[Text("} tok"), Text(", \"token\")")],
-        &["crates/core/src/units.rs"],
+        &["crates/surco/src/figures.rs"],
     )
 }
 
@@ -275,7 +276,7 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             "crates/testkit/src/stubs.rs",
             // Blessing a golden is what a person asks of a test run, and
             // reading that request is what the module is for.
-            "crates/testkit-core/src/golden.rs",
+            "crates/surco/src/golden.rs",
         ],
     )
 }

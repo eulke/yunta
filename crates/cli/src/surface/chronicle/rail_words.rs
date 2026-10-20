@@ -3,10 +3,10 @@
 
 use std::collections::BTreeMap;
 
+use surco::text::counted;
 use yunta_core::rail::hook::RailFailureCause;
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
-use yunta_core::text::counted;
 use yunta_core::ModelName;
 
 /// A failed call of the rail: the moment it was for, when the log read

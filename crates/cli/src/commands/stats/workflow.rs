@@ -2,14 +2,17 @@
 //! verified task over time, its modes side by side, and what its checks
 //! never caught.
 
+use surco::bars::sparkline;
+use surco::components::{Checklist, Found};
+use surco::doc::{Block, Doc};
+use surco::figures::Tokens;
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::width::{cell_width, truncate, INDENT, LABEL_WIDTH};
 use yunta_core::{ModeName, WorkflowName};
 use yunta_engine::{prior_estimation, RunSummary};
 
 use super::format_estimation_line;
-use crate::render::blocks::{Checklist, Found};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::{Line, Tone};
-use crate::render::{cell_width, sparkline, truncate, Look, Tokens, INDENT, LABEL_WIDTH};
 
 /// What the `yunta stats --workflow <name>` page is drawn from: a
 /// workflow's past runs, and what their logs say about its checks.
@@ -23,7 +26,7 @@ impl WorkflowPage<'_> {
     /// The page as one document: the history, then what the checks say
     /// when there is anything to say. A workflow nobody has run is told so
     /// in a line of its own.
-    pub(super) fn document(&self, look: &Look) -> Doc<'static> {
+    pub(super) fn document(&self, look: &Look) -> Doc {
         if self.history.is_empty() {
             return Doc::new().with(Block::Lines(vec![
                 Line::new().plain(format!("no runs of workflow `{}` yet", self.name))
@@ -45,7 +48,7 @@ impl WorkflowPage<'_> {
 fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Look) -> Vec<Line> {
     let mut lines = vec![Line::new().plain(format!(
         "workflow `{workflow_name}` — {}",
-        yunta_core::text::counted(history.len(), "run")
+        surco::text::counted(history.len(), "run")
     ))];
 
     lines.push(Line::new());
@@ -59,7 +62,7 @@ fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Loo
             "{INDENT}{} {:>3} {:<4}   median CPTV {}   median tokens {}",
             truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
             runs,
-            yunta_core::text::agreeing(runs, "run", "runs"),
+            surco::text::agreeing(runs, "run", "runs"),
             median_cptv
                 .map(|v| Tokens::rounded(v).figure())
                 .unwrap_or_else(|| "n/a".to_string()),
@@ -106,9 +109,7 @@ fn cptv_line(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> String
 /// `stats` or `check` exits non-zero: these are suggestions for a person
 /// to weigh, not errors, each a caution row. `None` when there is
 /// nothing to say, so each caller says nothing at all.
-pub(crate) fn verification_findings(
-    findings: &yunta_engine::VerificationFindings,
-) -> Option<Doc<'static>> {
+pub(crate) fn verification_findings(findings: &yunta_engine::VerificationFindings) -> Option<Doc> {
     if findings.is_empty() {
         return None;
     }
@@ -125,7 +126,7 @@ pub(crate) fn verification_findings(
 
 /// One caution row per thing a workflow's history says about its checks.
 fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
-    let runs = |n| yunta_core::text::counted(n, "run");
+    let runs = |n| surco::text::counted(n, "run");
     let mut checks = Checklist::default();
     for c in &findings.never_red_criteria {
         checks.push(
@@ -161,7 +162,7 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
             format!("gate `{}`", g.node),
             format!(
                 "approved without adjustment across {} — still adding value, or become ritual?",
-                yunta_core::text::counted(g.sample_count, "resolution")
+                surco::text::counted(g.sample_count, "resolution")
             ),
         );
     }
@@ -171,7 +172,7 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
             "every task",
             format!(
                 "passed on its first try across {} — the plan may be cutting too fine",
-                yunta_core::text::counted(t.sample_count, "task instance")
+                surco::text::counted(t.sample_count, "task instance")
             ),
         );
     }
@@ -181,7 +182,7 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
             format!("mode `{}`", m.name),
             format!(
                 "never chosen across {} — still worth declaring?",
-                yunta_core::text::counted(m.runs_observed, "run")
+                surco::text::counted(m.runs_observed, "run")
             ),
         );
     }
@@ -220,7 +221,7 @@ mod tests {
     use yunta_core::{ContentHash, RunId};
 
     use super::*;
-    use crate::render::Glyphs;
+    use surco::glyphs::Glyphs;
 
     fn summary(cptv: f64) -> RunSummary {
         RunSummary {

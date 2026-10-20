@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use surco::golden::assert_golden;
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{
     EngineError, EngineStep, EventPayload, Failure, NodeEvent, PauseReason, StoredEvent,
@@ -12,7 +13,6 @@ use yunta_core::events::{
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
 use yunta_engine::{derive, CheckError, RunReport, RunTerminal};
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
-use yunta_testkit_core::golden::assert_golden;
 
 const FORGE: &str = "forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n";
 

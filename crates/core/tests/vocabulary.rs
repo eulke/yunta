@@ -256,7 +256,7 @@ fn the_contract_a_door_hands_out_carries_the_shape_and_every_rule() {
             .chain(yunta_core::shape::run_rules(kind))
             .chain(yunta_core::shape::review_rules(kind))
         {
-            let demand = yunta_core::text::one_line(rule.demand);
+            let demand = surco::text::one_line(rule.demand);
             assert!(
                 contract.contains(&demand),
                 "{kind}'s contract never states `{}`:\n{contract}",

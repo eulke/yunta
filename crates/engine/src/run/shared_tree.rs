@@ -9,8 +9,8 @@
 //! content, less what git ignores.
 
 use std::path::{Path, PathBuf};
-use yunta_core::commit_message::CommitMessage;
 
+use yunta_core::commit_message::CommitMessage;
 use yunta_core::events::{EngineError, EngineStep, Failure, TokenUsage};
 use yunta_core::protected::{Closing, Protected, Trespass};
 use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind, TreeId};
@@ -291,7 +291,7 @@ pub(super) async fn land_unit(
     };
     let supervision = ctx.root_supervision();
     let said = CommitMessage::new(
-        yunta_core::text::detailed(format!("node {}", node.id), &close_title(node)),
+        surco::text::detailed(format!("node {}", node.id), &close_title(node)),
         ctx.run_id,
     )
     .node(&node.id)

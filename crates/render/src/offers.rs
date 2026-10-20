@@ -2,9 +2,10 @@
 //! by, what choosing it costs, and the question it asks. An option stores
 //! its id and where it leads, and its escalation's menu says the rest.
 
+use surco::text;
 use yunta_core::events::{Asks, GateOption, GateWaitingPayload, Leads, Menu, ScopeWait};
+use yunta_core::listed_globs;
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{listed_globs, text};
 
 use crate::blocks::{departure_words, remedy_words, reroute_words};
 

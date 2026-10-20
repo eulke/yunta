@@ -2,13 +2,13 @@
 //! plan: task by task, what each test proves and the command that runs
 //! it, then the file it lives in.
 
+use surco::components::{Code, Fields, Section};
+use surco::doc::{Block, Doc};
+use surco::line::{Line, Tone};
+use surco::text::counted;
 use yunta_core::step::NextStep;
-use yunta_core::text::counted;
 use yunta_core::{NodeId, RunId, SpecFile};
 
-use crate::blocks::{Code, Fields, Section};
-use crate::doc::{Block, Doc};
-use crate::ink::{Line, Tone};
 use crate::plan::{Form, CODE_SHOWN};
 
 /// The tests of `file`, for the run `run`; each command a reader copies
@@ -19,7 +19,7 @@ pub fn document(
     run: &RunId,
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
-) -> Doc<'static> {
+) -> Doc {
     let tests: usize = file.specs.iter().map(|spec| spec.tests.len()).sum();
     let mut doc = Doc::new().with(Block::Title(
         Line::new()

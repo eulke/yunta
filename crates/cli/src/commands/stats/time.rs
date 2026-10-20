@@ -3,13 +3,14 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use surco::bars::{bar, bar_cells};
+use surco::figures::{duration, DURATION_WIDEST};
+use surco::line::Line;
+use surco::look::Look;
+use surco::width::{cell_width, id_column, middle_cut, INDENT};
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
-use yunta_core::units::DURATION_WIDEST;
 use yunta_engine::TimeSpent;
-
-use crate::render::ink::Line;
-use crate::render::{bar, bar_cells, cell_width, duration, id_column, middle_cut, Look, INDENT};
 
 /// The block `yunta stats <run>` shows of `time`, always in the same
 /// order so two runs read side by side. What a run spent on nothing is
@@ -114,9 +115,9 @@ pub(super) fn rail_latency(rails: &BTreeMap<RailEvent, Histogram>, look: &Look) 
         lines.push(Line::new().plain(format!(
             "{INDENT}{} p50 {} {} p95 {}",
             middle_cut(moment, column, look.glyphs),
-            yunta_render::latency(median),
+            surco::figures::latency(median),
             look.glyphs.sep(),
-            yunta_render::latency(high),
+            surco::figures::latency(high),
         )));
     }
     lines

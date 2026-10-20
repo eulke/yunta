@@ -14,7 +14,6 @@
 pub mod adapter;
 mod capture;
 mod clock;
-pub mod golden;
 mod ids;
 mod log;
 pub mod persisted;

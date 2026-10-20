@@ -4,12 +4,12 @@
 
 use std::time::Duration;
 
+use surco::figures::duration;
+use surco::text;
 use yunta_core::events::{
     AccountLimit, Failure, LimitSource, RefusalCause, SessionDeath, SessionEnd, SessionRefusal,
     Timed, Unchanged,
 };
-use yunta_core::text;
-use yunta_core::units::duration;
 
 use crate::pause::RESET_FORMAT;
 

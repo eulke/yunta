@@ -19,10 +19,13 @@
 
 use std::time::Duration;
 
+use surco::doc::{Block, Doc};
+use surco::line::Line;
+use surco::look::Look;
+use surco::text::counted;
 use yunta_core::events::RunPhaseRaw;
 use yunta_core::process::group::force_kill_group;
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
-use yunta_core::text::counted;
 use yunta_core::{describe, Pid, RunId};
 use yunta_engine::pace::Pace;
 
@@ -32,9 +35,6 @@ use crate::context::{Context, Opened};
 use crate::error::{note, warn, CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, progress, Answer, Mode};
-use crate::render::doc::{Block, Doc};
-use crate::render::ink::Line;
-use crate::render::Look;
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own interrupt grace of at most 200ms,
@@ -167,7 +167,7 @@ async fn await_engine(
             note(format!(
                 "run {called}: the engine did not stop within {} — escalating to SIGKILL \
                  on its process groups",
-                crate::render::duration(ENGINE_SHUTDOWN_TIMEOUT)
+                surco::figures::duration(ENGINE_SHUTDOWN_TIMEOUT)
             ));
             kill_groups(&registry.process_groups);
             if let Err(e) = signal_process(engine_pid, Signal::SIGKILL) {
@@ -219,7 +219,7 @@ fn answer(run_id: &RunId, state: CancelState) -> CancelAnswer {
 }
 
 impl Answer for CancelAnswer {
-    fn document<'a>(&'a self, _look: &Look) -> Doc<'a> {
+    fn document(&self, _look: &Look) -> Doc {
         let called = self.run_id.handle();
         let said = match &self.state {
             CancelState::AlreadyStopped { killed, .. } if *killed > 0 => format!(
@@ -373,7 +373,8 @@ mod tests {
     use super::{answer, signalable_group, CancelState};
     use crate::error::Outcome;
     use crate::output::Answer;
-    use crate::render::{draw, Look};
+    use crate::render::draw;
+    use surco::look::Look;
     use yunta_core::{Pid, RunId};
 
     #[test]

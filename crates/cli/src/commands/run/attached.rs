@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use surco::look::Look;
 use yunta_core::{AdapterId, ModeName};
 use yunta_storage::AsyncStorage;
 
@@ -14,7 +15,6 @@ use crate::commands::registry::{adapters_for, ScriptedPaths};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::Mode;
-use crate::render::Look;
 
 /// What driving a run here needs: the same workflow reference, inputs and
 /// overrides every run resolves, plus the fixture that scripts its

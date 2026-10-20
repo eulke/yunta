@@ -40,7 +40,7 @@ use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{PriorEstimation, RunObserver};
 use yunta_storage::{AsyncStorage, StorageError};
 
-use crate::render::Glyphs;
+use surco::glyphs::Glyphs;
 
 use feed::{Beat, Feed};
 use lines::Lines;

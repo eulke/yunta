@@ -6,12 +6,13 @@
 //! all three: a reader who picked `retry` off a menu and then reads the
 //! same run's page has to see the same option, not two renderings of it.
 
+use surco::text;
 use yunta_core::events::{
     Fact, FailureMenu, GateWaitingPayload, Menu, ProposedCheck, ScopeWait, WhyWithheld, Withheld,
 };
 use yunta_core::expansion::{Precheck, Waiting};
+use yunta_core::listed_globs;
 use yunta_core::shown::withheld_because;
-use yunta_core::{listed_globs, text};
 
 use crate::blocks::{departure_facts, stuck_words};
 

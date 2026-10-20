@@ -154,7 +154,7 @@ fn unplanned(task: &TaskId, planned: Option<&[TaskId]>) -> String {
     match planned {
         Some(planned) => format!(
             "the run's plan declares no task `{task}`; its tasks are {}",
-            crate::text::listed(planned.iter().map(TaskId::as_str))
+            surco::text::listed(planned.iter().map(TaskId::as_str))
         ),
         None => "the run holds no plan for a spec to hold to".to_string(),
     }
