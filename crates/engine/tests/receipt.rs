@@ -96,6 +96,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         unknown_kinds: Vec::new(),
         diagnostics: Vec::new(),
         failed: Vec::new(),
+        blocking_findings: 0,
     }
 }
 

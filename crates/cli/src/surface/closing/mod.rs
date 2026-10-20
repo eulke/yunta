@@ -94,7 +94,7 @@ pub(crate) struct Closing {
     cwd: PathBuf,
     home: Option<PathBuf>,
     /// The process that drove the run is this one, which asks no one.
-    engine: crate::render::Engine,
+    engine: yunta_engine::Engine,
 }
 
 impl Closing {
@@ -102,7 +102,15 @@ impl Closing {
     /// happened, read once after the run stops rather than carried along
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
-        let frame = run_frame_of(env.run_id, env.workflow, env.state, env.prior, env.now);
+        // The block is drawn by the process that drove the run.
+        let frame = run_frame_of(
+            env.run_id,
+            env.workflow,
+            env.state,
+            env.prior,
+            &yunta_engine::Engine::this(env.now),
+            env.now,
+        );
         Self::framed(
             env.run_id,
             frame,
@@ -134,7 +142,7 @@ impl Closing {
             isolation: outline.isolation,
             cwd: outline.cwd.to_path_buf(),
             home: outline.home.map(Path::to_path_buf),
-            engine: crate::render::Engine::this(now),
+            engine: yunta_engine::Engine::this(now),
         }
     }
 
@@ -142,7 +150,7 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        crate::render::exit(crate::render::run_word(&self.frame))
+        crate::render::exit(self.frame.standing)
     }
 
     /// The page this block is drawn from. The decision it waits on is laid
@@ -372,11 +380,7 @@ impl RunPage<'_> {
     /// to read the whole of it.
     pub(crate) fn closing_next(&self) -> Next {
         let handle = self.run_id.handle();
-        let mut steps = advice::after(
-            crate::render::run_word(self.frame),
-            handle,
-            self.decided_escalation(),
-        );
+        let mut steps = advice::after(self.frame, self.decided_escalation());
         steps.push((advice::status(handle), "shows the whole run"));
         Next { steps }
     }

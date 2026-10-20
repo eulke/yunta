@@ -98,7 +98,7 @@ pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Opti
         if !noted.is_empty() {
             blocks.push(
                 Marked {
-                    mark: Mark::Pending,
+                    mark: Mark::Absent,
                     items: noted,
                 }
                 .into(),

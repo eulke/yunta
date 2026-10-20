@@ -9,7 +9,7 @@ use surco::doc::{Block, Doc};
 use surco::line::Line;
 use surco::look::Look;
 use surco::width::{wrap, INDENT};
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_core::{Redactor, Responder, RunId};
 use yunta_engine::EngineLiveness;
 
@@ -49,7 +49,7 @@ pub async fn close(
     let answer = CloseAnswer {
         schema_version: SCHEMA_VERSION,
         run_id: run_id.clone(),
-        word: RunWord::Cancelled,
+        word: Standing::Stopped,
         by,
     };
     emit(output, &answer, look)
@@ -61,7 +61,7 @@ pub async fn close(
 pub(crate) struct CloseAnswer {
     schema_version: u32,
     run_id: RunId,
-    word: RunWord,
+    word: Standing,
     by: Responder,
 }
 

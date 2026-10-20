@@ -121,7 +121,7 @@ pub use pack_audit::{
 pub use pack_requires::{check_pack_requires, retired_permissions_sentence, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{
-    engine_liveness, engine_prompt, read_registry, registry_path, running_groups, Asked,
+    engine_liveness, engine_prompt, read_registry, registry_path, running_groups, Asked, Engine,
     EngineLiveness, EngineProcessFile, ProcessRegistry, Prompt, Registry,
 };
 pub use receipt::{
@@ -166,8 +166,9 @@ pub use verification_effectiveness::{
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
 pub use view::{
-    chronicle, run_frame, run_frame_of, ChildLink, Counter, Degradation, Happening, Moment,
-    NodeFrame, NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
+    chronicle, node_word, run_frame, run_frame_of, run_standing, ChildLink, Counter, Degradation,
+    Happening, Moment, NodeFrame, NodeStanding, Reroute, RunFrame, RunPhase, RunningTask,
+    TaskCounter, WaitingOn,
 };
 pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{

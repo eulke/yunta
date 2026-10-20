@@ -17,6 +17,7 @@ use surco::components::{Drawn, Headline};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::width::INDENT;
+use surco::words::Standing;
 use yunta_core::events::Channel;
 use yunta_core::{Answer, AnswerType, Env, Question, QuestionsFile};
 use yunta_engine::QuestionsReply;
@@ -43,8 +44,8 @@ pub(crate) fn answer(
     let look = console.look();
     let headline = Headline {
         subject: format!("node `{node}`"),
-        mark: Mark::NeedsYou,
-        said: "needs you".to_string(),
+        mark: Standing::NeedsYou.mark(),
+        said: Standing::NeedsYou.word().to_string(),
     };
     console.say("")?;
     for line in headline.lines(&look) {

@@ -12,7 +12,7 @@ use surco::figures::Tokens;
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::text::counted;
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_core::events::{BaselineOrigin, TerminalState};
 use yunta_core::receipt::{
     BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
@@ -54,7 +54,9 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
-    let word = receipt.terminal_state.map_or(RunWord::Running, run_word);
+    let word = receipt.terminal_state.map_or(Standing::Running, |state| {
+        standing(state, receipt.blocking_findings)
+    });
     let mut doc = Doc::new().with(Headline {
         subject: format!("receipt for run {handle}"),
         mark: word.mark(),
@@ -150,13 +152,15 @@ fn outside(receipt: &Receipt) -> Option<Checklist> {
     Some(outside)
 }
 
-/// The word a run that closed this way is called by.
-fn run_word(state: TerminalState) -> RunWord {
+/// The word a run that closed this way is called by: one that finished
+/// holding findings that block it is reported, as every surface says it.
+fn standing(state: TerminalState, blocking_findings: usize) -> Standing {
     match state {
-        TerminalState::Done => RunWord::Finished,
-        TerminalState::Failed => RunWord::Failed,
-        TerminalState::Cancelled => RunWord::Cancelled,
-        TerminalState::Promoted => RunWord::Promoted,
+        TerminalState::Done if blocking_findings > 0 => Standing::Reported,
+        TerminalState::Done => Standing::Finished,
+        TerminalState::Failed => Standing::Failed,
+        TerminalState::Cancelled => Standing::Stopped,
+        TerminalState::Promoted => Standing::Promoted,
     }
 }
 

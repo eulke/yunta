@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use surco::components::{Check, Found};
+use surco::words::Standing;
 use yunta_core::events::{ArtifactId, Failure, PauseReason, SessionDeath};
 use yunta_core::{
     AdapterId, ArtifactKind, NodeId, RunTool, RunnerCandidate, RunnerName, ToolNaming,
@@ -316,19 +317,25 @@ fn probe_context(
 /// How a run ended, said the way the rest of a refusal reads.
 fn ended(terminal: &yunta_engine::RunTerminal) -> String {
     match terminal {
-        yunta_engine::RunTerminal::Finished => "finished".to_string(),
-        yunta_engine::RunTerminal::Paused { reason } => {
-            format!("waiting ({})", yunta_render::pause::sentence(reason))
-        }
+        yunta_engine::RunTerminal::Finished => Standing::Finished.word().to_string(),
+        yunta_engine::RunTerminal::Paused { reason } => format!(
+            "{} ({})",
+            yunta_render::pause::standing(reason),
+            yunta_render::pause::sentence(reason)
+        ),
         yunta_engine::RunTerminal::Failed { node, failure } => {
             let said = PauseReason::NodeFailed {
                 node: node.clone(),
                 failure: failure.clone(),
             };
-            format!("failed ({})", yunta_render::pause::sentence(&said))
+            format!(
+                "{} ({})",
+                Standing::Failed,
+                yunta_render::pause::sentence(&said)
+            )
         }
         yunta_engine::RunTerminal::Promoted { suggested_mode } => {
-            format!("promoted to mode `{suggested_mode}`")
+            format!("{} to mode `{suggested_mode}`", Standing::Promoted)
         }
     }
 }
@@ -457,6 +464,7 @@ mod tests {
             &workflow,
             &events,
             None,
+            &yunta_engine::Engine::this(fixed_now()),
             fixed_now(),
         );
         let RunPhase::Failed { failure: page } = frame.phase else {

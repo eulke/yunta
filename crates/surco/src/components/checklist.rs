@@ -28,7 +28,7 @@ impl Found {
             Found::Holds => Mark::Done,
             Found::Caution => Mark::Caution,
             Found::Problem => Mark::Failed,
-            Found::NotApplicable => Mark::Pending,
+            Found::NotApplicable => Mark::Absent,
         }
     }
 }

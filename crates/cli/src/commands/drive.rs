@@ -379,7 +379,7 @@ async fn documented(
     let events = storage.events_for_run(run_id.clone()).await?;
     let state = yunta_engine::derive(&events);
     // This invocation is the engine that drove the run.
-    let engine = crate::render::Engine::this(ctx.clock.now());
+    let engine = yunta_engine::Engine::this(ctx.clock.now());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
         Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
         None => None,

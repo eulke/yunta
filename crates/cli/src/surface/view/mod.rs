@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use surco::words::Standing;
 use yunta_core::RunId;
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
@@ -90,12 +91,10 @@ pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
         ));
     }
     let line = Line::new().push(Tone::Muted, format!("{}{sep}", said.join(&sep)));
-    if advice::reset_pause(&frame.phase).is_some() {
-        return line.push(Tone::Muted, "waiting for a reset");
-    }
-    match advice::parked(&frame.phase) {
-        Some(_) => line.push(Tone::NeedsYou, "needs you"),
-        None => line.push(Tone::Muted, "nothing needs you"),
+    match frame.standing {
+        Standing::Waiting => line.push(Tone::Muted, "waiting for a reset"),
+        Standing::NeedsYou => line.push(Tone::NeedsYou, Standing::NeedsYou.word()),
+        _ => line.push(Tone::Muted, "nothing needs you"),
     }
 }
 
@@ -161,8 +160,8 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
 /// with the adapter and model behind it, how long it has been working,
 /// and how long ago it last said anything.
 fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
-    let state = crate::render::standing(&node.state);
-    let mark = state.word.mark();
+    let state = crate::render::node_display(node);
+    let mark = state.standing.mark();
     let tone = Tone::of(mark);
     let mut rest = Vec::new();
     if let Some(runner) = &node.runner {
@@ -183,7 +182,10 @@ fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
     }
     let sep = format!(" {} ", glyphs.sep());
     let row = Line::new()
-        .push(tone, format!("{} {}", glyphs.mark(mark), state.word.word()))
+        .push(
+            tone,
+            format!("{} {}", glyphs.mark(mark), state.standing.word()),
+        )
         .plain(" ")
         .push(Tone::Strong, node.id.as_str());
     match rest.is_empty() {
@@ -324,6 +326,12 @@ mod tests {
     /// says.
     fn standing(phase: RunPhase, prior: Option<yunta_engine::PriorEstimation>) -> RunFrame {
         RunFrame {
+            standing: yunta_engine::run_standing(
+                &phase,
+                &[],
+                0,
+                &yunta_engine::Engine::this(chrono::DateTime::UNIX_EPOCH),
+            ),
             phase,
             prior,
             elapsed: Some(Duration::from_secs(3)),

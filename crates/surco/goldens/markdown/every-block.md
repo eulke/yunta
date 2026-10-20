@@ -3,7 +3,7 @@
 | | node | |
 |---|---|---|
 | ✗ failed | `lint` | exit 101 |
-| · never ran | `fix-lint` |  |
+| ◌ never ran | `fix-lint` |  |
 
 | step | task | proven by | |
 |---|---|---|---|

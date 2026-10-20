@@ -258,7 +258,7 @@ fn every_block() -> Doc {
                 note: "exit 101".to_string(),
             },
             NodeRow {
-                mark: Mark::Pending,
+                mark: Mark::Absent,
                 word: "never ran",
                 id: "fix-lint".to_string(),
                 note: String::new(),
@@ -344,8 +344,8 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
         plain(&list),
         [
             "  + git    commits as Ada <ada@example.com>",
-            "  ! forge  github acme/web — reachable",
-            "  x codex/codex-model (executor, planner fallback, reviewer)",
+            "  ^ forge  github acme/web — reachable",
+            "  ! codex/codex-model (executor, planner fallback, reviewer)",
             "           session died",
         ]
     );

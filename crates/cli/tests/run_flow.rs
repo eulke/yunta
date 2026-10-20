@@ -2730,7 +2730,7 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
         wait_until(
             || {
                 let text = status();
-                ["finished", "failed", "waiting", "cancelled"]
+                ["finished", "failed", "needs you", "waiting", "stopped"]
                     .iter()
                     .any(|stop| text.contains(stop))
             },

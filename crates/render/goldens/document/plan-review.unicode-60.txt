@@ -50,7 +50,7 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
       printed on.
 
   out of scope
-    · Greeting in other languages.
+    ◌ Greeting in other languages.
 
   every task keeps passing
     measured     green before this run changed anything

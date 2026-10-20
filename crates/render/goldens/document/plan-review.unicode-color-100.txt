@@ -41,7 +41,7 @@
     ␛[33m▲␛[0m A name with a newline in it breaks the line it is printed on.
 
   ␛[1mout of scope␛[0m
-    ␛[2m·␛[0m Greeting in other languages.
+    ␛[2m◌␛[0m Greeting in other languages.
 
   ␛[1mevery task keeps passing␛[0m
     ␛[2mmeasured    ␛[0m green before this run changed anything

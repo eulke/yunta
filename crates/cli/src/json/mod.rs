@@ -32,7 +32,7 @@ use crate::commands::status::decision_json::DecisionJson;
 use crate::commands::status::progress;
 use crate::error::Outcome;
 pub use crate::output::print_json;
-use surco::words::RunWord;
+use surco::words::Standing;
 
 /// What the invocation that creates a run says before the first token —
 /// on stderr for the person watching, and carried here so the document
@@ -62,7 +62,7 @@ impl PreRunWarnings {
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Serializes a DTO as pretty JSON to a string — what the control plane
 /// hands back in a tool result instead of printing, so a `println!` never
@@ -80,7 +80,7 @@ pub fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, String> 
 /// command that drove a run to its stop and the command that reads that
 /// run an hour later publish the same answer. `outcome` is the word
 /// every text surface prints, spelled the same way here: a reader who
-/// saw `needs you` on a terminal finds `needs_you` in the document.
+/// saw `needs you` on a terminal finds `needs you` in the document.
 #[derive(serde::Serialize)]
 pub(crate) struct RunDocument {
     schema_version: u32,
@@ -88,7 +88,7 @@ pub(crate) struct RunDocument {
     /// What every line a person reads calls the run by.
     handle: String,
     /// How the run stands, in the one vocabulary every surface uses.
-    outcome: RunWord,
+    outcome: Standing,
     /// The same standing in a sentence, with the counters a person reads
     /// beside it.
     summary: String,
@@ -178,15 +178,15 @@ impl RunDocument {
         state: &RunState,
         manifest: &Manifest,
         now: DateTime<Utc>,
-        engine: &crate::render::Engine,
+        engine: &yunta_engine::Engine,
         decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     ) -> Self {
-        let frame = progress::frame_of(run_id, manifest, state, now);
+        let frame = progress::frame_of(run_id, manifest, state, engine, now);
         RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
             handle: run_id.handle().to_string(),
-            outcome: crate::render::observed_word(&frame, engine),
+            outcome: frame.standing,
             // A document reads the same whichever terminal asked for it.
             summary: progress::summary(&frame, engine, surco::glyphs::Glyphs::Unicode),
             reason: reason(&frame.phase),
@@ -334,7 +334,7 @@ impl WaitingOnJson {
     /// The frame's own answer, in the document's shape — or, for a run
     /// that is moving, the question its engine is asking at its terminal.
     /// `None` for a run that is not waiting on anything.
-    fn of(phase: &RunPhase, engine: &crate::render::Engine) -> Option<Self> {
+    fn of(phase: &RunPhase, engine: &yunta_engine::Engine) -> Option<Self> {
         let RunPhase::Waiting { on } = phase else {
             let moving = matches!(phase, RunPhase::Created | RunPhase::Running);
             return engine

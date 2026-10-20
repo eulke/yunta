@@ -386,8 +386,10 @@ their own branch in it — and ends with how many runs on the machine belong to
 other projects; `--all`, or running it outside a repository, lists every run.
 
 `yunta list --runs` groups runs by what can be done about them — what needs a
-person, what stalled, what is running, what has closed, and last the runs whose
-log or manifest does not read back. A run is stalled when its log says it is
+person, what stalled, what a person stopped, what is running, what has closed,
+and last the runs whose log or manifest does not read back. Under `--json` each
+row names its `group` (`needs_you`, `stalled`, `stopped`, `in_flight`, `closed`)
+and the `word` the run is called by. A run is stalled when its log says it is
 moving and the engine its registry (`scratch/engine.json`) names is gone: a
 process that exited, or a pid the host has since given to a process that started
 later. Nothing else is called stalled — a run with no registry at all may be
@@ -397,8 +399,8 @@ and its live engine is asking a person at its terminal: the registry records
 is asking, at which process's terminal, and for how long. Each row says what the run is called, its handle, its
 workflow and mode, and how long it has been where it is; a run that needs
 someone, or stalled, carries what holds it and the command that moves it under
-its row. The first three groups are ordered by how long a run has been where it
-is, longest first; two runs that have been there equally long are ordered by run
+its row. The groups before the closed one are ordered by how long a run has been where
+it is, longest first; two runs that have been there equally long are ordered by run
 id, which for a minted one is the order they were created in. Closed runs are
 listed newest first, and only the ten newest are named — the rest are counted
 (`2 older closed runs not listed`). A run in the last group has no derived state
@@ -413,7 +415,7 @@ parsing what it printed:
 | Code | The run |
 |---|---|
 | 0 | finished |
-| 1 | failed, was cancelled, promoted, stalled or broke — or the command itself failed |
+| 1 | failed, was stopped by a person, promoted, stalled or broke — or the command itself failed |
 | 2 | was never started: the command line did not parse |
 | 3 | needs you: it stopped on a person — a decision, a question, a budget, a scope |
 | 4 | reported: it finished holding findings that block it |
@@ -426,8 +428,11 @@ exits 1 with or without `--json`; under `--json` its document is on stdout.
 
 `yunta status` and `yunta close` exit 0 whatever the run says: they report a
 run, they do not drive it. `yunta test` reads a case's `final_state` in the same
-words: `finished`, `needs you`, `waiting`, `reported`, `failed`, `promoted`; a case
-written with `paused` is refused, naming `needs you`.
+words: `finished`, `needs you`, `waiting`, `stopped`, `reported`, `failed`,
+`promoted`; a case written with `paused` or `cancelled` is refused, naming the word
+that replaced it. A case's `expect.nodes` is written in the words a node's row
+prints, and a node expected `waiting` that stands at `needs you` is told that a
+node waiting on a person is `needs you` now.
 
 ## Color
 
@@ -458,15 +463,18 @@ place never passes the terminal's edge, whatever the floor says.
 
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 7`. The
+`stats --json`, `status --json` and `run --json` carry `schema_version: 8`. The
 three share one stamp, so all of them carry the new number even when a change
 touched only one of them: from 6 on, a run stopped on a person is `needs you` rather
 than `paused`, and a run that finished holding blocking findings is `reported` rather
 than `finished`. From 7 on, `tokens` is the spend in one shape in each of the three when it names one run:
 `input`, `output`, `cached` when the adapter reports it, `total`, and `in_flight` for
 the usage an open attempt has reported. A run paused on a limit's reset is `waiting`
-rather than `needs you`, and its document carries `awaiting_reset`. `waiting` joins
-version 7, which no released binary has written, so the stamp does not move for it.
+rather than `needs you`, and its document carries `awaiting_reset`. From 8 on, a run
+and a node are called by one vocabulary: a run a person stopped is `stopped` rather
+than `cancelled` or `needs you`, a node waiting on a person is `needs you` rather than
+`waiting`, a node whose attempt stopped with its run is `stopped` rather than
+`paused`, and a failed node a re-route is correcting is `rerouted`.
 
 Under `--json`, `list --runs`, `verify`, `close`, `cancel`, `resolve-gate` and `doctor`
 print one document each: the answer the command gives, with the fields its human view
@@ -475,7 +483,7 @@ for a terminal, so one without an option is refused. Each of these documents car
 the same stamp.
 
 A refusal under `--json` is one document as well, on stdout, and the refusal writes
-nothing to stderr: `{"schema_version": 7, "error": {"said", "detail", "next"}}`. `said`
+nothing to stderr: `{"schema_version": 8, "error": {"said", "detail", "next"}}`. `said`
 is the refusal as an agent reads it, with the whole run id where it names a run;
 `detail` is `null` when there is nothing to add; `next` lists the commands that go on
 from here as `{"command", "why"}` objects, and is empty when there are none. A command
@@ -500,7 +508,7 @@ and by the `handle` every line a person reads calls it. It is derived from the r
 log, so the command that drove a run to its stop and the command that reads that
 run afterwards publish the same answer, field for field, except the cautions above. `outcome` is the word
 every text surface prints for the run — `created`, `running`, `waiting`, `stalled`,
-`needs you`, `finished`, `reported`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
+`needs you`, `finished`, `reported`, `failed`, `stopped`, `promoted`, `broken` — so a reader who greps a
 terminal for what `status` said finds the same word in the document. A failed or
 broken run carries `reason`; a parked one carries `waiting_on` and, when its
 pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that
@@ -641,8 +649,9 @@ included and marked `skipped`; a node the log never mentioned is in it too,
 because a document that left it out could not say whether the run is still on
 its way there or never going. Each entry is `{id, state, detail?, group?,
 waiting_on?, session_death?, command_exit?, stop?, last_tool_failure?}`:
-`state` is the word every text surface prints for a node, `detail` is what
-qualifies it, `group` names the enclosing `parallel` group, and `waiting_on`
+`state` is the word every text surface prints for a node — `running`, `waiting`,
+`needs you`, `finished`, `failed`, `rerouted`, `stopped`, `skipped`, `never ran` —
+`detail` is what qualifies it, `group` names the enclosing `parallel` group, and `waiting_on`
 carries the wait in the same shape the run-level one uses.
 `command_exit` is how the command a node ran ended, for a node that failed
 because one exited non-zero: its `code`, the `tail`, the last lines it printed, and

@@ -30,7 +30,6 @@ use crate::error::note;
 use crate::error::{CliError, Outcome};
 use crate::json::{PreRunWarnings, RunDocument};
 use crate::output::{emit, Answer, Mode};
-use crate::render::Engine;
 use crate::run_page::{cautions, Decided, RunPage, Scope};
 use crate::surface::Outline;
 use node::NodePage;
@@ -38,6 +37,7 @@ use surco::doc::Doc;
 use surco::line::Line;
 use surco::look::Look;
 use surco::width::INDENT;
+use yunta_engine::Engine;
 
 /// Prints where `run_id` stands — or, with `node`, that one node whole. A
 /// program reads the run's document under `Mode::Json`, whatever `node`
@@ -100,7 +100,8 @@ impl Reading {
         let now = ctx.clock.now();
         let state = yunta_engine::derive(&events);
         let decision = crate::json::decision_of(&manifest, &run_dir, &state).await?;
-        let mut frame = progress::frame_of(run_id, &manifest, &state, now);
+        let engine = crate::render::engine(&run_dir, now);
+        let mut frame = progress::frame_of(run_id, &manifest, &state, &engine, now);
         frame.prior = stats::budget_prior(ctx, &manifest, &frame, &events).await;
         let bound = crate::project::bound_checkout(&state);
         let tree = ctx
@@ -108,7 +109,7 @@ impl Reading {
             .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
         Ok(Self {
             events,
-            engine: Engine::of(&run_dir, now),
+            engine,
             run_dir,
             manifest,
             state,

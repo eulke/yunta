@@ -6,7 +6,7 @@
 - cost: 1.54k tokens (1.2k in / 340 out (200 cached)) · CPTV: 770 tokens per task · 2 reroutes
 
 - ✓ **criteria** 3/3 green, each command below
-- · **baseline** not used by this workflow
+- ◌ **baseline** not used by this workflow
 - ✓ **scope** 4 files touched, none outside it
 - ✓ **review** by 2 independent runners via `review` (claude-code, codex)
 - ✓ **event chain** 10 events, hash-linked, replayable

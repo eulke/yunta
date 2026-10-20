@@ -104,7 +104,7 @@ fn bounded(mut doc: Doc, review: &PlanReview) -> Doc {
     let plan = &review.plan;
     for (title, mark, items) in [
         ("risks", Mark::Caution, &plan.risks),
-        ("out of scope", Mark::Pending, &plan.out_of_scope),
+        ("out of scope", Mark::Absent, &plan.out_of_scope),
     ] {
         if !items.is_empty() {
             doc = doc.with(titled(

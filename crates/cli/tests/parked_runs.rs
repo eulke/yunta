@@ -581,7 +581,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
          only the node: {text}"
     );
     assert!(
-        text.contains("progress     nodes 0/1 · 1 waiting"),
+        text.contains("progress     nodes 0/1 · 1 needs you"),
         "and counts the parked node: {text}"
     );
     assert!(

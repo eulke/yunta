@@ -5,6 +5,28 @@ use yunta_core::{NodeId, NonEmpty, OptionId};
 
 use super::*;
 
+/// A run standing at `standing` in `phase`, the rest of it as the test
+/// kit draws a run.
+fn frame(standing: Standing, phase: RunPhase) -> RunFrame {
+    RunFrame {
+        standing,
+        phase,
+        ..yunta_testkit::run_frame(&RunId::from_static("run-1"))
+    }
+}
+
+/// A run parked on a person.
+fn parked() -> RunFrame {
+    frame(
+        Standing::NeedsYou,
+        RunPhase::Waiting {
+            on: WaitingOn::Run {
+                reason: PauseReason::BudgetExhausted { spent: 5, cap: 4 },
+            },
+        },
+    )
+}
+
 #[test]
 fn a_run_paused_on_a_reset_names_its_node_and_the_moment_it_resumes() {
     let at = chrono::Utc
@@ -49,7 +71,7 @@ fn decision_stuck_on(stuck: Stuck) -> GateWaitingPayload {
 fn a_failure_stuck_on_an_unchanged_tree_lists_the_resume_that_retries_once_it_changed() {
     let stuck = decision_stuck_on(Stuck::TreeUnchanged);
     assert_eq!(
-        after(RunWord::NeedsYou, "run-1", Some(&stuck)),
+        after(&parked(), Some(&stuck)),
         vec![
             (
                 "yunta resume run-1".to_string(),
@@ -60,7 +82,7 @@ fn a_failure_stuck_on_an_unchanged_tree_lists_the_resume_that_retries_once_it_ch
     );
     let denied = decision_stuck_on(Stuck::ProjectDenies);
     assert_eq!(
-        after(RunWord::NeedsYou, "run-1", Some(&denied)),
+        after(&parked(), Some(&denied)),
         vec![("yunta close run-1".to_string(), "closes it for good")]
     );
 }
@@ -68,7 +90,7 @@ fn a_failure_stuck_on_an_unchanged_tree_lists_the_resume_that_retries_once_it_ch
 #[test]
 fn a_run_that_needs_a_person_without_a_decision_is_handed_back_once_settled() {
     assert_eq!(
-        after(RunWord::NeedsYou, "run-1", None),
+        after(&parked(), None),
         vec![
             (
                 "yunta resume run-1".to_string(),
@@ -81,7 +103,43 @@ fn a_run_that_needs_a_person_without_a_decision_is_handed_back_once_settled() {
 
 #[test]
 fn a_run_waiting_on_a_reset_is_offered_the_reset_words() {
-    assert_eq!(after(RunWord::Waiting, "run-1", None), after_reset("run-1"));
+    let reset = frame(
+        Standing::Waiting,
+        RunPhase::Waiting {
+            on: WaitingOn::Run {
+                reason: PauseReason::AwaitingReset {
+                    node: NodeId::from_static("build"),
+                    at: chrono::Utc
+                        .with_ymd_and_hms(2026, 10, 13, 12, 0, 0)
+                        .unwrap(),
+                },
+            },
+        },
+    );
+    assert_eq!(after(&reset, None), after_reset("run-1"));
+}
+
+#[test]
+fn a_run_a_person_stopped_is_continued_while_open_and_left_once_closed() {
+    let stopped = frame(
+        Standing::Stopped,
+        RunPhase::Waiting {
+            on: WaitingOn::Run {
+                reason: PauseReason::Cancelled,
+            },
+        },
+    );
+    assert_eq!(
+        after(&stopped, None),
+        vec![
+            (
+                "yunta resume run-1".to_string(),
+                "continues it where it stopped"
+            ),
+            ("yunta close run-1".to_string(), "closes it for good"),
+        ]
+    );
+    assert!(after(&frame(Standing::Stopped, RunPhase::Cancelled), None).is_empty());
 }
 
 #[test]

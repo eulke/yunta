@@ -8,6 +8,7 @@
 
 use surco::figures::{Bytes, Tokens};
 use surco::text;
+use surco::words::Standing;
 use yunta_core::events::PauseReason;
 use yunta_core::{NodeId, QuestionId, RunId};
 
@@ -43,16 +44,21 @@ pub fn asked_questions(asked: &[QuestionId]) -> String {
     )
 }
 
-/// The chronicle's words for a pause: `waiting` for a limit's reset, which
-/// the run resumes on its own, and `needs you` for every other stop, then
-/// the sentence the pause is.
+/// The word a run paused this way is called by: `waiting` for a limit's
+/// reset, which the run resumes on its own, `stopped` for a stop a person
+/// made, and `needs you` for every other stop.
+pub fn standing(pause: &PauseReason) -> Standing {
+    match pause {
+        _ if pause.reset_wait().is_some() => Standing::Waiting,
+        _ if pause.by_a_person() => Standing::Stopped,
+        _ => Standing::NeedsYou,
+    }
+}
+
+/// The chronicle's words for a pause: the word it is called by, then the
+/// sentence the pause is.
 pub fn said(pause: &PauseReason) -> String {
-    let word = if pause.reset_wait().is_some() {
-        "waiting"
-    } else {
-        "needs you"
-    };
-    format!("{word} — {}", sentence(pause))
+    format!("{} — {}", standing(pause), sentence(pause))
 }
 
 /// The one line a reader sees for a parked run. Every surface prints

@@ -222,7 +222,12 @@ mod tests {
         );
         assert_eq!(
             drawn,
-            ["  abcdefghij", "    > klmnop", "    > qrstuv", "    > wxyz"]
+            [
+                "  abcdefghij",
+                "    \\ klmnop",
+                "    \\ qrstuv",
+                "    \\ wxyz"
+            ]
         );
         assert!(drawn.iter().all(|line| cell_width(line) <= 12));
     }

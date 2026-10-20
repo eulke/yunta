@@ -13,10 +13,10 @@ use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::text::counted;
 use surco::width::{cell_width, indent, truncate, wrap, INDENT};
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_core::RunId;
 
-use super::inbox::{Inbox, RunRow, Standing, Unreadable};
+use super::inbox::{Group, Inbox, RunRow, Unreadable};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
@@ -118,18 +118,18 @@ fn listing_lines(rows: &[RunRow], unreadable: &[Unreadable], look: &Look) -> Vec
     let mut rows: Vec<&RunRow> = rows.iter().collect();
     rows.sort_by(|a, b| b.age.cmp(&a.age).then_with(|| a.run_id.cmp(&b.run_id)));
     let mut lines = Vec::new();
-    for standing in Standing::ALL {
+    for kind in Group::ALL {
         let mut group: Vec<&RunRow> = rows
             .iter()
             .copied()
-            .filter(|row| row.standing == standing)
+            .filter(|row| row.group == kind)
             .collect();
         if group.is_empty() {
             continue;
         }
-        push_heading(&mut lines, standing.heading(), group.len());
+        push_heading(&mut lines, kind.heading(), group.len());
         let mut folded = 0;
-        if standing == Standing::Closed {
+        if kind == Group::Closed {
             group.reverse();
             folded = group.len().saturating_sub(CLOSED_SHOWN);
             group.truncate(CLOSED_SHOWN);
@@ -203,7 +203,7 @@ impl RunRow {
         let tone = Tone::of(mark);
         // What the row takes besides the name: the margin, the mark and
         // the word, the handle, the age, and the gaps between them.
-        let fixed = cell_width(INDENT) + 2 + RunWord::WIDEST + HANDLE_WIDTH + DURATION_WIDEST + 6;
+        let fixed = cell_width(INDENT) + 2 + Standing::WIDEST + HANDLE_WIDTH + DURATION_WIDEST + 6;
         let room = NAME_WIDTH.min(look.width.cells().saturating_sub(fixed));
         let name = truncate(&format!("{} ({})", self.workflow, self.mode), room, glyphs);
         Line::new()
@@ -214,7 +214,7 @@ impl RunRow {
                     "{} {:<width$}",
                     glyphs.mark(mark),
                     self.word.word(),
-                    width = RunWord::WIDEST
+                    width = Standing::WIDEST
                 ),
             )
             .plain("  ")
@@ -241,18 +241,18 @@ mod tests {
     use yunta_core::{ModeName, RunId};
 
     use super::*;
-    use surco::words::RunWord;
 
-    fn row(id: &'static str, standing: Standing, age_secs: u64) -> RunRow {
-        let word = match standing {
-            Standing::NeedsYou => RunWord::NeedsYou,
-            Standing::Stalled => RunWord::Stalled,
-            Standing::InFlight => RunWord::Running,
-            Standing::Closed => RunWord::Finished,
+    fn row(id: &'static str, group: Group, age_secs: u64) -> RunRow {
+        let word = match group {
+            Group::NeedsYou => Standing::NeedsYou,
+            Group::Stalled => Standing::Stalled,
+            Group::Stopped => Standing::Stopped,
+            Group::InFlight => Standing::Running,
+            Group::Closed => Standing::Finished,
         };
         RunRow {
             run_id: RunId::from_static(id),
-            standing,
+            group,
             word,
             workflow: "review".into(),
             mode: ModeName::default(),
@@ -309,8 +309,8 @@ mod tests {
     #[test]
     fn a_group_answers_the_run_that_has_waited_longest_first() {
         let text = render(vec![
-            row(NEWEST, Standing::NeedsYou, 30),
-            row(OLDEST, Standing::NeedsYou, 86_400),
+            row(NEWEST, Group::NeedsYou, 30),
+            row(OLDEST, Group::NeedsYou, 86_400),
         ]);
         assert_eq!(listed(&text), handles(&[OLDEST, NEWEST]), "{text}");
     }
@@ -318,8 +318,8 @@ mod tests {
     #[test]
     fn runs_that_arrived_together_are_ordered_by_id() {
         let text = render(vec![
-            row(TIED_B, Standing::InFlight, 60),
-            row(TIED_A, Standing::InFlight, 60),
+            row(TIED_B, Group::InFlight, 60),
+            row(TIED_A, Group::InFlight, 60),
         ]);
         assert_eq!(listed(&text), handles(&[TIED_A, TIED_B]), "{text}");
     }
@@ -327,9 +327,9 @@ mod tests {
     #[test]
     fn what_needs_a_person_is_listed_above_what_is_only_moving() {
         let text = render(vec![
-            row(NEWEST, Standing::Closed, 900),
-            row(TIED_A, Standing::InFlight, 600),
-            row(OLDEST, Standing::NeedsYou, 5),
+            row(NEWEST, Group::Closed, 900),
+            row(TIED_A, Group::InFlight, 600),
+            row(OLDEST, Group::NeedsYou, 5),
         ]);
         assert_eq!(listed(&text), handles(&[OLDEST, TIED_A, NEWEST]), "{text}");
         assert!(text.contains("needs you (1)"), "{text}");
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn a_run_that_does_not_read_back_is_listed_last_and_by_id() {
         let text = render_runs(
-            vec![row(OLDEST, Standing::Closed, 10)],
+            vec![row(OLDEST, Group::Closed, 10)],
             vec![
                 Unreadable::new(&RunId::from_static(NEWEST), "gone".to_string()),
                 Unreadable::new(&RunId::from_static(TIED_A), "gone".to_string()),
@@ -358,7 +358,7 @@ mod tests {
         let waiting = RunRow {
             reason: Some(reason.to_string()),
             command: Some(format!("yunta status {}", &OLDEST[OLDEST.len() - 6..])),
-            ..row(OLDEST, Standing::NeedsYou, 5)
+            ..row(OLDEST, Group::NeedsYou, 5)
         };
         let text = render(vec![waiting]);
         let said: Vec<&str> = text.split_whitespace().collect();
@@ -381,7 +381,7 @@ mod tests {
         let closed: Vec<RunRow> = (0..CLOSED_SHOWN + 2)
             .map(|at| RunRow {
                 run_id: RunId::from(format!("01JBZ5X8K3N7Q2W6E4R9T1Y{at:03}").as_str()),
-                ..row(OLDEST, Standing::Closed, 60 * (at as u64 + 1))
+                ..row(OLDEST, Group::Closed, 60 * (at as u64 + 1))
             })
             .collect();
         let text = render(closed);
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn an_age_of_days_fits_its_column() {
         let text = render(vec![
-            row(OLDEST, Standing::InFlight, 5 * 86_400 + 13 * 3_600),
-            row(NEWEST, Standing::InFlight, 30),
+            row(OLDEST, Group::InFlight, 5 * 86_400 + 13 * 3_600),
+            row(NEWEST, Group::InFlight, 30),
         ]);
         let rows: Vec<&str> = text
             .lines()

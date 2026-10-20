@@ -9,7 +9,7 @@
 use surco::figures::duration;
 use surco::glyphs::Mark;
 use surco::text::{detailed, one_line};
-use surco::words::StateWord;
+use surco::words::Standing;
 use tasks::happening as tasks_happening;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
@@ -69,7 +69,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
             duration(*slept),
             duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
         ),
-        H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
+        H::Closed { terminal, .. } => view::closed_as(*terminal).word().to_string(),
         H::PromotionSignaled {
             to,
             cause,
@@ -98,12 +98,12 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
             format!("{} on {}/{}", it.runner, it.chosen.adapter, it.chosen.model),
         ),
         H::Reached { state, elapsed, .. } => {
-            let display = NodeDisplay::of(Some(state));
+            let display = NodeDisplay::of(yunta_engine::node_word(state), Some(state));
             let worked = elapsed
                 .map(|elapsed| format!(" {sep} {}", duration(elapsed)))
                 .unwrap_or_default();
             (
-                Some(display.word.mark()),
+                Some(display.standing.mark()),
                 format!("{}{worked}", display.label()),
             )
         }
@@ -420,15 +420,18 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
         H::Asked { questions } => (
             Some(Mark::NeedsYou),
             match NonEmpty::new(questions.clone()) {
-                Some(asked) => NodeDisplay::of(Some(&NodeState::Waiting {
-                    on: NodeWait::Questions { asked },
-                }))
+                Some(asked) => NodeDisplay::of(
+                    Standing::NeedsYou,
+                    Some(&NodeState::Waiting {
+                        on: NodeWait::Questions { asked },
+                    }),
+                )
                 .label(),
                 // A `questions_asked` naming nothing is a log this
                 // binary never wrote — its constructor refuses one — so
                 // the chronicle says what it has rather than a list it
                 // would be inventing.
-                None => StateWord::Waiting.word().to_string(),
+                None => Standing::NeedsYou.word().to_string(),
             },
         ),
         H::Answered { channel, responder } => (

@@ -65,13 +65,14 @@ fn running_page(scope: Scope) -> RunPage<'static> {
         &workflow(),
         state,
         None,
+        &yunta_engine::Engine::this(fixed_now()),
         fixed_now(),
     )));
     let run_id: &'static RunId = Box::leak(Box::new(RUN));
     RunPage {
         scope,
         run_id,
-        engine: crate::render::Engine::this(fixed_now()),
+        engine: yunta_engine::Engine::this(fixed_now()),
         frame,
         state,
         paths: outline(),

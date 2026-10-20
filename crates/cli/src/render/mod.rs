@@ -11,7 +11,7 @@ pub(crate) use stream::{
     glyphs, row_width, settle_color, settle_columns, settle_glyphs, stderr_ink, stderr_width,
     stdout_look,
 };
-pub(crate) use words::{exit, observed_word, run_word, standing, Engine, RunExit};
+pub(crate) use words::{engine, exit, node_display, RunExit};
 
 use surco::doc::Doc;
 use surco::line::Line;

@@ -68,7 +68,7 @@ pub(super) async fn tool_workflow_status(
     let run_id = required_run_id(args)?;
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
     let open = ctx.open_run(&run_id).await?;
-    let engine = crate::render::Engine::of(&open.run_dir, ctx.clock.now());
+    let engine = crate::render::engine(&open.run_dir, ctx.clock.now());
     let (events, manifest) = (open.events, open.manifest.doc);
     let state = yunta_engine::derive(&events);
     let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;

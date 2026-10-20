@@ -3203,6 +3203,7 @@ dependencies = [
  "yunta-core",
  "yunta-engine",
  "yunta-storage",
+ "yunta-surco",
  "yunta-testkit-core",
 ]
 

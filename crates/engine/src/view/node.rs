@@ -6,11 +6,13 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use surco::words::Standing;
 
-use yunta_core::events::{ArtifactId, RunPhaseRaw, TaskStatus, TokenUsage};
+use yunta_core::events::{ArtifactId, PauseReason, RunPhaseRaw, TaskStatus, TokenUsage};
 use yunta_core::{Node, NodeId, TaskId};
 
 use crate::live::{last_event_age, open_sessions, recent_tool_calls, OpenSession, ToolCall};
+use crate::process_registry::Engine;
 use crate::replay::{NodeState, RunState};
 use crate::stats::NodeStat;
 use yunta_core::events::{NodeRecord, Reroute, RerouteOrigin, ResolvedRunner};
@@ -28,6 +30,11 @@ pub struct NodeFrame {
     /// The enclosing `parallel` group, `None` for a top-level node —
     /// what lets a surface draw a group and its children as one unit.
     pub group: Option<NodeId>,
+    /// Where the node stands in the one vocabulary every surface says it
+    /// in — its row, the counter beside it, its JSON — decided here, once.
+    pub standing: Standing,
+    /// What stands behind that word: the mode or the birth that left the
+    /// node out, or what replay derived from the log.
     pub state: NodeStanding,
     /// The runner this node resolved through, as `runner_resolved`
     /// recorded it: the name, the candidate chosen (its adapter, model
@@ -76,11 +83,6 @@ pub struct NodeFrame {
     /// The last re-route this node took; `None` for one that never
     /// rerouted.
     pub reroute: Option<Reroute>,
-    /// Whether the node failed and was sent on to be corrected, in a run
-    /// that has not closed: its failure is being worked on, and a surface
-    /// that counted it as failed would alarm a reader about a correction
-    /// the workflow planned for.
-    pub correcting: bool,
 }
 
 /// A task in `running`, and whether an agent is on it: one no
@@ -110,6 +112,32 @@ pub enum NodeStanding {
     /// What replay derives from the log, with the node's outcome, its
     /// failure, or the gate it waits on.
     Reached(NodeState),
+}
+
+impl NodeStanding {
+    /// The word a node standing here is called by on its own, before what
+    /// the rest of its run says about it: a correction under way, a reset
+    /// the run waits on, a question asked about it at a terminal.
+    pub fn word(&self) -> Standing {
+        match self {
+            NodeStanding::Skipped | NodeStanding::LeftOut(_) => Standing::Skipped,
+            NodeStanding::ToGo => Standing::NeverRan,
+            NodeStanding::Paused { .. } => Standing::Stopped,
+            NodeStanding::Reached(state) => node_word(state),
+        }
+    }
+}
+
+/// The word a node in `state`, as replay derived it, is called by on its
+/// own — what a moment of the log says of it as it happened: a node on a
+/// gate or on unanswered questions needs a person.
+pub fn node_word(state: &NodeState) -> Standing {
+    match state {
+        NodeState::Running { .. } => Standing::Running,
+        NodeState::Finished { .. } => Standing::Finished,
+        NodeState::Failed { .. } => Standing::Failed,
+        NodeState::Waiting { .. } => Standing::NeedsYou,
+    }
 }
 
 /// Whether `record`'s latest failure was handed on to be corrected: it
@@ -143,6 +171,9 @@ pub(super) struct Reading<'a> {
     /// Whether the run has not closed: a correction under way belongs to
     /// a run that can still reach it.
     pub(super) open: bool,
+    /// The engine driving the run, as its registry said when the caller
+    /// read it.
+    pub(super) engine: &'a Engine,
 }
 
 impl Reading<'_> {
@@ -150,11 +181,19 @@ impl Reading<'_> {
     /// group it is declared inside.
     pub(super) fn node(&self, node: &Node, group: Option<&Node>) -> NodeFrame {
         let stat = self.stats.get(&node.id);
+        let state = self.standing(node, group);
+        let correcting = self.open
+            && self
+                .state
+                .nodes
+                .get(&node.id)
+                .is_some_and(sent_to_correction);
         NodeFrame {
             id: node.id.clone(),
             kind: node.kind.kind_name(),
             group: group.map(|group| group.id.clone()),
-            state: self.standing(node, group),
+            standing: self.word(&node.id, &state, correcting),
+            state,
             runner: self
                 .state
                 .nodes
@@ -180,12 +219,41 @@ impl Reading<'_> {
                 .nodes
                 .get(&node.id)
                 .and_then(|r| r.last_reroute.clone()),
-            correcting: self.open
-                && self
-                    .state
-                    .nodes
-                    .get(&node.id)
-                    .is_some_and(sent_to_correction),
+        }
+    }
+
+    /// The word `node` is called by, decided once from where the mode, the
+    /// run's birth and the log put it (`state`), a correction under way, a
+    /// reset the run waits on, and a question the process driving the run
+    /// is asking about it.
+    ///
+    /// A failed node a re-route is correcting is `rerouted`: counted as
+    /// failed it would alarm a reader about a correction the workflow
+    /// planned for. A node the run waits on a reset for is `waiting`, which
+    /// a clock ends. A node a person is being asked about at a terminal
+    /// needs them, whatever its log says.
+    fn word(&self, node: &NodeId, state: &NodeStanding, correcting: bool) -> Standing {
+        let reset = self.pause().and_then(PauseReason::reset_wait);
+        match state {
+            NodeStanding::Skipped | NodeStanding::LeftOut(_) => state.word(),
+            // A gate asks before its log says anything of it.
+            _ if self.engine.asks_about(node) => Standing::NeedsYou,
+            NodeStanding::Paused { .. } if reset.is_some() => Standing::Waiting,
+            NodeStanding::Reached(NodeState::Failed { .. }) if correcting => Standing::Rerouted,
+            NodeStanding::Reached(NodeState::Failed { .. })
+                if reset.is_some_and(|(held, _)| held == node) =>
+            {
+                Standing::Waiting
+            }
+            _ => state.word(),
+        }
+    }
+
+    /// The pause the run stands in, while it stands in one.
+    fn pause(&self) -> Option<&PauseReason> {
+        match self.state.run.phase() {
+            RunPhaseRaw::Paused => self.state.run.paused().map(|(reason, _)| reason),
+            _ => None,
         }
     }
 

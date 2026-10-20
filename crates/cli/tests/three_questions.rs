@@ -204,7 +204,7 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
         "the page says the run needs a person, and where to answer:\n{page}"
     );
     assert!(
-        page.lines().any(|line| line.contains("waiting")
+        page.lines().any(|line| line.contains("needs you")
             && line.contains("approve")
             && line.ends_with("asking at its terminal")),
         "the node asking is the one waiting on a person:\n{page}"

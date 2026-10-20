@@ -119,6 +119,9 @@ pub struct Receipt {
     /// not finish. Absent while nothing stands failed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failed: Vec<FailedNode>,
+    /// The findings that still block the run, counted once each: a run
+    /// that finished holding any is reported, not finished.
+    pub blocking_findings: usize,
 }
 
 /// A node that stands failed, and why, as the log recorded it.
@@ -150,7 +153,7 @@ impl Receipt {
     /// version is for whoever consumes `receipt.json` outside yunta,
     /// who has no log to derive it from and needs to know what shape
     /// they were handed.
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 }
 
 impl std::fmt::Display for DiagnosticCount {

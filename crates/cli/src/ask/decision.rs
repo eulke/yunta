@@ -9,7 +9,7 @@
 //! in how they are answered.
 
 use surco::components::{Drawn, Headline};
-use surco::glyphs::Mark;
+use surco::words::Standing;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, OptionId, RunId};
 use yunta_engine::ShownDocument;
@@ -128,8 +128,8 @@ fn present(
     }
     let mut lines = Headline {
         subject: "decision".to_string(),
-        mark: Mark::NeedsYou,
-        said: "needs you".to_string(),
+        mark: Standing::NeedsYou.mark(),
+        said: Standing::NeedsYou.word().to_string(),
     }
     .lines(&look);
     let nothing_beside = Beside {

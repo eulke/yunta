@@ -36,13 +36,17 @@ a page in a browser — need the same home, one that knows no type of Yunta's.
 2. **`yunta-core` depends on Surco**: a refusal counts, lists and quotes with
    Surco's grammar. Core keeps the figure a log records, a duration in whole
    milliseconds; how a person reads a figure is Surco's.
-3. **`yunta-render` says Yunta's facts with Surco**: the word a node's state is
-   called by, what a failure says beyond its row, the plan, the receipt, the
-   body of a gate's pull request. A domain fact is never a block of Surco's
-   document: it says itself in Surco's blocks, so every surface draws it the
-   way it draws any other.
-4. **The engine never draws** (D221 §2 stands). The words it answers an agent
-   with use Surco's grammar and figures, and nothing else of it.
+3. **`yunta-render` says Yunta's facts with Surco**: what qualifies the word a
+   node is called by, what a failure says beyond its row, the plan, the
+   receipt, the body of a gate's pull request. A domain fact is never a block
+   of Surco's document: it says itself in Surco's blocks, so every surface
+   draws it the way it draws any other.
+4. **The engine never draws** (D221 §2 stands), and it decides where a run and
+   each node stand once: a frame classifies them in Surco's vocabulary, with
+   what the registry of the process driving the run says as an input like the
+   instant it is read at, and every surface draws, counts and serializes that
+   one value. The words it answers an agent with use Surco's grammar and
+   figures. It builds no document, block or surface.
 5. **A golden is Surco's too**: comparing a surface's whole output with the one
    written down for it, and the look of a terminal a golden is rendered for,
    are decided once, behind the `golden` feature every drawing crate's tests

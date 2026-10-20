@@ -6,7 +6,7 @@ use crate::glyphs::Mark;
 use crate::line::{Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, id_column, middle_cut, truncate, INDENT};
-use crate::words::STATE_WIDTH;
+use crate::words::Standing;
 
 /// Rows of cells under named columns.
 ///
@@ -82,7 +82,7 @@ impl Table {
             .iter()
             .enumerate()
             .map(|(at, column)| match column.holds {
-                Holds::State => STATE_WIDTH,
+                Holds::State => Standing::WIDEST,
                 Holds::Id => id_column(held(at)).min(width / 3),
                 Holds::Words => id_column(held(at)),
                 Holds::Rest => 0,

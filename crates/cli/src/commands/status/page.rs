@@ -8,7 +8,7 @@ use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::prose;
 use surco::width::{indent, INDENT};
-use surco::words::{RunWord, StateWord};
+
 use yunta_core::events::Failure;
 use yunta_engine::{NodeState, RunState};
 use yunta_render::blocks::FailureDetail;
@@ -25,7 +25,7 @@ impl RunPage<'_> {
             .nodes
             .iter()
             .map(|node| {
-                let display = crate::render::standing(&node.state);
+                let display = crate::render::node_display(node);
                 let said = display
                     .modifier
                     .map(|said| prose::first_sentence(&said, look.width.cells(), look.glyphs));
@@ -35,24 +35,15 @@ impl RunPage<'_> {
                     .collect::<Vec<_>>()
                     .join(&format!(" {} ", look.glyphs.sep()));
                 let id = format!("{}{}", indent(usize::from(node.group.is_some())), node.id);
-                // The node a live engine is asking at its terminal is
-                // waiting on a person, whatever its log says.
-                let asking = self
-                    .engine
-                    .prompt
-                    .as_ref()
-                    .and_then(|prompt| prompt.node.as_ref());
-                if asking == Some(&node.id) {
-                    return NodeRow {
-                        mark: StateWord::Waiting.mark(),
-                        word: StateWord::Waiting.word(),
-                        id,
-                        note: "asking at its terminal".to_string(),
-                    };
-                }
+                // The frame calls the node a live engine is asking about
+                // `needs you`; where it is asked is what the row adds.
+                let note = match self.engine.asks_about(&node.id) {
+                    true => "asking at its terminal".to_string(),
+                    false => note,
+                };
                 NodeRow {
-                    mark: display.word.mark(),
-                    word: display.word.word(),
+                    mark: display.standing.mark(),
+                    word: display.standing.word(),
                     id,
                     note,
                 }
@@ -135,7 +126,7 @@ impl RunPage<'_> {
         let room = look
             .width
             .cells()
-            .saturating_sub(INDENT.len() + 2 + surco::words::STATE_WIDTH + 1 + ids + 2);
+            .saturating_sub(INDENT.len() + 2 + surco::words::Standing::WIDEST + 1 + ids + 2);
         if surco::width::cell_width(&claim) <= room {
             return Vec::new();
         }
@@ -204,15 +195,8 @@ impl RunPage<'_> {
 
     /// What a person types next, for where the run stands.
     pub(crate) fn status_next(&self) -> Next {
-        // A run asking at its terminal is alive: what moves it is the
-        // answer given there, and what stops it is what stops any run
-        // that is moving.
-        let word = match self.engine.prompt {
-            Some(_) => RunWord::Running,
-            None => crate::render::observed_word(self.frame, &self.engine),
-        };
         Next {
-            steps: advice::after(word, self.run_id.handle(), self.decided_escalation()),
+            steps: advice::after(self.frame, self.decided_escalation()),
         }
     }
 }

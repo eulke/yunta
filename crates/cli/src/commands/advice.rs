@@ -16,11 +16,11 @@
 //! id printed as an example gets pasted, and no id printed beside a run
 //! is ever one that run's own menu does not offer.
 
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_core::events::{GateWaitingPayload, Stuck};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
-use yunta_engine::{NodeWait, RunPhase, WaitingOn};
+use yunta_engine::{NodeWait, RunFrame, RunPhase, WaitingOn};
 
 use crate::error::Reader;
 
@@ -172,17 +172,26 @@ pub(crate) fn verify(run: &str) -> String {
 /// own commands, and a failure that no retry can change until the tree
 /// moves says so beside the command that hands the run back.
 pub(crate) fn after(
-    word: RunWord,
-    run: &str,
+    frame: &RunFrame,
     decision: Option<&GateWaitingPayload>,
 ) -> Vec<(String, &'static str)> {
-    match word {
-        RunWord::Stalled => vec![
+    let run = frame.run_id.handle();
+    let open = matches!(
+        frame.phase,
+        RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
+    );
+    match frame.standing {
+        Standing::Stalled => vec![
             (resume(run), "continues it from its log"),
             (close(run), "closes it for good"),
         ],
-        RunWord::Waiting => after_reset(run),
-        RunWord::NeedsYou => match decision {
+        Standing::Waiting => after_reset(run),
+        // Asked live, the question is answered where it is asked: what a
+        // command here can do is stop the run.
+        Standing::NeedsYou if matches!(frame.phase, RunPhase::Created | RunPhase::Running) => {
+            vec![(cancel(run), "stops it and everything under it")]
+        }
+        Standing::NeedsYou => match decision {
             None => vec![
                 (resume(run), "hands it back once that is settled"),
                 (close(run), "closes it for good"),
@@ -196,12 +205,21 @@ pub(crate) fn after(
                 steps
             }
         },
-        RunWord::Finished | RunWord::Reported => vec![(receipt(run), "certifies what it did")],
-        RunWord::Broken => vec![(verify(run), "says where its log stops reading")],
-        RunWord::Created | RunWord::Running => {
+        Standing::Finished | Standing::Reported => vec![(receipt(run), "certifies what it did")],
+        Standing::Broken => vec![(verify(run), "says where its log stops reading")],
+        Standing::Created | Standing::Running => {
             vec![(cancel(run), "stops it and everything under it")]
         }
-        RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => Vec::new(),
+        Standing::Stopped if open => vec![
+            (resume(run), "continues it where it stopped"),
+            (close(run), "closes it for good"),
+        ],
+        Standing::Failed
+        | Standing::Stopped
+        | Standing::Promoted
+        | Standing::Rerouted
+        | Standing::Skipped
+        | Standing::NeverRan => Vec::new(),
     }
 }
 

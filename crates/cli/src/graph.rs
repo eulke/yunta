@@ -69,11 +69,13 @@ pub async fn graph(
         (None, Some(run_id)) => {
             let open = ctx.open_run(run_id).await?;
             let manifest = open.manifest.doc;
+            let now = ctx.clock.now();
             let frame = crate::commands::status::progress::frame(
                 run_id,
                 &manifest,
                 &open.events,
-                ctx.clock.now(),
+                &crate::render::engine(&open.run_dir, now),
+                now,
             );
             (manifest.workflow, derived_labels(&frame), Outcome::Success)
         }
@@ -114,12 +116,7 @@ fn derived_labels(frame: &RunFrame) -> Option<Labels> {
         frame
             .nodes
             .iter()
-            .map(|node| {
-                (
-                    node.id.clone(),
-                    crate::render::standing(&node.state).label(),
-                )
-            })
+            .map(|node| (node.id.clone(), crate::render::node_display(node).label()))
             .collect(),
     )
 }

@@ -12,35 +12,46 @@ pub const OVERRIDE_VAR: &str = "YUNTA_GLYPHS";
 ///
 /// Each mark means one thing. `NeedsYou` is for a person and nothing
 /// else — a reader who learns that mark learns where they are wanted —
-/// so a re-route and a caution have marks of their own.
+/// so a re-route, a caution and a stop have marks of their own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mark {
     Done,
     Failed,
+    /// Moving on its own, or waiting on a clock.
     Running,
-    /// Something waits on a person.
+    /// A person owes an answer.
     NeedsYou,
-    Skipped,
-    Pending,
-    /// Control went somewhere else: a re-route, a promotion.
-    Reroute,
     /// Worth a reader's attention, and nothing anybody has to answer: a
     /// run nobody drives, findings that still block, a red baseline.
     Caution,
+    /// Control went somewhere else: a re-route, a promotion.
+    Reroute,
+    /// A person stopped it, and nothing is wrong with it.
+    Stopped,
+    /// Left out by the run's own choice: its mode.
+    Skipped,
+    /// Nothing stands here yet: a node that never ran, a check that does
+    /// not apply, what a plan leaves out.
+    Absent,
 }
 
 /// Every mark, for a test that has to hold all of them at once.
 #[cfg(test)]
-pub const ALL_MARKS: [Mark; 8] = [
+pub const ALL_MARKS: [Mark; 9] = [
     Mark::Done,
     Mark::Failed,
     Mark::Running,
     Mark::NeedsYou,
-    Mark::Skipped,
-    Mark::Pending,
-    Mark::Reroute,
     Mark::Caution,
+    Mark::Reroute,
+    Mark::Stopped,
+    Mark::Skipped,
+    Mark::Absent,
 ];
+
+/// What a path under the reader's home directory starts with, in both
+/// sets: the way a shell writes it.
+pub const HOME: char = '~';
 
 /// The set of decorative characters a surface draws with.
 ///
@@ -109,7 +120,7 @@ impl Glyphs {
     pub fn bar_filled(self) -> char {
         match self {
             Self::Unicode => '█',
-            Self::Ascii => '#',
+            Self::Ascii => '=',
         }
     }
 
@@ -118,17 +129,18 @@ impl Glyphs {
     /// the eye reads as a missing row.
     pub fn bar_empty(self) -> char {
         match self {
-            Self::Unicode => '·',
-            Self::Ascii => '.',
+            Self::Unicode => '░',
+            Self::Ascii => '_',
         }
     }
 
-    /// The mark that closes a value cut to fit its column. One cell in
-    /// either set, so the arithmetic that places the cut is the same.
-    pub fn ellipsis(self) -> char {
+    /// The mark that closes a value cut to fit its column: one cell in
+    /// Unicode and three in ASCII, where a single dot is a mark of its own;
+    /// the arithmetic that places a cut measures it.
+    pub fn ellipsis(self) -> &'static str {
         match self {
-            Self::Unicode => '…',
-            Self::Ascii => '~',
+            Self::Unicode => "…",
+            Self::Ascii => "...",
         }
     }
 
@@ -144,7 +156,7 @@ impl Glyphs {
     pub fn sep(self) -> char {
         match self {
             Self::Unicode => '·',
-            Self::Ascii => '|',
+            Self::Ascii => ';',
         }
     }
 
@@ -169,7 +181,7 @@ impl Glyphs {
     pub fn continued(self) -> char {
         match self {
             Self::Unicode => '↪',
-            Self::Ascii => '>',
+            Self::Ascii => '\\',
         }
     }
 
@@ -254,18 +266,20 @@ impl Glyphs {
             (Self::Unicode, Mark::Failed) => '✗',
             (Self::Unicode, Mark::Running) => '●',
             (Self::Unicode, Mark::NeedsYou) => '◆',
-            (Self::Unicode, Mark::Skipped) => '○',
-            (Self::Unicode, Mark::Pending) => '·',
-            (Self::Unicode, Mark::Reroute) => '↻',
             (Self::Unicode, Mark::Caution) => '▲',
+            (Self::Unicode, Mark::Reroute) => '↻',
+            (Self::Unicode, Mark::Stopped) => '■',
+            (Self::Unicode, Mark::Skipped) => '○',
+            (Self::Unicode, Mark::Absent) => '◌',
             (Self::Ascii, Mark::Done) => '+',
-            (Self::Ascii, Mark::Failed) => 'x',
+            (Self::Ascii, Mark::Failed) => '!',
             (Self::Ascii, Mark::Running) => '>',
             (Self::Ascii, Mark::NeedsYou) => '?',
-            (Self::Ascii, Mark::Skipped) => '-',
-            (Self::Ascii, Mark::Pending) => '.',
-            (Self::Ascii, Mark::Reroute) => '~',
-            (Self::Ascii, Mark::Caution) => '!',
+            (Self::Ascii, Mark::Caution) => '^',
+            (Self::Ascii, Mark::Reroute) => '@',
+            (Self::Ascii, Mark::Stopped) => '#',
+            (Self::Ascii, Mark::Skipped) => 'o',
+            (Self::Ascii, Mark::Absent) => '.',
         }
     }
 }
@@ -388,8 +402,7 @@ mod tests {
     #[test]
     fn every_glyph_of_either_set_occupies_exactly_one_cell() {
         for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
-            let mut drawn: Vec<char> =
-                vec![glyphs.bar_filled(), glyphs.bar_empty(), glyphs.ellipsis()];
+            let mut drawn: Vec<char> = vec![glyphs.bar_filled(), glyphs.bar_empty()];
             drawn.extend(glyphs.ramp());
             drawn.extend(ALL_MARKS.map(|mark| glyphs.mark(mark)));
             for ch in drawn {
@@ -399,6 +412,50 @@ mod tests {
                     "{ch:?} is not one cell wide under {glyphs}"
                 );
             }
+        }
+    }
+
+    /// What a line of text is marked and joined with in one set: the marks,
+    /// and every sign a sentence or a row carries.
+    fn tokens(glyphs: Glyphs) -> Vec<String> {
+        let mut tokens: Vec<String> = ALL_MARKS
+            .iter()
+            .map(|mark| glyphs.mark(*mark).to_string())
+            .collect();
+        tokens.extend(
+            [
+                glyphs.sep(),
+                glyphs.gutter(),
+                glyphs.times(),
+                glyphs.bar_filled(),
+                glyphs.bar_empty(),
+                glyphs.continued(),
+                HOME,
+            ]
+            .map(String::from),
+        );
+        tokens.push(glyphs.ellipsis().to_string());
+        tokens
+    }
+
+    #[test]
+    fn no_mark_or_sign_of_a_set_repeats_another() {
+        for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
+            let tokens = tokens(glyphs);
+            let mut seen = std::collections::BTreeSet::new();
+            for token in &tokens {
+                assert!(
+                    seen.insert(token.clone()),
+                    "{glyphs}: `{token}` says two things"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_ascii_set_is_ascii() {
+        for token in tokens(Glyphs::Ascii) {
+            assert!(token.is_ascii(), "`{token}`");
         }
     }
 }

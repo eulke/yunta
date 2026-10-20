@@ -2,17 +2,17 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
   Greet a person by name, and say goodbye too.
 
   tasks
-    ! 1  greet     1 spec test     code 1/2  Greet by name
-    ! 2  farewell  `greet`'s test  code 0/1  Say goodbye
+    ^ 1  greet     1 spec test     code 1/2  Greet by name
+    ^ 2  farewell  `greet`'s test  code 0/1  Say goodbye
 
   what keeps this plan from being proven as it is written
-    ! `greet` plans to change `tests/greet.rs`, a test the spec wrote for
+    ^ `greet` plans to change `tests/greet.rs`, a test the spec wrote for
       `greet`
       so           no session may write it, so the task cannot be done as
                    planned
       fix          leave the test as the spec wrote it, and change the code it
                    tests
-    ! `farewell` is judged by `cargo test --test greet`, the spec's test of
+    ^ `farewell` is judged by `cargo test --test greet`, the spec's test of
       `greet`
       so           it passes once `greet` is done, whatever this task does
       fix          judge the task by a test of its own
@@ -43,7 +43,7 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
     Greeter in src/greet.rs — its code is in step 1, `greet`
 
   risks
-    ! A name with a newline in it breaks the line it is printed on.
+    ^ A name with a newline in it breaks the line it is printed on.
 
   out of scope
     . Greeting in other languages.
@@ -70,7 +70,7 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
         |     pub fn hello(&self) -> String;
         | }
 
-      ! tests/greet.rs — a test the spec wrote for `greet`; no session may write
+      ^ tests/greet.rs — a test the spec wrote for `greet`; no session may write
         it
 
       done when    the greeting names the person

@@ -63,11 +63,11 @@ impl NodePage<'_> {
     /// said or what failed it, its failure whole, what it took, the
     /// documents it produced, and what to type next.
     pub(super) fn document(&self, look: &Look) -> Doc {
-        let display = crate::render::standing(&self.node.state);
+        let display = crate::render::node_display(self.node);
         let headline = Headline {
             subject: format!("node {} of run {}", self.node.id, self.run_id.handle()),
-            mark: display.word.mark(),
-            said: display.word.word().to_string(),
+            mark: display.standing.mark(),
+            said: display.standing.word().to_string(),
         };
         let mut documents = Vec::new();
         for document in self.documents {

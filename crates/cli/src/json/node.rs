@@ -3,7 +3,7 @@
 //! sits in the graph, and — for a node waiting or one whose session
 //! died — the shape a program acts on instead of parsing a sentence.
 
-use surco::words::StateWord;
+use surco::words::Standing;
 use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd, TaskStop};
 use yunta_engine::{NodeFrame, NodeStanding, NodeState, NodeWait};
 
@@ -42,7 +42,7 @@ impl NodeWaitJson {
 #[derive(serde::Serialize)]
 pub(crate) struct NodeJson {
     id: String,
-    state: StateWord,
+    state: Standing,
     /// What qualifies the word — the outcome, the failure, the attempt
     /// running, the questions it asked. Absent when the word says all
     /// there is.
@@ -84,10 +84,10 @@ pub(crate) struct RunToolFailureJson {
 
 impl NodeJson {
     pub(super) fn of(node: &NodeFrame, record: Option<&yunta_core::events::NodeRecord>) -> Self {
-        let display = crate::render::standing(&node.state);
+        let display = crate::render::node_display(node);
         NodeJson {
             id: node.id.to_string(),
-            state: display.word,
+            state: display.standing,
             detail: display.modifier.clone(),
             group: node.group.as_ref().map(ToString::to_string),
             waiting_on: match &node.state {

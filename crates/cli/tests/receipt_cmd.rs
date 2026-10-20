@@ -75,7 +75,7 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     assert!(
         written_md
             .lines()
-            .any(|l| l == "- · **criteria** none declared, nothing to prove"),
+            .any(|l| l == "- ◌ **criteria** none declared, nothing to prove"),
         "{written_md}"
     );
     assert!(

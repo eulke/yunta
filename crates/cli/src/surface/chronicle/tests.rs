@@ -52,15 +52,15 @@ fn rerouted(cause: &str) -> EventPayload {
     )))
 }
 
-/// A child that failed or was cancelled is not marked as one that
-/// finished: the mark repeats how it closed.
+/// A child that failed or that a person stopped is not marked as one
+/// that finished: the mark repeats how it closed.
 #[test]
 fn a_closed_child_is_marked_by_how_it_closed() {
     use yunta_core::events::{ChildEvent, ChildRunFinishedPayload, TerminalState};
     for (terminal, mark) in [
         (TerminalState::Done, Mark::Done),
         (TerminalState::Failed, Mark::Failed),
-        (TerminalState::Cancelled, Mark::Failed),
+        (TerminalState::Cancelled, Mark::Stopped),
         (TerminalState::Promoted, Mark::Reroute),
     ] {
         let events = vec![StoredEvent {

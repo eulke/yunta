@@ -37,7 +37,7 @@ impl Tone {
             Mark::Running => Tone::Running,
             Mark::NeedsYou => Tone::NeedsYou,
             Mark::Caution | Mark::Reroute => Tone::Caution,
-            Mark::Skipped | Mark::Pending => Tone::Muted,
+            Mark::Stopped | Mark::Skipped | Mark::Absent => Tone::Muted,
         }
     }
 }
@@ -166,7 +166,7 @@ mod tests {
             .plain(": ")
             .push(Tone::Strong, "yunta resolve-gate T1Y0P5 <option>");
         let cut = line.cut(20, Glyphs::Ascii);
-        assert_eq!(Ink::Plain.paint(&cut), "needs you: yunta re~");
+        assert_eq!(Ink::Plain.paint(&cut), "needs you: yunta...");
         assert_eq!(cut.spans()[0], line.spans()[0]);
         assert_eq!(cut.spans().last().map(|span| span.tone), Some(Tone::Strong));
         assert_eq!(line.cut(80, Glyphs::Ascii), line);

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{PauseReason, StoredEvent};
-use yunta_core::{Manifest, ModeName, RunId, Workflow, WorkflowName};
+use yunta_core::{Clock, Manifest, ModeName, RunId, Workflow, WorkflowName};
 use yunta_engine::{
     compute_run_stats_of, prior_estimation, run_summary, PriorEstimation, RunFrame, RunPhase,
     RunSummary, VerificationFindings, WaitingOn,
@@ -113,13 +113,22 @@ async fn stats_run(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome,
     let run_stats = compute_run_stats_of(&manifest.workflow, &state);
     let mode = state.run.mode().as_str();
     let pricing = ctx.project.config.pricing.clone();
+    let now = ctx.clock.now();
+    let frame = yunta_engine::run_frame_of(
+        run_id,
+        &manifest.workflow,
+        &state,
+        None,
+        &crate::render::engine(&open.run_dir, now),
+        now,
+    );
     let answer = RunStatsAnswer {
         json: RunStatsJson::from(run_id, mode, &run_stats, pricing.as_ref()),
         page: RunStatsPage {
             run_id,
             mode,
             stats: &run_stats,
-            state: &state,
+            nodes: &frame.nodes,
             pricing: pricing.as_ref(),
         },
     };

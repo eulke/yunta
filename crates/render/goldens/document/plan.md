@@ -54,7 +54,7 @@ graph LR
 
 ### out of scope
 
-- · Greeting in other languages.
+- ◌ Greeting in other languages.
 
 ### every task keeps passing
 

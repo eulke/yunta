@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use surco::look::Look;
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
 use yunta_core::{Clock, Manifest, RunId};
@@ -75,7 +75,14 @@ async fn parked(
         .project
         .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
     let worktree = still_or_again(ctx, &manifest, run_id, worktree).await?;
-    let frame = progress::frame_of(run_id, &manifest, &state, ctx.clock.now());
+    let now = ctx.clock.now();
+    let frame = progress::frame_of(
+        run_id,
+        &manifest,
+        &state,
+        &crate::render::engine(&run_dir, now),
+        now,
+    );
     let prior = stats::budget_prior(ctx, &manifest, &frame, &open.events).await;
     Ok(Some(Parked {
         run_dir,
@@ -175,7 +182,7 @@ fn waiting_line(run_id: &RunId, reason: &PauseReason) -> String {
     format!(
         "run {}: {} — {}",
         run_id.handle(),
-        RunWord::Waiting,
+        Standing::Waiting,
         yunta_render::pause::sentence(reason)
     )
 }

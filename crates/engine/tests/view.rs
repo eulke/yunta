@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
+use surco::words::Standing;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, AuthorGate,
     Capabilities, CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload,
@@ -30,12 +31,14 @@ use yunta_core::{
 };
 use yunta_engine::NodeWait;
 use yunta_engine::{
-    compute_run_stats, run_frame, Counter, NodeStanding, NodeState, Percentiles, PriorEstimation,
-    RunFrame, RunPhase, RunningTask, WaitingOn,
+    compute_run_stats, run_frame, Counter, Engine, NodeStanding, NodeState, Percentiles,
+    PriorEstimation, RunFrame, RunPhase, RunningTask, TaskCounter, WaitingOn,
 };
 
 const RUN: &str = "run-1";
 
+#[path = "view/standing.rs"]
+mod standing;
 #[path = "view/stops.rs"]
 mod stops;
 
@@ -95,7 +98,14 @@ nodes:
 }
 
 fn frame(workflow: &Workflow, events: &[StoredEvent], now_secs: i64) -> RunFrame {
-    run_frame(&RUN.into(), workflow, events, None, at(now_secs))
+    run_frame(
+        &RUN.into(),
+        workflow,
+        events,
+        None,
+        &Engine::this(at(now_secs)),
+        at(now_secs),
+    )
 }
 
 fn created(mode: &str) -> EventPayload {
@@ -255,16 +265,30 @@ fn run_finished(terminal_state: TerminalState) -> EventPayload {
     }))
 }
 
-/// Every bucket of `counter`, so a movement between two of them is read
-/// as a whole rather than one field at a time.
+/// Every place a node can stand in, so a movement between two of them is
+/// read as a whole rather than one place at a time: finished, failed,
+/// rerouted, running, stopped, needs you, never ran.
 fn buckets(counter: &Counter) -> [usize; 7] {
+    [
+        Standing::Finished,
+        Standing::Failed,
+        Standing::Rerouted,
+        Standing::Running,
+        Standing::Stopped,
+        Standing::NeedsYou,
+        Standing::NeverRan,
+    ]
+    .map(|standing| counter.of(standing))
+}
+
+/// Every status a task can be counted in: done, failed, running,
+/// blocked, to go.
+fn task_buckets(counter: &TaskCounter) -> [usize; 5] {
     [
         counter.done,
         counter.failed,
-        counter.correcting,
         counter.running,
-        counter.paused,
-        counter.waiting,
+        counter.blocked,
         counter.to_go,
     ]
 }
@@ -290,7 +314,15 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
     let events = log(vec![(0, None, created("alpha"))]);
 
     assert_eq!(
-        run_frame(&RUN.into(), &workflow, &events, None, at(100)).prior,
+        run_frame(
+            &RUN.into(),
+            &workflow,
+            &events,
+            None,
+            &Engine::this(at(100)),
+            at(100)
+        )
+        .prior,
         None,
         "a run's own log cannot know what this workflow's other runs cost"
     );
@@ -311,7 +343,15 @@ fn what_past_runs_cost_is_the_callers_to_hand_over_and_travels_unchanged() {
         },
     };
     assert_eq!(
-        run_frame(&RUN.into(), &workflow, &events, Some(&prior), at(100)).prior,
+        run_frame(
+            &RUN.into(),
+            &workflow,
+            &events,
+            Some(&prior),
+            &Engine::this(at(100)),
+            at(100)
+        )
+        .prior,
         Some(prior)
     );
 }
@@ -382,7 +422,7 @@ fn a_failed_node_rerouted_to_its_fix_counts_as_correcting_until_it_runs_again() 
             .find(|node| node.id == "build")
             .expect("build")
             .clone();
-        (buckets(&frame.flow), node.correcting)
+        (buckets(&frame.flow), node.standing == Standing::Rerouted)
     };
 
     assert_eq!(
@@ -425,8 +465,8 @@ fn a_correction_a_closed_run_never_reached_counts_as_failed() {
         (6, None, run_finished(TerminalState::Failed)),
     ]);
     let flow = frame(&workflow, &events, 100).flow;
-    assert_eq!(flow.correcting, 0);
-    assert_eq!(flow.failed, 1, "nothing will correct it now");
+    assert_eq!(flow.of(Standing::Rerouted), 0);
+    assert_eq!(flow.of(Standing::Failed), 1, "nothing will correct it now");
 }
 
 #[test]
@@ -473,10 +513,8 @@ fn tasks_are_absent_until_a_ledger_registers_one() {
     let tasks = frame(&workflow, &events, 100)
         .tasks
         .expect("the ledger registered two tasks");
-    assert_eq!(buckets(&tasks), [1, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(task_buckets(&tasks), [1, 0, 0, 0, 1]);
     assert_eq!(tasks.total, 2);
-    assert_eq!(tasks.skipped, 0);
-    assert_eq!(tasks.skipped_by, None);
 }
 
 #[test]
@@ -494,15 +532,15 @@ fn a_task_that_returns_to_ready_moves_back_into_to_go_and_the_total_holds() {
     let running = frame(&workflow, &events[..4], 100)
         .tasks
         .expect("registered");
-    assert_eq!(buckets(&running), [0, 0, 0, 1, 0, 0, 0]);
+    assert_eq!(task_buckets(&running), [0, 0, 1, 0, 0]);
 
     let back = frame(&workflow, &events, 100).tasks.expect("registered");
-    assert_eq!(buckets(&back), [0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(task_buckets(&back), [0, 0, 0, 0, 1]);
     assert_eq!(back.total, running.total);
 }
 
 #[test]
-fn a_task_held_by_its_dependencies_is_waiting_and_a_failed_one_is_failed() {
+fn a_blocked_task_is_counted_blocked_and_a_failed_one_failed() {
     let workflow = chain();
     let events = log(vec![
         (0, None, created("alpha")),
@@ -516,9 +554,9 @@ fn a_task_held_by_its_dependencies_is_waiting_and_a_failed_one_is_failed() {
 
     let tasks = frame(&workflow, &events, 100).tasks.expect("registered");
     assert_eq!(
-        buckets(&tasks),
-        [0, 1, 0, 0, 0, 1, 1],
-        "a task parked on its dependencies is waiting, not running"
+        task_buckets(&tasks),
+        [0, 1, 0, 1, 1],
+        "a task stopped with a cause is blocked, not running"
     );
     assert_eq!(tasks.total, 3);
 }
@@ -1155,7 +1193,7 @@ nodes:
 }
 
 #[test]
-fn a_cancelled_run_is_reported_as_cancelled_not_as_finished() {
+fn a_run_a_person_closed_is_stopped_not_finished() {
     let workflow = chain();
     let events = log(vec![
         (0, None, created("alpha")),
@@ -1164,7 +1202,9 @@ fn a_cancelled_run_is_reported_as_cancelled_not_as_finished() {
         (3, None, run_finished(TerminalState::Cancelled)),
     ]);
 
-    assert_eq!(frame(&workflow, &events, 100).phase, RunPhase::Cancelled);
+    let frame = frame(&workflow, &events, 100);
+    assert_eq!(frame.phase, RunPhase::Cancelled);
+    assert_eq!(frame.standing, Standing::Stopped);
 }
 
 #[test]
@@ -1255,10 +1295,10 @@ fn a_run_closed_with_no_evidence_behind_it_reports_none_instead_of_inventing_one
 }
 
 /// A run that paused while a node's attempt was open shows that node
-/// paused, not running: nothing runs it, and the run's resume starts it
+/// stopped, not running: nothing runs it, and the run's resume starts it
 /// again.
 #[test]
-fn a_node_open_when_its_run_paused_reads_paused() {
+fn a_node_open_when_its_run_paused_reads_stopped() {
     let events = log(vec![
         (0, None, created("alpha")),
         (1, Some("plan"), started(1)),
@@ -1279,5 +1319,6 @@ fn a_node_open_when_its_run_paused_reads_paused() {
         .find(|node| node.id == "plan")
         .expect("declared");
     assert_eq!(plan.state, NodeStanding::Paused { attempt: 1 });
+    assert_eq!(plan.standing, Standing::Stopped);
     assert_eq!(buckets(&frame.flow), [0, 0, 0, 0, 1, 0, 2]);
 }

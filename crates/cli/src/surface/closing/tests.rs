@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use surco::golden::{assert_golden, ENVIRONMENTS};
+use surco::words::Standing;
 use yunta_core::events::{
     Claim, CommandExit, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption, Menu,
     NodeOutcome, NodeState, NodeWait, PauseReason, TokenUsage,
@@ -68,17 +69,26 @@ fn failed_lint() -> NodeFrame {
     )
 }
 
-fn frame(phase: RunPhase, nodes: Vec<NodeFrame>) -> RunFrame {
+fn frame(phase: RunPhase, nodes: Vec<NodeFrame>, blocking_findings: usize) -> RunFrame {
     let failed = nodes
         .iter()
         .filter(|node| matches!(node.state, NodeStanding::Reached(NodeState::Failed { .. })))
         .count();
     RunFrame {
+        standing: yunta_engine::run_standing(
+            &phase,
+            &nodes,
+            blocking_findings,
+            &yunta_engine::Engine::this(chrono::DateTime::UNIX_EPOCH),
+        ),
         phase,
+        blocking_findings,
         flow: Counter {
+            by: vec![
+                (Standing::Finished, nodes.len() - failed),
+                (Standing::Failed, failed),
+            ],
             total: nodes.len(),
-            done: nodes.len() - failed,
-            failed,
             ..Counter::default()
         },
         tokens: TokenUsage {
@@ -139,7 +149,11 @@ fn draw_closing(closing: &Closing, look: &Look) -> String {
 
 #[test]
 fn a_finished_run_closes_without_empty_rows() {
-    let mut quiet = frame(RunPhase::Finished, vec![finished("lint"), finished("test")]);
+    let mut quiet = frame(
+        RunPhase::Finished,
+        vec![finished("lint"), finished("test")],
+        0,
+    );
     quiet.tokens = TokenUsage::default();
     let drawn = draw_closing(&closing(quiet, None), &Look::plain());
     for label in ["tokens", "artifacts", "degraded", "unread"] {
@@ -157,6 +171,7 @@ fn a_failed_run_closes_with_the_tail_of_what_failed() {
                     failure: Some(failure),
                 },
                 vec![failed_lint()],
+                0,
             ),
             None,
         ),
@@ -185,11 +200,11 @@ fn cases() -> Vec<(&'static str, Closing)> {
             reason: Some(PauseReason::Escalation(Box::new(exhausted_escalation()))),
         },
     };
-    let mut reported = frame(
+    let reported = frame(
         RunPhase::Finished,
         vec![finished("lint"), finished("review")],
+        1,
     );
-    reported.blocking_findings = 1;
     let failed = RunPhase::Failed {
         failure: Some(failure),
     };
@@ -197,18 +212,25 @@ fn cases() -> Vec<(&'static str, Closing)> {
         (
             "finished",
             closing(
-                frame(RunPhase::Finished, vec![finished("lint"), finished("test")]),
+                frame(
+                    RunPhase::Finished,
+                    vec![finished("lint"), finished("test")],
+                    0,
+                ),
                 None,
             ),
         ),
         (
             "failed",
-            closing(frame(failed, vec![failed_lint(), finished("test")]), None),
+            closing(
+                frame(failed, vec![failed_lint(), finished("test")], 0),
+                None,
+            ),
         ),
         (
             "needs-you",
             closing(
-                frame(parked, vec![failed_lint()]),
+                frame(parked, vec![failed_lint()], 0),
                 Some((NodeId::from("lint"), exhausted())),
             ),
         ),

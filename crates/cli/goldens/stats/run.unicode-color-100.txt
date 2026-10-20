@@ -8,7 +8,7 @@ run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
   ␛[2manswers     ␛[0m 2 given, 1 proved — 1 settled
 
 nodes:
-  ␛[32m✓␛[0m finished  plan                        ██████··············   4.4k tokens     50s   20% blocked
+  ␛[32m✓␛[0m finished  plan                        ██████░░░░░░░░░░░░░░   4.4k tokens     50s   20% blocked
   ␛[32m✓␛[0m finished  implement-the-whole-feature ████████████████████  15.4k tokens   6m15s   20% blocked
 
 runners:

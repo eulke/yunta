@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use surco::look::Look;
+use surco::words::Standing;
 use yunta_core::{AdapterId, ModeName};
 use yunta_storage::AsyncStorage;
 
@@ -67,7 +68,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
     // The documents the run was born with are on its log now; what the
     // rest of the run needs is the manifest.
     let manifest = frozen.manifest;
-    super::super::started(&prepared.run_id, "created", output, look);
+    super::super::started(&prepared.run_id, Standing::Created.word(), output, look);
 
     let adapters = adapters_for(
         &manifest,

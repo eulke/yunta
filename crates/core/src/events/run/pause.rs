@@ -86,6 +86,19 @@ impl PauseReason {
             _ => None,
         }
     }
+
+    /// Whether a person stopped the run: a cancel, before or after the
+    /// engine that drove it died, a gate answered with a pause, or a child
+    /// run stopped that way. Nobody owes an answer; a resume continues it.
+    pub fn by_a_person(&self) -> bool {
+        match self {
+            PauseReason::Cancelled
+            | PauseReason::CancelledAfterCrash
+            | PauseReason::GateAborted { .. } => true,
+            PauseReason::ChildPaused { child, .. } => child.by_a_person(),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]

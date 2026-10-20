@@ -17,7 +17,7 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
 
     assert_decision_menu(&state, &run_id);
 
-    assert_eq!(state["schema_version"], 7, "{state:#}");
+    assert_eq!(state["schema_version"], 8, "{state:#}");
     assert!(
         state["summary"]
             .as_str()

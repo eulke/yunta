@@ -242,9 +242,12 @@ mod pause_reason_tests {
                 ),
                 surco::glyphs::Glyphs::Unicode,
             );
-            // A limit's reset is nobody's to answer, so its line reads waiting.
+            // A limit's reset is nobody's to answer, so its line reads waiting;
+            // a person's own stop reads stopped.
             let word = if matches!(reason, PauseReason::AwaitingReset { .. }) {
                 "waiting"
+            } else if reason.by_a_person() {
+                "stopped"
             } else {
                 "needs you"
             };

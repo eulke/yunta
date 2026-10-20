@@ -76,6 +76,6 @@ mod tests {
     #[test]
     fn a_long_sentence_is_cut_to_its_room() {
         let cut = first_sentence("a very long sentence that does not fit", 12, Glyphs::Ascii);
-        assert_eq!(cut, "a very long~");
+        assert_eq!(cut, "a very lo...");
     }
 }

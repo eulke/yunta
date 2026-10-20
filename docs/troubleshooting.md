@@ -334,6 +334,15 @@ before that time waits for it the same way, and says on the terminal that it is
 waiting. A resume that wakes before the reset pauses again on the same reset. A
 limit that names no reset time is not a wait: the run says `needs you`.
 
+## A run says it `stopped`
+
+A person stopped it: `yunta cancel` on the running run, or `abort` chosen at a
+gate. Nothing is asked of anyone and nothing is wrong with it: `yunta resume
+<run>` continues it where it stopped, and `yunta close <run>` closes it for good.
+A node whose attempt was open when its run stopped says `stopped` too, and the
+resume starts that attempt again. A run that was closed after a stop keeps the
+word, and nothing resumes it.
+
 ## A node failed and `resume` pauses on the same failure
 
 A node with no `on_failure` re-route that fails leaves the decision to you:

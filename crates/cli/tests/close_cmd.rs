@@ -47,7 +47,7 @@ fn closing_a_parked_run_records_it_cancelled_by_who_closed_it() {
     let close = yunta_at!(&checkout, &["close", &run_id, "--by", "lead"]);
     assert!(close.status.success(), "{}", stderr(&close));
     assert!(
-        stdout(&close).contains("cancelled\n  closed by lead"),
+        stdout(&close).contains("stopped\n  closed by lead"),
         "{}",
         stdout(&close)
     );
@@ -60,7 +60,7 @@ fn closing_a_parked_run_records_it_cancelled_by_who_closed_it() {
 
     let status = yunta_at!(&checkout, &["status", &run_id, "--json"]);
     let document: Value = serde_json::from_str(&stdout(&status)).expect("one document");
-    assert_eq!(document["outcome"], "cancelled");
+    assert_eq!(document["outcome"], "stopped");
 }
 
 #[test]

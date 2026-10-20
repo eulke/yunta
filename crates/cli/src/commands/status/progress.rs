@@ -13,10 +13,10 @@
 
 use chrono::{DateTime, Utc};
 use surco::glyphs::Glyphs;
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{RunFrame, RunPhase, RunState};
+use yunta_engine::{Engine, RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
 
@@ -38,9 +38,10 @@ pub(crate) fn frame(
     run_id: &RunId,
     manifest: &Manifest,
     events: &[StoredEvent],
+    engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    frame_of(run_id, manifest, &yunta_engine::derive(events), now)
+    frame_of(run_id, manifest, &yunta_engine::derive(events), engine, now)
 }
 
 /// The frame of a run whose state the caller already derived from its
@@ -50,9 +51,10 @@ pub(crate) fn frame_of(
     run_id: &RunId,
     manifest: &Manifest,
     state: &RunState,
+    engine: &Engine,
     now: DateTime<Utc>,
 ) -> RunFrame {
-    yunta_engine::run_frame_of(run_id, &manifest.workflow, state, None, now)
+    yunta_engine::run_frame_of(run_id, &manifest.workflow, state, None, engine, now)
 }
 
 /// The counters and the phase on one line: the counters every surface
@@ -62,7 +64,7 @@ pub(crate) fn frame_of(
 /// `engine` is what the run's registry says about the process driving
 /// it, which is what tells a run that is moving from one whose engine is
 /// gone.
-pub(crate) fn summary(frame: &RunFrame, engine: &crate::render::Engine, glyphs: Glyphs) -> String {
+pub(crate) fn summary(frame: &RunFrame, engine: &yunta_engine::Engine, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let mut summary = format!(
         "{} {sep} {}",
@@ -77,12 +79,12 @@ pub(crate) fn summary(frame: &RunFrame, engine: &crate::render::Engine, glyphs: 
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(frame: &RunFrame, engine: &crate::render::Engine) -> String {
-    let word = crate::render::observed_word(frame, engine);
-    if word == RunWord::Stalled {
+fn phase_label(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
+    let word = frame.standing;
+    if word == Standing::Stalled {
         return format!("{word} — no process is driving it");
     }
-    if let (RunWord::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
+    if let (Standing::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
         return format!("{word} — {}", advice::asking(prompt, engine.at));
     }
     match &frame.phase {

@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
-use yunta_core::events::{EventPayload, Failure, Phase, RunMetrics, StoredEvent, TerminalState};
+use yunta_core::events::{
+    EventPayload, Failure, FindingSeverity, Phase, RunMetrics, StoredEvent, TerminalState,
+};
 use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId, Seq};
 
 use crate::replay::{derive, unknown_kind_counts, NodeState, RunState};
@@ -197,6 +199,10 @@ fn receipt(
         unknown_kinds,
         diagnostics: diagnostic_counts(state),
         failed: failed_nodes(manifest, state),
+        blocking_findings: crate::dedup_findings(&state.unsettled_findings())
+            .iter()
+            .filter(|finding| finding.severity == FindingSeverity::Blocking)
+            .count(),
     }
 }
 

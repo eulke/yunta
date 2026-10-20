@@ -1,14 +1,14 @@
 run 7E5PH4: ? needs you on a decision
-  x failed    lint      exit 101
+  ! failed    lint      exit 101
   . never ran fix-lint
-  ! 1  cli-global  no test runs its spec  Global and project flags for every pa~
+  ^ 1  cli-global  no test runs its spec  Global and project flags for every...
     2  docs        1 spec test            The guide says where a pack installs
   | line 4
   | line 5
   | line 6
   | line 7
   | line 8
-  | error[E0425]: cannot find value `undefined_variable_name` in this scope, re~
+  | error[E0425]: cannot find value `undefined_variable_name` in this scope,...
   3 lines above
   whole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c
   retry — runs `fix-lint` once more

@@ -51,8 +51,11 @@ pub fn sparkline(values: &[f64], cells: usize, glyphs: Glyphs) -> String {
     }
     let mut out = String::new();
     let values = if values.len() > cells {
-        out.push(glyphs.ellipsis());
-        let from = values.len().saturating_sub(cells.saturating_sub(1));
+        let mark = glyphs.ellipsis();
+        out.push_str(mark);
+        let from = values
+            .len()
+            .saturating_sub(cells.saturating_sub(crate::width::cell_width(mark)));
         values.get(from..).unwrap_or(values)
     } else {
         values
@@ -91,7 +94,7 @@ mod tests {
 
     #[test]
     fn a_bar_with_nothing_to_compare_against_is_empty_not_full() {
-        assert_eq!(bar(7, 0, BAR_WIDTH, Glyphs::Ascii), ".".repeat(BAR_WIDTH));
+        assert_eq!(bar(7, 0, BAR_WIDTH, Glyphs::Ascii), "_".repeat(BAR_WIDTH));
     }
 
     #[test]
@@ -123,6 +126,6 @@ mod tests {
 
     #[test]
     fn a_series_with_no_peak_draws_the_empty_step() {
-        assert_eq!(sparkline(&[0.0, 0.0], 10, Glyphs::Ascii), "..");
+        assert_eq!(sparkline(&[0.0, 0.0], 10, Glyphs::Ascii), "__");
     }
 }

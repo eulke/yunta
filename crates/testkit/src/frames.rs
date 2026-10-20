@@ -13,6 +13,7 @@
 
 use std::time::Duration;
 
+use surco::words::Standing;
 use yunta_core::events::{TerminalState, TokenUsage};
 use yunta_core::{ModeName, NodeId, RunId};
 use yunta_engine::{ChildLink, Counter, NodeFrame, NodeStanding, RunFrame, RunPhase};
@@ -32,6 +33,7 @@ pub fn run_frame(run_id: &RunId) -> RunFrame {
         run_id: run_id.clone(),
         workflow: "paced".into(),
         mode: ModeName::default(),
+        standing: Standing::Running,
         phase: RunPhase::Running,
         elapsed: Some(Duration::from_secs(30)),
         flow: Counter::default(),
@@ -54,6 +56,7 @@ pub fn node_frame(id: &NodeId, state: NodeStanding) -> NodeFrame {
         id: id.clone(),
         kind: "bash",
         group: None,
+        standing: state.word(),
         state,
         runner: None,
         attempt: Some(1),
@@ -65,7 +68,6 @@ pub fn node_frame(id: &NodeId, state: NodeStanding) -> NodeFrame {
         sessions: Vec::new(),
         activity: Vec::new(),
         reroute: None,
-        correcting: false,
     }
 }
 

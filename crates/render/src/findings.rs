@@ -124,7 +124,7 @@ pub fn mark(severity: FindingSeverity) -> Mark {
     match severity {
         FindingSeverity::Blocking => Mark::Failed,
         FindingSeverity::Major => Mark::Caution,
-        FindingSeverity::Minor | FindingSeverity::Note => Mark::Pending,
+        FindingSeverity::Minor | FindingSeverity::Note => Mark::Absent,
     }
 }
 

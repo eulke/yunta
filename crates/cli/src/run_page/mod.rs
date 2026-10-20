@@ -18,7 +18,7 @@ use surco::doc::{Block, Doc};
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::width::{truncate, wrap, INDENT};
-use surco::words::RunWord;
+use surco::words::Standing;
 use yunta_core::caution::Caution;
 use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::RunId;
@@ -53,7 +53,7 @@ pub(crate) struct RunPage<'a> {
     pub(crate) scope: Scope,
     pub(crate) run_id: &'a RunId,
     /// What the run's registry says about the process driving it.
-    pub(crate) engine: crate::render::Engine,
+    pub(crate) engine: yunta_engine::Engine,
     pub(crate) frame: &'a RunFrame,
     /// The run as its log derives it; the frame is read from the same log.
     pub(crate) state: &'a RunState,
@@ -74,7 +74,7 @@ impl RunPage<'_> {
 
     /// The block a stopped run leaves on the terminal.
     fn closing_document(&self, look: &Look) -> Doc {
-        let word = crate::render::run_word(self.frame);
+        let word = self.frame.standing;
         let doc = Doc::new()
             .with(Headline {
                 subject: format!("run {}", self.run_id.handle()),
@@ -90,7 +90,7 @@ impl RunPage<'_> {
 
     /// The page `yunta status` prints for a run.
     fn status_document(&self, look: &Look) -> Doc {
-        let word = crate::render::observed_word(self.frame, &self.engine);
+        let word = self.frame.standing;
         let doc = Doc::new()
             .with(Headline {
                 subject: format!("run {}", self.run_id),
@@ -189,7 +189,7 @@ impl RunPage<'_> {
 
     /// What holds a run that may be moving, on the line under its
     /// headline. The word is the one the page calls the run by.
-    fn status_holds(&self, word: RunWord, look: &Look) -> Vec<Line> {
+    fn status_holds(&self, word: Standing, look: &Look) -> Vec<Line> {
         let (tone, said) = self.status_said(word);
         let room = look.width.cells().saturating_sub(INDENT.len());
         vec![Line::new()
@@ -199,10 +199,10 @@ impl RunPage<'_> {
 
     /// The tone and sentence of what holds a run that may be moving,
     /// or that nothing does.
-    fn status_said(&self, word: RunWord) -> (Tone, String) {
+    fn status_said(&self, word: Standing) -> (Tone, String) {
         match (word, &self.frame.phase) {
-            (RunWord::Stalled, _) => (Tone::Caution, advice::STALLED.to_string()),
-            (RunWord::NeedsYou, RunPhase::Created | RunPhase::Running) => {
+            (Standing::Stalled, _) => (Tone::Caution, advice::STALLED.to_string()),
+            (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => {
                 match &self.engine.prompt {
                     Some(prompt) => (Tone::NeedsYou, advice::asking(prompt, self.engine.at)),
                     None => (Tone::NeedsYou, "it needs you".to_string()),
@@ -210,7 +210,7 @@ impl RunPage<'_> {
             }
             // A limit's reset moves the run on its own, so the wait is not a
             // stop a person is asked to answer.
-            (RunWord::Waiting, RunPhase::Waiting { on }) => {
+            (Standing::Waiting, RunPhase::Waiting { on }) => {
                 (Tone::Muted, advice::parked_in_full(on))
             }
             (_, RunPhase::Waiting { on }) => (Tone::NeedsYou, advice::parked_in_full(on)),

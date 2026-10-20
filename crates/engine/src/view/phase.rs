@@ -92,6 +92,16 @@ pub enum WaitingOn {
     Run { reason: PauseReason },
 }
 
+impl WaitingOn {
+    /// The pause the run's own `run_paused` recorded, while one stands.
+    pub fn reason(&self) -> Option<&PauseReason> {
+        match self {
+            WaitingOn::Node { reason, .. } => reason.as_ref(),
+            WaitingOn::Run { reason } => Some(reason),
+        }
+    }
+}
+
 /// The run's phase: a log that stopped making sense says so first, then
 /// the run's own close, then what it is parked on, then movement.
 pub(super) fn phase(workflow: &Workflow, state: &RunState) -> RunPhase {

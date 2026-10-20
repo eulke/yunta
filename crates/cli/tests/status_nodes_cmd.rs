@@ -108,7 +108,7 @@ fn status_json_lists_every_declared_node_in_order() {
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
 
-    assert_eq!(document["schema_version"], 7);
+    assert_eq!(document["schema_version"], 8);
     let nodes = document["nodes"].as_array().expect("a list of nodes");
     assert_eq!(
         nodes
@@ -355,7 +355,7 @@ fn status_says_which_questions_a_node_is_waiting_on() {
         ["ask  asked 1 question: `summary`"],
         "the node's own row says what it asked: {text}"
     );
-    assert!(text.contains("waiting   ask"), "{text}");
+    assert!(text.contains("needs you ask"), "{text}");
 
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");

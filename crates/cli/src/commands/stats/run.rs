@@ -10,20 +10,24 @@ use surco::figures::{duration, Ratio, Tokens, DURATION_WIDEST};
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT};
-use surco::words::STATE_WIDTH;
+use surco::words::Standing;
 use yunta_core::RunId;
-use yunta_engine::{NodeStat, RunState, RunStats};
+use yunta_engine::{NodeFrame, NodeStat, RunStats};
 use yunta_render::state::NodeDisplay;
+
+use crate::render::node_display;
 
 use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
-/// the state its nodes are read from, and what its model is priced at.
+/// its nodes as its frame stands them, and what its model is priced at.
 pub(super) struct RunStatsPage<'a> {
     pub(super) run_id: &'a RunId,
     pub(super) mode: &'a str,
     pub(super) stats: &'a RunStats,
-    pub(super) state: &'a RunState,
+    /// The frame's nodes, whose words every row opens with: the word a
+    /// node's row says here is the one `status` says.
+    pub(super) nodes: &'a [NodeFrame],
     pub(super) pricing: Option<&'a BTreeMap<String, yunta_core::PricingEntry>>,
 }
 
@@ -69,7 +73,7 @@ impl RunStatsPage<'_> {
             .with(fields)
             .with(Block::Lines(super::time::render(&stats.time, look)))
             .with(Block::Lines(super::time::rail_latency(&stats.rails, look)))
-            .with(Block::Lines(nodes_lines(stats, self.state, look)))
+            .with(Block::Lines(nodes_lines(stats, self.nodes, look)))
             .with(Block::Lines(runner_lines(stats, look)))
     }
 }
@@ -78,7 +82,7 @@ impl RunStatsPage<'_> {
 /// the same token count reads one way under a node that finished and
 /// another under one that failed, so the number never appears without
 /// it. Nothing for a run whose nodes never started.
-fn nodes_lines(stats: &RunStats, state: &RunState, look: &Look) -> Vec<Line> {
+fn nodes_lines(stats: &RunStats, nodes: &[NodeFrame], look: &Look) -> Vec<Line> {
     if stats.nodes.is_empty() {
         return Vec::new();
     }
@@ -91,11 +95,15 @@ fn nodes_lines(stats: &RunStats, state: &RunState, look: &Look) -> Vec<Line> {
     let column = id_column(stats.nodes.iter().map(|node| node.node_id.as_str()));
     // Every column but the bar: the margin, the mark and the word, the
     // id, the tokens, the duration and the blocked share, and the gaps.
-    let taken = cell_width(INDENT) + STATE_WIDTH + column + Tokens::WIDEST + DURATION_WIDEST + 29;
+    let taken =
+        cell_width(INDENT) + Standing::WIDEST + column + Tokens::WIDEST + DURATION_WIDEST + 29;
     let cells = bar_cells(look.width.cells(), taken);
     let mut lines = vec![Line::new(), Line::new().plain("nodes:")];
     for node in &stats.nodes {
-        let display = NodeDisplay::of(state.nodes.state(&node.node_id));
+        let display = nodes
+            .iter()
+            .find(|frame| frame.id == node.node_id)
+            .map_or_else(|| NodeDisplay::of(Standing::NeverRan, None), node_display);
         lines.push(node_line(node, (max_tokens, column, cells), &display, look));
     }
     lines
@@ -151,13 +159,13 @@ fn node_line(
         .blocked_fraction()
         .map(|fraction| Ratio(fraction).reads(glyphs.times()))
         .unwrap_or_else(|| "n/a".to_string());
-    let mark = display.word.mark();
+    let mark = display.standing.mark();
     let row = Line::new()
         .plain(INDENT)
         .push(Tone::of(mark), glyphs.mark(mark).to_string())
         .plain(format!(
             " {} {}{}  {}  {:>DURATION_WIDEST$}  {blocked:>4} blocked",
-            truncate(display.word.word(), STATE_WIDTH, glyphs),
+            truncate(display.standing.word(), Standing::WIDEST, glyphs),
             middle_cut(node.node_id.as_str(), column, glyphs),
             spaced(bar(total, max_tokens, cells, glyphs)),
             Tokens(total).column(),
@@ -248,7 +256,7 @@ mod tests {
         run_id: &RunId,
         mode: &str,
         stats: &RunStats,
-        state: &RunState,
+        nodes: &[NodeFrame],
         pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
         look: &Look,
     ) -> String {
@@ -256,21 +264,14 @@ mod tests {
             run_id,
             mode,
             stats,
-            state,
+            nodes,
             pricing,
         };
         crate::render::draw(page.document(look), look)
     }
 
     fn render(stats: &RunStats, look: &Look) -> String {
-        render_run_stats(
-            &RUN,
-            "default",
-            stats,
-            &yunta_engine::RunState::default(),
-            None,
-            look,
-        )
+        render_run_stats(&RUN, "default", stats, &[], None, look)
     }
 
     #[test]
@@ -281,12 +282,11 @@ mod tests {
         // findings come to are in it, each said as itself.
         let look = Look::plain();
         let run_stats = stats(Vec::new());
-        let state = yunta_engine::RunState::default();
         let page = RunStatsPage {
             run_id: &RUN,
             mode: "default",
             stats: &run_stats,
-            state: &state,
+            nodes: &[],
             pricing: None,
         };
         let rows: Vec<String> = surface_lines(page.document(&look), &look)
@@ -294,7 +294,7 @@ mod tests {
             .map(Line::text)
             .collect();
         for row in [
-            "  CPTV         500 tokens per verified task | 1 task done",
+            "  CPTV         500 tokens per verified task ; 1 task done",
             "  documents    3 accepted, 1 refused",
             "  findings     5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing",
             "  answers      2 given, 1 proved — 1 settled",
@@ -391,6 +391,23 @@ mod tests {
                 );
         }
         let state = yunta_engine::derive(&log.build());
+        // Each node as a frame stands it: finished, the word its row opens with.
+        let nodes: Vec<NodeFrame> = run
+            .nodes
+            .iter()
+            .map(|stat| {
+                yunta_testkit::node_frame(
+                    &stat.node_id,
+                    yunta_engine::NodeStanding::Reached(
+                        state
+                            .nodes
+                            .state(&stat.node_id)
+                            .cloned()
+                            .expect("every node the log ran has a state"),
+                    ),
+                )
+            })
+            .collect();
         let goldens: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/stats");
         for environment in &ENVIRONMENTS {
             assert_golden(
@@ -399,7 +416,7 @@ mod tests {
                     &RUN,
                     "default",
                     &run,
-                    &state,
+                    &nodes,
                     None,
                     &surco::look::Look::of(environment),
                 ),

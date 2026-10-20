@@ -162,12 +162,12 @@ mod tests {
         assert!(
             rows[1].starts_with("  checks")
                 && rows[1]
-                    .ends_with("5m00s | 4m00s of it guards a red criterion had already decided"),
+                    .ends_with("5m00s ; 4m00s of it guards a red criterion had already decided"),
             "{drawn}"
         );
         assert!(
             rows[2].starts_with("  measuring")
-                && rows[2].ends_with("2m00s | the suite, while nothing else ran"),
+                && rows[2].ends_with("2m00s ; the suite, while nothing else ran"),
             "{drawn}"
         );
     }
@@ -190,7 +190,7 @@ mod tests {
 
         assert_eq!(
             text(&rail_latency(&rails, &Look::plain())),
-            "\nrails:\n  before-write p50 3 ms | p95 3 ms\n"
+            "\nrails:\n  before-write p50 3 ms ; p95 3 ms\n"
         );
     }
 

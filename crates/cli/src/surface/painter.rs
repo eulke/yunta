@@ -220,12 +220,15 @@ impl Painter {
         } = self;
         let Draw::Live(region) = draw else { return };
         let state = derive(folded.settled());
+        let now = clock.now();
+        // The live region is drawn by the engine driving the run.
         let frame = run_frame_of(
             run_id,
             &manifest.workflow,
             &state,
             prior.as_ref(),
-            clock.now(),
+            &yunta_engine::Engine::this(now),
+            now,
         );
         // Only a parked run has a menu to rebuild, and rebuilding one is
         // a walk of the run's state — asked exactly when the answer changes

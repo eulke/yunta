@@ -1,30 +1,17 @@
-//! What a node's derived state is called, and the detail that qualifies
-//! the word.
+//! The detail that qualifies the word a node is called by.
 //!
-//! The words themselves are Surco's ([`surco::words`]); this module says
-//! which of them a node's state from the log is called by, and what
-//! qualifies it.
+//! The words themselves are Surco's ([`surco::words::Standing`]), and the
+//! engine decides which one a node is called by; this module says what
+//! qualifies it — the outcome it finished with, why it failed, which
+//! attempt runs, what it waits on.
 
-use surco::words::StateWord;
+use surco::words::Standing;
 use yunta_core::events::{NodeState, NodeWait};
-
-/// The word `state` is called by. A node the log carries nothing for
-/// never ran: absence is a state, and the one a reader most often
-/// wants named.
-pub fn word_of(state: Option<&NodeState>) -> StateWord {
-    match state {
-        None => StateWord::NeverRan,
-        Some(NodeState::Running { .. }) => StateWord::Running,
-        Some(NodeState::Finished { .. }) => StateWord::Finished,
-        Some(NodeState::Failed { .. }) => StateWord::Failed,
-        Some(NodeState::Waiting { .. }) => StateWord::Waiting,
-    }
-}
 
 /// A node's state as a surface shows it: the word that carries the
 /// meaning, and the detail that qualifies it.
 pub struct NodeDisplay {
-    pub word: StateWord,
+    pub standing: Standing,
     /// The outcome a node finished with, why it failed, which attempt is
     /// running, the handle it waits on — already collapsed onto one line
     /// through [`surco::text::one_line`], because every surface that
@@ -34,11 +21,11 @@ pub struct NodeDisplay {
 }
 
 impl NodeDisplay {
-    /// How `state` reads: the word [`word_of`] gives it, and what
-    /// that state carries beyond the word.
-    pub fn of(state: Option<&NodeState>) -> Self {
+    /// How a node called `standing` reads: the word, and what its
+    /// `state` carries beyond it.
+    pub fn of(standing: Standing, state: Option<&NodeState>) -> Self {
         Self {
-            word: word_of(state),
+            standing,
             modifier: match state {
                 None => None,
                 Some(NodeState::Running { attempt }) => Some(format!("attempt {attempt}")),
@@ -65,15 +52,16 @@ impl NodeDisplay {
     /// A node this run leaves out, `because` saying why.
     pub fn left_out(because: &str) -> Self {
         Self {
-            word: StateWord::Skipped,
+            standing: Standing::Skipped,
             modifier: detail(&format!("not in this run: {because}")),
         }
     }
 
-    /// A node whose attempt `attempt` was open when its run paused.
-    pub fn paused(attempt: u32) -> Self {
+    /// A node whose attempt `attempt` was open when its run paused, called
+    /// `standing`: stopped with its run, or waiting with it on a reset.
+    pub fn held(standing: Standing, attempt: u32) -> Self {
         Self {
-            word: StateWord::Paused,
+            standing,
             modifier: Some(format!("attempt {attempt}")),
         }
     }
@@ -82,20 +70,20 @@ impl NodeDisplay {
     /// to start: this run never reaches it, and a reader who cannot tell
     /// the two apart goes looking for a node that is never coming.
     pub fn skipped() -> Self {
-        Self::plain(StateWord::Skipped)
+        Self::plain(Standing::Skipped)
     }
 
     /// One line: the word, then what qualifies it after a dash.
     pub fn label(&self) -> String {
         match &self.modifier {
-            Some(detail) => format!("{} — {detail}", self.word.word()),
-            None => self.word.word().to_string(),
+            Some(detail) => format!("{} — {detail}", self.standing.word()),
+            None => self.standing.word().to_string(),
         }
     }
 
-    fn plain(word: StateWord) -> Self {
+    fn plain(standing: Standing) -> Self {
         Self {
-            word,
+            standing,
             modifier: None,
         }
     }
@@ -119,8 +107,8 @@ mod tests {
             outcome: NodeOutcome::Summary("exit 0\nwith a second line".to_string()),
             tokens: TokenUsage::default(),
         };
-        let display = NodeDisplay::of(Some(&state));
-        assert_eq!(display.word, StateWord::Finished);
+        let display = NodeDisplay::of(Standing::Finished, Some(&state));
+        assert_eq!(display.standing, Standing::Finished);
         assert_eq!(display.label(), "finished — exit 0 with a second line");
     }
 
@@ -132,36 +120,45 @@ mod tests {
             },
             tokens: TokenUsage::default(),
         };
-        assert_eq!(NodeDisplay::of(Some(&state)).label(), "failed — exit 1");
+        assert_eq!(
+            NodeDisplay::of(Standing::Failed, Some(&state)).label(),
+            "failed — exit 1"
+        );
     }
 
     #[test]
     fn a_state_with_nothing_to_qualify_it_is_the_word_alone() {
-        assert_eq!(NodeDisplay::of(None).label(), "never ran");
+        assert_eq!(
+            NodeDisplay::of(Standing::NeverRan, None).label(),
+            "never ran"
+        );
         assert_eq!(NodeDisplay::skipped().label(), "skipped");
         let waiting = NodeState::Waiting {
             on: NodeWait::Gate { external_ref: None },
         };
-        assert_eq!(NodeDisplay::of(Some(&waiting)).label(), "waiting");
+        assert_eq!(
+            NodeDisplay::of(Standing::NeedsYou, Some(&waiting)).label(),
+            "needs you"
+        );
     }
 
     #[test]
-    fn a_waiting_node_reads_as_the_handle_it_waits_on() {
+    fn a_node_on_a_published_gate_reads_as_the_handle_it_waits_on() {
         let waiting = NodeState::Waiting {
             on: NodeWait::Gate {
                 external_ref: Some("https://forge/pr/7".to_string()),
             },
         };
         assert_eq!(
-            NodeDisplay::of(Some(&waiting)).label(),
-            "waiting — https://forge/pr/7"
+            NodeDisplay::of(Standing::NeedsYou, Some(&waiting)).label(),
+            "needs you — https://forge/pr/7"
         );
     }
 
     /// A node that asked says what it asked, in the one sentence every
     /// surface says it with.
     #[test]
-    fn a_waiting_node_that_asked_names_its_questions() {
+    fn a_node_that_asked_names_its_questions() {
         let waiting = NodeState::Waiting {
             on: NodeWait::Questions {
                 asked: yunta_core::NonEmpty::new(vec![
@@ -172,8 +169,8 @@ mod tests {
             },
         };
         assert_eq!(
-            NodeDisplay::of(Some(&waiting)).label(),
-            "waiting — asked 2 questions: `q-scope`, `q-api`"
+            NodeDisplay::of(Standing::NeedsYou, Some(&waiting)).label(),
+            "needs you — asked 2 questions: `q-scope`, `q-api`"
         );
     }
 }
