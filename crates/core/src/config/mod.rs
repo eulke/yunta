@@ -1,4 +1,4 @@
-//! Layered config types: every group of the
+//! Layered config types: every config key of each group of the
 //! reference config parses and round-trips — `runners`, `adapters`,
 //! `mcp_servers`, `skills`, `baseline`/`coverage`, `storage`, `limits`,
 //! `paths`, `defaults`, `permissions`, `pricing`, `forge`, `secrets` and
@@ -7,7 +7,7 @@
 //!
 //! Merge semantics: maps merge key by key, more specific layer
 //! wins per key; arrays (like a role's candidate list) replace wholesale
-//! rather than concatenate. Precedence is repo > usuario > org — with one
+//! rather than concatenate. Precedence is repo > user > org — with one
 //! deliberate exception: `permissions` inverts it, the org
 //! layer is a ceiling and lower layers only narrow (see
 //! [`PermissionsConfig`] and [`permission_layer_conflicts`]).

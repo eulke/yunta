@@ -3,8 +3,10 @@
 //! `create_run` freezes the anatomy on disk (run.dir, `manifest.yaml`,
 //! `run_created`, and the baseline the run is measured against);
 //! `execute_run` drives the run forward and is also
-//! `yunta resume` — it replays the log, asks [`schedule::decide`]
-//! what's next, and executes until the answer is terminal. Crash,
+//! `yunta resume`: the run loop replays the log, asks [`schedule::decide`]
+//! what's next, and executes until the answer is terminal. A node it runs
+//! may be a session, a command, one of the gates a person or a forge
+//! answers, or one of the child workflows a `use:` names. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (`restart_node`).
 //!

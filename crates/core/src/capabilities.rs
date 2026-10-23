@@ -1,3 +1,12 @@
+//! What an adapter declares it can do: its capabilities, constant for the
+//! adapter's lifetime. The engine reads them before it asks for anything and
+//! never emulates what an adapter does not declare. Each capability's absence
+//! has one policy in [`crate::port::policy`]: `yunta check` refuses a
+//! workflow that needs what an adapter lacks, or the run goes on under a
+//! stated fallback and records it as `capability_degraded`. The struct is also
+//! the `capabilities` field of `agent_session_opened`, so the log and the
+//! `Adapter` trait share one definition.
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};

@@ -1,5 +1,5 @@
-//! The per-run MCP server — one loopback HTTP
-//! listener **per node session**, never per run: it is born just before
+//! The per-run MCP server that serves a session its run tools — one
+//! loopback HTTP listener **per node session**, never per run: it is born just before
 //! the session spawns, dies with it, and a resume always mints a fresh
 //! listener and credential (a credential that survives its session is
 //! reuse surface). The engine is the server, the

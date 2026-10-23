@@ -1201,6 +1201,10 @@ nodes:
 /// in the run's tasks document, which the session reads and checks its
 /// work against through its own tools; and a check it asks for is the
 /// close's own judgement, so the close answers that tree from it.
+/// Reached by: `crates/engine/src/task_cycle/dispatch.rs`, `crates/engine/src/task_cycle/open.rs`,
+/// `crates/engine/src/task_cycle/memo.rs`, `crates/engine/src/run/session_plan.rs`,
+/// `crates/engine/src/run_tools/tasks.rs`, `crates/engine/src/run_tools/notice.rs`,
+/// `crates/engine/src/run_tools/words/session.rs`, `crates/engine/src/run_tools/words/notice.rs`
 #[tokio::test]
 async fn a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_close_s() {
     let bench = Bench::new();

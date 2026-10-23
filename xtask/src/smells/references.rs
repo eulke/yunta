@@ -20,6 +20,9 @@ const EXEMPT: &[&str] = &[
     // The decision index reads and writes the decisions by number.
     "xtask/src/adr.rs",
     "xtask/src/adr/",
+    // The docs checker holds the agent docs by name: they are its subject.
+    "xtask/src/docs.rs",
+    "xtask/src/docs/",
     // The checkers spell the forms they look for.
     "xtask/src/smells/references.rs",
     "xtask/src/smells/prose.rs",
@@ -37,6 +40,11 @@ fn fixed() -> &'static Regex {
         Regex::new(r"\bD[0-9]{1,3}\b|§|\bADRs?\b|\bRFC-[0-9]{4}\b|\bM[0-9]{2}\b|\bA-[0-9]{1,2}\b|\bI[0-9]{1,2}\b|\bP[0-9]{1,2}\b|docs/design|docs/(guide|packs|adapters|concepts|compatibility|troubleshooting)\.md|referencia-schema|spec-(events|adapter|tasks)|(?i:plan-de-raiz|deuda-consciente|glosario|smoke[- ]test|smoke-checklist|cerco|run contract|contrato|\bdel plan\b|the (run )?contract('s| fixes| forbids| needs| states| says)|the (run )?spec (fixes|says|states))")
             .expect("a valid pattern")
     })
+}
+
+/// Whether `line` names an agent doc by its file.
+pub(crate) fn names_an_agent_doc(line: &str) -> bool {
+    agent_docs().is_match(line)
 }
 
 fn agent_docs() -> &'static Regex {

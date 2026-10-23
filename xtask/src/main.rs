@@ -1,17 +1,24 @@
-//! Repository tooling, run as `cargo xtask <command>`.
+//! Repository tooling, run as `cargo xtask <command>`. Its map:
 //!
-//! `schema` writes the JSON Schema of every authored document and of
-//! one event of the log under `crates/core/schemas/`, generated from the types that
-//! read them; `schema --check` verifies the committed files are exactly
-//! what the types emit, which is what CI runs. `smells` lowers the
-//! ratchet's counts in `xtask/smells.baseline` to what the tree counts and
-//! refuses a rise; `smells --check` fails when a count rises above that
-//! baseline or above the one of the branch's merge base. `adr` derives the index of the
-//! decision records from the decision files and proves what they say
-//! about each other; `adr --check` fails when the two disagree. All
-//! three run in CI.
+//! - `schema`, in this file, writes the JSON Schema of every authored document
+//!   and of one event of the log under `crates/core/schemas/`, generated from
+//!   the types that read them; `schema --check` verifies the committed files
+//!   are what the types emit.
+//! - `smells` holds the smell counters: it lowers the ratchet's counts in
+//!   `xtask/smells.baseline` to what the tree counts and refuses a rise;
+//!   `smells --check` fails when a count rises above that baseline or the merge
+//!   base's.
+//! - `docs` is the docs checker: `docs --check` holds the agent docs and the map
+//!   to their shapes, and `docs --about <paths>` prints what they record about
+//!   those paths.
+//! - `adr` derives the index of the decision records from the decision files
+//!   and proves what they say about each other; `adr --check` fails when the two
+//!   disagree.
+//!
+//! All four checks run in CI.
 
 mod adr;
+mod docs;
 mod smells;
 
 use std::path::{Path, PathBuf};
@@ -33,7 +40,17 @@ fn main() -> ExitCode {
         ["smells", "--check"] => smells::check(),
         ["adr"] => adr::run(Mode::Write),
         ["adr", "--check"] => adr::run(Mode::Check),
-        _ => Err("usage: cargo xtask <schema|smells|adr> [--check]".to_string()),
+        ["docs", "--check"] => docs::check(),
+        ["docs", "--about", paths @ ..] => docs::about(
+            &paths
+                .iter()
+                .map(|path| path.to_string())
+                .collect::<Vec<_>>(),
+        ),
+        _ => Err(
+            "usage: cargo xtask <schema|smells|adr> [--check] | docs <--check|--about [<paths>]>"
+                .to_string(),
+        ),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

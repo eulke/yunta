@@ -12,6 +12,17 @@
 //! capturing writer, a session request — is `yunta-testkit-core`, which
 //! the crates with no run to build depend on directly.
 //!
+//! Its map: `bench` is the canonical run harness; `bin` runs the compiled
+//! binary, and `checkout` and `child` hold a test that drives it; `terminal`
+//! drives a run on a real terminal; `repo` is a hermetic git fixture and
+//! `stubs` stand in for programs on `PATH`; `events` reads and writes a run's
+//! log and `frames` holds what a surface test draws; `interaction` and
+//! `observer` are doubles for a gate and the display boundary; `tools` hosts
+//! the per-run MCP listener; `tasks` writes a tasks document; `corpus` reads
+//! the repository's own documents; `owner` is what a test's subprocesses
+//! answer to; `stack` gives a deep run its thread; and `wait` bounds a wait on
+//! another process.
+//!
 //! It is a dev-dependency only: nothing here ships in a published crate.
 
 mod bench;

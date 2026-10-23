@@ -1,24 +1,29 @@
-//! How Yunta tells a reader things: the columns a line is built from,
-//! the step every block is indented by, the bars and sparklines that
-//! carry a magnitude, the words a run's and a node's state and a
-//! decision's options are called by, the sentences a log's typed facts
-//! are read as (why a run paused, how a node ended, what a failure says,
-//! which fallback the engine took), and the characters it is all drawn
-//! with.
+//! Surco, how Yunta tells a reader things: the visual language every surface
+//! draws with — its principles, its tokens (the columns a line is built from,
+//! the step every block is indented by, the glyphs and the ink) and its
+//! components (bars and sparklines, blocks, a decision's options, the sentences
+//! a log's typed facts are read as).
 //!
-//! One crate, because two readers told the same fact in two words — a
-//! person at a terminal, a file the engine writes, a pull request — read
-//! it side by side. It sits on `yunta-core` alone, below the engine, so
-//! the engine writes for a person with the same words and blocks the
-//! command line draws. What depends on the process — which stream is a
-//! terminal, how wide it measures, what the environment asked for — is
-//! the caller's to settle and pass in.
+//! One crate, because two readers told the same fact in two words — a person at
+//! a terminal, a file a run leaves, a pull request — read it side by side. It
+//! sits on `yunta-core` alone: the engine hands core data, and the CLI and the
+//! adapters draw it with the same words and blocks. A `Doc` says
+//! what to tell, and a surface draws it for its medium. What depends on the
+//! process — which stream is a terminal, how wide it measures, what the
+//! environment asked for — is the caller's to settle and pass in. How a problem
+//! looks is decided once, in [`yunta_core::text`], which this crate calls into.
 //!
-//! How a *problem* looks is not decided here. One line, a hanging block,
-//! an indented block and the block that lists what is wrong with a
-//! document all live in [`yunta_core::text`], which is the single place
-//! that decides it; this crate calls into it and never writes a second
-//! version of one.
+//! Its map:
+//!
+//! - What a surface says and draws: `doc`, `surface`, `blocks`, `markdown`,
+//!   `diagram`, `look`, `line_width` and `width`.
+//! - Tokens: `glyphs`, `ink`, `color` and `bars`.
+//! - A run and its nodes: `run_word`, `state`, `pause`, `outcome`, `failure`,
+//!   `spend`, `latency`, `caution`, `inputs`, `place`, `paths`, `target`,
+//!   `prose` and `policy`.
+//! - A decision a person meets: `escalation`, `claim`, `evidence`, `offers`,
+//!   `shown`, `plan`, `spec`, `fold`, `findings`, `found`, `published` and
+//!   `receipt`.
 
 pub mod bars;
 pub mod blocks;

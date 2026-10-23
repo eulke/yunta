@@ -84,6 +84,10 @@ async fn a_scoped_node_writing_a_denied_path_fails_without_a_grant_and_never_lan
 /// no node writes, whichever CLI it runs on: a pooled checkout keeps the
 /// file for the next session that opens there, and what it says would run
 /// outside that session's sandbox.
+/// Reached by: `crates/core/src/protected.rs`, `crates/core/src/protected/links.rs`,
+/// `crates/core/src/events/failure/**`, `crates/engine/src/scope.rs`,
+/// `crates/engine/src/worktree/capture.rs`, `crates/engine/src/run/node_scope.rs`,
+/// `crates/engine/src/run/protected.rs`
 #[tokio::test]
 async fn a_node_writing_an_agent_s_own_config_fails_without_a_grant_and_never_lands() {
     let bench = Bench::new();

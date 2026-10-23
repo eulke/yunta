@@ -1,5 +1,6 @@
 //! Event log types: every `kind` the engine emits, as the event schema
-//! (`crates/core/schemas/events.json`) defines them.
+//! (`crates/core/schemas/events.json`) defines them. An event kind is a name
+//! and a payload; the payload fields are those of its payload struct.
 //!
 //! Versioning: `schema_version` is
 //! per `kind`, not global. Every kind starts at v1 here — there is no

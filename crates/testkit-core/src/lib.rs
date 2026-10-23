@@ -1,13 +1,18 @@
 //! Test scaffolding for the crates that depend on `yunta-core` alone.
 //!
-//! `yunta-core` and `yunta-adapters` sit below the run harness — there is
-//! no run, no storage and no engine at their level — and used to hand-roll
-//! their own clocks, id sources and session requests, one copy per test
-//! file. This crate is the one copy: what a test needs to make time,
-//! identity and a session request constant, and nothing that needs a run.
+//! `yunta-core` and `yunta-adapters` sit below the run harness — there is no
+//! run, no storage and no engine at their level — so what their tests need to
+//! make time, identity and a session request constant lives here, once, and
+//! nothing that needs a run. `yunta-testkit` builds on it with everything a
+//! whole run takes — a git repository, a bench, a pty, a binary runner.
 //!
-//! `yunta-testkit` builds on it with everything a whole run takes — a git
-//! repository, a bench, a pty, a binary runner.
+//! Its map: `adapter` is what a test of an adapter needs first; `clock` and
+//! `ids` are deterministic clocks and ids; `capture` is a writer a test reads
+//! back; `golden` compares a surface's output with the output written down for
+//! it; `log` writes a log by hand; `persisted` states what every persisted
+//! document promises; `repo` asks git directly; `spell` is the spelling a
+//! surface writes next steps with; and `stubs` are the scripted CLIs that stand
+//! in for a real `codex` or `claude`.
 //!
 //! It is a dev-dependency only: nothing here ships in a published crate.
 

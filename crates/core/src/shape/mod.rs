@@ -1,4 +1,4 @@
-//! Reading a document an agent wrote, and publishing the shape it
+//! Reading a document an agent wrote, and publishing the document shape it
 //! should have written.
 //!
 //! [`read`] and [`accept`] parse with serde, so the schema is declared

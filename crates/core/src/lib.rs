@@ -1,9 +1,22 @@
 //! Shared domain types for the Yunta workspace.
 //!
-//! `yunta-core` is the bottom of the dependency graph: every other
-//! crate may depend on it, and it depends on nothing else in the workspace.
-//! Newtyped identifiers, the `Clock` trait, and error
-//! types live here since every other crate needs them.
+//! `yunta-core` is the bottom of the dependency graph: every other crate may
+//! depend on it, and it depends on nothing else in the workspace. Its map:
+//!
+//! - Documents a person or an agent writes, and how they are read: `workflow`,
+//!   `config`, `inputs`, `pack`, `tasks`, `spec`, `questions`, `findings`,
+//!   `agent`, `template`, `policy`, `schema` and `schema_range`, entering
+//!   through `yaml` and judged by `shape` and `diagnostic`.
+//! - The log and what a run is frozen with: `events`, `manifest`, `hash`,
+//!   `persisted`, and `receipt`, built from the log alone.
+//! - What a session may call and write: `port`, `capabilities`, `run_tool`,
+//!   `confinement`, `protected`, `glob`, `fence`, `rail` and `expansion`.
+//! - What a person is shown and may answer: `shown`, `reserved`, `step` and
+//!   `caution`; `best_effort` names a step a run carries on past.
+//! - Boundaries a decision is handed rather than reaching for: `clock`,
+//!   `id_source`, `process`, `disk`, `durable` and `secret`.
+//! - Values every crate shares: `ids`, `nonempty`, `graph`, `text`, `units`,
+//!   `shell`, `commit_message` and `error`.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.

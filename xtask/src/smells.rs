@@ -44,6 +44,8 @@ use shape::{
 };
 use thresholds::numeric_consts_without_reason;
 
+pub(crate) use references::names_an_agent_doc;
+
 /// Where the committed baseline lives, next to this crate.
 fn baseline_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("smells.baseline")

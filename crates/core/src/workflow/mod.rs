@@ -1,5 +1,7 @@
 //! The workflow schema: what `.yunta/workflows/<name>.yaml` declares,
-//! parsed once at the frontier.
+//! parsed once at the frontier. The workflow keys are the fields of
+//! [`Workflow`] and its parts, and the node kinds are [`NodeKind`]'s
+//! variants.
 //!
 //! A person writes these files, so every type here refuses a key it
 //! does not know and names the keys it does. The values the schema

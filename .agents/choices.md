@@ -1,0 +1,15 @@
+# Choices
+
+What Yunta does not do, and why, so a change does not propose it again unaware. An entry goes when its reason
+stops holding.
+
+### No workflow unlocks a protected path
+Not a key that lets a run write `.claude/`, `.codex/`, `.agents/skills/` or `.mcp.json`. Claude Code refuses
+writes under `.claude/` in a headless session and its sandbox never lets a command write there, so the unlock
+would hold on one CLI only; a session could edit the declaration that unlocks it; and a permission layer only
+narrows the one above it. A flow that iterates a skill keeps its source under `.yunta/skills/`, which nothing
+protects: every run freezes the version it starts with.
+
+### No Windows build
+The engine's process layer is POSIX: process groups, signals, and telling a live lock from a dead one. A binary
+that cannot stop a run's process tree is not published.

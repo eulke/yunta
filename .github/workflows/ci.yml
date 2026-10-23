@@ -51,6 +51,9 @@ jobs:
       - name: the audit's smell counts have not risen
         run: cargo xtask smells --check
 
+      - name: the agent docs hold
+        run: cargo xtask docs --check
+
       - name: the decisions and their index agree
         run: cargo xtask adr --check
 

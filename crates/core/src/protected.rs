@@ -252,6 +252,26 @@ impl Protected {
             .min()
     }
 
+    /// What a person granted the node or task this set is for that lifts one
+    /// of its protections: the instruction files among [`Protected::every`]
+    /// it may write all the same. A grant that reaches no instruction file
+    /// only widens the scope, so it is not here; nor is any grant when the
+    /// grants did not build, since they then lift nothing.
+    pub fn granted(&self) -> Vec<ScopeGlob> {
+        if self.lifted.is_empty() {
+            return Vec::new();
+        }
+        self.granted
+            .iter()
+            .filter(|glob| {
+                self.entries.iter().any(|entry| {
+                    entry.reason.person_may_grant() && might_overlap(glob, &entry.glob)
+                })
+            })
+            .cloned()
+            .collect()
+    }
+
     /// The set for one node or task, with the instruction files a person
     /// granted to it lifted. The caller passes only the grants the gate
     /// accepted. A grant that does not build lifts nothing: the bound fails closed.

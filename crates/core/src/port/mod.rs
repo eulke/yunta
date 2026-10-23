@@ -1,4 +1,5 @@
-//! What the engine calls, and what answers.
+//! What the engine calls, and what answers: the port an adapter implements
+//! for its CLI, and the one a forge implements for its pull requests.
 //!
 //! Two ports: [`session`], the agent CLI an adapter drives, and
 //! [`forge`], the pull request an external gate is decided on. Both live

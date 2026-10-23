@@ -48,6 +48,8 @@ fn of_agents_codex_owns_only_the_skills_root() {
 /// Every tree an adapter declares as its own is one every run protects, and
 /// every tree a run protects as an agent's is some adapter's: a new adapter
 /// whose trees the protected set does not hold fails here.
+/// Reached by: `crates/adapters/src/claude_code/mod.rs`, `crates/adapters/src/codex/mod.rs`,
+/// `crates/adapters/src/dialect/mod.rs`, `crates/core/src/protected.rs`
 #[test]
 fn every_run_protects_exactly_the_trees_the_adapters_declare() {
     let mut declared: Vec<String> = claude()

@@ -1,4 +1,4 @@
-//! `yunta mcp`: the control-plane MCP server, stdio. Seven tools —
+//! `yunta mcp`: the control plane's MCP server, stdio. Seven tools —
 //! `document_shape`, `list_workflows`, `run_workflow`,
 //! `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`
 //! — none of which ever blocks for a run's own duration:
