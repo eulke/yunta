@@ -11,7 +11,7 @@
 
 use crate::components::{
     Checklist, Code, Concern, Decision, Evidence, Fields, Furrow, Gist, Headline, Marked, Next,
-    NodeTable, Note, Paths, Prose, Said, Section, Table,
+    NodeTable, Note, Paths, Prose, Runs, Said, Section, Table,
 };
 use crate::line::Line;
 
@@ -58,6 +58,8 @@ pub enum Block {
     Fields(Fields),
     /// Rows under named columns; a run's nodes are one.
     Table(Table),
+    /// A field of runs, a row to each.
+    Runs(Runs),
     Evidence(Evidence),
     /// Lines a message says whole, as its author broke them.
     Said(Said),
@@ -104,6 +106,7 @@ block_from!(
     Gist(Gist),
     Fields(Fields),
     Table(Table),
+    Runs(Runs),
     Evidence(Evidence),
     Said(Said),
     Paths(Paths),

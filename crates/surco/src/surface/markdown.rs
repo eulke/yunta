@@ -4,8 +4,8 @@
 //! character and the word is what carries the meaning.
 
 use crate::components::{
-    Check, Checklist, Code, Concern, Decision, Evidence, Fields, Headline, Holds, Marked, Next,
-    Paths, Section, Table, Whole,
+    Check, Checklist, Code, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Marked,
+    Next, Paths, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
@@ -53,6 +53,7 @@ fn block(block: &Block, depth: usize) -> String {
         Block::Gist(gist) => gist.0.clone(),
         Block::Fields(fields) => self::fields(fields),
         Block::Table(table) => self::table(table),
+        Block::Runs(runs) => self::runs(runs),
         Block::Evidence(evidence) => self::evidence(evidence),
         Block::Said(said) => said.0.join("  \n"),
         Block::Paths(paths) => self::paths(paths),
@@ -194,6 +195,28 @@ fn table(table: &Table) -> String {
             }
             out.push_str(&format!(" {said} |"));
         }
+    }
+    out
+}
+
+/// Each run as a table row: where it stands, its handle, what it runs, what
+/// holds it, and its edge.
+fn runs(runs: &Runs) -> String {
+    let mut out = String::from("| | run | workflow | where it stands | |\n|---|---|---|---|---|");
+    for row in &runs.rows {
+        let edge = match &row.edge {
+            Edge::Age(age) => age.clone(),
+            Edge::Command(command) => format!("`{command}`"),
+        };
+        out.push_str(&format!(
+            "\n| {} {} | `{}` | {} ({}) | {} | {edge} |",
+            GLYPHS.mark(row.standing.mark()),
+            row.standing.word(),
+            row.handle,
+            cell(&row.workflow),
+            cell(&row.mode),
+            cell(&row.said),
+        ));
     }
     out
 }

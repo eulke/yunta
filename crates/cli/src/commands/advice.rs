@@ -51,6 +51,15 @@ pub(crate) fn asking(
     )
 }
 
+/// Whom a live engine is asking, on the one line a row has room for: the
+/// node, and that the answer is given at its terminal.
+pub(crate) fn asking_on(prompt: &yunta_engine::Prompt) -> String {
+    match &prompt.node {
+        Some(node) => format!("node `{node}` asks at its terminal"),
+        None => "the run asks at its terminal".to_string(),
+    }
+}
+
 /// What a run is parked on, or `None` for a run nobody has to touch —
 /// the one answer that decides whether a surface says anything about a
 /// decision at all.

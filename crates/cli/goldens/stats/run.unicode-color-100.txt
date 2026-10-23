@@ -1,4 +1,5 @@
-run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
+␛[36m●␛[0m ␛[1mpaced (default)␛[0m␛[2m · ␛[0m␛[36mrunning␛[0m␛[2m · 30s so far␛[0m                                                      9G5FAV
+␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
 
   ␛[2mCPTV        ␛[0m 500 tokens per verified task · 1 task done
   ␛[2mrework      ␛[0m 12% of tokens went to retries and re-routes

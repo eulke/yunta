@@ -58,6 +58,11 @@ pub fn greet() {}
 |---|---|---|---|---|
 | ✓ finished | `plan` | 4 tasks | 1m31s | 1.94M |
 
+| | run | workflow | where it stands | |
+|---|---|---|---|---|
+| ◆ needs you | `EKPBGE` | fragua (standard) | implement asks at its terminal | 32m |
+| ■ stopped | `60Y934` | fragua (quick) | stopped while it ran | `yunta resume 60Y934` |
+
 a line a page composed itself
 
 - **approve** — builds the plan  

@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use surco::doc::Depth;
 use surco::look::Look;
 use yunta_core::{OptionId, Responder, WorkflowName};
 
@@ -19,11 +20,14 @@ use crate::{commands, graph};
 /// is the mode the subcommand's own flags chose, and `look` the stdout look
 /// `main` built: every command writes with those and nothing else.
 pub(super) async fn dispatch(
-    command: Command,
+    command: Option<Command>,
     started: Instant,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
+    let Some(command) = command else {
+        return commands::list::field(look).await;
+    };
     match command {
         Command::Completions { shell } => completions_command(shell),
         Command::Check { workflow, config } => {
@@ -72,7 +76,13 @@ pub(super) async fn dispatch(
         Command::Close { run, by, .. } => {
             commands::close::close(&run.named().await?, by.as_ref(), output, look).await
         }
-        Command::List { runs, all, .. } => list_command(runs, all, output, look).await,
+        Command::List {
+            runs,
+            all,
+            full,
+            dig,
+            ..
+        } => list_command(runs, all, Depth::of(full, dig), output, look).await,
         Command::Doctor { session, .. } => commands::doctor::doctor(session, output, look).await,
         Command::Mcp => commands::mcp::mcp().await,
         Command::Gc { dry_run } => commands::gc::gc(dry_run, look).await,
@@ -135,11 +145,12 @@ async fn resolve_gate_command(
 async fn list_command(
     runs: bool,
     all: bool,
+    depth: Depth,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     if runs {
-        commands::list::list_runs(all, output, look).await
+        commands::list::list_runs(all, depth, output, look).await
     } else {
         commands::list::list_workflows(look).await
     }

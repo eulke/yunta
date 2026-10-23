@@ -1,4 +1,5 @@
-run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
+> paced (default) ; running ; 30s so far                                  9G5FAV
+--------------------------------------------------------------------------------
 
   CPTV         500 tokens per verified task ; 1 task done
   rework       12% of tokens went to retries and re-routes

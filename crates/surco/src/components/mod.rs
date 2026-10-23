@@ -19,6 +19,7 @@ mod headline;
 mod next;
 mod node_table;
 mod page;
+mod runs;
 mod said;
 mod table;
 
@@ -32,6 +33,7 @@ pub use headline::Headline;
 pub use next::Next;
 pub use node_table::{NodeRow, NodeTable};
 pub use page::{Furrow, Gist};
+pub use runs::{Edge, RunLine, Runs};
 pub use said::{PathNote, Paths, Said};
 pub use table::{Cell, Column, Holds, Row, Table};
 

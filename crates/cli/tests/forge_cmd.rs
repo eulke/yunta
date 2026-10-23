@@ -38,7 +38,7 @@ fn yunta_run_refuses_before_creating_a_run_when_the_forge_token_is_unset() {
     );
     let listed = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(
-        stdout(&listed).starts_with("no runs"),
+        stdout(&listed).contains("no runs yet"),
         "{}",
         stdout(&listed)
     );

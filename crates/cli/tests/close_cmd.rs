@@ -67,14 +67,16 @@ fn closing_a_parked_run_records_it_cancelled_by_who_closed_it() {
 fn a_closed_run_leaves_the_inbox_and_is_closed_once() {
     let (checkout, run_id) = parked();
     let before = stdout(&yunta_at!(&checkout, &["list", "--runs"]));
-    assert!(before.starts_with("needs you (1)"), "{before}");
+    let counted =
+        |field: &str, said: &str| field.lines().next().is_some_and(|line| line.contains(said));
+    assert!(counted(&before, "1 needs you"), "{before}");
 
     let close = yunta_at!(&checkout, &["close", &run_id]);
     assert!(close.status.success(), "{}", stderr(&close));
 
     let after = stdout(&yunta_at!(&checkout, &["list", "--runs"]));
     assert!(
-        !after.contains("needs you") && after.contains("closed (1)"),
+        counted(&after, "nothing needs you") && counted(&after, "1 closed"),
         "{after}"
     );
     let again = yunta_at!(&checkout, &["close", &run_id]);

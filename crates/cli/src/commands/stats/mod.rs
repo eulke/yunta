@@ -125,10 +125,8 @@ async fn stats_run(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome,
     let answer = RunStatsAnswer {
         json: RunStatsJson::from(run_id, mode, &run_stats, pricing.as_ref()),
         page: RunStatsPage {
-            run_id,
-            mode,
+            frame: &frame,
             stats: &run_stats,
-            nodes: &frame.nodes,
             pricing: pricing.as_ref(),
         },
     };

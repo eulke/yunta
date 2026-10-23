@@ -88,7 +88,7 @@ fn a_run_whose_engine_was_killed_is_listed_and_shown_as_stalled() {
     let list = yunta_at!(&checkout, &["list", "--runs"]);
     let inbox = stdout(&list);
     assert!(
-        inbox.lines().any(|line| line == "stalled (1)") && inbox.contains(handle(&run_id)),
+        inbox.lines().any(|line| line == "stalled") && inbox.contains(handle(&run_id)),
         "the inbox files the run under stalled:\n{inbox}"
     );
 }

@@ -49,6 +49,9 @@ what it found
               node                              time  tokens
   ✓ finished  plan  4 tasks                    1m31s   1.94M
 
+  ◆ EKPBGE  fragua (standa…  implement…                  32m
+  ■ 60Y934  fragua (quick)   stopped w…  yunta resume 60Y934
+
   a line a page composed itself
 
   approve — builds the plan

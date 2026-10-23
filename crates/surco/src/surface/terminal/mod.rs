@@ -20,6 +20,7 @@ mod markdown;
 mod next;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
+mod runs;
 mod table;
 
 /// A terminal stream, by how its lines look.
@@ -81,6 +82,7 @@ impl Terminal {
             Block::Gist(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
             Block::Table(block) => block.lines(look),
+            Block::Runs(block) => block.lines(look),
             Block::Evidence(block) => block.lines(look),
             Block::Said(block) => block.lines(look),
             Block::Paths(block) => block.lines(look),

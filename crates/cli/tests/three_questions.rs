@@ -50,11 +50,14 @@ fn typed(repo: &Path, home: &Path, command: &str) -> std::process::Output {
     yunta_in!(repo, home, &words)
 }
 
-/// The first line of `text` that, trimmed, opens with `command`.
+/// The command a line of `text` opens with, as a person copies it: the
+/// first line that, trimmed, opens with `command`, up to the gloss two
+/// spaces set beside it.
 fn line_starting<'a>(text: &'a str, command: &str) -> &'a str {
     text.lines()
         .map(str::trim)
         .find(|line| line.starts_with(command))
+        .and_then(|line| line.split("  ").next())
         .unwrap_or_else(|| panic!("no `{command}` line in:\n{text}"))
 }
 
@@ -79,9 +82,14 @@ fn a_person_learns_a_run_needs_them_from_status_and_the_list() {
     // The list opens with the runs that need someone, this one among
     // them, saying why.
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
-    assert!(list.starts_with("needs you (1)"), "{list}");
     assert!(
-        list.contains(handle(&run_id)) && list.contains("re-routes to `fix-lint` are exhausted"),
+        list.lines()
+            .next()
+            .is_some_and(|line| line.contains("1 needs you")),
+        "{list}"
+    );
+    assert!(
+        list.contains(handle(&run_id)) && list.contains("node `lint` failed"),
         "{list}"
     );
 }
@@ -238,8 +246,8 @@ fn the_documents_say_it_needs_you(repo: &Path, home: &Path, run_id: &str) {
     let handle = &run_id[run_id.len() - 6..];
     let filed = inbox
         .lines()
-        .skip_while(|line| !line.starts_with("needs you"))
+        .skip_while(|line| *line != "asking now")
         .take_while(|line| !line.is_empty())
         .any(|line| line.contains(handle));
-    assert!(filed, "the inbox files the run under needs you:\n{inbox}");
+    assert!(filed, "the inbox files the run under asking now:\n{inbox}");
 }

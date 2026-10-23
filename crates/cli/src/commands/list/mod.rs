@@ -21,13 +21,38 @@ use yunta_core::{InputSpec, Workflow};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::document;
-use surco::components::{Fields, Marked, Prose, Section};
-use surco::doc::Doc;
+use surco::components::{Fields, Gist, Headline, Marked, Next, Prose, Section};
+use surco::doc::{Depth, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 
 pub use runs::list_runs;
+
+/// `yunta` alone: in a repository, its field — the runs of that
+/// repository; anywhere else, where Yunta works and what to type.
+pub async fn field(look: &Look) -> Result<Outcome, CliError> {
+    let ctx = Context::load()?;
+    if inbox::in_a_repository(&ctx).await? {
+        return list_runs(false, Depth::Glance, crate::output::Mode::Human, look).await;
+    }
+    let page = Doc::new()
+        .with(Headline::new(Mark::Absent, "yunta", "not in a repository"))
+        .with(Gist::new(
+            "yunta works in a git repository, and this directory is in none",
+        ))
+        .with(Next {
+            steps: vec![
+                (
+                    "yunta list --runs --all".to_string(),
+                    "every run on this machine",
+                ),
+                ("yunta --help".to_string(), "what yunta does"),
+            ],
+        });
+    document(look, page);
+    Ok(Outcome::Success)
+}
 
 /// One catalog entry ready to render — `display_name` already carries
 /// the `publisher/` prefix for a pack entry, nothing else needs to know

@@ -53,6 +53,34 @@ pub(super) fn render(time: &TimeSpent, look: &Look) -> Vec<Line> {
     lines
 }
 
+/// Where most of a run's time went, as the sentence under its headline:
+/// the share that took the most, its part of the whole, and what it was
+/// spent on. Nothing for a run that spent no time.
+pub(super) fn gist(time: &TimeSpent) -> Option<String> {
+    let total = time.total();
+    let (spent, on) = [
+        (time.working, "agents and the engine at work"),
+        (time.rails, "formatting what sessions wrote"),
+        (time.checks, "checks on the tasks' trees"),
+        (time.measuring, "measuring the suite while nothing else ran"),
+        (time.people, "a person deciding"),
+        (time.offline, "sessions waiting for their service"),
+        (time.parked, "parked until a resume"),
+        (time.between, "the engine between steps"),
+    ]
+    .into_iter()
+    .max_by_key(|(spent, _)| *spent)?;
+    if spent.as_secs() == 0 || total.is_zero() {
+        return None;
+    }
+    let share = spent.as_secs_f64() / total.as_secs_f64() * 100.0;
+    Some(format!(
+        "{} of {}, {share:.0}%, was {on}",
+        duration(spent),
+        duration(total)
+    ))
+}
+
 /// Each share with what it says beside its figure.
 fn shares(time: &TimeSpent) -> [(&'static str, Duration, String); 8] {
     let decided = match time.decided_checks.is_zero() {

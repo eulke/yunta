@@ -46,6 +46,9 @@
 ␛[2m              node                                                                      time  tokens␛[0m
   ␛[32m✓␛[0m ␛[32mfinished ␛[0m plan  ␛[2m4 tasks                                                          ␛[0m  1m31s   1.94M
 
+  ␛[1;35m◆␛[0m ␛[1mEKPBGE␛[0m  ␛[2mfragua (standard)␛[0m  ␛[32m━␛[0m␛[32m━━␛[0m␛[32m━␛[0m␛[32m━␛[0m␛[32m━━␛[0m␛[1;35m━␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m  implement asks at its ter…                  ␛[2m32m␛[0m
+  ␛[2m■␛[0m ␛[1m60Y934␛[0m  ␛[2mfragua (quick)   ␛[0m  ␛[32m━━━␛[0m␛[32m━━━␛[0m␛[2m━━━␛[0m␛[2m┄┄␛[0m␛[2m┄┄┄␛[0m␛[2m┄┄┄␛[0m␛[2m┄┄┄␛[0m  stopped while it ran        ␛[1myunta resume 60Y934␛[0m
+
   a line a page composed itself
 
   ␛[1mapprove␛[0m — builds the plan

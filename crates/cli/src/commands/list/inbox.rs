@@ -49,15 +49,6 @@ pub(crate) enum Group {
 }
 
 impl Group {
-    /// Every group, in printing order.
-    pub(crate) const ALL: [Group; 5] = [
-        Group::NeedsYou,
-        Group::Stalled,
-        Group::Stopped,
-        Group::InFlight,
-        Group::Closed,
-    ];
-
     /// Which group a run called `standing` belongs in, `closed` saying
     /// whether its log closed it. A log that stopped making sense needs a
     /// person as much as a decision does: nothing moves it on its own
@@ -82,23 +73,10 @@ impl Group {
             | Standing::NeverRan => Group::Closed,
         }
     }
-
-    /// The heading a group of runs prints under. It says what the reader
-    /// can do about the rows below it, which is what a listing is read
-    /// for.
-    pub(crate) fn heading(self) -> &'static str {
-        match self {
-            Self::NeedsYou => Standing::NeedsYou.word(),
-            Self::Stalled => Standing::Stalled.word(),
-            Self::Stopped => "stopped by you",
-            Self::InFlight => Standing::Running.word(),
-            Self::Closed => "closed",
-        }
-    }
 }
 
 /// One run as the listing shows it, read off that run's own frame.
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct RunRow {
     pub(crate) run_id: RunId,
     pub(crate) group: Group,
@@ -115,6 +93,15 @@ pub(crate) struct RunRow {
     pub(crate) reason: Option<String>,
     /// The command that moves it on, when a person has one to run.
     pub(crate) command: Option<String>,
+    /// What holds the run, on the one line a field's row has room for.
+    #[serde(skip)]
+    pub(crate) said: String,
+    /// Where each of its nodes stands, in declaration order.
+    #[serde(skip)]
+    pub(crate) furrow: Vec<Standing>,
+    /// Whether its engine is asking a person at a terminal now.
+    #[serde(skip)]
+    pub(crate) asking: bool,
 }
 
 /// A run the listing can name but not derive: its log or the manifest it
@@ -135,6 +122,10 @@ pub(crate) struct Inbox {
     pub(crate) rows: Vec<RunRow>,
     pub(crate) unreadable: Vec<Unreadable>,
     pub(crate) elsewhere: usize,
+    /// Whether the listing is the runs of the repository it was asked in,
+    /// rather than every run on the machine.
+    #[serde(skip)]
+    pub(crate) here: bool,
 }
 
 impl Inbox {
@@ -145,7 +136,7 @@ impl Inbox {
         let run_ids: Vec<RunId> = storage
             .list_runs()
             .map(|runs| runs.into_iter().map(|run| run.run_id).collect())?;
-        let here = match all || run_ids.is_empty() {
+        let here = match all {
             true => None,
             false => Here::of(ctx).await?,
         };
@@ -154,6 +145,7 @@ impl Inbox {
             rows: Vec::new(),
             unreadable: Vec::new(),
             elsewhere: 0,
+            here: here.is_some(),
         };
         for run_id in run_ids {
             match run_row(&ctx.project, &storage, run_id, now) {
@@ -175,11 +167,6 @@ impl Inbox {
             }
         }
         Ok(inbox)
-    }
-
-    /// Whether no run under the state root reads as anything at all.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.rows.is_empty() && self.unreadable.is_empty() && self.elsewhere == 0
     }
 
     /// The runs of this listing that wait on a person, the one that has
@@ -256,6 +243,9 @@ impl RunRow {
     fn of(frame: &RunFrame, engine: &yunta_engine::Engine, age: Duration, menu: bool) -> Self {
         let word = frame.standing;
         let (reason, command) = held(frame, engine, word, menu);
+        let asking = word == Standing::NeedsYou
+            && matches!(frame.phase, RunPhase::Created | RunPhase::Running)
+            && engine.prompt.is_some();
         let closed = matches!(
             frame.phase,
             RunPhase::Finished
@@ -272,6 +262,9 @@ impl RunRow {
             age,
             reason,
             command,
+            said: said(frame, engine),
+            furrow: frame.nodes.iter().map(|node| node.standing).collect(),
+            asking,
         }
     }
 }
@@ -398,6 +391,45 @@ fn time_in_state(state: &RunState, now: DateTime<Utc>) -> Duration {
         .last_at()
         .map(|at| (now - at).to_std().unwrap_or(Duration::ZERO))
         .unwrap_or(Duration::ZERO)
+}
+
+/// What holds a run, on the one line a field's row has room for: the node
+/// a live engine asks about, the claim a parked run stopped on, the stall,
+/// how far a moving run has come, what failed a closed one. Nothing for a
+/// run that finished.
+fn said(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
+    match (frame.standing, &frame.phase) {
+        (Standing::Stalled, _) => advice::STALLED.to_string(),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => engine
+            .prompt
+            .as_ref()
+            .map(advice::asking_on)
+            .unwrap_or_default(),
+        (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
+        (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
+        (_, RunPhase::Created | RunPhase::Running) => {
+            crate::render::counter::progress(frame, crate::render::glyphs())
+        }
+        (
+            _,
+            RunPhase::Failed {
+                failure: Some(failure),
+            },
+        ) => yunta_render::failure::headline(failure),
+        (
+            _,
+            RunPhase::Finished
+            | RunPhase::Failed { failure: None }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { .. },
+        ) => String::new(),
+    }
+}
+
+/// Whether `ctx` is run inside a git repository: what decides whether a
+/// listing is that repository's runs.
+pub(crate) async fn in_a_repository(ctx: &Context) -> Result<bool, CliError> {
+    Ok(Here::of(ctx).await?.is_some())
 }
 
 /// A run's age in seconds, as a JSON reader compares it.

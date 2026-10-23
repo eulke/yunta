@@ -511,8 +511,8 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
     );
     let text = stdout(&list);
 
-    let needs_you = position(&text, "needs you (1)");
-    let in_flight = position(&text, "running (1)");
+    let needs_you = position(&text, "\nneeds you, oldest first\n");
+    let in_flight = position(&text, "\nrunning\n");
     assert!(
         needs_you < in_flight,
         "what waits on a person comes first: {text}"
@@ -525,8 +525,10 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
         text.contains("hopeless (default)"),
         "a row names the workflow and the mode, not only the id: {text}"
     );
+    // One line to a run: what holds it opens its row, and the run's page
+    // says it whole.
     assert!(
-        text.contains("node `lint` failed and its 0 re-routes to `fix-lint` are exhausted"),
+        text.contains("node `lint` failed and its"),
         "the row says what the wait is for, in words: {text}"
     );
     for line in text.lines() {
@@ -594,7 +596,8 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
     assert!(
-        list.contains("needs you (1)") && list.contains("node `ask` asked 1 question: `summary`"),
+        list.contains("\nneeds you, oldest first\n")
+            && list.contains("node `ask` asked 1 question: `summary`"),
         "the listing groups it with what needs a person, under the words the page uses: {list}"
     );
 }
@@ -620,10 +623,14 @@ fn a_run_whose_manifest_does_not_read_back_is_listed_as_itself() {
     let list = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(list.status.success());
     let text = stdout(&list);
-    assert!(text.contains("unreadable (1)"), "{text}");
     assert!(
-        text.contains(handle(&run_id)),
+        text.contains(&format!("{} could not be read", handle(&run_id))),
         "a run that cannot be derived is still named: {text}"
+    );
+    let full = stdout(&yunta_in!(&repo, &home, &["list", "--runs", "--full"]));
+    assert!(
+        full.contains("\ncould not be read\n") && full.contains(&format!("{}: ", handle(&run_id))),
+        "and the whole story says why: {full}"
     );
 }
 

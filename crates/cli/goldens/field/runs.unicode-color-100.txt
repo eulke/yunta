@@ -1,0 +1,17 @@
+␛[1;35m◆␛[0m ␛[1mruns of this repository␛[0m␛[2m · ␛[0m␛[1;35m2 need you␛[0m␛[2m · 1 stopped by you␛[0m␛[2m · 1 closed␛[0m
+␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+
+␛[2masking now␛[0m
+  ␛[1;35m◆␛[0m ␛[1mT1Y0P1␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[1;35m━━␛[0m␛[2m┄┄␛[0m  node `implement` asks at its terminal                   ␛[2m32m00s␛[0m
+
+␛[2mneeds you, oldest first␛[0m
+  ␛[1;35m◆␛[0m ␛[1mT1Y0P2␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[1;35m━━␛[0m␛[2m┄┄␛[0m  node `lint` failed and its 0 re-routes to `fix-lint`…   ␛[2m22d00h␛[0m
+
+␛[2mstopped by you␛[0m
+  ␛[2m■␛[0m ␛[1mT1Y0P3␛[0m  ␛[2mreview (default)␛[0m  ␛[32m━━␛[0m␛[2m━━␛[0m␛[2m┄┄␛[0m  cancelled by user                          ␛[1myunta resume T1Y0P3␛[0m
+
+  ␛[2m1 closed, the newest 8h00m ago␛[0m
+
+␛[2mnext␛[0m
+  ␛[1myunta status T1Y0P2     ␛[0m   ␛[2mopens the run that has waited longest␛[0m
+  ␛[1myunta list --runs --full␛[0m   ␛[2mlists the closed runs too␛[0m

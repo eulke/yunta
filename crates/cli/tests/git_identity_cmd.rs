@@ -40,7 +40,7 @@ fn a_run_is_refused_where_git_has_no_identity() {
     );
     let listed = yunta_in!(&repo, &home, &["list", "--runs"]);
     assert!(
-        stdout(&listed).starts_with("no runs"),
+        stdout(&listed).contains("no runs yet"),
         "{}",
         stdout(&listed)
     );

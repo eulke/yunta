@@ -16,10 +16,12 @@ use crate::output::Mode;
 
 /// Yunta — a deterministic workflow engine for code agents.
 #[derive(Parser)]
-#[command(name = "yunta", version, about, arg_required_else_help = true)]
+#[command(name = "yunta", version, about)]
 pub struct Cli {
+    /// The subcommand; without one, `yunta` shows the runs of the
+    /// repository it is run in.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
     /// When to color what is printed: on a terminal that draws it
     /// (`auto`, honoring `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE`),
     /// `always`, or `never`.
@@ -36,7 +38,10 @@ use dispatch::dispatch;
 impl Cli {
     /// The output mode of the parsed subcommand, read from its own flags.
     pub(crate) fn mode(&self) -> Mode {
-        Mode::of(self.command.json(), self.command.quiet())
+        match &self.command {
+            Some(command) => Mode::of(command.json(), command.quiet()),
+            None => Mode::Human,
+        }
     }
 
     /// Runs the parsed subcommand, handing back its verdict or the one
@@ -211,8 +216,16 @@ enum Command {
         all: bool,
         /// With `--runs`: the runs as one versioned JSON document instead
         /// of the terminal view.
-        #[arg(long, requires = "runs")]
+        #[arg(long, requires = "runs", conflicts_with_all = ["full", "dig"])]
         json: bool,
+        /// With `--runs`: lists the runs that closed and the ones that do
+        /// not read back, which a glance only counts.
+        #[arg(long, requires = "runs")]
+        full: bool,
+        /// With `--runs`: what `--full` lists, each run named by its whole
+        /// id.
+        #[arg(long, requires = "runs")]
+        dig: bool,
     },
     /// Check adapters, git, the forge and packs.
     ///

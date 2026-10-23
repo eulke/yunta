@@ -143,6 +143,38 @@ fn quoting() -> Vec<Block> {
 
 /// The blocks a plan and a run's rows are drawn with, and how a document
 /// closes: the decision, the facts, and what to type next.
+/// Two runs of a field: one waiting on its reader, one a person stopped.
+fn field() -> Runs {
+    let plowed = |done: usize, now: Standing, ahead: usize| {
+        let mut furrow = vec![Standing::Finished; done];
+        furrow.push(now);
+        furrow.extend(std::iter::repeat_n(Standing::NeverRan, ahead));
+        furrow
+    };
+    Runs {
+        rows: vec![
+            RunLine {
+                standing: Standing::NeedsYou,
+                handle: "EKPBGE".to_string(),
+                workflow: "fragua".to_string(),
+                mode: "standard".to_string(),
+                furrow: plowed(5, Standing::NeedsYou, 9),
+                said: "implement asks at its terminal".to_string(),
+                edge: Edge::Age("32m".to_string()),
+            },
+            RunLine {
+                standing: Standing::Stopped,
+                handle: "60Y934".to_string(),
+                workflow: "fragua".to_string(),
+                mode: "quick".to_string(),
+                furrow: plowed(2, Standing::Stopped, 4),
+                said: "stopped while it ran".to_string(),
+                edge: Edge::Command("yunta resume 60Y934".to_string()),
+            },
+        ],
+    }
+}
+
 fn closing() -> Vec<Block> {
     let column = |title, holds| Column { title, holds };
     let table = Table {
@@ -181,6 +213,7 @@ fn closing() -> Vec<Block> {
         .into(),
         table.into(),
         nodes.into(),
+        field().into(),
         Block::Lines(vec![Line::new().plain("  a line a page composed itself")]),
         decision().into(),
         Note("the run holds its own state on disk.".to_string()).into(),

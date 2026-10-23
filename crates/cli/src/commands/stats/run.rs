@@ -4,15 +4,14 @@
 use std::collections::BTreeMap;
 
 use surco::bars::{bar, bar_cells};
-use surco::components::Fields;
+use surco::components::{Fields, Furrow, Gist, Headline};
 use surco::doc::{Block, Doc};
 use surco::figures::{duration, Ratio, Tokens, DURATION_WIDEST};
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::width::{cell_width, id_column, middle_cut, truncate, INDENT};
 use surco::words::Standing;
-use yunta_core::RunId;
-use yunta_engine::{NodeFrame, NodeStat, RunStats};
+use yunta_engine::{NodeFrame, NodeStat, RunFrame, RunPhase, RunStats};
 use yunta_render::state::NodeDisplay;
 
 use crate::render::node_display;
@@ -20,20 +19,19 @@ use crate::render::node_display;
 use super::facts::{answers, cache, cptv, findings, rework, spent, submissions};
 
 /// What the `yunta stats <run_id>` block is drawn from: one run's stats,
-/// its nodes as its frame stands them, and what its model is priced at.
+/// the run as its frame stands it, and what its model is priced at.
 pub(super) struct RunStatsPage<'a> {
-    pub(super) run_id: &'a RunId,
-    pub(super) mode: &'a str,
+    /// The run's word, workflow, mode and nodes: the word a node's row
+    /// says here is the one `status` says.
+    pub(super) frame: &'a RunFrame,
     pub(super) stats: &'a RunStats,
-    /// The frame's nodes, whose words every row opens with: the word a
-    /// node's row says here is the one `status` says.
-    pub(super) nodes: &'a [NodeFrame],
     pub(super) pricing: Option<&'a BTreeMap<String, yunta_core::PricingEntry>>,
 }
 
 impl RunStatsPage<'_> {
-    /// The whole `yunta stats <run_id>` block: the run's facts, a row each
-    /// that has something to say, then its times, its rails, its nodes and
+    /// The whole `yunta stats <run_id>` block: the run's headline and
+    /// furrow, where most of its time went, its facts — a row each that
+    /// has something to say — then its times, its rails, its nodes and
     /// its runners.
     ///
     /// A block rather than a run of `println!`s: what this command says
@@ -66,15 +64,41 @@ impl RunStatsPage<'_> {
                 crate::commands::unknown_kinds_note(&stats.unknown_kinds, look.glyphs)
                     .unwrap_or_default(),
             );
+        let furrow = self.frame.nodes.iter().map(|node| node.standing).collect();
         Doc::new()
-            .with(Block::Lines(vec![
-                Line::new().plain(format!("run {} — mode {}", self.run_id, self.mode))
-            ]))
+            .with(self.headline())
+            .with(Furrow(furrow))
+            .with_all(super::time::gist(&stats.time).map(|gist| Gist::new(gist).into()))
             .with(fields)
             .with(Block::Lines(super::time::render(&stats.time, look)))
             .with(Block::Lines(super::time::rail_latency(&stats.rails, look)))
-            .with(Block::Lines(nodes_lines(stats, self.nodes, look)))
+            .with(Block::Lines(nodes_lines(stats, &self.frame.nodes, look)))
             .with(Block::Lines(runner_lines(stats, look)))
+    }
+}
+
+impl RunStatsPage<'_> {
+    /// The run's headline: its mark, workflow and mode, its word, how long
+    /// it has run — so far, or in all once it closed — and its handle.
+    fn headline(&self) -> Headline {
+        let frame = self.frame;
+        let word = frame.standing;
+        let mut headline = Headline::new(
+            word.mark(),
+            format!("{} ({})", frame.workflow, frame.mode),
+            word.word(),
+        );
+        let open = matches!(
+            frame.phase,
+            RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
+        );
+        if let Some(took) = frame.elapsed {
+            headline = headline.fact(match open {
+                true => format!("{} so far", duration(took)),
+                false => format!("in {}", duration(took)),
+            });
+        }
+        headline.edge(frame.run_id.handle())
     }
 }
 
@@ -193,7 +217,7 @@ mod tests {
     use super::*;
     use crate::render::surface_lines;
 
-    const RUN: RunId = RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const RUN: yunta_core::RunId = yunta_core::RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
     /// The usage the golden page reads, with the cache figure it reports.
     const PAGE_USAGE: TokenUsage = TokenUsage {
@@ -253,25 +277,25 @@ mod tests {
 
     /// The block of one run, drawn for `look`.
     fn render_run_stats(
-        run_id: &RunId,
-        mode: &str,
         stats: &RunStats,
         nodes: &[NodeFrame],
         pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
         look: &Look,
     ) -> String {
+        let frame = RunFrame {
+            nodes: nodes.to_vec(),
+            ..yunta_testkit::run_frame(&RUN)
+        };
         let page = RunStatsPage {
-            run_id,
-            mode,
+            frame: &frame,
             stats,
-            nodes,
             pricing,
         };
         crate::render::draw(page.document(look), look)
     }
 
     fn render(stats: &RunStats, look: &Look) -> String {
-        render_run_stats(&RUN, "default", stats, &[], None, look)
+        render_run_stats(stats, &[], None, look)
     }
 
     #[test]
@@ -282,11 +306,10 @@ mod tests {
         // findings come to are in it, each said as itself.
         let look = Look::plain();
         let run_stats = stats(Vec::new());
+        let frame = yunta_testkit::run_frame(&RUN);
         let page = RunStatsPage {
-            run_id: &RUN,
-            mode: "default",
+            frame: &frame,
             stats: &run_stats,
-            nodes: &[],
             pricing: None,
         };
         let rows: Vec<String> = surface_lines(page.document(&look), &look)
@@ -412,14 +435,7 @@ mod tests {
         for environment in &ENVIRONMENTS {
             assert_golden(
                 &environment.golden(&goldens, "run"),
-                &render_run_stats(
-                    &RUN,
-                    "default",
-                    &run,
-                    &nodes,
-                    None,
-                    &surco::look::Look::of(environment),
-                ),
+                &render_run_stats(&run, &nodes, None, &surco::look::Look::of(environment)),
             );
         }
     }
