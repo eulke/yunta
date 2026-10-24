@@ -111,12 +111,17 @@ failure goes straight to the run's `defaults.on_failure`.
 
 ## Scope and permissions
 
-`scope: [globs]` on a `prompt` or `loop` node is a hard post-check boundary: after
-the session closes, the engine diffs what actually changed against those globs. An
-edit outside `scope` fails the node — not a warning, not something the agent can talk
-its way past. That diff is the *only* thing enforcing scope: no adapter today blocks
-an out-of-scope write while it happens, so an agent can write outside `scope` and the
-node fails afterward for it.
+`scope: [globs]` on a `prompt` or `loop` node bounds what its sessions may write, at
+two moments. While a session works, its fence refuses a file-tool write outside
+`scope` before it happens: the CLI's hook asks the run's engine about each write, and
+the agent is told why and what to do instead — ask for more scope, or report a
+finding (see [What a session may write](adapters.md#what-a-session-may-write)). After
+the session closes, the engine diffs what actually changed against those globs, and
+an edit outside `scope` fails the node — not a warning, not something the agent can
+talk its way past. That diff is the guarantee: the fence judges the CLI's file tools,
+while a session's commands are confined by directory, so a command of an `edit`
+session can still write outside `scope` inside its checkout, and the node fails
+afterward for it.
 
 `scope: run` declares a node's reach without naming a path: it may change what the
 run has changed since its base, as that stands when the node starts. It is the scope

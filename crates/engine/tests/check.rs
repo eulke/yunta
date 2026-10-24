@@ -1286,8 +1286,9 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
     .is_empty());
 }
 
-/// A suite is measured on every run under this config. A workflow that
-/// never compares against it pays for a measurement nothing reads, and
+/// A workflow that composes others measures the suite, since a run it
+/// gives birth to may compare against it. When none of them compares and
+/// it has no loop of its own, it pays for a measurement nothing reads, and
 /// only the walk can say so — `check` reads no files, so it cannot see
 /// what the composed workflows do.
 #[test]

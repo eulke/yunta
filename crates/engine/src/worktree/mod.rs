@@ -1,23 +1,27 @@
-//! Working-tree isolation.
+//! Working-tree isolation: whether a run works in a checkout of its own.
 //!
-//! `worktree` (default): each run gets its own `git worktree`, checked
-//! out from the manifest's frozen `base_commit` — concurrent runs on the
-//! same repo never collide, and the user's own checkout stays untouched
-//! by the agent's edits. `none`: the run operates directly on the given
-//! checkout — legitimate for watching an agent edit live, or CI already
-//! inside an ephemeral container — but the engine **requires a clean
-//! tree** at the start (without that, scope-by-diff can't tell
+//! `worktree` (default): the run works in a checkout of its project's
+//! pool, on a branch of its own cut from the manifest's frozen
+//! `base_commit`, which keeps that checkout the run's for as long as the
+//! run lives, parked or not — concurrent runs on the same repo never
+//! collide, and the user's own checkout stays untouched by the agent's
+//! edits. As the run ends the checkout goes back to the pool with its
+//! build, unless a successor carries on in it, and the branch stays,
+//! holding what the run did. `none`: the run operates directly on the
+//! given checkout — legitimate for watching an agent edit live, or CI
+//! already inside an ephemeral container — but the engine **requires a
+//! clean tree** at the start (without that, scope-by-diff can't tell
 //! the agent's work from the user's) and refuses a second concurrent run
 //! on that same repo via a lock file next to git's own metadata. Both
 //! locks this module takes — the `none` isolation lock and the
 //! worktree-mutation lock — are [`crate::lock`] files: one protocol,
 //! one owner record, one notion of a holder being gone.
 //!
-//! Cleanup: a prepared worktree is left on disk after the run for
-//! inspection by default; a workflow that declares
-//! `on_finish.cleanup: worktree` gets [`cleanup_worktree`] at
-//! its real Finish instead. `none`'s lock is always released at
-//! Finish, since holding it forever would make every run after the
+//! Cleanup: a workflow that declares `on_finish.cleanup: worktree` also
+//! lets the run's branch go at its real Finish, once its checkout is back
+//! in the pool, and a checkout a run made before its project kept a pool
+//! is removed by [`cleanup_worktree`]. `none`'s lock is always released
+//! at Finish, since holding it forever would make every run after the
 //! first permanently refuse to start.
 //!
 //! Waking a run asks the same tree the other question this module
@@ -186,8 +190,8 @@ pub async fn hand_over_worktree(
 }
 
 /// Releases what `prepare_worktree` took: for `None`, removes the lock
-/// so a later run may proceed. For `Worktree`, a no-op — the worktree
-/// stays on disk (see module docs).
+/// so a later run may proceed. For `Worktree`, a no-op — the run's
+/// checkout goes back to its pool as the run ends (see module docs).
 pub async fn release_worktree(
     repo: &Path,
     isolation: Isolation,

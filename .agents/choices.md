@@ -19,3 +19,20 @@ Not an editor that draws a workflow. A developer writes YAML faster, with comple
 else the hard part is a criterion a command can verify, which no canvas writes. `yunta graph` draws what a workflow
 declares, and the YAML stays the only source a run reads: a drawing holding state the YAML did not would break
 versioning, packs and the manifest a run freezes.
+
+### No merge into the base branch
+Not a merge queue or a lock of Yunta's own. A run pushes its branch and opens a pull request; the forge's merge
+queue and branch protection already order concurrent merges and hold the required checks and the permissions, so a
+lock Yunta kept would only copy them. `check` warns about a node that pushes to the base branch with no gate before
+it.
+
+### No switch that turns verification off
+Not a flag, a mode or a config key that skips a task's criteria. A run that can finish without verifying anything
+makes its receipt mean nothing. Speed comes from the workflow instead: a smaller one, or a mode that skips
+deliberation, which never skips verification.
+
+### No secret manager integration
+Not an adapter for 1Password, Vault or a cloud's store. A secret reaches a session only as an environment variable
+the config names under `secrets:`, and the manager a team already uses fills the environment before the binary runs
+(`op run -- yunta run …`, `vault exec …`). An integration would be one adapter per provider, each with its own
+authentication, and an engine that keeps credentials.

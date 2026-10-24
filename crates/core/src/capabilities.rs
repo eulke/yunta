@@ -113,7 +113,9 @@ impl ToolNaming {
 /// What an adapter can build to keep a session's writes inside its
 /// fence. Three levels, because three is what the market has: nothing;
 /// a judgement before each file-tool call; or a filesystem sandbox the
-/// process itself runs under.
+/// process itself runs under. A level names what is built, never how a
+/// call reaches the engine: a hook, an extension and a delegated program
+/// that each ask before a write are one level, `tool_calls`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]

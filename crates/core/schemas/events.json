@@ -4958,7 +4958,7 @@
       ]
     },
     "FenceLevel": {
-      "description": "What an adapter can build to keep a session's writes inside its\nfence. Three levels, because three is what the market has: nothing;\na judgement before each file-tool call; or a filesystem sandbox the\nprocess itself runs under.",
+      "description": "What an adapter can build to keep a session's writes inside its\nfence. Three levels, because three is what the market has: nothing;\na judgement before each file-tool call; or a filesystem sandbox the\nprocess itself runs under. A level names what is built, never how a\ncall reaches the engine: a hook, an extension and a delegated program\nthat each ask before a write are one level, `tool_calls`.",
       "type": "string",
       "enum": [
         "none",

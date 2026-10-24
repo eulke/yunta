@@ -201,3 +201,61 @@ D205	code	crates/core/src/workflow/scope.rs	the engine resolves them when the no
 D218	code	crates/core/src/yaml/mod.rs	one grammar for reading a document and for pointing into it
 D219	code	crates/core/src/diagnostic/mod.rs	A document handed over as a structured value has no text, and no place in it.
 D244	code	crates/core/src/workflow/mod.rs	what the node says, else what its mode says, else every round
+contrato-del-run.md#5.2	code	crates/engine/src/task_cycle/mod.rs	The engine, never the agent, decides `done`
+contrato-del-run.md#5.3	code	crates/engine/src/human_interaction.rs	Every surface offers the same menu: the console draws it, and an MCP client reads it as data through `workflow_status`
+contrato-del-run.md#5.4	code	crates/engine/src/task_cycle/memo.rs	a criterion's result is reused when its command, the working tree's content and the resolved config are all unchanged since it last answered
+contrato-del-run.md#5.5	code	crates/engine/src/run/loop_exec/mod.rs	each iteration forms a batch of up to `concurrency` `ready` tasks (declaration order)
+contrato-del-run.md#6.1	code	crates/core/src/config/permissions.rs	the org layer rules here and lower layers only restrict further — without that inversion, governance is theater: any repo could undo it.
+contrato-del-run.md#6.2	code	crates/engine/src/scope_expansion.rs	Scope expansion: the agent proposes, the engine disposes.
+contrato-del-run.md#6.3	code	crates/core/src/config/mod.rs	env var *names* a session may receive; values only ever come from the process environment at spawn time, and nothing undeclared reaches a session's env at all.
+contrato-del-run.md#7.2	code	crates/engine/src/run/baseline.rs	The measurement a lineage takes once: what worked on the tree before the invocation started.
+contrato-del-run.md#7.3	code	crates/engine/src/worktree/mod.rs	Working-tree isolation: whether a run works in a checkout of its own.
+contrato-del-run.md#8.7	code	crates/engine/src/verification_effectiveness.rs	the same judgment the engine applies to a task's own work ("if something cannot fail, it is not testing anything") applied to the workflow's own ceremony
+contrato-del-run.md#11.3	test	crates/engine/tests/reverify.rs	An invariant's pass holds for the tree it left
+glosario.md#El cerco	code	crates/core/src/fence.rs	The fence: which of a session's file-tool writes its scope admits, judged by one pure function against the session's confinement.
+D09	code	crates/core/src/config/sections.rs	outside every repository, where an agent's git commands in its checkout never reach it
+D12	test	crates/engine/tests/task_cycle.rs	a_trivial_criterion_blocks_before_any_attempt_runs
+D116	test	crates/engine/tests/scope.rs	A single `*` never crosses a `/`
+D117	code	crates/core/src/config/mod.rs	`limits.max_expansion_files`, with the reference default (`5`) applied
+D150	test	crates/engine/tests/scope_audit.rs	read_only_is_audited_against_nothing_so_any_project_edit_fails_it
+D153	code	crates/engine/src/session_dir.rs	Sessions that can be alive at the same moment never share one
+D169	test	crates/cli/tests/run_surface.rs	a_run_that_finished_holding_blocking_findings_is_not_a_success
+D174	test	crates/core/tests/strict_keys.rs	A task's `criteria` are its whole verification, and what no command can settle goes behind a `gate`, where a person decides.
+D175	code	crates/core/src/findings/location.rs	What a location says instead is which of the run's two roots it is under: the work, or the run's own register.
+D177	test	crates/engine/tests/task_cycle.rs	The pre-check evaluates the whole set and names every criterion that already passes and every guard already red, in the order the task declares them.
+D182	test	crates/engine/tests/run_concurrency.rs	a_task_s_scope_is_checked_against_its_own_diff_never_a_sibling_s
+D183	test	crates/core/tests/integration.rs	One word for the tree a unit does not isolate, at every level: the retired one does not parse, and what it says instead is in the error.
+D187	test	crates/engine/tests/run_sessions.rs	A task session's brief names its task and says where its contract is read — never the contract itself.
+D192	test	crates/engine/tests/run_scope.rs	The answer is the one thing that changed for the session the cycle ended in
+D193	code	crates/engine/src/process.rs	the terminal belongs to the run's display, so what a child prints is kept or dropped, never interleaved with it.
+D200	test	crates/engine/tests/reverify.rs	an_invariant_that_ran_while_a_writer_finished_runs_again
+D201	test	crates/engine/tests/shared_tree.rs	A node that works in the run's own tree has its work committed on the run's branch when it closes
+D208	test	crates/engine/tests/run_checks.rs	a_run_that_reads_no_measurement_measures_nothing
+D209	code	crates/core/src/events/failure/exit.rs	What a command that exited non-zero left behind: whose command it was when it was not the node's own `run:`, the code it exited with, the last lines it printed
+D226	test	crates/engine/tests/commit_trailers.rs	Every commit a run makes names where it came from: the run, and the node and the task whose work it holds, as git trailers a clone reads without the run's log.
+D233	test	crates/engine/tests/run_tools.rs	A plan the run writes a spec for is not run when it is handed over
+D237	test	crates/engine/tests/measure_beside_loop.rs	A loop starts beside the lineage's measurement.
+D239	test	crates/engine/tests/derived_scope.rs	A task may write every file that names a shape it owns
+D245	test	crates/engine/tests/criteria_extend_the_suite.rs	A command that runs the project's tests extends the suite the run measures
+D246	code	crates/engine/src/worktree/pool/units.rs	A unit works on no branch: its ref keeps what it commits, and the checkout's record says the checkout is the unit's.
+D247	code	crates/engine/src/worktree/pool/room.rs	What the pool may keep of the disk: its builds within a budget, and a floor of the disk always free.
+D248	test	crates/engine/tests/follow_build.rs	A run follows the build its last unit left
+D251	code	crates/adapters/src/codex/rail.rs	Codex runs a `PreToolUse` hook before every `apply_patch`
+D252	code	crates/core/src/workflow/node.rs	An agent's session keeps it in its CLI's own sandbox, for every command the session runs
+D256	test	crates/engine/tests/held_guard.rs	is measured beside the suite, and holds every task as the suite does when it passed before the run changed anything.
+D259	code	crates/core/src/expansion.rs	A request is decided whole, the same whoever decides it.
+D260	code	crates/engine/src/task_cycle/judge.rs	The one judgement a session's work gets: a task session's when it stops and when its attempt closes, a node's when it stops and when its node closes.
+D261	code	crates/core/src/events/failure/remedy.rs	What can change a failure: the options a menu offers, what each one waits for, and the outlook the facts in the log give.
+D263	test	crates/engine/tests/tree_moved.rs	A person who changes the tree a failed node stopped on is offered a retry for a cause the tree can change.
+D265	test	crates/engine/tests/fence_breach.rs	A breach is filed only where nothing of the checkout is writable except through the fence
+D266	code	crates/core/src/rail/mod.rs	When the engine cannot be asked, the moment's own policy answers: a write is refused, and anything else goes on, because the attempt's close still judges the work.
+D33	test	crates/engine/tests/degradation.rs	a_secret_the_config_names_never_reaches_the_log
+D48	agents	.agents/choices.md	No merge into the base branch
+D51	code	crates/core/src/config/permissions.rs	each level may only narrow the one above, never loosen it.
+D60	agents	.agents/choices.md	No switch that turns verification off
+D64	code	crates/engine/src/worktree/pool.rs	A project instead keeps a pool of checkouts at paths of their own, and every checkout a run works in comes from it
+D80	test	crates/engine/tests/run_scope/denials.rs	every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterion
+D83	code	crates/core/src/workflow/scope.rs	A scope is what verifies an agent
+D92	agents	.agents/choices.md	No secret manager integration
+D93	code	crates/engine/src/verification_effectiveness.rs	Core metric is the pre-check red rate, not the total failure rate
+D50	code	crates/engine/src/human_interaction.rs	is enforced by this trait having no timeout parameter at all
