@@ -85,7 +85,7 @@ fn check(path: &Path, actual: &str, bless: bool) -> Result<(), String> {
     }
     let expected = std::fs::read_to_string(path).map_err(|_| {
         format!(
-            "no golden at {} — `YUNTA_BLESS=1` writes it from this run",
+            "no golden at {}; `YUNTA_BLESS=1` writes it from this run",
             path.display()
         )
     })?;

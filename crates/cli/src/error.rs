@@ -12,7 +12,10 @@ use yunta_core::RunId;
 
 pub use crate::output::{note, warn};
 
+mod page;
 pub(crate) mod words;
+
+use page::{document_problems, unrunnable};
 
 /// How a subcommand came back when nothing stopped it from running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,7 +70,7 @@ pub enum CliError {
     /// sentence, because a person who mistyped an id gets the same
     /// answer whichever command they typed it into — with the run it
     /// was one slip away from, when there is one.
-    #[error("no run is called `{id}`{}", .near.as_ref().map(|near| format!(" — did you mean `{near}`?")).unwrap_or_default())]
+    #[error("no run is called `{id}`{}", surco::text::near_miss(.near.as_deref()))]
     RunNotFound {
         id: RunId,
         /// Where it looked, as a person reads a path.
@@ -116,7 +119,7 @@ pub enum CliError {
     /// reader where it actually is is this border's word, so it
     /// is added here — named by its handle for a person, and by its whole
     /// id for an agent ([`CliError::said_to`]).
-    #[error("{} — `{}` shows where it is", words::resolve_gate(.refusal), crate::commands::advice::status(.run_id.handle()))]
+    #[error("{}; `{}` shows where it is", words::resolve_gate(.refusal), crate::commands::advice::status(.run_id.handle()))]
     NotPaused {
         run_id: RunId,
         refusal: yunta_engine::ResolveGateError,
@@ -126,7 +129,7 @@ pub enum CliError {
     /// Those pauses are settled where they were raised — a budget, a
     /// scope, an answers file, a review on a forge — and the run handed
     /// back, which is what the advice names.
-    #[error("{} — settle it where it was raised, then `{}`", words::resolve_gate(.refusal), crate::commands::advice::resume(.run_id.handle()))]
+    #[error("{}; settle it where it was raised, then `{}`", words::resolve_gate(.refusal), crate::commands::advice::resume(.run_id.handle()))]
     NoMenu {
         run_id: RunId,
         refusal: yunta_engine::ResolveGateError,
@@ -164,7 +167,7 @@ pub enum CliError {
 
     /// A run named by something more than one run answers to. Every
     /// run it could be is listed whole, so the next command can name one.
-    #[error("{said} — name one:{}", one_per_line(.candidates))]
+    #[error("{}:{}", page::name_one(.said), one_per_line(.candidates))]
     AmbiguousRun {
         said: String,
         candidates: Vec<crate::commands::run_ref::Candidate>,
@@ -172,11 +175,17 @@ pub enum CliError {
 
     /// A document that does not read, or breaks its own rules: every
     /// problem it has, each quoted from the text it was read from.
-    #[error("{}", yunta_render::blocks::diagnostic::report(.report, .text.as_deref()))]
+    #[error("{}", yunta_render::blocks::diagnostic::plain(&.report.document.path, document_problems(.report, .text.as_deref())))]
     Document {
         report: yunta_core::diagnostic::Report,
         text: Option<String>,
     },
+
+    /// A workflow that cannot run here: every problem `yunta check` finds
+    /// in it, each pointed at in its line, and what this project could
+    /// declare for the ones a declaration fixes.
+    #[error("{}", unrunnable(.0))]
+    Unrunnable(crate::commands::verdict::Unrunnable),
 
     /// A document kind this binary does not publish. The sentence
     /// lists the kinds that exist, so `yunta schema` and the
@@ -305,11 +314,11 @@ fn one_per_line(candidates: &[crate::commands::run_ref::Candidate]) -> String {
 fn close_advice(run: &str, refusal: &yunta_engine::CloseRunError) -> String {
     match refusal {
         yunta_engine::CloseRunError::Driven => format!(
-            " — `{}` stops it, and then it can be closed",
+            "; `{}` stops it, and then it can be closed",
             crate::commands::advice::cancel(run)
         ),
         yunta_engine::CloseRunError::Moving => format!(
-            " — `{}` shows where it is",
+            "; `{}` shows where it is",
             crate::commands::advice::status(run)
         ),
         yunta_engine::CloseRunError::AlreadyClosed
@@ -343,21 +352,29 @@ impl CliError {
 
     /// The refusal as `reader` reads it, with what caused it: a run's
     /// advice names it by its handle for a person, by its whole id for
-    /// an agent.
+    /// an agent. A refusal that found problems in a text says how many to
+    /// a person, whose page points at each in its line, and says each to
+    /// an agent, which reads no page.
     pub fn said_to(&self, reader: Reader) -> String {
         if let Some(said) = self.carried_words() {
             return said;
+        }
+        if let Some(headline) = self
+            .headline_for_a_person()
+            .filter(|_| reader == Reader::Person)
+        {
+            return headline;
         }
         let id = |run_id: &RunId| crate::commands::advice::named(run_id, reader).to_string();
         let said = match self {
             CliError::ResolveGate(refusal) => words::resolve_gate(refusal),
             CliError::NotPaused { run_id, refusal } => format!(
-                "{} — `{}` shows where it is",
+                "{}; `{}` shows where it is",
                 words::resolve_gate(refusal),
                 crate::commands::advice::status(&id(run_id))
             ),
             CliError::NoMenu { run_id, refusal } => format!(
-                "{} — settle it where it was raised, then `{}`",
+                "{}; settle it where it was raised, then `{}`",
                 words::resolve_gate(refusal),
                 crate::commands::advice::resume(&id(run_id))
             ),

@@ -200,7 +200,7 @@ fn settle_all(
 fn asked_in_group(group: &Node, child: &NodeId) -> RunError {
     RunError::Broken {
         diagnostic: format!(
-            "child `{child}` of parallel group `{}` handed questions over — a \
+            "child `{child}` of parallel group `{}` handed questions over, but a \
              node inside a group is never asked; `check` refuses this \
              workflow",
             group.id

@@ -98,7 +98,7 @@ fn a_gate_that_cannot_publish_for_want_of_a_forge_says_so_and_names_its_assignee
     };
     assert_eq!(
         sentence(&claim, None),
-        "node `approve` wants an external gate (assignee: lead) but no forge is reachable from this machine (no credentials, or none configured) — resolve it here instead"
+        "node `approve` wants an external gate (assignee: lead) but no forge is reachable from this machine (no credentials, or none configured): resolve it here instead"
     );
 }
 
@@ -110,7 +110,7 @@ fn a_gate_that_cannot_be_checked_again_names_the_reference_it_was_published_at()
     };
     assert_eq!(
         sentence(&claim, None),
-        "node `approve`'s external gate (published at example/repo#1) needs re-checking, but no forge is reachable from this machine — resolve it here instead"
+        "node `approve`'s external gate (published at example/repo#1) needs re-checking, but no forge is reachable from this machine: resolve it here instead"
     );
 }
 

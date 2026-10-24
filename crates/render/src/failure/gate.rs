@@ -11,7 +11,7 @@ use yunta_core::{FindingId, NodeId, OptionId, TaskId};
 /// The line a choice that routes the run back states: which option, and the
 /// node it routes to.
 pub(super) fn gate_chose_headline(option: &OptionId, target: &NodeId) -> String {
-    format!("gate chose `{option}` — re-routing to `{target}`")
+    format!("gate chose `{option}`, re-routing to `{target}`")
 }
 
 /// The choice a person made and wrote, under the line that states it.
@@ -50,7 +50,7 @@ pub(super) fn gate_choice_cause(failure: &Failure) -> String {
 /// again runs ahead of the loop.
 pub(super) fn tests_accepted(task: &TaskId, owed_by: &NodeId) -> String {
     format!(
-        "a person accepted that task `{task}`'s tests are wrong — `{owed_by}` writes them again \
+        "a person accepted that task `{task}`'s tests are wrong: `{owed_by}` writes them again \
          before the loop goes on"
     )
 }

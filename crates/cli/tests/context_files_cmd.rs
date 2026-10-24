@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in, Checkout, MOCK_CONFIG};
+use yunta_testkit::{git, init_repo, stderr, stdout, unwrapped, yunta_in, Checkout, MOCK_CONFIG};
 
 /// One prompt node that reads a file no commit of these repositories has.
 const READS_ARCHITECTURE: &str = r#"
@@ -58,7 +58,7 @@ fn run_refuses_a_file_nothing_before_its_reader_can_write_and_creates_no_run() {
     );
 
     assert!(!run.status.success(), "{}", stdout(&run));
-    let said = stderr(&run);
+    let said = unwrapped(&stderr(&run));
     assert!(
         said.contains("node `plan` reads `docs/architecture.md`")
             && said.contains("stops there every time"),
@@ -93,7 +93,7 @@ fn run_warns_before_the_first_token_and_its_document_carries_the_warning() {
         ]
     );
 
-    let said = stderr(&run);
+    let said = unwrapped(&stderr(&run));
     assert!(
         said.contains("warning: node `plan` reads `docs/architecture.md`"),
         "the person watching reads it before anything is spent: {said}"
@@ -123,7 +123,7 @@ fn check_refuses_a_file_nothing_before_its_reader_can_write() {
 
     assert!(!check.status.success(), "{}", stdout(&check));
     assert!(
-        stderr(&check).contains("node `plan` reads `docs/architecture.md`"),
+        unwrapped(&stderr(&check)).contains("node `plan` reads `docs/architecture.md`"),
         "{}",
         stderr(&check)
     );
@@ -143,10 +143,12 @@ fn check_names_a_file_the_commit_does_not_hold_without_refusing() {
         "a warning, never a refusal: {}",
         stderr(&check)
     );
+    // A warning is part of the verdict's page, which a check that passes
+    // draws on stdout.
     assert!(
-        stderr(&check).contains("node `plan` reads `docs/architecture.md`"),
+        unwrapped(&stdout(&check)).contains("node `plan` reads `docs/architecture.md`"),
         "{}",
-        stderr(&check)
+        stdout(&check)
     );
 }
 

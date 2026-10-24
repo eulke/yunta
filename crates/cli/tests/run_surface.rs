@@ -11,8 +11,8 @@
 use std::path::Path;
 
 use yunta_testkit::{
-    git, handle, run_id_from, stderr, stdout, write, yunta_at, yunta_in, yunta_on_terminal,
-    Checkout, Terminal,
+    git, handle, run_id_from, stderr, stdout, unwrapped, write, yunta_at, yunta_in,
+    yunta_on_terminal, Checkout, Terminal,
 };
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
@@ -175,7 +175,7 @@ fn without_a_terminal_line_one_names_the_downgrade_and_nothing_redraws() {
     assert!(
         progress
             .lines()
-            .any(|line| line.contains("touch — running") && line.starts_with('[')),
+            .any(|line| line.contains("touch running") && line.starts_with('[')),
         "one line per moment, in the words a watched terminal uses, each \
          carrying the run's elapsed time: {progress}"
     );
@@ -204,7 +204,7 @@ fn a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept() {
     // wrote too — the elapsed column and the mark are layout, and the
     // words under them are the same words.
     for node in ["touch", "verify"] {
-        let kept = format!("{node} — finished");
+        let kept = format!("{node} finished");
         assert!(
             drawn.contains(&kept),
             "the terminal kept `{kept}`:\n{drawn}"
@@ -311,7 +311,7 @@ fn the_closing_block_ends_with_the_decision_a_parked_run_waits_on() {
         );
     }
     assert!(
-        text.contains("close this terminal whenever you like"),
+        unwrapped(&text).contains("close this terminal whenever you like"),
         "the run holds its own state, and says so: {text}"
     );
 
@@ -557,7 +557,10 @@ fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), HOLDING);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
+    terminal.wait_for(
+        " done · ",
+        "the run never pinned its region to the terminal",
+    );
 
     terminal.interrupt();
     terminal.wait_for(
@@ -570,7 +573,7 @@ fn a_diagnostic_raised_while_the_region_is_drawn_goes_out_above_it() {
     // copy it left there — so the confirmation a person just asked for
     // is on the terminal for under a second.
     assert!(
-        terminal.cleared_before("nodes ", "interrupt received"),
+        terminal.cleared_before(" done · ", "interrupt received"),
         "the note landed inside the rows the region was redrawing:\n{}",
         terminal.drawn()
     );
@@ -933,7 +936,7 @@ fn a_failed_bash_node_leaves_its_tail_above_the_region() {
     let lines: Vec<&str> = drawn.lines().collect();
     let failed = lines
         .iter()
-        .position(|line| line.contains("build — failed"))
+        .position(|line| line.contains("build failed"))
         .unwrap_or_else(|| panic!("the failure was never kept above the region:\n{drawn}"));
     let after = &lines[failed..];
     let quoted = |text: &str| after.iter().position(|line| line.contains(text));
@@ -957,7 +960,7 @@ fn a_failed_bash_node_is_quoted_in_the_lines_a_pipe_gets() {
     assert_eq!(run.status.code(), Some(3), "{}", stderr(&run));
     let progress = stderr(&run);
     let failed = progress
-        .find("build — failed")
+        .find("build failed")
         .unwrap_or_else(|| panic!("{progress}"));
     assert!(
         progress[failed..].contains("error[E0425]: cannot find value `x` in this scope"),

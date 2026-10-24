@@ -73,10 +73,10 @@ impl NodeDisplay {
         Self::plain(Standing::Skipped)
     }
 
-    /// One line: the word, then what qualifies it after a dash.
+    /// One line: the word, then what qualifies it after a colon.
     pub fn label(&self) -> String {
         match &self.modifier {
-            Some(detail) => format!("{} — {detail}", self.standing.word()),
+            Some(detail) => format!("{}: {detail}", self.standing.word()),
             None => self.standing.word().to_string(),
         }
     }
@@ -90,7 +90,7 @@ impl NodeDisplay {
 }
 
 /// `text` on one line, or `None` when it says nothing — an empty
-/// modifier would leave a line ending in a dash that introduces nothing.
+/// modifier would leave a line ending in a colon that introduces nothing.
 fn detail(text: &str) -> Option<String> {
     let text = surco::text::one_line(text);
     (!text.is_empty()).then_some(text)
@@ -109,7 +109,7 @@ mod tests {
         };
         let display = NodeDisplay::of(Standing::Finished, Some(&state));
         assert_eq!(display.standing, Standing::Finished);
-        assert_eq!(display.label(), "finished — exit 0 with a second line");
+        assert_eq!(display.label(), "finished: exit 0 with a second line");
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
         };
         assert_eq!(
             NodeDisplay::of(Standing::Failed, Some(&state)).label(),
-            "failed — exit 1"
+            "failed: exit 1"
         );
     }
 
@@ -151,7 +151,7 @@ mod tests {
         };
         assert_eq!(
             NodeDisplay::of(Standing::NeedsYou, Some(&waiting)).label(),
-            "needs you — https://forge/pr/7"
+            "needs you: https://forge/pr/7"
         );
     }
 
@@ -170,7 +170,7 @@ mod tests {
         };
         assert_eq!(
             NodeDisplay::of(Standing::NeedsYou, Some(&waiting)).label(),
-            "needs you — asked 2 questions: `q-scope`, `q-api`"
+            "needs you: asked 2 questions: `q-scope`, `q-api`"
         );
     }
 }

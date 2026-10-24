@@ -62,7 +62,8 @@ fn add_shows_the_full_inventory_before_vendoring() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "pack acme/review-pack @ 1.0.0"),
+        text.lines()
+            .any(|l| l == "● pack acme/review-pack · installing · 1.0.0"),
         "{text}"
     );
     assert!(text.lines().any(|l| l == "    node `noop` bash"), "{text}");
@@ -82,7 +83,10 @@ fn add_shows_the_full_inventory_before_vendoring() {
         text.contains("Line two, still here, not summarized."),
         "{text}"
     );
-    assert!(text.lines().any(|l| l == "tests: none shipped"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "  tests        none shipped"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -97,7 +101,8 @@ fn audit_on_demand_reports_the_same_inventory_for_an_installed_pack() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "pack acme/review-pack @ 1.0.0"),
+        text.lines()
+            .any(|l| l == "✓ pack acme/review-pack · audited · 1.0.0"),
         "{text}"
     );
     assert!(

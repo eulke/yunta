@@ -12,17 +12,19 @@
 
 use std::path::Path;
 
-use surco::components::{Code, Fields, Marked, Section};
+use surco::components::{Check, Checklist, Code, Fields, Found, Furrow, Headline, Marked, Section};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
+use surco::text::counted;
 use yunta_core::PackRef;
 use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
 
-use super::test::{discover_case_paths, run_case};
+use super::test::{case_found, discover_case_paths, run_case};
 use crate::error::{CliError, Outcome};
-use crate::output::{blank, document, say};
+use crate::interrupt::Interrupt;
+use crate::output::document;
 use crate::pack::{packs_root, read_manifest, vendor_dir};
 
 pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
@@ -38,21 +40,17 @@ pub async fn audit(pack: &PackRef, look: &Look) -> Result<Outcome, CliError> {
     let manifest = read_manifest(&pack_dir)?;
 
     let report = audit_pack(&pack_dir, manifest);
-    print_report(&report, look);
-    let tests = run_pack_tests(&pack_dir, &ctx).await;
-    print_test_summary(&tests, look);
+    let tests = run_pack_tests(&pack_dir, ctx.interrupt()).await;
+    let headline = Headline::new(tests.mark(), format!("pack {pack}"), "audited")
+        .fact(report.manifest.version.to_string());
+    document(look, inventory(&report, headline).with_all(tests.blocks()));
     Ok(Outcome::Success)
 }
 
-/// Prints the full inventory — called both by `audit` (on demand) and by
-/// `pack add` (automatically, before vendoring).
-pub fn print_report(report: &PackAudit, look: &Look) {
-    document(look, inventory(report));
-}
-
-/// The inventory as a document: what the pack is and declares, then each
-/// workflow, node by node.
-fn inventory(report: &PackAudit) -> Doc {
+/// The inventory as a page under `headline`: what the pack declares, then
+/// each workflow, node by node. `audit` shows it on demand, and `pack add`
+/// before anything is vendored.
+pub fn inventory(report: &PackAudit, headline: Headline) -> Doc {
     let m = &report.manifest;
     let runners: Vec<String> = m
         .requires
@@ -80,10 +78,8 @@ fn inventory(report: &PackAudit) -> Doc {
         .push_if("mcp servers", m.requires.mcp_servers.join(", "))
         .push_if("programs", m.requires.programs.join(", "));
     let mut doc = Doc::new()
-        .with(Block::Title(Line::new().push(
-            Tone::Strong,
-            format!("pack {}/{} @ {}", m.publisher, m.name, m.version),
-        )))
+        .with(headline)
+        .with(Furrow(Vec::new()))
         .with(declares);
     for workflow in &report.workflows {
         doc = doc.with(workflow_section(workflow));
@@ -189,7 +185,9 @@ pub struct PackTestSummary {
     pub has_tests: bool,
     pub total: usize,
     pub failed: usize,
-    pub failures: Vec<String>,
+    /// Each case that failed: its name, what its row says, and every
+    /// problem it had, as written.
+    pub failures: Vec<(String, String, Vec<String>)>,
     /// Whether the cases ran: `add` counts them without running them
     /// unless asked, and says so.
     pub ran: bool,
@@ -208,7 +206,7 @@ pub fn count_pack_tests(pack_dir: &Path) -> PackTestSummary {
     }
 }
 
-pub async fn run_pack_tests(pack_dir: &Path, ctx: &crate::context::Context) -> PackTestSummary {
+pub async fn run_pack_tests(pack_dir: &Path, interrupt: Interrupt) -> PackTestSummary {
     let empty = PackTestSummary {
         has_tests: false,
         total: 0,
@@ -230,18 +228,11 @@ pub async fn run_pack_tests(pack_dir: &Path, ctx: &crate::context::Context) -> P
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| case_path.display().to_string());
-        match run_case(pack_dir, case_path, ctx.interrupt()).await {
-            Ok(problems) if problems.is_empty() => {}
-            Ok(problems) => {
-                failed += 1;
-                for problem in problems {
-                    failures.push(format!("{name}: {problem}"));
-                }
-            }
-            Err(error) => {
-                failed += 1;
-                failures.push(format!("{name}: {error}"));
-            }
+        let (found, said, problems) =
+            case_found(run_case(pack_dir, case_path, interrupt.shared()).await);
+        if found != Found::Holds {
+            failed += 1;
+            failures.push((name, said, problems));
         }
     }
     PackTestSummary {
@@ -253,36 +244,45 @@ pub async fn run_pack_tests(pack_dir: &Path, ctx: &crate::context::Context) -> P
     }
 }
 
-pub fn print_test_summary(summary: &PackTestSummary, look: &Look) {
-    blank();
-    if !summary.has_tests {
-        say(look, "tests: none shipped");
-    } else if !summary.ran {
-        say(
-            look,
-            format!(
-                "tests: {} shipped, not run (pass --run-tests)",
-                surco::text::counted(summary.total, "case")
+impl PackTestSummary {
+    /// What the pack's cases say, on the row they get: none shipped, how
+    /// many were shipped and not run, or how many ran and how many failed.
+    pub fn said(&self) -> String {
+        match (self.has_tests, self.ran) {
+            (false, _) => "none shipped".to_string(),
+            (true, false) => format!(
+                "{} shipped, not run (pass --run-tests)",
+                counted(self.total, "case")
             ),
-        );
-    } else {
-        // The heading counts cases and the lines under it count
-        // problems — one failing case contributes as many as it has —
-        // so each count stays with what it counts, and the block is
-        // indented rather than given a second, different total.
-        say(
-            look,
-            format!(
-                "tests: {}, {} failed",
-                surco::text::counted(summary.total, "case"),
-                summary.failed
-            ),
-        );
-        if !summary.failures.is_empty() {
-            say(
-                look,
-                surco::text::indent(&summary.failures.join("\n"), "  "),
-            );
+            (true, true) => format!("{}, {} failed", counted(self.total, "case"), self.failed),
         }
+    }
+
+    /// The mark a page about the pack opens with: what the page did held,
+    /// and a failed case is worth a look.
+    pub fn mark(&self) -> Mark {
+        match self.failed {
+            0 => Mark::Done,
+            _ => Mark::Caution,
+        }
+    }
+
+    /// The cases' row, and a row for each case that failed with every
+    /// problem it had under it, each line as written, as `yunta test` lists
+    /// them.
+    pub fn blocks(&self) -> Vec<Block> {
+        let mut failed = Checklist::default();
+        for (case, said, problems) in &self.failures {
+            failed.push_check(Check {
+                found: Found::Problem,
+                subject: case.clone(),
+                said: said.clone(),
+                details: problems.clone(),
+            });
+        }
+        let failed = (!self.failures.is_empty()).then(|| failed.into());
+        std::iter::once(Fields::new().push_if("tests", self.said()).into())
+            .chain(failed)
+            .collect()
     }
 }

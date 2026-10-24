@@ -52,6 +52,6 @@ async fn a_parallel_group_with_join_any_fails_naming_every_child_when_all_fail()
     assert_eq!(named, ["first", "second"], "{failure:?}");
     assert_eq!(
         yunta_render::failure::sentence(&failure),
-        "join: any — no child succeeded (2 failed)"
+        "no child succeeded under join: any (2 failed)"
     );
 }

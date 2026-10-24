@@ -22,7 +22,7 @@ use yunta_engine::{CloseRunError, ResolveGateError, RunError, StoreError};
 pub(crate) fn inputs(problem: &InputsProblem) -> String {
     let said = yunta_render::inputs::problem(problem);
     match problem {
-        InputsProblem::Missing { name } => format!("{said} — pass `--input {name}=...`"),
+        InputsProblem::Missing { name } => format!("{said}; pass `--input {name}=...`"),
         _ => said,
     }
 }
@@ -77,18 +77,20 @@ pub(crate) fn project_view(name: &str, source: &StoreError) -> String {
 /// records it.
 pub(crate) fn resolve_gate(error: &ResolveGateError) -> String {
     match error {
-        ResolveGateError::NotPaused => "this run isn't parked at a pause — a live process may still \
+        ResolveGateError::NotPaused => {
+            "this run isn't parked at a pause: a live process may still \
              be driving it, or it already finished"
-            .to_string(),
+                .to_string()
+        }
         ResolveGateError::NothingToResolve => "this run isn't currently waiting on a decision \
-             `resolve_gate` can answer — it's paused for a reason with no menu of options (a failed \
+             `resolve_gate` can answer: it's paused for a reason with no menu of options (a failed \
              gate node, a budget cap, an external gate with no forge)"
             .to_string(),
         ResolveGateError::UnknownOption { chosen, declared } => {
-            format!("option `{chosen}` isn't valid here — declared options: {declared}")
+            format!("option `{chosen}` isn't valid here; declared options: {declared}")
         }
         ResolveGateError::Unsaid { chosen, asks } => format!(
-            "option `{chosen}` asks \"{}\" — say it with the choice",
+            "option `{chosen}` asks \"{}\"; say it with the choice",
             yunta_render::offers::asked(asks)
         ),
         ResolveGateError::Withheld { chosen, withheld } => format!(

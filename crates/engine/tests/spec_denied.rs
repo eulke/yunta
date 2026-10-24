@@ -253,7 +253,7 @@ async fn a_task_held_to_tests_is_told_they_are_denied_and_how_to_dispute_one() {
 
     let prompt = task_prompt(&bench);
     for told in [
-        "The tests a person approved for this task are in your checkout — `tests/greet.sh` — \
+        "The tests a person approved for this task are in your checkout (`tests/greet.sh`) \
          and are not yours to change",
         "declare it on that criterion with `mcp__yunta-run__yunta_declare_deviation`, and a person decides \
          whether it is written again",

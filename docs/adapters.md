@@ -312,7 +312,7 @@ it is worth a look and stops nothing, `✗` when a run would stop on it — and
 
 ```
   ✓ claude-code  healthy (1.2.3)
-  ✗ codex        unhealthy — `codex` not found on PATH
+  ✗ codex        unhealthy: `codex` not found on PATH
 ```
 
 A config whose `runners:` names no adapter has nothing to probe, and `doctor`
@@ -322,12 +322,12 @@ and the model left for you to name:
 ```
   ✗ runners  none declared, and `lint-fix` needs one
 
-  declare a runner in .yunta/config.yaml — this machine answers for `claude-code`:
-      runners:
-        implementer:
-          - { adapter: claude-code, model: <model> }
-      defaults:
-        runner: implementer
+declare a runner in .yunta/config.yaml; this machine answers for `claude-code`:
+  runners:
+    implementer:
+      - { adapter: claude-code, model: <model> }
+  defaults:
+    runner: implementer
 ```
 
 That is a `✗` only when a workflow in the catalog has an agent node that would
@@ -369,8 +369,8 @@ runner falls back to is checked too, since a run reaches it exactly when
 the first is down.
 
 ```
-claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
-codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
+  ✓ claude-code/claude-sonnet-5 (executor, reviewer)  ok: 812 tokens
+  ✗ codex/gpt-5-codex (planner fallback)               session died: session `codex` exited with code 2 before any terminal event: url is not supported for stdio
 ```
 
 The prompt asks the session to call `yunta_submit_questions` with

@@ -239,7 +239,7 @@ fn rendered<T: Document>() -> String {
     if !T::RUN_RULES.is_empty() {
         text.push_str(
             "#\n# When it is submitted, the engine runs every criterion under `sh`, where it \
-             runs criteria — not in your shell, whose tools it may not have — and refuses \
+             runs criteria (not in your shell, whose tools it may not have), and refuses \
              the document unless:\n",
         );
         for rule in T::RUN_RULES {
@@ -257,8 +257,8 @@ fn rendered<T: Document>() -> String {
     }
     if !T::SPECIFIED_RULES.is_empty() {
         text.push_str(
-            "#\n# When it is handed over, the engine holds it to the run it belongs to — the \
-             spec the workflow writes, the questions a person answered — and refuses it \
+            "#\n# When it is handed over, the engine holds it to the run it belongs to (the \
+             spec the workflow writes, the questions a person answered), and refuses it \
              unless:\n",
         );
         for rule in T::SPECIFIED_RULES {

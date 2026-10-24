@@ -49,7 +49,7 @@ fn awaits_review(node: &NodeId, assignee: Option<&str>) -> String {
 /// assignee the gate names, and the console that answers in its place.
 fn forge_unreachable(node: &NodeId, assignee: &str) -> String {
     format!(
-        "node `{node}` wants an external gate (assignee: {assignee}) but no forge is reachable from this machine (no credentials, or none configured) — resolve it here instead"
+        "node `{node}` wants an external gate (assignee: {assignee}) but no forge is reachable from this machine (no credentials, or none configured): resolve it here instead"
     )
 }
 
@@ -57,7 +57,7 @@ fn forge_unreachable(node: &NodeId, assignee: &str) -> String {
 /// the reference its publication left, and the console that answers instead.
 fn recheck_unreachable(node: &NodeId, external_ref: &str) -> String {
     format!(
-        "node `{node}`'s external gate (published at {external_ref}) needs re-checking, but no forge is reachable from this machine — resolve it here instead"
+        "node `{node}`'s external gate (published at {external_ref}) needs re-checking, but no forge is reachable from this machine: resolve it here instead"
     )
 }
 

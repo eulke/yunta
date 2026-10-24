@@ -183,11 +183,11 @@ impl<'de> Deserialize<'de> for Isolation {
             "worktree" => Ok(Isolation::Worktree),
             "none" => Ok(Isolation::None),
             other if other == retired => Err(serde::de::Error::custom(format!(
-                "`{retired}` is no longer an isolation — write `{replacement}`, which says \
+                "`{retired}` is no longer an isolation: write `{replacement}`, which says \
                  the same thing at every level"
             ))),
             other => Err(serde::de::Error::custom(format!(
-                "unknown isolation `{other}` — expected `worktree` or `none`"
+                "unknown isolation `{other}`: expected `worktree` or `none`"
             ))),
         }
     }

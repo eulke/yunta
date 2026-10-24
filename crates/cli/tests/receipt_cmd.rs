@@ -4,7 +4,7 @@
 //! `run.dir`, the `--json` flag, refusing a non-terminal run) on top of
 //! `yunta_engine::receipt`'s own unit-tested derivation.
 
-use yunta_testkit::{handle, init_repo, run_id_from, stderr, stdout, write, yunta_in};
+use yunta_testkit::{handle, init_repo, run_id_from, stderr, stdout, unwrapped, write, yunta_in};
 
 fn bash_only_workflow() -> &'static str {
     r#"
@@ -144,9 +144,9 @@ fn receipt_refuses_a_run_that_has_not_finished() {
     let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id]);
     assert!(!receipt_out.status.success());
     assert_eq!(
-        stderr(&receipt_out).trim_end(),
+        unwrapped(&stderr(&receipt_out)),
         format!(
-            "error: run `{run_id}` hasn't reached a terminal state yet — \
+            "error: run `{run_id}` hasn't reached a terminal state yet: \
              a receipt is only generated once a run finishes; \
              `yunta status {}` shows where it is",
             handle(&run_id)

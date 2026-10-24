@@ -41,6 +41,23 @@ impl Headline {
         self
     }
 
+    /// This headline with what a list of checks under it found beside its
+    /// word: how many problems, then how many things are worth a look, each
+    /// only when there is one.
+    pub fn tally(self, problems: usize, cautions: usize) -> Self {
+        let headline = match problems {
+            0 => self,
+            problems => self.fact(crate::text::counted(problems, "problem")),
+        };
+        match cautions {
+            0 => headline,
+            cautions => headline.fact(format!(
+                "{} worth a look",
+                crate::text::counted(cautions, "thing")
+            )),
+        }
+    }
+
     /// This headline with `edge` at the line's far edge.
     pub fn edge(mut self, edge: impl Into<String>) -> Self {
         self.edge = Some(edge.into());

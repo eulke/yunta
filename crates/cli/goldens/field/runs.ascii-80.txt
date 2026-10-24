@@ -1,4 +1,4 @@
-? runs of this repository ; 2 need you ; 1 stopped by you ; 1 closed
+? runs of this repository ; 2 need you ; 1 stopped ; 1 closed
 --------------------------------------------------------------------------------
 
 asking now
@@ -7,8 +7,8 @@ asking now
 needs you, oldest first
   ? T1Y0P2  review (default)  ====..  node `lint` failed and its 0 re...  22d00h
 
-stopped by you
-  # T1Y0P3  review (default)  ====..  cancelled by user      yunta resume T1Y0P3
+stopped
+  # T1Y0P3  review (default)  ====..  interrupted by a p...  yunta resume T1Y0P3
 
   1 closed, the newest 8h00m ago
 

@@ -4,7 +4,7 @@
 //! person. Something two runs answer to is refused naming both.
 
 use serde_json::Value;
-use yunta_testkit::{handle, run_id_from, stdout, yunta_at, Checkout};
+use yunta_testkit::{handle, run_id_from, stderr, stdout, yunta_at, Checkout};
 
 const FINISHES: &str = "name: ok\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n";
 /// A build that fails at once: the run stops on a person.
@@ -96,6 +96,32 @@ fn needs_names_the_one_run_waiting_on_a_person_or_lists_them() {
 }
 
 #[test]
+fn a_person_chooses_among_the_runs_a_reference_could_mean() {
+    let checkout = checkout();
+    let first = ran(&checkout, "fails.yaml");
+    let second = ran(&checkout, "fails.yaml");
+
+    let status = yunta_at!(checkout, &["status", "needs"]);
+    assert!(!status.status.success());
+    let page = stderr(&status);
+    assert!(
+        page.starts_with("error: 2 runs of this repository need you; name one\n"),
+        "{page}"
+    );
+    // Each run is one row of the field, ending on the command that opens it.
+    for run_id in [&first, &second] {
+        let opens = format!("yunta status {}", handle(run_id));
+        assert_eq!(
+            page.lines()
+                .filter(|line| line.trim_end().ends_with(&opens))
+                .count(),
+            1,
+            "{page}"
+        );
+    }
+}
+
+#[test]
 fn an_unknown_run_suggests_the_closest_and_lists_the_commands() {
     let checkout = checkout();
     let run_id = ran(&checkout, "ok.yaml");
@@ -109,7 +135,7 @@ fn an_unknown_run_suggests_the_closest_and_lists_the_commands() {
     let said = found(&checkout, &slipped).expect_err("no run is called that");
     assert!(
         said.contains(&format!(
-            "no run is called `{slipped}` — did you mean `{called}`?"
+            "no run is called `{slipped}`; did you mean `{called}`?"
         )),
         "{said}"
     );

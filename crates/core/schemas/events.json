@@ -1706,7 +1706,7 @@
       ]
     },
     "Denial": {
-      "description": "Why a request was denied, typed. The event log keeps this value; the\nwords a reader sees are written from it where that reader is.",
+      "description": "Why a request was denied, typed. The event log keeps this value, and\nevery reader, agent or person, reads the one sentence it says.",
       "oneOf": [
         {
           "type": "object",

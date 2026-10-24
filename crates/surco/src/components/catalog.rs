@@ -108,37 +108,74 @@ fn quoting() -> Vec<Block> {
             "yunta status 7E5PH4 --node lint".to_string(),
         )),
     };
+    vec![Section {
+        mark: Some(Mark::Failed),
+        title: Line::new()
+            .push(Tone::Strong, "node `lint`")
+            .plain(": exit 101"),
+        blocks: vec![
+            evidence.into(),
+            Said(vec![
+                "error: unused import".to_string(),
+                "  --> src/lib.rs:3:5".to_string(),
+            ])
+            .into(),
+        ],
+    }
+    .into()]
+    .into_iter()
+    .chain(found())
+    .chain([named_paths()])
+    .collect()
+}
+
+/// What a check found in a file, and what a command refused: a problem
+/// pointed at in its line, a warning with no place, and a refusal.
+fn found() -> Vec<Block> {
     vec![
-        Section {
-            mark: Some(Mark::Failed),
-            title: Line::new()
-                .push(Tone::Strong, "node `lint`")
-                .plain(": exit 101"),
-            blocks: vec![
-                evidence.into(),
-                Said(vec![
-                    "error: unused import".to_string(),
-                    "  --> src/lib.rs:3:5".to_string(),
-                ])
-                .into(),
-            ],
+        Problem {
+            severity: Severity::Error,
+            said: "node `fix` references runner `implementr`, which `runners:` does not define"
+                .to_string(),
+            at: Some(Place {
+                path: ".yunta/workflows/lint-fix.yaml".to_string(),
+                line: 9,
+                col: 13,
+                source: Some("    runner: implementr".to_string()),
+                len: 10,
+            }),
         }
         .into(),
-        Paths {
-            heading: "outside the declared globs:".to_string(),
-            paths: vec![
-                PathNote {
-                    path: PathBuf::from("src/main.rs"),
-                    reason: None,
-                },
-                PathNote {
-                    path: PathBuf::from("Cargo.lock"),
-                    reason: Some("the lock file".to_string()),
-                },
-            ],
+        Problem {
+            severity: Severity::Warning,
+            said: "the program `cargo-nextest` is not on this machine's PATH".to_string(),
+            at: None,
+        }
+        .into(),
+        Refusal {
+            said: "no run is called `7E5PH5`; did you mean `7E5PH4`?".to_string(),
+            detail: Some("looked in ~/.yunta/runs".to_string()),
         }
         .into(),
     ]
+}
+
+/// The paths a failure names, each with why it is named.
+fn named_paths() -> Block {
+    Paths {
+        heading: "outside the declared globs:".to_string(),
+        paths: vec![
+            PathNote {
+                path: PathBuf::from("src/main.rs"),
+                reason: None,
+            },
+            PathNote {
+                path: PathBuf::from("Cargo.lock"),
+                reason: Some("the lock file".to_string()),
+            },
+        ],
+    }
+    .into()
 }
 
 /// The blocks a plan and a run's rows are drawn with, and how a document

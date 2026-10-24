@@ -19,7 +19,7 @@ mod rail_words;
 mod scope_words;
 mod words;
 
-use surco::text::{aside, one_line};
+use surco::text::one_line;
 use yunta_core::events::{children, findings, gates, node, run, session};
 use yunta_engine::{Happening, Moment};
 
@@ -50,9 +50,64 @@ pub(super) fn say(moment: &Moment, glyphs: Glyphs) -> Said {
         None => "run".to_string(),
     };
     let (mark, carried) = carried(&moment.happening, glyphs.sep());
-    Said {
-        mark,
-        text: aside(subject, &one_line(&carried)),
+    let text = joined(
+        &subject,
+        &one_line(&carried),
+        of_its_subject(&moment.happening),
+    );
+    Said { mark, text }
+}
+
+/// The subject and its words as one line: what the subject did or became
+/// reads after it as a sentence (`lint failed`), a remark about it after a
+/// colon (`lint: called Read`), and words that open by naming the subject
+/// name it once (`approve needs a decision`, not `approve gate `approve`
+/// needs a decision`).
+fn joined(subject: &str, carried: &str, predicate: bool) -> String {
+    if carried.is_empty() {
+        return subject.to_string();
+    }
+    if let Some(rest) = naming(subject, carried) {
+        return format!("{subject} {rest}");
+    }
+    match predicate {
+        true => format!("{subject} {carried}"),
+        false => format!("{subject}: {carried}"),
+    }
+}
+
+/// What follows the subject in words that open by naming it: `gate
+/// `approve` …` for `approve`, `run `01K…` …` for the run.
+fn naming<'a>(subject: &str, carried: &'a str) -> Option<&'a str> {
+    if subject == "run" {
+        let (_, rest) = carried.strip_prefix("run `")?.split_once("` ")?;
+        return Some(rest);
+    }
+    ["node", "gate", "loop", "task"]
+        .iter()
+        .find_map(|kind| carried.strip_prefix(format!("{kind} `{subject}` ").as_str()))
+}
+
+/// Whether the moment's words say what its subject did or became: a run's
+/// own moments, a node reaching a state, rerouted or opening its pull
+/// request, and what a gate asks and is answered. The rest are remarks
+/// about the subject.
+fn of_its_subject(happening: &Happening) -> bool {
+    match happening {
+        Happening::Run(
+            run::happening::Happening::HostSuspended { .. }
+            | run::happening::Happening::BaselineCaptured { .. }
+            | run::happening::Happening::BaselineHeld { .. },
+        ) => false,
+        Happening::Run(_) => true,
+        Happening::Node(
+            node::happening::Happening::Reached { .. }
+            | node::happening::Happening::Rerouted(_)
+            | node::happening::Happening::PullRequestOpened { .. },
+        ) => true,
+        Happening::Gates(gates::happening::Happening::Resolved(_)) => false,
+        Happening::Gates(_) => true,
+        _ => false,
     }
 }
 

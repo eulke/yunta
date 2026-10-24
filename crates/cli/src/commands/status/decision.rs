@@ -44,7 +44,7 @@ pub(crate) fn run_tree_line(tree: &Path) -> String {
     surco::text::detailed(
         "the run works in",
         &format!(
-            "{} — a node run again starts from what is there",
+            "{} (a node run again starts from what is there)",
             tree.display()
         ),
     )
@@ -240,7 +240,7 @@ mod tests {
             "{drawn:#?}"
         );
         assert!(
-            !drawn.iter().any(|line| line.contains("approve — approve")),
+            !drawn.iter().any(|line| line.contains("approve: approve")),
             "{drawn:#?}"
         );
     }

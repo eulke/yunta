@@ -86,7 +86,7 @@ fn standing_section(standing: &StandingFinding) -> Section {
             .unwrap_or_default();
         fields = fields.push_if(
             "answered",
-            format!("{}{by} — {}", answer.answer.as_str(), answer.why),
+            format!("{}{by}: {}", answer.answer.as_str(), answer.why),
         );
     }
     if let Some(proof) = &standing.proof {
@@ -115,7 +115,7 @@ fn titled(severity: FindingSeverity, title: &str) -> Line {
     let mark = mark(severity);
     Line::new()
         .push(Tone::of(mark), severity.as_str())
-        .plain(format!(" — {title}"))
+        .plain(format!(": {title}"))
 }
 
 /// The mark a severity is drawn with: a cross for what blocks, caution

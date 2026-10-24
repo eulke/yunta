@@ -40,7 +40,7 @@ fn a_group_that_failed_under_any_says_how_many_children_failed() {
     };
     assert_eq!(
         sentence(&failure),
-        "join: any — no child succeeded (2 failed)"
+        "no child succeeded under join: any (2 failed)"
     );
 }
 
@@ -51,7 +51,7 @@ fn a_child_left_with_no_terminal_event_names_the_node_and_the_policy_that_stops_
     };
     assert_eq!(
         sentence(&failure),
-        "`build` was running with no terminal event when the engine last stopped — \
+        "`build` was running with no terminal event when the engine last stopped; \
          `on_interrupt: fail_if_uncertain` refuses to guess whether it finished; verify manually \
          before resuming"
     );
@@ -177,10 +177,7 @@ fn a_gate_choice_names_the_option_the_node_it_routes_to_and_what_was_written() {
         target: node("build"),
         said: None,
     };
-    assert_eq!(
-        sentence(&bare),
-        "gate chose `retry` — re-routing to `build`"
-    );
+    assert_eq!(sentence(&bare), "gate chose `retry`, re-routing to `build`");
     let written = Failure::GateChose {
         node: yunta_core::NodeId::from("gate"),
         option: OptionId::from_static("retry"),
@@ -189,11 +186,11 @@ fn a_gate_choice_names_the_option_the_node_it_routes_to_and_what_was_written() {
     };
     assert_eq!(
         sentence(&written),
-        "gate chose `retry` — re-routing to `build`: try the other fixture"
+        "gate chose `retry`, re-routing to `build`: try the other fixture"
     );
     assert_eq!(
         headline(&written),
-        "gate chose `retry` — re-routing to `build`"
+        "gate chose `retry`, re-routing to `build`"
     );
     assert_eq!(detail(&written), vec!["try the other fixture"]);
 }
@@ -204,13 +201,13 @@ fn a_stalled_loop_and_a_loop_without_a_tasks_document_say_what_they_need() {
         sentence(&Failure::LoopStalled {
             not_ready: vec![TaskId::from("t1")],
         }),
-        "no task is ready and not all are done — blocked or failed tasks need a decision"
+        "no task is ready and not all are done: blocked or failed tasks need a decision"
     );
     assert_eq!(
         sentence(&Failure::NoTasksDocument {
             tasks_for: node("loop"),
         }),
-        "this run holds no tasks document — an earlier node declares `produces: [tasks]`, or the \
+        "this run holds no tasks document: an earlier node declares `produces: [tasks]`, or the \
          workflow declares a `type: document` input of `kind: tasks` and the run is given one"
     );
 }
@@ -222,7 +219,7 @@ fn a_loop_at_its_iteration_cap_names_the_limit_and_the_two_ways_past_it() {
             node: yunta_core::NodeId::from("loop"),
             loop_cap: 3
         }),
-        "loop `loop` exceeded `limits.max_loop_iterations` (3) — resume with an interactive surface \
+        "loop `loop` exceeded `limits.max_loop_iterations` (3); resume with an interactive surface \
          to continue past the cap or abort"
     );
 }
@@ -235,7 +232,7 @@ fn a_runner_that_does_not_resolve_says_why_it_did_not() {
     };
     assert_eq!(
         sentence(&unknown),
-        "no `runners:` entry defines runner `fast` — add it to the merged config"
+        "no `runners:` entry defines runner `fast`: add it to the merged config"
     );
     let none = Failure::RunnerUnresolved {
         runner: RunnerName::from("fast"),
@@ -248,7 +245,7 @@ fn a_runner_that_does_not_resolve_says_why_it_did_not() {
     };
     assert_eq!(
         sentence(&none),
-        "runner `fast` has no available candidate — tried adapters: mock, claude"
+        "runner `fast` has no available candidate (tried adapters: mock, claude)"
     );
 }
 
@@ -265,7 +262,7 @@ fn a_missing_capability_says_what_the_node_needs_it_for() {
     };
     assert!(missing(Some(CapabilityUse::Blackboard), None).starts_with(
         "node `implement` is in a `coordination: blackboard` group but adapter `mock` declares no \
-             `run_tools` capability — the blackboard cannot be mounted"
+             `run_tools` capability: the blackboard cannot be mounted"
     ));
     assert!(missing(
         Some(CapabilityUse::TypedArtifact {
@@ -278,7 +275,7 @@ fn a_missing_capability_says_what_the_node_needs_it_for() {
         .starts_with("node `implement` is a loop, whose task sessions read their task"));
     assert_eq!(
         missing(None, Some(AgentName::from("reviewer"))),
-        "a node requests agent `reviewer` but adapter `mock` does not declare `custom_agents` — \
+        "a node requests agent `reviewer` but adapter `mock` does not declare `custom_agents`: \
          pick a candidate on an adapter that does, or drop the agent"
     );
 }
@@ -319,7 +316,7 @@ fn a_child_nested_too_deep_names_itself_the_level_it_reaches_and_the_limit() {
             max_depth: 4,
         }),
         "creating child workflow `sub` would nest 5 levels deep but `limits.max_workflow_depth` \
-         is 4 — flatten the composition or raise the limit"
+         is 4; flatten the composition or raise the limit"
     );
 }
 
@@ -331,7 +328,7 @@ fn a_template_that_does_not_render_under_a_child_input_names_the_input() {
     };
     assert_eq!(
         sentence(&failure),
-        "child input `goal` does not render: unclosed `{{` at byte 4 — every template must \
+        "child input `goal` does not render: unclosed `{{` at byte 4: every template must \
          close with `}}`"
     );
 }
@@ -374,7 +371,7 @@ fn a_skill_the_run_does_not_hold_names_the_roots_it_searched() {
     };
     assert_eq!(
         sentence(&failure),
-        "skill `review` not found under `.yunta/skills`, `packs/x` — add the directory, fix \
+        "skill `review` not found under `.yunta/skills`, `packs/x`; add the directory, fix \
          `skills.paths` in the config, or install the pack that declares it"
     );
 }
@@ -392,7 +389,7 @@ fn an_artifact_the_run_cannot_read_says_the_object_it_lacks() {
         sentence(&failure),
         format!(
             "the tasks document: the child run cannot hand over its bytes: the run holds no \
-             object `{hash}` — an artifact names bytes that are not under `objects/`"
+             object `{hash}`: an artifact names bytes that are not under `objects/`"
         )
     );
 }
@@ -408,7 +405,7 @@ fn an_external_gate_that_publishes_what_no_node_made_names_the_artifact() {
     assert_eq!(
         sentence(&failure),
         "node `gate` publishes the artifact `report.md` with its external gate, and this run holds \
-         no such artifact — no node produced it"
+         no such artifact: no node produced it"
     );
 }
 
@@ -425,7 +422,7 @@ fn a_mount_whose_child_run_reached_no_terminal_state_names_the_artifact_and_the_
     assert_eq!(
         sentence(&failure),
         "mount of the report.md from node `a`: no linked child run of `a` reached a terminal \
-         state in this run — did this run's mode exclude it?"
+         state in this run; did this run's mode exclude it?"
     );
 }
 

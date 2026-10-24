@@ -29,7 +29,7 @@ pub(crate) fn forge_for(
         Ok(forge) => Some(Arc::new(forge)),
         Err(e) => {
             warn(format!(
-                "the forge is unavailable — {}; external gates degrade to the console",
+                "the forge is unavailable: {}; external gates degrade to the console",
                 describe(&e)
             ));
             None
@@ -59,7 +59,7 @@ pub(crate) fn refuse_unreachable_forge(
     }
     Err(CliError::msg(format!(
         "this workflow opens a pull request through `forge.github` ({}), and `{}`, the \
-         variable its token is in, is not set here — set it, then run again",
+         variable its token is in, is not set here; set it, then run again",
         github.repo, github.token_env
     )))
 }
@@ -76,20 +76,20 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> C
         .filter(|(_, workflow)| opens_a_pull_request(workflow, config))
         .map(|(name, _)| name)
         .collect();
-    let unset = format!("{named} — `{token_env}`, the variable its token is in, is not set");
+    let unset = format!("{named}: `{token_env}`, the variable its token is in, is not set");
     if opening.is_empty() {
         return check(
             Found::Caution,
             format!(
                 "{unset}; no workflow here opens a pull request, and a gate published there \
-                 asks on the console instead — export {token_env} to reach it"
+                 asks on the console instead; export {token_env} to reach it"
             ),
         );
     }
     check(
         Found::Problem,
         format!(
-            "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
+            "{unset}, and {} {} a pull request through it; export {token_env} to reach it",
             surco::text::listed(opening.iter().map(String::as_str)),
             surco::text::agreeing(opening.len(), "opens", "open"),
         ),
@@ -102,6 +102,7 @@ fn check(found: Found, said: String) -> Check {
         found,
         subject: "forge".to_string(),
         said,
+        details: Vec::new(),
     }
 }
 
@@ -141,10 +142,10 @@ pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Result<Vec<Ch
             can_push: Some(false),
         }) => check(
             Found::Problem,
-            format!("{named} — reachable, and its token cannot push there"),
+            format!("{named}: reachable, and its token cannot push there"),
         ),
-        Ok(_) => check(Found::Holds, format!("{named} — reachable")),
-        Err(error) => check(Found::Problem, format!("{named} — {}", describe(&error))),
+        Ok(_) => check(Found::Holds, format!("{named}: reachable")),
+        Err(error) => check(Found::Problem, format!("{named}: {}", describe(&error))),
     }];
     let remote = github.remote();
     match yunta_engine::git::remote_url(&ctx.cwd, remote, ctx.supervision()).await {

@@ -104,6 +104,26 @@ pub(crate) struct RunRow {
     pub(crate) asking: bool,
 }
 
+impl RunRow {
+    /// The run as a field's row draws it, named `handle`, with `edge` at
+    /// its far end.
+    pub(crate) fn line(
+        &self,
+        handle: String,
+        edge: surco::components::Edge,
+    ) -> surco::components::RunLine {
+        surco::components::RunLine {
+            standing: self.word,
+            handle,
+            workflow: self.workflow.to_string(),
+            mode: self.mode.to_string(),
+            furrow: self.furrow.clone(),
+            said: self.said.clone(),
+            edge,
+        }
+    }
+}
+
 /// A run the listing can name but not derive: its log or the manifest it
 /// froze does not read back. It is listed as itself, never dropped — a
 /// run missing from a listing is a run nobody goes looking for.

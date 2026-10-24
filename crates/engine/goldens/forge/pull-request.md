@@ -19,6 +19,6 @@ the run is still open: this is its last step
 
 **next**
 
-- `yunta verify golden` — checks this run's evidence again
+- `yunta verify golden`: checks this run's evidence again
 
 <!-- yunta run_id: run-pr-golden -->

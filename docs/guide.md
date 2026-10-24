@@ -308,7 +308,7 @@ command the config lacks and the repository answers for it, `yunta check`,
 `yunta doctor` and `yunta pack add` say what to declare:
 
 ```text
-node `lint`: the project declares no command `lint` — a run is refused until it does
+node `lint`: the project declares no command `lint`; a run is refused until it does
   detected here: declare `commands: { lint: "pnpm lint" }`
 ```
 

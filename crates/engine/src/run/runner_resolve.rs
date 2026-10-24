@@ -101,7 +101,7 @@ fn runner_failure(error: RunnerError) -> Failure {
 pub enum RunToolsSetupError {
     #[error(
         "node `{node}` is in a `coordination: blackboard` group but adapter `{adapter}` declares \
-         no `run_tools` capability — the blackboard cannot be mounted; pick a runner on an \
+         no `run_tools` capability: the blackboard cannot be mounted; pick a runner on an \
          adapter that can be a client of the per-run MCP endpoint"
     )]
     NoRunToolsCapability {
@@ -119,7 +119,7 @@ pub enum RunToolsSetupError {
     },
     #[error(
         "node `{node}` declares a `{kind}` artifact, which a session hands over \
-         through the run tools, and adapter `{adapter}` declares no `run_tools` capability — \
+         through the run tools, and adapter `{adapter}` declares no `run_tools` capability: \
          the document has no way in; pick a runner on an adapter that can be a client of the \
          per-run MCP endpoint"
     )]
@@ -140,7 +140,7 @@ pub enum RunToolsSetupError {
     },
     #[error(
         "node `{node}` is a loop, whose task sessions read their task and check their work \
-         through the run tools, and adapter `{adapter}` declares no `run_tools` capability — \
+         through the run tools, and adapter `{adapter}` declares no `run_tools` capability: \
          a session there could not learn what its task asks; pick a runner on an adapter \
          that can be a client of the per-run MCP endpoint"
     )]

@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use yunta_testkit::{git, init_repo, stderr, stdout, yunta_in};
+use yunta_testkit::{git, init_repo, stderr, stdout, unwrapped, yunta_in};
 
 fn write_pack_with_requires(dir: &Path) {
     std::fs::create_dir_all(dir.join("workflows")).unwrap();
@@ -113,7 +113,7 @@ fn doctor_names_a_retired_permissions_key_the_way_check_refuses_it() {
     let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
     assert!(!check_out.status.success(), "{}", stdout(&check_out));
     assert!(
-        stderr(&check_out).contains(&sentence),
+        unwrapped(&stderr(&check_out)).contains(&sentence),
         "check refuses the same key: {}",
         stderr(&check_out)
     );
@@ -363,7 +363,7 @@ fn check_and_run_refuse_a_pack_workflow_whose_requires_are_unmet() {
 
     let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
     assert!(!check_out.status.success(), "{}", stdout(&check_out));
-    let said = stderr(&check_out);
+    let said = unwrapped(&stderr(&check_out));
     for named in [
         "pack `acme/review-pack` requires runner `reviewer`",
         "pack `acme/review-pack` requires MCP server `internal-docs`",

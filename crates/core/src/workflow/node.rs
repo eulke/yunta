@@ -335,7 +335,7 @@ impl<'de> Deserialize<'de> for Node {
                 let retired = RETIRED_NODE_KEYS.iter().any(|(old, _)| old == key);
                 if let Some(near) = surco::text::nearest(key, valid.iter().copied()) {
                     if !retired {
-                        message.push_str(&format!("; `{key}`: did you mean `{near}`?"));
+                        message.push_str(&format!("; `{key}`: {}", surco::text::suggested(near)));
                     }
                 }
             }

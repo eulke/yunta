@@ -1220,7 +1220,7 @@ async fn a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_cl
         .map(|request| request.prompt)
         .find(|prompt| prompt.contains("task-1"))
         .expect("the task session's brief");
-    assert!(brief.contains("Your task: `task-1` — Write a1."), "{brief}");
+    assert!(brief.contains("Your task: `task-1` (Write a1)."), "{brief}");
     assert!(
         brief.contains("`mcp__yunta-run__yunta_task`")
             && brief.contains("`mcp__yunta-run__yunta_check_task`"),

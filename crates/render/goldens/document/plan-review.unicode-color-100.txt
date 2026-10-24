@@ -35,8 +35,8 @@
       ␛[2m            ␛[0m Ask for a name
 
   ␛[1mdesign␛[0m
-    `Greeter` owns the words; `main` reads the name and prints.
-    ␛[1mGreeter␛[0m in src/greet.rs␛[2m — its code is in step 1, `greet`␛[0m
+    ␛[1mGreeter␛[0m owns the words; ␛[1mmain␛[0m reads the name and prints.
+    ␛[1mGreeter␛[0m in src/greet.rs␛[2m: its code is in step 1, `greet`␛[0m
 
   ␛[1mrisks␛[0m
     ␛[33m▲␛[0m A name with a newline in it breaks the line it is printed on.
@@ -50,7 +50,7 @@
 
   ␛[1mstep 1 of 2␛[0m
 
-    ␛[1mgreet␛[0m — Greet by name
+    ␛[1mgreet␛[0m: Greet by name
       ␛[2myou will see␛[0m `hello ana` prints `hello, ana`.
       ␛[2mtouches     ␛[0m src/{greet.rs, main.rs}, tests/greet.rs
       ␛[2mkeeps       ␛[0m With no name it still greets `world`.
@@ -66,7 +66,7 @@
         ␛[2m│ ␛[0m    pub fn hello(&self) -> String;
         ␛[2m│ ␛[0m}
 
-      ␛[33m▲␛[0m tests/greet.rs — a test the spec wrote for `greet`; no session may write it
+      ␛[33m▲␛[0m tests/greet.rs: a test the spec wrote for `greet`; no session may write it
 
       ␛[2mdone when   ␛[0m the greeting names the person
       ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
@@ -80,7 +80,7 @@
 
   ␛[1mstep 2 of 2␛[0m
 
-    ␛[1mfarewell␛[0m — Say goodbye
+    ␛[1mfarewell␛[0m: Say goodbye
       ␛[2myou will see␛[0m `hello ana` prints a goodbye after the greeting.
       ␛[2mtouches     ␛[0m src/greet.rs, tests/greet.rs
       ␛[2muses        ␛[0m Greeter (from greet)

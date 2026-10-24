@@ -31,6 +31,18 @@ pub enum Protection {
 }
 
 impl Protection {
+    /// What protects a path, in the words every reader reads after the path
+    /// it names.
+    pub fn words(self) -> &'static str {
+        match self {
+            Protection::ProjectDeny => "denied to every run by `permissions.paths.deny`",
+            Protection::AgentConfig => "an agent CLI's own configuration",
+            Protection::AgentInstructions => "an instruction file, which only a person grants",
+            Protection::ApprovedTest => "a test a person approved",
+            Protection::GitRegister => "the run's git register",
+        }
+    }
+
     /// Whether a person may grant a path this reason protects. Only the
     /// instruction files: nobody grants the rest.
     pub fn person_may_grant(self) -> bool {

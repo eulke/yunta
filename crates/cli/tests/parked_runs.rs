@@ -145,8 +145,8 @@ fn closing_decision(text: &str) -> Vec<&str> {
 /// Whether `block` names every option of an exhausted re-route with what
 /// it does, and the command that chooses each, carrying the run's handle.
 fn names_every_option(block: &str, handle: &str) -> bool {
-    block.contains("retry — Re-route to `fix-lint` once more")
-        && block.contains("abort — Abort the run")
+    block.contains("retry: Re-route to `fix-lint` once more")
+        && block.contains("abort: Abort the run")
         && block.contains(&format!("yunta resolve-gate {handle} retry"))
         && block.contains(&format!("yunta resolve-gate {handle} abort"))
 }
@@ -331,10 +331,10 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         "the page says which node the decision belongs to: {text}"
     );
     assert!(
-        text.contains("retry — Run it again (attempt 2) once something outside the tree changes"),
+        text.contains("retry: Run it again (attempt 2) once something outside the tree changes"),
         "{text}"
     );
-    assert!(text.contains("abort — Abort the run"), "{text}");
+    assert!(text.contains("abort: Abort the run"), "{text}");
     for option in ["retry", "abort"] {
         assert!(
             text.contains(&format!("yunta resolve-gate {} {option}", handle(&run_id))),
@@ -447,7 +447,10 @@ fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
 
-    assert!(text.contains("budget: run spent 100 tokens"), "{text}");
+    assert!(
+        text.contains("its token budget is spent (100 tokens"),
+        "{text}"
+    );
     assert!(
         text.contains("no option answers this pause here"),
         "the absent menu is named, not silently missing: {text}"

@@ -5,7 +5,7 @@
 
 use crate::components::{
     Check, Checklist, Code, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Marked,
-    Next, Paths, Runs, Section, Table, Whole,
+    Next, Paths, Problem, Refusal, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
@@ -59,6 +59,8 @@ fn block(block: &Block, depth: usize) -> String {
         Block::Paths(paths) => self::paths(paths),
         Block::Decision(decision) => self::decision(decision),
         Block::Checklist(list) => self::checklist(list),
+        Block::Problem(problem) => self::problem(problem),
+        Block::Refusal(refusal) => self::refusal(refusal),
         Block::Next(next) => self::next(next),
         Block::Heading(title) => format!("{} {title}", "#".repeat(3 + depth)),
         Block::Title(title) => format!("# {}", title.text().trim()),
@@ -154,7 +156,7 @@ fn marked(marked: &Marked) -> String {
 fn code(code: &Code) -> String {
     let mut out = format!("`{}`", code.at);
     if let Some(what) = &code.what {
-        out.push_str(&format!(" — {what}"));
+        out.push_str(&format!(": {what}"));
     }
     if !code.lines.is_empty() {
         out.push_str(&format!(
@@ -165,7 +167,7 @@ fn code(code: &Code) -> String {
     }
     if let Some(rest) = &code.rest {
         out.push_str(&format!(
-            "\n\n{} more — {rest}",
+            "\n\n{} more: {rest}",
             crate::text::counted(code.whole - code.lines.len(), "line")
         ));
     }
@@ -246,7 +248,7 @@ fn evidence(evidence: &Evidence) -> String {
 fn paths(paths: &Paths) -> String {
     std::iter::once(paths.heading.clone())
         .chain(paths.paths.iter().map(|note| match &note.reason {
-            Some(reason) => format!("- `{}` — {reason}", note.path.display()),
+            Some(reason) => format!("- `{}` ({reason})", note.path.display()),
             None => format!("- `{}`", note.path.display()),
         }))
         .collect::<Vec<_>>()
@@ -260,7 +262,7 @@ fn decision(decision: &Decision) -> String {
         .map(|option| {
             let mut out = format!("- **{}**", option.id);
             if let Some(label) = option.said_label() {
-                out.push_str(&format!(" — {label}"));
+                out.push_str(&format!(": {label}"));
             }
             if let Some(tradeoff) = &option.tradeoff {
                 out.push_str(&format!("  \n  {tradeoff}"));
@@ -292,7 +294,14 @@ fn checklist(list: &Checklist) -> String {
                  found,
                  subject,
                  said,
-             }| { format!("- {} **{subject}** {said}", GLYPHS.mark(found.mark())) },
+                 details,
+             }| {
+                let mut row = format!("- {} **{subject}** {said}", GLYPHS.mark(found.mark()));
+                for detail in details.iter().flat_map(|detail| detail.lines()) {
+                    row.push_str(&format!("\n  - {detail}"));
+                }
+                row
+            },
         )
         .collect::<Vec<_>>()
         .join("\n")
@@ -313,7 +322,7 @@ fn next(next: &Next) -> String {
 fn steps(steps: &[(String, &'static str)]) -> String {
     steps
         .iter()
-        .map(|(command, gloss)| format!("- `{command}` — {gloss}"))
+        .map(|(command, gloss)| format!("- `{command}`: {gloss}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -344,6 +353,40 @@ fn concern(concern: &Concern) -> String {
         concern.so,
         concern.fix
     )
+}
+
+/// The problem's word in bold and what it says, then where it is and its
+/// line with the part at fault marked under it, fenced as text.
+fn problem(problem: &Problem) -> String {
+    let mut out = format!("**{}** {}", problem.severity.word(), problem.said);
+    let Some(place) = &problem.at else {
+        return out;
+    };
+    out.push_str(&format!("  \nat `{}`", place.named()));
+    if let Some((source, before, len)) = place.fault() {
+        let number = place.line.to_string();
+        let pad = " ".repeat(number.len());
+        let gutter = GLYPHS.gutter();
+        let marks = GLYPHS.fault().to_string().repeat(len);
+        let under = " ".repeat(crate::width::cell_width(&before));
+        out.push_str(&format!(
+            "\n\n```text\n{number} {gutter} {source}\n{pad} {gutter} {under}{marks}\n```"
+        ));
+    }
+    out
+}
+
+/// What a command would not do, in bold, and where it looked under it.
+fn refusal(refusal: &Refusal) -> String {
+    let said = format!(
+        "**{}** {}",
+        crate::surface::terminal::REFUSED,
+        refusal.said.replace('\n', "  \n")
+    );
+    match &refusal.detail {
+        Some(detail) => format!("{said}  \n_{detail}_"),
+        None => said,
+    }
 }
 
 fn cell(text: &str) -> String {

@@ -314,7 +314,7 @@ fn execute_kind<'a>(
         NodeKind::Gate { .. } => {
             let diagnostic = format!(
                 "node `{}` is a `kind: gate` but reached node execution, which only \
-                 dispatches sessions and checks — a gate resolves through its own \
+                 dispatches sessions and checks; a gate resolves through its own \
                  scheduler step (see this arm's own comment)",
                 node.id
             );

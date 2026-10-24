@@ -142,7 +142,9 @@ fn a_dry_run_says_which_unit_branches_it_would_keep_by_refs() {
 
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
     assert!(
-        stdout(&gc).contains("would keep the work of 1 unit branch by refs"),
+        stdout(&gc)
+            .lines()
+            .any(|l| l == "  would keep   the work of 1 unit branch by refs"),
         "{}",
         stdout(&gc)
     );
@@ -181,8 +183,16 @@ fn gc_says_what_the_checkouts_hold_and_what_it_emptied() {
 
     let said = stdout(&gc);
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
-    assert!(said.contains("emptied the build of"), "{said}");
-    assert!(said.contains("the project's checkouts:"), "{said}");
+    assert!(
+        said.lines()
+            .any(|l| l.starts_with("  emptied") && l.contains("the build of")),
+        "{said}"
+    );
+    assert!(
+        said.lines()
+            .any(|l| l.starts_with("  now") && l.contains("checkout")),
+        "the page ends on what the project's checkouts keep: {said}"
+    );
 }
 
 /// A checkout a parked run kept under its own directory, before the
@@ -238,7 +248,7 @@ fn gc_dry_run_reports_without_removing_anything() {
     let gc = yunta_in!(&repo, &home, &["gc", "--dry-run"]);
     assert!(gc.status.success());
     assert!(
-        stdout(&gc).contains("would be reclaimed"),
+        stdout(&gc).contains("would reclaim 1 run"),
         "got: {}",
         stdout(&gc)
     );
@@ -377,7 +387,7 @@ fn failed_removal_is_not_counted() {
     // Only the run gc fully reclaimed is counted; the stuck one is not,
     // even though it too is terminal and past retention.
     assert!(
-        said.contains("1 run reclaimed"),
+        said.contains("reclaimed 1 run"),
         "only the clean run counts: {said}"
     );
     // The failure is surfaced, never swallowed.
@@ -456,7 +466,7 @@ fn gc_leaves_a_paused_run_however_old_it_is() {
     let gc = yunta_in!(&repo, &home, &["gc"]);
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
     assert!(
-        stdout(&gc).contains("nothing to reclaim"),
+        stdout(&gc).contains("no run to reclaim"),
         "a non-terminal run offers nothing to reclaim: {}",
         stdout(&gc)
     );

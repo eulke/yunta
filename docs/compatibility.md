@@ -762,14 +762,14 @@ A call the engine cannot read as a call at all is answered by naming what that t
 takes instead:
 
 ```
-invalid submission — requires `document` (an object), the `tasks` document this node declares: `document` is missing or is not an object
+invalid submission: requires `document` (an object), the `tasks` document this node declares: `document` is missing or is not an object
 `notes.md` is not an artifact this node declares; it declares `tasks`
 node `plan` declares no artifacts, so there is nothing to check
 ```
 
 A run the binary could only interpret in part counts the same way on both surfaces
-that report it: `2 unknown event kinds, interpreted partially: <kind> ×<count>, …`,
-and `1 unknown event kind` for one. `yunta status` gives it a row of its own,
+that report it: ``2 event kinds this binary does not know, interpreted partially:
+`<kind>` <count> times, …``, and `1 event kind` for one. `yunta status` gives it a row of its own,
 `unread`, and so does `yunta stats`; the one line a listing's row and the JSON
 `summary` have fold it in, `·`-separated.
 
@@ -783,9 +783,10 @@ several, so a count there would put two different totals on one line. Each count
 stays with what it counts.
 
 `yunta pack add --run-tests` and `yunta pack audit` report that same tally in their
-tests section — `tests: 4 cases, 1 failed`, or `tests: 4 cases shipped, not run
-(pass --run-tests)` when nothing ran, or `tests: none shipped` when the pack ships
-no cases. Failure lines sit two spaces in under it.
+`tests` row: `4 cases, 1 failed`, or `4 cases shipped, not run (pass --run-tests)`
+when nothing ran, or `none shipped` when the pack ships no cases. Each case that
+failed is a row under it, with every problem it had on the lines beneath, as
+`yunta test` lists them.
 
 `yunta pack audit` prints a node's `prompt:` block even when the prompt file is
 empty: a blank line under the heading, an empty block that shows it is empty.

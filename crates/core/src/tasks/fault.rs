@@ -228,8 +228,8 @@ fn unexplained(decision: &str, choice: &str) -> String {
 
 fn change_without_code(at: &str) -> String {
     format!(
-        "the change at `{at}` shows no `code`; give the declarations it adds or changes — each \
-         type with its fields, each signature whole — so a person sees how the work will look"
+        "the change at `{at}` shows no `code`; give the declarations it adds or changes (each \
+         type with its fields, each signature whole), so a person sees how the work will look"
     )
 }
 
@@ -255,7 +255,7 @@ fn overlapping_scope(glob: &ScopeGlob, other: &TaskId, other_glob: &ScopeGlob) -
 
 fn changes_a_spec_test(at: &str, owner: &TaskId) -> String {
     format!(
-        "`changes` names `{at}`, a test the spec wrote for `{owner}`; no session may write it — \
+        "`changes` names `{at}`, a test the spec wrote for `{owner}`; no session may write it: \
          drop the change, or adjust the plan so the test asks for what it needs"
     )
 }
@@ -297,14 +297,14 @@ fn uses_its_own_shape(shape: &str) -> String {
 fn task_writes_its_test(at: &str, cmd: &str) -> String {
     format!(
         "`changes` names `{at}`, the test its criterion `{cmd}` runs; the spec writes a task's \
-         tests — keep the file in `scope`, out of `changes`, and name a test the spec will write"
+         tests: keep the file in `scope`, out of `changes`, and name a test the spec will write"
     )
 }
 
 fn shared_criterion(cmd: &str, owner: &TaskId) -> String {
     format!(
         "`{cmd}` also judges `{owner}`: once `{owner}` lands it passes, and this task is blocked \
-         before any work — give it a test of its own"
+         before any work; give it a test of its own"
     )
 }
 
@@ -366,7 +366,7 @@ fn change_code_misses_a_name(at: &str, names: &[String]) -> String {
     let named: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
     format!(
         "the change at `{at}` names {}, and its `code` does not show {}; give the declaration of \
-         each — its whole signature, or the type with the fields it adds",
+         each: its whole signature, or the type with the fields it adds",
         named.join(", "),
         if names.len() == 1 { "it" } else { "them" }
     )
@@ -374,8 +374,8 @@ fn change_code_misses_a_name(at: &str, names: &[String]) -> String {
 
 fn change_code_is_a_comment(at: &str) -> String {
     format!(
-        "the change at `{at}` has only a comment for its `code`; give the code it adds or changes \
-         — a comment says what the code will do, and a person decides on how it looks"
+        "the change at `{at}` has only a comment for its `code`; give the code it adds or changes: \
+         a comment says what the code will do, and a person decides on how it looks"
     )
 }
 
@@ -451,7 +451,7 @@ mod tests {
             }
             .clause(),
             "the change at `src/a.rs::add/update` names `add`, `update`, and its `code` does not \
-             show them; give the declaration of each — its whole signature, or the type with the \
+             show them; give the declaration of each: its whole signature, or the type with the \
              fields it adds"
         );
         assert_eq!(
@@ -471,7 +471,7 @@ mod tests {
             }
             .clause(),
             "`cargo test -p x` runs the project's tests outside the suite `cargo test --workspace`, \
-             so it builds them again beside the suite's build; extend the suite instead — `cargo \
+             so it builds them again beside the suite's build; extend the suite instead: `cargo \
              test --workspace <selector>`, where `<selector>` picks this task's tests"
         );
     }

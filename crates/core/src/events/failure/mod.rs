@@ -37,8 +37,9 @@ pub use exit::{
     Unanswered, STOPPED_EXIT_CODE, TAIL_LINES,
 };
 pub use records::{
-    CapabilityUse, ChildRefusal, FrozenRead, Interruption, MountError, NameProblem, ObjectProblem,
-    OwedScope, RedCheck, RequestedScope, RunnerRefusal, Timed, Unchanged, UnpassableTask,
+    skill_not_found, CapabilityUse, ChildRefusal, FrozenRead, Interruption, MountError,
+    NameProblem, ObjectProblem, OwedScope, RedCheck, RequestedScope, RunnerRefusal, Timed,
+    Unchanged, UnpassableTask,
 };
 pub use remedy::{Facts, Outlook, Precondition, Remedy, Stuck};
 pub use step::{EngineError, EngineStep};

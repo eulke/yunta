@@ -134,7 +134,7 @@ fn invariant_in_parallel(node: &NodeId, group: &NodeId) -> String {
 fn unknown_reference(field: &str, target: &NodeId, nearest: Option<&NodeId>) -> String {
     format!(
         "`{field}` names `{target}`, and no node carries that id{}",
-        surco::text::did_you_mean(target.as_str(), nearest.map(NodeId::as_str))
+        surco::text::near_miss(nearest.map(NodeId::as_str))
     )
 }
 
@@ -210,7 +210,7 @@ mod tests {
                 nearest: Some(NodeId::from("build")),
             }
             .clause(),
-            "`depends_on` names `buld`, and no node carries that id — did you mean `build`?"
+            "`depends_on` names `buld`, and no node carries that id; did you mean `build`?"
         );
         assert_eq!(
             WorkflowFault::UnknownReference {

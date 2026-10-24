@@ -442,7 +442,7 @@ nodes:
     assert_eq!(
         err.to_string(),
         format!(
-            "run `{}` hasn't reached a terminal state yet — a receipt is only generated \
+            "run `{}` hasn't reached a terminal state yet: a receipt is only generated \
              once a run finishes",
             bench.run_id
         ),
@@ -473,8 +473,8 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "3 artifact problems reported during the run: `parse` in the tasks document \u{d7}2, \
-             `no-criteria` in the tasks document \u{d7}1"
+            "3 artifact problems reported during the run: `parse` in the tasks document 2 times, \
+             `no-criteria` in the tasks document 1 time"
         ),
         "{markdown}"
     );
@@ -583,7 +583,7 @@ nodes:
         "an artifact no run holds is counted by its own code, under no kind"
     );
     assert!(
-        render_receipt_markdown(&receipt).contains("`artifact-unheld` \u{d7}1"),
+        render_receipt_markdown(&receipt).contains("`artifact-unheld` 1 time"),
         "{receipt:?}"
     );
 }
@@ -622,7 +622,7 @@ nodes:
         "a document nobody handed over is counted by its own code, under no kind"
     );
     assert!(
-        render_receipt_markdown(&receipt).contains("`artifact-undelivered` \u{d7}1"),
+        render_receipt_markdown(&receipt).contains("`artifact-undelivered` 1 time"),
         "{receipt:?}"
     );
 }
@@ -652,19 +652,16 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
     ];
     let markdown = render_receipt_markdown(&receipt);
     assert!(
-        markdown.contains("`duplicate-id` in the tasks document \u{d7}3"),
+        markdown.contains("`duplicate-id` in the tasks document 3 times"),
         "{markdown}"
     );
     assert!(
-        markdown.contains("`duplicate-id` in the findings artifact \u{d7}1"),
+        markdown.contains("`duplicate-id` in the findings artifact 1 time"),
         "{markdown}"
     );
     // A file that was never written has no content whose kind could be
     // wrong, so its count carries the code alone.
-    assert!(
-        markdown.contains("`artifact-missing` \u{d7}1"),
-        "{markdown}"
-    );
+    assert!(markdown.contains("`artifact-missing` 1 time"), "{markdown}");
 }
 
 /// The same counts as data, so a program reading the JSON receipt never

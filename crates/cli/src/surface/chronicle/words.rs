@@ -47,11 +47,11 @@ pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String
 fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
-        H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
+        H::Created { mode, base_branch } => format!("created: mode `{mode}` off {base_branch}"),
         H::Paused { pause } => yunta_render::pause::said(pause),
         H::Resumed { policies } => match policies.len() {
             0 => "resumed".to_string(),
-            n => format!("resumed — {} settled", surco::text::counted(n, "orphan")),
+            n => format!("resumed: {} settled", surco::text::counted(n, "orphan")),
         },
         H::BaselineCaptured { origin, red } => {
             return super::baseline_words::measured(origin, *red)
@@ -64,7 +64,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
             checkout.display()
         ),
         H::HostSuspended { slept } => format!(
-            "host suspended for {} — durations leave it out; new sessions wait until it has \
+            "host suspended for {}, which durations leave out; new sessions wait until it has \
              been awake {}",
             duration(*slept),
             duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
@@ -76,7 +76,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
             legacy_reason,
             evidence,
         } => detailed(
-            format!("promotion to `{to}`"),
+            format!("promoted to `{to}`"),
             &one_line(&yunta_render::outcome::promotion_reason(
                 cause.as_ref(),
                 legacy_reason.as_deref(),
@@ -128,7 +128,9 @@ fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark
             None,
             format!("{} out of scope", surco::text::counted(*violations, "path")),
         ),
-        H::PullRequestOpened { url, number } => (None, format!("pull request #{number} — {url}")),
+        H::PullRequestOpened { url, number } => {
+            (None, format!("opened pull request #{number} ({url})"))
+        }
     }
 }
 
@@ -162,7 +164,7 @@ fn criteria_checked(
         let named: Vec<String> = red
             .iter()
             .map(|red| match &red.said {
-                Some(line) => format!("`{}` exit {} — {line}", red.cmd, red.exit_code),
+                Some(line) => format!("`{}` exit {} ({line})", red.cmd, red.exit_code),
                 None => format!("`{}` exit {}", red.cmd, red.exit_code),
             })
             .collect();

@@ -10,14 +10,15 @@
 
 use std::path::Path;
 
-use surco::components::{Checklist, Fields, Found, Next};
-use surco::doc::Doc;
+use surco::components::{Checklist, Fields, Found, Furrow, Headline, Next, Said};
+use surco::doc::{Block, Doc};
+use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use yunta_engine::process::Supervision;
 
 use crate::ask::{ask_line, Console, Escape};
-use crate::error::{warn, CliError, Outcome};
+use crate::error::{CliError, Outcome};
 use crate::interrupt::Interrupt;
 use crate::surface::Diagnostics;
 
@@ -67,9 +68,9 @@ fn render_config_yaml(
     detected: &crate::detect::Detected,
 ) -> String {
     let mut out = String::new();
-    out.push_str("# Written by `yunta init` — team-shared, commit this file.\n");
+    out.push_str("# Written by `yunta init`: team-shared, commit this file.\n");
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
-    out.push_str("# config layer) — never in this file.\n\n");
+    out.push_str("# config layer), never in this file.\n\n");
     out.push_str("project:\n");
     out.push_str(&format!("  name: {project_name}\n"));
     out.push_str(&format!("  base_branch: {base_branch}\n"));
@@ -147,7 +148,7 @@ const GITIGNORE_MARKER: &str = "# added by `yunta init`";
 /// into the repo on purpose.
 fn gitignore_block() -> String {
     format!(
-        "\n{GITIGNORE_MARKER} — only matters if `paths:` ever points inside \
+        "\n{GITIGNORE_MARKER}: only matters if `paths:` ever points inside \
          this repo (defaults keep run state in ~/.yunta):\n.yunta/runs/\n\
          .yunta/worktrees/\n.yunta/*.db\n.yunta/*.db-*\n"
     )
@@ -192,20 +193,20 @@ fn mechanism_skill_content() -> String {
      declarative DAG whose nodes are mechanically verified (criteria, scope, \
      baseline) before anything is considered done, with a full audit log.\n\n\
      Before implementing something ad hoc, check whether a Yunta workflow \
-     already covers it — the catalog is never fixed at install time, so \
+     already covers it: the catalog is never fixed at install time, so \
      always look it up fresh:\n\n\
      - From a shell: `yunta list` (catalog) or `yunta list --runs` (local \
        run state).\n\
      - From an MCP-connected client: the `list_workflows` tool.\n\n\
      If a workflow covers the task, prefer `yunta run <workflow>` (or the \
-     `run_workflow` MCP tool) over reimplementing it by hand — that path \
+     `run_workflow` MCP tool) over reimplementing it by hand; that path \
      gets mechanical verification and an audit trail this one doesn't. If \
      none covers it, proceed as you normally would; nothing here requires \
      using Yunta for work it has no workflow for.\n\n\
      ## Writing a document Yunta reads\n\n\
      A tasks document, a findings artifact and a questions artifact are \
      validated strictly: a key that is not in the shape fails the node \
-     that produced it. Never guess the format — ask for it:\n\n\
+     that produced it. Never guess the format; ask for it:\n\n\
      - From a shell: `yunta schema <kind>`, or `yunta schema` to list the \
        kinds.\n\
      - From an MCP-connected client: the `document_shape` tool.\n"
@@ -223,11 +224,13 @@ fn write_mechanism_skill(repo: &Path, force: bool) -> std::io::Result<bool> {
     Ok(true)
 }
 
-fn claude_md_suggestion() -> &'static str {
-    "  This repo uses Yunta for verified workflows — before implementing\n  \
-     something ad hoc, check `yunta list` (or the `list_workflows` MCP\n  \
-     tool) for an existing verified workflow that already covers it."
-}
+/// What this repository's CLAUDE.md could say, a line at a time as a
+/// person pastes it.
+const CLAUDE_MD_SUGGESTION: [&str; 3] = [
+    "This repo uses Yunta for verified workflows. Before implementing",
+    "something ad hoc, check `yunta list` (or the `list_workflows` MCP",
+    "tool) for an existing verified workflow that already covers it.",
+];
 
 /// One setting asked for on `console`, or `default` when nobody
 /// answers.
@@ -268,7 +271,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     let config_path = repo.join(".yunta/config.yaml");
     if config_path.exists() && !force {
         return Err(CliError::msg(format!(
-            "{} already exists — pass --force to overwrite",
+            "{} already exists; pass --force to overwrite",
             config_path.display()
         )));
     }
@@ -282,7 +285,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
         false => None,
     };
     if interactive && console.is_none() {
-        warn("--interactive given but there is no terminal to ask on — using detected defaults");
+        crate::ask::no_terminal("using detected defaults");
     }
 
     let default_name = repo
@@ -310,16 +313,14 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
     let (wrote, skipped) = write_project(&repo, &config_path, config_yaml, force).await?;
 
-    crate::output::raw(&report(
-        &Wrote {
-            repo: &repo,
-            wrote: &wrote,
-            skipped: &skipped,
-            detected: &detected,
-            probed: &probed,
-        },
-        look,
-    ));
+    let init = Wrote {
+        repo: &repo,
+        wrote: &wrote,
+        skipped: &skipped,
+        detected: &detected,
+        probed: &probed,
+    };
+    crate::output::document(look, report(&init));
     Ok(Outcome::Success)
 }
 
@@ -377,15 +378,15 @@ struct Wrote<'a> {
     probed: &'a [crate::detect::ProbedAdapter],
 }
 
-/// The report `init` ends with: what it wrote and detected, as fields;
-/// each adapter this machine answers for, as a check; the line to paste
-/// into the project's CLAUDE.md; and the runner to declare, because no
-/// agent node runs until one is.
-fn report(init: &Wrote<'_>, look: &Look) -> String {
+/// The page `init` ends with: what it wrote and detected, as fields; each
+/// adapter this machine answers for, as a check; the lines to paste into
+/// the project's CLAUDE.md; and the runner to declare, because no agent
+/// node runs until one is.
+fn report(init: &Wrote<'_>) -> Doc {
     let detected = init.detected;
     let ecosystem = match &detected.ecosystem {
         Some(ecosystem) => format!(
-            "{} — wrote {}{}",
+            "{}: wrote {}{}",
             ecosystem.name,
             surco::text::counted(detected.commands.len(), "project command"),
             match detected.suite {
@@ -393,7 +394,7 @@ fn report(init: &Wrote<'_>, look: &Look) -> String {
                 None => "",
             }
         ),
-        None => "none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml) — \
+        None => "none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml); \
                  declare `commands:` and `baseline.suite` by hand"
             .to_string(),
     };
@@ -415,7 +416,7 @@ fn report(init: &Wrote<'_>, look: &Look) -> String {
                 .forge
                 .as_ref()
                 .map(|repo| {
-                    format!("github {repo}, from `origin` — its token is read from `GITHUB_TOKEN`")
+                    format!("github {repo}, from `origin`; its token is read from `GITHUB_TOKEN`")
                 })
                 .unwrap_or_default(),
         );
@@ -434,30 +435,33 @@ fn report(init: &Wrote<'_>, look: &Look) -> String {
             ),
         }
     }
-    let mut out = format!("yunta init: done in {}\n\n", init.repo.display());
-    out.push_str(&crate::render::draw(Doc::new().with(fields), look));
-    out.push('\n');
-    out.push_str(&crate::render::draw(Doc::new().with(adapters), look));
-    out.push_str(&format!(
-        "\nsuggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to \
-         that file):\n\n{}\n",
-        claude_md_suggestion()
-    ));
+    let suggestion = CLAUDE_MD_SUGGESTION.map(str::to_string).to_vec();
     // The config is written with its runners commented out: a probe
     // names an adapter and never a model, and the model is the project's
     // to choose. Until a runner is declared, no agent node can run, so
     // that is the step this ends with.
-    out.push_str("\nno runner is declared, so a workflow's agent nodes cannot run until one is.\n");
-    for line in crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed)) {
-        out.push_str(&format!("{line}\n"));
-    }
-    let next = Next {
-        steps: vec![(
-            "yunta doctor".to_string(),
-            "confirms everything above is usable",
-        )],
-    };
-    out.push('\n');
-    out.push_str(&crate::render::draw(Doc::new().with(next), look));
-    out
+    let runner = crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed));
+    let headline =
+        Headline::new(Mark::Done, "yunta init", "done").fact(format!("in {}", init.repo.display()));
+    Doc::new()
+        .with(headline)
+        .with(Furrow(Vec::new()))
+        .with(fields)
+        .with(adapters)
+        .with(Block::Heading(
+            "for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file"
+                .to_string(),
+        ))
+        .with(Said(suggestion))
+        .with(Block::Heading(
+            "no runner is declared, so a workflow's agent nodes cannot run until one is"
+                .to_string(),
+        ))
+        .with_all(runner.blocks())
+        .with(Next {
+            steps: vec![(
+                super::advice::doctor(),
+                "confirms everything above is usable",
+            )],
+        })
 }

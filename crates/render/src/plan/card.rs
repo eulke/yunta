@@ -39,7 +39,7 @@ pub(super) fn card(
             .filter(|file| file.run_by.is_empty())
             .map(|file| {
                 format!(
-                    "{} — written by the spec; none of its tests runs it",
+                    "{}: written by the spec; none of its tests runs it",
                     file.path
                 )
             })
@@ -59,7 +59,7 @@ pub(super) fn card(
         mark: None,
         title: Line::new()
             .push(Tone::Strong, task.id.as_str())
-            .plain(format!(" — {}", task.title)),
+            .plain(format!(": {}", task.title)),
         blocks,
     }
 }
@@ -192,7 +192,7 @@ fn changed(change: &Change, attached: Option<&Shape>, judged: Option<&TaskReview
         return Marked {
             mark: Mark::Caution,
             items: vec![format!(
-                "{at} — a test the spec wrote for `{}`; no session may write it",
+                "{at}: a test the spec wrote for `{}`; no session may write it",
                 denied.owner
             )],
         }

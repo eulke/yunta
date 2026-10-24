@@ -58,40 +58,37 @@ pub fn sentence(cause: &TaskCause) -> String {
 fn surprise(surprise: &Surprise) -> String {
     match surprise {
         Surprise::TrivialCriterion { cmd } => format!(
-            "criterion `{cmd}` already passes before any work — the criteria need fixing, not \
+            "criterion `{cmd}` already passes before any work: the criteria need fixing, not \
              the task"
         ),
         Surprise::BrokenGuard {
             cmd,
             proves: Some(proves),
         } => format!(
-            "guard `{cmd}` is already red before any work started — it is there to show that \
+            "guard `{cmd}` is already red before any work started: it is there to show that \
              {proves}"
         ),
         Surprise::BrokenGuard { cmd, proves: None } => {
             format!("guard `{cmd}` is already red before any work started")
         }
         Surprise::Unrunnable { cmd, exit_code } => format!(
-            "criterion `{cmd}` could not run: exit {} — the criteria need fixing, or the \
+            "criterion `{cmd}` could not run: exit {}; the criteria need fixing, or the \
              environment the engine runs them in does",
             Unanswered::exit_described(*exit_code)
         ),
     }
 }
 
-/// Each run as "`cmd` <verb> <exit code and what it means>", and the line
-/// it concluded with, in order: a person deciding about the task reads why
-/// it fails without opening what the run kept of it.
+/// Each run as "`cmd` <verb> <exit code>", the code with what it means and
+/// the line it concluded with, in order: a person deciding about the task
+/// reads why it fails without opening what the run kept of it.
 fn exits(runs: &[CriterionResult], verb: &str) -> String {
     runs.iter()
         .map(|run| {
-            text::aside(
-                format!(
-                    "`{}` {verb} {}",
-                    run.cmd,
-                    Unanswered::exit_described(run.exit_code)
-                ),
-                run.conclusion.as_deref().unwrap_or_default(),
+            format!(
+                "`{}` {verb} {}",
+                run.cmd,
+                Unanswered::exit_said(run.exit_code, run.conclusion.as_deref())
             )
         })
         .collect::<Vec<_>>()
@@ -127,7 +124,7 @@ fn departed(deviations: &NonEmpty<DeviationDeclaredPayload>) -> String {
         .iter()
         .map(|d| {
             format!(
-                "its session departs from the plan: {}: {} — {}",
+                "its session departs from the plan on {}: {}; {}",
                 d.from, d.instead, d.why
             )
         })
@@ -184,7 +181,7 @@ mod tests {
         };
         assert_eq!(
             sentence(&cause),
-            "not done after 2 attempts: `cargo test` still exits 101 — 3 failed"
+            "not done after 2 attempts: `cargo test` still exits 101 (it said `3 failed`)"
         );
     }
 
@@ -203,7 +200,7 @@ mod tests {
         };
         assert_eq!(
             sentence(&cause),
-            "criterion `true` already passes before any work — the criteria need fixing, not \
+            "criterion `true` already passes before any work: the criteria need fixing, not \
              the task\nguard `test -f seed` is already red before any work started"
         );
     }

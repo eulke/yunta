@@ -41,10 +41,10 @@ impl RunStatsPage<'_> {
         let stats = self.stats;
         let asleep = match stats.asleep.is_zero() {
             true => String::new(),
-            false => format!("{} — left out of every duration", duration(stats.asleep)),
+            false => format!("{}, left out of every duration", duration(stats.asleep)),
         };
         let fields = Fields::new()
-            .push_if("CPTV", cptv(stats, look.glyphs))
+            .push_if("task cost", cptv(stats, look.glyphs))
             .push_if("rework", rework(stats, look.glyphs))
             .push_if("cache", cache(stats, look.glyphs))
             .push_if("tokens", spent(stats))
@@ -61,8 +61,7 @@ impl RunStatsPage<'_> {
             .push_if("answers", answers(&stats.findings, stats.findings_settled))
             .push_if(
                 "unread",
-                crate::commands::unknown_kinds_note(&stats.unknown_kinds, look.glyphs)
-                    .unwrap_or_default(),
+                yunta_render::receipt::unknown_kinds(&stats.unknown_kinds).unwrap_or_default(),
             );
         let furrow = self.frame.nodes.iter().map(|node| node.standing).collect();
         Doc::new()
@@ -317,10 +316,10 @@ mod tests {
             .map(Line::text)
             .collect();
         for row in [
-            "  CPTV         500 tokens per verified task ; 1 task done",
+            "  task cost    500 tokens per verified task ; 1 task done",
             "  documents    3 accepted, 1 refused",
-            "  findings     5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing",
-            "  answers      2 given, 1 proved — 1 settled",
+            "  findings     5 posted, 1 updated, 1 withdrawn, 0 refused; 4 standing",
+            "  answers      2 given, 1 proved; 1 settled",
         ] {
             assert!(rows.iter().any(|line| line == row), "`{row}` in: {rows:?}");
         }

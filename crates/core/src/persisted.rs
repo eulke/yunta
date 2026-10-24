@@ -81,7 +81,7 @@ pub struct PersistedDoc<T> {
 pub enum PersistedError {
     #[error(
         "this `{name}` was written under schema {found}, and this binary reads up to \
-         {supported} — upgrade yunta to read it"
+         {supported}: upgrade yunta to read it"
     )]
     NewerWriter {
         name: &'static str,

@@ -23,7 +23,7 @@ pub(super) fn scope_words(happening: &scope::happening::Happening) -> String {
             &one_line(
                 &reason
                     .as_ref()
-                    .map(yunta_render::shown::denial)
+                    .map(|denial| denial.sentence())
                     .unwrap_or_default(),
             ),
         ),

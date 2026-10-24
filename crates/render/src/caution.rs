@@ -45,7 +45,7 @@ pub fn line(caution: &Caution) -> String {
 /// The declared cap sits under what history says the workflow spends at p90.
 fn budget(cap: u64, p90: f64, samples: usize) -> String {
     format!(
-        "`limits.max_tokens_per_run` ({cap}) is below this workflow's historical p90 ({} over {}) — \
+        "`limits.max_tokens_per_run` ({cap}) is below this workflow's historical p90 ({} over {}): \
          the run may pause on its budget",
         Tokens::rounded(p90).exact(),
         counted(samples, "run")
@@ -56,7 +56,7 @@ fn budget(cap: u64, p90: f64, samples: usize) -> String {
 fn parallel_scope(group: &NodeId) -> String {
     format!(
         "parallel group `{group}`: two or more children can write and don't declare scope as \
-         disjoint — they share the run's tree, so the last write wins and nothing says so; \
+         disjoint; they share the run's tree, so the last write wins and nothing says so; \
          declare `scope` on each, which gives every child a checkout of its own and its \
          writes a boundary this engine enforces"
     )
@@ -66,7 +66,7 @@ fn parallel_scope(group: &NodeId) -> String {
 fn fan_out(list: &[NodeId]) -> String {
     format!(
         "nodes {} have no dependency paths between them and can all write without declared \
-         scope — with `max_parallel_nodes` > 1 they share the run's tree at the same moment \
+         scope: with `max_parallel_nodes` > 1 they share the run's tree at the same moment \
          and the last write wins; declare `scope` on each, which gives every one a checkout \
          of its own, or chain them with `depends_on`",
         nodes(list)
@@ -77,7 +77,7 @@ fn fan_out(list: &[NodeId]) -> String {
 fn push_to_base(node: &NodeId, branch: &str) -> String {
     format!(
         "node `{node}` pushes to the base branch (`{branch}`) with no gate anywhere before it \
-         in the DAG — put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
+         in the DAG: put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
     )
 }
 
@@ -86,7 +86,7 @@ fn baseline_unread(suite: &str) -> String {
     format!(
         "config declares `baseline.suite` (`{suite}`) and no node of this workflow or of the \
          workflows it composes is a `baseline_compare`: run on its own, this workflow measures \
-         the suite before its first node and nothing reads the measurement — add the check, \
+         the suite before its first node and nothing reads the measurement; add the check, \
          or drop the suite"
     )
 }
@@ -95,7 +95,7 @@ fn baseline_unread(suite: &str) -> String {
 fn read_only_through_promotion(place: &Place, what: &PromotedRead, mode: &ModeName) -> String {
     format!(
         "{} reads {}, which mode `{mode}` holds only when a run is promoted into it from an \
-         earlier mode — a run started with `--mode {mode}` is refused for it",
+         earlier mode: a run started with `--mode {mode}` is refused for it",
         crate::place::label(place),
         promoted(what)
     )
@@ -104,15 +104,15 @@ fn read_only_through_promotion(place: &Place, what: &PromotedRead, mode: &ModeNa
 /// An `optional` node that needs nothing the project declares.
 fn optional_needs_nothing(node: &NodeId) -> String {
     format!(
-        "node `{node}` is declared `optional` and needs nothing the project declares — no \
-         command, forge or other key — so no run leaves it out; drop `optional`"
+        "node `{node}` is declared `optional` and needs nothing the project declares (no \
+         command, forge or other key), so no run leaves it out; drop `optional`"
     )
 }
 
 /// A literal command that starts a program this machine does not have.
 fn program_not_on_path(node: &NodeId, program: &str) -> String {
     format!(
-        "node `{node}` runs `{program}`, which is not on this machine's `PATH` — install it \
+        "node `{node}` runs `{program}`, which is not on this machine's `PATH`: install it \
          before the run reaches `{node}`, or it stops there"
     )
 }
@@ -133,7 +133,7 @@ fn token_cap_at_session_end(node: &NodeId) -> String {
     format!(
         "node `{node}`: `limits.max_tokens_per_run` is checked when the session ends, because \
          no candidate adapter declares `mid_session_token_cap` and so reports no usage \
-         mid-session — a session can spend past the cap before the check; use an adapter that \
+         mid-session: a session can spend past the cap before the check; use an adapter that \
          declares `mid_session_token_cap` to check the cap as the session runs"
     )
 }
@@ -180,7 +180,7 @@ pub fn missing_sentence(
     let optional = "or declare the entry `optional: true` if the node can do without it";
     match (missing, base) {
         (M::Nowhere, Some(base)) => format!(
-            "{reads}, which commit `{base}` — the one a run starts from — does not hold: \
+            "{reads}, which commit `{base}` (the one a run starts from) does not hold: \
              {stops}; commit the file first, {optional}"
         ),
         (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}; {optional}"),
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(
             line(&warning),
             "node `plan` reads `docs/architecture.md` (a `files:` context source), which commit \
-             `36096d2c0a1b` — the one a run starts from — does not hold: unless a node before it \
+             `36096d2c0a1b` (the one a run starts from) does not hold: unless a node before it \
              writes the file, `plan` stops there; commit the file first, or declare the entry \
              `optional: true` if the node can do without it"
         );
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(
             line(&push),
             "node `pr` pushes to the base branch (`main`) with no gate anywhere before it in the \
-             DAG — put a gate ahead of the push, or push to `{{run.branch}}`"
+             DAG: put a gate ahead of the push, or push to `{{run.branch}}`"
         );
     }
 }

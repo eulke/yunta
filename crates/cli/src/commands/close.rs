@@ -71,7 +71,7 @@ impl Answer for CloseAnswer {
             self.word.to_string(),
         );
         let gist = format!(
-            "closed by {} — its checkouts went back to the project, and its branch stays until \
+            "closed by {}: its checkouts went back to the project, and its branch stays until \
              `yunta gc` removes it",
             self.by
         );

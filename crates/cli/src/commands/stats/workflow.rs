@@ -47,19 +47,19 @@ impl WorkflowPage<'_> {
 /// estimates.
 fn history_lines(workflow_name: &WorkflowName, history: &[RunSummary], look: Look) -> Vec<Line> {
     let mut lines = vec![Line::new().plain(format!(
-        "workflow `{workflow_name}` — {}",
+        "workflow `{workflow_name}`: {}",
         surco::text::counted(history.len(), "run")
     ))];
 
     lines.push(Line::new());
-    lines.push(Line::new().plain("CPTV over time:"));
+    lines.push(Line::new().plain("cost per verified task over time:"));
     lines.push(Line::new().plain(cptv_line(history, look)));
 
     lines.push(Line::new());
     lines.push(Line::new().plain("modes:"));
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         lines.push(Line::new().plain(format!(
-            "{INDENT}{} {:>3} {:<4}   median CPTV {}   median tokens {}",
+            "{INDENT}{} {:>3} {:<4}   median task cost {}   median tokens {}",
             truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
             runs,
             surco::text::agreeing(runs, "run", "runs"),
@@ -133,7 +133,7 @@ fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
             Found::Caution,
             format!("criterion `{}`", c.cmd),
             format!(
-                "never red in pre-check across {} — either redundant, or mis-written",
+                "never red in pre-check across {}: either redundant, or mis-written",
                 runs(c.sample_count)
             ),
         );
@@ -143,7 +143,7 @@ fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
             Found::Caution,
             format!("node `{}`", r.node),
             format!(
-                "its re-route to `{}` never fired across {} — the flow before it is more \
+                "its re-route to `{}` never fired across {}: the flow before it is more \
                  reliable than expected",
                 r.goto,
                 runs(r.sample_count)
@@ -161,7 +161,7 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
             Found::Caution,
             format!("gate `{}`", g.node),
             format!(
-                "approved without adjustment across {} — still adding value, or become ritual?",
+                "approved without adjustment across {}: still adding value, or become ritual?",
                 surco::text::counted(g.sample_count, "resolution")
             ),
         );
@@ -171,7 +171,7 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
             Found::Caution,
             "every task",
             format!(
-                "passed on its first try across {} — the plan may be cutting too fine",
+                "passed on its first try across {}: the plan may be cutting too fine",
                 surco::text::counted(t.sample_count, "task instance")
             ),
         );
@@ -181,7 +181,7 @@ fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings)
             Found::Caution,
             format!("mode `{}`", m.name),
             format!(
-                "never chosen across {} — still worth declaring?",
+                "never chosen across {}: still worth declaring?",
                 surco::text::counted(m.runs_observed, "run")
             ),
         );

@@ -172,7 +172,7 @@ fn a_run_that_does_not_read_back_is_counted_and_listed_in_the_whole_story_by_id(
 #[test]
 fn a_stopped_run_ends_on_the_command_that_continues_it() {
     let stopped = RunRow {
-        said: "cancelled by user".to_string(),
+        said: interrupted(),
         command: Some(format!("yunta resume {}", handles(&[OLDEST])[0])),
         ..row(OLDEST, Group::Stopped, 5)
     };
@@ -203,6 +203,11 @@ fn every_row_fits_the_line_and_its_age_ends_in_one_column() {
     }
 }
 
+/// What the row of a run a person interrupted says.
+fn interrupted() -> String {
+    yunta_render::pause::sentence(&yunta_core::events::PauseReason::Cancelled)
+}
+
 /// A field with a run in every group a reader acts on.
 fn field() -> Vec<RunRow> {
     let asking = RunRow {
@@ -215,7 +220,7 @@ fn field() -> Vec<RunRow> {
         ..row(TIED_A, Group::NeedsYou, 22 * 86_400)
     };
     let stopped = RunRow {
-        said: "cancelled by user".to_string(),
+        said: interrupted(),
         command: Some("yunta resume T1Y0P3".to_string()),
         ..row(TIED_B, Group::Stopped, 18 * 86_400)
     };

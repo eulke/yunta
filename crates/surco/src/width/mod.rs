@@ -34,6 +34,10 @@ pub const LABEL_WIDTH: usize = 12;
 /// deep still leaves [`LINE_WIDTH`] most of its room for words.
 pub const INDENT: &str = "  ";
 
+/// The gap between a command a reader types and what it does, in every
+/// column of commands.
+pub const GAP: &str = "   ";
+
 /// One step of [`INDENT`] in display cells, for a caller that lays a
 /// column out by arithmetic rather than by prefixing a string — the
 /// same step, so a list whose rows are *computed* still lines up with

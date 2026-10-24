@@ -26,17 +26,17 @@ mod session;
 
 use std::collections::BTreeSet;
 
-use super::verify::{checklist, CheckRow};
+use super::verify::{checklist, tallied, CheckRow};
 use crate::context::Context;
+use crate::detect::Declaration;
 use crate::error::words;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use surco::components::{Checklist, Found, Next};
-use surco::doc::{Block, Doc};
-use surco::line::Line;
+use surco::components::{Checklist, Found, Furrow, Headline, Next};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
 use surco::look::Look;
-use surco::width::INDENT;
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
 use yunta_render::caution;
@@ -81,11 +81,32 @@ pub(crate) struct DoctorAnswer {
     session: bool,
     holds: bool,
     checks: Vec<CheckRow>,
-    steps: Vec<String>,
+    /// What to declare for each configuration a check found missing, as
+    /// the lines a person pastes.
+    #[serde(serialize_with = "pasted")]
+    steps: Vec<Declaration>,
+}
+
+/// The declarations as a document carries them: each one's lines, in order.
+fn pasted<S: serde::Serializer>(steps: &[Declaration], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(steps.iter().flat_map(Declaration::lines))
 }
 
 impl DoctorAnswer {
-    fn of(session: bool, checks: &Checklist, steps: Vec<String>) -> Self {
+    /// Whether this machine is ready to run, and how many checks stop a
+    /// run or are worth a look.
+    fn headline(&self) -> Headline {
+        let (mark, said) = match self.holds {
+            true => (Mark::Done, "ready"),
+            false => (Mark::Failed, "not ready"),
+        };
+        tallied(
+            Headline::new(mark, super::advice::doctor(), said),
+            &self.checks,
+        )
+    }
+
+    fn of(session: bool, checks: &Checklist, steps: Vec<Declaration>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             session,
@@ -98,27 +119,19 @@ impl DoctorAnswer {
 
 impl Answer for DoctorAnswer {
     fn document(&self, _look: &Look) -> Doc {
-        let mut doc = Doc::new().with(checklist(&self.checks));
-        if !self.steps.is_empty() {
-            // The lines to paste open under a blank line of their own.
-            let mut lines = vec![Line::new()];
-            lines.extend(
-                self.steps
-                    .iter()
-                    .map(|step| Line::new().plain(INDENT).plain(step.as_str())),
-            );
-            doc = doc.with(Block::Lines(lines));
-        }
-        if !self.session {
-            let next = Next {
-                steps: vec![(
-                    "yunta doctor --session".to_string(),
-                    "opens a session per binding, a prompt each",
-                )],
-            };
-            doc = doc.with(Block::Lines(vec![Line::new()])).with(next);
-        }
-        doc
+        let next = match self.session {
+            true => Vec::new(),
+            false => vec![(
+                format!("{} --session", super::advice::doctor()),
+                "opens a session per binding, a prompt each",
+            )],
+        };
+        Doc::new()
+            .with(self.headline())
+            .with(Furrow(Vec::new()))
+            .with(checklist(&self.checks))
+            .with_all(self.steps.iter().flat_map(Declaration::blocks))
+            .with(Next { steps: next })
     }
 
     fn outcome(&self) -> Outcome {
@@ -164,7 +177,7 @@ async fn checkouts(ctx: &Context, checks: &mut Checklist) {
 async fn probe_adapters(
     ctx: &Context,
     checks: &mut Checklist,
-    steps: &mut Vec<String>,
+    steps: &mut Vec<Declaration>,
 ) -> BTreeSet<AdapterId> {
     let adapters = ctx.adapters();
     if adapters.is_empty() {
@@ -191,10 +204,10 @@ async fn probe_adapters(
                 checks.push(
                     Found::Problem,
                     name.as_str(),
-                    format!("unhealthy — {diagnostic}"),
+                    format!("unhealthy: {diagnostic}"),
                 );
             }
-            Err(e) => checks.push(Found::Problem, name.as_str(), format!("unhealthy — {e}")),
+            Err(e) => checks.push(Found::Problem, name.as_str(), format!("unhealthy: {e}")),
         }
     }
     healthy
@@ -205,7 +218,7 @@ async fn probe_adapters(
 /// runner to declare with the adapters this machine answers for. A
 /// problem when a workflow in the catalog needs one — it would stop the
 /// first time it reached an agent node — and a caution otherwise.
-async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut Vec<String>) {
+async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut Vec<Declaration>) {
     let needing = needing_a_runner(ctx);
     let errors: Vec<yunta_engine::CheckError> = needing
         .iter()
@@ -215,14 +228,18 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut V
     let mut step = crate::detect::suggestions(&errors, &detected);
     if step.is_empty() {
         let probed = crate::detect::probe_known_adapters().await;
-        step = crate::detect::runner_step(&[], true, &crate::detect::healthy(&probed));
+        step = vec![crate::detect::runner_step(
+            &[],
+            true,
+            &crate::detect::healthy(&probed),
+        )];
     }
     let names: Vec<&str> = needing.iter().map(|(name, _)| name.as_str()).collect();
     match names.is_empty() {
         true => checks.push(
             Found::Caution,
             "runners",
-            "none declared — a workflow's agent nodes cannot run until one is",
+            "none declared: a workflow's agent nodes cannot run until one is",
         ),
         false => checks.push(
             Found::Problem,
@@ -277,7 +294,7 @@ fn check_installed_pack_requires(
     cwd: &std::path::Path,
     config: &yunta_core::ConfigLayer,
     checks: &mut Checklist,
-    steps: &mut Vec<String>,
+    steps: &mut Vec<Declaration>,
 ) {
     for publisher in yunta_engine::installed_publishers(cwd) {
         let packs = yunta_engine::packs_for_publisher(cwd, &publisher);
@@ -299,7 +316,7 @@ fn check_gap(
     env: &yunta_core::Env,
     gap: &yunta_engine::PackRequiresGap,
     checks: &mut Checklist,
-    steps: &mut Vec<String>,
+    steps: &mut Vec<Declaration>,
 ) {
     let pack = format!("pack {}", gap.pack);
     for runner in &gap.missing_runners {
@@ -311,15 +328,17 @@ fn check_gap(
                  defines with zero candidates"
             ),
         );
-        steps.extend([
-            format!("declare runner `{runner}` in .yunta/config.yaml:"),
-            "    runners:".to_string(),
-            format!("      {runner}:"),
-            format!(
-                "        - {{ adapter: {}, model: <model> }}",
-                super::first_built_adapter()
-            ),
-        ]);
+        steps.push(Declaration {
+            said: format!("declare runner `{runner}` in .yunta/config.yaml:"),
+            paste: vec![
+                "runners:".to_string(),
+                format!("  {runner}:"),
+                format!(
+                    "    - {{ adapter: {}, model: <model> }}",
+                    super::first_built_adapter()
+                ),
+            ],
+        });
     }
     for runner in &gap.retired_permissions {
         checks.push(
@@ -360,7 +379,7 @@ fn check_gap(
 async fn check_installed_pack_workflows(
     ctx: &Context,
     checks: &mut Checklist,
-    steps: &mut Vec<String>,
+    steps: &mut Vec<Declaration>,
 ) -> Result<(), CliError> {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();

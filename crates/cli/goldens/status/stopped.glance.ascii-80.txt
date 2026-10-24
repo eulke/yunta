@@ -1,6 +1,6 @@
 # fragua (quick) ; stopped ; for 32m10s                                   7E5PH4
 --------------------------------------------------------------------------------
-  cancelled by user.
+  interrupted by a person.
 
   progress     1 of 3 nodes done
   nodes        + 1 finished: plan

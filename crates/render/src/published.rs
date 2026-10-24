@@ -24,7 +24,7 @@ pub fn gate(request: &PublishRequest, spell: &dyn Fn(&NextStep) -> String) -> Do
         .map(|(path, what)| {
             Line::new()
                 .push(Tone::Command, path)
-                .plain(" — ")
+                .plain(": ")
                 .plain(what)
         })
         .collect();

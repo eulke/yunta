@@ -46,7 +46,7 @@ graph LR
 
 `Greeter` owns the words; `main` reads the name and prints.
 
-**Greeter** in src/greet.rs — its code is in step 1, `greet`
+**Greeter** in src/greet.rs: its code is in step 1, `greet`
 
 ### risks
 
@@ -63,14 +63,14 @@ graph LR
 
 ### step 1 of 2
 
-#### greet — Greet by name
+#### greet: Greet by name
 
 - you will see: `hello ana` prints `hello, ana`.
 - touches: src/{greet.rs, main.rs}, tests/greet.rs
 - keeps: With no name it still greets `world`.
 - checked by: nothing but the suite
 
-`src/greet.rs › Greeter` — the type that holds the name and words the greeting
+`src/greet.rs › Greeter`: the type that holds the name and words the greeting
 
 ```rust
 pub struct Greeter {
@@ -82,12 +82,12 @@ impl Greeter {
 }
 ```
 
-- ▲ tests/greet.rs — a test the spec wrote for `greet`; no session may write it
+- ▲ tests/greet.rs: a test the spec wrote for `greet`; no session may write it
 
 - done when: the greeting names the person  
   `$ cargo test --test greet`
 
-`tests/greet.rs` — the spec wrote it, and this command runs it
+`tests/greet.rs`: the spec wrote it, and this command runs it
 
 ```rust
 #[test]
@@ -99,7 +99,7 @@ fn the_greeting_names_the_person() {
 
 ### step 2 of 2
 
-#### farewell — Say goodbye
+#### farewell: Say goodbye
 
 - you will see: `hello ana` prints a goodbye after the greeting.
 - touches: src/greet.rs, tests/greet.rs
@@ -109,7 +109,7 @@ fn the_greeting_names_the_person() {
   `$ cargo test --test greet_alone`
 - after: greet
 
-`src/greet.rs › Greeter › bye` — the goodbye, beside the greeting
+`src/greet.rs › Greeter › bye`: the goodbye, beside the greeting
 
 - done when: the program also says goodbye  
   `$ cargo test --test greet`  

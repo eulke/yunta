@@ -485,7 +485,9 @@ mod tests {
             region.show(&frame(RunPhase::Running, nodes), &RUN, false);
             let drawn = rows(&term);
             assert!(
-                drawn.last().is_some_and(|row| row.starts_with("nodes ")),
+                drawn
+                    .last()
+                    .is_some_and(|row| row.contains(" of ") && row.contains(" done")),
                 "{drawn:?}"
             );
         }

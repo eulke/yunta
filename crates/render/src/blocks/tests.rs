@@ -56,15 +56,15 @@ fn a_decision_prints_one_command_per_option_with_the_handle() {
 fn a_quoted_refusal_matches_its_golden() {
     let text = "name: fix\nnodes:\n  - id: lint\n    kind: bash\n    run: { command: lnt }\n  - id: fix\n    kind: prompt\n    prompt: p\n    runner: implementr\n";
     let at = |line, col, len| Some(yunta_core::yaml::Location { line, col, len });
-    let problems = [
+    let problems = vec![
         (
-            "node `lint`: it runs the project's command `lnt`, and the config declares none — \
+            "node `lint`: it runs the project's command `lnt`, and the config declares none; \
              did you mean `lint`?"
                 .to_string(),
             at(5, 21, 3),
         ),
         (
-            "node `fix` references runner `implementr`, which `runners:` does not define — \
+            "node `fix` references runner `implementr`, which `runners:` does not define; \
              did you mean `implementer`?"
                 .to_string(),
             at(9, 13, 10),
@@ -73,6 +73,12 @@ fn a_quoted_refusal_matches_its_golden() {
     ];
     assert_golden(
         &goldens().join("quoted-refusal.txt"),
-        &super::diagnostic::located("wf.yaml", &problems, "wf.yaml", Some(text)),
+        &super::diagnostic::plain(
+            "wf.yaml",
+            problems
+                .into_iter()
+                .map(|(said, at)| super::diagnostic::located(said, at, "wf.yaml", Some(text)))
+                .collect(),
+        ),
     );
 }

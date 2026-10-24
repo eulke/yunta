@@ -60,7 +60,7 @@ impl SpecFault {
             ),
             Self::SpecTestRunsNoSpecFile { cmd } => format!(
                 "`{cmd}` runs none of the files this spec writes, so it judges the task by tests \
-                 the task writes itself; run a file of the spec — and if no test can observe the \
+                 the task writes itself; run a file of the spec, and if no test can observe the \
                  change through what the plan declares, give the task no spec and say so"
             ),
             Self::OutsideTheSuite { command, suite } => {
@@ -102,7 +102,7 @@ mod tests {
             }
             .clause(),
             "`pytest tests/a.py` runs the project's tests outside the suite `pytest -q`, so it \
-             builds them again beside the suite's build; extend the suite instead — `pytest -q \
+             builds them again beside the suite's build; extend the suite instead: `pytest -q \
              <selector>`, where `<selector>` picks this task's tests"
         );
     }

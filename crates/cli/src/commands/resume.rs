@@ -15,7 +15,6 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use surco::look::Look;
-use surco::words::Standing;
 use yunta_adapters::MOCK_SESSION_PREFIX;
 use yunta_core::events::{EventPayload, PauseReason, SessionEvent, StoredEvent};
 use yunta_core::{Clock, Manifest, RunId};
@@ -180,10 +179,9 @@ async fn waited_out_reset(
 /// recorded for the pause, which names the node and the instant.
 fn waiting_line(run_id: &RunId, reason: &PauseReason) -> String {
     format!(
-        "run {}: {} — {}",
+        "run {}: {}",
         run_id.handle(),
-        Standing::Waiting,
-        yunta_render::pause::sentence(reason)
+        yunta_render::pause::said(reason)
     )
 }
 
@@ -287,7 +285,7 @@ mod tests {
         let line = waiting_line(&run_id, &reason);
         assert!(
             line.starts_with(&format!(
-                "run {}: waiting — node `build` waits for its limit to reset at ",
+                "run {}: waiting: node `build` waits for its limit to reset at ",
                 run_id.handle()
             )),
             "{line}"

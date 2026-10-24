@@ -50,7 +50,7 @@ pub fn detail(cause: &FindingCause) -> String {
         FindingCause::ScopeDenied { denial, asked, .. } => scope_detail(denial, asked.as_ref()),
         FindingCause::FenceBreached { adapter, paths } => fence_detail(adapter, paths),
         FindingCause::ReviewComment { body, .. } => body.clone(),
-        FindingCause::Unprovable { flaw } => format!("{} — {}", flaw.so(), flaw.fix()),
+        FindingCause::Unprovable { flaw } => format!("{}: {}", flaw.so(), flaw.fix()),
         FindingCause::ArtifactsUnverified {
             unchecked,
             verified,
@@ -59,7 +59,7 @@ pub fn detail(cause: &FindingCause) -> String {
             format!("nothing outside this invocation can see its process tree: {report}")
         }
         FindingCause::CleanupSkipped => "the run's tree is not a linked git worktree, so \
-             removing it would delete a primary checkout — nothing was touched"
+             removing it would delete a primary checkout; nothing was touched"
             .to_string(),
         FindingCause::CleanupFailed { what, report } => cleanup_detail(*what, report),
         FindingCause::DistillFailed { step } => distill_detail(*step),
@@ -85,10 +85,10 @@ fn asker_named(asker: &ScopeAsker) -> String {
 
 /// Why a scope request was refused, and what it asked for when the session asked.
 fn scope_detail(denial: &Denial, asked: Option<&AskedScope>) -> String {
-    let words = crate::shown::denial(denial);
+    let words = denial.sentence();
     match asked {
         Some(asked) => format!(
-            "{words} — paths asked for: {}; agent's stated reason: {}",
+            "{words}; paths asked for: {}; agent's stated reason: {}",
             listed_globs(&asked.paths),
             stated_reason(asked.reason.as_deref())
         ),
@@ -113,7 +113,7 @@ fn fence_detail(adapter: &AdapterId, paths: &[PathBuf]) -> String {
 fn unverified_detail(unchecked: usize, verified: usize) -> String {
     format!(
         "left unchecked: {} of this run, named by `artifact_written` before a run kept the \
-         bytes of its artifacts under `{OBJECTS_DIR}/` — no object answers for such an \
+         bytes of its artifacts under `{OBJECTS_DIR}/`: no object answers for such an \
          artifact, and none ever did; verified: {} the log accepted",
         text::counted(unchecked, "artifact"),
         text::counted(verified, "artifact"),

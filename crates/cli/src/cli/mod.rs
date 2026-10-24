@@ -14,7 +14,7 @@ use crate::error::{CliError, Outcome};
 use crate::graph;
 use crate::output::Mode;
 
-/// Yunta — a deterministic workflow engine for code agents.
+/// Yunta: a deterministic workflow engine for code agents.
 #[derive(Parser)]
 #[command(name = "yunta", version, about)]
 pub struct Cli {
@@ -94,19 +94,19 @@ enum Command {
         mode: Option<ModeName>,
         /// Prints the run id and nothing else: no progress, and no
         /// closing block. The verdict travels in the exit code. A
-        /// diagnostic and the budget warning are printed either way —
+        /// diagnostic and the budget warning are printed either way:
         /// quiet is about progress, not about problems.
         #[arg(long, conflicts_with = "json")]
         quiet: bool,
         /// Creates the run, then hands it off to a detached `yunta
-        /// resume` child and returns immediately with the run id — the
+        /// resume` child and returns immediately with the run id; the
         /// workflow keeps running independent of this invocation (the
         /// same thing `run_workflow` triggers internally so the MCP
         /// control plane never blocks for a run's duration).
         #[arg(long)]
         detach: bool,
         /// Prints the run's outcome as one versioned JSON document
-        /// instead of the human progress and closing block — the same
+        /// instead of the human progress and closing block: the same
         /// DTO the MCP control plane returns.
         #[arg(long)]
         json: bool,
@@ -116,7 +116,7 @@ enum Command {
         #[command(flatten)]
         run: RunArg,
         /// Prints the derived state as one versioned JSON document
-        /// instead of the human view — the same DTO the control plane's
+        /// instead of the human view: the same DTO the control plane's
         /// `workflow_status` returns.
         #[arg(long, conflicts_with_all = ["full", "dig"])]
         json: bool,
@@ -138,7 +138,7 @@ enum Command {
         /// Prints the run id and nothing else, the same way `run` does.
         #[arg(long, conflicts_with = "json")]
         quiet: bool,
-        /// Prints the run's outcome as one versioned JSON document —
+        /// Prints the run's outcome as one versioned JSON document:
         /// the same document `run --json` prints, because the two
         /// commands execute the same thing.
         #[arg(long)]
@@ -146,8 +146,8 @@ enum Command {
     },
     /// Answer the decision a parked run waits on.
     ///
-    /// Answers a paused run's gate decision from a separate process — no
-    /// live surface attached to the run itself. Records the decision
+    /// Answers a paused run's gate decision from a separate process, with
+    /// no live surface attached to the run itself. Records the decision
     /// on the log and hands the run to a detached
     /// resume that applies it: exhausted re-routes (retry/abort/promote)
     /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
@@ -160,7 +160,7 @@ enum Command {
         option: Option<OptionId>,
         /// Who's answering, for the audit trail
         /// (`gate_resolved.resolved_by`). Omitted, the decision is recorded
-        /// as `unverified:$USER` — an ambient identity, not a claimed one.
+        /// as `unverified:$USER`, an ambient identity, not a claimed one.
         #[arg(long)]
         by: Option<Responder>,
         /// Free-form context alongside the choice.
@@ -229,13 +229,12 @@ enum Command {
     },
     /// Check adapters, git, the forge and packs.
     ///
-    /// Health-checks every adapter this project's `runners:` names —
+    /// Health-checks every adapter this project's `runners:` names:
     /// binary present, version compatible, auth valid.
     Doctor {
-        /// Also opens one real session per binding any runner names —
-        /// the smallest run there is, through the same machinery a
-        /// workflow uses, run tools mounted — and reports how each one
-        /// ended. Spends one prompt per binding.
+        /// Also opens one real session per binding any runner names (the
+        /// smallest run there is, through the same machinery a workflow
+        /// uses, run tools mounted) and reports how each one ended. Spends one prompt per binding.
         #[arg(long)]
         session: bool,
         /// Prints the report as one versioned JSON document instead of the
@@ -247,7 +246,7 @@ enum Command {
     ///
     /// Runs the control-plane MCP server over stdio: `document_shape`,
     /// `list_workflows`, `run_workflow`, `workflow_status`,
-    /// `resume_run`, `resolve_gate`, `answer_questions` — none of which
+    /// `resume_run`, `resolve_gate`, `answer_questions`, none of which
     /// ever blocks for a run's own duration. Not a daemon: exits when
     /// the client closes stdin, and no run's own life depends on this
     /// process staying up.
@@ -263,14 +262,14 @@ enum Command {
     },
     /// Draw a workflow's graph as Mermaid or DOT.
     ///
-    /// Renders a workflow's DAG as Mermaid or DOT (`--format`) —
+    /// Renders a workflow's DAG as Mermaid or DOT (`--format`),
     /// optionally annotated with a run's derived state.
     Graph {
         /// Path to the workflow YAML file, or a catalog name. Omitted
         /// with `--run`, which draws the workflow that run froze.
         workflow: Option<PathBuf>,
         /// Draw the workflow this run froze, each node annotated with
-        /// the state its own log derives — named as any command names a
+        /// the state its own log derives, named as any command names a
         /// run.
         #[arg(long)]
         run: Option<RunRef>,
@@ -350,10 +349,10 @@ enum Command {
     },
     /// Answer an agent CLI's hook.
     ///
-    /// What an agent's CLI runs while it works — before it writes, among
-    /// other moments: reads the call on stdin, asks the engine of the
+    /// What an agent's CLI runs while it works (before it writes, among
+    /// other moments): reads the call on stdin, asks the engine of the
     /// session it belongs to, and answers in that CLI's own shape.
-    /// Hidden because no person invokes it — a session's own CLI does,
+    /// Hidden because no person invokes it: a session's own CLI does,
     /// and the adapter that opened the session is what put the command
     /// there.
     #[command(name = yunta_core::rail::SUBCOMMAND, hide = true)]
@@ -370,7 +369,7 @@ enum Command {
     Schema {
         /// Which document: `tasks`, `findings`, `questions` or `answers`.
         kind: Option<String>,
-        /// Emits the JSON Schema instead of the annotated example — what
+        /// Emits the JSON Schema instead of the annotated example: what
         /// an editor's language server validates against.
         #[arg(long)]
         json: bool,
@@ -389,7 +388,7 @@ enum Command {
     /// Writes `.yunta/workflows/<name>.yaml` from a commented schema
     /// skeleton and runs `check` on it.
     New {
-        /// The workflow's name — becomes `.yunta/workflows/<name>.yaml`.
+        /// The workflow's name; it becomes `.yunta/workflows/<name>.yaml`.
         name: String,
         /// Which skeleton to start from: one-node, lint-fix or tasks.
         #[arg(long)]
@@ -441,7 +440,7 @@ enum PackAction {
     Add {
         source: String,
         /// Confirms installing a pack that ships executors (executable
-        /// code, not just declarative YAML) — required whenever the
+        /// code, not just declarative YAML), required whenever the
         /// pack's `declares.executors` is non-empty; review the audit
         /// this command prints first.
         #[arg(long)]
@@ -457,7 +456,7 @@ enum PackAction {
         /// `publisher/name`.
         pack: PackRef,
         r#ref: String,
-        /// Confirms updating to a ref that declares executors — same
+        /// Confirms updating to a ref that declares executors, the same
         /// gate as `add`: a new ref is where new executable code first
         /// appears. `permissions.packs.executors: deny` refuses
         /// regardless; `allow` skips the confirmation.
@@ -481,7 +480,7 @@ enum PackAction {
     List,
     /// Full static inventory of an installed pack: every
     /// command, context source, per-node permission, required agent,
-    /// mcp server, executor, and each workflow's full prompt text —
+    /// mcp server, executor, and each workflow's full prompt text,
     /// plus whether the pack ships tests and whether they pass.
     /// `add` runs this automatically before vendoring; this is the
     /// on-demand form.

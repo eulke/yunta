@@ -5,23 +5,21 @@
 
 use std::path::Path;
 
-use surco::look::Look;
-use surco::width::INDENT;
+use surco::components::Said;
+use surco::doc::Block;
 use yunta_core::{ConfigKey, NodeId, PackManifest, Workflow};
 
 use crate::context::Context;
 use crate::detect::Detected;
 use crate::error::CliError;
-use crate::output::{blank, say};
 
-/// Prints what `manifest`'s workflows, vendored at `pack_dir`, need and
-/// the project lacks; nothing when they need nothing.
-pub(crate) async fn report(
+/// What `manifest`'s workflows, vendored at `pack_dir`, need and the
+/// project lacks, as the blocks a page draws; none when they need nothing.
+pub(crate) async fn blocks(
     ctx: &Context,
     pack_dir: &Path,
     manifest: &PackManifest,
-    look: &Look,
-) -> Result<(), CliError> {
+) -> Result<Vec<Block>, CliError> {
     let detected = Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
     let mut lines: Vec<String> = Vec::new();
     for declared in &manifest.contents.workflows {
@@ -35,17 +33,12 @@ pub(crate) async fn report(
         }
     }
     if lines.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    blank();
-    say(
-        look,
-        format!("{} needs from this project:", manifest.reference()),
-    );
-    for line in lines {
-        say(look, format!("{INDENT}{line}"));
-    }
-    Ok(())
+    Ok(vec![
+        Block::Heading("needs from this project".to_string()),
+        Said(lines).into(),
+    ])
 }
 
 /// One line per key `workflow` needs and `config` leaves unset — saying
@@ -67,7 +60,7 @@ fn needs(
             false => "a run is refused until it does",
         };
         lines.push(format!(
-            "node `{node}`: the project declares {} — {fate}",
+            "node `{node}`: the project declares {}; {fate}",
             key.undeclared()
         ));
         if let Some(suggestion) = detected.suggestion(&key) {

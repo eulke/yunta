@@ -22,7 +22,7 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
         state["summary"]
             .as_str()
             .unwrap_or_default()
-            .contains("needs you — node `lint` failed"),
+            .contains("needs you: node `lint` failed"),
         "{state:#}"
     );
     assert!(

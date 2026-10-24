@@ -81,16 +81,16 @@ fn pack_add_reports_what_the_pack_needs_with_what_it_detected() {
     let said = stdout(&out);
     let needs: Vec<&str> = said
         .lines()
-        .skip_while(|l| *l != "acme/lint-pack needs from this project:")
+        .skip_while(|l| *l != "needs from this project")
         .take(5)
         .collect();
     assert_eq!(
         needs,
         [
-            "acme/lint-pack needs from this project:",
-            "  node `lint`: the project declares no command `lint` — a run is refused until it does",
+            "needs from this project",
+            "  node `lint`: the project declares no command `lint`; a run is refused until it does",
             "    detected here: declare `commands: { lint: \"pnpm lint\" }`",
-            "  node `types`: the project declares no command `typecheck` — a run leaves the node out until it does",
+            "  node `types`: the project declares no command `typecheck`; a run leaves the node out until it does",
             "    detected here: declare `commands: { typecheck: \"pnpm typecheck\" }`",
         ],
         "{said}"

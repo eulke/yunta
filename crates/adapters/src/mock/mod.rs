@@ -374,7 +374,7 @@ impl MockAdapter {
                     adapter: ID.clone(),
                     message: format!(
                         "fixture exhausted: {}, none left unconsumed and matching this \
-                         request — add a session to the fixture for every session the run \
+                         request; add a session to the fixture for every session the run \
                          opens",
                         surco::text::counted(self.fixture.sessions.len(), "scripted session"),
                     ),
@@ -413,7 +413,7 @@ impl MockAdapter {
                 adapter: ID.clone(),
                 message: format!(
                     "fixture ambiguous: {} unconsumed scripts with different needles match \
-                     this request's prompt (`match_prompt_contains`: {}) — make the needles \
+                     this request's prompt (`match_prompt_contains`: {}); make the needles \
                      tell them apart",
                     matching.len(),
                     needles.join(", ")

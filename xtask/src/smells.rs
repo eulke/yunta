@@ -28,6 +28,7 @@ mod references;
 mod scan;
 mod shape;
 mod sites;
+mod strings;
 mod thresholds;
 
 use std::collections::BTreeMap;
@@ -37,10 +38,8 @@ use yunta_core::durable::{self, Durability};
 use corpus::{crate_src_dirs, crate_test_dirs, is_test_source, rs_files, Corpus};
 use disk::{count_engine_fs_outside_runtime, count_sync_fs_in_async, discarded_results};
 use scan::blanked_lines;
-use shape::{
-    functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
-    production_only,
-};
+use shape::{functions_over, production_only};
+use strings::{in_glyphs, production_lines, string_counts};
 use thresholds::numeric_consts_without_reason;
 
 /// Where the committed baseline lives, next to this crate.
@@ -132,54 +131,6 @@ fn code_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
     );
 }
 
-/// The counters over the text a production string carries: its spacing, its
-/// plurals and the values it formats with `Debug`.
-fn string_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
-    // A run of spaces inside a message is a `\` continuation that went
-    // missing: the reader gets the source's indentation in the text.
-    counts.insert(
-        "space_runs_in_prod_strings".to_string(),
-        corpus
-            .prod
-            .iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| has_inner_space_run(line))
-            .count(),
-    );
-    // A count hedged with `(s)` while its number stands beside it: the
-    // message says `3 file(s)` where it knows to say `3 files`.
-    counts.insert(
-        "parenthesized_plural_in_prod_strings".to_string(),
-        corpus
-            .prod
-            .iter()
-            .flat_map(|text| text.lines())
-            .filter(|line| has_parenthesized_plural(line))
-            .count(),
-    );
-    // A value formatted with `Debug` in text a reader is told. Counted over
-    // the crates that ship: a test-support crate talks to the one who wrote
-    // the code.
-    counts.insert(
-        "debug_format_reaching_reader".to_string(),
-        corpus
-            .src
-            .iter()
-            .filter(|path| {
-                let shown = path.to_string_lossy();
-                !shown.contains("crates/testkit") && !is_test_source(path)
-            })
-            .map(|path| read_corpus(path))
-            .map(|text| {
-                production_only(&text)
-                    .lines()
-                    .filter(|line| has_debug_format(line))
-                    .count()
-            })
-            .sum(),
-    );
-}
-
 /// The counters over the text a reader is shown: the glyphs a line is drawn
 /// with, a ledger's fold, and the words and tense the repository states.
 fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
@@ -189,20 +140,9 @@ fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize
     // have printed what that terminal can draw.
     counts.insert(
         "separator_literal_outside_glyphs".to_string(),
-        corpus
-            .drawn
-            .iter()
-            .filter(|path| !path.ends_with("surco/src/glyphs.rs") && !is_test_source(path))
-            .map(|path| read_corpus(path))
-            .map(|text| {
-                production_only(&text)
-                    .lines()
-                    .filter(|line| {
-                        !line.trim_start().starts_with("//") && line.contains(['·', '↪'])
-                    })
-                    .count()
-            })
-            .sum(),
+        production_lines(&corpus.drawn, in_glyphs, |line| {
+            !line.trim_start().starts_with("//") && line.contains(['·', '↪'])
+        }),
     );
     // A `_ =>` inside a ledger's fold is a kind that derives nothing with
     // nothing saying so: the arm exists, the reader sees no diagnostic, and
@@ -426,6 +366,7 @@ mod tests {
         "reason_built_by_format",
         "run_tool_named_outside_vocabulary",
         "separator_literal_outside_glyphs",
+        "dash_in_prod_strings",
         "sleep_outside_mock_latency",
         "src_files_over_500_lines",
         "prod_fns_over_100_lines",

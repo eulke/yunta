@@ -87,7 +87,7 @@ impl Reading {
         // invisible to them should know that is what they are doing.
         if !open.manifest.unknown.is_empty() {
             note(format!(
-                "this run's manifest carries {} this binary does not know: {} — a newer yunta \
+                "this run's manifest carries {} this binary does not know ({}): a newer yunta \
                  wrote it, and what it recorded there is not read here",
                 surco::text::counted(open.manifest.unknown.len(), "key"),
                 open.manifest.unknown_keys().join(", ")

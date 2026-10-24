@@ -65,7 +65,7 @@ pub(crate) fn runner_step(
     roles: &[RunnerName],
     needs_default: bool,
     healthy: &[AdapterId],
-) -> Vec<String> {
+) -> super::Declaration {
     let proposed = [RunnerName::from_static(PROPOSED_RUNNER)];
     let roles = match roles.is_empty() {
         true => &proposed[..],
@@ -87,21 +87,19 @@ pub(crate) fn runner_step(
             ),
         ),
     };
-    let mut lines = vec![format!(
-        "declare a runner in .yunta/config.yaml — {where_from}:"
-    )];
-    lines.push("    runners:".to_string());
+    let mut paste = vec!["runners:".to_string()];
     for role in roles {
-        lines.push(format!("      {role}:"));
-        lines.push(format!(
-            "        - {{ adapter: {adapter}, model: <model> }}"
-        ));
+        paste.push(format!("  {role}:"));
+        paste.push(format!("    - {{ adapter: {adapter}, model: <model> }}"));
     }
     if let (true, Some(first)) = (needs_default, roles.first()) {
-        lines.push("    defaults:".to_string());
-        lines.push(format!("      runner: {first}"));
+        paste.push("defaults:".to_string());
+        paste.push(format!("  runner: {first}"));
     }
-    lines
+    super::Declaration {
+        said: format!("declare a runner in .yunta/config.yaml; {where_from}:"),
+        paste,
+    }
 }
 
 #[cfg(test)]
@@ -114,16 +112,20 @@ mod tests {
             AdapterId::from_static("claude-code"),
             AdapterId::from_static("codex"),
         ];
+        let step = runner_step(&[], true, &healthy);
         assert_eq!(
-            runner_step(&[], true, &healthy),
+            step.said,
+            "declare a runner in .yunta/config.yaml; this machine answers for `claude-code`, \
+             `codex`:"
+        );
+        assert_eq!(
+            step.paste,
             vec![
-                "declare a runner in .yunta/config.yaml — this machine answers for \
-                 `claude-code`, `codex`:",
-                "    runners:",
-                "      implementer:",
-                "        - { adapter: claude-code, model: <model> }",
-                "    defaults:",
-                "      runner: implementer",
+                "runners:",
+                "  implementer:",
+                "    - { adapter: claude-code, model: <model> }",
+                "defaults:",
+                "  runner: implementer",
             ]
         );
     }
@@ -134,8 +136,9 @@ mod tests {
             &[RunnerName::from_static("planner")],
             false,
             &[AdapterId::from_static("codex")],
-        );
-        assert!(lines.contains(&"      planner:".to_string()), "{lines:?}");
+        )
+        .paste;
+        assert!(lines.contains(&"  planner:".to_string()), "{lines:?}");
         assert!(
             !lines.iter().any(|line| line.contains("defaults")),
             "a node that names its runner needs no default: {lines:?}"
@@ -144,8 +147,11 @@ mod tests {
 
     #[test]
     fn with_no_adapter_answering_the_step_says_so_and_leaves_it_to_fill() {
-        let lines = runner_step(&[], false, &[]);
-        assert!(lines[0].contains("no adapter CLI answered"), "{lines:?}");
-        assert!(lines.iter().any(|line| line.contains("adapter: <adapter>")));
+        let step = runner_step(&[], false, &[]);
+        assert!(step.said.contains("no adapter CLI answered"), "{step:?}");
+        assert!(step
+            .paste
+            .iter()
+            .any(|line| line.contains("adapter: <adapter>")));
     }
 }

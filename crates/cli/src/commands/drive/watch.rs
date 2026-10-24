@@ -113,7 +113,7 @@ fn announce(diagnostics: Diagnostics, cancel: CancellationToken) -> JoinHandle<(
     tokio::spawn(async move {
         cancel.cancelled().await;
         diagnostics
-            .raise("interrupt received — stopping the run (sessions get interrupt, then kill)")
+            .raise("interrupt received: stopping the run (sessions get interrupt, then kill)")
             .await;
     })
 }

@@ -66,10 +66,9 @@ impl Answer for VerifyAnswer {
             true => (Mark::Done, "intact"),
             false => (Mark::Failed, "broken"),
         };
-        let headline = Headline::new(
-            mark,
-            format!("run {}", self.run_id.handle()),
-            said.to_string(),
+        let headline = tallied(
+            Headline::new(mark, format!("run {}", self.run_id.handle()), said),
+            &self.checks,
         );
         Doc::new().with(headline).with(checklist(&self.checks))
     }
@@ -80,6 +79,13 @@ impl Answer for VerifyAnswer {
             false => Outcome::Reported,
         }
     }
+}
+
+/// `headline` with how many of `checks` are problems and how many are
+/// worth a look.
+pub(crate) fn tallied(headline: Headline, checks: &[CheckRow]) -> Headline {
+    let count = |found: Found| checks.iter().filter(|check| check.found == found).count();
+    headline.tally(count(Found::Problem), count(Found::Caution))
 }
 
 /// One check as a document carries it: what it found, what it checked,
@@ -127,17 +133,14 @@ fn chain(run_id: &RunId, storage: &Storage, checks: &mut Checklist) -> Result<()
         ChainVerification::Intact { events } => checks.push(
             Found::Holds,
             "chain",
-            format!(
-                "intact — {} verified",
-                surco::text::counted(events, "event")
-            ),
+            format!("intact: {} verified", surco::text::counted(events, "event")),
         ),
         // A broken chain is the `broken` reading of the run: the log can
         // no longer be trusted from this point on.
         ChainVerification::Broken { seq, detail } => checks.push(
             Found::Problem,
             "chain",
-            format!("broken at seq {seq} — {detail}"),
+            format!("broken at seq {seq}: {detail}"),
         ),
     }
     Ok(())
@@ -156,7 +159,7 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage, checks: &mut 
             Found::Caution,
             "objects",
             format!(
-                "not checked — no run directory under {} (or the default state root), so the \
+                "not checked: no run directory under {} (or the default state root), so the \
                  bytes its log names are not here to read",
                 ctx.project.runs_root.display()
             ),
@@ -173,7 +176,7 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage, checks: &mut 
                 Found::Problem,
                 "objects",
                 format!(
-                    "not checked — the log does not read back as events, so nothing names \
+                    "not checked: the log does not read back as events, so nothing names \
                      them: {error}"
                 ),
             );
@@ -191,7 +194,7 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
             Found::Holds,
             "objects",
             format!(
-                "intact — {} verified",
+                "intact: {} verified",
                 surco::text::counted(integrity.verified, "artifact")
             ),
         ),
@@ -200,7 +203,7 @@ fn report(integrity: &ArtifactIntegrity, checks: &mut Checklist) {
                 Found::Problem,
                 "objects",
                 format!(
-                    "broken — {} of {} are not the bytes the run accepted",
+                    "broken: {} of {} are not the bytes the run accepted",
                     integrity.faults.len(),
                     surco::text::counted(integrity.verified + integrity.faults.len(), "artifact")
                 ),
@@ -248,11 +251,11 @@ mod tests {
     #[test]
     fn a_rebuilt_checklist_draws_as_the_one_it_came_from() {
         let mut checks = Checklist::default();
-        checks.push(Found::Holds, "chain", "intact — 3 events verified");
+        checks.push(Found::Holds, "chain", "intact: 3 events verified");
         checks.push(
             Found::Problem,
             "objects",
-            "broken — 1 of 2 are not the bytes the run accepted",
+            "broken: 1 of 2 are not the bytes the run accepted",
         );
         let rows: Vec<CheckRow> = checks.checks().map(CheckRow::of).collect();
         let look = Look::plain();

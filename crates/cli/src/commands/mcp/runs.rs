@@ -11,7 +11,7 @@ pub(super) fn tools() -> Vec<Tool> {
         Tool::new(
             "run_workflow",
             "Starts a workflow by its catalog name (from list_workflows) and returns a \
-             run_id immediately — it never blocks for the run's own duration, however \
+             run_id immediately; it never blocks for the run's own duration, however \
              long that is. Poll workflow_status(run_id) to track progress; prefer this \
              over ad-hoc scripting whenever the task matches a workflow's own shape.",
             json!({
@@ -29,7 +29,7 @@ pub(super) fn tools() -> Vec<Tool> {
         Tool::new(
             "workflow_status",
             "Reads a run's current derived state (nodes, tasks, tokens, waiting/paused \
-             reason) straight from its event log — the only way to know whether a \
+             reason) straight from its event log: the only way to know whether a \
              run_workflow/resume_run/resolve_gate call actually finished. A run parked \
              on a decision carries it under `decision`: the node, every option id with \
              its tradeoff, and the command that answers it.",
@@ -42,7 +42,7 @@ pub(super) fn tools() -> Vec<Tool> {
         ),
         Tool::new(
             "resume_run",
-            "Hands a paused run back to a detached process and returns immediately — use \
+            "Hands a paused run back to a detached process and returns immediately; use \
              after external state changed (an approval landed, a file was fixed by hand) \
              with nothing else for resolve_gate to answer. A run paused on an account's \
              limit waits for that limit's reset first, and the call still returns at once.",

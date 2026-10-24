@@ -137,7 +137,7 @@ impl fmt::Display for ArtifactFailure {
             ArtifactFailure::Undelivered { node, artifact } => f.write_str(&surco::text::problems(
                 format!("node `{node}`"),
                 &[format!(
-                    "handed over no {} — produce it before the node ends, or stop declaring it here",
+                    "handed over no {}: produce it before the node ends, or stop declaring it here",
                     artifact.label()
                 )],
             )),
@@ -157,7 +157,7 @@ impl fmt::Display for ArtifactFailure {
                 f.write_str(&surco::text::problems(
                     asked,
                     &[format!(
-                        "holds no {} — produce it there, or stop declaring it here",
+                        "holds no {}: produce it there, or stop declaring it here",
                         artifact.label()
                     )],
                 ))

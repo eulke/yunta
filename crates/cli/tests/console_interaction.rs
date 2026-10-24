@@ -12,7 +12,6 @@
 
 use std::path::Path;
 
-use surco::text::indent;
 use yunta_core::events::{EventPayload, GateEvent, GateResolvedPayload, HumanChoice};
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
 
@@ -96,6 +95,15 @@ fn run_dir(root: &Path) -> Option<std::path::PathBuf> {
         .map(|run| run.path())
 }
 
+/// `questions` nested under the fixture's key, every line twelve spaces in.
+fn nested(questions: &str) -> String {
+    questions
+        .lines()
+        .map(|line| format!("{}{line}", " ".repeat(12)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A run of [`ASKING`] on a terminal, its node having produced
 /// `questions`.
 fn asking(root: &Path, questions: &str) -> Terminal {
@@ -104,7 +112,7 @@ fn asking(root: &Path, questions: &str) -> Terminal {
         .workflow("wf", ASKING)
         .file(
             "fixture.yaml",
-            &HANDED_THEM_OVER.replace("QUESTIONS", &indent(questions, &" ".repeat(12))),
+            &HANDED_THEM_OVER.replace("QUESTIONS", &nested(questions)),
         )
         .committed();
     let (repo, home) = (checkout.repo, checkout.home);
@@ -320,7 +328,7 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
     let happened = drawn
         .find("re-routes to `fix` are exhausted")
         .expect("a decision opens with the account of what raised it");
-    let options = drawn.find("retry — ").unwrap_or_default();
+    let options = drawn.find("retry: ").unwrap_or_default();
     assert!(
         happened < options,
         "what happened is read before what to do about it, not after it:\n{drawn}"

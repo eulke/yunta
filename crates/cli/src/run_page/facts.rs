@@ -19,7 +19,6 @@ use yunta_core::Isolation;
 use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation};
 
 use super::{caution_row, RunPage, Scope};
-use crate::commands::unknown_kinds_note;
 use crate::render::counter;
 
 /// How many of the run's longest nodes the `slowest` row names. Enough to
@@ -62,7 +61,7 @@ impl RunPage<'_> {
         }
         fields = fields.push_if(
             "unread",
-            unknown_kinds_note(&self.frame.unknown_kinds, glyphs).unwrap_or_default(),
+            yunta_render::receipt::unknown_kinds(&self.frame.unknown_kinds).unwrap_or_default(),
         );
         if self.depth.reaches(Depth::Dig) {
             fields = fields.push_if("id", self.run_id.to_string()).push_if(
@@ -188,7 +187,7 @@ impl RunPage<'_> {
             .summary()
             .map(|(times, slept)| {
                 format!(
-                    "suspended {} for {} in all — durations leave it out",
+                    "suspended {} for {} in all, which durations leave out",
                     counted(times, "time"),
                     duration(slept)
                 )

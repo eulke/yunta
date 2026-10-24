@@ -28,7 +28,7 @@ fn a_pack_path_that_leaves_its_pack_is_refused_before_the_run_exists() {
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "pack"]);
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
-    let said = format!("{}{}", stdout(&run), stderr(&run));
+    let said = unwrapped(&format!("{}{}", stdout(&run), stderr(&run)));
     assert!(
         !run.status.success()
             && said.contains(

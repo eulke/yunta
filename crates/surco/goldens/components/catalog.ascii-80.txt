@@ -25,11 +25,23 @@ what it found
     error: unused import
       --> src/lib.rs:3:5
 
+  error  node `fix` references runner `implementr`, which `runners:` does not
+         define
+   --> .yunta/workflows/lint-fix.yaml:9:13
+    |
+  9 |     runner: implementr
+    |             ^^^^^^^^^^
+
+  warning  the program `cargo-nextest` is not on this machine's PATH
+
+error: no run is called `7E5PH5`; did you mean `7E5PH4`?
+  looked in ~/.yunta/runs
+
   outside the declared globs:
     src/main.rs
-    Cargo.lock — the lock file
+    Cargo.lock (the lock file)
 
-  A change **in Markdown**, with `code`.
+  A change in Markdown, with `code`.
 
   - an item
 
@@ -51,7 +63,7 @@ what it found
 
   a line a page composed itself
 
-  approve — builds the plan
+  approve: builds the plan
     the four tasks run in three steps
     yunta resolve-gate 7E5PH4 approve
   adjust

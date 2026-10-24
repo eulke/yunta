@@ -94,7 +94,7 @@ impl Code {
             lines.push(Line::new().plain(under.as_str()).push(
                 Tone::Muted,
                 format!(
-                    "{} more — {rest}",
+                    "{} more: {rest}",
                     crate::text::counted(self.whole - self.lines.len(), "line")
                 ),
             ));
@@ -120,7 +120,7 @@ impl Paths {
                     .plain(indent(2))
                     .plain(note.path.display().to_string());
                 match &note.reason {
-                    Some(reason) => line.plain(" — ").plain(reason.as_str()),
+                    Some(reason) => line.plain(format!(" ({reason})")),
                     None => line,
                 }
             }))

@@ -128,7 +128,7 @@ fn a_markdown_document_shown_is_titled_by_its_first_heading() {
     let headed = read("# Global pack installation\n\nA pack installs for the user.\n");
     assert_eq!(
         headed.lines().next(),
-        Some("Global pack installation — brief.md of `brief`"),
+        Some("Global pack installation: brief.md of `brief`"),
         "{headed}"
     );
     assert!(

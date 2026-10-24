@@ -131,33 +131,33 @@ impl fmt::Display for ConfigKey {
         match self {
             ConfigKey::BaselineSuite => f.write_str(
                 "`baseline_compare` has nothing to compare against: the config declares no \
-                 `baseline.suite`, so nothing is measured before the first node — declare one",
+                 `baseline.suite`, so nothing is measured before the first node; declare one",
             ),
             ConfigKey::Coverage => f.write_str(
-                "`coverage_gate` has nothing to measure: the config declares no `coverage` — \
+                "`coverage_gate` has nothing to measure: the config declares no `coverage`; \
                  declare `coverage.cmd` and `coverage.threshold`",
             ),
             ConfigKey::Executor { executor } => write!(
                 f,
-                "executor `{executor}` is not registered — declare it under `skills.executors`"
+                "executor `{executor}` is not registered: declare it under `skills.executors`"
             ),
             ConfigKey::Runner => f.write_str(
                 "it opens a session and names no runner, and the config declares no \
-                 `defaults.runner` — name a `runner:` on the node, or declare `defaults.runner`",
+                 `defaults.runner`: name a `runner:` on the node, or declare `defaults.runner`",
             ),
             ConfigKey::Command { command } => write!(
                 f,
-                "it runs the project's command `{command}`, and the config declares none — \
+                "it runs the project's command `{command}`, and the config declares none: \
                  declare what this project runs for it under `commands.{command}`"
             ),
             ConfigKey::Forge => f.write_str(
                 "it opens a pull request through the project's forge, and the config declares \
-                 no `forge` — declare `forge.github` with the repository and the variable its \
+                 no `forge`: declare `forge.github` with the repository and the variable its \
                  token is in",
             ),
             ConfigKey::RunBranch => f.write_str(
                 "it pushes the run's own branch, and a run under `defaults.isolation: none` \
-                 works in a person's checkout and has none — run with `isolation: worktree`",
+                 works in a person's checkout and has none: run with `isolation: worktree`",
             ),
         }
     }

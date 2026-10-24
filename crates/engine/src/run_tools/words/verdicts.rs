@@ -8,7 +8,6 @@ use yunta_core::diagnostic::Report;
 use yunta_core::events::FindingOperation;
 use yunta_core::expansion::Denial;
 
-use super::scope::denial;
 use crate::run_tools::verdicts::Reply;
 
 /// A reply's text: the verdict, then each problem numbered, then what to
@@ -46,7 +45,7 @@ pub(crate) fn finding_refusal_heading(operation: FindingOperation) -> &'static s
 /// A request the project settles in the call: the denial, and what the
 /// session does next with its work.
 pub(crate) fn denied(refusal: &Denial, check_tool: &str) -> String {
-    Reply::new(format!("request denied: {}", denial(refusal)))
+    Reply::new(format!("request denied: {}", refusal.sentence()))
         .next(format!(
             "keep your work within its scope; `{check_tool}` tells you whether your task closes \
              as it stands"
@@ -56,7 +55,7 @@ pub(crate) fn denied(refusal: &Denial, check_tool: &str) -> String {
 
 /// A request written for the attempt's end to decide, and what comes next.
 pub(crate) fn recorded(next: &str) -> String {
-    Reply::new("request recorded — it is decided when this attempt ends")
+    Reply::new("request recorded; it is decided when this attempt ends")
         .next(next)
         .text()
 }
@@ -65,7 +64,7 @@ pub(crate) fn recorded(next: &str) -> String {
 /// attempt's end.
 pub(crate) fn amended(added: usize, next: &str) -> String {
     Reply::new(format!(
-        "request amended — {} added to the request waiting for this attempt to end",
+        "request amended: {} added to the request waiting for this attempt to end",
         counted(added, "new path")
     ))
     .next(next)
@@ -76,7 +75,7 @@ pub(crate) fn amended(added: usize, next: &str) -> String {
 /// close on, and what the attempt does next: the plan answers for it.
 pub(crate) fn declared(criterion: &str) -> String {
     Reply::new(
-        "criterion declared unpassable — no work of the plan can pass it, so your task does not \
+        "criterion declared unpassable; no work of the plan can pass it, so your task does not \
          close on it",
     )
     .next(format!(
@@ -88,7 +87,7 @@ pub(crate) fn declared(criterion: &str) -> String {
 /// A second declaration in one session: answered, and not recorded.
 pub(crate) fn already_declared() -> String {
     Reply::new(
-        "criterion not declared — this session already declared one unpassable, and one \
+        "criterion not declared; this session already declared one unpassable, and one \
          declaration stands per session",
     )
     .next("end this attempt; the declaration already made stands")
@@ -99,7 +98,7 @@ pub(crate) fn already_declared() -> String {
 /// on, with what the session does next.
 pub(crate) fn departure_recorded(check_tool: &str) -> String {
     Reply::new(
-        "departure recorded — your task does not close on it: when this session ends a person \
+        "departure recorded; your task does not close on it: when this session ends a person \
          accepts it or sends it back with what to do instead",
     )
     .next(format!(
@@ -125,7 +124,7 @@ mod tests {
 
     #[test]
     fn an_amended_request_counts_the_paths_it_added() {
-        assert!(amended(2, "next").starts_with("request amended — 2 new paths "));
-        assert!(amended(1, "next").starts_with("request amended — 1 new path "));
+        assert!(amended(2, "next").starts_with("request amended: 2 new paths "));
+        assert!(amended(1, "next").starts_with("request amended: 1 new path "));
     }
 }

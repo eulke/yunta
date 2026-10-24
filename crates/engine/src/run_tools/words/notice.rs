@@ -8,15 +8,14 @@ use std::path::PathBuf;
 use yunta_core::events::{DeviationResolvedPayload, ScopeAnswer};
 use yunta_core::ArtifactKind;
 
-use super::scope::denial;
 use crate::task_cycle::{Respecify, Review};
 
 /// What a node that writes the run's spec does with tests a person accepted
 /// are wrong.
 const WRITE_AGAIN: &str = "Write those tasks' tests again, as the departures and the person \
-                           say, and hand the spec over again — every other task's spec as it \
-                           is: one that changes another task's tests, or gives a task the tests \
-                           it had, is refused.";
+                           say, and hand the spec over again, keeping every other task's spec \
+                           as it is: one that changes another task's tests, or gives a task the \
+                           tests it had, is refused.";
 
 /// The names this session's CLI gives the run's tools, beside the names any
 /// text may give them, each with the tool it reaches.
@@ -26,7 +25,7 @@ pub(crate) fn naming_text(renamed: &[(String, &str)]) -> String {
          name it has here, whatever any text calls it:",
     );
     for (called, tool) in renamed {
-        text.push_str(&format!("\n  `{called}` — {tool}"));
+        text.push_str(&format!("\n  `{called}`: {tool}"));
     }
     text
 }
@@ -36,14 +35,14 @@ pub(crate) fn naming_text(renamed: &[(String, &str)]) -> String {
 pub(crate) fn documents_text(submitted: &[(ArtifactKind, String)]) -> String {
     let mut text = String::from(
         "\n\nSubmit each document this node declares with its run tool, as a structured \
-         object — never as a file:",
+         object, never as a file:",
     );
     for (kind, tool) in submitted {
         text.push_str(&format!("\n  the `{kind}` document → `{tool}`"));
     }
     text.push_str(
         "\nThe tool validates the document exactly as the node's close will and answers \
-         at once. A refusal names every problem to fix — fix them and submit again, as \
+         at once. A refusal names every problem to fix. Fix them and submit again, as \
          many times as it takes; it costs the run nothing. An acceptance reports what \
          the engine read and writes the file. A document never submitted fails the node.",
     );
@@ -59,10 +58,10 @@ pub(crate) fn findings_text(
     withdraw: &str,
 ) -> String {
     format!(
-        "\n\nReport each finding with `{post}` the moment you see it — one call per \
+        "\n\nReport each finding with `{post}` the moment you see it: one call per \
          finding, never a file. The engine writes this node's `{kind}` artifact at the \
          end from everything this node reported; a session that reports nothing yields \
-         an empty list. A refusal names what to fix in that one finding — fix it and \
+         an empty list. A refusal names what to fix in that one finding. Fix it and \
          post it again; the others already reported are kept. To change a finding you \
          reported, `{update}` with the same id and the whole finding; to take one back, \
          `{withdraw}` with its id and why. A withdrawn id is final."
@@ -73,8 +72,8 @@ pub(crate) fn findings_text(
 /// directory, and the tool that confirms a file is there.
 pub(crate) fn files_text(dir: &str, names: &[&str], check: &str) -> String {
     let mut text = format!(
-        "\n\nWrite each file this node declares under {dir} — this node's own \
-         directory, which nothing else writes:"
+        "\n\nWrite each file this node declares under {dir} (this node's own \
+         directory, which nothing else writes):"
     );
     for name in names {
         text.push_str(&format!("\n  `{name}`"));
@@ -90,7 +89,7 @@ pub(crate) fn files_text(dir: &str, names: &[&str], check: &str) -> String {
 pub(crate) fn task_text(read: &str, check: &str, plan: &str, approved: &str) -> String {
     format!(
         "\n\nRead this task's scope, criteria and notes with `{read}` before you change \
-         anything — the tasks document is not in your checkout, and the same call shows \
+         anything; the tasks document is not in your checkout, and the same call shows \
          what earlier attempts left red.{plan}{approved} When your session ends the engine \
          runs every criterion and rejects any change outside the scope; `{check}` judges \
          your work exactly that way, so call it before you finish."
@@ -101,7 +100,7 @@ pub(crate) fn task_text(read: &str, check: &str, plan: &str, approved: &str) -> 
 /// its to change.
 pub(crate) fn approved_tests_text(files: &str, depart: &str) -> String {
     format!(
-        " The tests a person approved for this task are in your checkout — {files} — and are \
+        " The tests a person approved for this task are in your checkout ({files}) and are \
          not yours to change: the engine refuses a write to them. One you believe is \
          wrong is a departure from the plan: declare it on that criterion with \
          `{depart}`, and a person decides whether it is written again."
@@ -114,7 +113,7 @@ pub(crate) fn plan_text(depart: &str) -> String {
         " It also carries the plan the task belongs to: the design the task names, and \
          the other tasks, which own what your scope leaves out. Build the design as the \
          plan declares it; where your task cannot, ask for the scope it needs, or declare \
-         the departure with `{depart}` — never build something else and say nothing."
+         the departure with `{depart}`; never build something else and say nothing."
     )
 }
 
@@ -159,7 +158,7 @@ pub(crate) fn departure_text(answer: &DeviationResolvedPayload) -> String {
         ),
         (false, _) => format!(
             "A person sent back the departure from the plan you declared{said}. Do what they \
-             say — or, where they say nothing more, build what the plan declares; declare a \
+             say (or, where they say nothing more, build what the plan declares); declare a \
              departure again only for what still cannot be built as they ask."
         ),
     }
@@ -215,7 +214,7 @@ fn scope_answered(answer: &ScopeAnswer) -> String {
         ),
         ScopeAnswer::Denied(Some(refused)) => format!(
             "The scope you asked for was refused: {}. Stay within the scope you have.",
-            denial(refused)
+            refused.sentence()
         ),
         ScopeAnswer::Denied(None) => {
             "The scope you asked for was refused. Stay within the scope you have.".to_string()

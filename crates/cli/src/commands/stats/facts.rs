@@ -17,7 +17,7 @@ pub(super) fn cptv(stats: &RunStats, glyphs: Glyphs) -> String {
             glyphs.sep(),
             surco::text::counted(stats.tasks_done, "task done")
         ),
-        None => "n/a — no task is done, so no cost per verified task".to_string(),
+        None => "n/a: no task is done, so no cost per verified task".to_string(),
     }
 }
 
@@ -44,7 +44,7 @@ pub(super) fn cache(stats: &RunStats, glyphs: Glyphs) -> String {
             "{} cached tokens per input token",
             Ratio(rate).reads(glyphs.times())
         ),
-        None if stats.total_tokens.total() > 0 => "n/a — the adapter never reported it".to_string(),
+        None if stats.total_tokens.total() > 0 => "n/a: the adapter never reported it".to_string(),
         None => String::new(),
     }
 }
@@ -83,7 +83,7 @@ pub(super) fn findings(activity: &yunta_engine::FindingActivity, effective: u64)
         return String::new();
     }
     format!(
-        "{} posted, {} updated, {} withdrawn, {} refused — {effective} standing",
+        "{} posted, {} updated, {} withdrawn, {} refused; {effective} standing",
         activity.posted, activity.updated, activity.withdrawn, activity.refused,
     )
 }
@@ -94,7 +94,7 @@ pub(super) fn answers(activity: &yunta_engine::FindingActivity, settled: u64) ->
         return String::new();
     }
     format!(
-        "{} given, {} proved — {settled} settled",
+        "{} given, {} proved; {settled} settled",
         activity.answered, activity.proved
     )
 }

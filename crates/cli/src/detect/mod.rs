@@ -15,11 +15,52 @@ mod remote;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use surco::components::{Prose, Said};
+use surco::doc::Block;
 use yunta_core::{AdapterId, CommandName, ConfigKey, GitHubRepo, RunnerName};
 use yunta_engine::process::Supervision;
 
 pub(crate) use adapters::{healthy, probe_known_adapters, runner_step, ProbedAdapter};
 pub(crate) use ecosystems::Ecosystem;
+
+/// What this project could declare, as a person is told it: the sentence
+/// that says what, and the lines to paste when the sentence does not carry
+/// them itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Declaration {
+    pub(crate) said: String,
+    pub(crate) paste: Vec<String>,
+}
+
+impl Declaration {
+    /// A declaration its sentence says whole.
+    fn said(said: String) -> Self {
+        Declaration {
+            said,
+            paste: Vec::new(),
+        }
+    }
+
+    /// The blocks a page draws it with: the sentence as the heading the
+    /// lines to paste hang from, or as prose when there is nothing to paste.
+    pub(crate) fn blocks(&self) -> Vec<Block> {
+        match self.paste.is_empty() {
+            true => vec![Prose(self.said.clone()).into()],
+            false => vec![
+                Block::Heading(self.said.clone()),
+                Said(self.paste.clone()).into(),
+            ],
+        }
+    }
+
+    /// As plain text says it: the sentence, then each line to paste one
+    /// step in.
+    pub(crate) fn lines(&self) -> Vec<String> {
+        std::iter::once(self.said.clone())
+            .chain(self.paste.iter().map(|line| format!("  {line}")))
+            .collect()
+    }
+}
 
 /// What one repository was found to have.
 #[derive(Debug, Default, PartialEq)]
@@ -105,8 +146,11 @@ impl Detected {
 
 /// What this repository answers for each key `errors` says a workflow
 /// needs and the config lacks, each once, in the order they are named.
-pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detected) -> Vec<String> {
-    let mut said: Vec<String> = Vec::new();
+pub(crate) fn suggestions(
+    errors: &[yunta_engine::CheckError],
+    detected: &Detected,
+) -> Vec<Declaration> {
+    let mut said: Vec<Declaration> = Vec::new();
     for error in errors {
         let key = match error {
             yunta_engine::CheckError::Unset { key, .. } => key.clone(),
@@ -114,15 +158,16 @@ pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detect
             _ => continue,
         };
         if let Some(line) = detected.suggestion(&key) {
-            if !said.contains(&line) {
-                said.push(line);
+            let declaration = Declaration::said(line);
+            if !said.contains(&declaration) {
+                said.push(declaration);
             }
         }
     }
     let roles = runners_wanted(errors);
     let needs_default = default_wanted(errors);
     if !roles.is_empty() || needs_default {
-        said.extend(runner_step(&roles, needs_default, &detected.adapters));
+        said.push(runner_step(&roles, needs_default, &detected.adapters));
     }
     said
 }

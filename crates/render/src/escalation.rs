@@ -12,6 +12,7 @@ use yunta_core::events::{
 };
 use yunta_core::expansion::{Precheck, Waiting};
 use yunta_core::listed_globs;
+use yunta_core::protected::Protection;
 use yunta_core::shown::withheld_because;
 
 use crate::blocks::{departure_facts, stuck_words};
@@ -98,11 +99,10 @@ fn waiting(wait: &ScopeWait) -> String {
     match wait.because {
         Waiting::ModeAsk => "the loop's scope mode is `ask`, so a person grants scope".to_string(),
         Waiting::SharedWithBatch => "another task of the batch may write these paths".to_string(),
-        Waiting::CapExhausted { granted, cap } => format!(
-            "{granted}/{cap} {} used",
-            text::agreeing(cap as usize, "grant", "grants")
-        ),
-        Waiting::Instructions => "an instruction file, which only a person grants".to_string(),
+        Waiting::CapExhausted { granted, cap } => {
+            format!("{granted} of {} used", text::counted(cap as usize, "grant"))
+        }
+        Waiting::Instructions => Protection::AgentInstructions.words().to_string(),
         Waiting::Person => "a node's own request, which a person answers".to_string(),
     }
 }
@@ -131,7 +131,7 @@ fn withheld_facts(escalation: &GateWaitingPayload) -> Vec<Fact> {
         .map(|withheld| {
             Fact::labelled(
                 "withheld",
-                format!("`{}` — {}", withheld.option, because(withheld)),
+                format!("`{}`, because {}", withheld.option, because(withheld)),
             )
         })
         .collect()
@@ -209,8 +209,8 @@ mod tests {
         assert_eq!(
             sentence(&budget),
             format!(
-                "run `{RUN}` exhausted its token budget — limits.max_tokens_per_run: 400; total \
-                 input+output tokens derived from the event log: 500"
+                "run `{RUN}` exhausted its token budget (limits.max_tokens_per_run: 400; total \
+                 input+output tokens derived from the event log: 500)"
             )
         );
     }
@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(evidence(&gate), vec!["assignee: lead"]);
         assert_eq!(
             sentence(&gate),
-            "gate `approve` needs a decision — assignee: lead"
+            "gate `approve` needs a decision (assignee: lead)"
         );
     }
 
@@ -332,8 +332,8 @@ mod tests {
             evidence(&approve.into_payload()),
             vec![
                 "assignee: lead",
-                "withheld: `continue` — the plan cannot be proven as it is written: the spec's \
-                 test of `T001`, `test -f a.txt`, runs none of the files the spec wrote",
+                "withheld: `continue`, because the plan cannot be proven as it is written: \
+                 the spec's test of `T001`, `test -f a.txt`, runs none of the files the spec wrote",
             ]
         );
     }
@@ -382,13 +382,12 @@ mod tests {
             evidence(&request),
             vec![
                 "paths: src/a.rs",
-                "waiting: 1/1 grant used",
+                "waiting: 1 of 1 grant used",
                 "pre-check: `test -f a` exits 1",
             ]
         );
-        assert!(
-            sentence(&request).ends_with("waiting: 1/1 grant used; pre-check: `test -f a` exits 1")
-        );
+        assert!(sentence(&request)
+            .ends_with("waiting: 1 of 1 grant used; pre-check: `test -f a` exits 1)"));
     }
 
     #[test]
@@ -412,7 +411,7 @@ mod tests {
         assert_eq!(
             evidence(&payload),
             vec![
-                "wrote what no session of the run may write — a.txt: undo those changes",
+                "wrote what no session of the run may write: a.txt; undo those changes",
                 "way out: the project's permissions refuse it, so no attempt goes \
                  differently: change what they refuse, or the permissions themselves",
             ]

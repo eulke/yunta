@@ -34,6 +34,7 @@ pub async fn graph(
     workflow_path: Option<&Path>,
     run_id: Option<&RunId>,
     format: GraphFormat,
+    look: &surco::look::Look,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
 
@@ -56,13 +57,13 @@ pub async fn graph(
                 verdict::Reach::Workflow,
             )
             .await?;
-            verdict.warn();
+            // A verdict with nothing to say stays off the drawing's way.
+            if !verdict.passes() || verdict.warns() {
+                crate::output::on_stderr(look, verdict.page(&ctx, &path).await?);
+            }
             let outcome = match verdict.passes() {
                 true => Outcome::Success,
-                false => {
-                    crate::error::note(verdict.refusal(&ctx).await?);
-                    Outcome::Reported
-                }
+                false => Outcome::Reported,
             };
             (workflow, None, outcome)
         }

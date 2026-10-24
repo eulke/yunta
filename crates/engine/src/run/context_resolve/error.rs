@@ -81,7 +81,7 @@ pub(super) enum ContextResolveError {
         cmd: String,
     },
     #[error(
-        "context `{source_id}` on node `{node}`: the {}{} was never produced — \
+        "context `{source_id}` on node `{node}`: the {}{} was never produced; \
          this run's log holds no such artifact",
         .artifact.label(),
         .referenced.as_ref().map(|r| format!(" (declared by node `{r}`)")).unwrap_or_default()
@@ -116,7 +116,7 @@ pub(super) enum ContextResolveError {
     /// alphabetical or install order, it names both and stops.
     #[error(
         "context `{source_id}` on node `{node}`: knowledge file `{file}` is shipped by two \
-         installed packs — `{pack_a}` and `{pack_b}` — and the org layer has no precedence \
+         installed packs (`{pack_a}` and `{pack_b}`), and the org layer has no precedence \
          between packs; remove one, or shadow the file with the repo's own \
          `.yunta/knowledge/{file}`"
     )]
@@ -193,7 +193,7 @@ impl std::fmt::Display for Absence {
                 branched_from: Some(base),
             } => write!(
                 f,
-                "`{path}` is not in the run's tree, which starts from commit `{}` — a file \
+                "`{path}` is not in the run's tree, which starts from commit `{}`: a file \
                  that is not committed there, or that git ignores, never reaches it; put it \
                  at `{}` and choose `retry`, or declare the entry `optional: true` if the node \
                  can do without it",

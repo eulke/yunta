@@ -147,9 +147,25 @@ impl Unanswered {
     /// An exit code as a reader reads it: the code, and what it means when
     /// the command never answered.
     pub fn exit_described(exit_code: i32) -> String {
-        match Unanswered::of(exit_code) {
-            Some(why) => format!("{exit_code} ({})", why.words()),
-            None => exit_code.to_string(),
+        Unanswered::exit_said(exit_code, None)
+    }
+
+    /// An exit code as a reader reads it beside the line its command
+    /// concluded with: what the code means when the command never answered,
+    /// then what the command said, in the one parenthesis.
+    pub fn exit_said(exit_code: i32, said: Option<&str>) -> String {
+        let said = said
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(|line| format!("it said `{line}`"));
+        let parts: Vec<String> = Unanswered::of(exit_code)
+            .map(|why| why.words().to_string())
+            .into_iter()
+            .chain(said)
+            .collect();
+        match parts.is_empty() {
+            true => exit_code.to_string(),
+            false => format!("{exit_code} ({})", parts.join("; ")),
         }
     }
 }
@@ -176,6 +192,19 @@ mod tests {
             Unanswered::exit_described(STOPPED_EXIT_CODE),
             "-2 (stopped before it answered)"
         );
+    }
+
+    #[test]
+    fn what_a_command_said_shares_the_parenthesis_its_exit_code_opens() {
+        assert_eq!(
+            Unanswered::exit_said(127, Some("sh: 1: ./check.sh: not found")),
+            "127 (command not found; it said `sh: 1: ./check.sh: not found`)"
+        );
+        assert_eq!(
+            Unanswered::exit_said(101, Some("3 failed")),
+            "101 (it said `3 failed`)"
+        );
+        assert_eq!(Unanswered::exit_said(1, Some("  ")), "1");
     }
 
     #[test]

@@ -20,6 +20,8 @@ mod markdown;
 mod next;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
+mod problem;
+pub(in crate::surface) use problem::REFUSED;
 mod runs;
 mod table;
 
@@ -88,10 +90,16 @@ impl Terminal {
             Block::Paths(block) => block.lines(look),
             Block::Decision(block) => block.lines(look),
             Block::Checklist(block) => block.lines(look),
+            Block::Problem(block) => block.lines(look),
+            Block::Refusal(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
-            Block::Heading(title) => {
-                vec![Line::new(), Line::new().push(Tone::Muted, title.as_str())]
-            }
+            Block::Heading(title) => std::iter::once(Line::new())
+                .chain(
+                    crate::width::wrap_unbroken(title, look.width.cells())
+                        .into_iter()
+                        .map(|part| Line::new().push(Tone::Muted, part)),
+                )
+                .collect(),
             Block::Title(title) => vec![title.clone()],
             Block::Section(section) => self.section(section),
             Block::Prose(block) => block.lines(look),
@@ -121,12 +129,7 @@ impl Terminal {
                     _ => vec![Line::new()],
                 };
                 lines.extend(match part {
-                    Part::Text(text) => {
-                        markdown::markdown(&text, INDENT, look.width.cells(), look.glyphs)
-                            .into_iter()
-                            .map(|line| Line::new().plain(line))
-                            .collect()
-                    }
+                    Part::Text(text) => markdown::markdown(&text, INDENT, look),
                     Part::Diagram(diagram) => diagram.lines(look),
                 });
                 lines

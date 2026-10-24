@@ -170,14 +170,14 @@ pub fn user_knowledge_dir(env: &Env) -> Option<PathBuf> {
 /// form is one this schema does not read (`~user/...`).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HomeExpansionError {
-    #[error("`{field}` is `{path}` but no home directory is known — set HOME (or YUNTA_HOME for the state root) or write the path in full")]
+    #[error("`{field}` is `{path}` but no home directory is known: set HOME (or YUNTA_HOME for the state root) or write the path in full")]
     NoHome { field: String, path: String },
     #[error(
-        "`{field}` is `{path}` — only `~` and `~/...` expand; write another user's home in full"
+        "`{field}` is `{path}`: only `~` and `~/...` expand; write another user's home in full"
     )]
     OtherUser { field: String, path: String },
     #[error(
-        "`{field}` is `{path}` — a shared directory is shared by every checkout of a run, so \
+        "`{field}` is `{path}`: a shared directory is shared by every checkout of a run, so \
          it is written in full or from `~`, never relative to one of them"
     )]
     Relative { field: String, path: String },

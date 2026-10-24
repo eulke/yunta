@@ -87,7 +87,7 @@ fn a_closed_child_is_marked_by_how_it_closed() {
 fn a_reroute_with_a_cause_reads_as_the_target_and_the_cause() {
     assert_eq!(
         said_for(rerouted("exit 1")),
-        "run — rerouted to `fix-lint`: exit 1"
+        "run rerouted to `fix-lint`: exit 1"
     );
 }
 
@@ -117,7 +117,7 @@ fn a_red_post_check_names_each_red_criterion_with_the_last_line_it_printed() {
     }));
     assert_eq!(
         said_for(payload),
-        "run — T001 post: 3 criteria · red: `cargo test` exit 101 — test result: FAILED; \
+        "run: T001 post: 3 criteria · red: `cargo test` exit 101 (test result: FAILED); \
          `test -f made.txt` exit 1"
     );
 }
@@ -150,21 +150,21 @@ fn a_check_answer_says_how_long_it_took_and_what_stands_between_the_task_and_don
     };
     assert_eq!(
         said_for(answered(true, 0, &[])),
-        "run — T001 checked in 3m42s: it would close"
+        "run: T001 checked in 3m42s: it would close"
     );
     assert_eq!(
         said_for(answered(false, 101, &[])),
-        "run — T001 checked in 3m42s: 1 of its criteria red"
+        "run: T001 checked in 3m42s: 1 of its criteria red"
     );
     assert_eq!(
         said_for(answered(false, 0, &["notes.md"])),
-        "run — T001 checked in 3m42s: its work reaches paths it may not change"
+        "run: T001 checked in 3m42s: its work reaches paths it may not change"
     );
 }
 
 #[test]
 fn a_reroute_with_no_cause_recorded_reads_as_the_target_alone() {
-    assert_eq!(said_for(rerouted("")), "run — rerouted to `fix-lint`");
+    assert_eq!(said_for(rerouted("")), "run rerouted to `fix-lint`");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn a_promotion_names_the_node_whose_reroutes_ran_out() {
     let promoted = PromotionSignaledPayload::new(cause, Evidence::none(), "ship".into());
     assert_eq!(
         said_for(EventPayload::Run(RunEvent::PromotionSignaled(promoted))),
-        "run — promotion to `ship`: node `lint` exhausted its re-routes to `fix-lint`"
+        "run promoted to `ship`: node `lint` exhausted its re-routes to `fix-lint`"
     );
 }
 
@@ -200,7 +200,7 @@ fn an_escalation_whose_claim_is_a_failed_node_reads_as_that_node_failed() {
         NonEmpty::from((GateOption::reserved(ReservedOption::Retry), Vec::new())),
     );
     let waiting = EventPayload::Gates(GateEvent::Waiting(Box::new(escalation.into_payload())));
-    assert_eq!(said_for(waiting), "run — node `x` failed");
+    assert_eq!(said_for(waiting), "run node `x` failed");
 }
 
 fn baseline(exit_code: i32) -> EventPayload {
@@ -227,7 +227,7 @@ fn a_host_suspension_stays_above_the_live_region_and_says_how_long() {
     ));
     assert_eq!(
         said_for(payload.clone()),
-        "run — host suspended for 38m00s — durations leave it out; new sessions wait \
+        "run: host suspended for 38m00s, which durations leave out; new sessions wait \
          until it has been awake 2m00s"
     );
     assert!(kept_from_event(payload));
@@ -235,7 +235,7 @@ fn a_host_suspension_stays_above_the_live_region_and_says_how_long() {
 
 #[test]
 fn a_baseline_measured_green_reads_as_measured() {
-    assert_eq!(said_for(baseline(0)), "run — baseline measured");
+    assert_eq!(said_for(baseline(0)), "run: baseline measured");
 }
 
 /// A person watching learns, before any comparison passes, that none
@@ -244,7 +244,7 @@ fn a_baseline_measured_green_reads_as_measured() {
 fn a_baseline_measured_red_says_no_comparison_can_find_a_regression() {
     assert_eq!(
         said_for(baseline(101)),
-        "run — baseline measured, already red (exit 101): no comparison can find a \
+        "run: baseline measured, already red (exit 101): no comparison can find a \
          regression, and no task is held to it"
     );
 }
@@ -263,7 +263,7 @@ fn a_finding_with_no_title_reads_as_its_severity_alone() {
             proposed_criterion: None,
         },
     }));
-    assert_eq!(said_for(payload), "run — finding f1 minor");
+    assert_eq!(said_for(payload), "run: finding f1 minor");
 }
 
 /// A note reads as its size and the head of its digest, whether the log kept
@@ -282,7 +282,7 @@ fn a_note_reads_its_size_and_its_digest() {
         "message_type": "note",
         "text": "135 bytes, sha256 2eb6d565235b",
     });
-    let words = "run — note: 135 bytes, sha256 2eb6d565235b";
+    let words = "run: note: 135 bytes, sha256 2eb6d565235b";
     assert_eq!(read(digest), words);
     assert_eq!(read(stored), words);
 }
@@ -293,7 +293,7 @@ fn a_node_that_finished_saying_nothing_is_still_said_to_have_finished() {
         NodeOutcome::Summary(String::new()),
         TokenUsage::default(),
     )));
-    assert_eq!(said_for(payload), "run — finished");
+    assert_eq!(said_for(payload), "run finished");
 }
 
 /// A degradation whose recorded policy is an empty sentence, as an
@@ -307,7 +307,7 @@ fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
         policy: yunta_core::port::PolicyApplied::Recorded("".into()),
     };
     let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(degraded));
-    assert_eq!(said_for(payload), "run — run_tools not declared by codex");
+    assert_eq!(said_for(payload), "run: run_tools not declared by codex");
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn every_kind_earns_its_words_once() {
         let kind = payload.kind_name();
         let said = said_for(payload);
         assert!(
-            said.contains('—') || said != "run",
+            said != "run",
             "`{kind}` says nothing beyond its subject: {said:?}"
         );
         assert!(
@@ -405,7 +405,7 @@ fn a_formatter_stopped_at_its_bound_reads_as_stopped_not_as_a_failed_exit() {
     };
     assert_eq!(
         said_for(EventPayload::Session(SessionEvent::WriteFormatted(stopped))),
-        "run — `fmt` was stopped while formatting what it wrote"
+        "run: `fmt` was stopped while formatting what it wrote"
     );
 }
 
@@ -421,7 +421,7 @@ fn a_rail_failure_is_kept_and_says_its_moment_and_cause() {
     }));
     assert_eq!(
         said_for(failed.clone()),
-        "run — rail failed before a write: no answer within its window"
+        "run: rail failed before a write: no answer within its window"
     );
     assert!(
         kept_from_event(failed),
@@ -435,7 +435,7 @@ fn a_rail_failure_is_kept_and_says_its_moment_and_cause() {
     }));
     assert_eq!(
         said_for(unread),
-        "run — rail failed: a call the engine could not read"
+        "run: rail failed: a call the engine could not read"
     );
 }
 
@@ -461,7 +461,7 @@ fn a_rail_summary_is_not_kept_and_says_its_calls_and_model() {
     }));
     assert_eq!(
         said_for(summary.clone()),
-        "run — the rail answered 7 calls, model claude-haiku-4-5"
+        "run: the rail answered 7 calls, model claude-haiku-4-5"
     );
     assert!(
         !kept_from_event(summary),

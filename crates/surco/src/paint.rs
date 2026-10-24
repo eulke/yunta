@@ -141,19 +141,66 @@ impl Ink {
     }
 }
 
-/// The SGR parameters `tone` is painted with: the sixteen ANSI
-/// colors only, so every terminal draws them in its own palette.
-fn sgr(tone: Tone) -> Option<&'static str> {
+/// How `tone` is painted on sixteen colors: bold, dim, and the ANSI color
+/// it takes, so every terminal draws it in its own palette. The one table
+/// both the SGR escapes and clap's styles are written from.
+fn ansi(tone: Tone) -> (bool, bool, Option<u8>) {
     match tone {
-        Tone::Plain => None,
-        Tone::Strong | Tone::Command => Some("1"),
-        Tone::Muted => Some("2"),
-        Tone::Done => Some("32"),
-        Tone::Failed => Some("31"),
-        Tone::Running => Some("36"),
-        Tone::NeedsYou => Some("1;35"),
-        Tone::Caution => Some("33"),
+        Tone::Plain => (false, false, None),
+        Tone::Strong | Tone::Command => (true, false, None),
+        Tone::Muted => (false, true, None),
+        Tone::Done => (false, false, Some(32)),
+        Tone::Failed => (false, false, Some(31)),
+        Tone::Running => (false, false, Some(36)),
+        Tone::NeedsYou => (true, false, Some(35)),
+        Tone::Caution => (false, false, Some(33)),
     }
+}
+
+/// The SGR parameters `tone` is painted with, from [`ansi`].
+fn sgr(tone: Tone) -> Option<String> {
+    let (bold, dim, color) = ansi(tone);
+    let parameters: Vec<String> = [bold.then(|| "1".to_string()), dim.then(|| "2".to_string())]
+        .into_iter()
+        .flatten()
+        .chain(color.map(|color| color.to_string()))
+        .collect();
+    (!parameters.is_empty()).then(|| parameters.join(";"))
+}
+
+/// The styles `clap` draws its own help and usage errors in, in the tones
+/// every page takes: a heading and a value to fill in muted, what a reader
+/// types strong, an error failed, a valid value done, an invalid one a
+/// caution. Each is the color [`Ink::Ansi16`] paints its tone in.
+#[cfg(feature = "clap")]
+pub fn clap_styles() -> clap::builder::Styles {
+    use clap::builder::styling::{AnsiColor, Style};
+    let style = |tone: Tone| {
+        let (bold, dim, color) = ansi(tone);
+        let color = color.and_then(|code| match code {
+            31 => Some(AnsiColor::Red),
+            32 => Some(AnsiColor::Green),
+            33 => Some(AnsiColor::Yellow),
+            35 => Some(AnsiColor::Magenta),
+            36 => Some(AnsiColor::Cyan),
+            _ => None,
+        });
+        let style = Style::new().fg_color(color.map(Into::into));
+        let style = if bold { style.bold() } else { style };
+        if dim {
+            style.dimmed()
+        } else {
+            style
+        }
+    };
+    clap::builder::Styles::styled()
+        .header(style(Tone::Muted))
+        .usage(style(Tone::Muted))
+        .literal(style(Tone::Strong))
+        .placeholder(style(Tone::Muted))
+        .error(style(Tone::Failed))
+        .valid(style(Tone::Done))
+        .invalid(style(Tone::Caution))
 }
 
 /// `text` with every SGR escape and every link taken out: what a painted
@@ -193,6 +240,27 @@ pub fn strip_sgr(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "clap")]
+    #[test]
+    fn clap_draws_each_tone_in_the_escape_a_page_paints_it_in() {
+        let styles = clap_styles();
+        for (style, tone) in [
+            (styles.get_header(), Tone::Muted),
+            (styles.get_usage(), Tone::Muted),
+            (styles.get_literal(), Tone::Strong),
+            (styles.get_placeholder(), Tone::Muted),
+            (styles.get_error(), Tone::Failed),
+            (styles.get_valid(), Tone::Done),
+            (styles.get_invalid(), Tone::Caution),
+        ] {
+            assert_eq!(
+                style.render().to_string(),
+                format!("\x1b[{}m", sgr(tone).unwrap_or_default()),
+                "{tone:?}"
+            );
+        }
+    }
 
     const ROLES: [Tone; 8] = [
         Tone::Plain,

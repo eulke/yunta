@@ -42,7 +42,7 @@ use yunta_adapters::{ClaudeCodeAdapter, CodexAdapter, CLAUDE_CODE_ID, CODEX_ID};
 use yunta_core::events::PauseReason;
 use yunta_core::port::{Adapter, ProbeReport};
 use yunta_core::{AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, Workflow};
-use yunta_engine::{RunState, UnknownKindCount};
+use yunta_engine::RunState;
 
 use crate::error::CliError;
 use crate::output::Mode;
@@ -315,32 +315,6 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
     )))
 }
 
-/// How a partially interpreted run says so: every event kind this
-/// binary does not know, with how many events carried it. `None` when
-/// the log is interpreted in full.
-///
-/// `yunta status` folds it into its summary line and `yunta stats`
-/// prints it on its own, so the framing is each caller's and the
-/// sentence is one — a reader meets the same fact worded the same way
-/// on either surface.
-pub(crate) fn unknown_kinds_note(
-    counts: &[UnknownKindCount],
-    glyphs: surco::glyphs::Glyphs,
-) -> Option<String> {
-    if counts.is_empty() {
-        return None;
-    }
-    let kinds: Vec<String> = counts
-        .iter()
-        .map(|count| format!("{} {}{}", count.kind, glyphs.times(), count.events))
-        .collect();
-    Some(format!(
-        "{}, interpreted partially: {}",
-        surco::text::counted(counts.len(), "unknown event kind"),
-        kinds.join(", ")
-    ))
-}
-
 /// Resolves a workflow reference to a file, the one rule `check`, `run`
 /// and `graph` share: a bare catalog name (no extension) resolves through
 /// the repo catalog under `cwd`, then a publisher's vendored packs
@@ -408,7 +382,7 @@ pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, output: Mode, loo
         Mode::Human => crate::output::say(
             look,
             format!(
-                "run {run_id}: {doing} — `{}` follows it",
+                "run {run_id}: {doing} (`{}` follows it)",
                 advice::status(run_id.handle())
             ),
         ),

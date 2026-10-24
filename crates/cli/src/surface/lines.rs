@@ -253,9 +253,9 @@ mod pause_reason_tests {
             };
             assert_eq!(
                 said.text,
-                surco::text::aside(
-                    "run",
-                    &surco::text::one_line(&format!("{word} — {sentence}"))
+                format!(
+                    "run {}",
+                    surco::text::one_line(&format!("{word}: {sentence}"))
                 )
             );
 
@@ -289,7 +289,7 @@ mod promotion_tests {
             &yunta_testkit::moment(None, promoted),
             surco::glyphs::Glyphs::Unicode,
         );
-        assert_eq!(said.text, "run — promotion to `ship`");
+        assert_eq!(said.text, "run promoted to `ship`");
     }
 
     /// The failure a promotion carries is read beside the node whose
@@ -315,7 +315,7 @@ mod promotion_tests {
         );
         assert_eq!(
             said.text,
-            "run — promotion to `ship`: node `lint` exhausted its re-routes to `fix-lint` — exit 1"
+            "run promoted to `ship`: node `lint` exhausted its re-routes to `fix-lint` (exit 1)"
         );
     }
 }

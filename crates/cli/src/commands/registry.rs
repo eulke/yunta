@@ -27,7 +27,7 @@ pub(crate) enum ServableError {
     /// The run is pinned to an adapter that a runner the node uses does not
     /// reach: none of that runner's candidates is on it.
     #[error(
-        "node `{node}` runs on runner `{runner}`, which has no candidate on `--adapter {pin}` — \
+        "node `{node}` runs on runner `{runner}`, which has no candidate on `--adapter {pin}`; \
          its candidates are on: {}; add one on `{pin}` to `runners.{runner}`, or drop the flag",
         listed(candidates)
     )]
@@ -40,7 +40,7 @@ pub(crate) enum ServableError {
     /// The pinned adapter is not one `runners:` names that this binary builds.
     /// `runnable` is what the refusal offers instead: those adapters, sorted.
     #[error(
-        "unknown adapter `{pin}` — this binary can run: {}",
+        "unknown adapter `{pin}`; this binary can run: {}",
         runnable_list(runnable)
     )]
     UnbuiltPin {
@@ -73,7 +73,7 @@ fn listed(adapters: &[AdapterId]) -> String {
 /// that this binary builds, or a note that `runners:` names none it builds.
 fn runnable_list(runnable: &[AdapterId]) -> String {
     if runnable.is_empty() {
-        return "(none configured — `runners:` names no adapter this build supports)".to_string();
+        return "(none configured: `runners:` names no adapter this build supports)".to_string();
     }
     listed(runnable)
 }
@@ -477,11 +477,11 @@ mod tests {
         };
         assert_eq!(
             refused(vec![AdapterId::from("claude-code")]),
-            "unknown adapter `codex` — this binary can run: claude-code"
+            "unknown adapter `codex`; this binary can run: claude-code"
         );
         assert_eq!(
             refused(Vec::new()),
-            "unknown adapter `codex` — this binary can run: (none configured — `runners:` names no adapter this build supports)"
+            "unknown adapter `codex`; this binary can run: (none configured: `runners:` names no adapter this build supports)"
         );
     }
 }

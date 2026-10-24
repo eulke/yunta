@@ -64,7 +64,7 @@ pub fn name(written: &str, problem: &NameProblem) -> String {
     let said: String = match problem {
         NameProblem::Empty => "an artifact is named by a file name, and this one is empty".into(),
         NameProblem::OutsideRun => format!(
-            "`{written}` reaches outside the run directory — an artifact name is relative, with \
+            "`{written}` reaches outside the run directory: an artifact name is relative, with \
              no `..` component"
         ),
         NameProblem::Reserved { identity } => format!(
@@ -79,7 +79,7 @@ pub fn mount(error: &MountError) -> String {
     match error {
         MountError::NoTerminalChild { artifact, node } => format!(
             "mount of the {artifact} from node `{node}`: no linked child run of `{node}` reached \
-             a terminal state in this run — did this run's mode exclude it?"
+             a terminal state in this run; did this run's mode exclude it?"
         ),
         MountError::Unreadable {
             artifact,
@@ -122,7 +122,7 @@ pub(super) fn template(template: &TemplateError, input: &Option<InputName>) -> S
 pub(super) fn gate_missing(node: &NodeId, artifact: &ArtifactId) -> String {
     format!(
         "node `{node}` publishes the {} with its external gate, and this run holds no such \
-         artifact — no node produced it",
+         artifact: no node produced it",
         artifact.label()
     )
 }

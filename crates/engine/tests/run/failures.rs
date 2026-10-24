@@ -40,7 +40,7 @@ sessions:
             );
             assert_eq!(
                 yunta_render::failure::sentence(failure),
-                "node `plan`: 1 error\n  handed over no tasks document — \
+                "node `plan`: 1 error\n  handed over no tasks document: \
                  produce it before the node ends, or stop declaring it here"
             );
         }

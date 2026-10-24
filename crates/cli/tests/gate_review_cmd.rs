@@ -86,7 +86,7 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     assert!(
         drawn.contains("plan of `plan`")
             && drawn.contains("Writes the file the run is about.")
-            && drawn.contains("T001 — Make it")
+            && drawn.contains("T001: Make it")
             && drawn.contains("done when    the file exists")
             && drawn.contains("$ test -f made.txt")
             && drawn.contains("--node plan"),
@@ -108,7 +108,7 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
 
     // The planner goes again and the gate asks about the second plan.
     terminal.wait_for(
-        "T002 — Say it",
+        "T002: Say it",
         "the gate never showed the plan the correction made",
     );
     // `approve`, the first option, with nothing to add.
@@ -165,7 +165,7 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
     let drawn = terminal.drawn();
     assert!(
         drawn.contains("plan of `plan`")
-            && drawn.contains("T001 — Make it")
+            && drawn.contains("T001: Make it")
             && drawn.contains("done when    the file exists"),
         "resolve-gate offered a decision without the plan it decides on:\n{drawn}"
     );
@@ -203,7 +203,7 @@ fn status_node_prints_a_plan_whole() {
     let page = yunta_testkit::stdout(&shown);
     assert!(
         page.contains("plan of `plan`")
-            && page.contains("T001 — Make it")
+            && page.contains("T001: Make it")
             && page.contains("$ test -f made.txt"),
         "the node's page reads the plan it wrote whole:\n{page}"
     );
@@ -224,7 +224,7 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
         "the plan is read first and the question asked last, beside the menu:\n{drawn}"
     );
     assert!(
-        !drawn[question..].contains("T001 — Make it"),
+        !drawn[question..].contains("T001: Make it"),
         "nothing of the plan sits between the question and its options:\n{drawn}"
     );
 }
@@ -294,7 +294,7 @@ fn what_was_asked_is_read_before_the_plan_that_answers_it() {
     let drawn = terminal.drawn();
 
     let asked = drawn
-        .find("Global pack installation — brief.md of `brief`")
+        .find("Global pack installation: brief.md of `brief`")
         .expect(&drawn);
     let plan = drawn.find("plan of `plan`").expect(&drawn);
     assert!(asked < plan, "the brief is read before the plan:\n{drawn}");

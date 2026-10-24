@@ -6,11 +6,13 @@ use crate::words::Standing;
 /// stands, the handle a reader types next, what it runs, the furrow its
 /// nodes plow, what holds it, and — at the row's far edge — how long it has
 /// stood there or the command that moves it on.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Runs {
     pub rows: Vec<RunLine>,
 }
 
 /// One run's row.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunLine {
     pub standing: Standing,
     /// What a reader types to name the run.
@@ -27,6 +29,7 @@ pub struct RunLine {
 }
 
 /// What a run's row ends with, at the line's far edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edge {
     /// How long the run has stood where it is.
     Age(String),

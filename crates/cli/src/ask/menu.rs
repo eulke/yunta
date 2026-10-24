@@ -66,7 +66,7 @@ impl<T> Choice<T> {
     /// said apart from it.
     fn head(&self) -> String {
         match &self.label {
-            Some(label) => format!("{} — {label}", self.name),
+            Some(label) => format!("{}: {label}", self.name),
             None => self.name.clone(),
         }
     }
@@ -332,7 +332,7 @@ mod tests {
         let read = read(std::slice::from_ref(&retry), LINE_WIDTH);
         assert_eq!(
             read,
-            ["  1  retry — Re-route to `fix` once more\n     one more attempt"]
+            ["  1  retry: Re-route to `fix` once more\n     one more attempt"]
         );
         assert_eq!(rows(std::slice::from_ref(&retry), LINE_WIDTH), ["1  retry"]);
     }

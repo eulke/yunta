@@ -22,7 +22,7 @@ async fn a_run_that_would_fill_the_disk_pauses_saying_how_to_make_room() {
     assert!(matches!(reason, PauseReason::NoRoom { .. }), "{reason:?}");
     let words = yunta_render::pause::sentence(&reason);
     assert!(
-        words.starts_with("no room: the disk has") && words.contains("`yunta gc`"),
+        words.starts_with("no room on the disk, which has") && words.contains("`yunta gc`"),
         "{words}"
     );
     assert!(state.nodes.state("only").is_none(), "nothing ran");

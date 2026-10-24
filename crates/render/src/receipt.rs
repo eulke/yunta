@@ -13,7 +13,7 @@ use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::text::counted;
 use surco::words::Standing;
-use yunta_core::events::{BaselineOrigin, TerminalState};
+use yunta_core::events::{BaselineOrigin, TerminalState, UnknownKindCount};
 use yunta_core::receipt::{
     BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
 };
@@ -107,7 +107,7 @@ fn failed_node(failed: &FailedNode, run: &RunId, spell: &dyn Fn(&NextStep) -> St
         mark: Some(Mark::Failed),
         title: Line::new()
             .push(Tone::Strong, format!("node `{node}`"))
-            .plain(" — ")
+            .plain(": ")
             .plain(crate::failure::headline(&failed.failure)),
         blocks: FailureDetail {
             failure: &failed.failure,
@@ -191,29 +191,34 @@ fn criteria_check(checks: &mut Checklist, receipt: &Receipt) {
         (total, all) => checks.push(
             if all { Found::Holds } else { Found::Problem },
             "criteria",
-            format!("{}/{total} green, each command below", criteria.green),
+            format!("{} of {total} green, each command below", criteria.green),
         ),
     }
+}
+
+/// How a partially interpreted run says so, on the receipt and on every
+/// page about the run: every event kind this binary does not know, with
+/// how many events carried it. `None` when the log is interpreted in full.
+pub fn unknown_kinds(counts: &[UnknownKindCount]) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+    let kinds: Vec<String> = counts
+        .iter()
+        .map(|count| format!("`{}` {}", count.kind, counted(count.events, "time")))
+        .collect();
+    Some(format!(
+        "{} this binary does not know, interpreted partially: {}",
+        counted(counts.len(), "event kind"),
+        kinds.join(", ")
+    ))
 }
 
 /// The event kinds this binary reads only in part, and the artifact problems
 /// reported during the run, when there are any.
 fn caution_checks(checks: &mut Checklist, receipt: &Receipt) {
-    if !receipt.unknown_kinds.is_empty() {
-        let kinds: Vec<String> = receipt
-            .unknown_kinds
-            .iter()
-            .map(|count| format!("`{}` ×{}", count.kind, count.events))
-            .collect();
-        checks.push(
-            Found::Caution,
-            "event kinds",
-            format!(
-                "{} this binary does not know — interpreted partially: {}",
-                counted(receipt.unknown_kinds.len(), "event kind"),
-                kinds.join(", ")
-            ),
-        );
+    if let Some(said) = unknown_kinds(&receipt.unknown_kinds) {
+        checks.push(Found::Caution, "event kinds", said);
     }
     if !receipt.diagnostics.is_empty() {
         let kinds: Vec<String> = receipt
@@ -313,7 +318,7 @@ fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
     );
     if let Some(cptv) = cost.cptv {
         said.push_str(&format!(
-            " {} CPTV: {} per task",
+            " {} cost per verified task: {}",
             glyphs.sep(),
             Tokens::rounded(cptv)
         ));

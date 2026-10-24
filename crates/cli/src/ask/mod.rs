@@ -28,6 +28,14 @@ use yunta_core::{Env, Pid, Responder};
 use crate::error::warn;
 use crate::surface::Diagnostics;
 
+/// What `--interactive` says when there is no terminal to ask on, before
+/// the `fallback` the command takes instead.
+pub(crate) fn no_terminal(fallback: &str) {
+    warn(format!(
+        "--interactive given but there is no terminal to ask on; {fallback}"
+    ));
+}
+
 mod decision;
 mod field;
 mod form;
@@ -212,8 +220,8 @@ impl Console {
         if !term.is_term() {
             diagnostics
                 .raise(format!(
-                    "{}: nothing was asked here: a prompt draws on stderr, and this run's is \
-                     redirected — the run parks with its state intact; run it again with \
+                    "{}: nothing was asked here, since a prompt draws on stderr and this run's is \
+                     redirected: the run parks with its state intact; run it again with \
                      stderr on a terminal to be asked",
                     crate::error::warning_word()
                 ))
@@ -338,7 +346,7 @@ impl Console {
             // finish.
             if let Err(e) = tcsetattr(std::io::stdin(), SetArg::TCSANOW, mode) {
                 warn(format!(
-                    "could not put this terminal back to reading a line at a time: {e} — \
+                    "could not put this terminal back to reading a line at a time: {e}; \
                      run `stty sane` to type into your shell again"
                 ));
             }
@@ -376,7 +384,7 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
         Err(e) => {
             diagnostics
                 .raise(format!(
-                    "{}: this terminal does not say what mode it is in ({e}) — a prompt this \
+                    "{}: this terminal does not say what mode it is in ({e}); a prompt this \
                      run leaves mid-read leaves it as the read left it; run `stty sane` to \
                      type into your shell again",
                     crate::error::warning_word()
@@ -397,7 +405,7 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
 fn attributed(console: &Console, env: &Env) -> std::io::Result<Responder> {
     let responder = crate::identity::responder(None, env.user.as_deref());
     console.say(&format!(
-        "attributed to `{responder}` — unsigned, nothing here authenticates who typed"
+        "attributed to `{responder}`: unsigned, nothing here authenticates who typed"
     ))?;
     Ok(responder)
 }

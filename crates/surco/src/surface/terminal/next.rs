@@ -43,7 +43,7 @@ pub(super) fn steps(steps: &[(String, &'static str)], margin: &str, look: &Look)
             lines.push(match at == last {
                 true => line
                     .push(Tone::Strong, format!("{piece:<column$}"))
-                    .plain("   ")
+                    .plain(crate::width::GAP)
                     .push(Tone::Muted, *gloss),
                 false => line.push(Tone::Strong, piece),
             });

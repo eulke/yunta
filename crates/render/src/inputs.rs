@@ -20,7 +20,7 @@ pub fn problem(problem: &InputsProblem) -> String {
             label,
             detail,
         } => format!(
-            "input `{name}` names `{path}`, which cannot be read as a file: {detail} — point the \
+            "input `{name}` names `{path}`, which cannot be read as a file: {detail}; point the \
              input at the {label} itself"
         ),
         InputsProblem::DocumentRefused { name, report } => format!(
@@ -50,7 +50,7 @@ fn unknown(names: &[InputName], declared: &[InputName]) -> String {
         false => format!("only: {}", listed(declared, ", ")),
     };
     format!(
-        "unknown {} `{}` — this workflow declares {declares}",
+        "unknown {} `{}`: this workflow declares {declares}",
         text::agreeing(names.len(), "input", "inputs"),
         listed(names, "`, `"),
     )

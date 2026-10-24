@@ -11,12 +11,17 @@
 
 use std::path::{Path, PathBuf};
 
+use surco::components::{Fields, Furrow, Headline, Next};
+use surco::doc::Doc;
+use surco::glyphs::Mark;
 use surco::look::Look;
 use yunta_core::{ConfigLayer, Workflow};
 
+use super::advice;
+use super::verdict::{check_again, file_named, Found};
 use crate::ask::{choose, Choice, Console, Escape};
-use crate::error::{warn, CliError, Outcome};
-use crate::output::say;
+use crate::error::{CliError, Outcome};
+use crate::output::document;
 use crate::project;
 use crate::surface::Diagnostics;
 
@@ -36,7 +41,7 @@ impl Shape {
         Self::all()
             .into_iter()
             .find(|shape| shape.label() == name)
-            .ok_or_else(|| format!("unknown shape `{name}` — choose one of: {}", Self::listed()))
+            .ok_or_else(|| format!("unknown shape `{name}`; choose one of: {}", Self::listed()))
     }
 
     fn all() -> [Self; 3] {
@@ -98,7 +103,7 @@ impl Shape {
 const ONE_NODE_TEMPLATE: &str = "\
 name: {{workflow-name}}
 # A minimal workflow: one node, one command. Its exit code *is* the
-# verification — replace `run:` with something that actually checks
+# verification: replace `run:` with something that actually checks
 # your work, and narrow `scope:` to what this node may touch.
 nodes:
   - id: main
@@ -201,10 +206,7 @@ async fn choose_shape(shape: Option<&str>, interactive: bool) -> Result<Shape, C
             true => match Console::open(&Diagnostics::none(), Escape::TakesTheFirst).await {
                 Some(console) => picked(&console),
                 None => {
-                    warn(
-                        "--interactive given but there is no terminal to ask on — \
-                         defaulting to `one-node`",
-                    );
+                    crate::ask::no_terminal("defaulting to `one-node`");
                     Shape::OneNode
                 }
             },
@@ -244,12 +246,13 @@ pub async fn new_workflow(
     let workflow = parse_skeleton(shape, &yaml)?;
 
     let path = write_skeleton(&cwd, name, &yaml, force).await?;
-    say(
-        look,
-        format!("wrote {} ({})", path.display(), shape.label()),
-    );
-
-    report_verdict(&cwd, &workflow, &path, &config, look).await
+    let written = Written {
+        name,
+        shape,
+        workflow: &workflow,
+        path: &path,
+    };
+    written.page(&cwd, &config, look).await
 }
 
 /// The workflow a `shape` skeleton parses to, or why it does not parse.
@@ -272,7 +275,7 @@ async fn write_skeleton(
     let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
     if path.exists() && !force {
         return Err(CliError::msg(format!(
-            "{} already exists — pass --force to overwrite",
+            "{} already exists; pass --force to overwrite",
             path.display()
         )));
     }
@@ -287,26 +290,78 @@ async fn write_skeleton(
     Ok(path)
 }
 
-/// Reports the verdict `yunta check` reaches on the written file.
-async fn report_verdict(
-    cwd: &Path,
-    workflow: &Workflow,
-    path: &Path,
-    config: &ConfigLayer,
-    look: &Look,
-) -> Result<Outcome, CliError> {
-    // The verdict `yunta check` reaches on the file, said under it: a
-    // workflow the config cannot run is reported as one, whatever it is
-    // the config has to declare first.
-    let ctx = crate::context::Context::load()?;
-    let verdict = super::verdict::verdict(
-        &ctx,
-        workflow,
-        path,
-        config,
-        super::verdict::layer_conflicts(cwd)?,
-        super::verdict::Reach::Workflow,
-    )
-    .await?;
-    verdict.report(&ctx, path.display(), look).await
+/// A workflow `new` wrote: its name, the shape it took, and where.
+struct Written<'a> {
+    name: &'a str,
+    shape: Shape,
+    workflow: &'a Workflow,
+    path: &'a Path,
+}
+
+impl Written<'_> {
+    /// The page `new` answers with: the file it wrote, and the verdict
+    /// `yunta check` reaches on it, said under it. A workflow the config
+    /// cannot run yet is written and said to be one, whatever the config
+    /// has to declare first, and the exit says so too.
+    async fn page(
+        &self,
+        cwd: &Path,
+        config: &ConfigLayer,
+        look: &Look,
+    ) -> Result<Outcome, CliError> {
+        let at = surco::paths::shown(self.path, cwd, None);
+        let found = match self.found(cwd, config).await {
+            Ok(found) => found,
+            Err(stop) => {
+                // The file is on disk whatever stopped the check of it.
+                let headline = Headline::new(Mark::Done, file_named(self.path), "written")
+                    .fact(self.shape.label());
+                document(
+                    look,
+                    Doc::new()
+                        .with(headline)
+                        .with(Furrow(Vec::new()))
+                        .with(Fields::new().push_if("at", at)),
+                );
+                return Err(stop);
+            }
+        };
+        let (mark, steps) = match found.errors {
+            0 => (Mark::Done, vec![(advice::run(self.name), "runs it")]),
+            _ => (Mark::Caution, vec![check_again(&at)]),
+        };
+        let runs = found.said();
+        let Found { blocks, errors } = found;
+        let headline = Headline::new(mark, file_named(self.path), "written")
+            .fact(self.shape.label())
+            .fact(runs);
+        document(
+            look,
+            Doc::new()
+                .with(headline)
+                .with(Furrow(Vec::new()))
+                .with(Fields::new().push_if("at", at))
+                .with_all(blocks)
+                .with(Next { steps }),
+        );
+        Ok(match errors {
+            0 => Outcome::Success,
+            _ => Outcome::Reported,
+        })
+    }
+
+    /// The verdict `yunta check` reaches on the written file.
+    async fn found(&self, cwd: &Path, config: &ConfigLayer) -> Result<Found, CliError> {
+        let ctx = crate::context::Context::load()?;
+        let verdict = super::verdict::verdict(
+            &ctx,
+            self.workflow,
+            self.path,
+            config,
+            super::verdict::layer_conflicts(cwd)?,
+            super::verdict::Reach::Workflow,
+        )
+        .await?;
+        verdict.found(&ctx).await
+    }
 }

@@ -6,35 +6,31 @@
 //! each explicit:
 //!
 //! 1. **Engine alive** — SIGINT to the engine pid; its own Ctrl-C path
-//!    (interrupt→kill) exterminates the tree and records
-//!    `run_paused { reason: "cancelled by user" }`. This command waits
+//!    (interrupt→kill) exterminates the tree and records `run_paused`
+//!    with `PauseReason::Cancelled`. This command waits
 //!    for that terminal in the log, escalating to SIGKILL on the
 //!    registered process groups if it doesn't arrive in time.
 //! 2. **Engine dead, pgids registered** (a crash) — kill the orphaned
-//!    groups directly, record `run_paused { reason: "cancelled after
-//!    crash" }`, delete the leftover registry.
+//!    groups directly, record `run_paused` with
+//!    `PauseReason::CancelledAfterCrash`, delete the leftover registry.
 //! 3. **No registry yet** — a run its creator has just handed to an engine
 //!    moves before that engine registers: wait for the registration, then
 //!    case 1. With no engine registering, report what the log says.
 
 use std::time::Duration;
 
-use surco::doc::{Block, Doc};
-use surco::line::Line;
 use surco::look::Look;
-use surco::text::counted;
 use yunta_core::events::RunPhaseRaw;
 use yunta_core::process::group::force_kill_group;
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
-use yunta_core::{describe, Pid, RunId};
+use yunta_core::{describe, Clock, Pid, RunId};
 use yunta_engine::pace::Pace;
 
 use crate::commands::advice;
 use crate::commands::close::give_back;
 use crate::context::{Context, Opened};
 use crate::error::{note, warn, CliError, Outcome};
-use crate::json::SCHEMA_VERSION;
-use crate::output::{emit, progress, Answer, Mode};
+use crate::output::{emit, progress, Mode};
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own interrupt grace of at most 200ms,
@@ -46,7 +42,10 @@ const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 /// register, and to record its terminal after the SIGINT.
 const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
 
+mod page;
 mod registered;
+
+use page::{answer, CancelState};
 
 pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -61,7 +60,16 @@ pub async fn cancel(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome
 
     let end = if state.broken.is_some() || stopped {
         let killed = settle_stopped(&ctx, &open, run_id).await;
-        CancelState::AlreadyStopped { killed, parked }
+        let now = ctx.clock.now();
+        let engine = crate::render::engine(&open.run_dir, now);
+        let standing =
+            super::status::progress::frame_of(run_id, &open.manifest.doc, &state, &engine, now)
+                .standing;
+        CancelState::AlreadyStopped {
+            killed,
+            parked,
+            standing,
+        }
     } else {
         stop_engine(&ctx, &storage, &open, run_id, &state, output, look).await?
     };
@@ -120,7 +128,7 @@ async fn signal_live_engine(
     );
     signal_process(registry.engine_pid, Signal::SIGINT).map_err(|e| {
         CliError::msg(format!(
-            "{} — retry `{}`",
+            "{}; retry `{}`",
             describe(&e),
             advice::cancel(run_id.handle())
         ))
@@ -149,8 +157,8 @@ async fn await_engine(
             () = Pace::every(ENGINE_SHUTDOWN_POLL).beat() => {}
             () = ctx.cancellation().cancelled() => {
                 note(format!(
-                    "run {called}: interrupted while waiting — the SIGINT is with the \
-                     engine, which stops on its own; `{}` says where it got to",
+                    "run {called}: interrupted while waiting; the engine has the SIGINT and \
+                     stops on its own, and `{}` says where it got to",
                     advice::status(run_id.handle())
                 ));
                 return Ok(CancelState::Interrupted { engine_pid });
@@ -161,11 +169,12 @@ async fn await_engine(
         // already resumed.
         let state = yunta_engine::derive(&events);
         if !matches!(state.run.phase(), RunPhaseRaw::Open) {
-            return Ok(CancelState::Cancelled { engine_pid });
+            let closed = matches!(state.run.phase(), RunPhaseRaw::Closed);
+            return Ok(CancelState::Cancelled { engine_pid, closed });
         }
         if tokio::time::Instant::now() >= deadline {
             note(format!(
-                "run {called}: the engine did not stop within {} — escalating to SIGKILL \
+                "run {called}: the engine did not stop within {}; escalating to SIGKILL \
                  on its process groups",
                 surco::figures::duration(ENGINE_SHUTDOWN_TIMEOUT)
             ));
@@ -176,85 +185,6 @@ async fn await_engine(
                 }
             }
             return Ok(CancelState::Escalated { engine_pid });
-        }
-    }
-}
-
-/// What `cancel` found and did, as a document carries it.
-#[derive(serde::Serialize)]
-pub(crate) struct CancelAnswer {
-    schema_version: u32,
-    run_id: RunId,
-    #[serde(flatten)]
-    state: CancelState,
-}
-
-/// How a cancel ended, and what it did to the processes that were left.
-#[derive(serde::Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub(crate) enum CancelState {
-    /// The run was stopped already. `killed` process groups its engine
-    /// could not stop were killed by this call; `parked` says it waits on a person.
-    AlreadyStopped { killed: usize, parked: bool },
-    /// No node of the run was in progress, so there was nothing to signal.
-    NothingRunning,
-    /// The engine recorded its terminal after the interrupt it was sent.
-    Cancelled { engine_pid: Pid },
-    /// The engine did not stop within the shutdown timeout, so its process
-    /// groups were killed.
-    Escalated { engine_pid: Pid },
-    /// The wait was interrupted; the interrupt stays with the engine.
-    Interrupted { engine_pid: Pid },
-    /// The engine had died: its orphaned process groups were killed, and the
-    /// pause recorded.
-    Crashed { engine_pid: Pid, killed: usize },
-}
-
-fn answer(run_id: &RunId, state: CancelState) -> CancelAnswer {
-    CancelAnswer {
-        schema_version: SCHEMA_VERSION,
-        run_id: run_id.clone(),
-        state,
-    }
-}
-
-impl Answer for CancelAnswer {
-    fn document(&self, _look: &Look) -> Doc {
-        let called = self.run_id.handle();
-        let said = match &self.state {
-            CancelState::AlreadyStopped { killed, .. } if *killed > 0 => format!(
-                "run {called}: already stopped — killed {}, which the engine could not stop",
-                counted(*killed, "process group")
-            ),
-            CancelState::AlreadyStopped { parked: true, .. } => format!(
-                "run {called}: already stopped — nothing to cancel; `{}` closes it for good",
-                advice::close(called)
-            ),
-            CancelState::AlreadyStopped { .. } => {
-                format!("run {called}: already stopped — nothing to cancel")
-            }
-            CancelState::NothingRunning => {
-                format!("run {called}: no node in progress — nothing to cancel")
-            }
-            CancelState::Cancelled { .. } => {
-                format!("run {called}: cancelled — the log has its terminal")
-            }
-            CancelState::Crashed { engine_pid, killed } => format!(
-                "run {called}: engine (pid {engine_pid}) was already dead — killed {}, \
-                 recorded the pause",
-                counted(*killed, "orphaned process group")
-            ),
-            // A stop the engine answers to has no line of its own: its
-            // notes went to stderr while it ran.
-            CancelState::Escalated { .. } | CancelState::Interrupted { .. } => return Doc::new(),
-        };
-        Doc::new().with(Block::Lines(vec![Line::new().plain(said)]))
-    }
-
-    fn outcome(&self) -> Outcome {
-        match &self.state {
-            CancelState::Escalated { .. } => Outcome::Reported,
-            _ => Outcome::Success,
         }
     }
 }
@@ -326,8 +256,8 @@ fn may_signal(pgid: Pid) -> bool {
         return true;
     }
     warn(format!(
-        "refusing to signal process group {pgid}: not a run's own process group — \
-         engine.json is corrupt, skipping it"
+        "refusing to signal process group {pgid}: not a run's own process group, \
+         so engine.json is corrupt; skipping it"
     ));
     false
 }
@@ -370,12 +300,8 @@ fn signalable_group(pgid: Pid) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{answer, signalable_group, CancelState};
-    use crate::error::Outcome;
-    use crate::output::Answer;
-    use crate::render::draw;
-    use surco::look::Look;
-    use yunta_core::{Pid, RunId};
+    use super::signalable_group;
+    use yunta_core::Pid;
 
     #[test]
     fn a_run_never_signals_init_or_a_lower_group() {
@@ -385,67 +311,5 @@ mod tests {
         assert!(!signalable_group(Pid::try_from(1u32).unwrap()));
         assert!(signalable_group(Pid::try_from(2u32).unwrap()));
         assert!(signalable_group(Pid::try_from(4321u32).unwrap()));
-    }
-
-    #[test]
-    fn a_cancel_that_finds_nothing_to_stop_says_so_in_its_words() {
-        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
-        let said = |state: CancelState| {
-            let reply = answer(&run, state);
-            draw(reply.document(&Look::plain()), &Look::plain())
-        };
-        assert_eq!(
-            said(CancelState::NothingRunning),
-            "run AAAAAA: no node in progress — nothing to cancel\n"
-        );
-        assert_eq!(
-            said(CancelState::AlreadyStopped {
-                killed: 2,
-                parked: false
-            }),
-            "run AAAAAA: already stopped — killed 2 process groups, which the engine could not stop\n"
-        );
-        assert_eq!(
-            said(CancelState::AlreadyStopped {
-                killed: 0,
-                parked: true
-            }),
-            "run AAAAAA: already stopped — nothing to cancel; `yunta close AAAAAA` closes it for good\n"
-        );
-        assert_eq!(
-            said(CancelState::AlreadyStopped {
-                killed: 0,
-                parked: false
-            }),
-            "run AAAAAA: already stopped — nothing to cancel\n"
-        );
-    }
-
-    #[test]
-    fn a_cancel_that_waits_on_its_engine_says_what_it_found() {
-        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
-        let engine = Pid::try_from(4321u32).unwrap();
-        let said = |state: CancelState| {
-            let reply = answer(&run, state);
-            draw(reply.document(&Look::plain()), &Look::plain())
-        };
-        assert_eq!(
-            said(CancelState::Cancelled { engine_pid: engine }),
-            "run AAAAAA: cancelled — the log has its terminal\n"
-        );
-        assert_eq!(
-            said(CancelState::Crashed {
-                engine_pid: engine,
-                killed: 1
-            }),
-            "run AAAAAA: engine (pid 4321) was already dead — killed 1 orphaned process group, recorded the pause\n"
-        );
-        // A stop the engine answers to draws no line of its own.
-        assert_eq!(said(CancelState::Escalated { engine_pid: engine }), "");
-        assert_eq!(said(CancelState::Interrupted { engine_pid: engine }), "");
-        assert_eq!(
-            answer(&run, CancelState::Escalated { engine_pid: engine }).outcome(),
-            Outcome::Reported
-        );
     }
 }

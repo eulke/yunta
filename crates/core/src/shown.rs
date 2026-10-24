@@ -187,7 +187,7 @@ impl Flaw {
         match self {
             Flaw::PassesByAName { .. } => "run the test that observes the behavior",
             Flaw::HollowSpecTest { .. } => {
-                "run a file the spec wrote — or give the task no spec, and say why"
+                "run a file the spec wrote, or give the task no spec, and say why"
             }
             Flaw::UnrunSpecFile { .. } => "name it in the command of the test that runs it",
             Flaw::ChangesASpecTest { .. } => {

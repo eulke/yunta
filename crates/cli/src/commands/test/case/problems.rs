@@ -23,7 +23,7 @@ pub(super) fn unclaimed_problems(
         return Vec::new();
     }
     vec![format!(
-        "fixture `{}`: {} nothing opened — {}",
+        "fixture `{}`: {} nothing opened: {}",
         fixture_path.display(),
         surco::text::counted(unclaimed.len(), "scripted session"),
         unclaimed

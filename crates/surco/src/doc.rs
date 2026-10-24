@@ -11,7 +11,7 @@
 
 use crate::components::{
     Checklist, Code, Concern, Decision, Evidence, Fields, Furrow, Gist, Headline, Marked, Next,
-    NodeTable, Note, Paths, Prose, Runs, Said, Section, Table,
+    NodeTable, Note, Paths, Problem, Prose, Refusal, Runs, Said, Section, Table,
 };
 use crate::line::Line;
 
@@ -67,6 +67,10 @@ pub enum Block {
     Paths(Paths),
     Decision(Decision),
     Checklist(Checklist),
+    /// A problem found in a text, pointed at in its line.
+    Problem(Problem),
+    /// What a command would not do.
+    Refusal(Refusal),
     Next(Next),
     /// What a whole document is, before anything it says.
     Title(Line),
@@ -112,6 +116,8 @@ block_from!(
     Paths(Paths),
     Decision(Decision),
     Checklist(Checklist),
+    Problem(Problem),
+    Refusal(Refusal),
     Next(Next),
     Section(Section),
     Prose(Prose),

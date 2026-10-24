@@ -130,25 +130,26 @@ impl SessionProbe {
         let (found, said) = match &self.outcome {
             Outcome::Ok { tokens } => (
                 Found::Holds,
-                format!("ok — {}", surco::figures::Tokens(*tokens)),
+                format!("ok: {}", surco::figures::Tokens(*tokens)),
             ),
             Outcome::Died(died) => (
                 Found::Problem,
                 format!(
-                    "session died — {}",
+                    "session died: {}",
                     yunta_render::failure::session_death(died)
                 ),
             ),
             Outcome::NoDelivery(why) => (
                 Found::Problem,
-                format!("session opened, no questions document — {why}"),
+                format!("session opened, no questions document: {why}"),
             ),
-            Outcome::Refused(why) => (Found::Problem, format!("probe failed — {why}")),
+            Outcome::Refused(why) => (Found::Problem, format!("probe failed: {why}")),
         };
         Check {
             found,
             subject: format!("{} ({})", self.binding, self.named_by),
             said,
+            details: Vec::new(),
         }
     }
 }

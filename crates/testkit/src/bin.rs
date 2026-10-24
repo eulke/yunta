@@ -137,6 +137,12 @@ pub fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// What `text` says with every run of whitespace one space: a page's
+/// sentences read whole, wherever the width it was drawn at wrapped them.
+pub fn unwrapped(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// The checkouts of every project's pool under the state root `home`: the
 /// checkouts runs worked in, wherever the pool put them.
 pub fn pool_checkouts(home: &std::path::Path) -> Vec<std::path::PathBuf> {

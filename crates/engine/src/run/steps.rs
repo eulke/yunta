@@ -366,7 +366,7 @@ pub(super) async fn execute_batch(
     // A node whose run paused — a child run on its own log, or a departure the
     // person aborted — can't close its node: after the whole batch lands, the
     // run pauses too, with the first such reason. A root cancellation takes
-    // precedence: the loop-top check handles it as "cancelled by user".
+    // precedence: the loop-top check pauses on `PauseReason::Cancelled`.
     let mut paused: Option<PauseReason> = None;
     for result in futures::future::join_all(executions).await {
         if let node_exec::NodeEnd::Paused { reason } = result? {

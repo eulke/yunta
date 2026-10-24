@@ -17,6 +17,7 @@ use surco::figures::duration;
 use surco::glyphs::{Glyphs, Mark};
 use surco::look::Look;
 use surco::text::counted;
+use surco::words::Standing;
 
 use super::inbox::{Group, Inbox, RunRow};
 use crate::commands::advice;
@@ -126,8 +127,8 @@ impl ListRunsAnswer {
             headline = headline.fact(format!("{stalled} stalled"));
         }
         for (group, word) in [
-            (Group::Stopped, "stopped by you"),
-            (Group::InFlight, "running"),
+            (Group::Stopped, Standing::Stopped.word()),
+            (Group::InFlight, Standing::Running.word()),
             (Group::Closed, "closed"),
         ] {
             let count = self.count(group);
@@ -157,9 +158,9 @@ impl ListRunsAnswer {
         let mut parts = vec![
             ("asking now", of(Group::NeedsYou, true)),
             ("needs you, oldest first", of(Group::NeedsYou, false)),
-            ("stalled", of(Group::Stalled, false)),
-            ("stopped by you", of(Group::Stopped, false)),
-            ("running", of(Group::InFlight, false)),
+            (Standing::Stalled.word(), of(Group::Stalled, false)),
+            (Standing::Stopped.word(), of(Group::Stopped, false)),
+            (Standing::Running.word(), of(Group::InFlight, false)),
         ];
         if self.depth.reaches(Depth::Full) {
             parts.push(("closed, newest first", closed));
@@ -188,15 +189,7 @@ impl ListRunsAnswer {
             (Group::Stalled | Group::Stopped, Some(command)) => Edge::Command(command.clone()),
             _ => Edge::Age(duration(row.age)),
         };
-        RunLine {
-            standing: row.word,
-            handle,
-            workflow: row.workflow.to_string(),
-            mode: row.mode.to_string(),
-            furrow: row.furrow.clone(),
-            said: row.said.clone(),
-            edge,
-        }
+        row.line(handle, edge)
     }
 
     /// The runs that do not read back, each with why, in the whole story.

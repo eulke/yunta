@@ -45,7 +45,7 @@ impl PackRequiresGap {
     pub fn unmet(&self, on_path: &dyn Fn(&str) -> bool) -> Vec<crate::CheckError> {
         let runners = self.missing_runners.iter().map(|runner| {
             format!(
-                "runner `{runner}`, which `runners:` does not define with a candidate — define it"
+                "runner `{runner}`, which `runners:` does not define with a candidate: define it"
             )
         });
         let retired = self
@@ -53,14 +53,14 @@ impl PackRequiresGap {
             .iter()
             .map(retired_permissions_sentence);
         let servers = self.missing_mcp_servers.iter().map(|server| {
-            format!("MCP server `{server}`, which `mcp_servers:` does not define — define it")
+            format!("MCP server `{server}`, which `mcp_servers:` does not define: define it")
         });
         let programs = self
             .required_programs
             .iter()
             .filter(|program| !on_path(program))
             .map(|program| {
-                format!("program `{program}`, which is not on this machine's `PATH` — install it")
+                format!("program `{program}`, which is not on this machine's `PATH`: install it")
             });
         runners
             .chain(retired)
@@ -77,7 +77,7 @@ impl PackRequiresGap {
 /// What a required runner that still sets `permissions` is refused with: no
 /// profile enforces that key, so the pack drops it.
 pub fn retired_permissions_sentence(runner: &RunnerName) -> String {
-    format!("runner `{runner}` with `permissions`, which no profile enforces — remove the key")
+    format!("runner `{runner}` with `permissions`, which no profile enforces: remove the key")
 }
 
 pub fn check_pack_requires(manifest: &PackManifest, config: &ConfigLayer) -> PackRequiresGap {

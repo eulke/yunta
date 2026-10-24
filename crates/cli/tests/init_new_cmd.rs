@@ -4,7 +4,7 @@
 //! workflow must pass `check`; `new` must never reference a pack or
 //! touch `yunta.lock`.
 
-use yunta_testkit::{init_repo, stderr, stdout, yunta_in};
+use yunta_testkit::{init_repo, stderr, stdout, unwrapped, yunta_in};
 
 fn setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -44,7 +44,7 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
     let out = stdout(&result);
     assert!(
         out.lines().any(|l| l
-            == "suggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to that file):"),
+            == "for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file"),
         "init points at CLAUDE.md without ever writing it: {out}"
     );
     assert!(
@@ -137,7 +137,11 @@ fn every_new_shape_writes_a_workflow_that_passes_check() {
             stdout(&result),
             stderr(&result)
         );
-        assert!(stdout(&result).contains("OK"), "got: {}", stdout(&result));
+        assert!(
+            stdout(&result).contains("written · ") && stdout(&result).contains(" · can run here"),
+            "got: {}",
+            stdout(&result)
+        );
         let path = repo.join(".yunta/workflows").join(format!("{name}.yaml"));
         assert!(path.is_file());
     }
@@ -231,8 +235,12 @@ fn new_writes_before_init_ever_ran_and_says_the_workflow_cannot_run_yet() {
     // cannot run until the config declares one.
     let result = yunta_in!(&repo, &home, &["new", "standalone", "--shape", "tasks"]);
     assert!(repo.join(".yunta/workflows/standalone.yaml").is_file());
-    assert!(stdout(&result).contains("wrote "), "{}", stdout(&result));
-    let said = stderr(&result);
+    assert!(
+        stdout(&result).contains(" · written · "),
+        "{}",
+        stdout(&result)
+    );
+    let said = unwrapped(&stdout(&result));
     assert!(
         !result.status.success(),
         "a workflow that cannot run is not OK"
@@ -255,15 +263,17 @@ fn new_and_check_agree_on_a_workflow_that_needs_a_runner() {
         "one verdict, one exit code"
     );
     assert!(!check.status.success());
-    let problem = |said: &str| {
-        said.lines()
-            .find(|line| line.contains("node `fix`"))
-            .map(str::trim)
-            .map(str::to_string)
+    // Each page's problem about node `fix`, read whole: `new` draws its
+    // page on stdout, and `check` its failing one on stderr.
+    let problem = |page: &str| {
+        page.split("\n  error  ")
+            .skip(1)
+            .map(|block| unwrapped(block.split("-->").next().unwrap_or_default()))
+            .find(|said| said.contains("node `fix`"))
     };
     assert!(problem(&stderr(&check)).is_some(), "{}", stderr(&check));
     assert_eq!(
-        problem(&stderr(&new)),
+        problem(&stdout(&new)),
         problem(&stderr(&check)),
         "`new` says what `check` says, in the same words"
     );

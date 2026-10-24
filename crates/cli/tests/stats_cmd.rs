@@ -47,7 +47,7 @@ fn stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color() {
     let text = stdout(&stats);
     assert!(
         text.lines()
-            .any(|l| l == "  CPTV         n/a — no task is done, so no cost per verified task"),
+            .any(|l| l == "  task cost    n/a: no task is done, so no cost per verified task"),
         "got: {text}"
     );
 
@@ -130,11 +130,21 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let text = stdout(&workflow_stats);
     assert!(
         text.lines()
-            .any(|l| l == "workflow `bash-only-stats` — 4 runs"),
+            .any(|l| l == "workflow `bash-only-stats`: 4 runs"),
         "got: {text}"
     );
     assert!(
         text.lines().any(|l| l.starts_with("4 past runs · ")),
+        "got: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l == "cost per verified task over time:"),
+        "got: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l.contains("4 runs") && l.contains("median task cost")),
         "got: {text}"
     );
 }
@@ -260,7 +270,7 @@ fn history_sees_a_run_under_the_default_state_root() {
     let text = stdout(&stats);
     assert!(
         text.lines()
-            .any(|line| line == "workflow `bash-only-stats` — 2 runs"),
+            .any(|line| line == "workflow `bash-only-stats`: 2 runs"),
         "the runs under the default root are still this workflow's history: {text}"
     );
 }

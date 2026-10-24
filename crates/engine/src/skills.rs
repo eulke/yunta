@@ -50,11 +50,7 @@ pub(crate) fn skill_names(
 /// A skill name that resolves to no directory.
 #[derive(Debug, thiserror::Error)]
 pub enum SkillsError {
-    #[error(
-        "skill `{name}` not found under {} — add the directory, fix `skills.paths` in the config, \
-         or install the pack that declares it",
-        searched.iter().map(|root| format!("`{}`", root.display())).collect::<Vec<_>>().join(", ")
-    )]
+    #[error("{}", yunta_core::events::skill_not_found(.name, .searched))]
     NotFound {
         name: SkillName,
         searched: Vec<PathBuf>,

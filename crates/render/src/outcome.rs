@@ -26,7 +26,7 @@ fn fact_sentence(fact: &EngineFact) -> String {
     match fact {
         EngineFact::ExitStatus { code } => format!("exit {code}"),
         EngineFact::PullRequestOpened { number, url } => {
-            format!("pull request #{number} — {url}")
+            format!("pull request #{number}: {url}")
         }
         EngineFact::ChildrenFinished { count } => {
             format!("{} finished", text::counted_as(*count, "child", "children"))
@@ -212,7 +212,7 @@ mod tests {
         let record = Evidence::from(vec![Fact::bare("exit 1")]);
         assert_eq!(
             promotion_reason(Some(&cause), None, &record),
-            "node `lint` exhausted its re-routes to `fix-lint` — exit 1"
+            "node `lint` exhausted its re-routes to `fix-lint` (exit 1)"
         );
         assert_eq!(
             promotion_reason(None, Some("an older sentence"), &record),
@@ -231,7 +231,7 @@ mod tests {
         };
         assert_eq!(
             promotion_reason(Some(&cause), None, &Evidence::none()),
-            "node `lint` exhausted its re-routes to `fix-lint` — exit 1"
+            "node `lint` exhausted its re-routes to `fix-lint` (exit 1)"
         );
     }
 }

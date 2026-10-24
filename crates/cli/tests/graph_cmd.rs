@@ -170,7 +170,8 @@ nodes:
     );
     let said = String::from_utf8_lossy(&output.stderr);
     assert!(
-        said.contains("fails `yunta check`") && said.contains("runner `planner`"),
+        said.starts_with("✗ wf.yaml · 1 error\n")
+            && yunta_testkit::unwrapped(&said).contains("runner `planner`"),
         "the verdict goes beside the drawing: {said}"
     );
 }

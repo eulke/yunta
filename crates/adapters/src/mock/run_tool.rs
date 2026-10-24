@@ -16,7 +16,7 @@ use yunta_core::port::RunToolsEndpoint;
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RunToolCallError {
     #[error(
-        "fixture step run_tool `{tool}` but this session has no run_tools_endpoint — the \
+        "fixture step run_tool `{tool}` but this session has no run_tools_endpoint: the \
          engine never offered one (missing `run_tools` capability, or the listener wasn't \
          opened)"
     )]

@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, git_output, hermetic, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write,
-    yunta_at, yunta_in, Checkout, CliChild, ProcessGroupCleanup,
+    git, git_output, hermetic, init_repo, run_id_from, stderr, stdout, unwrapped, wait_for,
+    wait_until, write, yunta_at, yunta_in, Checkout, CliChild, ProcessGroupCleanup,
 };
 
 #[path = "run_flow/frozen.rs"]
@@ -64,7 +64,7 @@ nodes:
         String::from_utf8_lossy(&status.stderr)
     );
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(state["summary"], "nodes 2/2 · finished");
+    assert_eq!(state["summary"], "2 of 2 nodes done · finished");
     assert_eq!(node_of(&state, "touch"), finished_node("touch"));
     assert_eq!(node_of(&state, "verify"), finished_node("verify"));
 
@@ -289,9 +289,11 @@ expect:
     assert_eq!(
         (
             yunta_testkit::checked(&text, "happy-path").as_deref(),
-            text.lines().last()
+            text.lines()
+                .last()
+                .is_some_and(|line| line.ends_with("yunta test · 1 case, 0 failed"))
         ),
-        (Some("ok"), Some("1 case, 0 failed")),
+        (Some("ok"), true),
         "the one case runs against the mock adapter and every expectation holds: {text}"
     );
 }
@@ -417,9 +419,11 @@ expect:
     assert_eq!(
         (
             yunta_testkit::checked(&text, "from-a-document").as_deref(),
-            text.lines().last()
+            text.lines()
+                .last()
+                .is_some_and(|line| line.ends_with("yunta test · 1 case, 0 failed"))
         ),
-        (Some("ok"), Some("1 case, 0 failed")),
+        (Some("ok"), true),
         "the loop finds the tasks the input brought in: {text}"
     );
 }
@@ -994,8 +998,8 @@ nodes:
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(!run.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&run.stderr).trim_end(),
-        "error: input `idea` is required and has no default — pass `--input idea=...`",
+        unwrapped(&String::from_utf8_lossy(&run.stderr)),
+        "error: input `idea` is required and has no default; pass `--input idea=...`",
         "the refusal names the missing input and how to supply it"
     );
     assert!(
@@ -1020,9 +1024,9 @@ fn mode_is_refused_since_modes_have_no_schema_yet() {
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "ship"]);
     assert!(!run.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&run.stderr).trim_end(),
-        "error: workflow `only-node` declares no mode `ship` — declared modes: \
-         (none — this workflow declares no modes:)",
+        unwrapped(&String::from_utf8_lossy(&run.stderr)),
+        "error: workflow `only-node` declares no mode `ship`; declared modes: \
+         (none: this workflow declares no modes)",
         "the refusal names the unknown mode and that the workflow declares none"
     );
 }
@@ -1058,7 +1062,7 @@ nodes:
     assert!(list.status.success());
     assert_eq!(
         stdout(&list).trim_end(),
-        "  greet — Says hello\n    inputs       --input greeting=… (string, optional) — What to say\n    run          yunta run greet",
+        "  greet: Says hello\n    inputs       --input greeting=… (string, optional): What to say\n    run          yunta run greet",
         "list shows the workflow, its description, its one optional input and how to run it"
     );
 }
@@ -1182,7 +1186,7 @@ nodes:
     );
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
-        state["summary"], "nodes 2/2 · finished",
+        state["summary"], "2 of 2 nodes done · finished",
         "the normative counters read both nodes done and finished, and a run with no \
          reroute says nothing about them"
     );
@@ -1229,7 +1233,7 @@ nodes:
     let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
-        state["summary"], "nodes 3/3 \u{b7} 1 skipped by `fan-only` \u{b7} finished",
+        state["summary"], "3 of 3 nodes done \u{b7} 1 skipped by `fan-only` \u{b7} finished",
         "the group and both its children are inside the denominator, and the \
          only skipped node is the top-level one the mode leaves out"
     );
@@ -1362,7 +1366,7 @@ nodes:
     signal_process(pid_of(&run), Signal::SIGINT).expect("the run is alive to be interrupted");
     let output = run.wait_with_output().unwrap();
     assert!(
-        stdout(&output).contains("cancelled"),
+        stdout(&output).contains("interrupted by a person"),
         "the closing block names the outcome: {}",
         stdout(&output)
     );
@@ -1593,7 +1597,7 @@ nodes:
     let output = yunta.wait_with_output().unwrap();
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(
-        text.contains("cancelled by user"),
+        text.contains("interrupted by a person"),
         "the pause must say why: {text}"
     );
 
@@ -1703,14 +1707,14 @@ nodes:
         String::from_utf8_lossy(&cancel.stderr)
     );
     assert!(
-        stdout(&cancel).contains("cancelled"),
+        stdout(&cancel).contains(" · stopped"),
         "got: {}",
         stdout(&cancel)
     );
 
     // The run process exits, its child is dead, the log is terminal.
     let output = yunta.wait_with_output().unwrap();
-    assert!(String::from_utf8_lossy(&output.stdout).contains("cancelled by user"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("interrupted by a person"));
     assert_eq!(
         liveness(parse_pid(&child_pid)),
         Liveness::Dead,
@@ -1720,7 +1724,7 @@ nodes:
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
-        stdout(&status).contains("cancelled by user"),
+        stdout(&status).contains("interrupted by a person"),
         "got: {}",
         stdout(&status)
     );
@@ -1845,7 +1849,7 @@ nodes:
         String::from_utf8_lossy(&cancel.stderr)
     );
     assert!(
-        stdout(&cancel).contains("already dead"),
+        stdout(&cancel).contains("had already died"),
         "got: {}",
         stdout(&cancel)
     );
@@ -1873,7 +1877,7 @@ nodes:
     assert!(!engine_json.exists());
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
-        stdout(&status).contains("cancelled after crash"),
+        stdout(&status).contains("its engine had died, and a cancel recorded the stop"),
         "got: {}",
         stdout(&status)
     );
@@ -2078,7 +2082,7 @@ nodes:
     signal_process(pid_of(&yunta), Signal::SIGINT).expect("yunta is alive to be interrupted");
     let output = yunta.wait_with_output().unwrap();
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("cancelled by user"),
+        String::from_utf8_lossy(&output.stdout).contains("interrupted by a person"),
         "got: {}",
         String::from_utf8_lossy(&output.stdout)
     );
@@ -2400,7 +2404,7 @@ fn a_detached_run_leaves_the_checkout_locked_by_the_child_that_is_in_it() {
     // took the checkout over from a "dead" holder and ran a second time
     // in a tree the child was working in.
     let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
-    let said = stderr(&second);
+    let said = unwrapped(&stderr(&second));
     // Released before anything is asserted: the node holds until this
     // file exists, and an assertion firing first would leave it holding
     // for as long as the suite runs.
@@ -2965,8 +2969,8 @@ nodes:
     let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "nonexistent"]);
     assert!(!resolve.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&resolve.stderr).trim_end(),
-        "error: option `nonexistent` isn't valid here — declared options: retry, abort",
+        unwrapped(&String::from_utf8_lossy(&resolve.stderr)),
+        "error: option `nonexistent` isn't valid here; declared options: retry, abort",
         "the rejection lists exactly the options on this decision's menu"
     );
 
@@ -3013,10 +3017,10 @@ nodes:
     let resolve = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "retry"]);
     assert!(!resolve.status.success());
     assert_eq!(
-        stderr(&resolve).trim_end(),
+        unwrapped(&stderr(&resolve)),
         format!(
-            "error: this run isn't parked at a pause — a live process may still be \
-             driving it, or it already finished — `yunta status {}` shows where it is",
+            "error: this run isn't parked at a pause: a live process may still be \
+             driving it, or it already finished; `yunta status {}` shows where it is",
             yunta_testkit::handle(&run_id)
         ),
         "the refusal names the state and what shows it"
@@ -3539,14 +3543,14 @@ fn yunta_test_and_yunta_run_execute_the_same_recipe() {
         ]
     );
     assert!(!refused_run.status.success());
-    let said = String::from_utf8_lossy(&refused_run.stderr).into_owned();
+    let said = unwrapped(&String::from_utf8_lossy(&refused_run.stderr));
 
     let refused_case = yunta_in!(&repo, &home, &["test"]);
     assert!(!refused_case.status.success());
     let complaint = "a mode that keeps a node keeps what it reroutes to";
     assert!(said.contains(complaint), "yunta run: {said}");
     assert!(
-        stdout(&refused_case).contains(complaint),
+        unwrapped(&stdout(&refused_case)).contains(complaint),
         "yunta test: {}",
         stdout(&refused_case)
     );
@@ -3641,7 +3645,7 @@ fn an_interrupt_during_a_resume_pauses_the_run_as_cancelled_by_user() {
 
     let status = project.run(Path::new(env!("CARGO_BIN_EXE_yunta")), &["status", &run_id]);
     assert!(
-        stdout(&status).contains("cancelled by user"),
+        stdout(&status).contains("interrupted by a person"),
         "the resume's own stop is on the log: {}\n{}",
         stdout(&status),
         stderr(&output)
@@ -3796,7 +3800,7 @@ fn yunta_cancel_on_a_detached_run_pauses_it_as_cancelled_by_user() {
 
     let cancelled = project.run(bin, &["cancel", &run_id]);
     assert!(
-        stdout(&cancelled).contains("the log has its terminal"),
+        stdout(&cancelled).contains("its engine stopped every session and recorded the pause"),
         "the detached engine answered its SIGINT: {}{}",
         stdout(&cancelled),
         stderr(&cancelled)
@@ -3811,7 +3815,7 @@ fn yunta_cancel_on_a_detached_run_pauses_it_as_cancelled_by_user() {
 
     let status = stdout(&project.run(bin, &["status", &run_id]));
     assert!(
-        status.contains("cancelled by user"),
+        status.contains("interrupted by a person"),
         "the run's own log says who stopped it: {status}"
     );
 }
@@ -3863,7 +3867,7 @@ fn an_interrupt_during_yunta_cancel_stops_the_wait() {
     signal_process(engine, Signal::SIGCONT).expect("the engine is still there");
     let status = || stdout(&project.run(bin, &["status", &run_id]));
     wait_until(
-        || status().contains("cancelled by user"),
+        || status().contains("interrupted by a person"),
         || {
             format!(
                 "the engine never acted on the SIGINT it was sent: {}",

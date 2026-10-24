@@ -77,8 +77,8 @@ pub(super) fn verdict(first: Duration, then: Duration, noticeable: Duration) -> 
             Found::Caution,
             format!(
                 "{said}: macOS assesses each new executable before its first run, and a \
-                 suite pays that for every test binary it links again — add the terminal that \
-                 runs yunta under System Settings › Privacy & Security › Developer Tools, then \
+                 suite pays that for every test binary it links again; add the terminal that \
+                 runs yunta under System Settings > Privacy & Security > Developer Tools, then \
                  open it again"
             ),
         ),

@@ -14,7 +14,8 @@ use yunta_core::events::GateEvent;
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, init_repo, run_id_from, stderr, stdout, wait_for_async, wait_until_async, write, yunta_in,
+    git, init_repo, run_id_from, stderr, stdout, unwrapped, wait_for_async, wait_until_async,
+    write, yunta_in,
 };
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
@@ -767,8 +768,8 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
     let from_shell = stderr(&output);
 
     assert_eq!(
-        from_shell.trim(),
-        format!("error: {from_control_plane}"),
+        unwrapped(&from_shell),
+        unwrapped(&format!("error: {from_control_plane}")),
         "the same mistake gets the same sentence at either door"
     );
     assert!(
@@ -1193,8 +1194,8 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
     assert_eq!(answered.is_error, Some(true), "{answered:#?}");
     // The same refusal, naming the run by the whole id an agent copies.
     assert_eq!(
-        tool_text(&answered),
-        sentence.replace(yunta_testkit::handle(&run_id), &run_id)
+        unwrapped(&tool_text(&answered)),
+        unwrapped(&sentence.replace(yunta_testkit::handle(&run_id), &run_id))
     );
     client.cancel().await.ok();
 }

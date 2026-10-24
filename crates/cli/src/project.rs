@@ -103,7 +103,7 @@ pub enum ProjectError {
     },
     #[error("failed to parse config layer `{path}`: {detail}")]
     Parse { path: PathBuf, detail: String },
-    #[error("no home directory and no YUNTA_HOME set — cannot place state")]
+    #[error("no home directory and no YUNTA_HOME set: cannot place state")]
     NoStateRoot,
     #[error("failed to create state directory `{path}`: {source}")]
     CreateStateDir {

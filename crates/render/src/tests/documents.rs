@@ -202,7 +202,7 @@ fn a_task_card_shows_the_code_of_its_changes_and_of_its_test() {
     let doc = document(&review(), " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
     let card =
-        &drawn[drawn.find("greet — Greet by name").unwrap()..drawn.find("step 2 of 2").unwrap()];
+        &drawn[drawn.find("greet: Greet by name").unwrap()..drawn.find("step 2 of 2").unwrap()];
     for code in [
         "| pub struct Greeter {",
         "| fn the_greeting_names_the_person() {",
@@ -223,7 +223,7 @@ fn a_change_shows_its_own_code() {
     farewell.changes[0].code = Some("pub fn bye(&self) -> String;".to_string());
     let doc = document(&review, " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
-    let card = &drawn[drawn.find("farewell — Say goodbye").unwrap()..];
+    let card = &drawn[drawn.find("farewell: Say goodbye").unwrap()..];
     assert!(
         card.contains("| pub fn bye(&self) -> String;"),
         "the change's code is in its card:\n{card}"
@@ -237,8 +237,8 @@ fn a_shape_a_task_builds_is_in_its_card_whole_when_its_change_brings_its_own_lin
     greet.changes[0].code = Some("pub fn hello(&self) -> String;".to_string());
     let doc = document(&review, " of `plan`", &run(), Form::Review, &*spell());
     let drawn = Terminal::on(Look::plain()).draw(&doc);
-    let card = &drawn[drawn.find("greet — Greet by name").unwrap()
-        ..drawn.find("farewell — Say goodbye").unwrap()];
+    let card = &drawn
+        [drawn.find("greet: Greet by name").unwrap()..drawn.find("farewell: Say goodbye").unwrap()];
 
     let shape = card
         .find("src/greet.rs › Greeter ")
@@ -298,7 +298,7 @@ fn a_file_longer_than_a_card_holds_says_where_the_rest_is() {
         "{drawn}"
     );
     assert!(
-        drawn.contains("20 lines more — yunta status 7E5PH4 --node spec"),
+        drawn.contains("20 lines more: yunta status 7E5PH4 --node spec"),
         "{drawn}"
     );
     let whole = Terminal::on(Look::plain()).draw(&document(
@@ -387,7 +387,7 @@ fn a_spec_file_no_test_runs_is_never_said_to_test_the_task() {
         "{drawn}"
     );
     assert!(
-        drawn.contains("tests/greet.rs — written by the spec; none of its tests runs it"),
+        drawn.contains("tests/greet.rs: written by the spec; none of its tests runs it"),
         "{drawn}"
     );
     assert!(
@@ -425,9 +425,9 @@ fn a_decision_that_restates_an_answer_says_you_answered_it() {
 fn a_task_with_no_guard_says_only_the_suite_checks_what_it_keeps() {
     let drawn = read(&review());
 
-    let greet = drawn.find("greet — Greet by name").expect("greet's card");
+    let greet = drawn.find("greet: Greet by name").expect("greet's card");
     let farewell = drawn
-        .find("farewell — Say goodbye")
+        .find("farewell: Say goodbye")
         .expect("farewell's card");
     assert!(
         drawn[greet..farewell].contains("checked by   nothing but the suite"),
@@ -456,7 +456,7 @@ fn a_card_shows_each_test_whole_and_folds_what_only_sets_it_up() {
     assert!(
         reviewed.contains("fn run(args: &[&str]) -> String { ... 2 lines }")
             && reviewed.contains("assert_eq!(run(&[\"ana\"]), \"hello, ana\");")
-            && reviewed.contains("3 lines more — yunta status 7E5PH4 --node spec"),
+            && reviewed.contains("3 lines more: yunta status 7E5PH4 --node spec"),
         "{reviewed}"
     );
     let whole = draw(Form::Whole);
@@ -475,8 +475,8 @@ fn a_card_names_only_the_shapes_its_task_builds_on() {
         &*spell(),
     ));
 
-    let greet = drawn.find("greet — Greet by name").expect(&drawn);
-    let farewell = drawn.find("farewell — Say goodbye").expect(&drawn);
+    let greet = drawn.find("greet: Greet by name").expect(&drawn);
+    let farewell = drawn.find("farewell: Say goodbye").expect(&drawn);
     assert!(
         !drawn[greet..farewell].contains("uses"),
         "a task does not build on the shape it builds: {drawn}"

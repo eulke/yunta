@@ -6,17 +6,25 @@ bugs — Yunta prefers a named, actionable error over guessing what you meant.
 
 ## `yunta check` refuses the workflow
 
-`check` validates statically, before any session opens. The message always
+`check` validates statically, before any session opens. The page always
 names the node and the exact problem, and a problem about the workflow file is
 followed by the line it is about, with carets under the part at fault:
 
 ```
-workflow.yaml: 1 error
-  node `fix` references runner `implementr`, which `runners:` does not define — did you mean `implementer`?
-     --> workflow.yaml:6:13
-      |
-    6 |     runner: implementr
-      |             ^^^^^^^^^^
+✗ workflow.yaml · 1 error
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  at           workflow.yaml
+
+  error  node `fix` references runner `implementr`, which `runners:` does not
+         define; did you mean `implementer`?
+   --> workflow.yaml:5:13
+    │
+  5 │     runner: implementr
+    │             ^^^^^^^^^^
+
+next
+  yunta check workflow.yaml   again, once they are fixed
 ```
 
 A name one or two typos away from one the workflow or the config declares — a
@@ -79,7 +87,7 @@ them all. `yunta run` refuses a file with any of them.
 ## `yunta doctor` reports an adapter unhealthy
 
 ```
-  ✗ codex  unhealthy — `codex` not found on PATH
+  ✗ codex  unhealthy: `codex` not found on PATH
 ```
 
 The diagnostic names the actual problem: binary missing, version
@@ -185,7 +193,7 @@ node on a failure of its own, headed by the node rather than by a file:
 
 ```
 node `plan`: 1 error
-  handed over no tasks document — produce it before the node ends, or stop declaring it here
+  handed over no tasks document: produce it before the node ends, or stop declaring it here
 ```
 
 No path is named because none was ever going to be there: such a document is
@@ -271,7 +279,7 @@ as.
 ## `isolation: none` refuses to start
 
 ```
-`<path>` has uncommitted changes — isolation `none` requires a clean tree
+`<path>` has uncommitted changes; isolation `none` requires a clean tree: without it, scope-by-diff can't tell the agent's work from what was already there
 ```
 
 `isolation: none` runs directly against your working tree instead of a
@@ -283,7 +291,7 @@ in place.
 ## A run looked stuck after the laptop slept
 
 ```
-run — host suspended for 1h52m — durations leave it out; new sessions wait until it has been awake 2m00s
+run: host suspended for 1h52m, which durations leave out; new sessions wait until it has been awake 2m00s
 ```
 
 The run noticed the machine slept and recorded it. None of its durations count
@@ -396,7 +404,7 @@ session opened. The stop names each guard, and says what the guard is there to
 show when the criteria say so:
 
 ```
-guard `cargo test -p billing` is already red before any work started — it is there to show that totals match the invoices
+guard `cargo test -p billing` is already red before any work started: it is there to show that totals match the invoices
 ```
 
 The menu offers a `retry` that waits for what the guard reads. Once the log has
@@ -429,7 +437,7 @@ task, and only the plan can change them.
 ```
 run is broken: run `01J...` no longer holds the bytes its log accepted for 1
 of the 3 artifacts it names: `artifacts/plan/tasks.yaml`: object
-`a1b2...` holds content that hashes to `c3d4...` — the bytes under
+`a1b2...` holds content that hashes to `c3d4...`: the bytes under
 `objects/` are not the bytes the run accepted
 ```
 
@@ -466,7 +474,9 @@ HEAD `9f1c...` no longer has the run's base commit `4a77...` behind it: every
 task, scope check and criterion this run's log records was established against
 a tree that this one is not a continuation of. Put it back on the run's own
 branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/01J...`), or
-on any commit that still descends from `4a77...` — ...
+on any commit that still descends from `4a77...` (`git -C
+/home/me/.yunta/worktrees/01J... reflog` shows where the run left it). If those
+commits are gone for good, start a new run against the tree as it is now.
 ```
 
 Waking a run asks its worktree two questions, and this is the second one
@@ -504,7 +514,7 @@ that is gone.
 
 ```
 the run's branch `yunta/01J...` has no worktree at
-`/home/me/.yunta/worktrees/01J...` (there is nothing at that path) — the
+`/home/me/.yunta/worktrees/01J...` (there is nothing at that path); the
 run's history and artifacts are intact; bring the checkout back with `git
 worktree add /home/me/.yunta/worktrees/01J... yunta/01J...`, run from the
 repository the run was created in, and resume again

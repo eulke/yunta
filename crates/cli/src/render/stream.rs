@@ -49,7 +49,7 @@ pub(crate) fn settle_glyphs(env: &GlyphEnv) {
     if let Some(value) = &env.explicit {
         if parse_choice(value).is_none() {
             crate::error::warn(format!(
-                "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii` — drawing with \
+                "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii`; drawing with \
                  {chosen}, which is what this environment names"
             ));
         }

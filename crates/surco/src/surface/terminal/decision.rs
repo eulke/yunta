@@ -17,7 +17,7 @@ impl Decision {
                 .plain(INDENT)
                 .push(Tone::Strong, option.id.as_str());
             if let Some(label) = option.said_label() {
-                head = head.plain(" — ").plain(label);
+                head = head.plain(": ").plain(label);
             }
             lines.push(head);
             let mut said: Vec<String> = option.tradeoff.iter().cloned().collect();

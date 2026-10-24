@@ -141,7 +141,7 @@ async fn listed(
     };
     let mut title = Line::new().push(Tone::Strong, name.as_str());
     if let Some(description) = workflow.description.as_deref() {
-        title = title.plain(format!(" — {description}"));
+        title = title.plain(format!(": {description}"));
     }
     let mut fields = input_fields(&workflow);
     if let Some(ctx) = history_source {
@@ -176,7 +176,7 @@ fn input_fields(workflow: &Workflow) -> Fields {
         };
         let description = spec
             .description()
-            .map(|description| format!(" — {description}"))
+            .map(|description| format!(": {description}"))
             .unwrap_or_default();
         fields = fields.push_if(
             if n == 0 { "inputs" } else { "" },

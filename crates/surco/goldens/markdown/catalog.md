@@ -31,9 +31,22 @@ whole output: `yunta status 7E5PH4 --node lint`
 error: unused import  
   --> src/lib.rs:3:5
 
+**error** node `fix` references runner `implementr`, which `runners:` does not define  
+at `.yunta/workflows/lint-fix.yaml:9:13`
+
+```text
+9 │     runner: implementr
+  │             ^^^^^^^^^^
+```
+
+**warning** the program `cargo-nextest` is not on this machine's PATH
+
+**error:** no run is called `7E5PH5`; did you mean `7E5PH4`?  
+_looked in ~/.yunta/runs_
+
 outside the declared globs:
 - `src/main.rs`
-- `Cargo.lock` — the lock file
+- `Cargo.lock` (the lock file)
 
 A change **in Markdown**, with `code`.
 
@@ -44,7 +57,7 @@ graph LR
   plan --> build
 ```
 
-`src/lib.rs` — the change
+`src/lib.rs`: the change
 
 ```rust
 pub fn greet() {}
@@ -65,7 +78,7 @@ pub fn greet() {}
 
 a line a page composed itself
 
-- **approve** — builds the plan  
+- **approve**: builds the plan  
   the four tasks run in three steps  
   `yunta resolve-gate 7E5PH4 approve`
 - **adjust**  
@@ -75,7 +88,7 @@ a line a page composed itself
 
 or
 
-- `yunta close 7E5PH4` — closes it for good
+- `yunta close 7E5PH4`: closes it for good
 
 _the run holds its own state on disk._
 
@@ -83,4 +96,4 @@ _the run holds its own state on disk._
 
 **next**
 
-- `yunta status 7E5PH4` — where it stands
+- `yunta status 7E5PH4`: where it stands

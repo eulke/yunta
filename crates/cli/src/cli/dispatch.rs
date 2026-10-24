@@ -90,7 +90,7 @@ pub(super) async fn dispatch(
             workflow,
             run,
             format,
-        } => graph_command(workflow, run, format).await,
+        } => graph_command(workflow, run, format, look).await,
         Command::Test { dir } => commands::test::test(dir.as_deref(), look).await,
         Command::Verify { run, .. } => {
             commands::verify::verify(&run.named().await?, output, look).await
@@ -161,11 +161,13 @@ async fn graph_command(
     workflow: Option<PathBuf>,
     run: Option<RunRef>,
     format: graph::GraphFormat,
+    look: &Look,
 ) -> Result<Outcome, CliError> {
     graph::graph(
         workflow.as_deref(),
         named(run.as_ref()).await?.as_ref(),
         format,
+        look,
     )
     .await
 }

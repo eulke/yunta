@@ -31,15 +31,6 @@ pub fn hanging(text: &str, prefix: &str) -> String {
     out
 }
 
-/// Every line prefixed, the first one included, for a surface that
-/// nests the whole block rather than introducing it.
-pub fn indent(text: &str, prefix: &str) -> String {
-    text.lines()
-        .map(|line| format!("{prefix}{line}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// A headline and the detail that explains it, joined by `": "`, and the
 /// headline alone when the detail says nothing.
 ///
@@ -62,19 +53,19 @@ pub fn detailed(headline: impl fmt::Display, detail: &str) -> String {
     format!("{headline}: {detail}")
 }
 
-/// A subject and what it carries, set off by an em dash, and the subject
+/// A subject and what it carries, in parentheses after it, and the subject
 /// alone when there is nothing to set off.
 ///
-/// The dash promises a reader exactly what [`detailed`]'s colon does;
-/// what chooses between them is the shape of what follows. A colon
-/// introduces a value, so it reads wrong in front of something that
-/// carries colons of its own — a claim followed by the labelled facts
-/// behind it, or an event line followed by the free text a payload
-/// holds. The dash sets those aside instead of introducing them.
+/// The parentheses promise a reader what [`detailed`]'s colon does; what
+/// chooses between them is the shape of what follows. A colon introduces a
+/// value, so it reads wrong in front of something that carries colons of
+/// its own: a claim followed by the labelled facts behind it, or an event
+/// line followed by the free text a payload holds. The parentheses set
+/// those aside instead of introducing them.
 ///
 /// ```
 /// # use crate::text::aside;
-/// assert_eq!(aside("run_paused", "cap: 400; spent: 500"), "run_paused — cap: 400; spent: 500");
+/// assert_eq!(aside("run_paused", "cap: 400; spent: 500"), "run_paused (cap: 400; spent: 500)");
 /// assert_eq!(aside("run_paused", ""), "run_paused");
 /// ```
 pub fn aside(subject: impl fmt::Display, carried: &str) -> String {
@@ -82,7 +73,7 @@ pub fn aside(subject: impl fmt::Display, carried: &str) -> String {
     if carried.is_empty() {
         return subject.to_string();
     }
-    format!("{subject} — {carried}")
+    format!("{subject} ({carried})")
 }
 
 /// `n` things, named: `1 case`, `2 cases`. The one place a count already
@@ -158,12 +149,22 @@ pub fn nearest<'a>(typed: &str, candidates: impl IntoIterator<Item = &'a str>) -
     best.filter(|_| !tied).map(|(candidate, _)| candidate)
 }
 
-/// ` — did you mean `name`?`, said after a name nothing answers to when
-/// one of `candidates` is [`nearest`] to it; nothing otherwise.
-pub fn did_you_mean<'a>(typed: &str, candidates: impl IntoIterator<Item = &'a str>) -> String {
-    nearest(typed, candidates)
-        .map(|near| format!(" — did you mean `{near}`?"))
+/// `did you mean `name`?`: the question every refusal that suggests a
+/// name asks, of the name `near` that what it refused was a slip away from.
+pub fn suggested(near: &str) -> String {
+    format!("did you mean `{near}`?")
+}
+
+/// `; did you mean `name`?`, said after a name nothing answers to when
+/// `near` is the name it was a slip away from; nothing otherwise.
+pub fn near_miss(near: Option<&str>) -> String {
+    near.map(|near| format!("; {}", suggested(near)))
         .unwrap_or_default()
+}
+
+/// The [`near_miss`] of `typed` among `candidates`: the one [`nearest`] to it.
+pub fn did_you_mean<'a>(typed: &str, candidates: impl IntoIterator<Item = &'a str>) -> String {
+    near_miss(nearest(typed, candidates))
 }
 
 /// Identifiers as a reader sees a list of them, each in its own
@@ -241,7 +242,7 @@ mod tests {
         let keys = ["depends_on", "scope", "prompt", "runner"];
         assert_eq!(nearest("promt", keys), Some("prompt"));
         assert_eq!(nearest("depend_on", keys), Some("depends_on"));
-        assert_eq!(did_you_mean("scpe", keys), " — did you mean `scope`?");
+        assert_eq!(did_you_mean("scpe", keys), "; did you mean `scope`?");
     }
 
     #[test]
@@ -296,15 +297,15 @@ mod tests {
     }
 
     #[test]
-    fn a_subject_with_something_to_carry_is_joined_by_a_dash() {
+    fn a_subject_with_something_to_carry_carries_it_in_parentheses() {
         assert_eq!(
             aside("run_paused", "cap: 400; spent: 500"),
-            "run_paused — cap: 400; spent: 500"
+            "run_paused (cap: 400; spent: 500)"
         );
     }
 
     #[test]
-    fn a_subject_carrying_nothing_keeps_no_dash_promising_one() {
+    fn a_subject_carrying_nothing_keeps_no_parentheses_promising_it() {
         assert_eq!(aside("run_paused", ""), "run_paused");
         assert_eq!(aside("run_paused", "  \n\t "), "run_paused");
     }

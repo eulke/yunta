@@ -158,13 +158,13 @@ impl Requiredness {
 pub enum InputSpecError {
     /// A number input's `default`, `min` and `max` are finite: NaN and
     /// the infinities compare with nothing and render as nothing.
-    #[error("`{field}` is not a finite number — a number input's default and bounds are finite")]
+    #[error("`{field}` is not a finite number: a number input's default and bounds are finite")]
     NotFinite { field: &'static str },
 
     /// A `default` is what makes an input optional, so `required: true`
     /// next to one cannot be honored.
     #[error(
-        "`required: true` and a `default` contradict each other — the default is what makes \
+        "`required: true` and a `default` contradict each other: the default is what makes \
          an input optional; drop one of them"
     )]
     RequiredWithDefault,
@@ -172,7 +172,7 @@ pub enum InputSpecError {
     /// no value at all, which no `{{inputs.x}}` render site can
     /// represent.
     #[error(
-        "`required: false` with no `default` leaves the input without a value — give it a \
+        "`required: false` with no `default` leaves the input without a value: give it a \
          default, or drop `required: false`"
     )]
     OptionalWithoutDefault,

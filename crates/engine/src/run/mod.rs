@@ -151,7 +151,7 @@ pub enum RunError {
     #[error(transparent)]
     Secret(#[from] yunta_core::ShortSecret),
 
-    #[error("run `{run_id}` has no events — create it before executing it")]
+    #[error("run `{run_id}` has no events: create it before executing it")]
     UnknownRun { run_id: RunId },
 
     #[error("run is broken: {diagnostic}")]
@@ -161,8 +161,8 @@ pub enum RunError {
     /// while it was preparing the tree a run works on. A birth has no
     /// log of its own to record a pause on, so it says so to its
     /// caller — a `kind: workflow` node turns it into the parent's
-    /// `run_paused { cancelled by user }`, and a CLI into its own exit.
-    #[error("cancelled by user")]
+    /// `run_paused` for a person's stop, and a CLI into its own exit.
+    #[error("interrupted by a person")]
     Cancelled,
 
     /// The disk has no room for what the run is about to build: the run
@@ -185,7 +185,7 @@ pub enum RunError {
     /// mode's *internal* coherence, but never sees which one a run
     /// actually asks for, so this is where an unknown `--mode` name is
     /// caught, before anything is written.
-    #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
+    #[error("workflow `{workflow}` declares no mode `{mode}`; declared modes: {declared}")]
     UnknownMode {
         workflow: WorkflowName,
         mode: ModeName,
@@ -197,7 +197,7 @@ pub enum RunError {
     /// to a birth that stopped before its `run_created` — either way
     /// the id is not free.
     #[error(
-        "run directory `{path}` already exists — a run id names one birth; a directory with \
+        "run directory `{path}` already exists: a run id names one birth; a directory with \
          no run in the log is left from a birth that stopped early and is safe to delete"
     )]
     RunDirExists { path: PathBuf },

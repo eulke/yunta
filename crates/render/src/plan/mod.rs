@@ -260,7 +260,7 @@ fn designed(doc: Doc, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc {
                 .push(
                     Tone::Muted,
                     format!(
-                        " — its code is in step {}, `{}`",
+                        ": its code is in step {}, `{}`",
                         step_of(&shape.owner),
                         shape.owner
                     ),

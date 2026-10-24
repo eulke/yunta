@@ -38,8 +38,8 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
     },
     crate::diagnostic::Rule {
         code: RuleCode::UnknownDependency,
-        demand: "every reference to a node — `depends_on`, `on_failure.goto`, a gate option's \
-                 `on`, a `context` artifact's producer, a `mounts` entry, a mode's `include` — \
+        demand: "every reference to a node (`depends_on`, `on_failure.goto`, a gate option's \
+                 `on`, a `context` artifact's producer, a `mounts` entry, a mode's `include`) \
                  names a node the workflow declares",
     },
     crate::diagnostic::Rule {
@@ -60,7 +60,7 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
     crate::diagnostic::Rule {
         code: RuleCode::IncoherentOptional,
         demand: "`optional: true` is declared on a top-level node, and no node a run keeps \
-                 re-routes to an optional node or reads from one — but the node only an \
+                 re-routes to an optional node or reads from one, except the node only an \
                  optional one leads to, which goes with it",
     },
 ];

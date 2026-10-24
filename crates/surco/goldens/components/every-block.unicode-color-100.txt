@@ -14,7 +14,7 @@
 ␛[2m  │ ␛[0merror[E0425]: cannot find value `undefined_variable_name` in this scope, reported at src/lib.rs…
   ␛[2m3 lines above␛[0m␛[2m · ␛[0m␛[2mwhole output: ␛[0m~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c
 
-  ␛[1mretry␛[0m — runs `fix-lint` once more
+  ␛[1mretry␛[0m: runs `fix-lint` once more
     ␛[2mone more correction attempt beyond `max_reroutes`␛[0m
     ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
   ␛[1madjust␛[0m
@@ -22,8 +22,8 @@
     ␛[2masks: what to change␛[0m
     ␛[1myunta resolve-gate 7E5PH4 adjust --text "<answer>"␛[0m
 
-  ␛[2mprogress    ␛[0m nodes 1/2 · 1 failed
-  ␛[2mtokens      ␛[0m 20.2k spent · 3 past runs, median 18k tokens
+  ␛[2mprogress    ␛[0m 1 of 2 nodes done, 1 failed
+  ␛[2mtokens      ␛[0m 20.2k spent, 3 past runs, median 18k tokens
 
 ␛[2mnext␛[0m
   ␛[1myunta status 7E5PH4␛[0m   ␛[2mwhere it stands␛[0m

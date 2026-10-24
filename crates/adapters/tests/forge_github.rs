@@ -433,11 +433,11 @@ async fn a_gate_pull_request_asks_its_question_and_says_what_each_review_does() 
     assert_eq!(pr.title, "Is the spec ready to build on?");
     for said in [
         "Gate `approve-spec` of run `run-1` waits on this pull request, for lead.",
-        "**approve** — approve this pull request, or merge it",
+        "**approve**: approve this pull request, or merge it",
         "the gate passes, and the run goes on to `build` and `docs`",
         "each comment reaches `spec` as a finding",
-        "**close** — close this pull request",
-        "`spec.md` — as the run holds it",
+        "**close**: close this pull request",
+        "`spec.md`: as the run holds it",
         "`yunta resume run-1`",
         "`yunta cancel run-1`",
     ] {

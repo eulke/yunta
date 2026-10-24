@@ -15,6 +15,7 @@
 
 use std::fmt::Display;
 
+use surco::components::{Next, Refusal};
 use surco::doc::{Block, Doc};
 use surco::line::Line;
 use surco::look::Look;
@@ -186,8 +187,9 @@ impl ErrorDocument {
 
 /// Writes the refusal `error` for a command run in `mode`. Under `--json`
 /// it is the one document on stdout, and stderr stays empty. Otherwise a
-/// person reads the sentence on stderr, then where the refusal looked and
-/// the commands that go on from here.
+/// person reads it on stderr as a page: the sentence and where it looked,
+/// each problem it found pointed at in its line, and the commands that go
+/// on from here.
 pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
     if mode == Mode::Json {
         // The whole id, which is what a program copies from a refusal.
@@ -197,35 +199,26 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
         }
         return;
     }
-    // What a person reads on stderr is painted and measured for stderr,
-    // whatever stdout is: a stream redirected away from the terminal does
-    // not decide how the refusal on the terminal looks.
-    let ink = render::stderr_ink();
-    eprintln!(
-        "{}: {}",
-        ink.word(surco::line::Tone::Failed, "error"),
-        error.said_to(Reader::Person)
-    );
-    let (detail, next) = error.advice();
-    if let Some(detail) = detail {
-        eprintln!(
-            "{}{}",
-            surco::width::INDENT,
-            ink.word(surco::line::Tone::Muted, &detail)
-        );
-    }
-    if !next.is_empty() {
-        let stderr = Look {
-            ink,
-            width: render::stderr_width(),
-            ..*look
-        };
-        eprint!(
-            "\n{}",
-            render::draw(
-                Doc::new().with(surco::components::Next { steps: next }),
-                &stderr
-            )
-        );
-    }
+    let (detail, steps) = error.advice();
+    let page = Doc::new()
+        .with(Refusal {
+            said: error.said_to(Reader::Person),
+            detail,
+        })
+        .with_all(error.blocks())
+        .with(Next { steps });
+    on_stderr(look, page);
+}
+
+/// A page a person reads on stderr: a refusal, or a verdict that fails.
+/// It is painted and measured for stderr, whatever stdout is: a stream
+/// redirected away from the terminal does not decide how a page on the
+/// terminal looks.
+pub(crate) fn on_stderr(look: &Look, doc: Doc) {
+    let stderr = Look {
+        ink: render::stderr_ink(),
+        width: render::stderr_width(),
+        ..*look
+    };
+    eprint!("{}", render::draw(doc, &stderr));
 }

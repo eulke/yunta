@@ -169,7 +169,7 @@ impl ArtifactRefId {
         }
         id.ok_or_else(|| {
             D::Error::custom(format!(
-                "{what} names the artifact with `kind:` — one of {} — or with `name:`",
+                "{what} names the artifact with `kind:` (one of {}), or with `name:`",
                 ArtifactKind::listed()
             ))
         })

@@ -105,7 +105,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
             reason: reason @ PauseReason::Escalation(_),
         } => assert_eq!(
             yunta_render::pause::sentence(&reason),
-            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
+            "node `lint` failed and its 1 re-route to `fix-lint` is exhausted (exit 1)"
         ),
         other => panic!("expected Paused, got {other:?}"),
     }

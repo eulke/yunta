@@ -46,7 +46,7 @@ fn every_error_message_names_its_rule() {
             runner: "planer".into(),
             near: Some("planner".into()),
         }),
-        "node `a` references runner `planer`, which `runners:` does not define — did you mean \
+        "node `a` references runner `planer`, which `runners:` does not define; did you mean \
          `planner`?"
     );
 }
@@ -101,7 +101,7 @@ fn a_gate_that_routes_abort_somewhere_is_reported() {
             node: "approve".into(),
             route: UntakenRoute::Abort,
         }),
-        "gate `approve`: `on.abort` is never taken — choosing `abort` pauses the run; give the \
+        "gate `approve`: `on.abort` is never taken: choosing `abort` pauses the run; give the \
          option that sends the run back another id"
     );
 }
@@ -232,7 +232,7 @@ fn a_composed_refusal_names_the_use_and_its_problems() {
             near: None,
         }],
     });
-    assert!(check(&refusal).starts_with("node `sub`: `use: a` fails check — node `gate`"));
+    assert!(check(&refusal).starts_with("node `sub`: `use: a` fails check: node `gate`"));
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn an_artifact_view_that_cannot_be_written_names_the_object_it_lacks() {
         ),
         format!(
             "failed to write the `artifacts/` view of `report.md`: the run holds no object \
-             `{named}` — an artifact names bytes that are not under `objects/`"
+             `{named}`: an artifact names bytes that are not under `objects/`"
         )
     );
 }
@@ -291,7 +291,7 @@ fn an_input_the_command_was_not_given_or_gave_out_of_range_is_named_with_its_bou
         inputs(&InputsError::Missing {
             name: "goal".into(),
         }),
-        "input `goal` is required and has no default — pass `--input goal=...`"
+        "input `goal` is required and has no default; pass `--input goal=...`"
     );
     assert_eq!(
         inputs(&InputsError::BelowMin {
@@ -306,7 +306,7 @@ fn an_input_the_command_was_not_given_or_gave_out_of_range_is_named_with_its_bou
             names: vec!["x".into()],
             declared: vec!["goal".into()],
         }),
-        "unknown input `x` — this workflow declares only: goal"
+        "unknown input `x`: this workflow declares only: goal"
     );
 }
 
@@ -314,7 +314,7 @@ fn an_input_the_command_was_not_given_or_gave_out_of_range_is_named_with_its_bou
 fn a_decision_the_run_cannot_take_says_why_and_what_to_choose_instead() {
     assert_eq!(
         resolve_gate(&ResolveGateError::NotPaused),
-        "this run isn't parked at a pause — a live process may still be driving it, or it already \
+        "this run isn't parked at a pause: a live process may still be driving it, or it already \
          finished"
     );
     assert_eq!(
@@ -322,7 +322,7 @@ fn a_decision_the_run_cannot_take_says_why_and_what_to_choose_instead() {
             chosen: OptionId::from_static("retry"),
             declared: "proceed, abort".to_string(),
         }),
-        "option `retry` isn't valid here — declared options: proceed, abort"
+        "option `retry` isn't valid here; declared options: proceed, abort"
     );
     assert_eq!(
         resolve_gate(&ResolveGateError::Withheld {

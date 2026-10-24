@@ -254,8 +254,8 @@ fn every_block() -> Doc {
         "needs you on a decision".to_string(),
     );
     let fields = Fields::new()
-        .push_if("progress", "nodes 1/2 · 1 failed")
-        .push_if("tokens", "20.2k spent · 3 past runs, median 18k tokens");
+        .push_if("progress", "1 of 2 nodes done, 1 failed")
+        .push_if("tokens", "20.2k spent, 3 past runs, median 18k tokens");
     let table = NodeTable {
         rows: vec![
             NodeRow {

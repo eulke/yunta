@@ -18,6 +18,10 @@ use crate::escalation;
 /// person reads a log's clock.
 pub(crate) const RESET_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
 
+/// What a run a person interrupted says of the stop: what the log knows,
+/// whoever reads it, a teammate or an agent among them.
+pub const INTERRUPTED: &str = "interrupted by a person";
+
 /// The half every cap's sentence ends with: a reader who hit a declared
 /// limit has the same two ways past it whichever limit it was.
 pub const PAST_THE_CAP: &str =
@@ -27,7 +31,7 @@ pub const PAST_THE_CAP: &str =
 /// its value, and the two ways past it. The loop's pause and its failure
 /// both read it, so a parked run names the limit to whichever surface reads it.
 pub(crate) fn exceeded_loop_cap(cap: u32) -> String {
-    format!("exceeded `limits.max_loop_iterations` ({cap}) — {PAST_THE_CAP}")
+    format!("exceeded `limits.max_loop_iterations` ({cap}); {PAST_THE_CAP}")
 }
 
 /// The one sentence for questions awaiting an answer: `asked 2
@@ -58,7 +62,7 @@ pub fn standing(pause: &PauseReason) -> Standing {
 /// The chronicle's words for a pause: the word it is called by, then the
 /// sentence the pause is.
 pub fn said(pause: &PauseReason) -> String {
-    format!("{} — {}", standing(pause), sentence(pause))
+    format!("{}: {}", standing(pause), sentence(pause))
 }
 
 /// The one line a reader sees for a parked run. Every surface prints
@@ -66,8 +70,10 @@ pub fn said(pause: &PauseReason) -> String {
 pub fn sentence(pause: &PauseReason) -> String {
     match pause {
         PauseReason::Escalation(waiting) => escalation::sentence(waiting),
-        PauseReason::Cancelled => "cancelled by user".to_string(),
-        PauseReason::CancelledAfterCrash => "cancelled after crash".to_string(),
+        PauseReason::Cancelled => INTERRUPTED.to_string(),
+        PauseReason::CancelledAfterCrash => {
+            "its engine had died, and a cancel recorded the stop".to_string()
+        }
         PauseReason::BudgetExhausted { spent, cap } => budget(*spent, *cap),
         PauseReason::NoRoom {
             available,
@@ -108,7 +114,7 @@ pub fn sentence(pause: &PauseReason) -> String {
 /// Why a run stops once it has spent the tokens its limit allows.
 fn budget(spent: u64, cap: u64) -> String {
     format!(
-        "budget: run spent {} with `limits.max_tokens_per_run: {cap}` — {PAST_THE_CAP}",
+        "its token budget is spent ({} with `limits.max_tokens_per_run: {cap}`); {PAST_THE_CAP}",
         Tokens(spent).exact()
     )
 }
@@ -120,7 +126,7 @@ fn no_room(available: u64, need: u64, keep_free: u64) -> String {
         need => format!(", and a build here takes about {} more", Bytes(need)),
     };
     format!(
-        "no room: the disk has {} free{building}, where {} stays free — make room \
+        "no room on the disk, which has {} free where {} stays free{building}; make room \
          (`yunta gc`, close a parked run, or lower `storage.pool.keep_free`) and resume",
         Bytes(available),
         Bytes(keep_free)
@@ -130,7 +136,7 @@ fn no_room(available: u64, need: u64, keep_free: u64) -> String {
 /// Why a run stops when it cannot tell how `nodes` ended.
 fn uncertain(nodes: &[NodeId]) -> String {
     format!(
-        "{} running with no terminal event when the engine last stopped: {} — \
+        "{} running with no terminal event when the engine last stopped: {}; \
          `on_interrupt: fail_if_uncertain` refuses to guess how each ended; verify manually \
          before resuming",
         text::agreeing(nodes.len(), "a node was", "nodes were"),
@@ -197,7 +203,7 @@ mod tests {
 
     #[test]
     fn a_pause_a_person_chose_reads_as_the_choice() {
-        assert_eq!(sentence(&PauseReason::Cancelled), "cancelled by user");
+        assert_eq!(sentence(&PauseReason::Cancelled), "interrupted by a person");
     }
 
     #[test]
@@ -208,7 +214,7 @@ mod tests {
         };
         assert_eq!(
             sentence(&overrun),
-            "loop `fix-lint` exceeded `limits.max_loop_iterations` (3) — resume with an \
+            "loop `fix-lint` exceeded `limits.max_loop_iterations` (3); resume with an \
              interactive surface to continue past the cap or abort"
         );
     }
@@ -236,7 +242,7 @@ mod tests {
         assert_eq!(
             sentence(&parked),
             "node `grill`'s child run is parked: child run `child` paused, and resuming this \
-             run resumes it:\n  cancelled by user"
+             run resumes it:\n  interrupted by a person"
         );
     }
 

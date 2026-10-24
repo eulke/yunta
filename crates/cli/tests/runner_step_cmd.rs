@@ -45,7 +45,7 @@ fn init_ends_with_the_runner_step() {
     assert!(
         said.contains("this machine answers for `claude-code`")
             && said.contains(SNIPPET_LINE)
-            && said.contains("      runner: implementer"),
+            && said.contains("    runner: implementer"),
         "{said}"
     );
 }

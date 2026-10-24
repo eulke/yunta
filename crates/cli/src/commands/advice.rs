@@ -164,6 +164,26 @@ pub(crate) fn close(run: &str) -> String {
     format!("yunta close {run}")
 }
 
+/// Reclaims the disk runs past their retention hold.
+pub(crate) fn gc() -> String {
+    "yunta gc".to_string()
+}
+
+/// Runs a project's test cases.
+pub(crate) fn test() -> String {
+    "yunta test".to_string()
+}
+
+/// Says whether this machine is ready to run.
+pub(crate) fn doctor() -> String {
+    "yunta doctor".to_string()
+}
+
+/// Starts a workflow, named the way the catalog names it.
+pub(crate) fn run(workflow: &str) -> String {
+    format!("yunta run {workflow}")
+}
+
 /// Shows where a run stands, derived from its own log.
 pub(crate) fn status(run: &str) -> String {
     format!("yunta status {run}")
@@ -281,7 +301,7 @@ pub(crate) fn spell_for(step: &NextStep, reader: Reader) -> String {
             let answer = if *text { " --text \"<answer>\"" } else { "" };
             format!("yunta resolve-gate {} {option}{answer}", named(run, reader))
         }
-        NextStep::Gc => "yunta gc".to_string(),
+        NextStep::Gc => gc(),
         NextStep::Check { workflow } => format!("yunta check {workflow}"),
     }
 }

@@ -16,8 +16,9 @@ mod setup;
 use yunta_core::events::{ChildRefusal, Fact, Failure, RedCheck};
 
 pub use artifact::{mount, name, object};
+pub use child::past_the_depth_limit;
 pub use command::{command_exit, command_headline, denied};
-pub(crate) use scope::{paths_listed, protection_words};
+pub(crate) use scope::paths_listed;
 pub(crate) use session::{limit_sentence, refusal_sentence, unchanged_sentence};
 pub use session::{session_death, session_end};
 

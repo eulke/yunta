@@ -143,7 +143,7 @@ impl TryFrom<String> for TemplateVar {
 /// A `{{…}}` naming something that is not a variable.
 #[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[error(
-    "template references `{{{{{name}}}}}`, which is not a variable — the ones that exist are \
+    "template references `{{{{{name}}}}}`, which is not a variable: the ones that exist are \
          {known} and `inputs.<name>` for each declared input"
 )]
 pub struct UnknownVariable {
@@ -170,7 +170,7 @@ pub enum TemplateError {
     #[error("template references `{{{{{name}}}}}`, which is not defined here")]
     Undefined { name: TemplateVar },
 
-    #[error("unclosed `{{{{` at byte {at} — every template must close with `}}}}`")]
+    #[error("unclosed `{{{{` at byte {at}: every template must close with `}}}}`")]
     Unclosed { at: usize },
 
     #[error(transparent)]

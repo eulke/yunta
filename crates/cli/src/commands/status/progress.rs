@@ -71,7 +71,7 @@ pub(crate) fn summary(frame: &RunFrame, engine: &yunta_engine::Engine, glyphs: G
         crate::render::counter::line(frame, glyphs),
         phase_label(frame, engine)
     );
-    if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds, glyphs) {
+    if let Some(note) = yunta_render::receipt::unknown_kinds(&frame.unknown_kinds) {
         summary.push_str(&format!(" {sep} {note}"));
     }
     summary
@@ -82,17 +82,17 @@ pub(crate) fn summary(frame: &RunFrame, engine: &yunta_engine::Engine, glyphs: G
 fn phase_label(frame: &RunFrame, engine: &yunta_engine::Engine) -> String {
     let word = frame.standing;
     if word == Standing::Stalled {
-        return format!("{word} — no process is driving it");
+        return format!("{word}: no process is driving it");
     }
     if let (Standing::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
-        return format!("{word} — {}", advice::asking(prompt, Some(engine.at)));
+        return format!("{word}: {}", advice::asking(prompt, Some(engine.at)));
     }
     match &frame.phase {
         // A parked run is waiting on a person, not stuck, and what it is
         // parked on is the thing a reader acts on next.
-        RunPhase::Waiting { on } => format!("{word} — {}", advice::parked_on(on)),
+        RunPhase::Waiting { on } => format!("{word}: {}", advice::parked_on(on)),
         RunPhase::Broken { diagnostic } => {
-            format!("{word} — {}", surco::text::one_line(diagnostic))
+            format!("{word}: {}", surco::text::one_line(diagnostic))
         }
         RunPhase::Created
         | RunPhase::Running

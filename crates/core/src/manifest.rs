@@ -40,7 +40,7 @@ pub struct FrozenPaths {
 /// takes for a config path that cannot be resolved.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "the {field} `{path}` is not absolute — a run freezes its state roots at creation and \
+    "the {field} `{path}` is not absolute: a run freezes its state roots at creation and \
      reads them back from any directory, so a relative one would resolve against the wrong \
      place later; give an absolute path"
 )]

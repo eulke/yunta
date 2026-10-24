@@ -9,15 +9,18 @@ impl Checklist {
     /// Each check on its row: its mark, what it checked in a column as
     /// wide as the widest subject that fits in half the line, and what it
     /// found, wrapped under itself. A subject wider than that has the
-    /// line to itself, and what it found starts on the next one — one
-    /// long subject never pushes every other finding across the line.
+    /// line to itself, and what it found starts on the next one: one long
+    /// subject never pushes every other finding across the line. What says
+    /// more hangs under the row, each line as written.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let lead = cell_width(INDENT) + 2;
         let half = look.width.cells() / 2;
         let column = self
             .checks
             .iter()
-            .map(|check| cell_width(&check.subject))
+            .map(|check| check.subject.as_str())
+            .chain(self.aligned.iter().map(String::as_str))
+            .map(cell_width)
             .filter(|width| *width <= half)
             .max()
             .unwrap_or(0);
@@ -45,6 +48,14 @@ impl Checklist {
                 (_, None) => lines.push(head),
             }
             lines.extend(said.map(|part| Line::new().plain(under.as_str()).plain(part)));
+            let hang = " ".repeat(lead + cell_width(INDENT));
+            lines.extend(
+                check
+                    .details
+                    .iter()
+                    .flat_map(|detail| detail.lines())
+                    .map(|detail| Line::new().plain(hang.as_str()).plain(detail)),
+            );
         }
         lines
     }

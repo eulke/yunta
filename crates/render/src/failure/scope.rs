@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use surco::text;
 use yunta_core::events::{Failure, OwedScope, RequestedScope};
 use yunta_core::listed_globs;
-use yunta_core::protected::Protection;
 
 use crate::found;
 
@@ -24,7 +23,7 @@ pub(crate) fn paths_listed(paths: &[PathBuf]) -> String {
 /// files, and which.
 pub(super) fn violated(outside_scope: &[PathBuf]) -> String {
     format!(
-        "scope violated: {} outside the declared globs — {}",
+        "scope violated: {} outside the declared globs: {}",
         text::counted(outside_scope.len(), "file"),
         paths_listed(outside_scope)
     )
@@ -49,7 +48,7 @@ pub(super) fn violated_detail(outside_scope: &[PathBuf]) -> Vec<String> {
 /// A session that asked for scope beyond its own: the globs and the reason.
 pub(super) fn requested(requested_scope: &RequestedScope) -> String {
     format!(
-        "asked for scope beyond its own — {}: {}",
+        "asked for scope beyond its own ({}): {}",
         listed_globs(&requested_scope.paths),
         requested_scope.reason
     )
@@ -77,7 +76,7 @@ pub(super) fn owed(owed: &[OwedScope]) -> String {
 /// One request a loop owes a person: the task's paths, and its reason.
 pub(super) fn owed_line(owed: &OwedScope) -> String {
     format!(
-        "`{}` — {}: {}",
+        "`{}` ({}): {}",
         owed.task_id,
         listed_globs(&owed.paths),
         found::stated_reason(owed.reason.as_deref())
@@ -98,25 +97,12 @@ pub(super) fn denied(failure: &Failure) -> String {
         .iter()
         .enumerate()
         .map(|(index, path)| match reasons.get(index) {
-            Some(reason) => format!("{} ({})", path.display(), protection_words(*reason)),
+            Some(reason) => format!("{} ({})", path.display(), reason.words()),
             None => path.display().to_string(),
         })
         .collect();
     format!(
-        "wrote what no session of the run may write — {}: undo those changes",
+        "wrote what no session of the run may write: {}; undo those changes",
         listed.join(", ")
     )
-}
-
-/// The words a protected path's reason reads as, after the path it names.
-pub(crate) fn protection_words(protection: Protection) -> &'static str {
-    match protection {
-        Protection::ProjectDeny => "denied by the project's permissions",
-        Protection::AgentConfig => "an agent CLI's own configuration",
-        Protection::AgentInstructions => {
-            "an instruction file: only a person grants it, and only to a session that asks"
-        }
-        Protection::ApprovedTest => "an approved test",
-        Protection::GitRegister => "the run's git record",
-    }
 }

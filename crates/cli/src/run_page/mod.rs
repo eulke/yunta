@@ -27,7 +27,7 @@ pub(crate) use story::handed;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use surco::components::{Furrow, Gist, Headline, Next, Note, Said};
+use surco::components::{Furrow, Gist, Headline, Next, Note, Prose};
 use surco::doc::{Block, Depth, Doc};
 use surco::figures::duration;
 use surco::look::Look;
@@ -255,13 +255,13 @@ impl RunPage<'_> {
         // The closing's branch row says where the run works.
         if self.scope == Scope::Status && !self.depth.reaches(Depth::Full) {
             let tree = decision::run_tree_line(self.paths.worktree);
-            blocks.push(Said(vec![tree]).into());
+            blocks.push(Prose(tree).into());
         }
         let mut section = decision::section(self.run_id, decided, self.otherwise());
         if self.scope == Scope::Closing {
             section.blocks.push(
                 Note(
-                    "the run holds its own state on disk — close this terminal whenever you \
+                    "the run holds its own state on disk, so close this terminal whenever you \
                      like and answer from anywhere."
                         .to_string(),
                 )

@@ -1,4 +1,4 @@
-◆ runs of this repository · 2 need you · 1 stopped by you
+◆ runs of this repository · 2 need you · 1 stopped
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
 asking now
@@ -7,8 +7,8 @@ asking now
 needs you, oldest first
   ◆ T1Y0P2  review (defaul…  node `lint` failed and…  22d00h
 
-stopped by you
-  ■ T1Y0P3  review (defaul…  cancelled…  yunta resume T1Y0P3
+stopped
+  ■ T1Y0P3  review (defaul…  interrupt…  yunta resume T1Y0P3
 
   1 closed, the newest 8h00m ago
 

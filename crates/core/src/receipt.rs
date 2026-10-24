@@ -163,12 +163,17 @@ impl std::fmt::Display for DiagnosticCount {
         match self.kind {
             Some(kind) => write!(
                 f,
-                "`{}` in the {} ×{}",
+                "`{}` in the {} {}",
                 self.code,
                 kind.label(),
-                self.occurrences
+                surco::text::counted(self.occurrences, "time")
             ),
-            None => write!(f, "`{}` ×{}", self.code, self.occurrences),
+            None => write!(
+                f,
+                "`{}` {}",
+                self.code,
+                surco::text::counted(self.occurrences, "time")
+            ),
         }
     }
 }

@@ -406,7 +406,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
             assert!(matches!(reason, PauseReason::Escalation(_)), "{reason:?}");
             assert_eq!(
                 yunta_render::pause::sentence(reason),
-                "Approve the plan? — assignee: lead"
+                "Approve the plan? (assignee: lead)"
             )
         }
         other => panic!("headless internal gate must pause, got {other:?}"),

@@ -1,6 +1,6 @@
 ␛[2m■␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[2mstopped␛[0m␛[2m · for 32m10s␛[0m                                                       7E5PH4
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
-  cancelled by user.
+  interrupted by a person.
 
 ␛[2m              node                                                                              time␛[0m
   ␛[32m✓␛[0m ␛[32mfinished ␛[0m plan   ␛[2mexit 0                                                                   ␛[0m   12s

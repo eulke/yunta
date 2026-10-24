@@ -2,10 +2,10 @@
 //! `status`, the run listing, the live region and the block that closes
 //! a run.
 //!
-//! One function, because the same frame counted two ways is two answers
-//! to one question — a page that said `1/2 nodes` while the block above
-//! it said `nodes 0/2 · 1 fail` left a reader to work out which was
-//! right.
+//! One owner, because the same frame counted two ways is two answers to
+//! one question: a page that said one count while the block above it said
+//! another left a reader to work out which was right. Every count reads
+//! `N of M`.
 
 use std::collections::BTreeMap;
 
@@ -27,17 +27,7 @@ const NAMES: usize = 3;
 pub(crate) fn progress(frame: &RunFrame, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let flow = &frame.flow;
-    let mut text = format!(
-        "{} of {} done",
-        flow.of(Standing::Finished),
-        counted(flow.total, "node")
-    );
-    if let Some(mode) = &flow.skipped_by {
-        text.push_str(&format!(" {sep} {} skipped by `{mode}`", flow.skipped));
-    }
-    if flow.left_out > 0 {
-        text.push_str(&format!(" {sep} {} left out", flow.left_out));
-    }
+    let mut text = format!("{}{}", done(flow), narrowed(flow, sep));
     if frame.reroutes > 0 {
         text.push_str(&format!(" {sep} {}", counted(frame.reroutes, "reroute")));
     }
@@ -124,10 +114,31 @@ fn named(names: &[&str]) -> String {
     said.join(", ")
 }
 
+/// How many nodes are done of the ones this run will do.
+fn done(counter: &Counter) -> String {
+    format!(
+        "{} of {} done",
+        counter.of(Standing::Finished),
+        counted(counter.total, "node")
+    )
+}
+
+/// What narrowed the nodes this run will do: the ones its mode skips and
+/// the ones its project leaves out, each after `sep`.
+fn narrowed(counter: &Counter, sep: char) -> String {
+    let mut text = String::new();
+    if let Some(mode) = &counter.skipped_by {
+        text.push_str(&format!(" {sep} {} skipped by `{mode}`", counter.skipped));
+    }
+    if counter.left_out > 0 {
+        text.push_str(&format!(" {sep} {} left out", counter.left_out));
+    }
+    text
+}
+
 /// The counters, at both levels the run has: the DAG's nodes and the
-/// run's tasks, each as finished over what this run will do, with
-/// every other place that holds anything beside it, and the re-routes
-/// when there were any.
+/// run's tasks, each as `N of M done`, with every other place that holds
+/// anything beside it, and the re-routes when there were any.
 ///
 /// The places are not decoration. A re-routed node runs again, so
 /// `finished` alone walks backwards; printed beside `failed`, `rerouted`
@@ -136,9 +147,9 @@ fn named(names: &[&str]) -> String {
 /// grew it. Each node is counted under the word its row says.
 pub(crate) fn line(frame: &RunFrame, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
-    let mut line = format!("nodes {}", nodes(&frame.flow, sep));
+    let mut line = nodes(&frame.flow, sep);
     if let Some(tasks) = &frame.tasks {
-        line.push_str(&format!(" {sep} tasks {}", self::tasks(tasks, sep)));
+        line.push_str(&format!(" {sep} {}", self::tasks(tasks, sep)));
     }
     if frame.reroutes > 0 {
         line.push_str(&format!(" {sep} {}", counted(frame.reroutes, "reroute")));
@@ -158,30 +169,29 @@ const NAMED: [Standing; 6] = [
     Standing::NeedsYou,
 ];
 
-/// The nodes: finished over the total this run will do, then each other
-/// place a node stands in, then what the run's mode or the project left
-/// out.
+/// The nodes: how many are done of the ones this run will do, then each
+/// other place a node stands in, then what the run's mode or the project
+/// left out.
 fn nodes(counter: &Counter, sep: char) -> String {
-    let mut text = format!("{}/{}", counter.of(Standing::Finished), counter.total);
+    let mut text = done(counter);
     for standing in NAMED {
         let count = counter.of(standing);
         if count > 0 {
             text.push_str(&format!(" {sep} {count} {standing}"));
         }
     }
-    if let Some(mode) = &counter.skipped_by {
-        text.push_str(&format!(" {sep} {} skipped by `{mode}`", counter.skipped));
-    }
-    if counter.left_out > 0 {
-        text.push_str(&format!(" {sep} {} left out", counter.left_out));
-    }
+    text.push_str(&narrowed(counter, sep));
     text
 }
 
-/// The tasks: done over the total, then each status that holds anything,
-/// in the words a task's ledger calls it by.
+/// The tasks: how many are done of the total, then each status that holds
+/// anything, in the words a task's ledger calls it by.
 fn tasks(counter: &TaskCounter, sep: char) -> String {
-    let mut text = format!("{}/{}", counter.done, counter.total);
+    let mut text = format!(
+        "{} of {} done",
+        counter.done,
+        counted(counter.total, "task")
+    );
     for (count, word) in [
         (counter.failed, "failed"),
         (counter.running, "running"),
@@ -227,7 +237,7 @@ mod tests {
         );
         assert_eq!(
             counted,
-            "nodes 0/5 · 1 failed · 1 rerouted · 1 running · 1 reroute"
+            "0 of 5 nodes done · 1 failed · 1 rerouted · 1 running · 1 reroute"
         );
     }
 
@@ -244,7 +254,7 @@ mod tests {
             ),
             Glyphs::Unicode,
         );
-        assert_eq!(counted, "nodes 2/2");
+        assert_eq!(counted, "2 of 2 nodes done");
     }
 
     #[test]
@@ -259,7 +269,7 @@ mod tests {
         });
         assert_eq!(
             line(&frame, Glyphs::Unicode),
-            "nodes 0/0 · tasks 1/3 · 1 blocked"
+            "0 of 0 nodes done · 1 of 3 tasks done · 1 blocked"
         );
     }
 }

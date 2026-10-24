@@ -125,9 +125,7 @@ fn denied_says(paths: &[PathBuf], reasons: &[Protection]) -> FailureSays {
             .enumerate()
             .map(|(index, path)| PathNote {
                 path: path.clone(),
-                reason: reasons
-                    .get(index)
-                    .map(|reason| words::protection_words(*reason).to_string()),
+                reason: reasons.get(index).map(|reason| reason.words().to_string()),
             })
             .collect(),
     )
@@ -417,7 +415,7 @@ fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
         label,
         Some(format!(
             "Closes this run (`run_finished: promoted`) and starts a successor in {target}, \
-             inheriting this run's artifacts — there's no mechanism to demote back to the mode \
+             inheriting this run's artifacts; there's no mechanism to demote back to the mode \
              this run is in"
         )),
     )
@@ -427,10 +425,10 @@ fn promotion_words(next_mode: Option<&ModeName>) -> (String, Option<String>) {
 pub(crate) fn stuck_words(stuck: &Stuck) -> String {
     match stuck {
         Stuck::FrozenConfig => "this run's config was frozen when it was created, so no attempt \
-            of it can go differently — declare what is missing in the config and start a new run"
+            of it can go differently: declare what is missing in the config and start a new run"
             .to_string(),
         Stuck::FrozenInput => "a file this run froze when it was created has changed since, and \
-            no attempt of it can read the file as it was — start a new run to read it as it \
+            no attempt of it can read the file as it was: start a new run to read it as it \
             now stands"
             .to_string(),
         Stuck::ProjectDenies => "the project's permissions refuse it, so no attempt goes \

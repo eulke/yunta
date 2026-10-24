@@ -50,7 +50,10 @@ fn main() -> ExitCode {
 
     let command = cli::Cli::command();
     let template = help::template(&command);
-    let matches = command.help_template(template).get_matches();
+    let matches = command
+        .styles(surco::paint::clap_styles())
+        .help_template(template)
+        .get_matches();
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     // The process environment, read once here at the shell's edge: every
     // color, glyph, width, terminal and log decision below reads this value.

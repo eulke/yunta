@@ -52,7 +52,7 @@ impl Suite {
 pub(crate) fn outside_clause(command: &str, suite: &str) -> String {
     format!(
         "`{command}` runs the project's tests outside the suite `{suite}`, so it builds them \
-         again beside the suite's build; extend the suite instead — `{suite} <selector>`, \
+         again beside the suite's build; extend the suite instead: `{suite} <selector>`, \
          where `<selector>` picks this task's tests"
     )
 }

@@ -18,8 +18,6 @@ use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::text::{agreeing, counted};
 use yunta_core::events::{ArtifactId, Withheld};
-use yunta_core::expansion::Denial;
-use yunta_core::protected::Protection;
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
@@ -56,7 +54,7 @@ pub fn document(
                 Some((heading, body)) => (
                     Line::new()
                         .push(Tone::Strong, heading)
-                        .push(Tone::Muted, format!(" — {named}")),
+                        .push(Tone::Muted, format!(": {named}")),
                     body,
                 ),
                 None => (Line::new().push(Tone::Strong, named), text.as_str()),
@@ -176,7 +174,7 @@ fn handed(review: &PlanReview) -> Option<String> {
     let broke: Vec<String> = handed
         .refused
         .iter()
-        .map(|(code, times)| format!("{code} ×{times}"))
+        .map(|(code, times)| format!("{code} {}", counted(*times, "time")))
         .collect();
     Some(format!(
         "handed over {}; refused {}: {}",
@@ -235,52 +233,6 @@ fn unguarded(review: &PlanReview) -> Option<String> {
             counted(unguarded, "promise")
         )
     })
-}
-
-/// What a refused scope request says to the person it was put to: why it was
-/// refused, naming each path it reached and why that path is protected.
-pub fn denial(denial: &Denial) -> String {
-    match denial {
-        Denial::ReachesProtected { reached } => format!(
-            "it reaches what the task may never write: {}",
-            reached
-                .iter()
-                .map(|reach| format!("{} ({})", reach.path, protected_as(reach.reason)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Denial::ModeDeny => "scope_expansion mode is deny (the default)".to_string(),
-        Denial::NoCriterion => "rules mode requires a proposed_criterion".to_string(),
-        Denial::PrecheckPasses => {
-            "proposed criterion already passes — nothing to expand for".to_string()
-        }
-        Denial::CriterionCouldNotRun => {
-            "proposed criterion could not run, so nothing judges the request".to_string()
-        }
-        Denial::TooManyFiles { touched, bound } => format!(
-            "diff at the requested paths touches {}, over the {bound}-file bound",
-            counted(*touched, "file")
-        ),
-        Denial::NothingLeft => {
-            "no requested path is left to widen once the protected ones are out".to_string()
-        }
-        Denial::NotWidenable => "no person may widen this node's scope on this run".to_string(),
-        Denial::Chosen { note, .. } => note
-            .clone()
-            .unwrap_or_else(|| "denied by a human at the gate".to_string()),
-        Denial::Legacy { text: said } => said.as_str().to_string(),
-    }
-}
-
-/// The words a path a refused request reached is protected by.
-fn protected_as(reason: Protection) -> &'static str {
-    match reason {
-        Protection::ProjectDeny => "the project denies it to every run: permissions.paths.deny",
-        Protection::AgentConfig => "an agent CLI's own configuration",
-        Protection::AgentInstructions => "an instruction file, which only a person grants",
-        Protection::ApprovedTest => "a test the task is held to",
-        Protection::GitRegister => "the run's git register",
-    }
 }
 
 /// The first sentence of `text`, for a list that names each thing once.

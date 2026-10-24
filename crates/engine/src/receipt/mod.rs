@@ -39,7 +39,7 @@ pub enum ReceiptError {
     /// which command shows a reader where that run stands is the
     /// caller's own vocabulary, not the engine's.
     #[error(
-        "run `{0}` hasn't reached a terminal state yet — a receipt is only generated \
+        "run `{0}` hasn't reached a terminal state yet: a receipt is only generated \
          once a run finishes"
     )]
     NotFinished(RunId),

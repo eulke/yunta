@@ -23,10 +23,10 @@ pub(crate) fn artifact_verdict(
     verified: Result<VerifiedArtifact, ArtifactFailure>,
 ) -> String {
     match verified {
-        Ok(verified) => format!("{name} — ok. {}", read_as(&verified)),
+        Ok(verified) => format!("{name}: ok. {}", read_as(&verified)),
         Err(failure) => match failure.report() {
-            Some(report) => numbered(format!("{name} — {}", failure_heading(report)), report),
-            None => format!("{name} — {failure}"),
+            Some(report) => numbered(format!("{name}: {}", failure_heading(report)), report),
+            None => format!("{name}: {failure}"),
         },
     }
 }
@@ -34,7 +34,7 @@ pub(crate) fn artifact_verdict(
 /// An accepted document's reply: what the engine read out of it, beside what
 /// the session is told about its tests.
 pub(crate) fn accepted(name: &str, verified: &VerifiedArtifact, told: &str) -> String {
-    format!("{name} — accepted. {}{told}", read_as(verified))
+    format!("{name}: accepted. {}{told}", read_as(verified))
 }
 
 /// A refused document's reply: what was not accepted, and what to fix.
@@ -69,19 +69,18 @@ pub(crate) fn failing_now(failing: &[(TaskId, CriterionRun)], redactor: &Redacto
         return String::new();
     }
     let mut text = String::from(
-        "\n\nHow each test fails now, before any work — one that fails for anything but the \
-         missing behavior fails after the work too:",
+        "\n\nHow each test fails now, before any work (one that fails for anything but the \
+         missing behavior fails after the work too):",
     );
     for (task, run) in failing {
-        let line = match run.conclusion() {
-            Some(line) => format!(" — it said `{}`", redactor.text(&line)),
-            None => ", printing nothing".to_string(),
+        let exit = match run.conclusion() {
+            Some(line) => Unanswered::exit_said(run.exit_code, Some(&redactor.text(&line))),
+            None => format!(
+                "{}, printing nothing",
+                Unanswered::exit_described(run.exit_code)
+            ),
         };
-        text.push_str(&format!(
-            "\n  `{}` (task `{task}`): exit {}{line}",
-            run.cmd,
-            Unanswered::exit_described(run.exit_code)
-        ));
+        text.push_str(&format!("\n  `{}` (task `{task}`): exit {exit}", run.cmd));
     }
     text
 }

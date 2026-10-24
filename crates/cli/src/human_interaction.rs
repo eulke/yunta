@@ -171,7 +171,7 @@ fn settled<T>(read: Answered<T>) -> Option<T> {
     match read {
         Ok(answered) => Some(answered),
         Err(NoAnswer::Declined) => {
-            note("nothing recorded — the run parks here, with its state intact, until it resumes");
+            note("nothing recorded: the run parks here, with its state intact, until it resumes");
             None
         }
         // The interrupt is already on its way to the run's own
@@ -179,7 +179,7 @@ fn settled<T>(read: Answered<T>) -> Option<T> {
         // story about whether a person stopped the run.
         Err(NoAnswer::Interrupted) => None,
         Err(NoAnswer::OffMenu) => {
-            warn("the prompt answered with an option that was not on the menu — nothing recorded");
+            warn("the prompt answered with an option that was not on the menu: nothing recorded");
             None
         }
         Err(NoAnswer::Unreadable(e)) => {

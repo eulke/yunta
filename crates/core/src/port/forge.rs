@@ -40,7 +40,7 @@ pub enum ForgeError {
     /// is the wait it named, when it named one.
     #[error(
         "forge: rate limited while trying to {action}{}",
-        retry_after.map(|wait| format!(" — retry in {}s", wait.as_secs())).unwrap_or_default()
+        retry_after.map(|wait| format!("; retry in {}s", wait.as_secs())).unwrap_or_default()
     )]
     RateLimited {
         action: &'static str,

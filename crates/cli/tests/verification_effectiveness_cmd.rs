@@ -38,11 +38,11 @@ fn a_never_triggered_reroute_surfaces_in_both_check_and_stats() {
     );
     let said = stdout(&check);
     assert!(
-        said.find("never fired") > said.find("OK"),
+        said.find("never fired") > said.find("can run here"),
         "the advice follows check's verdict: {said}"
     );
     assert!(
-        stdout(&check).contains("OK"),
+        stdout(&check).contains("can run here"),
         "check's own OK line must still print, got: {}",
         stdout(&check)
     );

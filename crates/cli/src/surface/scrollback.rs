@@ -106,7 +106,7 @@ mod tests {
         // What closed is put here by the chronicle, not deduced by
         // comparing frames: the region shows what is open, and this is
         // what left it.
-        region.record(&[surco::line::Line::new().plain("+ plan — finished — exit 0")]);
+        region.record(&[surco::line::Line::new().plain("+ plan finished (exit 0)")]);
         region.show(&frame(vec![running("build")]), &RUN, false);
         assert!(
             !term.shown().contains("plan"),
@@ -119,7 +119,7 @@ mod tests {
             term.shown()
         );
         assert!(
-            above.text().contains("plan — finished — exit 0"),
+            above.text().contains("plan finished (exit 0)"),
             "it landed above the region: {:?}",
             above.text()
         );

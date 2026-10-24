@@ -373,7 +373,7 @@ fn render_block(
         )
     } else {
         format!(
-            "--- context: {source_id} ({kind}) ---\n[{} bytes, referenced — see {}]\n",
+            "--- context: {source_id} ({kind}) ---\n[{} bytes, referenced; see {}]\n",
             content.len(),
             materialized_path.display()
         )

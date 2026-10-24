@@ -117,6 +117,24 @@ pub fn has_inner_space_run(line: &str) -> bool {
     false
 }
 
+/// Whether `line` says an em or en dash outside a comment: a sentence that
+/// joins its parts with one instead of the punctuation every reader reads.
+pub fn has_dash(line: &str) -> bool {
+    let line = line.trim_start();
+    if line.starts_with("//") {
+        return false;
+    }
+    let code = line.split(" // ").next().unwrap_or(line);
+    code.contains(['\u{2014}', '\u{2013}'])
+}
+
+/// Whether `line` is a doc comment that says an em or en dash: where clap
+/// prints a command's doc comments as its help, they are sentences a reader
+/// is told.
+pub fn has_doc_dash(line: &str) -> bool {
+    line.trim_start().starts_with("///") && line.contains(['\u{2014}', '\u{2013}'])
+}
+
 /// Whether `line` hedges a count with a plural in parentheses —
 /// `3 file(s)`, `2 child(ren)`, `a process(es)` — where the number beside
 /// it already says how many: a word written just before a parenthesis
@@ -378,6 +396,27 @@ mod tests {
         ));
         assert!(!has_parenthesized_plural("    let t = str::trim(s);"));
         assert!(!has_parenthesized_plural("    let t = Some(s);"));
+    }
+
+    #[test]
+    fn a_dash_in_a_string_counts_and_one_in_a_comment_does_not() {
+        assert!(has_dash("    \"node `a` failed \u{2014} exit 1\","));
+        // A continued line of a message opens on the word.
+        assert!(has_dash("             \u{2013} a range\","));
+        assert!(!has_dash("    /// a claim \u{2014} and what explains it"));
+        assert!(!has_dash(
+            "    call(); // a claim \u{2014} and what explains it"
+        ));
+        assert!(!has_dash("    \"node `a` failed: exit 1\","));
+    }
+
+    #[test]
+    fn a_dash_in_a_doc_comment_counts_where_it_is_help() {
+        assert!(has_doc_dash("    /// Runs a workflow \u{2014} to its end."));
+        assert!(!has_doc_dash("    /// Runs a workflow: to its end."));
+        assert!(!has_doc_dash(
+            "    // a note \u{2014} for whoever reads the code"
+        ));
     }
 
     #[test]
