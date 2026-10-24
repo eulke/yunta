@@ -2,7 +2,6 @@
 //! the text, and each `mermaid` block as a diagram.
 
 use crate::diagram::Diagram;
-use crate::doc::Block;
 
 /// One part of authored Markdown.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,29 +52,4 @@ fn flush(parts: &mut Vec<Part>, text: &mut Vec<&str>) {
         parts.push(Part::Text(said.trim().to_string()));
     }
     text.clear();
-}
-
-/// What a review shows of `markdown`: its first paragraph, then each
-/// diagram — a picture of the change says what a paragraph takes a page
-/// to.
-pub fn reviewed(markdown: &str) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    let mut said = false;
-    for part in parts(markdown) {
-        match part {
-            Part::Text(text) if !said => {
-                said = true;
-                let first = text.split("\n\n").next().unwrap_or_default();
-                blocks.push(Block::Markdown(first.to_string()));
-            }
-            Part::Text(_) => {}
-            Part::Diagram(diagram) => {
-                if !blocks.is_empty() {
-                    blocks.push(Block::Lines(vec![crate::line::Line::new()]));
-                }
-                blocks.push(Block::Diagram(diagram));
-            }
-        }
-    }
-    blocks
 }

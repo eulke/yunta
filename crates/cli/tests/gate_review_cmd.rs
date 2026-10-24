@@ -84,12 +84,11 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     terminal.wait_for("3  abort", "the gate never put its options on the console");
     let drawn = terminal.drawn();
     assert!(
-        drawn.contains("plan of `plan`")
+        drawn.contains("plan: 1 task")
             && drawn.contains("Writes the file the run is about.")
             && drawn.contains("T001: Make it")
-            && drawn.contains("done when    the file exists")
-            && drawn.contains("$ test -f made.txt")
-            && drawn.contains("--node plan"),
+            && drawn.contains("tested by    the file exists")
+            && drawn.contains("test -f made.txt"),
         "the gate shows the plan it asks about, as the run judges it:\n{drawn}"
     );
 
@@ -164,9 +163,9 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
     );
     let drawn = terminal.drawn();
     assert!(
-        drawn.contains("plan of `plan`")
+        drawn.contains("plan: 1 task")
             && drawn.contains("T001: Make it")
-            && drawn.contains("done when    the file exists"),
+            && drawn.contains("tested by    the file exists"),
         "resolve-gate offered a decision without the plan it decides on:\n{drawn}"
     );
 }
@@ -202,9 +201,9 @@ fn status_node_prints_a_plan_whole() {
     assert!(shown.status.success(), "{}", stderr(&shown));
     let page = yunta_testkit::stdout(&shown);
     assert!(
-        page.contains("plan of `plan`")
+        page.contains("plan: 1 task")
             && page.contains("T001: Make it")
-            && page.contains("$ test -f made.txt"),
+            && page.contains("test -f made.txt"),
         "the node's page reads the plan it wrote whole:\n{page}"
     );
 }
@@ -215,7 +214,7 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
     let terminal = reviewing(root.path());
     terminal.wait_for("3  abort", "the gate never put its options on the console");
     let drawn = terminal.drawn();
-    let plan = drawn.find("plan of `plan`").expect("the plan was shown");
+    let plan = drawn.find("plan: 1 task").expect("the plan was shown");
     let question = drawn
         .find("◆ decision · needs you")
         .expect("the decision was put");
@@ -296,7 +295,7 @@ fn what_was_asked_is_read_before_the_plan_that_answers_it() {
     let asked = drawn
         .find("Global pack installation: brief.md of `brief`")
         .expect(&drawn);
-    let plan = drawn.find("plan of `plan`").expect(&drawn);
+    let plan = drawn.find("plan: 1 task").expect(&drawn);
     assert!(asked < plan, "the brief is read before the plan:\n{drawn}");
     assert!(
         drawn[asked..plan].contains("A pack installs for the user, not one project."),

@@ -104,7 +104,7 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
 fn failed_node(failed: &FailedNode, run: &RunId, spell: &dyn Fn(&NextStep) -> String) -> Section {
     let node = &failed.node;
     Section {
-        mark: Some(Mark::Failed),
+        lead: Some(surco::components::Lead::Mark(Mark::Failed)),
         title: Line::new()
             .push(Tone::Strong, format!("node `{node}`"))
             .plain(": ")

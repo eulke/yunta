@@ -1,9 +1,9 @@
 //! Rows under named columns, each column as wide as what it holds.
 
-use crate::components::{Holds, Row, Table};
+use crate::components::{Cell, Holds, Row, Table};
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, id_column, middle_cut, truncate, INDENT};
+use crate::width::{cell_width, id_column, middle_cut, truncate, wrap_unbroken, INDENT};
 use crate::words::Standing;
 
 impl Table {
@@ -26,13 +26,13 @@ impl Table {
                 Holds::Words => id_column(held(at)),
                 // A figure stands under its title, which says what it counts.
                 Holds::Figure => id_column(held(at)).max(cell_width(column.title)),
-                Holds::Rest => 0,
+                Holds::Rest | Holds::Prose => 0,
             })
             .collect();
         let gaps: usize = (1..self.columns.len()).map(|at| self.gap(at)).sum();
         let fixed = cell_width(INDENT) + self.mark_width() + gaps + widths.iter().sum::<usize>();
         for (at, column) in self.columns.iter().enumerate() {
-            if column.holds == Holds::Rest {
+            if matches!(column.holds, Holds::Rest | Holds::Prose) {
                 widths[at] = width.saturating_sub(fixed);
             }
         }
@@ -74,8 +74,8 @@ impl Table {
     }
 
     /// `row` laid out in `widths`, ending at its last cell with anything
-    /// to say.
-    fn row(&self, row: &Row, widths: &[usize], look: &Look) -> Line {
+    /// to say; a cell of prose goes on under itself on the lines after.
+    fn row(&self, row: &Row, widths: &[usize], look: &Look) -> Vec<Line> {
         let mut line = Line::new().plain(INDENT);
         if self.mark_width() > 0 {
             line = match row.mark {
@@ -90,8 +90,9 @@ impl Table {
             .zip(widths)
             .rposition(|(cell, width)| *width > 0 && !cell.text.trim().is_empty())
         else {
-            return line;
+            return vec![line];
         };
+        let mut under: Vec<Line> = Vec::new();
         for (at, (cell, column)) in row
             .cells
             .iter()
@@ -102,25 +103,50 @@ impl Table {
             if at > 0 {
                 line = line.plain(" ".repeat(self.gap(at)));
             }
-            let width = widths[at];
-            let fitted = match column.holds {
-                Holds::Id => middle_cut(&cell.text, width, look.glyphs),
-                Holds::Figure => format!(
-                    "{}{}",
-                    " ".repeat(width.saturating_sub(cell_width(&cell.text))),
-                    cell.text
-                ),
-                Holds::State | Holds::Words | Holds::Rest => {
-                    truncate(&cell.text, width, look.glyphs)
-                }
-            };
+            let start = cell_width(&line.text());
+            let (fitted, goes_on) = fitted(cell, column.holds, (widths[at], start), look);
+            under.extend(goes_on);
             let fitted = match at == last {
                 true => fitted.trim_end().to_string(),
                 false => fitted,
             };
             line = line.push(cell.tone, fitted);
         }
-        line
+        std::iter::once(line).chain(under).collect()
+    }
+}
+
+/// `cell` fitted to the width of its column as `holds` lays it out; a cell
+/// of prose gives the lines it goes on in too, each at `start`, the cell
+/// its column starts at.
+fn fitted(
+    cell: &Cell,
+    holds: Holds,
+    (width, start): (usize, usize),
+    look: &Look,
+) -> (String, Vec<Line>) {
+    match holds {
+        Holds::Id => (middle_cut(&cell.text, width, look.glyphs), Vec::new()),
+        Holds::Figure => (
+            format!(
+                "{}{}",
+                " ".repeat(width.saturating_sub(cell_width(&cell.text))),
+                cell.text
+            ),
+            Vec::new(),
+        ),
+        Holds::State | Holds::Words | Holds::Rest => {
+            (truncate(&cell.text, width, look.glyphs), Vec::new())
+        }
+        Holds::Prose => {
+            let mut parts = wrap_unbroken(&cell.text, width).into_iter();
+            let first = parts.next().unwrap_or_default();
+            let margin = " ".repeat(start);
+            let goes_on = parts
+                .map(|part| Line::new().plain(margin.as_str()).push(cell.tone, part))
+                .collect();
+            (first, goes_on)
+        }
     }
 }
 
@@ -128,7 +154,11 @@ impl Table {
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let widths = self.widths(look.width.cells());
         let mut lines: Vec<Line> = self.header(&widths).into_iter().collect();
-        lines.extend(self.rows.iter().map(|row| self.row(row, &widths, look)));
+        lines.extend(
+            self.rows
+                .iter()
+                .flat_map(|row| self.row(row, &widths, look)),
+        );
         lines
     }
 
@@ -154,5 +184,49 @@ impl Table {
             });
         }
         Some(Line::new().push(Tone::Muted, header.trim_end()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::components::{Cell, Column, Holds, Row, Table};
+    use crate::look::Look;
+
+    /// A column of prose goes on under itself, whole, in its own column:
+    /// on a line of 30 cells it starts at the eleventh and has 19.
+    #[test]
+    fn a_column_of_prose_wraps_under_itself_and_is_never_cut() {
+        let table = Table {
+            columns: vec![
+                Column {
+                    title: "task",
+                    holds: Holds::Id,
+                },
+                Column {
+                    title: "what it does",
+                    holds: Holds::Prose,
+                },
+            ],
+            rows: vec![Row {
+                mark: None,
+                cells: vec![
+                    Cell::plain("storage"),
+                    Cell::plain("Store packs and locks at a selected install scope"),
+                ],
+            }],
+        };
+        let look = Look {
+            width: Look::plain().width.within(30),
+            ..Look::plain()
+        };
+        let drawn: Vec<String> = table.lines(&look).iter().map(|line| line.text()).collect();
+        assert_eq!(
+            drawn,
+            [
+                "  storage  Store packs and",
+                "           locks at a selected",
+                "           install scope",
+            ]
+        );
     }
 }

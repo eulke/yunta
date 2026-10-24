@@ -2,15 +2,12 @@
 //!
 //! What they decide on is what the run holds, so the words come from the
 //! document itself, cut to the width they read at, and the path under
-//! them is where its file sits, in full. A plan is read the way it is
-//! reviewed: its tasks at a glance, what keeps it from being proven, what
-//! it changes and why — with each diagram the author drew — the choices
-//! it makes, what it risks and leaves out, then task by task what each
-//! does, the code of what it changes and what proves it done. A spec is
-//! read task by task, its tests whole and what only sets them up folded;
-//! what a review found, the most severe first; the run's findings the
-//! same way, each with the node that found it and how others answered
-//! it. What weighs on the decision is said last, beside its menu.
+//! them is where its file sits, in full. A plan is read as the change it
+//! makes, its proof a step away; a spec task by task, its tests whole and
+//! what only sets them up folded; what a review found, the most severe
+//! first; the run's findings the same way, each with the node that found
+//! it and how others answered it. What weighs on the decision is said
+//! last, beside its menu.
 
 use surco::components::{Marked, Section};
 use surco::doc::{Block, Doc};
@@ -22,25 +19,23 @@ use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
 use yunta_core::RunId;
 
-pub use crate::plan::{Form, CODE_SHOWN};
+pub use crate::plan::Form;
 
-/// What `document` says, for the run `run`, in `form`. Each command it names
-/// is written by `spell`.
+/// What `document` says, for the run `run`, in `form`. Each command it
+/// names is written by `spell`.
 pub fn document(
     document: &ShownDocument,
     run: &RunId,
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
 ) -> Doc {
-    let of = document
-        .shown
-        .producer
-        .as_ref()
+    let producer = document.shown.producer.as_ref();
+    let of = producer
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
     match &document.content {
-        ShownContent::Tasks(review) => crate::plan::document(review, &of, run, form, spell),
-        ShownContent::Spec(file) => crate::spec::document(file, &of, run, form, spell),
+        ShownContent::Tasks(review) => crate::plan::document(review, run, form, spell),
+        ShownContent::Spec(file) => crate::spec::document(file, (&of, producer), run, form, spell),
         ShownContent::Findings(file) => crate::findings::document(file, &of),
         ShownContent::RunFindings(view) => crate::findings::run_document(view),
         ShownContent::Text(text) => {
@@ -83,8 +78,8 @@ fn headed(text: &str) -> Option<(&str, &str)> {
 ///
 /// What the gate does not offer, and each flaw that keeps the plan from
 /// being proven; how its planner got it accepted, when it took more than
-/// one handover; what of it shows no code, or is checked by nothing but
-/// the suite; and the risks it names. `None` when there is nothing to say.
+/// one handover; what of it shows no code; and the risks it names. `None`
+/// when there is nothing to say.
 pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Option<Section> {
     let mut blocks: Vec<Block> = Vec::new();
     for review in shown.iter().filter_map(|document| match &document.content {
@@ -119,7 +114,7 @@ pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Opti
         }
     }
     (!blocks.is_empty()).then(|| Section {
-        mark: None,
+        lead: None,
         title: Line::new().push(Tone::Strong, "before you decide"),
         blocks,
     })
@@ -147,7 +142,7 @@ fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block> {
         }
     };
     vec![Section {
-        mark: None,
+        lead: None,
         title: Line::new().push(Tone::Caution, heading),
         blocks: crate::plan::concerns(&flaws),
     }
@@ -156,9 +151,9 @@ fn unprovable(withheld: &[Withheld], review: &PlanReview) -> Vec<Block> {
 
 /// What a person deciding on `review` should know and the plan does not
 /// say about itself: how its planner got it accepted, and what of it
-/// nothing shows or checks.
+/// shows no code.
 fn noted(review: &PlanReview) -> Vec<String> {
-    [handed(review), codeless(review), unguarded(review)]
+    [handed(review), codeless(review)]
         .into_iter()
         .flatten()
         .collect()
@@ -184,53 +179,15 @@ fn handed(review: &PlanReview) -> Option<String> {
     ))
 }
 
-/// How many of the plan's changes show no code: neither their own nor
-/// the shape their task declares in that file.
+/// How many of the changes the plan's cards draw show no code: neither
+/// their own nor a shape of their task's.
 fn codeless(review: &PlanReview) -> Option<String> {
-    let plan = &review.plan;
-    let changes: Vec<bool> = plan
-        .tasks
-        .iter()
-        .flat_map(|task| {
-            task.changes.iter().map(move |change| {
-                change.code.is_some()
-                    || plan
-                        .shapes
-                        .iter()
-                        .any(|shape| shape.owner == task.id && shape.file == change.file())
-            })
-        })
-        .collect();
-    let codeless = changes.iter().filter(|coded| !**coded).count();
+    let (codeless, changes) = crate::plan::codeless(review);
     (codeless > 0).then(|| {
         format!(
             "{codeless} of {} {} no code",
-            counted(changes.len(), "change"),
+            counted(changes, "change"),
             agreeing(codeless, "shows", "show")
-        )
-    })
-}
-
-/// How many promises the plan's tasks keep that no guard of theirs
-/// checks, only the suite.
-fn unguarded(review: &PlanReview) -> Option<String> {
-    let unguarded: usize = review
-        .plan
-        .tasks
-        .iter()
-        .filter(|task| {
-            review
-                .tasks
-                .iter()
-                .find(|judged| judged.task == task.id)
-                .is_none_or(|judged| judged.guards.is_empty())
-        })
-        .map(|task| task.invariants.len())
-        .sum();
-    (unguarded > 0).then(|| {
-        format!(
-            "nothing but the suite checks {} the tasks keep",
-            counted(unguarded, "promise")
         )
     })
 }

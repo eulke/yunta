@@ -50,22 +50,53 @@ impl Marked {
 }
 
 impl Code {
+    /// Where the code is, on as many lines as the line's room asks: broken
+    /// before a joiner, never inside the file's path, each part after the
+    /// first under the file; then its `size` at the far edge, when the last
+    /// part leaves room for it.
+    fn titled(&self, size: &str, look: &Look) -> Vec<Line> {
+        let room = look.width.cells();
+        let under = format!("{INDENT}{INDENT}");
+        let margin = |at: usize| match at {
+            0 => INDENT,
+            _ => under.as_str(),
+        };
+        let mut parts = self.title_parts(look.glyphs).into_iter();
+        let mut rows: Vec<String> = parts.next().into_iter().collect();
+        for part in parts {
+            let at = rows.len() - 1;
+            let row = &mut rows[at];
+            match cell_width(margin(at)) + cell_width(row) + 1 + cell_width(&part) <= room {
+                true => {
+                    row.push(' ');
+                    row.push_str(&part);
+                }
+                false => rows.push(part),
+            }
+        }
+        let last = rows.len() - 1;
+        rows.into_iter()
+            .enumerate()
+            .map(|(at, row)| {
+                let used = cell_width(margin(at)) + cell_width(&row);
+                let line = Line::new().plain(margin(at)).push(Tone::Strong, row);
+                match at == last && !size.is_empty() && used + 2 + cell_width(size) <= room {
+                    true => line
+                        .plain(" ".repeat(room - used - cell_width(size)))
+                        .push(Tone::Muted, size),
+                    false => line,
+                }
+            })
+            .collect()
+    }
+
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let size = match self.whole {
             0 => String::new(),
             lines => crate::text::counted(lines, "line"),
         };
         let room = look.width.cells();
-        let gap = room
-            .saturating_sub(cell_width(INDENT) + cell_width(&self.at) + cell_width(&size))
-            .max(2);
-        let mut head = Line::new()
-            .plain(INDENT)
-            .push(Tone::Strong, self.at.as_str());
-        if !size.is_empty() {
-            head = head.plain(" ".repeat(gap)).push(Tone::Muted, size);
-        }
-        let mut lines = vec![head];
+        let mut lines = self.titled(&size, look);
         let under = format!("{INDENT}{INDENT}");
         if let Some(what) = &self.what {
             let room = room.saturating_sub(cell_width(&under));
@@ -125,5 +156,34 @@ impl Paths {
                 }
             }))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::components::Code;
+    use crate::look::Look;
+
+    /// A title too long for its line breaks before a joiner, never inside
+    /// the file's path, and leaves out its size rather than run past the
+    /// edge.
+    #[test]
+    fn a_code_title_too_long_for_its_line_breaks_at_its_joiner() {
+        let code = Code::whole("crates/engine/src/frozen/provenance.rs", None, "fn a();")
+            .within(["pack_provenance"]);
+        let look = Look {
+            width: Look::plain().width.within(44),
+            ..Look::plain()
+        };
+        let drawn: Vec<String> = code.lines(&look).iter().map(|line| line.text()).collect();
+        assert_eq!(drawn[0], "  crates/engine/src/frozen/provenance.rs");
+        assert_eq!(
+            drawn[1].trim_end(),
+            "    :: pack_provenance                1 line"
+        );
+        assert!(
+            drawn.iter().all(|line| line.chars().count() <= 44),
+            "{drawn:?}"
+        );
     }
 }

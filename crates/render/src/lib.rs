@@ -44,12 +44,14 @@ pub mod target;
 
 #[cfg(test)]
 mod tests {
+    mod cards;
     mod cautions;
     mod claims;
     mod deciding;
     mod documents;
     mod failure;
     mod failure_families;
+    mod findings;
     mod found;
     mod grant;
     mod inputs;

@@ -1,0 +1,257 @@
+summary: Install packs in the user's Yunta state directory for use across projects
+description: |-
+  Add user-wide pack installation alongside project-local vendoring. A global
+  pack lives under the existing YUNTA_HOME (or ~/.yunta) state root, so every
+  project using that same user state can discover it. `yunta pack add --global`
+  installs there; local installs continue to use the repository tree. Resolution
+  prefers a project-local pack when the same workflow is available locally, then
+  falls back to global packs. Pack locks and list/remove operations remain
+  scoped to the selected installation level.
+design: |-
+  `PackInstallScope` selects the root before the existing staging, vendor,
+  lock and management operations run. Project scope uses `<repo>/.yunta`;
+  global scope uses the Yunta user state root. Runtime catalog readers receive
+  the global packs root from the process environment and inspect local packs
+  first, then global packs, retaining the existing ambiguity rule within a
+  source. Locks remain separate: project installs use `.yunta/yunta.lock`;
+  global installs use `$YUNTA_HOME/yunta.lock`.
+decisions:
+  - id: global-root
+    question: What scope and persistence does a global installation have?
+    choice: >-
+      Store global packs under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and make
+      them available to projects run by that user state root.
+    alternatives:
+      - A system-wide shared directory
+      - A configurable directory per installation
+    why: >-
+      Yunta already defines and shares a user state root through YUNTA_HOME;
+      using it keeps global availability aligned with existing user state and
+      test isolation.
+  - id: global-flag
+    question: How does a user select global rather than project installation?
+    choice: >-
+      Add `--global` to `yunta pack add`; add `--global` selectors to pack list,
+      remove, update and audit so lifecycle actions address the intended store.
+    alternatives:
+      - A separate `pack install --global` command
+      - Global installs as the default
+    why: >-
+      The explicit flag preserves the established project-local default and
+      makes the target visible on every mutating or inspection command.
+  - id: precedence
+    question: What happens when local and global installations expose the same workflow or pack?
+    choice: >-
+      Project-local catalog entries take precedence over global entries; global
+      entries are fallback candidates. Ambiguity within either level remains an
+      error. Permit same pack identity in both stores and keep independent lock
+      entries.
+    alternatives:
+      - Global overrides local
+      - Refuse duplicate pack identities across levels
+    why: >-
+      Local project state is the most specific choice, while independent stores
+      allow a project to pin a different version without changing the user's
+      installation.
+  - id: lifecycle
+    question: Which lifecycle, permission, and compatibility behaviors are in scope?
+    choice: >-
+      Support global add, update, remove, list and audit with separate global
+      locks; preserve existing audit, schema and executor checks for either
+      target. Do not migrate existing project installs.
+    alternatives:
+      - Only add global installs
+      - Automatically migrate project installs
+    why: >-
+      A useful persistent user-level install needs the existing management
+      operations and safety gates; migration is unnecessary and could
+      unexpectedly change checked-in project state.
+shapes:
+  - name: PackInstallScope
+    owner: global-pack-storage
+    file: crates/cli/src/pack.rs
+    code: |-
+      #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+      pub enum PackInstallScope {
+          Project,
+          Global,
+      }
+
+      impl PackInstallScope {
+          pub fn root(self, project_root: &Path, user_root: &Path) -> PathBuf;
+      }
+  - name: installed_packs
+    owner: global-pack-storage
+    file: crates/cli/src/pack.rs
+    code: |-
+      pub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: &Path) -> Result<(PackLock, PathBuf), PackError>;
+  - name: resolve_workflow
+    owner: global-pack-catalog
+    file: crates/engine/src/catalog.rs
+    code: |-
+      pub fn resolve_workflow(repo_root: &Path, global_packs_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError>;
+  - name: PackAction
+    owner: global-pack-cli
+    file: crates/cli/src/cli/mod.rs
+    code: |-
+      #[derive(Subcommand)]
+      enum PackAction {
+          Add { source: String, #[arg(long)] global: bool, #[arg(long)] yes: bool, #[arg(long)] run_tests: bool },
+          Update { pack: PackRef, r#ref: String, #[arg(long)] global: bool, #[arg(long)] yes: bool },
+          New { pack: PackRef },
+          Remove { pack: PackRef, #[arg(long)] global: bool },
+          List { #[arg(long)] global: bool },
+          Audit { pack: PackRef, #[arg(long)] global: bool },
+      }
+risks:
+  - >-
+    Global lock state is user-specific and is not committed with a project, so
+    different users may have different fallback pack versions.
+  - >-
+    Global catalog lookup must be threaded through every workflow, skill, agent,
+    frozen-layer and prompt discovery path that currently reads only project
+    packs.
+out_of_scope:
+  - Migrating existing project installations to global storage.
+  - Sharing global installs between operating system users.
+tasks:
+  - id: global-pack-storage
+    title: Store packs and locks at a selected install scope
+    scope: [crates/cli/src/pack.rs, crates/cli/tests/pack_storage.rs, crates/cli/tests/global_pack_storage.rs]
+    criteria:
+      - cmd: cargo test --workspace global_pack_storage
+        proves: Scope-aware storage uses the user root for global pack files and lock data.
+    changes:
+      - at: crates/cli/src/pack.rs::PackInstallScope
+        what: scope enum and root selection API
+        code: |-
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub enum PackInstallScope {
+              Project,
+              Global,
+          }
+
+          impl PackInstallScope {
+              pub fn root(self, project_root: &Path, user_root: &Path) -> PathBuf;
+          }
+      - at: crates/cli/src/pack.rs::installed_packs
+        what: scope-aware lock location and pack enumeration
+        code: |-
+          pub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: &Path) -> Result<(PackLock, PathBuf), PackError>;
+    outcome: >-
+      Global storage resolves under the user's Yunta state directory, while
+      project scope still resolves under the repository.
+    invariants:
+      - Pack trees are staged beside their destination and moved into place atomically.
+      - Lock writes are atomic, and failed writes restore the previous vendored tree.
+  - id: global-pack-catalog
+    title: Discover global packs after project packs
+    scope:
+      - crates/engine/src/catalog.rs
+      - crates/engine/src/skills.rs
+      - crates/engine/src/agents.rs
+      - crates/engine/src/frozen/layers.rs
+      - crates/engine/src/frozen/prompt.rs
+      - crates/engine/src/frozen/provenance.rs
+      - crates/engine/tests/global_pack_catalog.rs
+    criteria:
+      - cmd: cargo test --workspace global_pack_catalog
+        proves: Catalog lookup falls back to global packs while preserving project precedence and pack path containment.
+    changes:
+      - at: crates/engine/src/catalog.rs::resolve_workflow
+        what: accept global packs root and search local before global
+        code: |-
+          pub fn resolve_workflow(repo_root: &Path, global_packs_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError>;
+      - at: crates/engine/src/frozen/layers.rs::installed_layers
+        what: include knowledge files from global installed packs
+        code: |-
+          pub(crate) async fn installed_layers(repo: &Path, global_packs_root: &Path) -> Result<Vec<LayerFile>, FrozenError>;
+      - at: crates/engine/src/frozen/prompt.rs::PromptOrigin
+        what: represent global pack prompt origin with exact pack directory
+        code: |-
+          pub(crate) enum PromptOrigin {
+              Repo { dir: PathBuf },
+              Pack { pack: String, pack_dir: PathBuf, dir: PathBuf },
+          }
+      - at: crates/engine/src/frozen/provenance.rs::pack_provenance
+        what: read manifest and lock provenance for a pack at the resolved directory
+        code: |-
+          pub(crate) async fn pack_provenance(repo: &Path, pack_dir: &Path, manifest_path: &Path) -> (Option<PackProvenance>, Vec<ProvenanceGap>);
+    outcome: >-
+      A workflow supplied by a global pack can be run from any project using the
+      same Yunta state root; a matching project pack continues to win.
+    invariants:
+      - Repository workflows shadow pack workflows.
+      - Multiple packs from one publisher declaring the same workflow name are reported as ambiguous.
+      - Declared pack content paths must stay inside their pack directory.
+      - Frozen provenance records pack identity and lock commit when available.
+  - id: global-pack-cli
+    title: Expose global pack lifecycle flags
+    scope:
+      - crates/cli/src/cli/mod.rs
+      - crates/cli/src/cli/dispatch.rs
+      - crates/cli/src/commands/pack.rs
+      - crates/cli/src/commands/pack_audit.rs
+      - crates/cli/tests/global_pack_cmd.rs
+    depends_on: [global-pack-storage]
+    criteria:
+      - cmd: cargo test --workspace global_pack_cmd
+        proves: Global lifecycle commands use a separate user store and leave project installs intact.
+    changes:
+      - at: crates/cli/src/cli/mod.rs::PackAction
+        what: global option on supported pack lifecycle actions
+        code: |-
+          #[derive(Subcommand)]
+          enum PackAction {
+              Add { source: String, #[arg(long)] global: bool, #[arg(long)] yes: bool, #[arg(long)] run_tests: bool },
+              Update { pack: PackRef, r#ref: String, #[arg(long)] global: bool, #[arg(long)] yes: bool },
+              New { pack: PackRef },
+              Remove { pack: PackRef, #[arg(long)] global: bool },
+              List { #[arg(long)] global: bool },
+              Audit { pack: PackRef, #[arg(long)] global: bool },
+          }
+      - at: crates/cli/src/cli/dispatch.rs::pack_command
+        what: dispatch scope to lifecycle operations
+        code: |-
+          async fn pack_command(action: PackAction, look: &Look) -> Result<Outcome, CliError>;
+      - at: crates/cli/src/commands/pack.rs::add/update/remove/list
+        what: use selected storage and preserve audit and policy sequence
+        code: |-
+          pub async fn add(source: &str, global: bool, confirmed_executors: bool, run_tests: bool, look: &Look) -> Result<Outcome, CliError>;
+          pub async fn update(pack: &PackRef, ref_: &str, global: bool, confirmed_executors: bool, look: &Look) -> Result<Outcome, CliError>;
+          pub fn remove(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome, CliError>;
+          pub fn list(global: bool, look: &Look) -> Result<Outcome, CliError>;
+      - at: crates/cli/src/commands/pack_audit.rs::audit
+        what: audit selected installation scope
+        code: |-
+          pub async fn audit(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome, CliError>;
+    uses: [PackInstallScope, installed_packs]
+    outcome: >-
+      Users can pass `--global` to install or manage a pack in their user store;
+      commands without it retain repository-local behavior.
+    invariants:
+      - Publisher and executor policies are checked before vendoring.
+      - The audit is printed before an executor confirmation gate and pack code runs only with `--run-tests`.
+      - List verifies the installed tree against the lock.
+  - id: global-pack-docs
+    title: Document global pack installation
+    scope: [docs/global-install.md, crates/cli/tests/global_pack_docs_cmd.rs]
+    depends_on: [global-pack-cli, global-pack-catalog]
+    criteria:
+      - cmd: grep -q 'pack add --global' docs/global-install.md
+        proves: The guide documents the global installation command.
+    changes:
+      - at: docs/global-install.md
+        what: global install usage and behavior in the installation guide
+        code: |-
+          ```bash
+          yunta pack add --global github.com/acme/review-pack@v1.2.0
+          yunta pack list --global
+          yunta pack update --global acme/review-pack v1.3.0
+          yunta pack remove --global acme/review-pack
+          ```
+
+          Global packs are stored under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and are available to projects using that user state root. Project packs shadow matching global workflows; each scope has its own lock.
+    outcome: >-
+      The pack guide shows how to install and manage user-wide packs and
+      explains where they live and how precedence works.

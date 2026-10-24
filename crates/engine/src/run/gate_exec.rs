@@ -70,7 +70,9 @@ pub(super) async fn publish_gate(
         return Ok(GateStep::Resolved);
     };
     let state = ctx.run_view().await?.state;
-    let shown = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
+    let shown =
+        crate::artifacts::shown::documents(ctx.run_dir, &shows, &state, ctx.manifest.request())
+            .await?;
     let flaws = super::flawed::unprovable(&shown);
     if !flaws.is_empty() {
         return super::flawed::send_back(ctx, node, &flaws).await;

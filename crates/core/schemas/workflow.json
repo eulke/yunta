@@ -496,6 +496,11 @@
               ],
               "default": null
             },
+            "request": {
+              "description": "What the person asks the run for, in their words: a page about\nthe run's work quotes it as what they asked. One input at most.",
+              "type": "boolean",
+              "default": false
+            },
             "required": {
               "$ref": "#/$defs/Requiredness"
             },

@@ -135,13 +135,14 @@ fn code_counts(corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
 /// with, a ledger's fold, and the words and tense the repository states.
 fn text_counts(root: &Path, corpus: &Corpus, counts: &mut BTreeMap<String, usize>) {
     // A glyph that says how a line reads — the separator between two facts,
-    // the mark of a line that goes on — written as a literal: a surface
+    // the mark of a line that goes on, the sign of one thing inside
+    // another — written as a literal: a surface
     // drawing with the ASCII set prints it nonetheless, where the glyph set would
     // have printed what that terminal can draw.
     counts.insert(
         "separator_literal_outside_glyphs".to_string(),
         production_lines(&corpus.drawn, in_glyphs, |line| {
-            !line.trim_start().starts_with("//") && line.contains(['·', '↪'])
+            !line.trim_start().starts_with("//") && line.contains(['·', '↪', '›'])
         }),
     );
     // A `_ =>` inside a ledger's fold is a kind that derives nothing with

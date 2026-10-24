@@ -167,7 +167,7 @@ impl<'a> InternalGate<'a> {
             .filter(|shown| !super::gate_findings::shows_view(shown))
             .cloned()
             .collect();
-        let documents = crate::artifacts::shown::documents(run_dir, &read, state).await?;
+        let documents = crate::artifacts::shown::documents(run_dir, &read, state, None).await?;
         let flaws: Vec<Flaw> = super::flawed::unprovable(&documents)
             .into_iter()
             .map(|(_, flaw)| flaw)

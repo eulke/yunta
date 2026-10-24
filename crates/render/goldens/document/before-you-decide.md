@@ -11,7 +11,6 @@
   - fix: judge the task by a test of its own
 
 - ◌ handed over 16 times; refused 15: criterion-already-passes 12 times, shared-criterion 3 times
-- ◌ 2 of 3 changes show no code
-- ◌ nothing but the suite checks 1 promise the tasks keep
+- ◌ 1 of 2 changes shows no code
 
 - ▲ risk: A name with a newline in it breaks the line it is printed on.

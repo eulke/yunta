@@ -101,7 +101,7 @@ fn workflow_section(workflow: &WorkflowAudit) -> Section {
             .collect(),
     };
     Section {
-        mark: None,
+        lead: None,
         title: Line::new()
             .plain("workflow ")
             .push(Tone::Strong, workflow.declared_path.to_string()),
@@ -145,16 +145,7 @@ fn node_section(node: &NodeAudit) -> Section {
     let mut blocks: Vec<Block> = vec![fields.into()];
     match &node.prompt {
         None => {}
-        Some(Ok(text)) => blocks.push(
-            Code {
-                at: "prompt".to_string(),
-                what: None,
-                lines: text.trim_end().lines().map(str::to_string).collect(),
-                whole: text.trim_end().lines().count(),
-                rest: None,
-            }
-            .into(),
-        ),
+        Some(Ok(text)) => blocks.push(Code::whole("prompt", None, text).into()),
         Some(Err(error)) => blocks.push(
             Marked {
                 mark: Mark::Failed,
@@ -167,7 +158,7 @@ fn node_section(node: &NodeAudit) -> Section {
         ),
     }
     Section {
-        mark: None,
+        lead: None,
         title: Line::new()
             .plain("node ")
             .push(Tone::Strong, format!("`{}`", node.id))

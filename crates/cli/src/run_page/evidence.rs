@@ -40,7 +40,7 @@ impl RunPage<'_> {
                 blocks.extend(FailureDetail { failure, whole }.blocks());
                 (!said || !blocks.is_empty()).then(|| {
                     Section {
-                        mark: Some(Mark::Failed),
+                        lead: Some(surco::components::Lead::Mark(Mark::Failed)),
                         title,
                         blocks,
                     }

@@ -1,9 +1,9 @@
 ---
 number: D223
 title: "The engine writes no view for a person; a document is drawn where it is read"
-status: accepted
+status: revised
 revises: [D16, D195]
-revised_by: []
+revised_by: [D270]
 ---
 
 # D223 — The engine writes no view for a person; a document is drawn where it is read

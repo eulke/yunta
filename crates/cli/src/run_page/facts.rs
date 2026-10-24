@@ -211,7 +211,7 @@ impl RunPage<'_> {
         for (under, born) in crate::surface::children_by_node(self.frame) {
             blocks.push(
                 Section {
-                    mark: None,
+                    lead: None,
                     title: Line::new().push(Tone::Plain, under),
                     blocks: vec![Said(
                         born.iter()

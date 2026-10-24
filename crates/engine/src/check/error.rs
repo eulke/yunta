@@ -188,6 +188,11 @@ pub enum CheckError {
         detail: String,
     },
 
+    /// More than one input says it is the person's request: a page that
+    /// quotes what they asked for quotes one.
+    #[error("more_than_one_request")]
+    MoreThanOneRequest { names: Vec<InputName> },
+
     /// `check` verifies that every `{{{{inputs.x}}}}` refers to a
     /// declared input — scanned wherever a template can appear inline
     /// in the workflow (prompt text, `bash`/hook commands, `context:`

@@ -39,6 +39,10 @@ pub enum Holds {
     /// What the line leaves once every other column is whole: a cell
     /// longer than that is cut at its end.
     Rest,
+    /// What the line leaves, like [`Holds::Rest`], read as words a cut
+    /// would lose: a longer cell wraps under itself and is never cut. The
+    /// last column of its table.
+    Prose,
 }
 
 /// One row: its mark, when it has one, and a cell for each column.

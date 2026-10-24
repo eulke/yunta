@@ -642,21 +642,25 @@ nodes:
 ```
 
 At the decision you read what was asked first — fragua's plan gate shows the
-brief, titled by its own first heading — then the plan as the run will judge it. It
-opens on its tasks at a glance: the step each runs in, what proves it, how many of
-its changes show their code, and a mark on each task that cannot be proven as it is
-written. Then come what keeps it from being proven, each flaw with what it means and
-what fixes it; what it changes and why, with each diagram its author drew — in boxes
-on a terminal, as the Mermaid itself on a forge and in a file; what you already
-answered when the run asked, apart from what the plan decided for you; its design
-and risks; and step by step each task: what you will see once it is done, what it
-touches and keeps — and what checks that it keeps it, its guards or nothing but the
-suite — the code of each change it makes, and what proves it done, with each test
-the spec wrote whole and what only sets it up folded. Every claim says what backs
-it: a plan whose spec tests run nothing the spec wrote says so in its title, and a
-file of the spec no test runs is never said to test the task.
-`yunta status <run> --node plan` prints the whole plan, every file whole. The log records the
-exact version you saw by its hash, so an approval is an approval of those bytes.
+brief, titled by its own first heading — then the plan as the change it makes. It
+opens on what it is: how many tasks in how many steps, what it decided for you, what
+it risks and leaves out, what keeps it from being proven when anything does, and
+what you asked the run for, quoted from the input the workflow declares as the
+request. Then the change: its description whole, with each diagram its author drew —
+in boxes on a terminal, as the Mermaid itself on a forge and in a file; each choice
+the plan made for you, what it chose instead of what and why; what you already
+answered when the run asked; its risks, what it leaves out and its design. Then the
+steps, each task under the step it runs in and the order they wait on each other in,
+drawn; and task by task a card: what you will see once it is done, the files it
+changes, the shapes of another task it builds on, what it keeps and what tests it —
+a line a test, in the spec's words, with its command — then the code the task
+writes, each shape and each change once. The proof comes last: how many tests the
+spec wrote and the command that shows them whole, the suite every task keeps
+passing, each guard that checks what a task keeps, and how many promises no guard
+checks. No test's code is part of the plan at the decision; `yunta status <run>
+--node plan` prints the whole plan, each file the spec wrote whole after the cards,
+before its proof. The log records the exact version you
+saw by its hash, so an approval is an approval of those bytes.
 A gate after the work that shows the same plan — before a pull request, say —
 reads first every departure from it a person accepted while its tasks were built:
 what the plan said, what was built instead and why, and what they said accepting
@@ -688,8 +692,8 @@ and the `proves`, and tells the planner what is missing in the same answer.
 What weighs on the decision is said last, between the question and its options:
 on a terminal the last lines printed are the first ones read. Under "before you
 decide" come what the gate does not offer and why, how the planner got the plan
-accepted when that took more than one handover, how many changes show no code, how
-many promises only the suite checks, and the first sentence of each risk. `yunta
+accepted when that took more than one handover, how many changes show no code, and
+the first sentence of each risk. `yunta
 status` prints the same block above the options of a parked run, and a gate's pull
 request says it before how to answer.
 

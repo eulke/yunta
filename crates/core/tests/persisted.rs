@@ -236,3 +236,24 @@ fn a_non_mock_manifest_keeps_its_hash() {
         PersistedDoc::read(text.as_bytes()).expect("a schema 4 manifest reads");
     assert_eq!(read.doc.manifest_hash().as_str(), GOLDEN_MANIFEST_HASH);
 }
+
+/// What a person asked the run for is the value of the one input the
+/// workflow declares as its request, as it was given; a workflow that
+/// declares none has nothing to quote.
+#[test]
+fn a_manifest_quotes_the_input_its_workflow_declares_as_the_request() {
+    let mut manifest = manifest();
+    manifest.workflow = yunta_core::yaml::parse(
+        "name: ship\ninputs:\n  idea: { type: string, request: true }\n  branch: { type: string, default: main }\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
+    )
+    .expect("a workflow");
+    manifest.inputs = BTreeMap::from([
+        ("idea".into(), "greet people by name".to_string()),
+        ("branch".into(), "main".to_string()),
+    ]);
+    assert_eq!(manifest.request(), Some("greet people by name"));
+    let frozen = yunta_core::yaml::to_string(&manifest.workflow.inputs["branch"]).unwrap();
+    assert!(!frozen.contains("request"), "{frozen}");
+    manifest.workflow.inputs.remove("idea");
+    assert_eq!(manifest.request(), None);
+}

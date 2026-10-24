@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::artifacts::HandedOver;
 use crate::events::findings::RunFindings;
 use crate::events::{AcceptedDeparture, Shown};
-use crate::{HeldFindings, QuestionId, SpecFile, TaskId, TasksFile};
+use crate::{HeldFindings, NodeId, QuestionId, SpecFile, TaskId, TasksFile};
 
 /// One document an escalation shows, as the run holds it: what the log
 /// names, where its view sits, and what it says.
@@ -46,8 +46,15 @@ pub struct PlanReview {
     /// were built — where the work stops being what the plan says.
     pub departed: Vec<AcceptedDeparture>,
     /// The spec the plan is shown with, when a decision shows both: its
-    /// tests are read on their tasks rather than as a second document.
+    /// tests are what proves each task, a step away from the change.
     pub spec: Option<SpecFile>,
+    /// The node whose page shows the spec's tests whole: the one that
+    /// wrote the spec, or the one that wrote the plan when the spec came
+    /// from no node of the run's, since the plan's page shows its spec.
+    pub spec_node: Option<NodeId>,
+    /// What the person asked the run for, as they wrote it: the request
+    /// the plan answers.
+    pub asked: Option<String>,
     /// The commands the run measured green before any work — its suite,
     /// and each `baseline.held` names — which hold every task.
     pub held: Vec<String>,
@@ -152,17 +159,6 @@ pub enum Flaw {
 }
 
 impl Flaw {
-    /// The task the flaw is in.
-    pub fn task(&self) -> &TaskId {
-        match self {
-            Flaw::PassesByAName { task, .. }
-            | Flaw::HollowSpecTest { task, .. }
-            | Flaw::UnrunSpecFile { task, .. }
-            | Flaw::ChangesASpecTest { task, .. }
-            | Flaw::JudgedByAnotherTasksTest { task, .. } => task,
-        }
-    }
-
     /// What the flaw means for the decision.
     pub fn so(&self) -> String {
         match self {
@@ -248,39 +244,9 @@ pub struct TaskReview {
     /// Each change the plan names on a file a person approved as a test,
     /// which no session may write.
     pub denied: Vec<DeniedChange>,
-    /// Each file the spec wrote for the task, with the tests that run it.
-    pub files: Vec<SpecFileReview>,
     /// The task's own guards — what checks what it keeps — the suite
     /// aside.
     pub guards: Vec<JudgedCriterion>,
-}
-
-impl TaskReview {
-    /// How many of the spec's tests the task is held to run a file the
-    /// spec wrote — every one of them when the spec wrote none. A test
-    /// that runs none of the spec's files holds the task to nothing the
-    /// spec says.
-    pub fn spec_tests_that_run(&self) -> usize {
-        self.criteria
-            .iter()
-            .filter(|criterion| matches!(criterion.from, HeldTo::Spec))
-            .filter(|criterion| {
-                self.files.is_empty()
-                    || self
-                        .files
-                        .iter()
-                        .any(|file| file.run_by.contains(&criterion.cmd))
-            })
-            .count()
-    }
-}
-
-/// A file the spec wrote for a task, and the commands of its tests that
-/// run it: none, and the file judges nothing.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpecFileReview {
-    pub path: String,
-    pub run_by: Vec<String>,
 }
 
 /// One criterion a task is judged by, and what holds the task to it.
@@ -296,8 +262,7 @@ pub struct JudgedCriterion {
 pub enum HeldTo {
     /// The plan declares it, and no test of the spec runs it.
     Plan,
-    /// A test the spec gives this task; which of its files it runs is the
-    /// task's [`SpecFileReview`] to say.
+    /// A test the spec gives this task.
     Spec,
     /// The plan declares it, and it runs the test the spec gives
     /// another task.

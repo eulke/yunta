@@ -281,7 +281,9 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
             commands.join("\n")
         )));
     };
-    let shown = yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state).await?;
+    let asked = open.manifest.doc.request();
+    let shown =
+        yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state, asked).await?;
     match crate::ask::decide(&console, &ctx.env, &escalation, Some((run_id, &shown))) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(GateState::Declined)),

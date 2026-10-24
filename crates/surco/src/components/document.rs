@@ -11,11 +11,19 @@ use crate::line::Line;
 /// What follows a title, one step under it: a medium draws the title
 /// and then each block the way it draws any other.
 pub struct Section {
-    /// What the title is marked with, when its subject carries a mark —
-    /// a finding's severity.
-    pub mark: Option<Mark>,
+    /// What the title is led by, when anything leads it.
+    pub lead: Option<Lead>,
     pub title: Line,
     pub blocks: Vec<Block>,
+}
+
+/// What leads a section's title: the mark its subject carries — a
+/// finding's severity — or its place in a numbered list. A title too long
+/// for its line goes on past it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lead {
+    Mark(Mark),
+    Ordinal(usize),
 }
 
 /// A paragraph, wrapped to the line by whoever draws it.
@@ -35,8 +43,11 @@ pub struct Marked {
 /// A file's code, or what of it a reader is shown: where it is, what it
 /// is there for, and its lines as written.
 pub struct Code {
-    /// Where the code is: a file, and what in it.
+    /// The file the code is in.
     pub at: String,
+    /// What in the file the code is, outermost first: a type, then a
+    /// function of it.
+    pub within: Vec<String>,
     /// What the code is there for, in words.
     pub what: Option<String>,
     /// The lines shown, as written.
@@ -53,11 +64,36 @@ impl Code {
         let lines: Vec<String> = code.trim_end().lines().map(str::to_string).collect();
         Code {
             at: at.into(),
+            within: Vec::new(),
             what,
             whole: lines.len(),
             lines,
             rest: None,
         }
+    }
+
+    /// This code, as what `within` names inside its file.
+    pub fn within(mut self, within: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.within = within.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Where the code is, as its title says it: the file, then what in it,
+    /// each after the sign of the one it is inside of in `glyphs`.
+    pub fn title(&self, glyphs: crate::glyphs::Glyphs) -> String {
+        self.title_parts(glyphs).join(" ")
+    }
+
+    /// The title's parts, which a line too narrow for all of them breaks
+    /// between: the file, then `› name` for each thing in it.
+    pub fn title_parts(&self, glyphs: crate::glyphs::Glyphs) -> Vec<String> {
+        std::iter::once(self.at.clone())
+            .chain(
+                self.within
+                    .iter()
+                    .map(|inner| format!("{} {inner}", glyphs.within())),
+            )
+            .collect()
     }
 
     /// `code`, the file at `at`, as a review shows it: each test whole and
@@ -94,11 +130,7 @@ impl Code {
     /// The language a fence names for the file the code is in, by its
     /// extension, so a viewer that colors code colors it right.
     pub fn language(&self) -> &str {
-        let extension = self
-            .at
-            .split(|c: char| c.is_whitespace() || c == ':')
-            .find_map(|part| Path::new(part).extension().and_then(|ext| ext.to_str()));
-        match extension {
+        match Path::new(&self.at).extension().and_then(|ext| ext.to_str()) {
             Some("rs") => "rust",
             Some("py") => "python",
             Some("ts") => "typescript",

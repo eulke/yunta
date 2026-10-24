@@ -86,6 +86,7 @@ impl CheckError {
             CheckError::InputEmptyEnumValues { name } => inputs(name).key("values"),
             CheckError::InputMinExceedsMax { name, .. } => inputs(name).key("min"),
             CheckError::InputInvalidPattern { name, .. } => inputs(name).key("pattern"),
+            CheckError::MoreThanOneRequest { .. } => Pointer::root().key("inputs"),
             CheckError::Unanswerable(unanswerable) => unanswerable.pointer(),
             _ => return None,
         })

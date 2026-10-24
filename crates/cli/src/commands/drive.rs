@@ -336,7 +336,9 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
         .await?
         .map(|(node, escalation)| (node, escalation.into_payload()));
     let shown = match &decision {
-        Some((_, escalation)) => crate::json::shown_of(closed.run_dir, escalation, &state).await?,
+        Some((_, escalation)) => {
+            crate::json::shown_of(closed.manifest, closed.run_dir, escalation, &state).await?
+        }
         None => Vec::new(),
     };
     let closing = Closing::of(ClosingEnv {

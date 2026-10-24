@@ -1,7 +1,7 @@
 //! A document on a terminal: each block laid out in columns at the
 //! stream's width, with its glyph set, painted by its ink.
 
-use crate::components::Section;
+use crate::components::{Lead, Section};
 use crate::doc::{Block, Doc};
 use crate::line::{Line, Tone};
 use crate::look::Look;
@@ -148,11 +148,12 @@ impl Terminal {
                 .within(self.look.width.cells().saturating_sub(cell_width(INDENT))),
             ..self.look
         });
-        // A title wider than the line goes on under itself, past its mark.
-        let lead = match section.mark {
-            Some(mark) => Line::new()
+        // A title wider than the line goes on under itself, past its lead.
+        let lead = match section.lead {
+            Some(Lead::Mark(mark)) => Line::new()
                 .push(Tone::of(mark), self.look.glyphs.mark(mark).to_string())
                 .plain(" "),
+            Some(Lead::Ordinal(at)) => Line::new().push(Tone::Strong, format!("{at}  ")),
             None => Line::new(),
         };
         let hang = " ".repeat(cell_width(&lead.text()));

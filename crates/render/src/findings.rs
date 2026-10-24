@@ -26,7 +26,7 @@ pub fn document(held: &HeldFindings, of: &str) -> Doc {
     for finding in sorted {
         let (title, detail) = found::said(&finding.says);
         doc = doc.with(Section {
-            mark: Some(mark(finding.severity)),
+            lead: Some(surco::components::Lead::Mark(mark(finding.severity))),
             title: titled(finding.severity, &title),
             blocks: vec![
                 Prose(format!("{}, at {}", finding.id, finding.location)).into(),
@@ -100,7 +100,7 @@ fn standing_section(standing: &StandingFinding) -> Section {
         fields = fields.push_if("settled", format!("a person went on past `{gate}`"));
     }
     Section {
-        mark: Some(mark(finding.severity)),
+        lead: Some(surco::components::Lead::Mark(mark(finding.severity))),
         title: titled(finding.severity, &title),
         blocks: vec![
             Prose(found_by).into(),

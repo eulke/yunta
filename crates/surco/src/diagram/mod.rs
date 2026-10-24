@@ -9,7 +9,7 @@ mod grid;
 mod layer;
 pub(crate) mod outline;
 pub(crate) mod place;
-pub mod split;
+pub(crate) mod split;
 
 pub use flowchart::{flowchart, Direction, Flowchart, Link, Node, Shape, Stroke};
 
@@ -29,6 +29,21 @@ impl Diagram {
             source: source.to_string(),
             chart: flowchart(source),
         }
+    }
+
+    /// A drawing, left to right, of a box for each of `labels` and an arrow
+    /// for each of `links`, from one box to another by their places. Its
+    /// source is written here, each box named by its place, so no label is
+    /// ever read as a word of the drawing's own.
+    pub fn linked(labels: &[&str], links: &[(usize, usize)]) -> Self {
+        let mut source = String::from("flowchart LR");
+        for (at, label) in labels.iter().enumerate() {
+            source.push_str(&format!("\n  n{at}[\"{}\"]", label.replace('"', "#quot;")));
+        }
+        for (from, to) in links {
+            source.push_str(&format!("\n  n{from} --> n{to}"));
+        }
+        Diagram::of(&source)
     }
 }
 

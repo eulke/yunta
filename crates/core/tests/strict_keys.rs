@@ -193,7 +193,7 @@ fn a_mode_and_an_input_refuse_unknown_keys() {
     ));
     assert_eq!(
         text,
-        "`inputs.idea`: unknown field `descripton`, expected one of `required`, `default`, `description`, `pattern`, `min_length`; did you mean `description`? at line 7 column 3"
+        "`inputs.idea`: unknown field `descripton`, expected one of `required`, `default`, `description`, `pattern`, `min_length`, `request`; did you mean `description`? at line 7 column 3"
     );
 }
 

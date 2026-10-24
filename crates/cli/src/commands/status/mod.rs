@@ -49,7 +49,13 @@ pub async fn status(
     let reading = Reading::of(&ctx, run_id).await?;
     let documents = match (output, node) {
         (Mode::Human, Some(id)) => {
-            yunta_engine::produced_documents(&reading.run_dir, id, &reading.state).await?
+            yunta_engine::produced_documents(
+                &reading.run_dir,
+                id,
+                &reading.state,
+                reading.manifest.request(),
+            )
+            .await?
         }
         _ => Vec::new(),
     };
@@ -190,7 +196,13 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
     let Some((node, escalation)) = &reading.decision else {
         return Ok(None);
     };
-    let shown = crate::json::shown_of(&reading.run_dir, escalation, &reading.state).await?;
+    let shown = crate::json::shown_of(
+        &reading.manifest,
+        &reading.run_dir,
+        escalation,
+        &reading.state,
+    )
+    .await?;
     // The page's ask made the claim, and a failed node's evidence is
     // quoted above it.
     let beside = decision::Beside {

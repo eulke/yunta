@@ -73,11 +73,16 @@ declaración.
 | `out_of_scope` | lista de strings | no | — |
 
 El engine no escribe una vista para leer el plan: lo dibuja quien lo muestra, al
-leerlo (D223). Un gate que muestra el plan lo muestra como el run lo va a juzgar
-—cada criterio con lo que lo sostiene, los tests de la spec en la tarjeta de su
-tarea, la suite que guarda todas, y cada cambio sobre un test que ninguna sesión
-puede escribir—, con el código de cada cambio y de cada test. `yunta status <run>
---node <planner>` lo imprime entero.
+leerlo (D223, D270). Un gate que muestra el plan lo muestra como el cambio que
+hace: su título con cuánto es, lo que decidió por la persona y lo que pidió; el
+cambio entero; los pasos con su orden dibujado; una tarjeta por tarea con lo que
+se va a ver, los archivos que cambia, los shapes de otra tarea sobre los que
+construye, lo que mantiene y qué la testea —cada test de la spec con su `proves`
+y su comando—, y el código de cada shape y de cada cambio una vez; al final la
+prueba: los tests de la spec contados y el comando que los muestra enteros, la
+suite que guarda todas las tareas y cada guard. Ningún código de test forma parte
+de la revisión; `yunta status <run> --node <planner>` imprime el plan entero, con
+cada archivo de la spec entero después de las tarjetas.
 
 ## 3. Validación al registrar
 

@@ -1,328 +1,93 @@
-//! A plan as the person deciding on it reads it: what it changes, its
-//! tasks at a glance with what proves each, what of it cannot be done as
-//! written, why it changes what it does, the
-//! choices it makes, what it risks and leaves out, then step by step each
-//! task — what a person sees once it is done, what it touches and keeps,
-//! the code of each change it makes and what proves it done, with the
-//! code of the test that does.
+//! A plan as a person reads it: what it changes before how it is proven.
+//! It opens with what the plan is and what the person asked for, and with
+//! every departure from it a person accepted; then the change — what it
+//! does, what it decided for them and what they answered, what it risks
+//! and leaves out, how it is designed; then the steps it takes, and each
+//! task's card with the code it writes; then what proves it.
 //!
-//! The code sits in the task it belongs to: understanding a task is
-//! seeing what it will write, and a shape drawn under the design or a
-//! test drawn in a second document after every task is a screen away
-//! from the task it explains.
+//! A person deciding on a change reads the change. The code a task writes
+//! sits in its card, once; the code of the tests that prove it is not part
+//! of the read — the whole plan has each file the spec wrote after every
+//! card, and a review names the command that shows them.
 
-use surco::components::{Fields, Marked, Next, Prose, Section};
+use surco::components::{Code, Section};
 use surco::doc::{Block, Doc};
-use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
-use surco::text::{agreeing, counted};
-use yunta_core::events::AcceptedDeparture;
-use yunta_core::shown::{Answered, HeldTo, PlanReview, TaskReview};
+use yunta_core::shown::PlanReview;
 use yunta_core::step::NextStep;
-use yunta_core::{Decision, RunId, ScopeGlob, Task, TasksFile};
+use yunta_core::RunId;
 
 mod card;
+mod change;
 mod flawed;
-mod map;
+mod head;
+mod proof;
+mod steps;
 
+pub(crate) use card::codeless;
 pub(crate) use flawed::concerns;
-
-use card::card;
 
 /// How much of a plan a reader is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form {
-    /// Where a decision is made on it: every section, a description's
-    /// first paragraph, and no file longer than [`CODE_SHOWN`] lines.
+    /// Where a decision is made on it: the change, and what proves each
+    /// task in a line; no test's code.
     Review,
-    /// Everything the plan says, every file whole.
+    /// Everything the plan says, and each file the spec wrote, whole, after
+    /// the cards.
     Whole,
 }
 
-/// The lines of a file a task's card shows before the rest is a command
-/// away: the length of a test that checks one behavior, so a card shows
-/// what the task's tests do without a file pushing every other task off
-/// the screen.
-pub const CODE_SHOWN: usize = 60;
-
-/// `review` as a document: `of` names the node that wrote the plan, and
-/// `run` the run a person reads the whole plan by. Each command it names is
-/// written by `spell`.
+/// `review` as a document, under the headline of the page that reads it.
+/// `run` is the run it is read in; each command it names is written by
+/// `spell`.
 pub fn document(
     review: &PlanReview,
-    of: &str,
     run: &RunId,
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
 ) -> Doc {
-    let plan = &review.plan;
-    let steps = plan.steps();
-    let mut doc = Doc::new().with(Block::Title(
-        Line::new()
-            .push(Tone::Strong, format!("plan{of}"))
-            .plain(format!(": {}", sized(plan, steps.len(), review))),
-    ));
-    if let Some(summary) = said(&plan.summary) {
-        doc = doc.with(Prose(summary.to_string()));
-    }
-    doc = doc.with(titled("tasks", vec![map::map(review, &steps).into()]));
-    doc = flawed::flawed(doc, review);
+    let steps = review.plan.steps();
+    let mut doc = head::head(review, &steps);
     if !review.departed.is_empty() {
-        doc = doc.with(departures(&review.departed));
+        doc = doc.with(change::departures(&review.departed));
     }
-    if let Some(description) = said(&plan.description) {
-        doc = described(doc.with(blank()), description, form);
-    }
-    doc = decisions(doc, review);
-    doc = designed(doc, plan, &steps);
-    doc = bounded(doc, review);
+    let doc = change::change(doc, review);
+    let doc = steps::steps(doc, &steps);
     let total = steps.len();
-    for (at, step) in steps.iter().enumerate() {
+    let doc = steps.iter().enumerate().fold(doc, |doc, (at, step)| {
         let cards = step
             .iter()
-            .map(|task| card(task, review, form, run, spell).into())
+            .map(|task| card::card(task, review).into())
             .collect();
-        doc = doc.with(titled(&format!("step {} of {total}", at + 1), cards));
-    }
-    match form {
-        Form::Review => doc.with(blank()).with(Next {
-            steps: vec![(
-                spell(&NextStep::Status {
-                    run: run.clone(),
-                    node: of_node(of).parse().ok(),
-                }),
-                "the whole plan, every file whole",
-            )],
-        }),
-        Form::Whole => doc,
-    }
-}
-
-/// What the plan risks and leaves out, and the suite every task keeps
-/// passing.
-fn bounded(mut doc: Doc, review: &PlanReview) -> Doc {
-    let plan = &review.plan;
-    for (title, mark, items) in [
-        ("risks", Mark::Caution, &plan.risks),
-        ("out of scope", Mark::Absent, &plan.out_of_scope),
-    ] {
-        if !items.is_empty() {
-            doc = doc.with(titled(
-                title,
-                vec![Marked {
-                    mark,
-                    items: items.clone(),
-                }
-                .into()],
-            ));
-        }
-    }
-    if !review.held.is_empty() {
-        let held = review.held.iter().fold(
-            Fields::new().push_if("measured", "green before this run changed anything"),
-            |fields, command| fields.push_command("", format!("$ {command}")),
-        );
-        doc = doc.with(titled("every task keeps passing", vec![held.into()]));
-    }
-    doc
-}
-
-/// How big the plan is, in one line: its tasks and steps, and the tests
-/// the spec holds them to — only those that run what the spec wrote.
-fn sized(plan: &TasksFile, steps: usize, review: &PlanReview) -> String {
-    let tasks = counted(plan.tasks.len(), "task");
-    let mut said = match steps {
-        0 | 1 => tasks,
-        n => format!("{tasks} in {n} steps"),
+        doc.with(titled(&format!("step {} of {total}", at + 1), cards))
+    });
+    let doc = match form {
+        Form::Review => doc,
+        Form::Whole => tests_whole(doc, review),
     };
-    if review.spec.is_some() {
-        let tests: usize = review
-            .tasks
-            .iter()
-            .map(|task| {
-                task.criteria
-                    .iter()
-                    .filter(|criterion| matches!(criterion.from, HeldTo::Spec))
-                    .count()
+    proof::proof(doc, review, form, (run, spell))
+}
+
+/// Each file the spec wrote, whole, after every card, with the task its
+/// tests prove: what the whole plan holds that a review leaves a command
+/// away.
+fn tests_whole(doc: Doc, review: &PlanReview) -> Doc {
+    let files: Vec<Block> = review
+        .spec
+        .iter()
+        .flat_map(|spec| &spec.specs)
+        .flat_map(|spec| {
+            spec.files.iter().map(move |file| {
+                let what = format!("what proves `{}`", spec.task);
+                Code::whole(file.path.as_str(), Some(what), &file.content).into()
             })
-            .sum();
-        let running: usize = review
-            .tasks
-            .iter()
-            .map(TaskReview::spec_tests_that_run)
-            .sum();
-        let idle = tests - running;
-        said.push_str(&match idle {
-            0 => format!(", held to {} from its spec", counted(tests, "test")),
-            _ => format!(
-                ", held to {running} of its {}: {idle} {} nothing the spec wrote",
-                counted(tests, "spec test"),
-                agreeing(idle, "runs", "run")
-            ),
-        });
-    }
-    said
-}
-
-/// Every departure from the plan a person accepted: what the plan says,
-/// what was built instead and why.
-fn departures(departed: &[AcceptedDeparture]) -> Section {
-    let blocks = departed
-        .iter()
-        .map(|departure| {
-            let declared = &departure.declared;
-            let mut fields = Fields::new()
-                .push_if("the plan", declared.planned.as_str())
-                .push_if("built", declared.instead.as_str())
-                .push_if("because", declared.why.as_str());
-            if let Some(said) = said(&departure.said) {
-                fields = fields.push_if("accepted", said);
-            }
-            Section {
-                mark: None,
-                title: Line::new().plain(format!(
-                    "{} departs from {}",
-                    declared.task_id, declared.from
-                )),
-                blocks: vec![fields.into()],
-            }
-            .into()
         })
         .collect();
-    titled("accepted departures from this plan", blocks)
-}
-
-/// The description: its first paragraph and each diagram where a
-/// decision is made; all of it otherwise.
-fn described(doc: Doc, description: &str, form: Form) -> Doc {
-    match form {
-        Form::Whole => doc.with(Block::Markdown(description.to_string())),
-        Form::Review => surco::diagram::split::reviewed(description)
-            .into_iter()
-            .fold(doc, Doc::with),
+    match files.is_empty() {
+        true => doc,
+        false => doc.with(titled("the spec's tests", files)),
     }
-}
-
-/// What the plan decided: what a person answered, and what the plan
-/// decided for them.
-fn decisions(mut doc: Doc, review: &PlanReview) -> Doc {
-    let plan = &review.plan;
-    let answer_of = |decision: &Decision| {
-        let id = decision.answers.as_ref()?;
-        review.answered.iter().find(|answered| answered.id == *id)
-    };
-    let yours: Vec<Block> = plan
-        .decisions
-        .iter()
-        .filter_map(|decision| Some((decision, answer_of(decision)?)))
-        .enumerate()
-        .map(|(at, (decision, answered))| restated(at + 1, decision, answered).into())
-        .collect();
-    if !yours.is_empty() {
-        doc = doc.with(titled("you answered", yours));
-    }
-    let ours: Vec<Block> = plan
-        .decisions
-        .iter()
-        .filter(|decision| answer_of(decision).is_none())
-        .enumerate()
-        .map(|(at, decision)| decided(at + 1, decision).into())
-        .collect();
-    if !ours.is_empty() {
-        doc = doc.with(titled("decided for you", ours));
-    }
-    doc
-}
-
-/// How the plan is built: the design, and where each shape's code is.
-fn designed(doc: Doc, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc {
-    if said(&plan.design).is_none() && plan.shapes.is_empty() {
-        return doc;
-    }
-    let mut blocks: Vec<Block> = Vec::new();
-    if let Some(design) = said(&plan.design) {
-        blocks.push(Block::Markdown(design.to_string()));
-    }
-    let step_of = |task: &yunta_core::TaskId| {
-        steps
-            .iter()
-            .position(|step| step.iter().any(|candidate| candidate.id == *task))
-            .map_or(0, |at| at + 1)
-    };
-    let shapes: Vec<Line> = plan
-        .shapes
-        .iter()
-        .map(|shape| {
-            Line::new()
-                .plain("  ")
-                .push(Tone::Strong, shape.name.as_str())
-                .plain(format!(" in {}", shape.file))
-                .push(
-                    Tone::Muted,
-                    format!(
-                        ": its code is in step {}, `{}`",
-                        step_of(&shape.owner),
-                        shape.owner
-                    ),
-                )
-        })
-        .collect();
-    if !shapes.is_empty() {
-        blocks.push(shapes.into());
-    }
-    doc.with(titled("design", blocks))
-}
-
-/// One decision: what was open, what the plan chose and why, and what it
-/// did not choose.
-fn decided(at: usize, decision: &Decision) -> Section {
-    let mut fields = Fields::new().push_if("chose", decision.choice.as_str());
-    if let Some(why) = said(&decision.why) {
-        fields = fields.push_if("because", why);
-    }
-    for (n, alternative) in decision.alternatives.iter().enumerate() {
-        fields = fields.push_if(if n == 0 { "not" } else { "" }, alternative.as_str());
-    }
-    Section {
-        mark: None,
-        title: Line::new().push(Tone::Strong, format!("{at}  {}", decision.question)),
-        blocks: vec![fields.into()],
-    }
-}
-
-/// A decision that restates what a person answered: their words, and
-/// what the plan does with them.
-fn restated(at: usize, decision: &Decision, answered: &Answered) -> Section {
-    Section {
-        mark: None,
-        title: Line::new().push(Tone::Strong, format!("{at}  {}", answered.question)),
-        blocks: vec![Fields::new()
-            .push_if("you said", answered.answer.as_str())
-            .push_if("the plan", decision.choice.as_str())
-            .into()],
-    }
-}
-
-/// `scope` as a reader scans it: globs that share a directory under that
-/// directory once, in the order the task names them.
-pub(super) fn grouped(scope: &[ScopeGlob]) -> Vec<String> {
-    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
-    for glob in scope {
-        let glob = glob.as_str();
-        let (dir, name) = glob.rsplit_once('/').unwrap_or(("", glob));
-        match groups.iter_mut().find(|(seen, _)| *seen == dir) {
-            Some((_, names)) => names.push(name),
-            None => groups.push((dir, vec![name])),
-        }
-    }
-    groups
-        .into_iter()
-        .map(|(dir, names)| match (dir, names.as_slice()) {
-            ("", _) => names.join(", "),
-            (_, [one]) => format!("{dir}/{one}"),
-            _ => format!("{dir}/{{{}}}", names.join(", ")),
-        })
-        .collect()
 }
 
 /// A blank line between two blocks a reader takes apart.
@@ -331,17 +96,12 @@ pub(super) fn blank() -> Block {
 }
 
 /// A section titled `title`, in the plan's own heading tone.
-fn titled(title: &str, blocks: Vec<Block>) -> Section {
+pub(super) fn titled(title: &str, blocks: Vec<Block>) -> Section {
     Section {
-        mark: None,
+        lead: None,
         title: Line::new().push(Tone::Strong, title),
         blocks,
     }
-}
-
-/// The node a plan's `of` names, for the command that shows it whole.
-fn of_node(of: &str) -> &str {
-    of.trim_start_matches(" of ").trim_matches('`')
 }
 
 /// Text that says something, trimmed.
@@ -349,30 +109,4 @@ pub(super) fn said(text: &Option<String>) -> Option<&str> {
     text.as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_task_s_scope_is_grouped_by_the_directory_its_globs_share() {
-        let scope: Vec<ScopeGlob> = [
-            "crates/cli/src/render/color.rs",
-            "crates/cli/src/render/mod.rs",
-            "crates/cli/src/error.rs",
-            "Cargo.toml",
-        ]
-        .into_iter()
-        .map(ScopeGlob::from)
-        .collect();
-        assert_eq!(
-            grouped(&scope),
-            vec![
-                "crates/cli/src/render/{color.rs, mod.rs}",
-                "crates/cli/src/error.rs",
-                "Cargo.toml",
-            ]
-        );
-    }
 }

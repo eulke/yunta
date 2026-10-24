@@ -299,6 +299,10 @@ fn input_words(error: &CheckError) -> Option<String> {
             pattern,
             detail,
         } => format!("input `{name}`'s `pattern` `{pattern}` is not a valid regex: {detail}"),
+        CheckError::MoreThanOneRequest { names } => format!(
+            "inputs {} each say they are the person's request; a workflow's request is one input",
+            surco::text::listed(names.iter().map(|name| name.as_str()))
+        ),
         CheckError::UndeclaredInput { node, name } => format!(
             "node `{node}` references `{{{{inputs.{name}}}}}`, which `inputs:` does not declare"
         ),

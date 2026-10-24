@@ -41,6 +41,14 @@ pub(crate) fn check_input_specs(
             _ => {}
         }
     }
+    let requests: Vec<yunta_core::InputName> = inputs
+        .iter()
+        .filter(|(_, spec)| spec.is_request())
+        .map(|(name, _)| name.clone())
+        .collect();
+    if requests.len() > 1 {
+        errors.push(CheckError::MoreThanOneRequest { names: requests });
+    }
 }
 
 /// Every `{{inputs.x}}` appearing in an inline template must name

@@ -89,7 +89,7 @@ pub(crate) fn section(
     menu.otherwise = otherwise;
     blocks.push(menu.into());
     Section {
-        mark: Some(Mark::NeedsYou),
+        lead: Some(surco::components::Lead::Mark(Mark::NeedsYou)),
         title: Line::new().push(Tone::Strong, format!("decision on node `{}`", decided.node)),
         blocks,
     }

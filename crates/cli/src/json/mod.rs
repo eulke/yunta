@@ -286,14 +286,18 @@ pub(crate) async fn decision_of(
     Ok(yunta_engine::current_escalation(manifest, run_dir, state).await?)
 }
 
-/// The documents `escalation` shows, as the run whose derived state is
-/// `state` holds them.
+/// The documents `escalation` shows, as the run born with `manifest`,
+/// whose derived state is `state`, holds them.
 pub(crate) async fn shown_of(
+    manifest: &yunta_core::Manifest,
     run_dir: &std::path::Path,
     escalation: &yunta_core::events::GateWaitingPayload,
     state: &RunState,
 ) -> Result<Vec<yunta_engine::ShownDocument>, crate::error::CliError> {
-    Ok(yunta_engine::shown_documents(run_dir, escalation.shows(), state).await?)
+    Ok(
+        yunta_engine::shown_documents(run_dir, escalation.shows(), state, manifest.request())
+            .await?,
+    )
 }
 
 /// What a waiting run is waiting on.

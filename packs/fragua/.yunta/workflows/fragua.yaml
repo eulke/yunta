@@ -32,6 +32,7 @@ yunta_schema: ">=1 <2"
 inputs:
   idea:
     type: string
+    request: true
     required: true
     description: "What to build — becomes the brief"
 

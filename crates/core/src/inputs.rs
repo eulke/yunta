@@ -35,6 +35,10 @@ pub enum InputSpec {
         pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         min_length: Option<u32>,
+        /// Whether this input is what the person asked the run for, in
+        /// their words: what a page about the run's work quotes as asked.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        request: bool,
     },
     Number {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,6 +102,11 @@ impl InputSpec {
             InputSpec::Path { default, .. } => default.is_none(),
             InputSpec::Document { default, .. } => default.is_none(),
         }
+    }
+
+    /// Whether this input is what the person asked the run for.
+    pub fn is_request(&self) -> bool {
+        matches!(self, InputSpec::String { request: true, .. })
     }
 
     pub fn description(&self) -> Option<&str> {
@@ -195,6 +204,10 @@ enum AuthoredInputSpec {
         pattern: Option<String>,
         #[serde(default)]
         min_length: Option<u32>,
+        /// What the person asks the run for, in their words: a page about
+        /// the run's work quotes it as what they asked. One input at most.
+        #[serde(default)]
+        request: bool,
     },
     Number {
         #[serde(default)]
@@ -266,6 +279,7 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
                 description,
                 pattern,
                 min_length,
+                request,
             } => {
                 required.check_against(default.is_some())?;
                 InputSpec::String {
@@ -273,6 +287,7 @@ impl TryFrom<AuthoredInputSpec> for InputSpec {
                     description,
                     pattern,
                     min_length,
+                    request,
                 }
             }
             AuthoredInputSpec::Number {

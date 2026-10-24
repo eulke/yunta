@@ -3,9 +3,7 @@
 //! plan names on a test no session may write.
 
 use yunta_core::events::AcceptedDeparture;
-use yunta_core::shown::{
-    DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
-};
+use yunta_core::shown::{DeniedChange, HeldTo, JudgedCriterion, PlanReview, TaskReview};
 use yunta_core::{SpecFile, Task, TasksFile};
 
 use super::judged::{specified, waived};
@@ -31,6 +29,8 @@ pub fn review(
         tasks,
         handed_over: None,
         answered: Vec::new(),
+        spec_node: None,
+        asked: None,
     }
 }
 
@@ -59,29 +59,8 @@ fn task_review(
         task: task.id.clone(),
         criteria: criteria.into_iter().map(reviewed).collect(),
         denied: denied(task, spec),
-        files: files(task, spec),
         guards: guards.into_iter().map(reviewed).collect(),
     }
-}
-
-/// Each file the spec wrote for `task`, with the commands of its tests
-/// that run it.
-fn files(task: &Task, spec: Option<&SpecFile>) -> Vec<SpecFileReview> {
-    let Some(own) = spec.and_then(|spec| spec.of(&task.id)) else {
-        return Vec::new();
-    };
-    own.files
-        .iter()
-        .map(|file| SpecFileReview {
-            path: file.path.clone(),
-            run_by: own
-                .tests
-                .iter()
-                .filter(|test| yunta_core::names_file(&test.cmd, &file.in_repo()))
-                .map(|test| test.cmd.clone())
-                .collect(),
-        })
-        .collect()
 }
 
 /// What holds `task` to the criterion that runs `cmd`: a test of its own
@@ -188,14 +167,6 @@ specs:
         let review = reviewed();
         let store: Vec<&HeldTo> = review.tasks[0].criteria.iter().map(|c| &c.from).collect();
         assert_eq!(store, vec![&HeldTo::Spec]);
-        assert_eq!(
-            review.tasks[0].files,
-            vec![SpecFileReview {
-                path: "tests/store.rs".to_string(),
-                run_by: vec!["cargo test --test store".to_string()],
-            }],
-            "the file is tied to the test that runs it"
-        );
     }
 
     #[test]

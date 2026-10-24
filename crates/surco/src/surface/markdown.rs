@@ -4,8 +4,8 @@
 //! character and the word is what carries the meaning.
 
 use crate::components::{
-    Check, Checklist, Code, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Marked,
-    Next, Paths, Problem, Refusal, Runs, Section, Table, Whole,
+    Check, Checklist, Code, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Lead,
+    Marked, Next, Paths, Problem, Refusal, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
@@ -70,7 +70,10 @@ fn block(block: &Block, depth: usize) -> String {
         Block::Markdown(text) => text.trim().to_string(),
         Block::Marked(marked) => self::marked(marked),
         Block::Concern(concern) => self::concern(concern),
-        Block::Diagram(diagram) => format!("```mermaid\n{}\n```", diagram.source),
+        Block::Diagram(diagram) => {
+            let fence = fence(&diagram.source);
+            format!("{fence}mermaid\n{}\n{fence}", diagram.source)
+        }
         Block::Code(code) => self::code(code),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
@@ -123,10 +126,11 @@ fn fields(fields: &Fields) -> String {
 /// A section: its title as a heading a level under the document's, and
 /// each of its blocks a level deeper.
 fn section(section: &Section, depth: usize) -> String {
-    let mark = section
-        .mark
-        .map(|mark| format!("{} ", GLYPHS.mark(mark)))
-        .unwrap_or_default();
+    let mark = match section.lead {
+        Some(Lead::Mark(mark)) => format!("{} ", GLYPHS.mark(mark)),
+        Some(Lead::Ordinal(at)) => format!("{at}  "),
+        None => String::new(),
+    };
     let mut parts = vec![format!(
         "{} {mark}{}",
         "#".repeat(3 + depth),
@@ -154,16 +158,14 @@ fn marked(marked: &Marked) -> String {
 /// Code under where it is and what it is there for, fenced in the
 /// language of its file.
 fn code(code: &Code) -> String {
-    let mut out = format!("`{}`", code.at);
+    let mut out = format!("`{}`", code.title(GLYPHS));
     if let Some(what) = &code.what {
         out.push_str(&format!(": {what}"));
     }
     if !code.lines.is_empty() {
-        out.push_str(&format!(
-            "\n\n```{}\n{}\n```",
-            code.language(),
-            code.lines.join("\n")
-        ));
+        let lines = code.lines.join("\n");
+        let fence = fence(&lines);
+        out.push_str(&format!("\n\n{fence}{}\n{lines}\n{fence}", code.language()));
     }
     if let Some(rest) = &code.rest {
         out.push_str(&format!(
@@ -172,6 +174,18 @@ fn code(code: &Code) -> String {
         ));
     }
     out
+}
+
+/// The fence around `text` as code: one backtick more than the longest
+/// run that opens any of its lines, and three at least, so a fence the
+/// text holds — a Markdown file's own — never closes the one around it.
+fn fence(text: &str) -> String {
+    let longest = text
+        .lines()
+        .map(|line| line.trim_start().chars().take_while(|c| *c == '`').count())
+        .max()
+        .unwrap_or_default();
+    "`".repeat((longest + 1).max(3))
 }
 
 /// A table with its header: an id as code, a row's mark in front of its
@@ -190,7 +204,9 @@ fn table(table: &Table) -> String {
         for (at, (said, column)) in row.cells.iter().zip(&table.columns).enumerate() {
             let mut said = match column.holds {
                 Holds::Id => format!("`{}`", said.text),
-                Holds::State | Holds::Words | Holds::Figure | Holds::Rest => cell(&said.text),
+                Holds::State | Holds::Words | Holds::Figure | Holds::Rest | Holds::Prose => {
+                    cell(&said.text)
+                }
             };
             if let (0, Some(mark)) = (at, row.mark) {
                 said = format!("{} {said}", GLYPHS.mark(mark));
@@ -426,4 +442,29 @@ fn refusal(refusal: &Refusal) -> String {
 
 fn cell(text: &str) -> String {
     crate::text::one_line(text).replace('|', "\\|")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::components::{Code, Section};
+    use crate::doc::Doc;
+    use crate::line::Line;
+    use crate::surface::{Markdown, Surface};
+
+    /// Code that holds a fence of its own is fenced longer, so what comes
+    /// after it is never read as code.
+    #[test]
+    fn a_fence_the_code_holds_never_closes_the_one_around_it() {
+        let code = Code::whole("notes/install.md", None, "```bash\nyunta run\n```\n");
+        let after = Section {
+            lead: None,
+            title: Line::new().plain("proof"),
+            blocks: Vec::new(),
+        };
+        let drawn = Markdown.draw(&Doc::new().with(code).with(after));
+        assert!(drawn.contains("````markdown\n```bash"), "{drawn}");
+        let open = drawn.matches("````").count();
+        assert_eq!(open, 2, "{drawn}");
+        assert!(drawn.trim_end().ends_with("### proof"), "{drawn}");
+    }
 }

@@ -280,6 +280,17 @@ fn rename_isolation(value: &mut crate::yaml::Value, retired: &str, replacement: 
 }
 
 impl Manifest {
+    /// What the person asked the run for, as they wrote it: the value of
+    /// the input the workflow declares as its request.
+    pub fn request(&self) -> Option<&str> {
+        let (name, _) = self
+            .workflow
+            .inputs
+            .iter()
+            .find(|(_, spec)| spec.is_request())?;
+        self.inputs.get(name).map(String::as_str)
+    }
+
     /// Hash of the whole frozen manifest — the value `run_created`
     /// records, and what the storage derives the event hash chain's
     /// genesis from (`H0 = SHA-256(manifest_hash)`): one chain per run,

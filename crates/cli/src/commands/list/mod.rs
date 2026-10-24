@@ -129,7 +129,7 @@ async fn listed(
         Ok(workflow) => workflow,
         Err(why) => {
             return Section {
-                mark: None,
+                lead: None,
                 title: Line::new().push(Tone::Strong, name.as_str()),
                 blocks: why,
             }
@@ -145,7 +145,7 @@ async fn listed(
     }
     fields = fields.push_command("run", format!("yunta run {name}"));
     Section {
-        mark: None,
+        lead: None,
         title,
         blocks: vec![fields.into()],
     }

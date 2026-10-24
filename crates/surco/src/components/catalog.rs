@@ -110,7 +110,7 @@ fn quoting() -> Vec<Block> {
         )),
     };
     vec![Section {
-        mark: Some(Mark::Failed),
+        lead: Some(crate::components::Lead::Mark(Mark::Failed)),
         title: Line::new()
             .push(Tone::Strong, "node `lint`")
             .plain(": exit 101"),

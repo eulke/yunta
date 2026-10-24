@@ -801,6 +801,31 @@ fn a_number_input_with_min_above_max_is_a_check_error() {
 }
 
 #[test]
+fn a_workflow_whose_request_is_two_inputs_is_a_check_error() {
+    let inputs = std::collections::BTreeMap::from([
+        ("idea".into(), input_spec("type: string\nrequest: true\n")),
+        ("issue".into(), input_spec("type: string\nrequest: true\n")),
+    ]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::MoreThanOneRequest { names } if names.len() == 2
+        )),
+        "{errors:?}"
+    );
+    let one = std::collections::BTreeMap::from([(
+        "idea".into(),
+        input_spec("type: string\nrequest: true\n"),
+    )]);
+    let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], one);
+    assert!(!check(&wf, &ConfigLayer::default())
+        .iter()
+        .any(|e| matches!(e, CheckError::MoreThanOneRequest { .. })));
+}
+
+#[test]
 fn a_string_input_with_an_invalid_regex_pattern_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
         "branch".into(),

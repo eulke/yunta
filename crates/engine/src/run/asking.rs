@@ -30,7 +30,13 @@ impl RunCtx<'_> {
             true => Vec::new(),
             false => {
                 let state = self.run_view().await?.state;
-                crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &state).await?
+                crate::artifacts::shown::documents(
+                    self.run_dir,
+                    escalation.shows(),
+                    &state,
+                    self.manifest.request(),
+                )
+                .await?
             }
         };
         let asking = crate::Asking {

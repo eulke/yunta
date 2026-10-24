@@ -126,3 +126,26 @@ async fn a_shown_plan_carries_the_questions_the_run_asked_with_their_answers() {
         }]
     );
 }
+
+#[tokio::test]
+async fn a_shown_plan_carries_what_the_person_asked_the_run_for() {
+    let workflow = ASKED_THEN_PLANNED.replace(
+        "name: asked-then-planned\n",
+        "name: asked-then-planned\ninputs:\n  idea: { type: string, request: true }\n",
+    );
+    let bench = Bench::new().with_inputs(&[("idea", "deploy it where we test")]);
+    let person = Answering::default();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, SESSIONS, &person)
+        .await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let shown = person.0.lock().unwrap().clone();
+    let ShownContent::Tasks(review) = &shown[0][0].content else {
+        panic!("the gate shows the plan: {shown:?}");
+    };
+    assert_eq!(review.asked.as_deref(), Some("deploy it where we test"));
+}

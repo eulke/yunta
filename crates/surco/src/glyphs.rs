@@ -179,6 +179,15 @@ impl Glyphs {
         }
     }
 
+    /// What stands between a file and what in it a reader is shown, and
+    /// between a thing and what is inside it: `src/greet.rs › Greeter`.
+    pub fn within(self) -> &'static str {
+        match self {
+            Self::Unicode => "›",
+            Self::Ascii => "::",
+        }
+    }
+
     /// What joins one thing to another without pointing either way.
     pub fn joins(self) -> &'static str {
         match self {

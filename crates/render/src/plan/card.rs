@@ -1,62 +1,26 @@
-//! One task's card: what a person sees once it is done, what it touches,
-//! keeps and waits on; each change it makes with the code the plan writes
-//! for it; what proves it done, with the code of the test that does.
+//! One task's card: what a person sees once it is done, the files it
+//! changes, the shapes of another task it builds on, what it keeps and what
+//! tests it; then the code it writes — each shape it builds and each change
+//! it makes, once.
 
-use surco::components::{Code, Fields, Marked, Section};
+use surco::components::{Code, Fields, Section};
 use surco::doc::Block;
-use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
-use yunta_core::shown::{HeldTo, JudgedCriterion, PlanReview, TaskReview};
-use yunta_core::step::NextStep;
-use yunta_core::{Change, RunId, Shape, Task, TasksFile};
+use yunta_core::shown::{HeldTo, PlanReview, TaskReview};
+use yunta_core::{Change, Shape, Task, TasksFile};
 
-use super::{blank, grouped, said, Form, CODE_SHOWN};
+use super::{blank, said};
 
-/// One task: what a person sees once it is done, what it touches, keeps
-/// and waits on; then each change it makes with the code the plan writes
-/// for it; then what proves it done, with the code of the test.
-pub(super) fn card(
-    task: &Task,
-    review: &PlanReview,
-    form: Form,
-    run: &RunId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Section {
-    let judged = review.tasks.iter().find(|judged| judged.task == task.id);
-    let mut blocks: Vec<Block> = vec![facts(task, &review.plan, judged).into()];
-    for change in changes(task, &review.plan, judged) {
+/// One task's card: what it says in words, then the code it writes.
+pub(super) fn card(task: &Task, review: &PlanReview) -> Section {
+    let judged = judged(review, task);
+    let mut blocks: Vec<Block> = vec![facts(task, review, judged).into()];
+    for piece in pieces(task, &review.plan, judged) {
         blocks.push(blank());
-        blocks.push(change);
-    }
-    if let Some(judged) = judged {
-        for criterion in &judged.criteria {
-            blocks.push(blank());
-            blocks.extend(proved(criterion, judged, review, form, run, spell));
-        }
-        let unrun: Vec<String> = judged
-            .files
-            .iter()
-            .filter(|file| file.run_by.is_empty())
-            .map(|file| {
-                format!(
-                    "{}: written by the spec; none of its tests runs it",
-                    file.path
-                )
-            })
-            .collect();
-        if !unrun.is_empty() {
-            blocks.push(blank());
-            blocks.push(
-                Marked {
-                    mark: Mark::Caution,
-                    items: unrun,
-                }
-                .into(),
-            );
-        }
+        blocks.push(piece.code.into());
     }
     Section {
-        mark: None,
+        lead: None,
         title: Line::new()
             .push(Tone::Strong, task.id.as_str())
             .plain(format!(": {}", task.title)),
@@ -64,18 +28,67 @@ pub(super) fn card(
     }
 }
 
-/// What a task's card says in words: what it keeps beside what checks
-/// that it does.
-fn facts(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Fields {
+/// How many of the changes `review`'s cards draw show no code, and how
+/// many changes they draw.
+pub(crate) fn codeless(review: &PlanReview) -> (usize, usize) {
+    let drawn: Vec<bool> = review
+        .plan
+        .tasks
+        .iter()
+        .flat_map(|task| pieces(task, &review.plan, judged(review, task)))
+        .filter(|piece| piece.change.is_some())
+        .map(|piece| piece.code.lines.is_empty())
+        .collect();
+    (
+        drawn.iter().filter(|codeless| **codeless).count(),
+        drawn.len(),
+    )
+}
+
+/// How the run judges `task`, when `review` says.
+fn judged<'a>(review: &'a PlanReview, task: &Task) -> Option<&'a TaskReview> {
+    review.tasks.iter().find(|judged| judged.task == task.id)
+}
+
+/// What a task's card says in words: what a person sees once it is done,
+/// the files it changes, the shapes of another task it builds on, what it
+/// keeps, and what tests it.
+fn facts(task: &Task, review: &PlanReview, judged: Option<&TaskReview>) -> Fields {
     let mut fields = Fields::new();
     if let Some(outcome) = said(&task.outcome) {
         fields = fields.push_if("you will see", outcome);
     }
-    fields = fields.push_if("touches", grouped(&task.scope).join(", "));
-    // What the task builds on: a shape it builds itself is in its
-    // changes, however a plan accepted before that was a rule says it.
-    let uses: Vec<String> = task
-        .uses
+    fields = fields
+        .push_if("changes", changed_files(task, judged).join(", "))
+        .push_if("builds on", built_on(task, &review.plan).join(", "));
+    for (n, invariant) in task.invariants.iter().enumerate() {
+        fields = fields.push_if(if n == 0 { "keeps" } else { "" }, invariant.as_str());
+    }
+    tested(fields, task, review, judged)
+}
+
+/// The files `task` changes, each once, in the order it names them. A test
+/// the spec wrote is the spec's: a change on one is no change of the
+/// task's, and what keeps the plan from being proven says so.
+fn changed_files<'a>(task: &'a Task, judged: Option<&TaskReview>) -> Vec<&'a str> {
+    let mut files: Vec<&str> = Vec::new();
+    for change in task.changes.iter().filter(|change| !denied(change, judged)) {
+        if !files.contains(&change.file()) {
+            files.push(change.file());
+        }
+    }
+    files
+}
+
+/// Whether `change` is on a test the spec wrote, which no session writes.
+fn denied(change: &Change, judged: Option<&TaskReview>) -> bool {
+    judged.is_some_and(|judged| judged.denied.iter().any(|denied| denied.at == change.at))
+}
+
+/// The shapes of another task `task` builds on, each with the task that
+/// builds it: a shape it builds itself is in its code.
+fn built_on(task: &Task, plan: &TasksFile) -> Vec<String> {
+    task.uses
         .iter()
         .filter_map(
             |name| match plan.shapes.iter().find(|shape| shape.name == *name) {
@@ -84,211 +97,163 @@ fn facts(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Fields {
                 None => Some(name.clone()),
             },
         )
-        .collect();
-    fields = fields.push_if("uses", uses.join(", "));
-    for (n, invariant) in task.invariants.iter().enumerate() {
-        fields = fields.push_if(if n == 0 { "keeps" } else { "" }, invariant.as_str());
-    }
-    fields = checked(fields, task, judged);
-    if !task.depends_on.is_empty() {
-        let after: Vec<&str> = task.depends_on.iter().map(|id| id.as_str()).collect();
-        fields = fields.push_if("after", after.join(", "));
-    }
-    fields
+        .collect()
 }
 
-/// What checks that a task keeps what it promises: each of its guards,
-/// or that only the suite does.
-fn checked(mut fields: Fields, task: &Task, judged: Option<&TaskReview>) -> Fields {
-    let guards = judged
-        .map(|judged| judged.guards.as_slice())
-        .unwrap_or_default();
-    if guards.is_empty() {
-        if !task.invariants.is_empty() {
-            fields = fields.push_if("checked by", "nothing but the suite");
-        }
-        return fields;
-    }
-    for (n, guard) in guards.iter().enumerate() {
-        let label = if n == 0 { "checked by" } else { "" };
-        fields = match guard.proves.as_deref() {
-            Some(proves) => fields
-                .push_if(label, proves)
-                .push_command("", format!("$ {}", guard.cmd)),
-            None => fields.push_command(label, format!("$ {}", guard.cmd)),
+/// `fields` with what tests `task`: each test the spec gives it, what it
+/// proves in the spec's words and the command that runs it; with no spec
+/// beside the plan, each criterion the plan gives it.
+fn tested(
+    mut fields: Fields,
+    task: &Task,
+    review: &PlanReview,
+    judged: Option<&TaskReview>,
+) -> Fields {
+    let tests: Vec<(&str, &str)> = match review.spec.as_ref().and_then(|spec| spec.of(&task.id)) {
+        Some(spec) => spec
+            .tests
+            .iter()
+            .map(|test| (test.proves.as_str(), test.cmd.as_str()))
+            .collect(),
+        None => judged
+            .into_iter()
+            .flat_map(|judged| &judged.criteria)
+            .filter(|criterion| matches!(criterion.from, HeldTo::Plan))
+            .map(|criterion| {
+                (
+                    criterion.proves.as_deref().unwrap_or_default(),
+                    criterion.cmd.as_str(),
+                )
+            })
+            .collect(),
+    };
+    for (n, (proves, cmd)) in tests.into_iter().enumerate() {
+        let label = if n == 0 { "tested by" } else { "" };
+        fields = match proves.trim() {
+            "" => fields.push_command(label, cmd),
+            proves => fields.push_if(label, proves).push_command("", cmd),
         };
     }
     fields
 }
 
-/// Each change a task makes: where, what for, and the code the plan
-/// writes for it — or, for a test the spec wrote, that no session may —
-/// and each shape the task builds, whole, once: under the first change
-/// of its file that brings no code of its own, before the first change
-/// of its file otherwise, and first of all when no change touches its
-/// file. A shape is the interface the task adds; a change's code is often
-/// one line of it, and neither stands in for the other.
-fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Block> {
+/// One piece of the code a task writes: the change it is drawn under, when
+/// it is one's, and its code.
+struct Piece<'a> {
+    change: Option<&'a Change>,
+    code: Code,
+}
+
+/// The code `task` writes, each piece once. A shape whose file no change
+/// names comes first. Under each change, the shape it is about, said with
+/// what the change is for, when the change brings no lines of its own or
+/// only a shape's; its own lines otherwise, after that shape; and with
+/// neither, where it is and what for. A shape no change is about comes
+/// last.
+fn pieces<'a>(task: &'a Task, plan: &'a TasksFile, judged: Option<&TaskReview>) -> Vec<Piece<'a>> {
     let owned: Vec<&Shape> = plan
         .shapes
         .iter()
         .filter(|shape| shape.owner == task.id)
         .collect();
-    let mut drawn = vec![false; owned.len()];
-    let attached: Vec<Option<&Shape>> = task
+    let changes: Vec<&Change> = task
         .changes
         .iter()
-        .map(|change| {
-            if change.code.is_some() {
-                return None;
-            }
-            let at = (0..owned.len()).find(|at| !drawn[*at] && owned[*at].file == change.file())?;
-            drawn[at] = true;
-            Some(owned[at])
-        })
+        .filter(|change| !denied(change, judged))
         .collect();
-    let mut blocks: Vec<Block> = Vec::new();
+    let mut drawn = vec![false; owned.len()];
+    let mut pieces = Vec::new();
     for (at, shape) in owned.iter().enumerate() {
-        if !task
-            .changes
-            .iter()
-            .any(|change| change.file() == shape.file)
-        {
+        if !changes.iter().any(|change| shape.file == change.file()) {
             drawn[at] = true;
-            blocks.push(built(shape));
+            pieces.push(Piece {
+                change: None,
+                code: shaped(shape, None),
+            });
         }
     }
-    for (change, attached) in task.changes.iter().zip(attached) {
-        for (at, shape) in owned.iter().enumerate() {
-            if !drawn[at] && shape.file == change.file() {
-                drawn[at] = true;
-                blocks.push(built(shape));
-            }
-        }
-        blocks.push(changed(change, attached, judged));
+    for change in changes {
+        pieces.extend(under(change, &owned, &mut drawn));
     }
-    blocks
+    for (at, shape) in owned.iter().enumerate() {
+        if !drawn[at] {
+            pieces.push(Piece {
+                change: None,
+                code: shaped(shape, None),
+            });
+        }
+    }
+    pieces
 }
 
-/// A shape the task builds, whole.
-fn built(shape: &Shape) -> Block {
-    Code::whole(
-        format!("{} › {}", shape.file, shape.name),
-        Some("the shape this task builds".to_string()),
-        &shape.code,
-    )
-    .into()
-}
-
-/// One change: where, what for, and its own code — or the code of the
-/// shape `attached` to it, when it brings none.
-fn changed(change: &Change, attached: Option<&Shape>, judged: Option<&TaskReview>) -> Block {
-    let at = change.at.replace("::", " › ");
-    let denied = judged
-        .into_iter()
-        .flat_map(|judged| &judged.denied)
-        .find(|denied| denied.at == change.at);
-    if let Some(denied) = denied {
-        return Marked {
-            mark: Mark::Caution,
-            items: vec![format!(
-                "{at}: a test the spec wrote for `{}`; no session may write it",
-                denied.owner
-            )],
-        }
-        .into();
-    }
-    let code = change
+/// What a card draws under `change`: the shape among `owned` it is about,
+/// said with what the change is for when it brings no lines of its own or
+/// only a shape's; then its own lines; and with neither, where it is and
+/// what for. A shape drawn is marked in `drawn`.
+fn under<'a>(change: &'a Change, owned: &[&Shape], drawn: &mut [bool]) -> Vec<Piece<'a>> {
+    let about = about(change, owned, drawn);
+    let own = change
         .code
         .as_deref()
-        .or_else(|| attached.map(|shape| shape.code.as_str()));
-    match code {
-        Some(code) => Code::whole(at, Some(change.what.clone()), code).into(),
-        None => Code {
-            at,
-            what: Some(change.what.clone()),
-            lines: Vec::new(),
-            whole: 0,
-            rest: None,
-        }
-        .into(),
+        .filter(|code| !owned.iter().any(|shape| shape.code.trim() == code.trim()));
+    let mut pieces = Vec::new();
+    if let Some(at) = about {
+        drawn[at] = true;
+        pieces.push(Piece {
+            change: own.is_none().then_some(change),
+            code: shaped(owned[at], own.is_none().then(|| change.what.clone())),
+        });
     }
+    match (own, about) {
+        (Some(code), _) => pieces.push(Piece {
+            change: Some(change),
+            code: placed(change, code),
+        }),
+        (None, Some(_)) => {}
+        (None, None) => pieces.push(Piece {
+            change: Some(change),
+            code: placed(change, ""),
+        }),
+    }
+    pieces
 }
 
-/// One criterion: what it proves, the command that runs it, and the code
-/// of each file the spec wrote that the command runs.
-fn proved(
-    criterion: &JudgedCriterion,
-    judged: &TaskReview,
-    review: &PlanReview,
-    form: Form,
-    run: &RunId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Vec<Block> {
-    let mut fields = Fields::new();
-    if let Some(proves) = criterion.proves.as_deref() {
-        fields = fields.push_if("done when", proves);
-    }
-    fields = fields.push_command(
-        if criterion.proves.is_some() {
-            ""
-        } else {
-            "done when"
-        },
-        format!("$ {}", criterion.cmd),
-    );
-    let mut blocks: Vec<Block> = Vec::new();
-    match &criterion.from {
-        HeldTo::Spec => {
-            blocks.push(fields.into());
-            blocks.extend(tests_run(criterion, judged, review, form, run, spell));
-        }
-        HeldTo::AnotherTask { task } => {
-            blocks.push(
-                fields
-                    .push_if("", format!("the same command as the spec test of `{task}`"))
-                    .into(),
-            );
-        }
-        HeldTo::Plan => blocks.push(fields.into()),
-    }
-    blocks
+/// The shape of its task `change` is about, by its place in `owned`, when
+/// it has not been drawn yet: the one whose code the change repeats, else
+/// the one it names, else, for a change to its file as a whole, the first
+/// of its file.
+fn about(change: &Change, owned: &[&Shape], drawn: &[bool]) -> Option<usize> {
+    let open = |at: &usize| !drawn[*at] && owned[*at].file == change.file();
+    let repeated = change.code.as_deref().and_then(|code| {
+        (0..owned.len())
+            .filter(open)
+            .find(|at| owned[*at].code.trim() == code.trim())
+    });
+    let named = || {
+        let names: Vec<&str> = change
+            .within()
+            .last()?
+            .split(['/', ','])
+            .map(str::trim)
+            .collect();
+        (0..owned.len())
+            .filter(open)
+            .find(|at| names.contains(&owned[*at].name.as_str()))
+    };
+    let whole = || match change.within().next() {
+        None => (0..owned.len()).find(open),
+        Some(_) => None,
+    };
+    repeated.or_else(named).or_else(whole)
 }
 
-/// The code of each file the spec wrote that `criterion` runs.
-fn tests_run(
-    criterion: &JudgedCriterion,
-    judged: &TaskReview,
-    review: &PlanReview,
-    form: Form,
-    run: &RunId,
-    spell: &dyn Fn(&NextStep) -> String,
-) -> Vec<Block> {
-    judged
-        .files
-        .iter()
-        .filter(|file| file.run_by.contains(&criterion.cmd))
-        .map(|file| {
-            let content = review
-                .spec
-                .iter()
-                .flat_map(|spec| &spec.specs)
-                .flat_map(|spec| &spec.files)
-                .find(|test| test.path == file.path)
-                .map(|test| test.content.as_str())
-                .unwrap_or_default();
-            let what = Some("the spec wrote it, and this command runs it".to_string());
-            match form {
-                Form::Review => Code::reviewed(
-                    file.path.as_str(),
-                    what,
-                    content,
-                    CODE_SHOWN,
-                    crate::spec::status_command(run, spell),
-                ),
-                Form::Whole => Code::whole(file.path.as_str(), what, content),
-            }
-            .into()
-        })
-        .collect()
+/// A shape, whole, titled by its file and its name; `what` is what the
+/// change it stands under is for.
+fn shaped(shape: &Shape, what: Option<String>) -> Code {
+    Code::whole(shape.file.as_str(), what, &shape.code).within([shape.name.as_str()])
+}
+
+/// `code` where `change` is, with what it is for.
+fn placed(change: &Change, code: &str) -> Code {
+    Code::whole(change.file(), Some(change.what.clone()), code).within(change.within())
 }
