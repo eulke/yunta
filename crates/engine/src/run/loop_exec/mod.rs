@@ -6,6 +6,10 @@
 //! and only then fast-forward the run's shared worktree. `concurrency:
 //! 1` (the default) walks the exact same path with a batch of one —
 //! there is no special case for it.
+//!
+//! A plan of two hundred tasks walks the same path as a plan of two: the
+//! loop reads each task from the run's tasks as data, and nothing
+//! summarizes, truncates or collapses the document for its size.
 
 mod batch;
 mod depart;

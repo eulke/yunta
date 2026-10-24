@@ -1,9 +1,9 @@
 //! The checkouts a run's units work in, taken from their project's pool.
 //! A unit takes a free checkout, put back to the commit it starts from,
 //! and what git ignores — a build's output — stays for the next unit. A
-//! checkout on a unit's branch is that unit's, and work that is still
-//! somebody's — committed and not landed, or uncommitted — is never handed
-//! to another unit.
+//! checkout its record keeps for a unit is that unit's, and work that is
+//! still somebody's — committed and not landed, or uncommitted — is never
+//! handed to another unit.
 
 mod pool_world;
 

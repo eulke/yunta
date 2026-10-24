@@ -25,7 +25,7 @@ use crate::process::Supervision;
 use crate::run_tools::TaskAccess;
 use crate::scope_expansion::{consume_request, read_request, ScopeExpansionOutcome};
 
-/// Everything one attempt of [`run_task`] reads: the per-cycle context that
+/// Everything one attempt of [`run_task`](super::run_task) reads: the per-cycle context that
 /// never changes between attempts, so an attempt takes just this and its
 /// number.
 pub(super) struct AttemptParams<'a> {
@@ -57,7 +57,7 @@ pub(super) struct AttemptParams<'a> {
     pub(super) supervision: Supervision<'a>,
 }
 
-/// What one attempt tells [`run_task`] to do next.
+/// What one attempt tells [`run_task`](super::run_task) to do next.
 pub(super) enum AttemptStep {
     /// The cycle is over — record this attempt and report this outcome.
     Stop {
@@ -78,7 +78,7 @@ pub(super) enum AttemptStep {
 /// that degrades, never a contract), dispatches it, then verifies the result
 /// the engine's own way — the agent's `Completed` never counts, only re-run
 /// criteria and a clean scope diff. Returns what the adapter staged this
-/// attempt alongside the step [`run_task`] acts on.
+/// attempt alongside the step [`run_task`](super::run_task) acts on.
 pub(super) async fn run_one_attempt(
     params: &AttemptParams<'_>,
     recorder: Recorder<'_>,

@@ -140,7 +140,7 @@ pub struct SubprocessSession {
     reaped: bool,
     reader: JoinHandle<()>,
     stderr_drain: JoinHandle<()>,
-    /// The last [`TAIL_LINES`] lines the child wrote, redacted.
+    /// The last [`TAIL_LINES`](crate::events::TAIL_LINES) lines the child wrote, redacted.
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
     /// What the launch set up, taken back by [`AgentSession::release`] or,

@@ -17,12 +17,17 @@ use crate::ids::{ModeName, NodeId, OptionId, QuestionId, Responder};
 /// exactly those bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Shown {
+    /// The node that produced it; absent for what no node produced, such as
+    /// the run's findings — a view the log derives, which the run's store
+    /// keeps under this hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub producer: Option<crate::ids::NodeId>,
     pub artifact: crate::events::ArtifactId,
+    /// The exact bytes the person was shown.
     pub content_hash: ContentHash,
 }
 
+/// How a round of questions was answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Channel {
@@ -44,6 +49,10 @@ impl Channel {
     }
 }
 
+/// An escalation waiting on a person: what it claims, the one menu that
+/// says what it is about, and the options that answer it. The log keeps the
+/// data of each, and no word of it: a label, a trade-off, a question or a
+/// fact a person reads is written from the data where it is shown.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateWaitingPayload {
     /// The claim: what happened, as the engine states it or in the words of
@@ -53,6 +62,7 @@ pub struct GateWaitingPayload {
     /// workspace writes one, so a line written now carries none.
     #[serde(default, skip_serializing_if = "Evidence::is_empty")]
     pub(super) evidence: Evidence,
+    /// The answers on offer, each by its id.
     pub(super) options: Vec<GateOption>,
     /// The forge's own handle for this gate, such as a pull request's
     /// URL; `None` for an internal escalation, such as exhausted
@@ -209,8 +219,11 @@ pub enum GateResolvedPayload {
 /// never reports an approval a forge did not give.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanChoice {
+    /// The option chosen, by its id.
     pub option: OptionId,
+    /// Who chose it.
     pub by: Responder,
+    /// What they wrote with it: required for an option that asks for words.
     pub free_text: Option<String>,
 }
 
@@ -362,10 +375,14 @@ impl QuestionsAskedPayload {
     }
 }
 
+/// The answers to a node's questions arrived, and how. The node is
+/// `Running` again, owed the close its questions deferred.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct QuestionsAnsweredPayload {
+    /// The hash of the answers artifact.
     pub answers_hash: ContentHash,
     pub channel: Channel,
+    /// Who answered, when the channel says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub responder: Option<Responder>,
 }
@@ -379,7 +396,10 @@ pub struct FailureMenu {
     /// The attempt the menu's choices start, numbered as the log numbers
     /// attempts.
     pub attempt: u32,
+    /// The failure, as `node_failed` records it.
     pub failure: Failure,
+    /// What can change it: each a reserved option, with the precondition
+    /// that has to change first.
     pub remedies: Vec<Remedy>,
     /// Why no remedy is offered, when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -394,8 +414,11 @@ pub struct FailureMenu {
 /// when the workflow names one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExhaustedReroute {
+    /// The node `on_failure.goto` names.
     pub goto: NodeId,
+    /// The cap the re-routes reached.
     pub max_reroutes: u32,
+    /// The mode a promotion would take the run to, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_mode: Option<ModeName>,
 }
@@ -407,6 +430,7 @@ pub struct ExhaustedReroute {
 /// question is written from these fields when it is shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DepartureMenu {
+    /// What the session declared, as `deviation_declared` records it.
     pub deviations: Vec<DeviationDeclaredPayload>,
     /// The commands of the plan's criteria accepting stops holding the
     /// task to. Absent when accepting waives none.

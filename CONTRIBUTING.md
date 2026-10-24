@@ -1,7 +1,8 @@
 # Contributing to Yunta
 
-[AGENTS.md](AGENTS.md) contains shared engineering principles. This page
-lists local commands and contribution logistics.
+[AGENTS.md](AGENTS.md) is the map a coding agent reads before changing
+Yunta, with the engineering principles a contributor shares. This page lists
+local commands and contribution logistics.
 
 ## Building and testing
 
@@ -12,7 +13,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
 cargo xtask schema                     # regenerates crates/core/schemas/ after a change to a document type
-cargo run -p xtask -- smells --check   # the measured smell counts have not risen
+cargo run -p xtask -- smells --check   # no smell count rose above the baseline or the merge base's
+cargo run -p xtask -- smells           # lowers the baseline to what the tree counts; refuses a rise
+cargo run -p xtask -- docs --check     # the agent docs and the map hold their shapes
+cargo run -p xtask -- docs --about <files>   # what the agent docs record about those files
 ```
 
 A golden test compares a surface's whole output with a file under the crate's
@@ -21,12 +25,30 @@ means to change what a surface prints, write the new files and review them in
 the diff:
 
 ```bash
-YUNTA_BLESS=1 cargo test -p yunta -p yunta-render golden
-git diff -- crates/cli/goldens crates/render/goldens
+YUNTA_BLESS=1 cargo test -p yunta -p yunta-engine -p yunta-render
+git diff -- crates/cli/goldens crates/engine/goldens crates/render/goldens
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. See
 `.github/workflows/ci.yml` for the current CI checks.
+
+## Releases
+
+A release is a pushed `vX.Y.Z` tag. `.github/workflows/release.yml` runs every
+step of the `ci` job on it, then builds the binary for each platform (Linux
+x86_64 and aarch64 as static musl binaries, macOS x86_64 and aarch64) and
+starts each one in a clean container or on a fresh runner. Only once all of
+that passes does it publish the GitHub release, each binary with
+`checksums.txt`, which `install.sh` verifies before it installs one.
+
+## Where a rule came from
+
+A rule stands in the code that holds it, and why it changed is in the commit
+that changed it. The design records the project kept before that, in Spanish,
+are in git under three tags: `archive/design-corpus` holds them as they last
+stood, `archive/design-fates` holds them beside the table of where each of
+their rules went, and `archive/improve-ux` holds, one by one, the commits of the
+engine's rebuild that its merge squashed into one.
 
 ## Pull requests
 

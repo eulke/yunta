@@ -25,9 +25,10 @@ runners:
     - { adapter: codex, model: gpt-5-codex }
 ```
 
-A role can list more than one candidate — the engine picks the first whose
-adapter is healthy, so a role degrades gracefully across a team with mixed
-tooling instead of hard-failing.
+A role can list more than one candidate. The engine takes the first whose
+adapter this binary builds, and probes that adapter before the run starts: an
+unhealthy one refuses the run, naming what the probe found, rather than
+passing the role to its next candidate.
 
 `yunta run --adapter <id>` pins the run to one adapter: each role resolves to
 its candidate on that adapter, and the log records the candidates it passes
@@ -112,15 +113,21 @@ leaves it with only what the run mounts (`--setting-sources ""` and
 for `codex`). A tool of an MCP server the session loads that way writes without
 asking the rail, and the files it writes are not formatted as they are written: the
 close judges them like any other write. The trees a CLI loads that configuration from inside a checkout —
-`.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/**` for
-`codex` — are never written by any session of any run. The instruction files,
-`AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. The
+`.claude/**` and `.mcp.json` for `claude-code`, `.codex/**` and `.agents/skills/**`
+for `codex` — are never written by any session of any run; the rest of
+`.agents/` is the project's, since no CLI loads it. The instruction files,
+`AGENTS.md` and `CLAUDE.md`, are written only when a person grants them. A link
+committed at one of these paths holds what it points to inside the checkout to
+the same rule, since the CLI reads through it. The
 close judges what each session wrote against these trees and files, git-ignored
 files included, so a write the fence let through is still refused. No CLI sandbox
 covers a protected file, a pattern that covers part of a directory, or a glob
 that names no directory of its own, such as `**/AGENTS.md` or `**/CLAUDE.md`:
 the sandbox settings take only whole trees, `dir/**`. The rail judges those for
-the file tools. The close finds them through git: a pattern that names its
+the file tools. `claude-code`'s sandbox also refuses a command that creates a
+missing directory above a tree it denies, such as `.agents` above
+`.agents/skills`; the session's file tools create it, and a command writes under
+it once it exists. The close finds them through git: a pattern that names its
 directory, such as `config/secrets.yaml`, is looked for inside that directory even
 when the project ignores it; a pattern that names no directory is not looked for
 inside a directory the project ignores whole, such as a build output or a
@@ -304,13 +311,14 @@ yunta doctor
 ```
 
 Runs the exact same health probe `yunta run`/`yunta resume` run before
-spending anything — binary present, version compatible, auth valid — for
-every adapter your `runners:` names, and reports every one of them instead of
-stopping at the first failure. Each check is a row: `✓` when it holds, `▲` when
+spending anything — the binary is there and answers `--version` (for `codex`,
+with a version it supports), and the adapter reads every setting it is given —
+for every adapter your `runners:` names, and reports every one of them as a
+check of its own instead of refusing. Each check is a row: `✓` when it holds, `▲` when
 it is worth a look and stops nothing, `✗` when a run would stop on it — and
 `doctor` exits non-zero only for a `✗`:
 
-```
+```text
   ✓ claude-code  healthy (1.2.3)
   ✗ codex        unhealthy — `codex` not found on PATH
 ```
@@ -319,7 +327,7 @@ A config whose `runners:` names no adapter has nothing to probe, and `doctor`
 says so with the runner to declare, on the adapter CLIs this machine answers for
 and the model left for you to name:
 
-```
+```text
   ✗ runners  none declared, and `lint-fix` needs one
 
   declare a runner in .yunta/config.yaml — this machine answers for `claude-code`:
@@ -349,12 +357,12 @@ unresolved role.
 
 ### `--session`: opening one for real
 
-A probe asks the CLI for its version. That tells you the binary is there,
-answers and authenticates; it does not tell you a session opens, because
-`--version` never touches the configuration a run writes the CLI. A CLI
-that refuses that configuration says so on stderr and exits before its
-first line — from the outside, a node that failed with no exit and no
-tokens.
+A probe asks the CLI for its version. That tells you the binary is there and
+answers; it does not tell you its credentials hold or a session opens, because
+`--version` reaches no service and never touches the configuration a run writes
+the CLI. A CLI that refuses that configuration says so on stderr and exits
+before its first line — from the outside, a node that failed with no exit and
+no tokens.
 
 ```bash
 yunta doctor --session
@@ -368,7 +376,7 @@ two runners naming the same one are not two things to check, and one a
 runner falls back to is checked too, since a run reaches it exactly when
 the first is down.
 
-```
+```text
 claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
 codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
 ```
@@ -395,9 +403,10 @@ same thing:
   stdio and offers `list_workflows`, `run_workflow`, `workflow_status`
   and the rest.
 - **The per-run server**, which the engine mounts into each session
-  itself and always calls `yunta-run`. It talks over streamable HTTP,
-  lives as long as the run does, and carries the tools a node uses to
-  post findings and submit documents.
+  itself and always calls `yunta-run`. It talks over streamable HTTP on
+  loopback, lives as long as the session it serves — each session, a
+  resumed one included, gets a listener and a token of its own — and
+  carries the tools a node uses to post findings and submit documents.
 
 When Codex receives that per-run endpoint, Yunta sets
 `mcp_servers.yunta-run.default_tools_approval_mode="approve"` for the spawned

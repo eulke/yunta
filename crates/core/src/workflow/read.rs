@@ -1,20 +1,16 @@
 //! The one door onto a workflow: read from bytes and held to the rules
 //! that are true of the file alone.
 //!
-//! A workflow that parsed used to be a workflow nobody had checked —
-//! the graph rules lived in the engine's `check`, and eleven places
-//! reached `Workflow` through the parser without them. So a run could
-//! be created from a file with two nodes of one id, or a `depends_on`
-//! naming nothing, and find out at replay.
-//!
-//! [`read`] is that door. It parses, expands what the file implies —
-//! a fan-out into its siblings, a context reference into the edge it
-//! is — and then asks the four questions the file alone can answer:
-//! is every id declared once, does every reference reach something,
-//! can two parallel children reach the same files, and does every mode
-//! leave a graph that still runs. Everything else `yunta check` asks
-//! needs the merged config or the adapters this binary built, and stays
-//! there.
+//! [`read`] parses, expands what the file implies — a fan-out into its
+//! siblings, a context reference into the edge it is — and then asks what
+//! the file alone can answer: is every id declared once, does every
+//! reference reach something, can two parallel children reach the same
+//! files, does every mode leave a graph that still runs, and do
+//! `invariant` and `optional` sit where a run can honor them. A graph rule
+//! kept where a caller could skip it would let a run be created from a
+//! file with two nodes of one id, or a `depends_on` naming nothing, and
+//! find out at replay. Everything else `yunta check` asks needs the merged
+//! config or the adapters this binary built, and stays there.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -319,6 +315,10 @@ fn parallel_scopes(nodes: &[Node]) -> Vec<Diagnostic> {
 /// Every declared mode leaves a graph that still runs: it names nodes
 /// the file declares, keeps every node the workflow cannot run without,
 /// and keeps whatever the nodes it kept reroute to or read from by name.
+/// A mode that keeps a node and leaves out where it re-routes holds the
+/// same broken reference as a `goto` to a node nobody declared, met only
+/// once the node fails and the nodes before it have spent their tokens,
+/// so it is refused, never warned about.
 ///
 /// A mode's `include:` names top-level nodes only — a `parallel` group
 /// is in or out as a whole — so the ids it is read against are the

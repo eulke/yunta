@@ -380,6 +380,32 @@ async fn a_skill_is_mounted_where_the_cli_finds_it_and_taken_back_after() {
     assert!(!tokio::fs::try_exists(cwd.join(".agents")).await.unwrap());
 }
 
+/// A mount leaves the project's own files under `.agents/` as they were: what
+/// it takes back is its link and the directories it made.
+#[tokio::test]
+async fn a_mount_taken_back_keeps_the_project_s_own_agents_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (skill, cwd) = skill_and_cwd(dir.path());
+    std::fs::create_dir_all(cwd.join(".agents")).unwrap();
+    std::fs::write(cwd.join(".agents/notes.md"), "the project's\n").unwrap();
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill];
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+    req.env.plain.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string(),
+    );
+    let mut session = adapter().spawn(req).await.unwrap();
+    let _: Vec<AgentEvent> = session.events().collect().await;
+    session.release().await.unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(cwd.join(".agents/notes.md")).unwrap(),
+        "the project's\n"
+    );
+    assert!(!cwd.join(".agents/skills").exists());
+}
+
 /// A launch refused for want of its hook mounts nothing: the refusal comes
 /// before any skill is linked.
 #[tokio::test]

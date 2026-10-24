@@ -1,10 +1,7 @@
-//! Every decision a person was asked for, folded once.
-//!
-//! Six places used to walk the gate kinds with their own rule — two of
-//! them the same function copied byte for byte. Every surface that asks
-//! what a node is waiting on, what was published, what was decided or
-//! what was asked reads it here rather than walking those four kinds
-//! itself: a second fold is a second answer.
+//! Every decision a person was asked for, folded once. Every surface that
+//! asks what a node is waiting on, what was published, what was decided or
+//! what was asked reads it here rather than walking the gate kinds itself:
+//! a second fold is a second answer.
 
 use std::collections::{BTreeMap, BTreeSet};
 

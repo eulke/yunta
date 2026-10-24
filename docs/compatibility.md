@@ -83,23 +83,6 @@ diagnostic; a missing checkout is an error naming the command that brings it
 back, not a broken run. Neither depends on the binary's version: both are
 asked of the run's own frozen manifest.
 
-## What every release verifies before it ships
-
-Per the release pipeline's `test` gate (`.github/workflows/release.yml`):
-
-- `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`,
-  `cargo fmt --all --check`, `cargo deny check` — all green.
-- The factory packs (`packs/starter`, `packs/fragua`) pass `yunta check` and
-  their own `.yunta/tests/` cases against the `mock` adapter
-  (`yunta test --dir <pack>`).
-- Each of the four published binaries (Linux x86_64 and aarch64 as static
-  musl binaries, macOS x86_64 and aarch64) installs and runs in a clean
-  environment for its target platform, and `yunta doctor` is the first
-  command the installer suggests running.
-
-None of this is negotiable on a per-release basis — a release that doesn't
-pass all of it doesn't ship.
-
 ## Scope globs
 
 A scope pattern — a node's or task's `scope`, or an entry of
@@ -465,8 +448,7 @@ than `paused`, and a run that finished holding blocking findings is `reported` r
 than `finished`. From 7 on, `tokens` is the spend in one shape in each of the three when it names one run:
 `input`, `output`, `cached` when the adapter reports it, `total`, and `in_flight` for
 the usage an open attempt has reported. A run paused on a limit's reset is `waiting`
-rather than `needs you`, and its document carries `awaiting_reset`. `waiting` joins
-version 7, which no released binary has written, so the stamp does not move for it.
+rather than `needs you`, and its document carries `awaiting_reset`.
 
 Under `--json`, `list --runs`, `verify`, `close`, `cancel`, `resolve-gate` and `doctor`
 print one document each: the answer the command gives, with the fields its human view
@@ -552,8 +534,7 @@ lists its facts there too. `decision.failure.failure` is the failure as the log 
 it: `engine_error` and `denied_rule` are objects rather than sentences, and
 `release_failed` sits beside `session_not_stopped` when taking back what the session
 set up failed too. An owed scope request carries `reason` only when its session gave
-one. The stamp does not move for these: version 7 is not published, and no released
-binary has written it.
+one.
 
 Each problem of an artifact's `diagnostics` that is a broken rule carries `fault`, the
 value its clause is written from, and beside it `detail`, the clause a reader sees,
@@ -742,7 +723,7 @@ and which call to make again, then lists the problems numbered from 1, one per
 paragraph. The heading names the document by the noun of its kind — `tasks document`,
 `spec document`, `findings artifact`, `questions artifact`:
 
-```
+```text
 The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
 The finding was not accepted. Fix these and post it again:
 The finding update was not accepted. Fix these and update it again:
@@ -752,7 +733,7 @@ The withdrawal was not accepted. Fix these and withdraw it again:
 A call the engine cannot read as a call at all is answered by naming what that tool
 takes instead:
 
-```
+```text
 invalid submission — requires `document` (an object), the `tasks` document this node declares: `document` is missing or is not an object
 `notes.md` is not an artifact this node declares; it declares `tasks`
 node `plan` declares no artifacts, so there is nothing to check

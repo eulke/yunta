@@ -1,12 +1,9 @@
-//! Every node's lifecycle, folded once.
-//!
-//! Nineteen modules used to read the `node_started`/`node_finished`/
-//! `node_failed` triple, each with its own rule for what an attempt is,
-//! when a session is open and which failure is the current one. Every
-//! surface that counts attempts, reports a node's state, times it or
-//! lists what it ran reads that here rather than folding the triple
-//! itself — with three kinds per attempt, a second fold is a second
-//! answer.
+//! Every node's lifecycle, folded once: what an attempt is, when a session
+//! is open, and which failure is the current one. Every surface that counts
+//! attempts, reports a node's state, times it or lists what it ran reads
+//! that here rather than folding the `node_started`/`node_finished`/
+//! `node_failed` triple itself — with three kinds per attempt, a second
+//! fold is a second answer.
 
 use std::collections::BTreeMap;
 use std::time::Duration;

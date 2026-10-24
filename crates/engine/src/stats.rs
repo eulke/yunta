@@ -1,7 +1,6 @@
 //! `yunta stats`: every number here is derived
 //! from the event log alone — never estimated, never trusting an agent's
-//! own report (the same guarantee [`crate::progress`] and
-//! [`crate::replay`] already give). **CPTV and its companions** are read
+//! own report (the same guarantee [`crate::replay`] gives). **CPTV and its companions** are read
 //! here off one run's derived state, and the arithmetic that makes CPTV is
 //! `RunMetrics::of` in core, so a run's close and its stats can never
 //! disagree; the comparison across a workflow's past runs is
@@ -53,7 +52,7 @@ use yunta_core::{ModelName, Node, NodeId, RunnerName, Workflow};
 use crate::replay::{derive, unknown_kind_counts, RunState, TimeSpent, UnknownKindCount};
 
 /// One node's contribution to a run's stats — declaration order (`parallel`
-/// children flattened in place, same convention `crate::progress` uses).
+/// children flattened in place, as [`Workflow::iter_nodes`](yunta_core::Workflow::iter_nodes) walks them).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeStat {
     pub node_id: NodeId,

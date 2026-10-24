@@ -26,10 +26,9 @@ pub enum NodeKind {
         /// Simultaneous `ready` tasks per batch — absent
         /// means the engine's own default, `1` (sequential; the batch
         /// mechanism handles both the same way, with no special case).
-        /// Declared per-node, deliberately: no config-level default
-        /// exists anywhere in the reference schema, since token spend
-        /// multiplies with it and nobody should discover that from the
-        /// bill instead of the workflow file.
+        /// Declared per node, deliberately, with no config-level default:
+        /// token spend multiplies with it, and nobody should discover that
+        /// from the bill instead of the workflow file.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         concurrency: Option<u32>,
         /// The agent never widens its own scope — it requests,
@@ -74,32 +73,28 @@ pub enum NodeKind {
     Check(CheckBuiltin),
     /// The extension point when neither `bash` (exit code only, no
     /// structured input) nor `check`'s closed builtin list covers it —
-    /// external code, a JSON contract over stdio. `executor` names an
-    /// entry in `skills.executors:`; `with` is opaque, executor-defined
-    /// input. The high-level shape is fixed (JSON in, JSON out,
-    /// exit code is the verdict); the field names are open work.
+    /// external code, a JSON contract over stdio: JSON in, JSON out, the
+    /// exit code as the verdict. `executor` names an entry in
+    /// `skills.executors:`; `with` is opaque, executor-defined input. The
+    /// word names this extension and nothing else: not the session that
+    /// does a task's work, which is the task's runner.
     Executor {
         executor: ExecutorName,
         #[serde(default)]
         with: serde_json::Map<String, serde_json::Value>,
-        /// Absent means unenforced, same convention as `HookStep`'s own
-        /// `timeout_seconds` — the design only calls for an
-        /// engine-enforced timeout, without fixing a default or a field
-        /// name.
+        /// How long the executor may run before the engine stops it and
+        /// fails the node; absent, nothing bounds it, as with a hook
+        /// step's own `timeout_seconds`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_seconds: Option<u64>,
     },
-    /// A human decision resolved outside this process — v1's
-    /// only shape is `external: {kind: pull_request, ...}`: the engine
-    /// delegates the multi-person substrate (identity, permissions,
-    /// notifications) to the team's forge instead of building a serve
-    /// mode early. With `external: None` this is an **internal gate**
-    /// — the shape the reference workflows' own `approve-plan`/
-    /// `ship` use and the mode-coherence rule requiring every mode to
-    /// include a gate option: resolved through `HumanInteraction`
-    /// (console today, a richer resolution surface later) with the
-    /// declared `options`, and `on:` mapping an option to an
-    /// `on_failure.goto`-style re-route.
+    /// A decision a person makes. With `external:` it is published to the
+    /// team's forge as a pull request, whose people, permissions and
+    /// notifications answer it; without, it is an **internal gate**, put
+    /// through whatever surface reaches a person — the console, or
+    /// `resolve_gate` from another process — with the declared `options`,
+    /// and `on:` mapping an option to an `on_failure.goto`-style re-route.
+    /// Not a `check`: a gate waits for a person, and a check never does.
     Gate {
         /// Who the escalation names — a human on the forge (external),
         /// or whoever holds the interactive surface (internal).
@@ -135,16 +130,17 @@ pub enum NodeKind {
     },
     /// `kind: workflow`: runs another workflow as a
     /// sub-run — a **complete run** with its own run_id, manifest, event
-    /// log and run.dir, never an inline expansion. The parent freezes
-    /// only the child's *name and inputs* (these two fields); the child
-    /// resolves and freezes its own workflow file at birth, so a long
-    /// process picks up improvements to child workflows between
-    /// executions without any individual run losing immutability.
+    /// log and run.dir, never an inline expansion. The parent's birth
+    /// freezes the child's text and prompts among its own frozen inputs,
+    /// and the child is born from that copy and freezes its own manifest;
+    /// a later run of the parent reads the child's workflow afresh, so a
+    /// long process picks up improvements to its children between runs
+    /// without any run losing its immutability.
     Workflow {
-        /// The child workflow's name, resolved at child birth against
-        /// the repo catalog: `.yunta/workflows/<name>.yaml` in the
-        /// parent run's own working tree (versioned, the same catalog
-        /// `list_workflows` reads).
+        /// The child workflow's name, resolved when the parent run is born
+        /// through the catalog `list_workflows` reads: the repo's
+        /// `.yunta/workflows/<name>.yaml` first, then a publisher's
+        /// installed packs.
         r#use: String,
         /// Inputs handed to the child, template-rendered in the
         /// parent's own scope (`{{inputs.x}}`, `{{run.branch}}`, …)
@@ -391,7 +387,15 @@ pub enum JoinPolicy {
 /// A node's prompt: an inline string, or `{file: ...}`. The distinction
 /// is **structural, never heuristic**: a scalar is
 /// always literal text, even if its contents look like a path — only an
-/// explicit `{file: ...}` mapping reads from disk.
+/// explicit `{file: ...}` mapping reads from disk. One key with two forms
+/// rather than a second key: another way of naming where a prompt comes
+/// from is a field of that mapping.
+///
+/// A file is named relative to the workflow that names it, and a pack's
+/// workflow may name none outside its pack. Its text is read once, when the
+/// run is born, and frozen in the manifest, rendered with the same
+/// templates an inline prompt gets: editing the file while the run goes on
+/// changes nothing of it, and a file the birth cannot read refuses the run.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PromptSource {
     Inline(String),

@@ -12,7 +12,10 @@ use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
-/// Exact variant names are provisional.
+/// Where a task of the run stands: the token the log writes, and the word
+/// every surface, document and agent reads. Not a node's word: a task is
+/// `done` when its criteria pass and its work has landed, while a node
+/// finishes when it ran, so a finished loop can leave tasks `blocked`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -46,15 +49,22 @@ impl std::fmt::Display for TaskStatus {
     }
 }
 
+/// A task of the run's tasks document, registered as the document states
+/// it: what a status change, a check and a session read the task by.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRegisteredPayload {
     pub task_id: TaskId,
+    /// Its criteria, a frozen copy of what the document declares.
     pub criteria: Vec<Criterion>,
+    /// The globs it may write.
     pub scope: Vec<ScopeGlob>,
+    /// The tasks it waits on; empty, and absent, when it waits on none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<TaskId>,
 }
 
+/// A task moved, as the engine decided it, and the event that justifies
+/// the move. Nothing else moves a task: no session has a tool that does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskStatusChangedPayload {
     pub task_id: TaskId,
@@ -164,17 +174,21 @@ pub struct TaskCheckStartedPayload {
 
 /// What that judgement answered the session, and how long it took.
 ///
-/// A `task_check_started` with no answer after it is a check whose
+/// Audit: a check judges work in progress, and only the attempt's close
+/// moves the task. The question is written before the judgement runs, so
+/// a `task_check_started` with no answer after it is a check whose
 /// session ended first, or whose answer never reached it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskCheckAnsweredPayload {
     pub task_id: TaskId,
     /// Whether the task would have been done had the session ended then.
     pub closes: bool,
+    /// One result per criterion that ran or was answered by an earlier run
+    /// on the same tree, the guards the run holds every task to among them.
     pub results: Vec<CriterionResult>,
-    /// The guards the check did not run, by command: one of the task's
-    /// own criteria was red, and a guard runs only once every one of
-    /// those passes. Absent when every guard ran.
+    /// The guards the check did not run, by command: a criterion that ran
+    /// before them — one of the task's own, or a guard — was red. Absent
+    /// when every guard ran.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waiting: Vec<String>,
     /// What the work changed outside the task's scope.
@@ -184,6 +198,8 @@ pub struct TaskCheckAnsweredPayload {
     /// project denies to every run, or a test a person approved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied: Vec<PathBuf>,
+    /// How long the whole judgement took, answers taken from earlier runs
+    /// included.
     pub duration_ms: u64,
 }
 
@@ -215,7 +231,9 @@ impl std::fmt::Display for DepartsFrom {
 
 /// A task session declared that its work departs from the plan: what
 /// the plan said, what the session did or needs instead, and why. The
-/// task does not close on it until a person answers.
+/// task does not close on it until a person answers. The session's words
+/// are kept whole: unlike what it says while it works, a departure is
+/// something it states to the run on purpose.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeviationDeclaredPayload {
     pub task_id: TaskId,
@@ -232,6 +250,9 @@ pub struct DeviationDeclaredPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeviationResolvedPayload {
     pub task_id: TaskId,
+    /// Accepted, the task closes as it stands once its criteria pass, less
+    /// the plan's criteria it departed from; sent back, its session picks
+    /// the work up again with what the person said.
     pub accepted: bool,
     /// What the person said, when they said anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -244,11 +265,18 @@ pub struct DeviationResolvedPayload {
 
 /// A criterion of a task that its session declared no work of the plan
 /// can pass. The engine ran it on the tree the session left and saw it
-/// red; the exit code it saw and the session's reason are recorded.
+/// red; the exit code it saw and the session's reason are recorded. Only
+/// a session's first declaration is. The task does not close on it, and a
+/// loop left with nothing to run fails with `PlanUnpassable`, the failure
+/// a re-route hands to whatever writes the plan again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CriterionUnpassablePayload {
     pub task_id: TaskId,
+    /// The criterion's command, as the plan writes it.
     pub criterion: String,
+    /// The code it exited with on that tree: never zero, and never 126 or
+    /// 127, which name the environment rather than the work.
     pub exit_code: i32,
+    /// The session's reason, never empty.
     pub why: String,
 }

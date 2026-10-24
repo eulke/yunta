@@ -70,7 +70,7 @@ fn the_reference_workflow_parses_and_round_trips() {
             .map(yunta_core::SchemaRange::as_str),
         Some(">=1 <2")
     );
-    assert_eq!(workflow.nodes.len(), 12);
+    assert_eq!(workflow.nodes.len(), 15);
     assert_eq!(workflow.on_finish.len(), 2);
     let grill = &workflow.nodes[0];
     assert_eq!(grill.skills, vec!["grill"]);

@@ -1,15 +1,14 @@
 //! Run-level token budget: `limits.max_tokens_per_run`
-//! against the spend the log derives, checked before every
-//! token-spending scheduler step. Exhaustion is never a silent pause —
-//! it's an escalation (`continue`/`abort`) first, and only degrades
-//! to `run_paused { reason: budget… }` when no surface can answer.
+//! against the spend the log derives, never an agent's own report,
+//! checked before every token-spending scheduler step. Exhaustion is never
+//! a silent pause — it's an escalation (`continue`/`abort`) first, and only
+//! degrades to a `run_paused` with `budget_exhausted` when no surface can
+//! answer.
 //!
 //! Authorization is **per invocation, in memory** — deliberately not
-//! derived from the log: identifying which historical `gate_resolved`
-//! was a budget escalation would take string-matching or a schema
-//! marker, and semantically every new invocation spends new money. A
-//! resume re-asks; the decision it gets is still audited in the log as
-//! a run-level gate pair (`node_id: None`).
+//! derived from the log: every new invocation spends new money, so a
+//! resume re-asks; the decision it gets is still audited in the log as a
+//! run-level gate pair (`node_id: None`).
 
 use yunta_core::events::{
     BudgetCap, Claim, Escalation, EventPayload, GateEvent, GateOption, GateResolvedPayload,
@@ -130,14 +129,13 @@ pub fn session_token_budget(cap: u64, spent: u64, non_terminal_nodes: usize) -> 
 }
 
 impl RunCtx<'_> {
-    /// The [`Budget`] for one agent session: an equal
+    /// The [`Budget`](yunta_core::port::Budget) for one agent session: an equal
     /// share of the remaining run cap
     /// ([`session_token_budget`]'s policy). Unlimited — exactly
     /// the pre-limits behavior — when no cap is declared, or when a
     /// human already answered `continue` this invocation (their lift
-    /// must not resurface as a zero-token session budget). `timeout`
-    /// stays `None`: `defaults.timeout_minutes` is resolved separately,
-    /// outside this function's scope.
+    /// must not resurface as a zero-token session budget). `timeout` is
+    /// `defaults.timeout_minutes` on every path, cap or no cap.
     pub(crate) async fn session_budget(&self) -> Result<yunta_core::port::Budget, RunError> {
         // `defaults.timeout_minutes` applies on every path — time the
         // host is awake is orthogonal to the token cap and to a human's

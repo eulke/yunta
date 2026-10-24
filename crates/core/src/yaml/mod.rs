@@ -1,12 +1,29 @@
-//! The one place YAML enters and leaves the system.
+//! The one place YAML enters and leaves the system, read, written and
+//! located by one library: `serde-saphyr`, whose own parser is also what
+//! [`SourceMap`] reads a text with to say where a value sits in it — one
+//! grammar for reading a document and for pointing into it, so no
+//! diagnostic points at a place the parser never read.
 //!
-//! Every file a person or an agent writes — workflows, config layers,
-//! pack manifests, test cases, mock fixtures, tasks documents, findings,
-//! questions — parses through [`parse`]; what the engine persists and
-//! reads back (manifests, locks) parses through the same function with
-//! types that tolerate what they do not know. A parse error names the
-//! path of the value that failed (`nodes[2].artifacts.produces[0]`), so
-//! a caller only ever adds the file.
+//! Three kinds of YAML cross it. What a person writes before any run —
+//! config layers, workflows, `pack.yaml`, test cases, mock fixtures — is
+//! held strictly to its types, and `yunta check` reaches it before a token
+//! is spent. What an agent writes during a run — an interpreted artifact,
+//! handed over as an object or written by a command node — exists only
+//! once the run does, so no check reaches it, and its reader refuses what
+//! it does not know too; a `document` input a person wrote goes through
+//! the same door, at the run's birth. What the engine persists and reads
+//! back — manifests, locks — parses through the same [`parse`] with types
+//! that tolerate what they do not know, because a binary reads what older
+//! ones wrote.
+//!
+//! A document is read as YAML 1.2: only `true` and `false` are booleans,
+//! so a node named `n` and a gate option `on` are the words they look
+//! like, and a key written twice in one mapping is refused. Digits grouped
+//! with `_` read as the number they spell. A parse error names the path of
+//! the value that failed (`nodes[2].artifacts.produces[0]`), so a caller
+//! only ever adds the file. What the engine writes keeps a line of text on
+//! one line, however long, and text with lines of its own in a literal
+//! block.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;

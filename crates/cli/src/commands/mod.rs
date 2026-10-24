@@ -288,11 +288,11 @@ pub(crate) fn refuse_unrunnable(
 }
 
 /// Health-checks every real adapter this run would use via `probe()` —
-/// binary present, version compatible, auth valid — and refuses before
-/// any worktree or token is spent if one comes back unhealthy. `yunta
-/// doctor` calls the same adapters' `probe()` directly instead of
-/// through this helper, since it reports every result rather than
-/// stopping at the first failure.
+/// the binary there and answering `--version`, every setting read — and
+/// refuses before any worktree or token is spent if one comes back
+/// unhealthy. `yunta doctor` calls the same adapters' `probe()` directly
+/// instead of through this helper, since it reports every result as a
+/// check of its own rather than refusing.
 pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError> {
     let mut unhealthy = Vec::new();
     for (name, adapter) in adapters {

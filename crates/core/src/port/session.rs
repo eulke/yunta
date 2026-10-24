@@ -6,12 +6,11 @@
 //! depends on, rather than beside the adapters that implement it: the
 //! compiler is what keeps a concrete CLI out of the engine.
 //!
-//! `SessionRequest` drops `context: ResolvedContext` — the engine
-//! inlines or references context in the prompt. Everything else in the
-//! Adapter Spec's `SessionRequest` is here, including fields no caller
-//! populates (`env`, `budget`, `adapter_settings`): they are struct
-//! fields, not machinery, so an adapter can read what a workflow
-//! declares the day one does.
+//! Two traits: an [`Adapter`] is the factory that opens and resumes
+//! sessions, its capabilities fixed once it is built; an [`AgentSession`]
+//! is one session while it lives — its stream, and the stops that end it.
+//! What the engine has to remember of a session travels in that stream's
+//! events, so it never asks an adapter what an earlier session did.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -42,6 +41,8 @@ pub enum PermissionProfile {
     Full,
 }
 
+/// What a session may spend: tokens, and time the host is awake. The engine
+/// holds a session to both whatever its CLI does.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Budget {
     pub max_tokens: Option<u64>,
@@ -51,7 +52,9 @@ pub struct Budget {
 /// A session request the engine hands to an adapter to open.
 #[derive(Debug, Clone)]
 pub struct SessionRequest {
-    /// Already rendered by the engine — templates resolved.
+    /// Already rendered by the engine — templates resolved. An adapter
+    /// hands it to its CLI on stdin, never in an argument any process of
+    /// the machine can list.
     pub prompt: String,
     /// The run's worktree.
     pub cwd: PathBuf,
@@ -193,8 +196,8 @@ impl RunToolsEndpoint {
     }
 }
 
-/// Health check result (`probe()` — binary present, version compatible,
-/// auth valid).
+/// What [`Adapter::probe`] found: whether the adapter can open sessions, as
+/// far as asking its CLI for its version tells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProbeReport {
     /// The adapter can open sessions; `version` is what its CLI
@@ -272,7 +275,8 @@ impl Clone for AgentError {
 pub enum AgentEvent {
     /// Mandatory first event of every session. `model` is the one the
     /// CLI reported, absent when it reports none — never the one the
-    /// request asked for.
+    /// request asked for. A CLI that names no session is given an id its
+    /// adapter makes up, and that adapter declares no `resume_session`.
     SessionOpened {
         session_id: SessionId,
         model: Option<ModelName>,
@@ -296,7 +300,8 @@ pub enum AgentEvent {
     /// What the CLI reported it spent. Every count is optional and
     /// absent means absent: a CLI that says nothing about a count has
     /// not said zero, and a run that recorded zero would report a
-    /// session that cost nothing.
+    /// session that cost nothing. `input_tokens` is all a call read, its
+    /// cache included, and `cached_input_tokens` the part read from it.
     Usage {
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
@@ -315,14 +320,19 @@ pub enum AgentEvent {
 }
 
 /// Converts a session request into a stream of typed events — nothing
-/// more. `id()`/`capabilities()` are sync: capabilities are fixed at
-/// construction and never require I/O to report.
+/// more. It reads no workflow, runs no criterion and decides no retry, so a
+/// new CLI is one more translation. `id()`/`capabilities()` are sync:
+/// capabilities are fixed at construction and never require I/O to report.
 #[async_trait]
 pub trait Adapter: Send + Sync {
     fn id(&self) -> &'static AdapterId;
 
     fn capabilities(&self) -> Capabilities;
 
+    /// Whether the CLI is there and answers `--version` — with a version
+    /// this adapter supports — and every setting it is given is one it
+    /// reads. It opens no session, so it cannot tell whether the CLI's
+    /// credentials hold or it takes the flags a session launches with.
     async fn probe(&self) -> Result<ProbeReport>;
 
     /// The worktree-relative paths a session opened for `req` writes

@@ -17,9 +17,13 @@ use crate::rail::hook::RailFailureCause;
 use crate::rail::RailEvent;
 use crate::{Capabilities, Capability};
 
+pub use super::usage::TokenUsage;
 pub use crate::rail::timing::RailSummaryPayload;
 
-/// The closed reason a run tool call failed, without adapter error text.
+/// The closed reason a run tool call failed, without adapter error text:
+/// `approval_blocked`, the call never reached the server because the CLI
+/// held it back, or `call_failed`, the server received it and answered with
+/// an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunToolFailureCause {
@@ -70,7 +74,9 @@ impl RunToolRefusal {
     }
 }
 
-/// A call to a tool this binary serves that it refused, and why.
+/// A call to a tool this binary serves that it refused, and why, written by
+/// the listener that refused it. A call a stop cut short — the run's, its
+/// task's or its session's — was refused by nothing, and leaves none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunToolRefusedPayload {
     pub tool: crate::RunTool,
@@ -78,9 +84,11 @@ pub struct RunToolRefusedPayload {
 }
 
 /// A session cut off from the service behind it: it waits for the service
-/// to answer, and goes on as the same session.
+/// to answer, and goes on as the same session. Past the wait's bound no
+/// `service_reachable` follows, and the session fails as any other does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ServiceUnreachablePayload {
+    /// The session that lost its service, the one that goes on.
     pub session_id: SessionId,
     /// What the session's CLI said when it lost the service.
     pub message: String,
@@ -93,72 +101,15 @@ pub struct ServiceReachablePayload {
     pub waited_ms: u64,
 }
 
-/// One failed call to a tool this binary serves on `yunta-run`.
+/// One failed call to a tool this binary serves on `yunta-run`, as the CLI
+/// reported rejecting it. Not a terminal: it does not say the node failed
+/// because of the call, and it holds no argument, answer or error text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunToolFailedPayload {
+    /// The session that made the call.
     pub session_id: SessionId,
     pub tool: crate::RunTool,
     pub cause: RunToolFailureCause,
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-pub struct TokenUsage {
-    pub input: u64,
-    pub output: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cached: Option<u64>,
-}
-
-impl TokenUsage {
-    /// Input plus output — the single figure token cost is measured by,
-    /// derived in one place so no two call sites can add it up differently.
-    /// `cached` is a subset of `input`, already counted, never added on top.
-    pub fn total(&self) -> u64 {
-        self.input + self.output
-    }
-
-    /// Field by field, never below zero: usage that settles more than was
-    /// in flight leaves nothing behind. `cached` stays unknown only while
-    /// nothing reported it, as it does under `+`.
-    pub fn saturating_sub(self, other: TokenUsage) -> TokenUsage {
-        TokenUsage {
-            input: self.input.saturating_sub(other.input),
-            output: self.output.saturating_sub(other.output),
-            cached: self
-                .cached
-                .map(|cached| cached.saturating_sub(other.cached.unwrap_or(0))),
-        }
-    }
-}
-
-/// Field by field; `cached` stays unknown only while nobody reported it.
-impl std::ops::Add for TokenUsage {
-    type Output = TokenUsage;
-
-    fn add(self, other: TokenUsage) -> TokenUsage {
-        TokenUsage {
-            input: self.input + other.input,
-            output: self.output + other.output,
-            cached: match (self.cached, other.cached) {
-                (None, None) => None,
-                (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-            },
-        }
-    }
-}
-
-impl std::ops::AddAssign for TokenUsage {
-    fn add_assign(&mut self, other: TokenUsage) {
-        *self = *self + other;
-    }
-}
-
-impl std::iter::Sum for TokenUsage {
-    fn sum<I: Iterator<Item = TokenUsage>>(iter: I) -> TokenUsage {
-        iter.fold(TokenUsage::default(), |total, usage| total + usage)
-    }
 }
 
 /// What the session was allowed to reach; absent on logs written before it.
@@ -193,9 +144,15 @@ impl ConfinementRecord {
     }
 }
 
+/// A session opened on an adapter's CLI: the first fact of every session,
+/// with the id it is resumed by, what it runs with and what it may reach.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentSessionOpenedPayload {
+    /// The CLI's own id for the session: what a resume hands back to the
+    /// adapter to pick the same conversation up.
     pub session_id: SessionId,
+    /// The agent the session worked as, when the node or its runner named
+    /// one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentName>,
     /// The model the CLI reported for the session; absent when it
@@ -206,6 +163,8 @@ pub struct AgentSessionOpenedPayload {
     /// node and its runner left it to the CLI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<crate::Effort>,
+    /// What the adapter declared it can do, as it stood when the session
+    /// opened.
     pub capabilities: Capabilities,
     /// How much of this session the adapter's fence covered — derived
     /// from what it built, never declared. Absent when it built none.
@@ -226,10 +185,15 @@ pub struct AgentSessionOpenedPayload {
     pub continues: Option<SessionId>,
 }
 
-/// A write the fence refused before it happened.
+/// A write the fence refused before it happened. The engine writes it from
+/// the session's rail, when the fence refuses a write the session's hook
+/// asked about, before it answers the hook; no adapter reports one, so a
+/// write a CLI's own sandbox denies is not here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WriteRefusedPayload {
+    /// The session that was open when the fence refused the write.
     pub session_id: SessionId,
+    /// What it was going to write, relative to the worktree when under it.
     pub target: ToolTarget,
 }
 
@@ -239,9 +203,12 @@ impl WriteRefusedPayload {
     }
 }
 
-/// What the engine formatted the moment a session wrote it.
+/// What the engine formatted the moment a session wrote it. The formatters
+/// of one write share the rail's format window, and one still running when
+/// it closes is cut: `-2` and `timed_out`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WriteFormattedPayload {
+    /// The session that wrote them.
     pub session_id: SessionId,
     /// The project command that formatted them.
     pub run: crate::ids::CommandName,
@@ -250,6 +217,7 @@ pub struct WriteFormattedPayload {
     /// The ones whose content it changed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed: Vec<std::path::PathBuf>,
+    /// How the command exited; `-2` when the window cut it.
     pub exit_code: i32,
     /// How long the command took, which the session waited.
     pub duration_ms: u64,
@@ -316,6 +284,8 @@ impl StopRefusal {
     }
 }
 
+/// Which report of a session an `agent_message` is: a tool it called, the
+/// usage it reported, or a note it wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentMessageType {
@@ -396,19 +366,25 @@ impl ToolTarget {
     }
 }
 
+/// What a session reported while it ran, and never the words it said: a
+/// tool it called, the usage it reported, or the digest of a note.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentMessagePayload {
     pub message_type: AgentMessageType,
+    /// The tool a `tool_use` called.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     /// What the tool acted on. Absent for a message that is not a tool
     /// call, and for a log written before the engine recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ToolTarget>,
+    /// The usage a `usage` reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
+    /// The part of `input_tokens` the CLI read from its cache, when it
+    /// says: a part of the input, never added to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached_input_tokens: Option<u64>,
     /// A note's size and digest: what the log keeps of a note's words.
@@ -420,10 +396,14 @@ pub struct AgentMessagePayload {
     pub text: Option<LoggedWords>,
 }
 
+/// A capability the engine consulted and an adapter does not declare, and
+/// what the engine did in its place: a fallback the log states, never a
+/// silent one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CapabilityDegradedPayload {
     /// The capability the engine consulted and the adapter does not declare.
     pub capability: Capability,
+    /// The adapter that does not declare it.
     pub adapter: AdapterId,
     /// What the engine did instead. A log that stored a sentence under
     /// `policy_applied` reads it back as `PolicyApplied::Recorded`.

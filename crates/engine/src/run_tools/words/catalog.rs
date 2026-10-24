@@ -106,7 +106,8 @@ pub(crate) fn task_description() -> &'static str {
      and notes; `scope`, the globs every change must stay inside (what the task declared \
      plus what was granted to it); `denied`, what no change may touch whatever the scope \
      — what the project denies, and the files of every test a person approved, this \
-     task's own among them; and `criteria`, the commands that must all exit 0 \
+     task's own among them; `granted`, the instruction files a person let this task \
+     write although `denied` holds them; and `criteria`, the commands that must all exit 0 \
      when your session ends — a criterion is red before the work starts, and a `guard` \
      is green before it and must stay green; each may say what it `proves`. When the run \
      measured its suite green before changing anything, that suite is among the guards: \

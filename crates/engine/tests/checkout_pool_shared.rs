@@ -2,9 +2,9 @@
 //! by a lock file that lasts as long as its process: another run's live
 //! hold is respected, a gone holder's is taken back unless the run it held
 //! for still has agents at work, and a checkout a crash left half added is
-//! made again. A second run finds the first
-//! run's checkouts where they were, with their builds, and the pool keeps
-//! no more free checkouts than its runs had busy at once.
+//! made again. A second run finds the first run's checkouts where they
+//! were, with their builds, and the pool keeps those builds within its
+//! budget and the disk's floor free.
 
 mod pool_world;
 
@@ -187,8 +187,8 @@ async fn a_checkout_holding_unlanded_work_goes_back_to_its_unit_only() {
     assert_eq!(again.worktree, first.worktree);
 }
 
-/// A unit whose work landed keeps its branch until somebody takes its
-/// checkout: the next unit may, and finds it the nearest.
+/// A unit that left no work to land leaves its checkout free: the next
+/// unit may take it, and finds it the nearest.
 #[tokio::test]
 async fn a_checkout_whose_work_landed_is_free_with_its_branch() {
     let world = World::new();

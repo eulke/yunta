@@ -12,8 +12,8 @@ A **workflow** is a YAML file: nodes, dependencies, re-routes. It describes
 what *could* happen — it isn't itself a record of anything happening.
 
 A **run** is what you get from `yunta run <workflow>`: a **manifest** (the
-workflow plus config, inputs and resolved runners — hashed and frozen the
-moment the run is created) and an **event log** in a local SQLite file.
+workflow plus config, inputs and prompts — hashed and frozen the moment the
+run is created) and an **event log** in a local SQLite file.
 Nothing about a run's state lives anywhere else. `yunta status`, `yunta
 resume` and `yunta stats` all derive their answer by replaying that log from
 the start — that's what makes killing the engine mid-run and resuming safe:
@@ -26,9 +26,10 @@ with. Want the new version? Start a new run.
 ## Nodes execute; verification decides
 
 Every node is one of a fixed set of **kinds** (`bash`, `prompt`, `loop`,
-`check`, `gate`, `parallel`, `executor`, `workflow` — see the [workflow
-guide](guide.md#node-kinds)). Only `prompt` and `loop` open an agent session;
-everything else is either a shell command, a decision, or composition.
+`check`, `gate`, `parallel`, `executor`, `workflow`, `pull_request` — see the
+[workflow guide](guide.md#node-kinds)). Only `prompt` and `loop` open an agent
+session; everything else is a command, a decision, composition, or the pull
+request a run opens.
 
 The engine never takes an agent's word for whether something worked. A
 node's **criteria** — a `bash` node's exit code, a `check` node's builtin, an

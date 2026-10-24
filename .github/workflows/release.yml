@@ -28,8 +28,9 @@ jobs:
   # static Linux binary, no glibc dependency); macOS compiles natively on
   # its own runner — cross-compiling to it costs more than it saves.
   # Windows is not a target: the engine's process layer (process groups,
-  # signals, lock liveness) is POSIX, and a binary that cannot keep the
-  # run contract is not published.
+  # signals, lock liveness) is POSIX, and a binary that cannot stop a
+  # run's whole process tree or tell a live lock from a dead one is not
+  # published.
   build:
     needs: test
     strategy:

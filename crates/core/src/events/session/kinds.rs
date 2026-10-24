@@ -2,7 +2,9 @@
 
 use super::payloads::*;
 
-/// An agent session: the CLI it opened on, what it said while it ran, — one variant per kind.
+/// An agent session: the CLI it opened on, what it reported while it ran,
+/// what its rail and its run tools answered, and a capability its adapter
+/// did not have — one variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionEvent {
     Opened(AgentSessionOpenedPayload),

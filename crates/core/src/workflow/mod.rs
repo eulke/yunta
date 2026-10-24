@@ -1,5 +1,7 @@
 //! The workflow schema: what `.yunta/workflows/<name>.yaml` declares,
-//! parsed once at the frontier.
+//! parsed once at the frontier. The workflow keys are the fields of
+//! [`Workflow`] and its parts, and the node kinds are [`NodeKind`]'s
+//! variants.
 //!
 //! A person writes these files, so every type here refuses a key it
 //! does not know and names the keys it does. The values the schema
@@ -7,6 +9,21 @@
 //! an `on_finish:` step, an artifact, a prompt, a mode's `include` —
 //! read that name explicitly and say which names exist when it is
 //! missing or wrong, instead of reporting that nothing matched.
+//!
+//! A key nests under another only when the two mean something only
+//! together and share their rules — `hooks: { before, after }` — never
+//! because they share a subject: `scope`, `artifacts` and `on_failure`
+//! each stand at a node's own level, where a reader looks for what holds
+//! the work.
+//!
+//! Adding a key: its field, with a `///`, on the type that owns it — for a
+//! node-level key on [`Node`], on the struct its deserializer reads and in
+//! the list of node keys (`node.rs`), and for a kind's own key in
+//! [`NodeKind::keys`], each list held by a test to what the types
+//! serialize; a value in a workflow the user reference shows, which shows
+//! `crates/core/tests/fixtures/build-feature.yaml` and `release-cycle.yaml`
+//! byte for byte, while the CLI's `doc_claims` test fails as long as a key
+//! of the schema appears in none of its blocks; then `cargo xtask schema`.
 
 mod artifacts;
 mod audit;
@@ -92,8 +109,7 @@ pub struct Workflow {
     /// `yunta_schema: ">=1 <2"` — a version range the
     /// binary's own schema major (`YUNTA_SCHEMA`) is checked against at
     /// `yunta check`, and frozen resolved into `run_created`. Absent
-    /// means "whatever this binary speaks" (the reference text's own
-    /// rule) — inferred, never an error.
+    /// means whatever this binary speaks — inferred, never an error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yunta_schema: Option<crate::SchemaRange>,
     /// `on_finish:`: close-of-run steps. The engine

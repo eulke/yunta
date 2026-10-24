@@ -1,8 +1,18 @@
 //! The real `codex` adapter: spawns `codex exec --json` headless,
 //! streams its JSONL into `AgentEvent`s (`parse.rs`), and maps yunta's
-//! portable request fields onto the CLI's own flags (`plan`). Automated
-//! tests use a scripted CLI. A live Codex probe is run separately when the
-//! binary and credentials are available.
+//! portable request fields onto the CLI's own flags (`plan`).
+//!
+//! What the run configures reaches the CLI as `-c` overrides of this
+//! invocation alone (`config.rs`), never written to the person's own
+//! `config.toml`. The fence judges each `apply_patch` through hooks those
+//! overrides install and trust (`rail.rs`). A confined session's commands
+//! run under a permission profile of its own (`profile.rs`); the lowest
+//! Codex measured to honor its keys is 0.157.0, so `probe()` reports an
+//! older CLI, or one whose version does not read, as unhealthy. An agent's
+//! instructions join the CLI's own as `developer_instructions`, and the
+//! run's tools are an HTTP server whose bearer the CLI reads from its
+//! environment. Automated tests use a scripted CLI; a live Codex probe is
+//! run separately when the binary and credentials are available.
 //!
 //! **`resume_session` is a fixed `true`, not computed from `probe()`.**
 //! `Adapter::new` is synchronous and `capabilities()` is fixed at
@@ -296,9 +306,6 @@ pub(crate) fn capabilities() -> Capabilities {
         usage_reporting: true,
         // The per-run MCP server reaches the CLI as an external
         // streamable-HTTP server, configured by `-c` overrides.
-        // Like every other mapping in this adapter, this is read
-        // off the CLI's own source rather than confirmed live —
-        // see this module's doc comment.
         run_tools: true,
         // The session's profile keeps it off the network unless its
         // request opens it; an unconfined session cannot close it, so
@@ -318,12 +325,12 @@ pub(crate) fn capabilities() -> Capabilities {
 }
 
 /// The trees of a checkout this CLI loads its configuration from: the
-/// `.codex/` tree, with its config and hooks, and the `.agents/` tree,
-/// where it finds skills. A tree covers every file under it, including
-/// files a session creates later.
+/// `.codex/` tree, with its config and hooks, and the skills root under
+/// `.agents/`, which is all of that tree it scans. A tree covers every file
+/// under it, including files a session creates later.
 pub(crate) fn own_config() -> Vec<yunta_core::ScopeGlob> {
-    [".codex/**", ".agents/**"]
-        .into_iter()
+    [".codex/**".to_string(), format!("{SKILLS_MOUNT}/**")]
+        .iter()
         .filter_map(|tree| tree.parse().ok())
         .collect()
 }

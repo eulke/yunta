@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::glob::{might_overlap, scope_globset, InvalidScopeGlob, ScopeGlob};
 
+mod links;
+
+pub use links::{resolved, LoadedLink};
+
 /// Why a path is protected. The first reason that holds a path names it.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -35,6 +39,15 @@ impl Protection {
     /// instruction files: nobody grants the rest.
     pub fn person_may_grant(self) -> bool {
         self == Protection::AgentInstructions
+    }
+
+    /// Whether a link at a path this reason protects carries the reason to
+    /// what it resolves to: what a CLI loads, it loads through a link too.
+    fn follows_links(self) -> bool {
+        matches!(
+            self,
+            Protection::AgentConfig | Protection::AgentInstructions
+        )
     }
 }
 
@@ -85,19 +98,51 @@ pub struct Pathspecs {
     /// reaches what it finds without entering a directory the project
     /// ignores whole, so a build output or a dependency tree is never read.
     pub loose: Vec<String>,
+    /// The paths held on the way, each as itself: git is asked about one
+    /// only when a link or a file stands there below real directories, and
+    /// never looks under a directory there.
+    pub points: Vec<PathBuf>,
 }
 
 impl Pathspecs {
     pub fn is_empty(&self) -> bool {
-        self.rooted.is_empty() && self.loose.is_empty()
+        self.rooted.is_empty() && self.loose.is_empty() && self.points.is_empty()
     }
 }
 
-/// Serialized as `{reason, glob}`.
+/// Serialized as `{reason, glob}`, with `on_the_way` when it is set.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
     reason: Protection,
     glob: ScopeGlob,
+    /// A path a CLI's lookup passes on the way to what it loads: the root of
+    /// a tree it loads, a directory above one, or a path a link's resolution
+    /// walks through. It is held as itself, since a link or a file put in its
+    /// place leads the lookup elsewhere; what lies under it is not protected
+    /// for its sake. A session is not told of it, and the git calls that take
+    /// in ignored paths do not look under it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    on_the_way: bool,
+}
+
+impl Entry {
+    /// An entry that protects every path its glob selects.
+    fn of(reason: Protection, glob: ScopeGlob) -> Self {
+        Entry {
+            reason,
+            glob,
+            on_the_way: false,
+        }
+    }
+
+    /// An entry that holds one path a lookup passes as itself.
+    fn on_the_way(reason: Protection, path: &Path) -> Result<Self, ProtectedError> {
+        Ok(Entry {
+            reason,
+            glob: ScopeGlob::exact(path)?,
+            on_the_way: true,
+        })
+    }
 }
 
 /// Why a protected set does not build.
@@ -113,24 +158,28 @@ pub enum ProtectedError {
     Pattern(#[from] InvalidScopeGlob),
 }
 
-/// What every agent CLI yunta drives reads as its own configuration in a
-/// checkout: Claude Code's and Codex's. Protected in every run, whichever
-/// adapters the run uses, so no session rewrites what another CLI reads.
-pub const AGENT_CONFIG: &[&str] = &[".claude/**", ".mcp.json", ".codex/**", ".agents/**"];
+/// What every agent CLI yunta drives loads from a checkout as its own
+/// configuration: Claude Code's tree and MCP file, Codex's tree, and the
+/// skills root Codex scans. Protected in every run, whichever adapters the
+/// run uses, so no session rewrites what another CLI loads. The rest of
+/// `.agents/` is the project's: no CLI loads it.
+pub const AGENT_CONFIG: &[&str] = &[".claude/**", ".mcp.json", ".codex/**", ".agents/skills/**"];
 
 impl Protected {
     /// The one union. The agents' configuration, the instruction files and
-    /// the git register are fixed here.
+    /// the git register are fixed here, and so is the root of each tree a
+    /// CLI loads, with every directory above it, on the way.
     pub fn new(project: &[ScopeGlob], approved: &[ScopeGlob]) -> Result<Self, ProtectedError> {
         let fixed = |list: &[&str]| -> Result<Vec<ScopeGlob>, ProtectedError> {
             list.iter()
                 .map(|glob| glob.parse::<ScopeGlob>().map_err(ProtectedError::from))
                 .collect()
         };
+        let config = fixed(AGENT_CONFIG)?;
         let mut entries = Vec::new();
         for (reason, globs) in [
             (Protection::ProjectDeny, project.to_vec()),
-            (Protection::AgentConfig, fixed(AGENT_CONFIG)?),
+            (Protection::AgentConfig, config.clone()),
             (
                 Protection::AgentInstructions,
                 fixed(&["**/AGENTS.md", "**/CLAUDE.md"])?,
@@ -138,19 +187,35 @@ impl Protected {
             (Protection::ApprovedTest, approved.to_vec()),
             (Protection::GitRegister, fixed(&[".git", ".git/**"])?),
         ] {
-            entries.extend(globs.into_iter().map(|glob| Entry { reason, glob }));
+            entries.extend(globs.into_iter().map(|glob| Entry::of(reason, glob)));
+        }
+        for root in links::roots_of(&config) {
+            entries.push(Entry::on_the_way(Protection::AgentConfig, &root)?);
         }
         Protected::try_from(entries)
+    }
+
+    /// The set a run reads: [`Protected::new`]'s, grown by what the links its
+    /// base commit holds where an agent CLI loads carry.
+    pub fn of_run(
+        project: &[ScopeGlob],
+        approved: &[ScopeGlob],
+        links: &[LoadedLink],
+    ) -> Result<Self, ProtectedError> {
+        Protected::new(project, approved)?.following(links)
     }
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Every protected glob, in the order the reasons are read.
+    /// Every protected glob, in the order the reasons are read: what a
+    /// session is told it may not write, and what a sandbox denies. A path
+    /// held only on the way is left out.
     pub fn every(&self) -> Vec<ScopeGlob> {
         self.entries
             .iter()
+            .filter(|entry| !entry.on_the_way)
             .map(|entry| entry.glob.clone())
             .collect()
     }
@@ -159,7 +224,7 @@ impl Protected {
     pub fn at_loop_close(&self) -> Vec<ScopeGlob> {
         self.entries
             .iter()
-            .filter(|entry| entry.reason != Protection::ApprovedTest)
+            .filter(|entry| !entry.on_the_way && entry.reason != Protection::ApprovedTest)
             .map(|entry| entry.glob.clone())
             .collect()
     }
@@ -185,6 +250,26 @@ impl Protected {
             .map(|entry| entry.reason)
             .filter(|reason| !(lifted && reason.person_may_grant()))
             .min()
+    }
+
+    /// What a person granted the node or task this set is for that lifts one
+    /// of its protections: the instruction files among [`Protected::every`]
+    /// it may write all the same. A grant that reaches no instruction file
+    /// only widens the scope, so it is not here; nor is any grant when the
+    /// grants did not build, since they then lift nothing.
+    pub fn granted(&self) -> Vec<ScopeGlob> {
+        if self.lifted.is_empty() {
+            return Vec::new();
+        }
+        self.granted
+            .iter()
+            .filter(|glob| {
+                self.entries.iter().any(|entry| {
+                    entry.reason.person_may_grant() && might_overlap(glob, &entry.glob)
+                })
+            })
+            .cloned()
+            .collect()
     }
 
     /// The set for one node or task, with the instruction files a person
@@ -225,10 +310,19 @@ impl Protected {
 
     /// Every glob but the register as a `:(glob)` pathspec, for the git calls
     /// that force-add or clean: rooted when the glob names its directory,
-    /// loose when it names none.
+    /// loose when it names none. A path held on the way is a point instead,
+    /// since a pathspec that names a directory takes in what lies under it,
+    /// which that path does not protect.
     pub fn pathspecs(&self) -> Pathspecs {
         let mut pathspecs = Pathspecs::default();
         for entry in &self.entries {
+            if entry.on_the_way {
+                let point = entry.glob.exact_path();
+                if let Some(point) = point.filter(|point| !pathspecs.points.contains(point)) {
+                    pathspecs.points.push(point);
+                }
+                continue;
+            }
             if entry.reason == Protection::GitRegister {
                 continue;
             }
@@ -314,107 +408,4 @@ pub fn is_register(relative: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_register_is_its_first_name_whatever_dots_come_before_it() {
-        assert!(is_register(Path::new(".git")));
-        assert!(is_register(Path::new("./.git/config")));
-        assert!(!is_register(Path::new(".gitignore")));
-        assert!(!is_register(Path::new("src/.git")));
-    }
-
-    #[test]
-    fn the_strictest_reason_that_reaches_a_glob_is_the_one_nobody_may_grant() {
-        let set = Protected::new(&[ScopeGlob::from(".github/**")], &[]).unwrap();
-        assert_eq!(
-            set.reached_by(&ScopeGlob::from("**")),
-            Some(Protection::ProjectDeny)
-        );
-        assert_eq!(
-            set.reached_by(&ScopeGlob::from("docs/**")),
-            Some(Protection::AgentInstructions)
-        );
-    }
-
-    #[test]
-    fn a_lifted_instruction_file_and_a_staged_path_are_no_trespass() {
-        let set = Protected::new(&[], &[ScopeGlob::from("tests/approved/**")]).unwrap();
-        let changed = [
-            PathBuf::from("AGENTS.md"),
-            PathBuf::from("tests/approved/a.rs"),
-        ];
-        assert_eq!(set.trespasses(&changed, &[], Closing::Every).len(), 2);
-        let lifted = set.lifting(&[ScopeGlob::from("AGENTS.md")]);
-        assert_eq!(
-            lifted.trespasses(&changed, &[], Closing::Every),
-            vec![Trespass {
-                path: "tests/approved/a.rs".into(),
-                reason: Protection::ApprovedTest,
-            }]
-        );
-        let staged = [PathBuf::from("AGENTS.md")];
-        assert_eq!(set.trespasses(&changed, &staged, Closing::Every).len(), 1);
-    }
-
-    #[test]
-    fn a_loop_close_leaves_the_approved_tests_to_their_task() {
-        let set = Protected::new(&[], &[ScopeGlob::from("tests/approved/**")]).unwrap();
-        let changed = [
-            PathBuf::from("AGENTS.md"),
-            PathBuf::from("tests/approved/a.rs"),
-        ];
-        assert_eq!(
-            set.trespasses(&changed, &[], Closing::LoopClose),
-            vec![Trespass {
-                path: "AGENTS.md".into(),
-                reason: Protection::AgentInstructions,
-            }]
-        );
-    }
-
-    #[test]
-    fn pathspecs_name_every_protection_but_the_register() {
-        let set = Protected::new(&[ScopeGlob::from(".github/**")], &[]).unwrap();
-        assert_eq!(
-            set.pathspecs(),
-            Pathspecs {
-                rooted: [".github/**", ".claude/**", ".codex/**", ".agents/**"]
-                    .map(|glob| format!(":(glob){glob}"))
-                    .to_vec(),
-                loose: [".mcp.json", "**/AGENTS.md", "**/CLAUDE.md"]
-                    .map(|glob| format!(":(glob){glob}"))
-                    .to_vec(),
-            }
-        );
-    }
-
-    #[test]
-    fn a_lift_removes_the_instruction_reason_and_no_other() {
-        let set = Protected::new(&[ScopeGlob::from("**/*.md")], &[]).unwrap();
-        let lifted = set.lifting(&[ScopeGlob::from("AGENTS.md")]);
-        assert_eq!(
-            lifted.reason_of(Path::new("AGENTS.md")),
-            Some(Protection::ProjectDeny)
-        );
-    }
-
-    #[test]
-    fn the_set_is_stored_as_its_entries_and_grants_and_built_again_on_read() {
-        let set = Protected::new(&[ScopeGlob::from(".github/**")], &[]).unwrap();
-        let text = serde_json::to_string(&set).unwrap();
-        let read: Protected = serde_json::from_str(&text).unwrap();
-        assert_eq!(read, set);
-        assert_eq!(
-            read.reason_of(Path::new(".github/ci.yml")),
-            Some(Protection::ProjectDeny)
-        );
-        let lifted = set.lifting(&[ScopeGlob::from("AGENTS.md")]);
-        assert_ne!(lifted, set);
-        let text = serde_json::to_string(&lifted).unwrap();
-        let read: Protected = serde_json::from_str(&text).unwrap();
-        assert_eq!(read, lifted);
-        assert_eq!(read.reason_of(Path::new("AGENTS.md")), None);
-    }
-}
+mod tests;

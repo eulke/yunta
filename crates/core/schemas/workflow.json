@@ -55,7 +55,7 @@
       }
     },
     "yunta_schema": {
-      "description": "`yunta_schema: \">=1 <2\"` — a version range the\nbinary's own schema major (`YUNTA_SCHEMA`) is checked against at\n`yunta check`, and frozen resolved into `run_created`. Absent\nmeans \"whatever this binary speaks\" (the reference text's own\nrule) — inferred, never an error.",
+      "description": "`yunta_schema: \">=1 <2\"` — a version range the\nbinary's own schema major (`YUNTA_SCHEMA`) is checked against at\n`yunta check`, and frozen resolved into `run_created`. Absent\nmeans whatever this binary speaks — inferred, never an error.",
       "anyOf": [
         {
           "$ref": "#/$defs/SchemaRange"
@@ -118,7 +118,7 @@
       ]
     },
     "ArtifactKind": {
-      "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
+      "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.\n\nThe bar for another kind is high: a document whose data the engine\nneeds, to decide or to count — never one it only carries. A file it\nonly carries is opaque: the engine knows that it exists and what it\nhashes to, and its structure is its writer's, which is why the\nknowledge a run distills stays prose for a person and an agent to read.",
       "type": "string",
       "enum": [
         "tasks",
@@ -179,7 +179,7 @@
       ]
     },
     "CliConfig": {
-      "description": "Whose configuration of the agent's CLI a session loads beside what the\nrun mounts for it.\n\n`inherit` loads the person's own — their settings, extensions, MCP\nservers and hooks — and adds the run's on top; `isolated` loads only\nwhat the run mounts, so a session behaves the same on any machine. The\nCLI's credentials are the person's either way.",
+      "description": "Whose configuration of the agent's CLI a session loads beside what the\nrun mounts for it.\n\n`inherit` loads the person's own — their settings, extensions, MCP\nservers and hooks — and adds the run's on top; `isolated` loads only\nwhat the run mounts, so a session behaves the same on any machine. The\nCLI's credentials are the person's either way, and the run's own hooks\nload either way: they come with the session's request, never from a\nconfiguration file the choice could leave out.",
       "type": "string",
       "enum": [
         "inherit",
@@ -417,7 +417,7 @@
       ]
     },
     "HookStep": {
-      "description": "One hook command. `timeout_seconds` is unenforced (no timeout) when\nabsent — additive over the earlier engine, which never had one.\nField name/units aren't pinned by the spec's prose (\"timeout corto\nconfigurable\"); seconds fit hook-scale commands better than the\nminutes granularity `defaults.timeout_minutes` uses for whole agent\nsessions.",
+      "description": "One hook command: a script the workflow wrote, or a project command by\nname. `timeout_seconds` bounds it — in seconds, the scale of a hook,\nwhere a whole session's bound is in minutes — and absent, nothing\ndoes.",
       "type": "object",
       "properties": {
         "on_failure": {
@@ -442,7 +442,7 @@
       ]
     },
     "Hooks": {
-      "description": "`hooks: {before, after}`.",
+      "description": "`hooks: {before, after}` — commands the engine runs around a node's own\nwork: `before` as the node starts, `after` before its close verifies\nanything, so what an `after` hook rewrites is what the criteria, the\nscope and the artifacts are judged on. Grouped because the two only\nmean something together and share their rules: commands only, never an\nagent; safe to repeat, since they run again on every retry and every\nresume; each run recorded as `hook_executed`; their edits held to the\nnode's scope like any other. A workflow declares them — on a node, or\nfor every node in `node_defaults` — and no config layer adds one.\nBusiness logic, or anything that takes long, is a `bash` node with a\nstate of its own instead.",
       "type": "object",
       "properties": {
         "after": {
@@ -690,7 +690,7 @@
       ]
     },
     "Isolation": {
-      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike:\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own declares `scope:`,\nwhich is what asks for one.)",
+      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it a checkout of its own, so runs work\nbeside each other and beside the person; `none` works directly in the\ncheckout it was given — legitimate for watching an agent edit live, for\nCI already inside an ephemeral container, or for a tree too costly to\nset up twice. A first-level run under `none` starts only from a clean\ncheckout, since the diff its scope is audited by could not tell the\nagent's change from the person's, and holds that checkout's lock, so\nno second run works there at once; its manifest records the isolation\nit ran with.\n\nOne word for every level, run and `kind: workflow` node alike:\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own declares `scope:`,\nwhich is what asks for one.)",
       "type": "string",
       "enum": [
         "worktree",
@@ -850,7 +850,7 @@
       ]
     },
     "Node": {
-      "description": "A single node. Fields here are the ones currently implemented;\n`runner` is included because a `prompt`/`loop` node is\nmeaningless without picking a runner, even though the resolution\nmechanism itself (`runners:` candidates, capability probing) is\nconfig-layer work handled elsewhere.",
+      "description": "A single node: the fields every kind shares, beside its kind's own.\n`runner` names the binding a session asks for; which candidate fills\nit is the config's to say and the run's to resolve.",
       "type": "object",
       "properties": {
         "agent": {
@@ -1053,7 +1053,7 @@
           "type": "object",
           "properties": {
             "concurrency": {
-              "description": "Simultaneous `ready` tasks per batch — absent\nmeans the engine's own default, `1` (sequential; the batch\nmechanism handles both the same way, with no special case).\nDeclared per-node, deliberately: no config-level default\nexists anywhere in the reference schema, since token spend\nmultiplies with it and nobody should discover that from the\nbill instead of the workflow file.",
+              "description": "Simultaneous `ready` tasks per batch — absent\nmeans the engine's own default, `1` (sequential; the batch\nmechanism handles both the same way, with no special case).\nDeclared per node, deliberately, with no config-level default:\ntoken spend multiplies with it, and nobody should discover that\nfrom the bill instead of the workflow file.",
               "type": [
                 "integer",
                 "null"
@@ -1177,7 +1177,7 @@
           ]
         },
         {
-          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio. `executor` names an\nentry in `skills.executors:`; `with` is opaque, executor-defined\ninput. The high-level shape is fixed (JSON in, JSON out,\nexit code is the verdict); the field names are open work.",
+          "description": "The extension point when neither `bash` (exit code only, no\nstructured input) nor `check`'s closed builtin list covers it —\nexternal code, a JSON contract over stdio: JSON in, JSON out, the\nexit code as the verdict. `executor` names an entry in\n`skills.executors:`; `with` is opaque, executor-defined input. The\nword names this extension and nothing else: not the session that\ndoes a task's work, which is the task's runner.",
           "type": "object",
           "properties": {
             "executor": {
@@ -1188,7 +1188,7 @@
               "const": "executor"
             },
             "timeout_seconds": {
-              "description": "Absent means unenforced, same convention as `HookStep`'s own\n`timeout_seconds` — the design only calls for an\nengine-enforced timeout, without fixing a default or a field\nname.",
+              "description": "How long the executor may run before the engine stops it and\nfails the node; absent, nothing bounds it, as with a hook\nstep's own `timeout_seconds`.",
               "type": [
                 "integer",
                 "null"
@@ -1208,7 +1208,7 @@
           ]
         },
         {
-          "description": "A human decision resolved outside this process — v1's\nonly shape is `external: {kind: pull_request, ...}`: the engine\ndelegates the multi-person substrate (identity, permissions,\nnotifications) to the team's forge instead of building a serve\nmode early. With `external: None` this is an **internal gate**\n— the shape the reference workflows' own `approve-plan`/\n`ship` use and the mode-coherence rule requiring every mode to\ninclude a gate option: resolved through `HumanInteraction`\n(console today, a richer resolution surface later) with the\ndeclared `options`, and `on:` mapping an option to an\n`on_failure.goto`-style re-route.",
+          "description": "A decision a person makes. With `external:` it is published to the\nteam's forge as a pull request, whose people, permissions and\nnotifications answer it; without, it is an **internal gate**, put\nthrough whatever surface reaches a person — the console, or\n`resolve_gate` from another process — with the declared `options`,\nand `on:` mapping an option to an `on_failure.goto`-style re-route.\nNot a `check`: a gate waits for a person, and a check never does.",
           "type": "object",
           "properties": {
             "assignee": {
@@ -1264,7 +1264,7 @@
           ]
         },
         {
-          "description": "`kind: workflow`: runs another workflow as a\nsub-run — a **complete run** with its own run_id, manifest, event\nlog and run.dir, never an inline expansion. The parent freezes\nonly the child's *name and inputs* (these two fields); the child\nresolves and freezes its own workflow file at birth, so a long\nprocess picks up improvements to child workflows between\nexecutions without any individual run losing immutability.",
+          "description": "`kind: workflow`: runs another workflow as a\nsub-run — a **complete run** with its own run_id, manifest, event\nlog and run.dir, never an inline expansion. The parent's birth\nfreezes the child's text and prompts among its own frozen inputs,\nand the child is born from that copy and freezes its own manifest;\na later run of the parent reads the child's workflow afresh, so a\nlong process picks up improvements to its children between runs\nwithout any run losing its immutability.",
           "type": "object",
           "properties": {
             "inputs": {
@@ -1290,7 +1290,7 @@
               }
             },
             "use": {
-              "description": "The child workflow's name, resolved at child birth against\nthe repo catalog: `.yunta/workflows/<name>.yaml` in the\nparent run's own working tree (versioned, the same catalog\n`list_workflows` reads).",
+              "description": "The child workflow's name, resolved when the parent run is born\nthrough the catalog `list_workflows` reads: the repo's\n`.yunta/workflows/<name>.yaml` first, then a publisher's\ninstalled packs.",
               "type": "string"
             }
           },
@@ -1337,7 +1337,7 @@
       ]
     },
     "NodeDefaults": {
-      "description": "`node_defaults:` — currently carries only `hooks`, the one consumer\nneeds. Extends when another field needs the same \"declare once,\nnodes inherit\" treatment.",
+      "description": "`node_defaults:` — what every node of the workflow inherits unless it\ndeclares its own: its hooks, its skills, and whose CLI configuration its\nsessions load.",
       "type": "object",
       "properties": {
         "cli_config": {
@@ -1390,6 +1390,7 @@
       ]
     },
     "NodePermissions": {
+      "description": "`permissions: read-only | edit | full` at node level — maps 1:1 onto\nthe adapter's session profile.",
       "type": "string",
       "enum": [
         "read-only",
@@ -1413,7 +1414,7 @@
       ]
     },
     "OnFailure": {
-      "description": "`on_failure: {goto, max_reroutes}` — node-level re-routing.\n`max_reroutes` is mandatory: a re-route without an explicit cap\nis how a correction cycle turns infinite, so the schema refuses it.\nDistinct from a hook's own `on_failure: fail|warn`.",
+      "description": "`on_failure: {goto, max_reroutes}` — where a failed node sends the run\nto be corrected. Re-routes are a second set of edges beside\n`depends_on`, which stays acyclic: control goes to `goto`, and once it\nand its subgraph complete, the failed node runs again. `max_reroutes`\nis mandatory and counted per failed node, and when it runs out the run\npauses for a person: a re-route without an explicit cap is how a\ncorrection cycle turns infinite, so the schema refuses it. A failure no\ncorrection can change — a key the run's frozen config leaves unset, a\nlimit that resets at a known time — is never re-routed. Distinct from a\nhook's own `on_failure: fail|warn`.",
       "type": "object",
       "properties": {
         "goto": {
@@ -1463,7 +1464,7 @@
       ]
     },
     "OnInterrupt": {
-      "description": "A node's crash-recovery policy — the full triple of options.",
+      "description": "A node's crash-recovery policy — the full triple of options.\n\n`restart_node` runs the node again from its start, as a new attempt:\nthe context it is handed is rebuilt from the run's data, so the attempt\ncan always begin, but its effect has to be safe to repeat.\n`fail_if_uncertain` is for an effect that is not — a notification with\nno key to dedupe on, a charge: a resume that finds the node running with\nno terminal pauses for a person instead of guessing how it ended.",
       "oneOf": [
         {
           "type": "string",
@@ -1564,7 +1565,7 @@
       "minLength": 1
     },
     "ScopeExpansion": {
-      "description": "`permissions: read-only | edit | full` at node level — maps 1:1 onto\nthe adapter's session profile. The names come\nstraight from the reference schema's own spelling.\n`scope_expansion:` — governs how a loop's tasks may\ngrow past their own declared scope. `mode` decides what a request may\nget; `max_per_run` caps how many expansions the engine may grant in one\nrun before exhaustion escalates (\"ten grants in a row are not\nre-scoping, they are a badly-cut plan\") — absent means uncapped.",
+      "description": "`scope_expansion:` — governs how a loop's tasks may\ngrow past their own declared scope. `mode` decides what a request may\nget; `max_per_run` caps how many expansions the engine may grant in one\nrun before exhaustion escalates (\"ten grants in a row are not\nre-scoping, they are a badly-cut plan\") — absent means uncapped.",
       "type": "object",
       "properties": {
         "max_per_run": {
@@ -1597,7 +1598,7 @@
       "minLength": 1
     },
     "TasksParams": {
-      "description": "`tasks: {}` — no parameters in the current resolution\n(the aggregate task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
+      "description": "`tasks: {}` — the state of every task the run registered, one line\neach; it takes no parameters. A task's own session reads its task\nthrough its run tools instead.",
       "type": "object",
       "additionalProperties": false
     },

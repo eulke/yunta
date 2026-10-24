@@ -4,10 +4,11 @@
 //! creation; everything downstream operates on the frozen value and never
 //! goes back to disk.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use yunta_core::protected::{LoadedLink, Protected, ProtectedError};
 use yunta_core::{
     content_hash, CommitSha, ConfigLayer, ContentHash, Frozen, FrozenWorkflow, InputName,
     InvalidId, Manifest, NodeId, PackProvenance, ProvenanceGap, RunAdapter, Workflow,
@@ -37,12 +38,20 @@ pub enum ManifestError {
     /// A frozen input could not be read or written; the error names it.
     #[error(transparent)]
     Frozen(#[from] FrozenError),
+    /// git could not list the base commit's links or read what they point
+    /// to.
+    #[error("failed to read the links the base commit holds: {0}")]
+    Links(GitError),
+    /// The protected set does not build with what the base commit's links
+    /// resolve to.
+    #[error(transparent)]
+    Protected(#[from] ProtectedError),
 }
 
 impl ManifestError {
     /// Whether the token stopped the git this freeze asked.
     pub fn cancelled(&self) -> bool {
-        matches!(self, ManifestError::Git(git) if git.cancelled())
+        matches!(self, ManifestError::Git(git) | ManifestError::Links(git) if git.cancelled())
     }
 }
 
@@ -181,6 +190,7 @@ async fn birth(
     let freezing = freeze_origin(&workflow, config, repo, origin).await?;
 
     let (base_commit, base_branch) = base_of(repo, supervision).await?;
+    let loaded_links = loaded_links(repo, &base_commit, supervision).await?;
     let manifest = Manifest {
         schema_version: <Manifest as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
         yunta_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -206,6 +216,7 @@ async fn birth(
         adapter: None,
         frozen: Some(freezing.frozen),
         provenance_gaps: freezing.provenance_gaps,
+        loaded_links,
     };
     Ok(FrozenRun {
         manifest,
@@ -320,6 +331,113 @@ async fn base_of(
     Ok((commit, branch))
 }
 
+/// The links `base` holds where an agent CLI loads its configuration or its
+/// instructions, each resolved inside the checkout: one listing of the
+/// commit's files, and one read of every link's text when it holds a link.
+/// The read never fetches: a partial clone that lacks a link's text answers
+/// it missing, and that link resolves to nothing.
+pub(crate) async fn loaded_links(
+    repo: &Path,
+    base: &CommitSha,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<Vec<LoadedLink>, ManifestError> {
+    let listing = ["ls-tree", "-r", "-z", "--full-tree", base.as_str()];
+    let listed = crate::git::read_bytes(repo, &listing, supervision)
+        .await
+        .map_err(ManifestError::Links)?;
+    let mut files = HashSet::new();
+    let mut found = Vec::new();
+    for (mode, object, path) in tree_entries(&listed) {
+        match mode {
+            "120000" => found.push((path, object)),
+            "160000" => {}
+            _ => {
+                files.insert(path);
+            }
+        }
+    }
+    let links = link_texts(repo, found, supervision).await?;
+    let is_file = |path: &Path| path.to_str().is_some_and(|path| files.contains(path));
+    let fixed = Protected::new(&[], &[])?;
+    Ok(fixed.loaded(yunta_core::protected::resolved(&links, is_file))?)
+}
+
+/// The text each of `found`'s links points by, keyed by the link's path: one
+/// `cat-file --batch` read, which never fetches an object the clone lacks.
+async fn link_texts(
+    repo: &Path,
+    found: Vec<(&str, &str)>,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<BTreeMap<PathBuf, String>, ManifestError> {
+    if found.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let asked: String = found
+        .iter()
+        .map(|(_, object)| format!("{object}\n"))
+        .collect();
+    let mut env = supervision.env.to_vec();
+    env.push(("GIT_NO_LAZY_FETCH".to_string(), "1".to_string()));
+    let batch = ["cat-file", "--batch"];
+    let answered =
+        crate::git::read_batch(repo, &batch, asked.into_bytes(), supervision.with_env(&env))
+            .await
+            .map_err(ManifestError::Links)?;
+    Ok(found
+        .into_iter()
+        .zip(batch_contents(&answered))
+        .map(|((path, _), text)| (PathBuf::from(path), text))
+        .collect())
+}
+
+/// The entries of an `ls-tree -z` listing: each one's mode, object and path.
+/// An entry whose path is not UTF-8 is left out: the manifest keeps a link's
+/// paths as text, so a link there, or a file it resolves to, is not followed.
+fn tree_entries(listed: &[u8]) -> impl Iterator<Item = (&str, &str, &str)> {
+    listed
+        .split(|byte| *byte == 0)
+        .filter_map(|entry| std::str::from_utf8(entry).ok())
+        .filter_map(|entry| {
+            let (fields, path) = entry.split_once('\t')?;
+            let mut fields = fields.split(' ');
+            let mode = fields.next()?;
+            let object = fields.nth(1)?;
+            Some((mode, object, path))
+        })
+}
+
+/// What `cat-file --batch` answered, one text per object asked and in the
+/// order asked. An object it reports missing reads as an empty text, which
+/// resolves to nothing.
+fn batch_contents(answered: &[u8]) -> Vec<String> {
+    let mut contents = Vec::new();
+    let mut rest = answered;
+    while let Some((header, after)) = first_line(rest) {
+        let size = String::from_utf8_lossy(header)
+            .rsplit(' ')
+            .next()
+            .and_then(|size| size.parse::<usize>().ok());
+        match size.and_then(|size| after.split_at_checked(size)) {
+            Some((text, past)) => {
+                contents.push(String::from_utf8_lossy(text).into_owned());
+                rest = past.strip_prefix(b"\n").unwrap_or(past);
+            }
+            None => {
+                contents.push(String::new());
+                rest = after;
+            }
+        }
+    }
+    contents
+}
+
+/// The bytes before the first newline, and those after it.
+fn first_line(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
+    let end = bytes.iter().position(|byte| *byte == b'\n')?;
+    let (line, rest) = bytes.split_at_checked(end)?;
+    Some((line, rest.get(1..).unwrap_or_default()))
+}
+
 /// The git directory the repository's checkouts share, which names the
 /// project. A git that cannot name it leaves the project unknown; a git the
 /// token stopped stops the freeze, as every other git the run asks does.
@@ -343,4 +461,33 @@ async fn git_line(
         .await
         .map(|stdout| stdout.trim().to_string())
         .map_err(ManifestError::Git)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_batch_answer_reads_one_text_per_object_and_a_missing_one_as_empty() {
+        let answered = b"a1 blob 4\n../x\nb2 missing\nc3 blob 5\na\nb/c\n";
+        assert_eq!(batch_contents(answered), ["../x", "", "a\nb/c"]);
+    }
+
+    /// A token that stopped the read of the links is the birth being
+    /// cancelled, not a failure of the base commit.
+    #[tokio::test]
+    async fn a_stopped_read_of_the_links_is_a_cancellation() {
+        let repo = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(repo.path());
+        let head = yunta_testkit::git_output(repo.path(), &["rev-parse", "HEAD"]);
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let clock = yunta_testkit_core::FixedClock;
+        let supervision = crate::process::Supervision::outside_any_run(&token, &clock);
+        let error = loaded_links(repo.path(), &head.parse().unwrap(), supervision)
+            .await
+            .expect_err("a stopped git answers nothing");
+        assert!(matches!(error, ManifestError::Links(_)), "{error}");
+        assert!(error.cancelled(), "{error}");
+    }
 }

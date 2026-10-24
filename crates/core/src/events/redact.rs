@@ -1,6 +1,12 @@
 //! The redactor's verdict on an event: the payload the log writes, with
 //! every secret taken out, or a refusal when that payload would not read
 //! back as the same payload.
+//!
+//! The secrets are the value of every variable the run's config names under
+//! `secrets`, and the token minted for each session's run tools. Taking them out is a
+//! defense beside a payload's own shape, which names content by its hash
+//! rather than carrying it. A refused payload is never written, in the
+//! clear or otherwise.
 
 use super::EventPayload;
 use crate::Redactor;

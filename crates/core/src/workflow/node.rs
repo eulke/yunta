@@ -12,9 +12,9 @@ use super::{
 use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
 use crate::yaml::{self, Mapping, Value};
 
-/// `node_defaults:` — currently carries only `hooks`, the one consumer
-/// needs. Extends when another field needs the same "declare once,
-/// nodes inherit" treatment.
+/// `node_defaults:` — what every node of the workflow inherits unless it
+/// declares its own: its hooks, its skills, and whose CLI configuration its
+/// sessions load.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NodeDefaults {
@@ -30,11 +30,9 @@ pub struct NodeDefaults {
     pub cli_config: Option<CliConfig>,
 }
 
-/// A single node. Fields here are the ones currently implemented;
-/// `runner` is included because a `prompt`/`loop` node is
-/// meaningless without picking a runner, even though the resolution
-/// mechanism itself (`runners:` candidates, capability probing) is
-/// config-layer work handled elsewhere.
+/// A single node: the fields every kind shares, beside its kind's own.
+/// `runner` names the binding a session asks for; which candidate fills
+/// it is the config's to say and the run's to resolve.
 #[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct Node {
     pub id: NodeId,

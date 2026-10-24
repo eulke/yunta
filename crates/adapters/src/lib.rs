@@ -1,9 +1,15 @@
-//! The adapters that implement `yunta_core::port`: `claude-code`,
-//! `codex` and `mock` — Spec Adapter v0.2.
+//! The adapters that implement `yunta_core::port`: `claude-code`, `codex` and
+//! `mock`.
 //!
 //! `claude-code` and `codex` each drive their own CLI; `mock` is what CI
 //! exercises the engine against — the two real adapters are each tested
-//! against their own scripted fake binary, never a real LLM in CI.
+//! against their own scripted fake binary, never a real LLM in CI. Its map:
+//! `claude_code`, `codex` and `mock` are the adapters; `dialect` names the CLIs
+//! a session can stand for and `session` holds what every adapter shares;
+//! `mount` puts a session's skills where its CLI finds them; `failure` reads
+//! what a CLI's failure says about a refusal; `reach` tells whether the service
+//! a session talks to answers; `forge` builds the two forges behind
+//! `yunta_core::port::Forge`.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.

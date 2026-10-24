@@ -337,8 +337,8 @@ fn check_expansion_mode(node: &Node, config: &ConfigLayer, errors: &mut Vec<Chec
 }
 
 /// Every loop that still declares `scope_expansion.within`, wherever it
-/// sits: the key is no longer read, so a loop keeping it would look bounded
-/// when it is not.
+/// sits: nothing bounds an expansion by that key, so a loop keeping it
+/// would look bounded when it is not.
 fn check_retired_within(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
         if let NodeKind::Loop {

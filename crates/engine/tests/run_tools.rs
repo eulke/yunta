@@ -669,6 +669,44 @@ fn unit_at(worktree: std::path::PathBuf) -> yunta_engine::Unit {
     }
 }
 
+/// A task a person granted an instruction file reads the grant beside what
+/// it may never touch, so the session knows it may write that file. A path
+/// granted to it that nothing protects is scope, never among the grants
+/// that lift a protection.
+#[tokio::test]
+async fn a_task_sheet_names_the_instruction_files_a_person_granted() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let unit = yunta_engine::Unit {
+        from: yunta_engine::head_tree(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        ..unit_at(repo.path().to_path_buf())
+    };
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let mut access = host.task_access(greeting_task(), unit);
+    let granted = [
+        yunta_core::ScopeGlob::from("AGENTS.md"),
+        yunta_core::ScopeGlob::from("src/extra.rs"),
+    ];
+    access.protected = Arc::new(Protected::new(&[], &[]).unwrap().lifting(&granted));
+    let session = host.task_session("implement", access).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+    assert!(!is_error, "{text}");
+    let sheet: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(sheet["granted"], json!(["AGENTS.md"]), "{sheet}");
+    assert!(
+        sheet["denied"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("**/AGENTS.md")),
+        "{sheet}"
+    );
+}
+
 /// A task session on the greeting task, working a fresh repository.
 struct GreetingSession {
     _owner: yunta_testkit::Owner,

@@ -35,9 +35,21 @@ fn the_codex_config_tree_covers_every_file_under_it() {
     assert!(trees.is_match(".codex/state/cache.json"));
 }
 
+/// Codex scans `.agents/skills` and nothing else of `.agents/`, so a project's
+/// own files there are not its configuration.
+#[test]
+fn of_agents_codex_owns_only_the_skills_root() {
+    let trees = yunta_core::scope_globset(&codex().own_config()).unwrap();
+    assert!(trees.is_match(".agents/skills/grill/SKILL.md"));
+    assert!(!trees.is_match(".agents/notes.md"));
+    assert!(!trees.is_match(".agents/style.md"));
+}
+
 /// Every tree an adapter declares as its own is one every run protects, and
 /// every tree a run protects as an agent's is some adapter's: a new adapter
 /// whose trees the protected set does not hold fails here.
+/// Reached by: `crates/adapters/src/claude_code/mod.rs`, `crates/adapters/src/codex/mod.rs`,
+/// `crates/adapters/src/dialect/mod.rs`, `crates/core/src/protected.rs`
 #[test]
 fn every_run_protects_exactly_the_trees_the_adapters_declare() {
     let mut declared: Vec<String> = claude()

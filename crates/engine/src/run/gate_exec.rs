@@ -1,14 +1,29 @@
-//! `kind: gate` dispatch — the imperative half of what
-//! `schedule::ScheduleStep::PublishGate`/`PollGate` name. Reads the
-//! declared artifacts off disk, asks the forge to publish/poll, and
-//! translates its answer into the same event vocabulary every other
-//! node kind already uses (`node_started`/`node_finished`/
-//! `node_failed`) — so nothing downstream (`on_failure.goto`,
-//! `yunta status`) needs to know a gate is different
-//! from any other node once it's resolved. Comments on a
-//! changes-requested review become `finding_posted`, mounted for the
-//! corrective node the same way `node-output` already is — a reviewer's
-//! words reach the fixing session without an intermediate summary.
+//! `kind: gate` with `external:` — the imperative half of what
+//! [`Decision::PublishGate`](super::schedule::Decision::PublishGate) and
+//! [`Decision::PollGate`](super::schedule::Decision::PollGate) name. A gate
+//! decided on a forge leaves to it what the engine does not keep — who may
+//! decide, and how they are told — and the person who answers needs
+//! neither Yunta nor the run's machine.
+//!
+//! Publishing commits on the gate's branch the bytes the run holds for each
+//! artifact the gate names, under the name its identity gives it, opens a
+//! pull request that asks the gate's question, and leaves the gate waiting
+//! with nothing running. An artifact the run does not hold fails the node
+//! naming it, so a partial review is never published.
+//!
+//! Resolution is pulled, never pushed: no webhook and no daemon, only a poll
+//! of the pull request each time the run wakes, and a review decides only
+//! the head it reviewed. An approval passes the gate, and so does a merge,
+//! its merge commit the evidence; `gate_resolved` records who answered and
+//! on which commit. A request for changes turns each comment into
+//! `finding_posted`, mounted for the corrective node the way `node-output`
+//! is, so a reviewer's words reach the fixing session without a summary in
+//! between, and fails the node toward its `on_failure`; a pull request
+//! closed unmerged fails it. On each wake of a run still open, a passed gate
+//! whose pull request moved past the approved commit waits again. Each answer
+//! becomes the event vocabulary every node kind uses (`node_started`,
+//! `node_finished`, `node_failed`), so nothing downstream needs to know a
+//! gate is different once it is resolved.
 //!
 //! **No forge, no credentials: degrades to console.** Both entry points
 //! fall back to [`console_gate`](super::console_gate), which asks here
@@ -239,12 +254,6 @@ pub(super) async fn poll_gate(
     resolve_from_poll(ctx, node, &polled, &published).await
 }
 
-/// The review→outcome mapping, applied uniformly whether resolving a
-/// gate for the first time or re-checking one already `Finished` for
-/// SHA drift (see this module's own doc comment): a review only counts
-/// if it covers the PR's *current* head; anything
-/// else — no decisive review recorded, or one that no longer covers the
-/// current commit — is "still waiting", not a decision.
 /// The gate continues: `gate_resolved` records who approved and the
 /// commit the approval covers, and the node finishes.
 async fn resolve_approved(
@@ -273,6 +282,11 @@ async fn resolve_approved(
     Ok(GateStep::Resolved)
 }
 
+/// The review→outcome mapping, applied uniformly whether resolving a
+/// gate for the first time or re-checking one already `Finished` for
+/// SHA drift: a review only counts if it covers the PR's *current* head;
+/// anything else — no decisive review recorded, or one that no longer
+/// covers the current commit — is "still waiting", not a decision.
 async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,

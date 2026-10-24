@@ -6,6 +6,14 @@
 //! a lint reported — declares its reach without naming a path of a
 //! repository it has never seen. The paths are the run's; the engine
 //! resolves them when the node starts and records them on the log.
+//!
+//! A scope is what verifies an agent: a session may do other than it was
+//! asked, which its fence and the diff its close audits catch, while a
+//! command does what its author wrote. So every task declares one, while
+//! a node may declare none: nothing refuses it, and `check` warns only
+//! where two writers without one can run at once and share a tree. A
+//! warning on every node that pushes a branch, opens a pull request or
+//! runs a suite would be noise nobody reads.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

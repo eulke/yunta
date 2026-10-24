@@ -8,25 +8,28 @@
 
 use std::path::{Path, PathBuf};
 
-/// Files the vocabulary counter reads: everything under `crates/` and
-/// `docs/`, plus every `.yaml` and `.json` in the tree. Build output is
-/// not source, so `target/` and `.git/` are skipped.
+/// Files the vocabulary counter reads: every file under `crates/` and
+/// `docs/` but an asset, the agent docs, and every `.yaml` and `.json` in the
+/// tree. Build output is not source, so `target/` and `.git/` are skipped.
 fn vocabulary_corpus(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for dir in ["crates", "docs"] {
-        collect(&root.join(dir), &mut out, &|_| true);
+        collect(&root.join(dir), &mut out, &|path| {
+            !super::corpus::is_asset(path)
+        });
     }
     collect(root, &mut out, &|path| {
         path.extension()
             .is_some_and(|ext| ext == "yaml" || ext == "json")
     });
+    out.extend(agent_docs(root));
     out.sort();
     out.dedup();
     out
 }
 
 /// Files the tense counter reads: Rust sources, where only `//` lines are
-/// prose, and the markdown of `docs/`.
+/// prose, the markdown of `docs/`, and the agent docs.
 fn tense_corpus(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     collect(&root.join("crates"), &mut out, &|path| {
@@ -35,8 +38,25 @@ fn tense_corpus(root: &Path) -> Vec<PathBuf> {
     collect(&root.join("docs"), &mut out, &|path| {
         path.extension().is_some_and(|ext| ext == "md")
     });
+    out.extend(agent_docs(root));
     out.sort();
     out.dedup();
+    out
+}
+
+/// The files an agent reads as this repository's own instructions and
+/// knowledge: `AGENTS.md` and `CLAUDE.md` at the root, and the markdown under
+/// `.agents/` but its skills, which a CLI loads as configuration.
+fn agent_docs(root: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = ["AGENTS.md", "CLAUDE.md"]
+        .iter()
+        .map(|name| root.join(name))
+        .filter(|path| path.is_file())
+        .collect();
+    let skills = root.join(".agents/skills");
+    collect(&root.join(".agents"), &mut out, &|path| {
+        path.extension().is_some_and(|ext| ext == "md") && !path.starts_with(&skills)
+    });
     out
 }
 
@@ -53,17 +73,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) {
     }
 }
 
-/// The files the prose counters do not read. A document records a rule's
-/// history or work that lies ahead, so it quotes the words a rule retired; a
-/// negative fixture or test quotes one to prove it is refused. Each entry
-/// states why it is exempt beside it.
+/// The files the prose counters do not read: a negative fixture or test
+/// quotes a retired word to prove it is refused. Each entry states why it is
+/// exempt beside it.
 const EXEMPT_DOCUMENTS: &[&str] = &[
-    "glosario.md",
-    "docs/design/adr/",
-    "adrs.md",
-    "docs/design/plan-de-raiz/",
-    "deuda-consciente.md",
-    "smoke-checklist.md",
     // A negative fixture proves a retired key is rejected, so it names the key.
     "cli/tests/fixtures/",
     // A negative test proves a retired key is rejected, so it names the key.
@@ -164,23 +177,132 @@ const MARKERS: &[&str] = &["for now", "will be", "future ", "now built"];
 
 /// Lines of prose that describe a plan or a past instead of what the
 /// repository does. In Rust only a comment is prose; in markdown every
-/// line is.
+/// line is. An agent doc is rewritten in place, so a date or a "no longer"
+/// in one is a log entry kept where the commit message belongs.
 pub fn tense_markers(root: &Path) -> usize {
+    let agent_docs = agent_docs(root);
     tense_corpus(root)
         .iter()
         .filter(|path| !exempt(path, EXEMPT_DOCUMENTS))
         .map(|path| {
-            let text = super::read_corpus(path);
-            let prose_only = path.extension().is_some_and(|ext| ext == "rs");
-            text.lines()
-                .filter(|line| !prose_only || line.trim_start().starts_with("//"))
+            let living = agent_docs.contains(path);
+            prose_lines(path, &super::read_corpus(path))
+                .iter()
                 .filter(|line| {
                     let low = line.to_lowercase();
                     MARKERS.iter().any(|marker| low.contains(marker))
+                        || (living && logs_a_change(line))
                 })
                 .count()
         })
         .sum()
+}
+
+/// The prose of a file: every line of markdown, and the `//` comment of each
+/// line of Rust, wherever on the line it starts.
+fn prose_lines(path: &Path, text: &str) -> Vec<String> {
+    if !path.extension().is_some_and(|ext| ext == "rs") {
+        return text.lines().map(str::to_string).collect();
+    }
+    text.lines()
+        .zip(super::scan::blanked_lines(text))
+        .map(|(line, code)| line.chars().skip(code.chars().count()).collect::<String>())
+        .filter(|comment| !comment.is_empty())
+        .collect()
+}
+
+/// Whether a line of an agent doc logs a change rather than stating what
+/// holds: a date, or a "no longer", outside its code spans.
+fn logs_a_change(line: &str) -> bool {
+    let plain: String = line.split('`').step_by(2).collect();
+    let low = plain.to_lowercase();
+    (low.contains("no longer") && !low.contains("no longer than")) || names_a_date(&plain)
+}
+
+/// Whether `line` holds an ISO date, `2026-10-20`.
+fn names_a_date(line: &str) -> bool {
+    line.as_bytes().windows(10).any(|w| {
+        let digits = |range: std::ops::Range<usize>| {
+            w.get(range)
+                .is_some_and(|d| d.iter().all(u8::is_ascii_digit))
+        };
+        digits(0..4)
+            && w.get(4) == Some(&b'-')
+            && digits(5..7)
+            && w.get(7) == Some(&b'-')
+            && digits(8..10)
+    })
+}
+
+/// Words Spanish prose writes and English prose does not.
+const SPANISH: &[&str] = &[
+    "el", "la", "los", "las", "del", "de", "en", "y", "un", "que", "una", "para", "por", "con",
+    "sin", "es", "son", "cuando", "donde", "porque", "pero", "sobre", "entre", "como", "cada",
+    "este", "esta", "estos", "se", "lo", "al", "su", "sus", "nunca", "también", "más", "hay", "ya",
+    "sólo", "solo", "puede", "debe",
+];
+
+/// Words English prose writes and Spanish prose does not.
+const ENGLISH: &[&str] = &[
+    "the", "of", "and", "to", "is", "that", "it", "for", "with", "as", "by", "this", "be", "are",
+    "from", "or", "an", "which", "its", "when", "what", "not", "can", "has", "have", "was", "on",
+    "in", "at", "if", "but", "into", "only", "each", "must", "does", "do", "never",
+];
+
+/// Lines of prose written in Spanish where the repository writes English: its
+/// markdown, and the comments of the Rust under `crates/` and `xtask/`. A line reads as Spanish when it
+/// holds three words of [`SPANISH`], or two beside a letter English does not
+/// write or with no word of [`ENGLISH`].
+pub fn spanish_prose_lines(root: &Path) -> usize {
+    spanish_corpus(root)
+        .iter()
+        .map(|path| {
+            prose_lines(path, &super::read_corpus(path))
+                .iter()
+                .filter(|line| reads_spanish(line))
+                .count()
+        })
+        .sum()
+}
+
+fn spanish_corpus(root: &Path) -> Vec<PathBuf> {
+    let markdown = |path: &Path| path.extension().is_some_and(|ext| ext == "md");
+    let mut out: Vec<PathBuf> = super::corpus::entries(root)
+        .into_iter()
+        .filter(|path| path.is_file() && markdown(path))
+        .collect();
+    for dir in ["docs", "packs", "crates"] {
+        collect(&root.join(dir), &mut out, &|path| markdown(path));
+    }
+    for dir in ["crates", "xtask"] {
+        collect(&root.join(dir), &mut out, &|path| {
+            path.extension().is_some_and(|ext| ext == "rs")
+        });
+    }
+    out.extend(agent_docs(root));
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Whether `line` reads as Spanish, its words taken as whitespace-separated
+/// tokens with the punctuation at their ends trimmed, so a path or a slug
+/// stays one word.
+fn reads_spanish(line: &str) -> bool {
+    let low = line.to_lowercase();
+    let words: Vec<&str> = low
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let spanish: std::collections::BTreeSet<&str> = words
+        .iter()
+        .copied()
+        .filter(|word| SPANISH.contains(word))
+        .collect();
+    let english = words.iter().any(|word| ENGLISH.contains(word));
+    let accented = low.contains(['ñ', 'á', 'é', 'í', 'ó', 'ú', '¿', '¡']);
+    spanish.len() >= 3 || (spanish.len() >= 2 && (accented || !english))
 }
 
 #[cfg(test)]
@@ -250,5 +372,76 @@ mod tests {
             &[("crates/engine/src/b.rs", "// a future resume\n")],
         );
         assert_eq!(tense_markers(&future), 1);
+    }
+
+    #[test]
+    fn a_spanish_line_reads_as_spanish_and_an_english_one_does_not() {
+        assert!(reads_spanish("el run no relee el workflow para cada nodo"));
+        assert!(reads_spanish("una sesión que escribe"));
+        assert!(reads_spanish("// Lee el log y deriva el estado"));
+        assert!(reads_spanish("// Si el nodo falla, se reintenta"));
+        assert!(!reads_spanish(
+            "/// Whether the cell at `x`, `y` holds nothing."
+        ));
+        assert!(!reads_spanish(
+            "see docs/design/adr/D06-una-decision-de-el.md for it"
+        ));
+        assert!(!reads_spanish(
+            "a session writes what its scope names, per se"
+        ));
+        assert!(!reads_spanish("the es2015 target, solo mode, et al"));
+    }
+
+    /// Spanish prose counts in the markdown and the agent docs, and only a
+    /// Rust comment is prose in a source file.
+    #[test]
+    fn spanish_counts_in_the_docs_and_only_as_prose_in_the_code() {
+        let root = scratch_tree(
+            "spanish",
+            &[
+                (
+                    "docs/guide.md",
+                    "el run no relee el workflow para cada nodo\n",
+                ),
+                (
+                    "crates/a/src/lib.rs",
+                    "// el run no relee el workflow para cada nodo\nlet x = \"el que la\";\n",
+                ),
+                (".agents/open.md", "una sesión que escribe\n"),
+            ],
+        );
+        assert_eq!(spanish_prose_lines(&root), 3);
+    }
+
+    /// An agent doc is rewritten in place, so a date or a "no longer" in one
+    /// counts; the user docs keep their own history words.
+    #[test]
+    fn a_date_or_a_no_longer_counts_in_an_agent_doc_and_nowhere_else() {
+        let root = scratch_tree(
+            "living",
+            &[
+                ("AGENTS.md", "As of 2026-10-20 the map is here.\n"),
+                (".agents/choices.md", "The engine no longer names a mode.\n"),
+                (".agents/skills/x/SKILL.md", "Written 2026-10-20.\n"),
+                (
+                    "docs/guide.md",
+                    "The flag no longer exists since 2026-10-20.\n",
+                ),
+            ],
+        );
+        assert_eq!(tense_markers(&root), 2);
+        assert!(names_a_date("on 2026-10-20"));
+        assert!(!names_a_date("version 0.0.5, 2026"));
+    }
+
+    #[test]
+    fn an_image_under_docs_is_not_read_as_prose() {
+        let root = scratch_tree("image", &[("docs/x.md", "plain words\n")]);
+        std::fs::write(
+            root.join("docs/x.png"),
+            [0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe],
+        )
+        .unwrap();
+        assert_eq!(banned_vocabulary(&root), 0);
     }
 }

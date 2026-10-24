@@ -35,14 +35,21 @@ pub struct ArtifactWrittenPayload {
 }
 
 /// What a session offered as a whole document, and what the engine
-/// answered.
+/// answered. Every hand-over is kept, accepted or refused; one accepted is
+/// also an `artifact_accepted` of origin `submitted`, the artifact the run
+/// holds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArtifactSubmittedPayload {
+    /// The name of the document's view, `<kind>.yaml`: the node declares
+    /// the kind, so a hand-over names nothing of its own.
     pub name: String,
     /// Named `artifact_kind`, not `kind`, for the reason
     /// [`ArtifactWrittenPayload`] gives: the envelope's own tag already
     /// claims `kind` in the serialized JSON.
     pub artifact_kind: crate::workflow::ArtifactKind,
+    /// Accepted, with the hash of the canonical document the run stores; or
+    /// refused, with the whole report, so what was refused and why reads
+    /// off the log.
     pub outcome: SubmissionOutcome,
     /// What the engine ran to prove the document, task by task: how each
     /// criterion answered on the tree it ran on, which a later invocation
@@ -89,8 +96,12 @@ pub enum SubmissionOutcome {
 /// the payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArtifactAcceptedPayload {
+    /// What the artifact is: what a reader asks for it by.
     pub artifact: ArtifactId,
+    /// The hash of the accepted bytes, the object under `objects/` that
+    /// holds them.
     pub content_hash: ContentHash,
+    /// How the run came by it.
     pub origin: ArtifactOrigin,
 }
 

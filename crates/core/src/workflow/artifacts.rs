@@ -190,6 +190,12 @@ impl fmt::Display for ArtifactRefId {
 /// it only checks for existence. The kind fixes the document's shape, so
 /// it is what every door — the workflow's own `kind:`, `yunta schema`,
 /// the `document_shape` tool, a failed read's report — names it by.
+///
+/// The bar for another kind is high: a document whose data the engine
+/// needs, to decide or to count — never one it only carries. A file it
+/// only carries is opaque: the engine knows that it exists and what it
+/// hashes to, and its structure is its writer's, which is why the
+/// knowledge a run distills stays prose for a person and an agent to read.
 #[derive(
     Debug,
     Clone,

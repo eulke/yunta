@@ -40,7 +40,10 @@ pub enum PauseReason {
     LoopOverrun { node: NodeId, cap: u32 },
     /// A gate is published and the forge has not answered it.
     ExternalGate { url: String },
-    /// A resume found nodes still running whose fate it cannot tell.
+    /// A resume found nodes still running whose fate it cannot tell: each
+    /// declares `on_interrupt: fail_if_uncertain`, because its effect is
+    /// not safe to repeat, and a person verifies how it ended before
+    /// resuming. One such node holds back the whole resume.
     UncertainOrphans { nodes: Vec<NodeId> },
     /// A node failed and nothing re-routed it.
     NodeFailed { node: NodeId, failure: Failure },

@@ -2,6 +2,18 @@
 //! request, a location a red criterion printed, or a node's offer. The engine
 //! gathers the facts; this module says what they mean, and a refusal is a
 //! typed [`Denial`].
+//!
+//! A request is decided whole, the same whoever decides it. Protection is
+//! read first: a request that reaches a path no person may grant is refused
+//! with every protected path it reached and why, even where a red output
+//! locates the rest, since a partial grant would let the session write what
+//! its close still refuses. One whose only protected paths are instruction
+//! files waits for a person under `ask` and `rules`, and is refused under
+//! `deny`. A loop has no ceiling of its own: a task's scope bounds what it
+//! writes, and the project's `permissions.paths.deny` what no run writes.
+//! `max_per_run` counts the grants the engine decides, by rule or by
+//! evidence: a person's answer is not the engine widening a run, so it
+//! spends none of the cap.
 
 use std::fmt;
 use std::path::PathBuf;

@@ -275,10 +275,9 @@ impl RunEventsFilter {
     }
 }
 
-/// `tasks: {}` — no parameters in the current resolution
-/// (the aggregate task-status view; see the node's own doc
-/// comment on `context` for the task-scoped variant this doesn't cover
-/// yet).
+/// `tasks: {}` — the state of every task the run registered, one line
+/// each; it takes no parameters. A task's own session reads its task
+/// through its run tools instead.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TasksParams {}
@@ -345,9 +344,6 @@ pub struct NodeOutputParams {
     pub node: NodeId,
 }
 
-/// `permissions: read-only | edit | full` at node level — maps 1:1 onto
-/// the adapter's session profile. The names come
-/// straight from the reference schema's own spelling.
 /// `scope_expansion:` — governs how a loop's tasks may
 /// grow past their own declared scope. `mode` decides what a request may
 /// get; `max_per_run` caps how many expansions the engine may grant in one

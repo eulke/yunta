@@ -30,8 +30,8 @@ are valid there. A mistyped key never silently becomes a default.
 - **`loop`** — drives a tasks document (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [tasks schema](design/spec-tasks.md) for what a task looks
-  like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
+  `1`, sequential). `yunta schema tasks` prints what a task looks like, each field
+  annotated — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
   you write one by hand while you're still designing the workflow. The loop works
   from whichever tasks document the run holds, however it came by one: produced
   by a node, given as a `type: document` input, mounted in from a parent, or
@@ -63,8 +63,10 @@ are valid there. A mistyped key never silently becomes a default.
   next time it wakes on the machine that holds it (`yunta resume <run>`).
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
-  interrupted). Children needing to compare notes mid-flight (not just after `join`)
-  set `coordination: blackboard` on the group — see [MCP per-run tools](#mcp) below.
+  interrupted). With `coordination: blackboard` the children post to a blackboard of
+  the group's own, and a sibling's posts are read only once the group joins, so no
+  child's judgment anchors another's while they work — see [MCP per-run tools](#mcp)
+  below.
 - **`executor`** — the extension point for anything `bash`'s bare exit code and
   `check`'s closed builtin list don't cover: `executor: <name>` (declared in
   `skills.executors:`) gets `with:` as JSON on stdin and returns a verdict as JSON on
@@ -109,12 +111,17 @@ failure goes straight to the run's `defaults.on_failure`.
 
 ## Scope and permissions
 
-`scope: [globs]` on a `prompt` or `loop` node is a hard post-check boundary: after
-the session closes, the engine diffs what actually changed against those globs. An
-edit outside `scope` fails the node — not a warning, not something the agent can talk
-its way past. That diff is the *only* thing enforcing scope: no adapter today blocks
-an out-of-scope write while it happens, so an agent can write outside `scope` and the
-node fails afterward for it.
+`scope: [globs]` on a `prompt` or `loop` node bounds what its sessions may write, at
+two moments. While a session works, its fence refuses a file-tool write outside
+`scope` before it happens: the CLI's hook asks the run's engine about each write, and
+the agent is told why and what to do instead — ask for more scope, or report a
+finding (see [What a session may write](adapters.md#what-a-session-may-write)). After
+the session closes, the engine diffs what actually changed against those globs, and
+an edit outside `scope` fails the node — not a warning, not something the agent can
+talk its way past. That diff is the guarantee: the fence judges the CLI's file tools,
+while a session's commands are confined by directory, so a command of an `edit`
+session can still write outside `scope` inside its checkout, and the node fails
+afterward for it.
 
 `scope: run` declares a node's reach without naming a path: it may change what the
 run has changed since its base, as that stands when the node starts. It is the scope
@@ -170,14 +177,18 @@ one, so no workflow fails for lacking it.
 Once a run holds a [spec](#artifacts-the-engine-reads), every file of it is denied the same way to
 every session of the run — the tests a person approved stay as approved through
 the pull request. A lint command that rewrites files fails over one of them like
-over any denied path. The trees an agent's CLI loads its own settings, hooks and
-MCP servers from — `.claude/**` and `.mcp.json` for Claude Code, `.codex/**` and
-`.agents/**` for Codex — are denied the same way to every run, whichever CLI it
-uses: a checkout outlives the session that writes one, and the next session to
-open there would run what it says outside its sandbox. `AGENTS.md` and
-`CLAUDE.md`, at any depth, are denied to every session too, because an agent
-reads them as its instructions. A person can grant those two, for the scope they
-are asked for, and nothing else that is protected. Git-ignored files under these
+over any denied path. The trees an agent's CLI loads its own settings, hooks,
+skills and MCP servers from — `.claude/**` and `.mcp.json` for Claude Code,
+`.codex/**` and `.agents/skills/**` for Codex — are denied the same way to every
+run, whichever CLI it uses: a checkout outlives the session that writes one, and
+the next session to open there would run what it says outside its sandbox. The
+rest of `.agents/` is your project's: a run writes it when a task's scope names
+it. `AGENTS.md` and `CLAUDE.md`, at any depth, are denied to every session too,
+because an agent reads them as its instructions. A person can grant those two,
+for the scope they are asked for, unless they sit inside one of the trees above,
+and nothing else that is protected. A link the project commits at
+one of these paths protects what it points to inside the checkout the same way,
+since the CLI reads through it. Git-ignored files under these
 trees, or an instruction file, count as written: a `.gitignore` entry does not
 hide one from the check. The check does not enter a directory your project ignores
 whole, such as a build output or a dependency tree, to look for an instruction
@@ -482,7 +493,7 @@ node, so a session can see its meaning survived the parse.
 
 The same shape is available anywhere else you need it:
 
-```
+```bash
 yunta schema                    # the kinds
 yunta schema tasks              # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
@@ -521,6 +532,26 @@ repo's own copy, or remove one of the packs. A knowledge path that leaves its
 pack is refused when the run is created, naming the path. An org layer with no
 knowledge packs installed simply contributes nothing, same as a user layer with
 an empty `~/.yunta/knowledge/`.
+
+## Skills
+
+`skills:` on a node (or under `node_defaults`, and `skills.always` in the config for
+every session) names skills by their directory under `skills.paths`, which is
+`.yunta/skills` unless the config says otherwise. A run freezes each skill it names
+when it is created, and every session mounts that frozen copy where its CLI loads
+skills — `.claude/skills/` for Claude Code, `.agents/skills/` for Codex — so each
+session of the run reads the same skill. No run writes those mount roots: they are
+what the CLIs load as their own configuration.
+
+### Iterating a skill
+
+A workflow can improve a skill. Its source under `.yunta/skills/<name>/` is the
+project's, so a task whose `scope` names `.yunta/skills/<name>/**` edits it, and its
+`criteria` run the skill's own checks against the file in the task's checkout. A
+later task of the same run reads the revision as a file, from the tree its checkout
+is born from. As a mounted skill, the revision reaches the next run: one created
+from a checkout that holds it mounts it, while every session of this run keeps the
+copy frozen when the run was created.
 
 ## Hooks
 
@@ -779,14 +810,16 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   its plan declares, and nothing else supplies, stops that criterion holding the
   task, and no task departs from the suite the run measured, which holds every one
   (a loop therefore needs a runner that
-  can hold these tools); `yunta_check_scope` and `yunta_request_scope_expansion` for
-  the session of a node that declares `scope:`, which audits its work against that
-  scope and asks a person to widen it rather than writing outside it;
+  can hold these tools); `yunta_check_scope` for the session of a node that declares
+  `scope:` and writes the checkout, which audits its work against that scope, and
+  `yunta_request_scope_expansion` for that session when a person may widen the scope
+  on this run, which asks for it rather than writing outside it;
   a `yunta_submit_<kind>` tool for each submittable kind the node declares under
   `artifacts.produces` (see [artifacts the engine reads](#artifacts-the-engine-reads));
   and `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own
-  children (scoped to that group, and only visible after `join` — never mid-flight
-  cross-talk that would anchor the group's judgments on each other).
+  children (scoped to that group: while the group runs, a member reads only its own
+  posts, and the whole board reaches the nodes after the `join`, ordered by what was
+  posted rather than when, so the outcome never depends on which session posted first).
 
 ## Authoring patterns
 
@@ -795,7 +828,7 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A task's `criteria` (see the [tasks schema](design/spec-tasks.md#21-criteria)) run
+A task's `criteria` (`yunta schema tasks` annotates each field) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip. A narrow criterion says *what* the task did;
@@ -926,7 +959,7 @@ and publishing your own.
 
 This guide covers what's needed to write and reason about a workflow. See
 [the documentation index](README.md) for adapters, troubleshooting, and the
-compatibility policy. The full normative schema — every field, every
-validation rule `yunta check` enforces, the event log's exact payloads, and
-the rationale behind design choices — lives in the design corpus under
-[`docs/design/`](design/README.md).
+compatibility policy. Every key of the config and the workflow language, each
+with a value, is in [the reference](reference.md); `yunta schema <kind>` prints
+each document a session hands over, and `yunta check` says which rule a
+workflow breaks.

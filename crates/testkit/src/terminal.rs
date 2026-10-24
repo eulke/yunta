@@ -124,6 +124,11 @@ impl Terminal {
 
     /// Waits until `needle` has been drawn, failing with `what` and
     /// everything drawn so far.
+    ///
+    /// It returns once `needle` is among what was drawn, which says a
+    /// redraw began, never that it ended: a test that then counts the rows
+    /// a redraw wrote or erased can read it half written under load. Wait
+    /// for what the redraw writes last instead.
     pub fn wait_for(&self, needle: &str, what: &str) {
         wait_until(
             || self.drawn().contains(needle),
