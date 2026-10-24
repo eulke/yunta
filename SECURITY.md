@@ -42,6 +42,6 @@ General bugs that don't have a security impact belong in a regular issue.
 
 ## Supported Versions
 
-Until the first tagged release, only the `main` branch is supported. Once
-releases exist, see the compatibility policy (`docs/compatibility.md`) for
-how many versions back get security fixes.
+Fixes land on `main` and ship in the next tagged release (`vX.Y.Z`), which
+`install.sh` installs by default. The compatibility policy
+(`docs/compatibility.md`) says what a release keeps from the one before it.

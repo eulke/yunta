@@ -53,10 +53,10 @@ yunta check acme/review
 The reference pack's workflow is `fragua.yaml`, so run it with
 `yunta run yunta/fragua` after installing the pack.
 
-The same form works inside a workflow (`use: acme/qa-review`) and a
-node's `skills:` list (`skills: [acme/review-rubric]`), and an agent a pack
-declares under `contents.agents` is named the same way in `agent:`
-(`agent: acme/auditor`). Resolution always
+The same form works inside a workflow (`use: acme/qa-review`), and an agent
+a pack declares under `contents.agents` is named the same way in `agent:`
+(`agent: acme/auditor`). A node's `skills:` list takes a bare name, which
+resolves under `skills.paths`. Resolution always
 tries the repo's own `.yunta/workflows/` first — a repo file at the same
 `publisher/name` path always wins over the pack: a local workflow with the
 same name shadows the one from the pack. `yunta list` reflects the same
@@ -138,7 +138,7 @@ and runs it, so the scaffold passes from the first command. Or copy the
 shape of [`packs/starter`](../packs/starter) (the smaller of the two
 examples) and adjust:
 
-```
+```text
 my-pack/
   pack.yaml
   README.md

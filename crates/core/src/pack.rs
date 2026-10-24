@@ -23,13 +23,12 @@ use crate::schema_range::SchemaRange;
 use crate::workflow::NodePermissions;
 
 /// The pack's own identity: `publisher/name`, invoked as
-/// `yunta run acme/review`, composed as `use: acme/qa-review`,
-/// referenced as `skills: [acme/review-rubric]`. Kept as two plain
-/// fields rather than one combined id — `publisher` and `name` are
-/// independently meaningful (namespacing, `permissions.packs.publishers`
-/// matches on `publisher` alone) and forcing every caller to split a
-/// combined string back apart would just move the parsing problem
-/// around instead of solving it.
+/// `yunta run acme/review` and composed as `use: acme/qa-review`. Kept
+/// as two plain fields rather than one combined id — `publisher` and
+/// `name` are independently meaningful (namespacing,
+/// `permissions.packs.publishers` matches on `publisher` alone) and
+/// forcing every caller to split a combined string back apart would
+/// just move the parsing problem around instead of solving it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackManifest {

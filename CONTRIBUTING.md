@@ -32,6 +32,15 @@ git diff -- crates/cli/goldens crates/engine/goldens crates/render/goldens
 The toolchain is pinned in `rust-toolchain.toml`. See
 `.github/workflows/ci.yml` for the current CI checks.
 
+## Releases
+
+A release is a pushed `vX.Y.Z` tag. `.github/workflows/release.yml` runs every
+step of the `ci` job on it, then builds the binary for each platform (Linux
+x86_64 and aarch64 as static musl binaries, macOS x86_64 and aarch64) and
+starts each one in a clean container or on a fresh runner. Only once all of
+that passes does it publish the GitHub release, each binary with
+`checksums.txt`, which `install.sh` verifies before it installs one.
+
 ## Pull requests
 
 Keep a pull request focused on one topic. Explain what changed, why, and what

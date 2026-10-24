@@ -1,26 +1,53 @@
-# The canonical reference workflow
-# as a parse fixture — exercises the full round-trip criterion,
-# including `runners:`.
+# A workflow that takes a feature from its brief to a pull request, written to
+# show every node kind but `workflow` and `parallel` and every key a node takes.
 name: build-feature
 description: Complete feature with grill, verified tasks document, multi-runner review and PR
-yunta_schema: ">=1 <2"
-inputs:
+yunta_schema: ">=1 <2"              # the schema versions it is written for; absent, the binary's
+inputs:                             # each input has a type, and only that type's fields
   idea:
     type: string
     required: true
-    description: "What to build — it becomes the brief"
+    description: "What to build; it becomes the brief"
+    min_length: 10
+  ticket:
+    type: string
+    pattern: "^[A-Z]+-[0-9]+$"
+    default: WEB-1
+  audience:
+    type: enum
+    values: [internal, public]
+    default: internal
+  max_tasks:
+    type: number
+    min: 1
+    max: 20
+    default: 8
+  notes:
+    type: path
+    default: docs/architecture.md
 
-modes:
-  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
-  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
-  full:     { include: all }
+modes:                              # their names and number are the author's, and their order
+                                    # is the ladder a run is promoted along
+  quick:
+    include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr]
+    ask: required                   # which question rounds stop the run: always (the default)
+                                    # or required; a node's own `ask` wins
+  standard:
+    include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, coverage,
+              licenses, review, fix-findings, findings, ship, pr]
+  full: { include: all }
 
 node_defaults:
   hooks:
+    before:
+      - { run: "cargo fetch", on_failure: warn, timeout_seconds: 120 }
     after:
       - run: "cargo fmt"
+  cli_config: isolated              # inherit (the default) | isolated: whether sessions load the
+                                    # CLI configuration of the person who runs them; a node may
+                                    # say its own
 
-nodes:
+nodes:                              # an id is a letter, then letters, digits, `_` or `-`
   - id: grill
     kind: prompt
     runner: planner
@@ -29,7 +56,8 @@ nodes:
       Identify the ambiguities in "{{inputs.idea}}" and write the questions
       needed as an artifact; do not converse.
     artifacts:
-      produces: [questions]
+      produces: [questions]         # a node that asks declares nothing else; it may say
+                                    # ask: always | required
 
   - id: brief
     kind: prompt
@@ -38,24 +66,27 @@ nodes:
     context:
       - artifact: { node: grill, kind: questions }
       - artifact: { node: grill, kind: answers }
+      - files: [{ path: "{{inputs.notes}}", optional: true }]   # optional: done without it
     prompt: |
       Write the brief for "{{inputs.idea}}" from the questions and their
-      answers.
+      answers, for {{inputs.audience}} readers, sized for at most
+      {{inputs.max_tasks}} tasks.
     artifacts:
       produces: [brief.md]
 
   - id: plan
     kind: prompt
     runner: planner
+    effort: xhigh                   # over the effort of whichever candidate resolves
     permissions: read-only
     depends_on: [brief]
     context:
       - artifact: { node: brief, name: brief.md }
-      - knowledge: {}
+      - knowledge: { layers: [repo, user] }
       - files: ["docs/architecture.md"]
       - command: "git log --oneline -20"
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
-    prompt: { file: prompts/plan.md }
+    prompt: { file: prompts/plan.md }   # or the prompt inline, as a string
     artifacts:
       produces: [tasks]
 
@@ -65,8 +96,8 @@ nodes:
     assignee: lead
     message: "Plan recorded. Do you approve?"
     options: [approve, adjust]
-    on: { adjust: plan }
-    shows: [{ node: plan, kind: tasks }]
+    on: { adjust: plan }            # asks what to change, and resumes plan's session with it
+    shows: [{ node: plan, kind: tasks }]   # the plan approved, bound to its hash
 
   - id: implement
     kind: loop
@@ -74,17 +105,18 @@ nodes:
     depends_on: [approve-plan]
     until: all_tasks_complete
     invariant: true
-    concurrency: 2
-    scope_expansion:
+    concurrency: 2                  # tasks at once, with disjoint scopes; the default is 1
+    scope_expansion:                # deny when absent
       mode: ask
-      max_per_run: 3
+      max_per_run: 3                # counts only the grants the engine decides
     prompt: |
       Read your task in the tasks document. Implement it within its scope.
 
   - id: lint
     kind: bash
     invariant: true
-    optional: true
+    optional: true                  # without commands.lint, the run goes on without this node
+    network: false                  # no network for this node; absent, permissions.network decides
     depends_on: [implement]
     run: { command: lint }
     on_failure: { goto: fix-lint, max_reroutes: 1 }
@@ -94,18 +126,31 @@ nodes:
     runner: mechanical
     context: [{ node-output: { node: lint } }]
     prompt: "Fix only the errors in the report."
-    scope: run
+    scope: run                      # what the run has changed so far
 
   - id: tests
     kind: check
-    builtin: baseline_compare
+    builtin: baseline_compare       # fails when something that passed on the base stops passing
     invariant: true
     depends_on: [lint]
 
+  - id: coverage
+    kind: check
+    builtin: coverage_gate          # runs coverage.cmd, and fails under coverage.threshold
+    depends_on: [tests]
+
+  - id: licenses
+    kind: executor
+    executor: license-scan          # declared under skills.executors
+    with: { deny: [AGPL-3.0] }      # handed to it as JSON on stdin; its verdict is JSON on stdout
+    timeout_seconds: 600
+    depends_on: [coverage]
+
   - id: review
     kind: prompt
-    depends_on: [tests]
-    runners: [reviewer, reviewer-alt]
+    depends_on: [licenses]
+    runners: [reviewer, reviewer-alt]   # one node per runner, before anything runs
+    agent: auditor                  # over the agent each candidate names
     permissions: read-only
     prompt: "Audit the changes and report each finding."
     artifacts:
@@ -116,19 +161,29 @@ nodes:
     runner: executor
     depends_on: [review]
     context:
-      - run-events: { filter: findings }
+      - run-events: { filter: findings }   # the findings as data, never as prose
+      - tasks: {}                   # the tasks document, each task with its status
     prompt: "Fix the blocking findings; document each dismissed one with its reason."
+
+  - id: findings
+    kind: check
+    builtin: findings_gate          # fails while a finding no proof or person settled
+    max_severity: blocking          # stands at this severity or above
+    depends_on: [fix-findings]
 
   - id: ship
     kind: gate
-    depends_on: [fix-findings]
+    depends_on: [findings]
     assignee: lead
     message: "Create the PR?"
 
   - id: pr
-    kind: pull_request
+    kind: pull_request              # pushes the run's branch and opens the PR on the forge
     depends_on: [ship]
+    on_interrupt: fail_if_uncertain # cut off mid-push, it fails as uncertain, never pushes again
     title: "{{inputs.idea}}"
+    body: "Closes {{inputs.ticket}}."
+    receipt: true                   # the body carries the run's receipt
 
 on_finish:
   - cleanup: worktree

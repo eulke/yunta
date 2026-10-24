@@ -86,10 +86,10 @@ fn the_readme_command_table_names_exactly_the_subcommands_the_binary_has() {
 /// `build-feature` as the reference writes it, plus the two names it
 /// reaches for which no document spells out.
 fn check_project() -> Checkout {
-    let build_feature = fenced_blocks(&reference_schema(), "yaml")
+    let build_feature = fenced_blocks(&reference(), "yaml")
         .into_iter()
-        .find(|block| block.text.starts_with("name: build-feature"))
-        .expect("the reference schema shows the workflow its composition builds with");
+        .find(|block| block.text.lines().any(|line| line == "name: build-feature"))
+        .expect("the reference shows the workflow its composition builds with");
     let stub = |name: &str| {
         format!("name: {name}\nnodes:\n  - {{ id: only, kind: bash, run: \"true\" }}\n")
     };
@@ -101,7 +101,8 @@ fn check_project() -> Checkout {
              \x20 mechanical: [{ adapter: mock, model: m }]\n\
              \x20 reviewer: [{ adapter: mock, model: m }]\n\
              \x20 reviewer-alt: [{ adapter: mock, model: m }]\nbaseline: { suite: \"true\" }\n\
-             commands: { lint: \"true\", fmt: \"true\" }\n\
+             commands: { lint: \"true\", fmt: \"true\" }\ncoverage: { cmd: \"true\", threshold: 0 }\n\
+             skills: { executors: [{ name: license-scan, kind: binary, path: .yunta/bin/license-scan }] }\n\
              forge: { github: { repo: acme/web, token_env: GITHUB_TOKEN } }\n",
         )
         .file(".yunta/workflows/build-feature.yaml", &build_feature.text)
@@ -156,19 +157,19 @@ fn case_runs(case_text: &str, origin: &str) {
     );
 }
 
-/// The reference schema is the one document whose job is to show every
-/// key with a real value, so the config it shows is one the parser takes
+/// The reference is the one document whose job is to show every key with
+/// a real value, so the config it shows is one the parser takes
 /// — a limit written the way a person reads it is a limit nobody can
 /// copy — and every workflow it shows is one `yunta check` accepts,
 /// the composition included: its `use:` names three workflows, and a
 /// composition whose parts no catalog holds is a shape nobody can run.
 #[test]
 fn the_reference_config_parses_and_its_workflows_check() {
-    let blocks = fenced_blocks(&reference_schema(), "yaml");
+    let blocks = fenced_blocks(&reference(), "yaml");
     let config = blocks
         .iter()
         .find(|block| has_top_level_key(&block.text, "limits"))
-        .expect("the reference schema shows the config with its limits");
+        .expect("the reference shows the config with its limits");
     let _: yunta_core::ConfigLayer = yunta_core::yaml::parse(&config.text)
         .unwrap_or_else(|e| panic!("{}: not a config layer: {e}", config.origin));
 
@@ -183,7 +184,7 @@ fn the_reference_config_parses_and_its_workflows_check() {
     }
     assert_eq!(
         checked, 2,
-        "the reference schema shows a workflow and the composition built on it"
+        "the reference shows a workflow and the composition built on it"
     );
 }
 
@@ -239,10 +240,10 @@ fn every_yaml_example_in_the_docs_is_one_the_binary_accepts() {
     );
 }
 
-/// The reference schema: the one document whose job is to show every
-/// key of the language with a real value.
-fn reference_schema() -> PathBuf {
-    repo_root().join("docs/design/referencia-schema.md")
+/// The reference: the one document whose job is to show every key of the
+/// config and the workflow language with a real value.
+fn reference() -> PathBuf {
+    repo_root().join("docs/reference.md")
 }
 
 /// One of the design documents, by file name.

@@ -316,7 +316,7 @@ stopping at the first failure. Each check is a row: `✓` when it holds, `▲` w
 it is worth a look and stops nothing, `✗` when a run would stop on it — and
 `doctor` exits non-zero only for a `✗`:
 
-```
+```text
   ✓ claude-code  healthy (1.2.3)
   ✗ codex        unhealthy — `codex` not found on PATH
 ```
@@ -325,7 +325,7 @@ A config whose `runners:` names no adapter has nothing to probe, and `doctor`
 says so with the runner to declare, on the adapter CLIs this machine answers for
 and the model left for you to name:
 
-```
+```text
   ✗ runners  none declared, and `lint-fix` needs one
 
   declare a runner in .yunta/config.yaml — this machine answers for `claude-code`:
@@ -374,7 +374,7 @@ two runners naming the same one are not two things to check, and one a
 runner falls back to is checked too, since a run reaches it exactly when
 the first is down.
 
-```
+```text
 claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
 codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
 ```

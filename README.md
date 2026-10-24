@@ -17,19 +17,23 @@ workflow's `criteria` do, by running and exiting `0`.
 
 ## Install
 
-Yunta isn't published to crates.io or as a prebuilt release binary.
-[`install.sh`](install.sh) builds a static binary from source and installs it to
-`~/.local/bin`, no sudo:
+Each release publishes a binary for Linux (x86_64 and aarch64, static musl) and
+macOS (x86_64 and aarch64); Yunta isn't published to crates.io.
+[`install.sh`](install.sh) installs the latest release's binary for your platform to
+`~/.local/bin` (or `$YUNTA_INSTALL_DIR`), no sudo, once it matches the release's
+SHA-256 checksums; `YUNTA_VERSION=v0.0.5` pins a release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eulke/yunta/main/install.sh | sh
 ```
 
-Or, from a clone already on disk, `./install.sh`. On Linux it links against `musl`
+Or, from a clone already on disk, `./install.sh`. Where no release matches the
+version and the platform, the script builds a static binary from source instead,
+which needs a recent stable Rust toolchain. On Linux that build links against `musl`
 for a real static binary (no glibc dependency at runtime) — `rustup target add
 x86_64-unknown-linux-musl` plus a musl C toolchain (`apt install musl-tools` on
 Debian/Ubuntu) if you don't have one already; the script installs the Rust target
-itself. Requires a recent stable Rust toolchain either way.
+itself.
 
 For local development, plain `cargo build --release` (binary at
 `target/release/yunta`) or `cargo run -p yunta --` from the workspace root both work
@@ -181,7 +185,7 @@ work held to its plan, PR).
 | `yunta verify <run> [--json]` | Checks a run's evidence end to end, reporting the two guarantees apart: its event hash chain, recomputed from the log as persisted, and the bytes of every artifact that log accepted, read back and hashed against its own name. `--json` prints the report as one document. |
 | `yunta receipt <run> [--json]` | Generates a Verified Work Receipt for a finished run — markdown + JSON, derived entirely from the event log, written to the run's own directory; a run that failed names each node that failed and why. A `pull_request` node puts the same receipt in the pull request it opens. |
 | `yunta doctor [--session] [--json]` | Health-checks every adapter your `runners:` name — binary present, version compatible, auth valid — or, when it names none, gives the runner to declare on the adapters this machine answers for. Says who git commits a run's work as, and checks every installed pack's `requires:` against your config: runners resolvable, mcp servers defined, commands on `PATH`. It fails only on what would stop a workflow in the catalog: a runner one needs, a forge token one opening a pull request needs. `--session` goes further and opens one real session per binding, which is the only way to find out whether a CLI accepts the configuration a run writes it; it spends a prompt each. `--json` prints the report as one document. |
-| `yunta pack add <source>[@ref] [--yes] [--run-tests]` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed; nothing of the pack runs unless `--run-tests` asks for its own cases after the install. Its workflows and skills are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`, `skills: [acme/rubric]`) — see [packs](docs/packs.md). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
+| `yunta pack add <source>[@ref] [--yes] [--run-tests]` / `update <publisher>/<name> <ref> [--yes]` / `remove <publisher>/<name>` / `list` | Clones, vendors and locks a third-party pack under `.yunta/packs/`, `yunta.lock` tracking exactly what's installed; nothing of the pack runs unless `--run-tests` asks for its own cases after the install. Its workflows are then addressable as `publisher/name` (`yunta run acme/review`, `use: acme/qa-review`) — see [packs](docs/packs.md). `permissions.packs` governs both verbs: a non-empty publisher allow-list restricts sources, and the executors policy (`prompt` default: `--yes` to confirm; `deny`: refused outright; `allow`: no confirmation) gates packs that ship executable code. `check` refuses any node that exceeds the pack's own declared permissions ceiling. |
 | `yunta pack audit <publisher>/<name>` | Prints a full static inventory of a pack's own workflows — every command, context source, per-node permission, agent, mcp server, executor and full untrimmed prompt — plus whether it ships tests and whether they pass. `add` runs this automatically before vendoring. |
 | `yunta mcp` | Runs the MCP control plane over stdio: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |

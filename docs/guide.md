@@ -30,8 +30,8 @@ are valid there. A mistyped key never silently becomes a default.
 - **`loop`** — drives a tasks document (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [tasks schema](design/spec-tasks.md) for what a task looks
-  like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
+  `1`, sequential). `yunta schema tasks` prints what a task looks like, each field
+  annotated — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
   you write one by hand while you're still designing the workflow. The loop works
   from whichever tasks document the run holds, however it came by one: produced
   by a node, given as a `type: document` input, mounted in from a parent, or
@@ -63,8 +63,10 @@ are valid there. A mistyped key never silently becomes a default.
   next time it wakes on the machine that holds it (`yunta resume <run>`).
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
-  interrupted). Children needing to compare notes mid-flight (not just after `join`)
-  set `coordination: blackboard` on the group — see [MCP per-run tools](#mcp) below.
+  interrupted). With `coordination: blackboard` the children post to a blackboard of
+  the group's own, and a sibling's posts are read only once the group joins, so no
+  child's judgment anchors another's while they work — see [MCP per-run tools](#mcp)
+  below.
 - **`executor`** — the extension point for anything `bash`'s bare exit code and
   `check`'s closed builtin list don't cover: `executor: <name>` (declared in
   `skills.executors:`) gets `with:` as JSON on stdin and returns a verdict as JSON on
@@ -486,7 +488,7 @@ node, so a session can see its meaning survived the parse.
 
 The same shape is available anywhere else you need it:
 
-```
+```bash
 yunta schema                    # the kinds
 yunta schema tasks              # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
@@ -525,6 +527,26 @@ repo's own copy, or remove one of the packs. A knowledge path that leaves its
 pack is refused when the run is created, naming the path. An org layer with no
 knowledge packs installed simply contributes nothing, same as a user layer with
 an empty `~/.yunta/knowledge/`.
+
+## Skills
+
+`skills:` on a node (or under `node_defaults`, and `skills.always` in the config for
+every session) names skills by their directory under `skills.paths`, which is
+`.yunta/skills` unless the config says otherwise. A run freezes each skill it names
+when it is created, and every session mounts that frozen copy where its CLI loads
+skills — `.claude/skills/` for Claude Code, `.agents/skills/` for Codex — so each
+session of the run reads the same skill. No run writes those mount roots: they are
+what the CLIs load as their own configuration.
+
+### Iterating a skill
+
+A workflow can improve a skill. Its source under `.yunta/skills/<name>/` is the
+project's, so a task whose `scope` names `.yunta/skills/<name>/**` edits it, and its
+`criteria` run the skill's own checks against the file in the task's checkout. A
+later task of the same run reads the revision as a file, from the tree its checkout
+is born from. As a mounted skill, the revision reaches the next run: one created
+from a checkout that holds it mounts it, while every session of this run keeps the
+copy frozen when the run was created.
 
 ## Hooks
 
@@ -799,7 +821,7 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A task's `criteria` (see the [tasks schema](design/spec-tasks.md#21-criteria)) run
+A task's `criteria` (`yunta schema tasks` annotates each field) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip. A narrow criterion says *what* the task did;
@@ -930,7 +952,7 @@ and publishing your own.
 
 This guide covers what's needed to write and reason about a workflow. See
 [the documentation index](README.md) for adapters, troubleshooting, and the
-compatibility policy. The full normative schema — every field, every
-validation rule `yunta check` enforces, the event log's exact payloads, and
-the rationale behind design choices — lives in the design corpus under
-[`docs/design/`](design/README.md).
+compatibility policy. Every key of the config and the workflow language, each
+with a value, is in [the reference](reference.md); `yunta schema <kind>` prints
+each document a session hands over, and `yunta check` says which rule a
+workflow breaks.

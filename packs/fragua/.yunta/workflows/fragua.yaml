@@ -1,10 +1,11 @@
-# The full reference pipeline (yunta/fragua) — a runnable copy of the
-# schema's own canonical example (also crates/core/tests/fixtures/
-# build-feature.yaml, the parse fixture). Two deliberate trims from that
-# reference: the `mcp:` context source is dropped (it needs a live MCP
-# server, which a pack's own mock self-test has no reason to stand up)
-# and `node_defaults.hooks` is dropped (an ecosystem-specific
-# convenience, not something a reference pack needs to demonstrate).
+# The full reference pipeline (yunta/fragua), on the shape of the
+# reference workflow (crates/core/tests/fixtures/build-feature.yaml) with
+# what a pack cannot assume of a project left out: the `mcp:` context
+# source (it needs a live MCP server, which a pack's own mock self-test
+# has no reason to stand up), `node_defaults.hooks` (an
+# ecosystem-specific convenience), and the nodes the reference adds to
+# show the rest of the language: an `executor`, a `coverage_gate` and a
+# `findings_gate`.
 # Additions. `spec` writes the tests the plan's tasks are held to before
 # any is built, in the modes that approve the plan: the person approving
 # it reads the tests beside it, and nobody who builds a task writes the

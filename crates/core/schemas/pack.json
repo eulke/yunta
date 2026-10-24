@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta pack manifest",
-  "description": "The pack's own identity: `publisher/name`, invoked as\n`yunta run acme/review`, composed as `use: acme/qa-review`,\nreferenced as `skills: [acme/review-rubric]`. Kept as two plain\nfields rather than one combined id — `publisher` and `name` are\nindependently meaningful (namespacing, `permissions.packs.publishers`\nmatches on `publisher` alone) and forcing every caller to split a\ncombined string back apart would just move the parsing problem\naround instead of solving it.",
+  "description": "The pack's own identity: `publisher/name`, invoked as\n`yunta run acme/review` and composed as `use: acme/qa-review`. Kept\nas two plain fields rather than one combined id — `publisher` and\n`name` are independently meaningful (namespacing,\n`permissions.packs.publishers` matches on `publisher` alone) and\nforcing every caller to split a combined string back apart would\njust move the parsing problem around instead of solving it.",
   "type": "object",
   "properties": {
     "contents": {

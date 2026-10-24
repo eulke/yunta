@@ -8,10 +8,10 @@ end. Everything here goes deeper, organized by what you're trying to do:
 |---|---|
 | Understand how the pieces fit before diving in | [Concepts](concepts.md) |
 | Write or extend a workflow — node kinds, context, permissions, gates, modes | [Workflow guide](guide.md) |
+| Look up a key of the config or the workflow language, with a value for each | [Reference](reference.md) |
 | Configure `claude-code`/`codex`, understand `mock`, or diagnose an unhealthy adapter | [Adapters](adapters.md) |
 | Install a pack, or create and publish your own | [Packs](packs.md) |
 | Figure out why a check, a run, or a pack install refused to do something | [Troubleshooting](troubleshooting.md) |
 | Know what's safe to rely on across releases | [Compatibility](compatibility.md) |
 
-These documents describe current behavior. Contracts and earlier decisions are
-indexed under [design references](design/README.md).
+These documents describe current behavior.
