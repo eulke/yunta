@@ -1,17 +1,14 @@
-//! The documents are held to the code and the schema they describe. A
-//! claim a document makes about a closed set, a field or an open item
-//! fails here once the binary publishes something else, and the reference
-//! shows every key the config and the workflow schemas publish. This file
+//! The user docs are held to the code and the schemas they describe: the
+//! reference shows every key the config and the workflow schemas publish,
+//! every template variable and input type, and the very files the core suite
+//! parses, and every fence of the user docs says its language. This file
 //! reads the documents by name because they are its subject.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use serde_json::Value;
-use yunta_testkit::{
-    enum_variants, fenced_blocks, has_top_level_key, json_schema, markdown_files, number_before,
-    section, trait_methods,
-};
+use yunta_testkit::{fenced_blocks, has_top_level_key, json_schema, markdown_files};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -29,13 +26,6 @@ fn reference_text() -> String {
         .unwrap_or_else(|e| panic!("cannot read `{}`: {e}", path.display()))
 }
 
-/// One of the design documents, by file name.
-fn design_doc(name: &str) -> String {
-    let path = repo_root().join("docs/design").join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read `{}`: {e}", path.display()))
-}
-
 /// The config layer's example in the reference: the first YAML block that
 /// declares `limits`.
 fn reference_config() -> String {
@@ -44,50 +34,6 @@ fn reference_config() -> String {
         .find(|b| has_top_level_key(&b.text, "limits"))
         .expect("config")
         .text
-}
-
-/// The payload spec's section 5 states how many kinds the log writes: the
-/// count must be the length of the list the binary publishes.
-#[test]
-fn the_payload_spec_heading_counts_the_kinds_the_binary_writes() {
-    let spec = design_doc("spec-events.md");
-    let heading = spec
-        .lines()
-        .find(|l| l.starts_with("## 5."))
-        .expect("section 5");
-    assert_eq!(
-        number_before(heading, "tipos"),
-        Some(yunta_core::events::EventPayload::KINDS.len())
-    );
-}
-
-/// The adapter spec's event section lists exactly the variants of
-/// `AgentEvent` the port declares.
-#[test]
-fn the_adapter_spec_lists_every_agent_event() {
-    let port =
-        std::fs::read_to_string(repo_root().join("crates/core/src/port/session.rs")).unwrap();
-    let spec = section(&design_doc("spec-adapter.md"), "## 3.");
-    assert_eq!(
-        enum_variants(&spec, "AgentEvent"),
-        enum_variants(&port, "AgentEvent")
-    );
-}
-
-/// The adapter spec's trait section lists exactly the methods of `Adapter`
-/// and `AgentSession` the port declares.
-#[test]
-fn the_adapter_spec_lists_every_adapter_method() {
-    let port =
-        std::fs::read_to_string(repo_root().join("crates/core/src/port/session.rs")).unwrap();
-    let spec = section(&design_doc("spec-adapter.md"), "## 2.");
-    for name in ["Adapter", "AgentSession"] {
-        assert_eq!(
-            trait_methods(&spec, name),
-            trait_methods(&port, name),
-            "{name}"
-        );
-    }
 }
 
 /// Every `on_interrupt` value the workflow schema accepts appears in the
@@ -186,6 +132,41 @@ fn the_reference_names_every_input_type() {
             reference.contains(&format!("`{name}`")),
             "the reference names no input type `{name}`"
         );
+    }
+}
+
+/// Every builtin a `check` node may name is shown in the reference.
+#[test]
+fn the_reference_names_every_check_builtin() {
+    let reference = reference_text();
+    let schema = json_schema(&repo_root().join("crates/core/schemas/workflow.json"));
+    let mut builtins = BTreeSet::new();
+    builtin_consts(&schema, &mut builtins);
+    assert_eq!(builtins.len(), 3, "{builtins:?}");
+    for name in builtins {
+        assert!(
+            reference.contains(&format!("builtin: {name}")),
+            "the reference shows no `check` with `builtin: {name}`"
+        );
+    }
+}
+
+/// The `const` every `builtin` property of the schema fixes.
+fn builtin_consts(node: &Value, out: &mut BTreeSet<String>) {
+    match node {
+        Value::Object(map) => {
+            if let Some(name) = map
+                .get("properties")
+                .and_then(|properties| properties.get("builtin"))
+                .and_then(|builtin| builtin.get("const"))
+                .and_then(Value::as_str)
+            {
+                out.insert(name.to_string());
+            }
+            map.values().for_each(|inner| builtin_consts(inner, out));
+        }
+        Value::Array(items) => items.iter().for_each(|inner| builtin_consts(inner, out)),
+        _ => {}
     }
 }
 
@@ -300,11 +281,7 @@ fn the_reference_shows_the_files_the_core_suite_parses() {
 fn every_fence_in_the_user_docs_says_its_language() {
     let root = repo_root();
     let mut files = vec![root.join("README.md"), root.join("SECURITY.md")];
-    files.extend(
-        markdown_files(&root.join("docs"))
-            .into_iter()
-            .filter(|file| !file.starts_with(root.join("docs/design"))),
-    );
+    files.extend(markdown_files(&root.join("docs")));
     for file in files {
         let text = std::fs::read_to_string(&file).unwrap();
         let mut inside = false;
@@ -321,12 +298,4 @@ fn every_fence_in_the_user_docs_says_its_language() {
             inside = !inside;
         }
     }
-}
-
-/// The open section of the debt register names no item as closed. The
-/// capital letter keeps the lowercase form of the closed-item word, which an
-/// open item's prose uses, from matching.
-#[test]
-fn the_open_debt_names_no_closed_item() {
-    assert!(!section(&design_doc("deuda-consciente.md"), "## Abiertos").contains("Cerrad"));
 }

@@ -22,7 +22,7 @@ every state from it, and what a person reads is drawn from that data by `yunta-r
 | `yunta` | the commands | core, storage, engine, adapters, render |
 | `yunta-testkit-core` | test scaffolding for the crates below the engine | core |
 | `yunta-testkit` | the whole-run test harness | core, testkit-core, storage, adapters, engine |
-| `xtask` | smells, the docs checker, schemas, the decision index | core |
+| `xtask` | smells, the docs checker, schemas | core |
 
 `yunta-engine`'s `[dependencies]` never name `yunta-adapters` or `yunta-render`; its tests may.
 `cargo xtask docs --check` holds this table to every member's manifest.

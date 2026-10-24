@@ -9,16 +9,11 @@
 //!   `smells --check` fails when a count rises above that baseline or the merge
 //!   base's.
 //! - `docs` is the docs checker: `docs --check` holds the agent docs and the map
-//!   to their shapes, and the fates of the design corpus's rules to their
-//!   destinations (`--complete` holds the corpus to them whole); `docs --about
-//!   <paths>` prints what the docs record about those paths.
-//! - `adr` derives the index of the decision records from the decision files
-//!   and proves what they say about each other; `adr --check` fails when the two
-//!   disagree.
+//!   to their shapes, and `docs --about <paths>` prints what they record about
+//!   those paths.
 //!
-//! All four checks run in CI.
+//! All three checks run in CI.
 
-mod adr;
 mod docs;
 mod smells;
 
@@ -39,10 +34,7 @@ fn main() -> ExitCode {
         ["schema", "--check"] => schema(Mode::Check),
         ["smells"] => smells::write(),
         ["smells", "--check"] => smells::check(),
-        ["adr"] => adr::run(Mode::Write),
-        ["adr", "--check"] => adr::run(Mode::Check),
-        ["docs", "--check"] => docs::check(false),
-        ["docs", "--check", "--complete"] => docs::check(true),
+        ["docs", "--check"] => docs::check(),
         ["docs", "--about", paths @ ..] => docs::about(
             &paths
                 .iter()
@@ -50,7 +42,7 @@ fn main() -> ExitCode {
                 .collect::<Vec<_>>(),
         ),
         _ => Err(
-            "usage: cargo xtask <schema|smells|adr> [--check] | docs <--check [--complete]|--about [<paths>]>"
+            "usage: cargo xtask <schema|smells> [--check] | docs <--check|--about [<paths>]>"
                 .to_string(),
         ),
     };

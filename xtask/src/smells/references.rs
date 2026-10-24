@@ -14,12 +14,8 @@ use regex::Regex;
 /// Files that read documents by name: the documents are their subject.
 const EXEMPT: &[&str] = &[
     "crates/cli/tests/docs_sync.rs",
-    "crates/cli/tests/tasks_spec_sync.rs",
     "crates/cli/tests/doc_claims.rs",
     "crates/core/tests/vocabulary.rs",
-    // The decision index reads and writes the decisions by number.
-    "xtask/src/adr.rs",
-    "xtask/src/adr/",
     // The docs checker holds the agent docs by name: they are its subject.
     "xtask/src/docs.rs",
     "xtask/src/docs/",

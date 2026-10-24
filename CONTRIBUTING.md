@@ -16,7 +16,6 @@ cargo xtask schema                     # regenerates crates/core/schemas/ after 
 cargo run -p xtask -- smells --check   # no smell count rose above the baseline or the merge base's
 cargo run -p xtask -- smells           # lowers the baseline to what the tree counts; refuses a rise
 cargo run -p xtask -- docs --check     # the agent docs and the map hold their shapes
-cargo run -p xtask -- docs --check --complete   # and every rule of docs/design has its fate
 cargo run -p xtask -- docs --about <files>   # what the agent docs record about those files
 ```
 
@@ -41,6 +40,15 @@ x86_64 and aarch64 as static musl binaries, macOS x86_64 and aarch64) and
 starts each one in a clean container or on a fresh runner. Only once all of
 that passes does it publish the GitHub release, each binary with
 `checksums.txt`, which `install.sh` verifies before it installs one.
+
+## Where a rule came from
+
+A rule stands in the code that holds it, and why it changed is in the commit
+that changed it. The design records the project kept before that, in Spanish,
+are in git under three tags: `archive/design-corpus` holds them as they last
+stood, `archive/design-fates` holds them beside the table of where each of
+their rules went, and `archive/improve-ux` holds, one by one, the commits of the
+engine's rebuild that its merge squashed into one.
 
 ## Pull requests
 

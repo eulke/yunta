@@ -45,6 +45,7 @@ pub(super) fn all(repo: &Repo, docs: &Docs) -> Result<Vec<String>, String> {
     problems.extend(crate_maps(repo)?);
     problems.extend(reach_notes(repo)?);
     problems.extend(separation(repo)?);
+    problems.extend(no_design_records(repo));
     problems.extend(instructions(repo));
     Ok(problems)
 }
@@ -655,10 +656,7 @@ pub(super) fn rust_files(repo: &Repo) -> Vec<&str> {
 fn separation(repo: &Repo) -> Result<Vec<String>, String> {
     let mut problems = Vec::new();
     let user_docs = repo.tracked().iter().map(String::as_str).filter(|path| {
-        *path == "README.md"
-            || (path.starts_with("docs/")
-                && path.ends_with(".md")
-                && !path.starts_with("docs/design/"))
+        *path == "README.md" || (path.starts_with("docs/") && path.ends_with(".md"))
     });
     for doc in user_docs {
         for (at, line) in repo.read(doc)?.lines().enumerate() {
@@ -671,6 +669,20 @@ fn separation(repo: &Repo) -> Result<Vec<String>, String> {
         }
     }
     Ok(problems)
+}
+
+/// No design records grow back under `docs/design/`: a rule stands in the code
+/// or the agent doc that holds it, and why it changed in the commit message.
+fn no_design_records(repo: &Repo) -> Vec<String> {
+    repo.tracked()
+        .iter()
+        .filter(|path| path.starts_with("docs/design/"))
+        .map(|path| {
+            format!(
+                "{path}: design records live nowhere in the tree — put the rule where `AGENTS.md` says knowledge goes"
+            )
+        })
+        .collect()
 }
 
 /// `CLAUDE.md` is the one line that loads the map, and the layer a run distils

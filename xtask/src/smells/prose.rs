@@ -73,17 +73,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) {
     }
 }
 
-/// The files the prose counters do not read. A document records a rule's
-/// history or work that lies ahead, so it quotes the words a rule retired; a
-/// negative fixture or test quotes one to prove it is refused. Each entry
-/// states why it is exempt beside it.
+/// The files the prose counters do not read: a negative fixture or test
+/// quotes a retired word to prove it is refused. Each entry states why it is
+/// exempt beside it.
 const EXEMPT_DOCUMENTS: &[&str] = &[
-    "glosario.md",
-    "docs/design/adr/",
-    "adrs.md",
-    "docs/design/plan-de-raiz/",
-    "deuda-consciente.md",
-    "smoke-checklist.md",
     // A negative fixture proves a retired key is rejected, so it names the key.
     "cli/tests/fixtures/",
     // A negative test proves a retired key is rejected, so it names the key.
@@ -256,9 +249,8 @@ const ENGLISH: &[&str] = &[
     "in", "at", "if", "but", "into", "only", "each", "must", "does", "do", "never",
 ];
 
-/// Lines of prose written in Spanish where the repository writes English: the
-/// markdown outside the design records `docs/design/` keeps, and the comments
-/// of the Rust under `crates/` and `xtask/`. A line reads as Spanish when it
+/// Lines of prose written in Spanish where the repository writes English: its
+/// markdown, and the comments of the Rust under `crates/` and `xtask/`. A line reads as Spanish when it
 /// holds three words of [`SPANISH`], or two beside a letter English does not
 /// write or with no word of [`ENGLISH`].
 pub fn spanish_prose_lines(root: &Path) -> usize {
@@ -274,16 +266,13 @@ pub fn spanish_prose_lines(root: &Path) -> usize {
 }
 
 fn spanish_corpus(root: &Path) -> Vec<PathBuf> {
-    let design = root.join("docs/design");
     let markdown = |path: &Path| path.extension().is_some_and(|ext| ext == "md");
     let mut out: Vec<PathBuf> = super::corpus::entries(root)
         .into_iter()
         .filter(|path| path.is_file() && markdown(path))
         .collect();
     for dir in ["docs", "packs", "crates"] {
-        collect(&root.join(dir), &mut out, &|path| {
-            markdown(path) && !path.starts_with(&design)
-        });
+        collect(&root.join(dir), &mut out, &|path| markdown(path));
     }
     for dir in ["crates", "xtask"] {
         collect(&root.join(dir), &mut out, &|path| {
@@ -403,17 +392,13 @@ mod tests {
         assert!(!reads_spanish("the es2015 target, solo mode, et al"));
     }
 
-    /// The design records still stand in Spanish; anywhere else, Spanish
-    /// prose counts, and only a Rust comment is prose in a source file.
+    /// Spanish prose counts in the markdown and the agent docs, and only a
+    /// Rust comment is prose in a source file.
     #[test]
-    fn spanish_counts_outside_the_design_records_and_only_as_prose() {
+    fn spanish_counts_in_the_docs_and_only_as_prose_in_the_code() {
         let root = scratch_tree(
             "spanish",
             &[
-                (
-                    "docs/design/x.md",
-                    "el run no relee el workflow para cada nodo\n",
-                ),
                 (
                     "docs/guide.md",
                     "el run no relee el workflow para cada nodo\n",

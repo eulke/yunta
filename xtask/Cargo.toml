@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-description = "Repository tooling: the generated JSON Schemas, the smell ratchet, the agent docs checker and the decision index"
+description = "Repository tooling: the generated JSON Schemas, the smell ratchet and the agent docs checker"
 
 [dependencies]
 yunta-core.workspace = true

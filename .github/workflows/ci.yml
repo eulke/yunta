@@ -54,9 +54,6 @@ jobs:
       - name: the agent docs hold
         run: cargo xtask docs --check
 
-      - name: the decisions and their index agree
-        run: cargo xtask adr --check
-
       # Private items too: a module's `//!` and an item's `///` are where
       # this repository explains its code, and a link in one must resolve.
       - name: rustdoc has no warnings
