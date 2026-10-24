@@ -23,3 +23,10 @@ Codex reports a turn's usage on `turn.completed` alone, so its adapter declares 
 run's token cap ends a Codex session only once it completes, where a Claude Code session is cut as it passes the
 cap. Every adapter offers the same features, so this is a gap to close, which needs a usage reading Codex gives
 while its turn runs.
+
+### A composed run's stack grows with every level of composition
+Paths: `crates/engine/src/run/workflow_exec/**`, `crates/testkit/src/stack.rs`
+A run that composes awaits its child's run inside its own, so each level nests in the one above and the stack a
+composed run takes grows with its depth; `limits.max_workflow_depth` defaults to 4, and the tests of deep
+composition run on a deep stack. Not decided: whether the engine bounds its recursion (boxing each level's await,
+or a limit tied to the stack rather than the depth) or the default depth is the guarantee.

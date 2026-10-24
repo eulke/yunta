@@ -291,3 +291,29 @@ spec-adapter.md#`mock`	code	crates/adapters/src/mock/mod.rs	The `mock` adapter �
 spec-adapter.md#7	code	crates/core/src/port/session.rs	the compiler is what keeps a concrete CLI out of the engine.
 spec-adapter.md#8	test	crates/adapters/tests/contract/main.rs	A subject that cannot express a fact fails the case; nothing is skipped.
 glosario.md#La frontera y la superficie	code	crates/core/src/port/mod.rs	A port is a trait the engine calls, never a network port
+D164	code	crates/engine/src/view/chronicle.rs	A frame says where each thing stands right now; a chronicle says what happened, in order.
+D179	user	docs/compatibility.md	the same list, in the same order, that `status` prints
+D211	code	crates/cli/src/surface/mod.rs	so `NO_COLOR` takes away the color and leaves the region.
+D215	code	crates/render/src/ink.rs	A line is built from spans that each carry a tone — what the text is to a reader — and painted once, by the ink its stream gets.
+D216	code	crates/render/src/line_width.rs	Either is held between a floor and a ceiling.
+D220	code	crates/cli/src/commands/list/runs.rs	How many closed runs the listing names: the newest, which are the ones a reader comes back for.
+D221	code	crates/render/src/lib.rs	the engine hands core data, and the CLI and the adapters draw it with the same words and blocks.
+D222	code	crates/render/src/doc.rs	A block holds what is said and the role each part plays, never a width, an escape or a glyph
+D223	agents	.agents/architecture.md	The engine derives data and never draws; the CLI and the adapters draw.
+D228	code	crates/render/src/diagram/mod.rs	a file keeps the Mermaid source as written, and a terminal draws what it can read of it.
+D01	history	-	the project's name, which no code decides
+D03	agents	.agents/architecture.md	`cargo xtask docs --check` holds this table to every member's manifest.
+D04	code	crates/cli/src/main.rs	Stays thin by design
+D35	agents	AGENTS.md	English for documentation, comments, UI text and examples, in the present tense.
+D40	agents	AGENTS.md	English for documentation, comments, UI text and examples
+D41	agents	AGENTS.md	This file is the map: where to read before a change and where to write what you learn.
+D67	code	Cargo.toml	license = "Apache-2.0"
+D68	user	README.md	Each release publishes a binary for Linux (x86_64 and aarch64, static musl) and macOS (x86_64 and aarch64)
+D69	history	-	a stance on how the project is funded, which no code decides
+D77	user	README.md	no daemon, no account, no network dependency to run a workflow
+D90	history	-	a milestone of the plan that built the engine
+D111	agents	.agents/choices.md	No Windows build
+D123	code	crates/engine/src/lib.rs	Birth and resume: `run` creates a run and drives its loop
+D155	code	.github/workflows/ci.yml	binary size stays under its ceiling
+D171	history	-	a list of fixes the plan that built the engine scheduled, each since done
+D267	agents	.agents/architecture.md	the clock, the environment, the filesystem and git are reached through their boundary modules
