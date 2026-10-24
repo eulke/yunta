@@ -9,30 +9,21 @@
 //! taken out, or renamed to the key meant when that key is missing, so
 //! that what the document says next is judged as the person meant it.
 
-use surco::text::{did_you_mean, nearest};
+use surco::text::nearest;
 
-use super::node::{NODE_KEYS, RETIRED_NODE_KEYS};
-use super::parse::list;
-use crate::diagnostic::{Diagnostic, Problem, Subject};
-use crate::yaml::{Mapping, Pointer, SourceMap, Value};
+use super::keys::{node_keys, retired, WORKFLOW_KEYS};
+use super::WorkflowFault;
+use crate::diagnostic::{Diagnostic, Named, Problem, Subject};
+use crate::yaml::{Mapping, Pointer, ReadAs, SourceMap, Value};
 use crate::NodeKind;
-
-/// The keys a workflow accepts at its top.
-pub(super) const WORKFLOW_KEYS: &[&str] = &[
-    "name",
-    "description",
-    "modes",
-    "inputs",
-    "node_defaults",
-    "nodes",
-    "yunta_schema",
-    "on_finish",
-];
 
 /// What the audit found, and the document it hands on.
 pub(super) struct Audit {
     pub(super) broken: Vec<Diagnostic>,
     pub(super) repaired: Value,
+    /// Each key read as the one it meant: where what is said about the
+    /// key meant is written.
+    pub(super) read_as: Vec<ReadAs>,
 }
 
 /// Every key `document`, read from `text`, writes that nothing reads.
@@ -41,6 +32,8 @@ pub(super) fn audit(document: Value, text: &str) -> Audit {
         text,
         map: None,
         broken: Vec::new(),
+        read_as: Vec::new(),
+        seen: 0,
     };
     let repaired = match document {
         Value::Mapping(mapping) => Value::Mapping(auditor.workflow(mapping)),
@@ -49,6 +42,7 @@ pub(super) fn audit(document: Value, text: &str) -> Audit {
     Audit {
         broken: auditor.broken,
         repaired,
+        read_as: auditor.read_as,
     }
 }
 
@@ -57,6 +51,10 @@ struct Auditor<'a> {
     /// Read only once there is something to place.
     map: Option<SourceMap>,
     broken: Vec<Diagnostic>,
+    read_as: Vec<ReadAs>,
+    /// How many nodes the audit has met, in the order the document has
+    /// them: what names a node whose id cannot be read.
+    seen: usize,
 }
 
 impl Auditor<'_> {
@@ -71,69 +69,62 @@ impl Auditor<'_> {
             if WORKFLOW_KEYS.contains(&name.as_str()) {
                 let value = match (name.as_str(), value) {
                     ("nodes", Value::Sequence(nodes)) => {
-                        Value::Sequence(self.nodes(nodes, Pointer::root().key("nodes"), "nodes"))
+                        Value::Sequence(self.nodes(nodes, Pointer::root().key("nodes")))
                     }
                     (_, value) => value,
                 };
                 kept.insert(key, value);
                 continue;
             }
-            let said = format!(
-                "unknown field `{name}`, expected one of {}{}",
-                list(WORKFLOW_KEYS),
-                did_you_mean(&name, WORKFLOW_KEYS.iter().copied())
+            let fault = WorkflowFault::UnknownKey {
+                key: name.clone(),
+                kind: None,
+                nearest: nearest(&name, WORKFLOW_KEYS.iter().copied()).map(str::to_string),
+            };
+            self.refuse(
+                &Pointer::root().key(name.as_str()),
+                Subject::Document,
+                fault,
             );
-            self.refuse(&Pointer::root().key(name.as_str()), "", said);
             if let Some(meant) = self.meant(&name, WORKFLOW_KEYS, &present) {
+                self.read(Pointer::root(), name, meant);
                 kept.insert(Value::from(meant), value);
             }
         }
         kept
     }
 
-    /// The nodes of a `nodes:` list at `at`, each audited; `path` is how a
-    /// deserializer names the list.
-    fn nodes(&mut self, nodes: Vec<Value>, at: Pointer, path: &str) -> Vec<Value> {
+    /// The nodes of a `nodes:` list at `at`, each audited.
+    fn nodes(&mut self, nodes: Vec<Value>, at: Pointer) -> Vec<Value> {
         nodes
             .into_iter()
             .enumerate()
             .map(|(index, node)| match node {
-                Value::Mapping(mapping) => Value::Mapping(self.node(
-                    mapping,
-                    at.clone().index(index),
-                    &format!("{path}[{index}]"),
-                )),
+                Value::Mapping(mapping) => {
+                    Value::Mapping(self.node(mapping, at.clone().index(index)))
+                }
                 other => other,
             })
             .collect()
     }
 
     /// One node's keys, judged against its own and its kind's. A node
-    /// whose kind is not one is left to the parser, which names the kinds
-    /// there are: which keys belong to it is not known.
-    fn node(&mut self, mapping: Mapping, at: Pointer, path: &str) -> Mapping {
-        let Some(kind_keys) = mapping
-            .get("kind")
+    /// whose kind is not one, and is no slip from one, is left to the
+    /// parser, which names the kinds there are: which keys belong to it is
+    /// not known.
+    fn node(&mut self, mut mapping: Mapping, at: Pointer) -> Mapping {
+        let id = mapping
+            .get("id")
             .and_then(Value::as_str)
-            .and_then(NodeKind::keys)
-        else {
+            .and_then(|id| id.parse().ok());
+        let subject = Subject::Node(Named::new(id, self.seen));
+        self.seen += 1;
+        let Some(kind) = self.kind_of(&mut mapping, &at, &subject) else {
             return mapping;
         };
-        let kind = mapping
-            .get("kind")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let subject = match mapping.get("id").and_then(Value::as_str) {
-            Some(id) => format!("node `{id}`"),
-            None => "node".to_string(),
+        let Some(valid) = node_keys(&kind) else {
+            return mapping;
         };
-        let valid: Vec<&str> = NODE_KEYS
-            .iter()
-            .chain(std::iter::once(&"kind"))
-            .chain(kind_keys.iter())
-            .copied()
-            .collect();
         let present = keys(&mapping);
         let mut kept = Mapping::new();
         for (key, value) in mapping {
@@ -143,21 +134,51 @@ impl Auditor<'_> {
             };
             if valid.contains(&name.as_str()) {
                 let value = match (kind.as_str(), name.as_str(), value) {
-                    ("parallel", "nodes", Value::Sequence(children)) => Value::Sequence(
-                        self.nodes(children, at.clone().key("nodes"), &format!("{path}.nodes")),
-                    ),
+                    ("parallel", "nodes", Value::Sequence(children)) => {
+                        Value::Sequence(self.nodes(children, at.clone().key("nodes")))
+                    }
                     (_, _, value) => value,
                 };
                 kept.insert(key, value);
                 continue;
             }
-            let said = unknown_node_key(&subject, &name, &kind, &valid);
-            self.refuse(&at.clone().key(name.as_str()), path, said);
+            let fault = unknown_node_key(&name, &kind, &valid);
+            self.refuse(&at.clone().key(name.as_str()), subject.clone(), fault);
             if let Some(meant) = self.meant(&name, &valid, &present) {
+                self.read(at.clone(), name, meant);
                 kept.insert(Value::from(meant), value);
             }
         }
         kept
+    }
+
+    /// The kind `mapping` is: the one it writes, or the one a slip in it
+    /// most likely meant, refused where it is written and read as meant.
+    /// `None` when it writes no kind, or one nothing is a slip from.
+    fn kind_of(
+        &mut self,
+        mapping: &mut Mapping,
+        at: &Pointer,
+        subject: &Subject,
+    ) -> Option<String> {
+        let written = mapping
+            .get(NodeKind::TAG)
+            .and_then(Value::as_str)?
+            .to_string();
+        if NodeKind::keys(&written).is_some() {
+            return Some(written);
+        }
+        let near = nearest(&written, NodeKind::KINDS.iter().copied())?;
+        let map = self.map.get_or_insert_with(|| SourceMap::read(self.text));
+        let place = map.place(&at.clone().key(NodeKind::TAG));
+        let fault = WorkflowFault::UnknownKind {
+            kind: written,
+            nearest: near.to_string(),
+        };
+        self.broken
+            .push(Diagnostic::new(subject.clone(), Problem::broke(fault)).at(place));
+        mapping.insert(Value::from(NodeKind::TAG), Value::from(near));
+        Some(near.to_string())
     }
 
     /// The key `typed` most likely meant, when it is unambiguous and the
@@ -168,28 +189,38 @@ impl Auditor<'_> {
             .filter(|meant| !present.iter().any(|key| key == meant))
     }
 
-    /// Records that the key at `at` is read by nothing.
-    fn refuse(&mut self, at: &Pointer, path: &str, said: String) {
+    /// Records that the mapping at `at` writes `written` and is read as
+    /// writing `meant`.
+    fn read(&mut self, at: Pointer, written: String, meant: &str) {
+        self.read_as.push(ReadAs {
+            at,
+            written,
+            meant: meant.to_string(),
+        });
+    }
+
+    /// Records that the key at `at`, written about `subject`, is read by
+    /// nothing.
+    fn refuse(&mut self, at: &Pointer, subject: Subject, fault: WorkflowFault) {
         let map = self.map.get_or_insert_with(|| SourceMap::read(self.text));
         let place = map.locate_key(at);
         self.broken
-            .push(Diagnostic::new(Subject::Document, Problem::parse(path, said)).at(place));
+            .push(Diagnostic::new(subject, Problem::broke(fault)).at(place));
     }
 }
 
-/// The refusal of `name`, a key no `kind` node reads: the keys it may
-/// write, and the key that replaced a retired one or the key a typo is
-/// one slip from.
-fn unknown_node_key(subject: &str, name: &str, kind: &str, valid: &[&str]) -> String {
-    let hint = RETIRED_NODE_KEYS
-        .iter()
-        .find(|(retired, _)| *retired == name)
-        .map(|(_, hint)| format!("; {hint}"))
-        .unwrap_or_else(|| did_you_mean(name, valid.iter().copied()));
-    format!(
-        "{subject}: unknown key `{name}` for a `{kind}` node; valid keys: {}{hint}",
-        list(valid)
-    )
+/// The refusal of `name`, a key no `kind` node reads, with the key a typo
+/// is one slip from; a key retired is told what took its place instead.
+fn unknown_node_key(name: &str, kind: &str, valid: &[&str]) -> WorkflowFault {
+    let near = match retired(name) {
+        Some(_) => None,
+        None => nearest(name, valid.iter().copied()).map(str::to_string),
+    };
+    WorkflowFault::UnknownKey {
+        key: name.to_string(),
+        kind: Some(kind.to_string()),
+        nearest: near,
+    }
 }
 
 /// The keys `mapping` writes, as text.

@@ -25,7 +25,7 @@ fn a_parse_error_names_the_path_of_the_failing_value() {
         yaml::parse::<Doc>("items:\n  - name: a\n    count: 1\n  - name: b\n    count: many\n")
             .unwrap_err();
     match &err {
-        YamlError::Parse { path, .. } => assert_eq!(path, "items[1].count"),
+        YamlError::Parse(refusal) => assert_eq!(refusal.path, "items[1].count"),
         other => panic!("the error must locate the value, got {other:?}"),
     }
 }
@@ -46,7 +46,7 @@ fn a_value_parsed_after_buffering_still_names_its_path() {
         yaml::parse("items:\n  - name: a\n    count: 1\n  - name: b\n    count: many\n").unwrap();
     let err = yaml::from_value::<Doc>(value).unwrap_err();
     match &err {
-        YamlError::Parse { path, .. } => assert_eq!(path, "items[1].count"),
+        YamlError::Parse(refusal) => assert_eq!(refusal.path, "items[1].count"),
         other => panic!("expected a parse error, got {other:?}"),
     }
 }

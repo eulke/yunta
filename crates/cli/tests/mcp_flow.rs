@@ -701,7 +701,14 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
         .find(|t| t.name.as_ref() == "document_shape")
         .expect("document_shape is advertised");
     let advertised = serde_json::to_string(&shape_tool.input_schema).unwrap();
-    for kind in ["tasks", "spec", "findings", "questions"] {
+    for kind in [
+        "tasks",
+        "spec",
+        "findings",
+        "questions",
+        "answers",
+        "workflow",
+    ] {
         assert!(
             advertised.contains(kind),
             "{kind} missing from {advertised}"
@@ -719,6 +726,19 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     assert!(text.contains("tasks:"), "{text}");
     assert!(text.contains("criteria:"), "{text}");
 
+    // A workflow's shape is every key it and each kind of node read.
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("document_shape")
+                .with_arguments(json!({"kind": "workflow"}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap();
+    let text = tool_text(&result);
+    for key in ["`nodes`", "`depends_on`", "`kind`", "`prompt`", "`run`"] {
+        assert!(text.contains(key), "{key} missing from {text}");
+    }
+
     // A kind that does not exist names the ones that do.
     let result = client
         .call_tool(
@@ -733,9 +753,9 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     client.cancel().await.ok();
 }
 
-/// An unknown document kind is one mistake, so it gets one sentence
-/// whichever door it is made at. Both doors parse the name with
-/// `ArtifactKind`'s own `FromStr`; a second hand-written list is exactly
+/// An unknown document is one mistake, so it gets one sentence whichever
+/// door it is made at. Both doors read the name through the one list of
+/// documents `yunta schema` shows; a second hand-written list is exactly
 /// what let two answers to the same question drift apart.
 #[tokio::test]
 async fn an_unknown_kind_reads_the_same_at_both_doors() {

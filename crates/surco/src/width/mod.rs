@@ -105,6 +105,52 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+/// `items` on lines of `room` cells, `sep` after each but the last, a line
+/// broken only between two items: one never starts on a line and ends on
+/// the next. An item wider than the room is wrapped on lines of its own,
+/// never cut inside a word, its separator at the end of its last line: a
+/// separator never takes a line alone.
+pub fn packed(items: &[&str], sep: char, room: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for (at, item) in items.iter().enumerate() {
+        let sep = (at + 1 < items.len()).then_some(sep);
+        let piece = match sep {
+            Some(sep) => format!("{item} {sep}"),
+            None => item.to_string(),
+        };
+        if cell_width(&piece) > room {
+            lines.extend((!line.is_empty()).then(|| std::mem::take(&mut line)));
+            lines.extend(wrapped_with(item, sep, room));
+            continue;
+        }
+        let joined = format!("{line} {piece}");
+        if line.is_empty() {
+            line = piece;
+        } else if cell_width(&joined) <= room {
+            line = joined;
+        } else {
+            lines.push(std::mem::replace(&mut line, piece));
+        }
+    }
+    lines.extend((!line.is_empty()).then_some(line));
+    lines
+}
+
+/// `item` wrapped on lines of `room` cells, never cut inside a word, with
+/// `sep` ending its last line when one follows it.
+fn wrapped_with(item: &str, sep: Option<char>, room: usize) -> Vec<String> {
+    let Some(sep) = sep else {
+        return wrap_unbroken(item, room);
+    };
+    let mut lines = wrap_unbroken(item, room.saturating_sub(2));
+    if let Some(last) = lines.last_mut() {
+        last.push(' ');
+        last.push(sep);
+    }
+    lines
+}
+
 /// `text` wrapped like [`wrap`], except that a word wider than the column
 /// is never cut: it takes a line of its own, whole, and runs past the
 /// edge. For a value a reader copies — a path, a branch, a command —

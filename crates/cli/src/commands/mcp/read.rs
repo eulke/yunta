@@ -12,10 +12,11 @@ pub(super) fn tools() -> Vec<Tool> {
         Tool::new(
             "document_shape",
             "The exact shape of a document Yunta reads and validates. Call it before you \
-             write a tasks document, a spec, a findings artifact or a questions artifact: \
-             they are validated strictly, a key that is not in the shape fails the node that \
-             produced it, and this is the one place the format is written down. Returns a \
-             complete, valid example with every field annotated.",
+             write a tasks document, a spec, a findings artifact, a questions artifact or a \
+             workflow: they are validated strictly, a key that is not in the shape fails the \
+             node that produced it, and this is the one place the format is written down. \
+             Returns a complete, valid example with every field annotated; for a workflow, \
+             every key it and each kind of node read.",
             json!({
                 "type": "object",
                 "properties": {

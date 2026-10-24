@@ -22,7 +22,7 @@ mod next;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;
 mod problem;
-pub(in crate::surface) use problem::REFUSED;
+pub(in crate::surface) use problem::{HELP, REFUSED};
 mod runs;
 mod table;
 

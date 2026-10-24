@@ -285,9 +285,11 @@ leaves the graph unable to run —
 reaches a reader as the same report a tasks document does. A diagnostic's subject,
 under `of`, names the entry the problem is about; for a workflow that is `node`.
 
-A problem is one of two shapes, under the key `problem`. `parse` carries `message`
-and, unless the root itself is at fault, the `path` of the value that stopped the
-read (`tasks[1].scope`); its stable code is `parse`. `rule` carries a `code` from a
+A problem is one of two shapes, under the key `problem`. `parse` carries `message`;
+`nearest`, the name the value that stopped the read is most likely a slip from, when
+it is one slip from a name the document reads; and, unless the root itself is at fault,
+the `path` of the value that stopped the read (`tasks[1].scope`); its stable code is
+`parse`. `rule` carries a `code` from a
 closed set and the `fault` its clause is written from: the family of the rule and the
 value it found, as in `{"tasks": "empty-title"}`. A reader writes the clause beside
 it, when it reads the log; a `rule` an older log wrote carries its `detail`, as it was
@@ -298,9 +300,10 @@ a flag stored beside it, says what a retry can change.
 
 The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
-`unknown-dependency`, `dependency-cycle`, `overlapping-scope`, `duplicate-shape`,
-`duplicate-decision`, `unknown-shape-owner`, `shape-outside-owner-scope`,
-`unknown-shape`, `shape-used-before-its-owner`, `change-outside-scope`,
+`unknown-dependency`, `unknown-key`, `unknown-kind`, `dependency-cycle`,
+`overlapping-scope`, `duplicate-shape`, `duplicate-decision`,
+`unknown-shape-owner`, `shape-outside-owner-scope`, `unknown-shape`,
+`shape-used-before-its-owner`, `change-outside-scope`,
 `duplicate-spec`, `no-spec-test`, `unexplained-test`, `test-file-escapes`,
 `duplicate-test-file`, `unknown-spec-task`, `test-file-exists`, `other-spec-changed`, `departed-spec-unchanged`, `criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `proposed-criterion-already-passes`, `no-summary`,
 `no-description`, `unexplained-criterion`, `no-outcome`, `no-changes`,
@@ -568,7 +571,9 @@ Each problem of an artifact's `diagnostics` that is a broken rule carries `fault
 value its clause is written from, and beside it `detail`, the clause a reader sees,
 written when the document is read. A rule an older log wrote carries its `detail` as it
 was written and gets no second clause; a parse problem carries its `message` and no
-`detail`.
+`detail`. A problem something helps fix carries `help`, a list of sentences, the most
+direct first: the name a slip most likely meant, or what took the place of a retired
+key.
 
 A findings document the run holds may carry an entry with `cause` in place of `title`
 and `detail`. Those are the documents a node's close derives, a gate shows, a child run

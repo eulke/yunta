@@ -141,7 +141,8 @@ impl ArtifactRefId {
         let unknown = |key: &dyn fmt::Display| {
             let key = key.to_string();
             D::Error::custom(format!(
-                "unknown key `{key}` for {what}; one of {}{}",
+                "{}; one of {}{}",
+                super::parse::unknown_key(&key, what),
                 list(&valid),
                 surco::text::did_you_mean(&key, valid.iter().copied())
             ))
@@ -339,14 +340,17 @@ impl fmt::Display for ArtifactKind {
     }
 }
 
-/// Names a kind that does not exist and lists the ones that do.
+/// Names a document Yunta does not read, every name a door reads one by,
+/// and the one it is most likely a slip from.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "`{value}` is not a document Yunta reads; one of {}",
-    ArtifactKind::listed()
+    "`{value}` is not a document Yunta reads; one of {}{}",
+    surco::text::listed(.names.iter().copied()),
+    surco::text::near_miss(surco::text::nearest(.value, .names.iter().copied()))
 )]
-pub struct UnknownArtifactKind {
+pub struct UnknownDocument {
     pub value: String,
+    pub names: Vec<&'static str>,
 }
 
 /// Reads a kind the way every other door does — through `Deserialize`,
@@ -354,15 +358,16 @@ pub struct UnknownArtifactKind {
 /// are exactly the ones a workflow or an event log accepts, alias
 /// included, with the derive as the one place that lists them.
 impl std::str::FromStr for ArtifactKind {
-    type Err = UnknownArtifactKind;
+    type Err = UnknownDocument;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         use serde::de::IntoDeserializer;
 
         let deserializer: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
             value.into_deserializer();
-        ArtifactKind::deserialize(deserializer).map_err(|_| UnknownArtifactKind {
+        ArtifactKind::deserialize(deserializer).map_err(|_| UnknownDocument {
             value: value.to_string(),
+            names: ArtifactKind::ALL.iter().map(|kind| kind.as_str()).collect(),
         })
     }
 }

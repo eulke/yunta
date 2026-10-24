@@ -157,3 +157,45 @@ fn two_fan_out_ids_cut_to_a_column_stay_distinct() {
     assert!(one.starts_with("revie") && one.ends_with("e-code"), "{one}");
     assert_eq!(middle_cut("lint", 6, Glyphs::Ascii), "lint  ");
 }
+
+#[test]
+fn packed_items_break_between_two_and_never_inside_one() {
+    assert_eq!(
+        packed(
+            &[
+                "did you mean `prompt`?",
+                "`yunta schema workflow` lists every key"
+            ],
+            ';',
+            40
+        ),
+        [
+            "did you mean `prompt`? ;",
+            "`yunta schema workflow` lists every key"
+        ]
+    );
+    assert_eq!(packed(&["git", "checkouts"], ';', 40), ["git ; checkouts"]);
+}
+
+#[test]
+fn the_separator_after_an_item_wrapped_ends_its_last_line_and_never_takes_one_alone() {
+    assert_eq!(
+        packed(&["a node names its runner with `runner:`", "x"], ';', 38),
+        ["a node names its runner with", "`runner:` ;", "x"]
+    );
+    let filled = packed(&["aaaaaaaaa bbbbbbbbbb", "x"], ';', 20);
+    assert_eq!(filled, ["aaaaaaaaa", "bbbbbbbbbb ;", "x"]);
+    assert!(filled.iter().all(|line| line.trim() != ";"), "{filled:?}");
+}
+
+#[test]
+fn an_item_wider_than_the_room_is_wrapped_on_lines_of_its_own() {
+    assert_eq!(
+        packed(
+            &["git", "a node that declares questions asks them"],
+            ';',
+            20
+        ),
+        ["git ;", "a node that declares", "questions asks them"]
+    );
+}

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use surco::components::{Fields, Furrow, Headline, Problem, Severity};
+use surco::components::{Fields, Furrow, Headline};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -198,14 +198,11 @@ async fn verify_scaffold(
                 )
                 .into(),
         )
-        .chain(errors.iter().map(|error| {
-            Problem {
-                severity: Severity::Error,
-                said: crate::error::words::check(error),
-                at: None,
-            }
-            .into()
-        }))
+        .chain(
+            errors
+                .iter()
+                .map(|error| crate::error::page::refused(error, None, EXAMPLE, None).into()),
+        )
         .collect();
         return Ok((Mark::Caution, found, Outcome::Reported));
     }

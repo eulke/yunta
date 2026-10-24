@@ -3,10 +3,13 @@
 use crate::components::{Place, Problem, Refusal, Severity};
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, wrap_unbroken, INDENT};
+use crate::width::{cell_width, packed, wrap_unbroken, INDENT};
 
 /// What a refusal opens with, on every surface.
 pub(in crate::surface) const REFUSED: &str = "error:";
+
+/// What the line of what helps fix a problem opens with, on every surface.
+pub(in crate::surface) const HELP: &str = "help:";
 
 impl Severity {
     fn tone(self) -> Tone {
@@ -20,7 +23,8 @@ impl Severity {
 impl Problem {
     /// Its word in its tone and what it says, wrapped under itself; then
     /// the place: where it is, the line as written, and the part at fault
-    /// marked under it.
+    /// marked under it; then what helps fix it, on a `help:` line under
+    /// them.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let tone = self.severity.tone();
         let word = self.severity.word();
@@ -41,16 +45,52 @@ impl Problem {
         if let Some(place) = &self.at {
             lines.extend(place.lines(tone, look));
         }
+        lines.extend(self.helped(look));
         lines
+    }
+
+    /// What helps fix it, on one line in the gutter's column under its
+    /// place, or as far in when it has none: each a separator apart, a line
+    /// broken only between two, wrapped under itself.
+    fn helped(&self, look: &Look) -> Vec<Line> {
+        if self.help.is_empty() {
+            return Vec::new();
+        }
+        let lead = match &self.at {
+            Some(place) => format!("{INDENT}{} ", place.pad()),
+            None => format!("{INDENT}{INDENT}"),
+        };
+        let under = format!("{lead}{}", " ".repeat(cell_width(HELP) + 1));
+        let room = look.width.cells().saturating_sub(cell_width(&under));
+        let items: Vec<&str> = self.help.iter().map(String::as_str).collect();
+        packed(&items, look.glyphs.sep(), room)
+            .into_iter()
+            .enumerate()
+            .map(|(at, part)| match at {
+                0 => Line::new()
+                    .plain(lead.as_str())
+                    .push(Tone::Strong, HELP)
+                    .plain(" ")
+                    .plain(part),
+                _ => Line::new().plain(under.as_str()).plain(part),
+            })
+            .collect()
     }
 }
 
 impl Place {
+    /// As many spaces as the line's number is wide: what sets the gutter
+    /// in the same column on every row of the place, and what helps fix
+    /// the problem under it.
+    pub(in crate::surface) fn pad(&self) -> String {
+        " ".repeat(cell_width(&self.line.to_string()))
+    }
+
     /// Where the problem is, then its line between a gutter and the line's
     /// number, and the part at fault marked under it in `tone`.
     fn lines(&self, tone: Tone, look: &Look) -> Vec<Line> {
         let number = self.line.to_string();
-        let pad = " ".repeat(cell_width(&number));
+        let pad = self.pad();
         let gutter = format!(" {} ", look.glyphs.gutter());
         let mut lines = vec![Line::new()
             .plain(INDENT)
@@ -62,6 +102,7 @@ impl Place {
             return lines;
         };
         let marks = look.glyphs.fault().to_string().repeat(len);
+        let indent = " ".repeat(cell_width(&before));
         lines.extend([
             Line::new()
                 .plain(INDENT)
@@ -76,7 +117,7 @@ impl Place {
                 .plain(INDENT)
                 .plain(pad.as_str())
                 .push(Tone::Muted, gutter.as_str())
-                .plain(" ".repeat(cell_width(&before)))
+                .plain(indent)
                 .push(tone, marks),
         ]);
         lines
@@ -107,5 +148,44 @@ impl Refusal {
             lines.push(Line::new().plain(INDENT).push(Tone::Muted, detail.as_str()));
         }
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::components::{Place, Problem};
+    use crate::look::Look;
+
+    #[test]
+    fn what_helps_fix_a_problem_starts_in_its_gutter_column_whatever_the_line_number() {
+        for line in [9, 12, 100] {
+            let problem = Problem::error(
+                "unknown key `promt`",
+                Some(Place {
+                    path: "wf.yaml".to_string(),
+                    line,
+                    col: 5,
+                    source: Some("    promt: p".to_string()),
+                    len: 5,
+                }),
+            )
+            .help(["did you mean `prompt`?".to_string()]);
+            let look = Look::plain();
+            let drawn: Vec<String> = problem
+                .lines(&look)
+                .iter()
+                .map(|row| look.ink.paint(row))
+                .collect();
+            let gutter = drawn
+                .iter()
+                .find(|row| row.trim() == "|")
+                .and_then(|row| row.find('|'))
+                .expect("a gutter row");
+            let help = drawn
+                .iter()
+                .find_map(|row| row.find("help:"))
+                .expect("a help line");
+            assert_eq!(help, gutter, "line {line}: {drawn:#?}");
+        }
     }
 }

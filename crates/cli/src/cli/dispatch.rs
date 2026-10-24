@@ -106,7 +106,9 @@ pub(super) async fn dispatch(
             commands::init::init(interactive, force, look).await
         }
         Command::Rail { adapter, event } => rail_hook(&adapter, event, started),
-        Command::Schema { kind, .. } => commands::schema::schema(kind.as_deref(), output, look),
+        Command::Schema { document, .. } => {
+            commands::schema::schema(document.as_deref(), output, look)
+        }
         Command::New {
             name,
             shape,

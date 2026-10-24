@@ -385,3 +385,16 @@ pub enum CheckError {
     #[error("pack_network_ceiling_exceeded")]
     PackNetworkCeilingExceeded { node: NodeId, pack: String },
 }
+
+impl CheckError {
+    /// The name the refused one is most likely a slip from, when the
+    /// refusal has one.
+    pub fn near(&self) -> Option<&str> {
+        match self {
+            CheckError::UnknownRunner { near, .. }
+            | CheckError::Unset { near, .. }
+            | CheckError::CommandUnsetIn { near, .. } => near.as_deref(),
+            _ => None,
+        }
+    }
+}

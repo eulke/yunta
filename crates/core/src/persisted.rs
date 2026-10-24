@@ -161,11 +161,12 @@ impl<T: Persisted> PersistedDoc<T> {
         let schema_version = Self::check_version(version)?;
         T::reconcile_json(&mut value);
         let doc = serde_json::from_value(value.clone()).map_err(|error| {
-            Self::unreadable(crate::yaml::YamlError::Parse {
+            Self::unreadable(crate::yaml::YamlError::from(crate::yaml::ParseRefusal {
                 path: String::new(),
                 message: error.to_string(),
                 at: None,
-            })
+                nearest: None,
+            }))
         })?;
         Ok(PersistedDoc {
             schema_version,

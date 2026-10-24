@@ -6,13 +6,24 @@ use yunta_engine::CheckError;
 
 use super::wrapped::{composition_words, unanswerable_words, untaken_words};
 
-/// What `check` refuses, in the words a person reads it as.
+/// What `check` refuses, on one line: what is wrong, then the name it is
+/// most likely a slip from.
+pub(crate) fn check(error: &CheckError) -> String {
+    format!(
+        "{}{}",
+        check_said(error),
+        surco::text::near_miss(error.near())
+    )
+}
+
+/// What `check` refuses, in the words a person reads it as, the name a
+/// slip most likely meant left for a page to say under it.
 ///
 /// Each family names the variants it writes and answers `None` for the rest,
 /// so every variant is written by exactly one family. A variant no family
 /// names is written as its code, which shows the gap instead of an empty
 /// sentence.
-pub(crate) fn check(error: &CheckError) -> String {
+pub(crate) fn check_said(error: &CheckError) -> String {
     node_words(error)
         .or_else(|| session_words(error))
         .or_else(|| runner_words(error))
@@ -87,9 +98,8 @@ fn runner_words(error: &CheckError) -> Option<String> {
             "node `{node}` declares `{field}`, which needs `{capability}`, and no adapter its \
              runner resolves to declares it ({adapters}); pick a runner on an adapter that has it"
         ),
-        CheckError::UnknownRunner { node, runner, near } => format!(
-            "node `{node}` references runner `{runner}`, which `runners:` does not define{}",
-            surco::text::near_miss(near.as_deref())
+        CheckError::UnknownRunner { node, runner, .. } => format!(
+            "node `{node}` references runner `{runner}`, which `runners:` does not define"
         ),
         CheckError::RunnerHasNoCandidates { node, runner } => format!(
             "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
@@ -125,20 +135,10 @@ pub(crate) fn lacking(error: &CheckError) -> Option<(String, String)> {
 /// What the config must declare for a node to run, and what it cannot be.
 fn config_words(error: &CheckError) -> Option<String> {
     Some(match error {
-        CheckError::Unset { node, key, near } => {
-            format!(
-                "node `{node}`: {key}{}",
-                surco::text::near_miss(near.as_deref())
-            )
-        }
-        CheckError::CommandUnsetIn {
-            field,
-            command,
-            near,
-        } => format!(
+        CheckError::Unset { node, key, .. } => format!("node `{node}`: {key}"),
+        CheckError::CommandUnsetIn { field, command, .. } => format!(
             "`{field}` names `{command}`, which `commands:` does not declare; declare it, or drop \
-             it{}",
-            surco::text::near_miss(near.as_deref())
+             it"
         ),
         CheckError::MaxParallelNodesZero => {
             "`defaults.max_parallel_nodes: 0` would starve every node forever; declare 1 or more, \

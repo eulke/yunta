@@ -1,6 +1,6 @@
 //! A problem found in a text and the place it is about, the way a
-//! compiler points at a line: how grave it is, what it says, and the line
-//! as written with the part at fault marked under it.
+//! compiler points at a line: how grave it is, what it says, the line as
+//! written with the part at fault marked under it, and what helps fix it.
 
 /// How grave a problem is: an error stops what was asked, and a warning
 /// is worth hearing before it goes on.
@@ -20,12 +20,41 @@ impl Severity {
     }
 }
 
-/// One problem: how grave, what it says, and where, when it has a place.
+/// One problem: how grave, what it says, where, when it has a place, and
+/// what helps fix it, the most direct first.
 #[derive(Debug, Clone)]
 pub struct Problem {
     pub severity: Severity,
     pub said: String,
     pub at: Option<Place>,
+    pub help: Vec<String>,
+}
+
+impl Problem {
+    /// An error that says `said`, at `at` when it has a place, with nothing
+    /// to help fix it yet.
+    pub fn error(said: impl Into<String>, at: Option<Place>) -> Self {
+        Problem {
+            severity: Severity::Error,
+            said: said.into(),
+            at,
+            help: Vec::new(),
+        }
+    }
+
+    /// A warning that says `said`, with no place.
+    pub fn warning(said: impl Into<String>) -> Self {
+        Problem {
+            severity: Severity::Warning,
+            ..Problem::error(said, None)
+        }
+    }
+
+    /// This problem with `help` said under it, after what it has.
+    pub fn help(mut self, help: impl IntoIterator<Item = String>) -> Self {
+        self.help.extend(help);
+        self
+    }
 }
 
 /// Where in a text a problem is: the file as its reader names it, the line

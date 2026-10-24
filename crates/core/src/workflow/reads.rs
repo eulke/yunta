@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ArtifactKind, ArtifactRefId, ContextSpec, Node, NodeKind};
 use crate::ids::NodeId;
+use crate::yaml::Pointer;
 
 /// Where a node names an artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -31,13 +32,26 @@ impl ReadSite {
             ReadSite::Shows => "shows",
         }
     }
+
+    /// Where in a node the read that is entry `entry` of this site names
+    /// the node it reads from.
+    pub fn names_its_node(self, entry: usize) -> Pointer {
+        let at = Pointer::root();
+        match self {
+            ReadSite::Context => at.key("context").index(entry).key("artifact").key("node"),
+            ReadSite::Mount => at.key("mounts").index(entry).key("artifact").key("node"),
+            ReadSite::Shows => at.key("shows").index(entry).key("node"),
+        }
+    }
 }
 
-/// One artifact a node names: where, the node it names it of — `None`
-/// for an artifact of the run, whoever produced it — and which.
+/// One artifact a node names: where, as which entry of that site's list,
+/// the node it names it of — `None` for an artifact of the run, whoever
+/// produced it — and which.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactRead<'a> {
     pub site: ReadSite,
+    pub entry: usize,
     pub node: Option<&'a NodeId>,
     pub id: &'a ArtifactRefId,
 }
@@ -48,9 +62,11 @@ pub fn artifact_reads(node: &Node) -> Vec<ArtifactRead<'_>> {
     let mut reads: Vec<ArtifactRead<'_>> = node
         .context
         .iter()
-        .filter_map(|source| match source {
+        .enumerate()
+        .filter_map(|(entry, source)| match source {
             ContextSpec::Artifact { artifact } => Some(ArtifactRead {
                 site: ReadSite::Context,
+                entry,
                 node: artifact.node.as_ref(),
                 id: &artifact.id,
             }),
@@ -59,15 +75,22 @@ pub fn artifact_reads(node: &Node) -> Vec<ArtifactRead<'_>> {
         .collect();
     match &node.kind {
         NodeKind::Workflow { mounts, .. } => {
-            reads.extend(mounts.iter().map(|mount| ArtifactRead {
-                site: ReadSite::Mount,
-                node: Some(&mount.artifact.node),
-                id: &mount.artifact.id,
-            }));
+            reads.extend(
+                mounts
+                    .iter()
+                    .enumerate()
+                    .map(|(entry, mount)| ArtifactRead {
+                        site: ReadSite::Mount,
+                        entry,
+                        node: Some(&mount.artifact.node),
+                        id: &mount.artifact.id,
+                    }),
+            );
         }
         NodeKind::Gate { shows, .. } => {
-            reads.extend(shows.iter().map(|shown| ArtifactRead {
+            reads.extend(shows.iter().enumerate().map(|(entry, shown)| ArtifactRead {
                 site: ReadSite::Shows,
+                entry,
                 node: shown.node.as_ref(),
                 id: &shown.id,
             }));

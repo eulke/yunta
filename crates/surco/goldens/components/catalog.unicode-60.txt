@@ -28,12 +28,13 @@ what it found
     error: unused import
       --> src/lib.rs:3:5
 
-  error  node `fix` references runner `implementr`, which
-         `runners:` does not define
-   --> .yunta/workflows/lint-fix.yaml:9:13
+  error  node `fix`: unknown key `promt` for a `prompt` node
+   --> .yunta/workflows/lint-fix.yaml:9:5
     │
-  9 │     runner: implementr
-    │             ^^^^^^^^^^
+  9 │     promt: "Fix what lint reported."
+    │     ^^^^^
+    help: did you mean `prompt`? ·
+          `yunta schema workflow` lists every key
 
   warning  the program `cargo-nextest` is not on this
            machine's PATH

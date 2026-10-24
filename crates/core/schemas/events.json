@@ -2222,6 +2222,13 @@
                 "message": {
                   "type": "string"
                 },
+                "nearest": {
+                  "description": "The name the refused one is most likely a slip from.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "path": {
                   "type": "string"
                 },
@@ -9141,6 +9148,16 @@
           "const": "unknown-dependency"
         },
         {
+          "description": "A key nothing in the document reads.",
+          "type": "string",
+          "const": "unknown-key"
+        },
+        {
+          "description": "A node's `kind` one slip from a kind a node can be.",
+          "type": "string",
+          "const": "unknown-kind"
+        },
+        {
           "description": "Two independent tasks reach for the same files.",
           "type": "string",
           "const": "overlapping-scope"
@@ -12753,6 +12770,64 @@
           "additionalProperties": false,
           "required": [
             "reads-what-may-go"
+          ]
+        },
+        {
+          "description": "A key nothing reads: written at the workflow's top when `kind` is\nnone, in a node of that kind otherwise. `nearest` is the key it is\na slip from; a key retired is told what took its place instead.",
+          "type": "object",
+          "properties": {
+            "unknown-key": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "nearest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-key"
+          ]
+        },
+        {
+          "description": "A `kind` no node can be, a slip from `nearest`, the kind it meant.",
+          "type": "object",
+          "properties": {
+            "unknown-kind": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "nearest": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "nearest"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown-kind"
           ]
         }
       ]

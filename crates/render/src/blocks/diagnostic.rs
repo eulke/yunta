@@ -2,20 +2,19 @@
 //! document and a workflow that fails `yunta check` are drawn with, and
 //! the same problems said as plain text to a reader that reads no page.
 
-use surco::components::{Place, Problem, Severity};
+use surco::components::{Place, Problem};
 use surco::doc::Doc;
 use surco::look::Look;
 use surco::surface::{Surface, Terminal};
-use yunta_core::diagnostic::Report;
+use yunta_core::diagnostic::Diagnostic;
 use yunta_core::yaml::Location;
 
 /// What is wrong at `at` in `text`, read from `path`, as an error: its line
 /// quoted when the text has one there, said alone when it has no place.
 pub fn located(said: String, at: Option<Location>, path: &str, text: Option<&str>) -> Problem {
-    Problem {
-        severity: Severity::Error,
+    Problem::error(
         said,
-        at: at.map(|at| Place {
+        at.map(|at| Place {
             path: path.to_string(),
             line: at.line,
             col: at.col,
@@ -24,22 +23,18 @@ pub fn located(said: String, at: Option<Location>, path: &str, text: Option<&str
                 .map(str::to_string),
             len: at.len,
         }),
-    }
+    )
 }
 
-/// Every problem of a document's report, each quoted from `text` when the
-/// document was read from text.
-pub fn report(report: &Report, text: Option<&str>) -> Vec<Problem> {
-    report
-        .diagnostics
-        .iter()
-        .map(|diagnostic| match (text, diagnostic.at) {
-            (Some(_), Some(at)) => {
-                located(diagnostic.said(), Some(at), &report.document.path, text)
-            }
-            _ => located(diagnostic.to_string(), None, &report.document.path, text),
-        })
-        .collect()
+/// One problem a document read from `path` has: what it says, quoted from
+/// `text` at its place when the document was read from text, and what
+/// helps fix it.
+pub fn found(diagnostic: &Diagnostic, path: &str, text: Option<&str>) -> Problem {
+    let problem = match (text, diagnostic.at) {
+        (Some(_), Some(at)) => located(diagnostic.said(), Some(at), path, text),
+        _ => located(diagnostic.said_unplaced(), None, path, text),
+    };
+    problem.help(diagnostic.help())
 }
 
 /// `problems` under `heading`, counted, as plain text says them — to an
@@ -85,6 +80,29 @@ mod tests {
         };
         let problem = located("x".to_string(), Some(at), "wf.yaml", Some("a: 1\n"));
         assert_eq!(problem.at.and_then(|place| place.source), None);
+    }
+
+    #[test]
+    fn a_diagnostic_is_quoted_at_its_place_with_what_helps_fix_it() {
+        let text = "name: w\nnodes: []\nnodez: 1\n";
+        let (_, report) =
+            yunta_core::workflow::read::read_all(text, std::path::Path::new("w.yaml"));
+        let diagnostic = &report.diagnostics[0];
+        let quoted = found(diagnostic, "w.yaml", Some(text));
+        assert_eq!(quoted.said, "the document has an unknown key `nodez`");
+        assert_eq!(quoted.help, ["did you mean `nodes`?"]);
+        let place = quoted.at.expect("a place");
+        assert_eq!(
+            (place.named(), place.source.as_deref()),
+            ("w.yaml:3:1".to_string(), Some("nodez: 1"))
+        );
+        let unquoted = found(diagnostic, "w.yaml", None);
+        assert!(unquoted.at.is_none());
+        assert_eq!(
+            unquoted.said,
+            "the document has an unknown key `nodez` at line 3 column 1"
+        );
+        assert_eq!(unquoted.help, ["did you mean `nodes`?"]);
     }
 
     #[test]

@@ -387,22 +387,26 @@ fn hung(so: Option<&str>, fix: Option<&crate::components::Fix>) -> String {
 }
 
 /// The problem's word in bold and what it says, then where it is and its
-/// line with the part at fault marked under it, fenced as text.
+/// line with the part at fault marked under it, fenced as text; then what
+/// helps fix it after an italic `help:`, the items a separator apart.
 fn problem(problem: &Problem) -> String {
     let mut out = format!("**{}** {}", problem.severity.word(), problem.said);
-    let Some(place) = &problem.at else {
-        return out;
-    };
-    out.push_str(&format!("  \nat `{}`", place.named()));
-    if let Some((source, before, len)) = place.fault() {
-        let number = place.line.to_string();
-        let pad = " ".repeat(number.len());
-        let gutter = GLYPHS.gutter();
-        let marks = GLYPHS.fault().to_string().repeat(len);
-        let under = " ".repeat(crate::width::cell_width(&before));
-        out.push_str(&format!(
-            "\n\n```text\n{number} {gutter} {source}\n{pad} {gutter} {under}{marks}\n```"
-        ));
+    if let Some(place) = &problem.at {
+        out.push_str(&format!("  \nat `{}`", place.named()));
+        if let Some((source, before, len)) = place.fault() {
+            let number = place.line;
+            let pad = place.pad();
+            let gutter = GLYPHS.gutter();
+            let marks = GLYPHS.fault().to_string().repeat(len);
+            let under = " ".repeat(crate::width::cell_width(&before));
+            out.push_str(&format!(
+                "\n\n```text\n{number} {gutter} {source}\n{pad} {gutter} {under}{marks}\n```"
+            ));
+        }
+    }
+    if !problem.help.is_empty() {
+        let help = problem.help.join(&format!(" {} ", GLYPHS.sep()));
+        out.push_str(&format!("\n\n_{}_ {help}", crate::surface::terminal::HELP));
     }
     out
 }

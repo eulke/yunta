@@ -169,6 +169,25 @@ pub(crate) fn gc() -> String {
     "yunta gc".to_string()
 }
 
+/// Lists the documents `yunta schema` shows.
+pub(crate) fn schemas() -> String {
+    "yunta schema".to_string()
+}
+
+/// Shows the shape of `document`, a name `yunta schema` lists: as a person
+/// reads it, or with `json` as the JSON Schema an editor validates against.
+pub(crate) fn schema(document: &str, json: bool) -> String {
+    match json {
+        true => format!("{} {document} --json", schemas()),
+        false => format!("{} {document}", schemas()),
+    }
+}
+
+/// The command that lists every key a workflow and each kind of node read.
+pub(crate) fn schema_workflow() -> String {
+    schema(super::schema::Shown::Workflow.as_str(), false)
+}
+
 /// Runs a project's test cases.
 pub(crate) fn test() -> String {
     "yunta test".to_string()

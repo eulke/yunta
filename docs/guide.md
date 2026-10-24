@@ -483,14 +483,15 @@ node, so a session can see its meaning survived the parse.
 The same shape is available anywhere else you need it:
 
 ```
-yunta schema                    # the kinds
+yunta schema                    # the documents
 yunta schema tasks              # the shape of the document
 yunta schema findings --json    # JSON Schema, for an editor to validate against
+yunta schema workflow           # every key a workflow and each kind of node read
 ```
 
 and through the `document_shape` tool on `yunta mcp`, so an agent connected to
 the control plane finds it without anyone passing the format along. With no
-arguments it lists what each kind is for:
+arguments it lists what each document is for:
 
 ```console
 $ yunta schema
@@ -502,10 +503,11 @@ documents Yunta reads and validates
                forward
   questions    what a node needs a person to decide
   answers      what a person replied, as the engine records it
+  workflow     the nodes a run executes, and how they connect
 
 next
-  yunta schema <kind>          the shape to write
-  yunta schema <kind> --json   the JSON Schema an editor validates against
+  yunta schema <document>          the shape to write
+  yunta schema <document> --json   the JSON Schema an editor validates against
 ```
 
 ### Knowledge layers

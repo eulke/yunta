@@ -14,22 +14,17 @@ use serde::Serialize;
 mod source;
 mod value;
 
-pub use source::{Location, Pointer, SourceMap, Step};
+pub use source::{Location, Pointer, ReadAs, SourceMap, Step};
 pub use value::{Mapping, Number, Value};
 
 /// A YAML document that could not be read or written.
 #[derive(Debug, thiserror::Error)]
 pub enum YamlError {
-    /// The document does not parse into the expected type. `path`
-    /// locates the offending value from the document's root; it is
-    /// empty when the root itself is the problem. `at` is where in the
-    /// text the parser stopped, when it was reading text.
-    #[error("{}", locate(path, message, at.as_ref()))]
-    Parse {
-        path: String,
-        message: String,
-        at: Option<Location>,
-    },
+    /// The document does not parse into the expected type: what the
+    /// parser refused, in a box so that every error carrying one stays
+    /// small.
+    #[error("{0}")]
+    Parse(Box<ParseRefusal>),
     #[error("not valid UTF-8: {source}")]
     Utf8 {
         #[source]
@@ -39,15 +34,39 @@ pub enum YamlError {
     Serialize { message: String },
 }
 
-fn locate(path: &str, message: &str, at: Option<&Location>) -> String {
-    let said = match at {
-        Some(at) => format!("{message} at line {} column {}", at.line, at.col),
-        None => message.to_string(),
-    };
-    if path.is_empty() || path == "." {
-        said
-    } else {
-        format!("`{path}`: {said}")
+/// What the parser refused, and where. `path` locates the offending value
+/// from the document's root; it is empty when the root itself is the
+/// problem. `at` is where in the text the parser stopped, when it was
+/// reading text.
+#[derive(Debug)]
+pub struct ParseRefusal {
+    pub path: String,
+    pub message: String,
+    pub at: Option<Location>,
+    /// The name the refused one is most likely a slip from.
+    pub nearest: Option<String>,
+}
+
+impl From<ParseRefusal> for YamlError {
+    fn from(refusal: ParseRefusal) -> Self {
+        YamlError::Parse(Box::new(refusal))
+    }
+}
+
+impl std::fmt::Display for ParseRefusal {
+    /// Where in the document, what was refused, the name a slip most
+    /// likely meant, and where in the text the parser stopped, on one line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let said = format!(
+            "{}{}{}",
+            self.message,
+            surco::text::near_miss(self.nearest.as_deref()),
+            self.at.as_ref().map(Location::in_words).unwrap_or_default()
+        );
+        match self.path.as_str() {
+            "" | "." => f.write_str(&said),
+            path => write!(f, "`{path}`: {said}"),
+        }
     }
 }
 
@@ -62,15 +81,33 @@ pub fn parse<T: DeserializeOwned>(text: &str) -> Result<T, YamlError> {
             error.into_inner()
         })
     })
-    .map_err(|error| YamlError::Parse {
-        path,
-        message: said(&error),
-        at: error.location().map(|at| Location {
-            line: at.line() as usize,
-            col: at.column() as usize,
-            len: at.span().len() as usize,
-        }),
+    .map_err(|error| {
+        YamlError::from(ParseRefusal {
+            path,
+            message: said(&error),
+            at: error.location().map(|at| Location {
+                line: at.line() as usize,
+                col: at.column() as usize,
+                len: at.span().len() as usize,
+            }),
+            nearest: slip(&error),
+        })
     })
+}
+
+/// The name a refused field or variant is most likely a slip from, among
+/// the ones serde expected there.
+fn slip(error: &serde_saphyr::Error) -> Option<String> {
+    use serde_saphyr::Error;
+    match error {
+        Error::SerdeUnknownField {
+            field, expected, ..
+        } => near(field, expected),
+        Error::SerdeUnknownVariant {
+            variant, expected, ..
+        } => near(variant, expected),
+        _ => None,
+    }
 }
 
 /// What a reader is told when a document does not read: the refusal in
@@ -99,20 +136,10 @@ impl serde_saphyr::MessageFormatter for Said {
         match error {
             Error::SerdeUnknownField {
                 field, expected, ..
-            } => format!(
-                "unknown field `{field}`, {}{}",
-                one_of(expected),
-                near(field, expected)
-            )
-            .into(),
+            } => format!("unknown field `{field}`, {}", one_of(expected)).into(),
             Error::SerdeUnknownVariant {
                 variant, expected, ..
-            } => format!(
-                "unknown variant `{variant}`, {}{}",
-                one_of(expected),
-                near(variant, expected)
-            )
-            .into(),
+            } => format!("unknown variant `{variant}`, {}", one_of(expected)).into(),
             Error::DuplicateMappingKey { key: Some(key), .. } => {
                 format!("`{key}` is written twice in one mapping").into()
             }
@@ -126,10 +153,10 @@ impl serde_saphyr::MessageFormatter for Said {
 
 /// The name `typed` most likely misspells, when there is a choice to
 /// make: with one name expected, the refusal already names it.
-fn near(typed: &str, expected: &[&str]) -> String {
+fn near(typed: &str, expected: &[&str]) -> Option<String> {
     match expected {
-        [_, _, ..] => surco::text::did_you_mean(typed, expected.iter().copied()),
-        _ => String::new(),
+        [_, _, ..] => surco::text::nearest(typed, expected.iter().copied()).map(str::to_string),
+        _ => None,
     }
 }
 
@@ -173,10 +200,13 @@ pub fn parse_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, YamlError> {
 /// relative to `value`: a custom `Deserialize` that buffers a subtree
 /// into a `Value` prefixes it with the subtree's own location.
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, YamlError> {
-    serde_path_to_error::deserialize(value).map_err(|error| YamlError::Parse {
-        path: error.path().to_string(),
-        message: error.into_inner().to_string(),
-        at: None,
+    serde_path_to_error::deserialize(value).map_err(|error| {
+        YamlError::from(ParseRefusal {
+            path: error.path().to_string(),
+            message: error.into_inner().to_string(),
+            at: None,
+            nearest: None,
+        })
     })
 }
 

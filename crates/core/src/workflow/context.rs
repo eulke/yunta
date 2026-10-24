@@ -152,7 +152,8 @@ impl<'de> Deserialize<'de> for ContextFile {
         if let Some((key, _)) = mapping.into_iter().next() {
             let key = key.as_str().unwrap_or("?");
             return Err(D::Error::custom(format!(
-                "unknown key `{key}` for a `files:` entry; one of {}{}",
+                "{}; one of {}{}",
+                super::parse::unknown_key(key, "a `files:` entry"),
                 super::parse::list(KEYS),
                 surco::text::did_you_mean(key, KEYS.iter().copied())
             )));

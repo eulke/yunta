@@ -8,31 +8,47 @@ bugs — Yunta prefers a named, actionable error over guessing what you meant.
 
 `check` validates statically, before any session opens. The page always
 names the node and the exact problem, and a problem about the workflow file is
-followed by the line it is about, with carets under the part at fault:
+followed by the line it is about, with carets under the part at fault and what
+helps fix it under them:
 
 ```
-✗ workflow.yaml · 1 error
+✗ bad.yaml · 2 errors
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 
-  at           workflow.yaml
+  at           .yunta/workflows/bad.yaml
 
-  error  node `fix` references runner `implementr`, which `runners:` does not
-         define; did you mean `implementer`?
-   --> workflow.yaml:5:13
+  error  node `lint`: `on_failure.goto` names `fixx`, and no node carries that
+         id
+   --> .yunta/workflows/bad.yaml:6:25
     │
-  5 │     runner: implementr
-    │             ^^^^^^^^^^
+  6 │     on_failure: { goto: fixx, max_reroutes: 1 }
+    │                         ^^^^
+    help: did you mean `fix`?
+
+  error  node `fix`: unknown key `promt` for a `prompt` node
+   --> .yunta/workflows/bad.yaml:9:5
+    │
+  9 │     promt: "Fix what lint reported."
+    │     ^^^^^
+    help: did you mean `prompt`? · `yunta schema workflow` lists every key
 
 next
-  yunta check workflow.yaml   again, once they are fixed
+  yunta check .yunta/workflows/bad.yaml   again, once they are fixed
 ```
 
 A name one or two typos away from one the workflow or the config declares — a
-key, a node id, a runner, a command — is suggested at the end of the sentence.
-`check` reads past a key it does not know — as the key it is one typo from, when
-the node does not write that key already — so every problem in the file is
-listed at once, in the order the file has them, and one round of edits fixes
-them all. `yunta run` refuses a file with any of them.
+key, a kind, a node id, a runner, a command — is suggested in the `help:` under
+the problem, in the plain text an agent or a pipe reads as on a terminal. Where a
+problem is said on one line — a run tool's reply, a log line, a `yunta doctor`
+row — the suggestion follows its sentence after a semicolon, and so does the one
+for a key inside a `context:` source, a `files:` entry, an artifact reference or
+an `on_finish` step. `yunta schema workflow` lists every key a workflow and each
+kind of node read.
+`check` reads past a key it does not know, and a kind one typo from a kind there
+is, each as the one it most likely meant — a key only when the node does not
+write that key already — so every problem in the file is listed at once, in the
+order the file has them, and one round of edits fixes them all. `yunta run`
+refuses a file with any of them.
 
 - **``node `x` references runner `y`, which `runners:` does not define``** —
   add the runner under `runners:` in `.yunta/config.yaml` (see

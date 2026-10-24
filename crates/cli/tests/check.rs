@@ -281,8 +281,11 @@ fn check_points_at_the_line_and_column_of_an_unknown_runner() {
     assert!(!output.status.success());
     let said = stderr(&output);
     assert!(
-        unwrapped(&said).contains("which `runners:` does not define; did you mean `implementer`?"),
-        "the near miss is named: {said}"
+        unwrapped(&said).contains("which `runners:` does not define")
+            && said
+                .lines()
+                .any(|line| line.trim() == "help: did you mean `implementer`?"),
+        "the near miss is named under the problem: {said}"
     );
     let quoted: Vec<&str> = said
         .lines()
@@ -299,6 +302,32 @@ fn check_points_at_the_line_and_column_of_an_unknown_runner() {
             "    │             ^^^^^^^^^^",
         ],
         "{said}"
+    );
+}
+
+#[test]
+fn check_names_the_command_an_unset_one_is_a_slip_from_under_its_place() {
+    let project = Checkout::new()
+        .file(".yunta/config.yaml", "commands:\n  lint: \"true\"\n")
+        .file(
+            "workflow.yaml",
+            "name: fixture\nnodes:\n  - id: lint\n    kind: bash\n    run: { command: lnt }\n",
+        );
+
+    let output = yunta_at!(project, &["check", "workflow.yaml"]);
+    assert!(!output.status.success());
+    let said = stderr(&output);
+    assert!(
+        unwrapped(&said).contains(
+            "node `lint`: it runs the project's command `lnt`, and the config declares none"
+        ) && said
+            .lines()
+            .any(|line| line.trim() == "help: did you mean `lint`?"),
+        "the command it is a slip from is named under the problem: {said}"
+    );
+    assert!(
+        said.contains("--> workflow.yaml:5:21"),
+        "where the command is named: {said}"
     );
 }
 

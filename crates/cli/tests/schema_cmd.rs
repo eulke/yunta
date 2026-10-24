@@ -19,9 +19,80 @@ fn with_no_arguments_it_lists_every_document_yunta_reads() {
     let output = yunta_in!(here.path(), here.path(), &["schema"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let text = stdout(&output);
-    for kind in ["tasks", "spec", "findings", "questions"] {
+    for kind in [
+        "tasks",
+        "spec",
+        "findings",
+        "questions",
+        "answers",
+        "workflow",
+    ] {
         assert!(text.contains(kind), "{kind} missing from {text}");
     }
+}
+
+/// Every key the schema an editor validates a workflow against has is on
+/// the page that lists them: at the top, in every node, and in each kind,
+/// on a row the kind heads.
+#[test]
+fn the_workflow_page_names_every_key_and_kind_its_schema_has() {
+    let here = tempfile::tempdir().unwrap();
+    let output = yunta_in!(here.path(), here.path(), &["schema", "workflow"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    let schema: serde_json::Value = serde_json::from_str(&committed("workflow.json")).unwrap();
+    let keys = |object: &serde_json::Value| -> Vec<String> {
+        object["properties"]
+            .as_object()
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+    let node = &schema["$defs"]["Node"];
+    for key in keys(&schema).iter().chain(&keys(node)) {
+        assert!(
+            text.contains(&format!("`{key}`")),
+            "`{key}` missing from {text}"
+        );
+    }
+    for kind in node["oneOf"]
+        .as_array()
+        .expect("a node is one of its kinds")
+    {
+        let name = kind["properties"]["kind"]["const"].as_str().unwrap();
+        assert!(
+            text.lines()
+                .any(|line| line.trim_start().starts_with(&format!("{name} "))),
+            "no row for `{name}` in {text}"
+        );
+        for key in keys(kind) {
+            assert!(
+                text.contains(&format!("`{key}`")),
+                "`{key}` of `{name}` missing from {text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_document_a_slip_from_one_is_refused_with_every_name_and_the_one_it_meant() {
+    let here = tempfile::tempdir().unwrap();
+    let output = yunta_in!(here.path(), here.path(), &["schema", "workflows"]);
+    assert!(!output.status.success());
+    let text = yunta_testkit::unwrapped(&stderr(&output));
+    for name in [
+        "tasks",
+        "spec",
+        "findings",
+        "questions",
+        "answers",
+        "workflow",
+    ] {
+        assert!(
+            text.contains(&format!("`{name}`")),
+            "`{name}` missing from {text}"
+        );
+    }
+    assert!(text.contains("did you mean `workflow`?"), "{text}");
 }
 
 #[test]
@@ -90,15 +161,21 @@ fn the_json_schema_served_is_the_one_committed_in_the_repository() {
         ("spec", "spec.json"),
         ("findings", "findings.json"),
         ("questions", "questions.json"),
+        ("answers", "answers.json"),
+        ("workflow", "workflow.json"),
     ] {
         let output = yunta_in!(here.path(), here.path(), &["schema", kind, "--json"]);
         assert!(output.status.success(), "{kind}: {}", stderr(&output));
-        let committed = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(COMMITTED_SCHEMAS)
-                .join(file),
-        )
-        .unwrap();
-        assert_eq!(stdout(&output), committed, "{kind}");
+        assert_eq!(stdout(&output), committed(file), "{kind}");
     }
+}
+
+/// The schema the repository keeps under `file`.
+fn committed(file: &str) -> String {
+    std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(COMMITTED_SCHEMAS)
+            .join(file),
+    )
+    .unwrap()
 }

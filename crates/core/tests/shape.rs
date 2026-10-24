@@ -123,6 +123,54 @@ fn a_key_the_type_does_not_declare_is_named() {
 }
 
 #[test]
+fn a_key_one_slip_from_one_the_type_declares_carries_the_name_it_meant() {
+    let report = read::<TasksFile>(
+        b"tasks:\n  - id: t1\n    titel: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
+        PLAN,
+    )
+    .expect_err("a key one slip from `title`");
+    let diagnostic = &report.diagnostics[0];
+    assert!(
+        matches!(
+            &diagnostic.problem,
+            yunta_core::Problem::Parse { nearest: Some(nearest), .. } if nearest == "title"
+        ),
+        "{report}"
+    );
+    assert_eq!(diagnostic.help(), ["did you mean `title`?"]);
+    let logged = serde_json::to_string(diagnostic).expect("a diagnostic serializes");
+    assert!(logged.contains("\"nearest\":\"title\""), "{logged}");
+    let read_back: yunta_core::Diagnostic = serde_json::from_str(&logged).expect("and reads back");
+    assert_eq!(read_back.help(), diagnostic.help());
+}
+
+#[test]
+fn a_key_no_name_is_near_carries_no_name_it_meant() {
+    let report = read::<TasksFile>(
+        b"tasks:\n  - id: t1\n    title: Work\n    estimate: extra\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
+        PLAN,
+    )
+    .expect_err("a key nobody declared");
+    let logged = serde_json::to_string(&report.diagnostics[0]).expect("a diagnostic serializes");
+    assert!(!logged.contains("\"nearest\""), "{logged}");
+    assert!(report.diagnostics[0].help().is_empty(), "{report}");
+}
+
+#[test]
+fn a_value_one_slip_from_one_the_type_accepts_carries_the_value_it_meant() {
+    let report = read::<FindingsFile>(
+        b"findings:\n  - id: f\n    severity: majr\n    title: t\n    location: \"src/a.rs:1\"\n    detail: d\n",
+        FINDINGS,
+    )
+    .expect_err("a severity one slip from `major`");
+    assert_eq!(
+        report.diagnostics[0].help(),
+        ["did you mean `major`?"],
+        "{report}"
+    );
+}
+
+#[test]
 fn answers_read_through_the_same_door_as_every_document() {
     // The engine writes the answers, and reads them back the way it
     // reads what an agent wrote: one door, one report. A document whose

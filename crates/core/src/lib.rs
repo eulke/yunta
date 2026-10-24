@@ -132,7 +132,7 @@ pub use workflow::{
     KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,
     NodeScope, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, Resolved,
-    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind,
+    RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, UnknownDocument,
     Workflow, WorkflowFault, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 

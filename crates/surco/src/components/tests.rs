@@ -341,29 +341,6 @@ fn markdown_says_every_word_the_terminal_does() {
     assert!(lost.is_empty(), "Markdown dropped {lost:?}");
 }
 
-#[test]
-fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
-    let mut list = Checklist::default();
-    list.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
-    list.push(Found::Caution, "forge", "github acme/web — reachable");
-    list.push(
-        Found::Problem,
-        "codex/codex-model (executor, planner fallback, reviewer)",
-        "session died",
-    );
-    let holds = list.holds();
-    assert_eq!(
-        plain(list),
-        [
-            "  + git    commits as Ada <ada@example.com>",
-            "  ^ forge  github acme/web — reachable",
-            "  ! codex/codex-model (executor, planner fallback, reviewer)",
-            "           session died",
-        ]
-    );
-    assert!(!holds, "a problem on the list is one a run stops on");
-}
-
 /// A command long enough to be cut, with a quoted stretch a cut inside
 /// would break.
 const LONG: &str = "cargo test -p yunta --test pack_cmd -- global_pack_scope_case --exact --nocapture 'a scope with spaces'";
@@ -422,6 +399,29 @@ fn a_cut_command_copies_as_one_command() {
 }
 
 #[test]
+fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
+    let mut list = Checklist::default();
+    list.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
+    list.push(Found::Caution, "forge", "github acme/web — reachable");
+    list.push(
+        Found::Problem,
+        "codex/codex-model (executor, planner fallback, reviewer)",
+        "session died",
+    );
+    let holds = list.holds();
+    assert_eq!(
+        plain(list),
+        [
+            "  + git    commits as Ada <ada@example.com>",
+            "  ^ forge  github acme/web — reachable",
+            "  ! codex/codex-model (executor, planner fallback, reviewer)",
+            "           session died",
+        ]
+    );
+    assert!(!holds, "a problem on the list is one a run stops on");
+}
+
+#[test]
 fn a_list_where_everything_holds_folds_into_its_one_row() {
     let mut list = Checklist::default().folded("healthy");
     list.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
@@ -443,6 +443,26 @@ fn a_list_where_nothing_holds_has_nothing_to_fold() {
     assert_eq!(
         plain(list),
         ["  ^ first run  a new binary's first run takes 337 ms"]
+    );
+}
+
+#[test]
+fn a_name_wider_than_the_fold_row_breaks_between_its_words() {
+    let mut list = Checklist::default().folded("healthy");
+    for name in ["a very long name of a check", "codex 0.157.0"] {
+        list.push_check(Check::new(Found::Holds, name, "holds").brief(name));
+    }
+    let look = Look {
+        width: Look::plain().width.within(40),
+        ..Look::plain()
+    };
+    assert_eq!(
+        draw_with(list, &look),
+        [
+            "  + 2 healthy  a very long name of a",
+            "               check ;",
+            "               codex 0.157.0",
+        ]
     );
 }
 

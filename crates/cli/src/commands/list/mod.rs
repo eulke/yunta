@@ -22,7 +22,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::document;
 use surco::components::{Fields, Gist, Headline, Marked, Next, Prose, Section};
-use surco::doc::{Depth, Doc};
+use surco::doc::{Block, Depth, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
 use surco::look::Look;
@@ -131,11 +131,7 @@ async fn listed(
             return Section {
                 mark: None,
                 title: Line::new().push(Tone::Strong, name.as_str()),
-                blocks: vec![Marked {
-                    mark: Mark::Failed,
-                    items: vec![why],
-                }
-                .into()],
+                blocks: why,
             }
         }
     };
@@ -156,13 +152,20 @@ async fn listed(
 }
 
 /// The workflow `entry` names, or the reason its file does not read.
-async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, String> {
-    tokio::fs::read_to_string(&entry.path)
-        .await
-        .map_err(|e| format!("unreadable: {e}"))
-        .and_then(|contents| {
-            yunta_core::workflow::read::read(&contents, &entry.path).map_err(|r| r.to_string())
-        })
+async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, Vec<Block>> {
+    let contents = tokio::fs::read_to_string(&entry.path).await.map_err(|e| {
+        vec![Marked {
+            mark: Mark::Failed,
+            items: vec![format!("unreadable: {e}")],
+        }
+        .into()]
+    })?;
+    yunta_core::workflow::read::read(&contents, &entry.path).map_err(|report| {
+        crate::error::page::document_problems(&report, Some(&contents))
+            .into_iter()
+            .map(Block::from)
+            .collect()
+    })
 }
 
 /// One row per input the workflow takes, the first one carrying the label.

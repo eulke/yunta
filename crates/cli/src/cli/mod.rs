@@ -369,11 +369,11 @@ enum Command {
     /// Show the shape of a document Yunta reads.
     ///
     /// Prints the shape of a document Yunta reads and validates, so
-    /// nobody has to guess it. With no arguments, lists the kinds.
+    /// nobody has to guess it. With no arguments, lists the documents.
     Schema {
-        /// Which document: `tasks`, `findings`, `questions` or `answers`.
-        kind: Option<String>,
-        /// Emits the JSON Schema instead of the annotated example: what
+        /// Which document; with none, every one is listed.
+        document: Option<String>,
+        /// Emits the JSON Schema instead of the page a person reads: what
         /// an editor's language server validates against.
         #[arg(long)]
         json: bool,

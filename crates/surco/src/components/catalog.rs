@@ -169,25 +169,22 @@ fn readiness() -> Checklist {
 /// pointed at in its line, a warning with no place, and a refusal.
 fn found() -> Vec<Block> {
     vec![
-        Problem {
-            severity: Severity::Error,
-            said: "node `fix` references runner `implementr`, which `runners:` does not define"
-                .to_string(),
-            at: Some(Place {
+        Problem::error(
+            "node `fix`: unknown key `promt` for a `prompt` node",
+            Some(Place {
                 path: ".yunta/workflows/lint-fix.yaml".to_string(),
                 line: 9,
-                col: 13,
-                source: Some("    runner: implementr".to_string()),
-                len: 10,
+                col: 5,
+                source: Some("    promt: \"Fix what lint reported.\"".to_string()),
+                len: 5,
             }),
-        }
+        )
+        .help([
+            "did you mean `prompt`?".to_string(),
+            "`yunta schema workflow` lists every key".to_string(),
+        ])
         .into(),
-        Problem {
-            severity: Severity::Warning,
-            said: "the program `cargo-nextest` is not on this machine's PATH".to_string(),
-            at: None,
-        }
-        .into(),
+        Problem::warning("the program `cargo-nextest` is not on this machine's PATH").into(),
         Refusal {
             said: "no run is called `7E5PH5`; did you mean `7E5PH4`?".to_string(),
             detail: Some("looked in ~/.yunta/runs".to_string()),

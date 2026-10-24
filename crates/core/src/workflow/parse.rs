@@ -42,12 +42,18 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
         .map_or(key, |(_, canonical)| canonical);
     if !keys.contains(&key) {
         return Err(D::Error::custom(format!(
-            "unknown key `{key}` for {what}; one of {}{}",
+            "{}; one of {}{}",
+            unknown_key(key, what),
             list(keys),
             surco::text::did_you_mean(key, keys.iter().copied())
         )));
     }
     Ok((key.to_string(), value))
+}
+
+/// What a refusal of `key`, which nothing in `what` reads, opens with.
+pub(super) fn unknown_key(key: &str, what: &str) -> String {
+    format!("unknown key `{key}` for {what}")
 }
 
 /// Takes the value of `key` out of `mapping`, parsed, leaving every
@@ -76,10 +82,10 @@ pub(super) fn nested<'de, D: Deserializer<'de>, T: DeserializeOwned>(
 
     yaml::from_value(value).map_err(|error| {
         D::Error::custom(match error {
-            YamlError::Parse { path, message, .. } if path.is_empty() || path == "." => {
-                format!("{key}: {message}")
+            YamlError::Parse(refusal) if refusal.path.is_empty() || refusal.path == "." => {
+                format!("{key}: {}", refusal.message)
             }
-            YamlError::Parse { path, message, .. } => format!("{key}.{path}: {message}"),
+            YamlError::Parse(refusal) => format!("{key}.{}: {}", refusal.path, refusal.message),
             other => other.to_string(),
         })
     })

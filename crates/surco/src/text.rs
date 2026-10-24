@@ -158,8 +158,13 @@ pub fn suggested(near: &str) -> String {
 /// `; did you mean `name`?`, said after a name nothing answers to when
 /// `near` is the name it was a slip away from; nothing otherwise.
 pub fn near_miss(near: Option<&str>) -> String {
-    near.map(|near| format!("; {}", suggested(near)))
-        .unwrap_or_default()
+    hinted(near.map(suggested))
+}
+
+/// `hints` as a line of text says them after its sentence, each after a
+/// semicolon; nothing when there are none.
+pub fn hinted(hints: impl IntoIterator<Item = String>) -> String {
+    hints.into_iter().map(|hint| format!("; {hint}")).collect()
 }
 
 /// The [`near_miss`] of `typed` among `candidates`: the one [`nearest`] to it.

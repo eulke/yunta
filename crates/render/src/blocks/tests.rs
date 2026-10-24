@@ -58,18 +58,16 @@ fn a_quoted_refusal_matches_its_golden() {
     let at = |line, col, len| Some(yunta_core::yaml::Location { line, col, len });
     let problems = vec![
         (
-            "node `lint`: it runs the project's command `lnt`, and the config declares none; \
-             did you mean `lint`?"
-                .to_string(),
+            "node `lint`: it runs the project's command `lnt`, and the config declares none",
             at(5, 21, 3),
+            Some("lint"),
         ),
         (
-            "node `fix` references runner `implementr`, which `runners:` does not define; \
-             did you mean `implementer`?"
-                .to_string(),
+            "node `fix` references runner `implementr`, which `runners:` does not define",
             at(9, 13, 10),
+            Some("implementer"),
         ),
-        ("a conflict between config layers".to_string(), None),
+        ("a conflict between config layers", None, None),
     ];
     assert_golden(
         &goldens().join("quoted-refusal.txt"),
@@ -77,7 +75,10 @@ fn a_quoted_refusal_matches_its_golden() {
             "wf.yaml",
             problems
                 .into_iter()
-                .map(|(said, at)| super::diagnostic::located(said, at, "wf.yaml", Some(text)))
+                .map(|(said, at, near)| {
+                    super::diagnostic::located(said.to_string(), at, "wf.yaml", Some(text))
+                        .help(near.map(surco::text::suggested))
+                })
                 .collect(),
         ),
     );

@@ -162,8 +162,12 @@ fn frozen_children(manifest: &Manifest) -> Result<Vec<(&str, Workflow)>, CliErro
         .iter()
         .flat_map(|frozen| &frozen.workflows)
         .map(|(name, child)| {
-            let workflow = yunta_core::workflow::read::read(&child.text, Path::new(name))
-                .map_err(|report| CliError::msg(report.to_string()))?;
+            let workflow = yunta_core::workflow::read::read(&child.text, Path::new(name)).map_err(
+                |report| CliError::Document {
+                    report,
+                    text: Some(child.text.clone()),
+                },
+            )?;
             Ok((name.as_str(), workflow))
         })
         .collect()

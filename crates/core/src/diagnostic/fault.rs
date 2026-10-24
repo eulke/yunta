@@ -39,6 +39,19 @@ impl Fault {
         }
     }
 
+    /// Whether the clause is about the document as a whole.
+    pub fn about_document(&self) -> bool {
+        matches!(self, Fault::Workflow(fault) if fault.about_document())
+    }
+
+    /// What helps fix it, the most direct first.
+    pub fn help(&self) -> Vec<String> {
+        match self {
+            Fault::Workflow(fault) => fault.help(),
+            _ => Vec::new(),
+        }
+    }
+
     /// The clause a reader acts on: what the rule found, in words.
     pub fn clause(&self) -> String {
         match self {

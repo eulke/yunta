@@ -6,21 +6,21 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::components::{Fields, Furrow, Headline, Next, Problem, Severity};
+use surco::components::{Fields, Furrow, Headline, Next, Problem};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::text::counted;
 use yunta_core::caution::Caution;
 use yunta_core::step::NextStep;
-use yunta_core::yaml::{Location, SourceMap};
+use yunta_core::yaml::SourceMap;
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::CheckError;
 use yunta_render::blocks::diagnostic::located;
 
 use super::advice;
 use crate::context::Context;
-use crate::error::{warn, CliError, Outcome};
+use crate::error::{page, warn, CliError, Outcome};
 use crate::output::{document, on_stderr};
 
 /// How much of the project a verdict reads beyond the workflow itself.
@@ -210,11 +210,7 @@ impl Verdict {
         let warnings = self
             .warnings
             .iter()
-            .map(|warning| Problem {
-                severity: Severity::Warning,
-                said: yunta_render::caution::line(warning),
-                at: None,
-            })
+            .map(|warning| Problem::warning(yunta_render::caution::line(warning)))
             .collect();
         Ok(Found {
             blocks: unrunnable.blocks(warnings),
@@ -234,31 +230,25 @@ impl Verdict {
     async fn unrunnable(&self, ctx: &Context) -> Result<Unrunnable, CliError> {
         let text = tokio::fs::read_to_string(&self.path).await.ok();
         let map = text.as_deref().map(SourceMap::read).unwrap_or_default();
-        let mut all: Vec<(String, Option<Location>)> = self
+        let shown = shown(ctx, &self.path);
+        let mut pointed: Vec<page::Pointed> = self
             .in_file
             .iter()
-            .map(|problem| match problem.at {
-                Some(at) => (problem.said(), Some(at)),
-                None => (problem.to_string(), None),
-            })
+            .map(|diagnostic| page::found(diagnostic, &shown, text.as_deref()))
             .chain(self.errors.iter().map(|error| {
                 let at = error.pointer().and_then(|pointer| map.place(&pointer));
-                (crate::error::words::check(error), at)
+                page::refused(error, at, &shown, text.as_deref()).into()
             }))
             .collect();
         // In the order the file has them; what has no place in it, a
         // config layer's conflict among them, after.
-        all.sort_by_key(|(_, at)| at.map_or((usize::MAX, 0), |at| (at.line, at.col)));
-        all.extend(
+        pointed.sort_by_key(page::Pointed::order);
+        let mut problems = page::hinted(pointed);
+        problems.extend(
             self.conflicts
                 .iter()
-                .map(|conflict| (conflict.clone(), None)),
+                .map(|conflict| located(conflict.clone(), None, &shown, None)),
         );
-        let shown = shown(ctx, &self.path);
-        let problems = all
-            .into_iter()
-            .map(|(said, at)| located(said, at, &shown, text.as_deref()))
-            .collect();
         let declare = match self.errors.is_empty() {
             true => Vec::new(),
             false => {

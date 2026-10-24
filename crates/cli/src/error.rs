@@ -12,7 +12,7 @@ use yunta_core::RunId;
 
 pub use crate::output::{note, warn};
 
-mod page;
+pub(crate) mod page;
 pub(crate) mod words;
 
 use page::{document_problems, unrunnable};
@@ -187,11 +187,10 @@ pub enum CliError {
     #[error("{}", unrunnable(.0))]
     Unrunnable(crate::commands::verdict::Unrunnable),
 
-    /// A document kind this binary does not publish. The sentence
-    /// lists the kinds that exist, so `yunta schema` and the
-    /// `document_shape` tool answer the same mistake the same way.
+    /// A document this binary does not show. The sentence lists the ones
+    /// it does, and the one a slip most likely meant.
     #[error(transparent)]
-    UnknownArtifactKind(#[from] yunta_core::UnknownArtifactKind),
+    UnknownDocument(#[from] yunta_core::UnknownDocument),
 
     /// A reply that does not answer the questions it claims to, or a
     /// round that could not be read back — the engine's own verdict,

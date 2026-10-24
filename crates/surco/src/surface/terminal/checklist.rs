@@ -6,7 +6,7 @@
 use crate::components::{Check, Checklist, Fix, Found};
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, wrap, wrap_unbroken, INDENT};
+use crate::width::{cell_width, packed, wrap, wrap_unbroken, INDENT};
 
 /// The label what a finding means hangs under it with, on every surface.
 pub(in crate::surface) const SO: &str = "so";
@@ -31,8 +31,9 @@ impl Checklist {
     /// subject never pushes every other finding across the line. Under a
     /// row hang what the finding means and how to make it hold, then what
     /// says more, each line as written. A list that folds draws the checks
-    /// that hold as one row naming each, a name never cut across lines, and
-    /// the others under it, a line apart.
+    /// that hold as one row naming each, its lines broken only between two
+    /// names unless one is wider than the row, and the others under it, a
+    /// line apart.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let fold = self.fold();
         let rest: Vec<&Check> = self.unfolded().collect();
@@ -170,30 +171,6 @@ pub(in crate::surface) fn hangers(
             .iter()
             .map(|line| Line::new().plain(margin.as_str()).plain(line.as_str())),
     );
-    lines
-}
-
-/// `names` on lines of `room` cells, `sep` after each but the last, a line
-/// broken only between two names: a name wider than the room has a line of
-/// its own.
-fn packed(names: &[&str], sep: char, room: usize) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut line = String::new();
-    for (at, name) in names.iter().enumerate() {
-        let piece = match at + 1 < names.len() {
-            true => format!("{name} {sep}"),
-            false => name.to_string(),
-        };
-        let joined = format!("{line} {piece}");
-        if line.is_empty() {
-            line = piece;
-        } else if cell_width(&joined) <= room {
-            line = joined;
-        } else {
-            lines.push(std::mem::replace(&mut line, piece));
-        }
-    }
-    lines.extend((!line.is_empty()).then_some(line));
     lines
 }
 

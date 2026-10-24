@@ -191,6 +191,9 @@ pub enum NodeKind {
 
 impl NodeKind {
     /// Every `kind:` a node can declare, as written in YAML.
+    /// The key a node names its kind with.
+    pub const TAG: &'static str = "kind";
+
     pub const KINDS: &'static [&'static str] = &[
         "prompt",
         "bash",

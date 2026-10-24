@@ -15,12 +15,14 @@ mod context;
 mod expand;
 mod fault;
 mod hooks;
+mod keys;
 mod node;
 mod node_kind;
 mod node_policy;
 mod optional;
 mod parse;
 mod place;
+mod references;
 mod scope;
 
 use std::collections::{BTreeMap, HashSet};
@@ -38,7 +40,7 @@ pub mod reads;
 
 pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
-    UnknownArtifactKind, ARTIFACTS_DIR, OBJECTS_DIR,
+    UnknownDocument, ARTIFACTS_DIR, OBJECTS_DIR,
 };
 pub use command::{node_commands, Resolved, RunCommand};
 pub use context::{
@@ -47,6 +49,7 @@ pub use context::{
 };
 pub use fault::WorkflowFault;
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
+pub use keys::{NODE_KEYS, WORKFLOW_KEYS};
 pub use node::{Node, NodeDefaults};
 pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,

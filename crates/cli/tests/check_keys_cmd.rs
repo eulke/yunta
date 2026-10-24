@@ -12,15 +12,23 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Each problem a check's page lists: what it says, read whole, and the
-/// place its `-->` line points at.
-fn problems(page: &str) -> Vec<(String, String)> {
+/// Each problem a check's page lists: what it says, read whole, the place
+/// its `-->` line points at, and what its `help:` says, read whole.
+fn problems(page: &str) -> Vec<(String, String, String)> {
     page.split("\n  error  ")
         .skip(1)
         .map(|problem| {
-            let (said, place) = problem.split_once("-->").unwrap_or((problem, ""));
-            let place = place.lines().next().unwrap_or_default().trim().to_string();
-            (yunta_testkit::unwrapped(said), place)
+            let (said, rest) = problem.split_once("-->").unwrap_or((problem, ""));
+            let place = rest.lines().next().unwrap_or_default().trim().to_string();
+            let help = rest
+                .split_once("help:")
+                .map(|(_, help)| help.split("\n\n").next().unwrap_or_default())
+                .unwrap_or_default();
+            (
+                yunta_testkit::unwrapped(said),
+                place,
+                yunta_testkit::unwrapped(help),
+            )
         })
         .collect()
 }
@@ -56,17 +64,67 @@ fn check_names_every_unknown_key_of_a_node_with_the_key_that_replaces_it() {
         ("role", "a node names its runner with `runner:`", 12),
         ("depend_on", "did you mean `depends_on`?", 13),
     ] {
-        let (said, place) = problems
+        let (_, place, help) = problems
             .iter()
-            .find(|(said, _)| said.contains(&format!("unknown key `{key}`")))
+            .find(|(said, _, _)| said.contains(&format!("unknown key `{key}`")))
             .unwrap_or_else(|| panic!("`{key}` is named: {stderr}"));
         assert!(
-            said.contains(instead) && place.ends_with(&at(line)),
+            help.contains(instead) && place.ends_with(&at(line)),
             "`{key}` is refused at line {line}, with what replaces it: {stderr}"
         );
     }
+    // Where every key is listed is said once, under the first of them.
+    let listed: Vec<&str> = problems
+        .iter()
+        .filter(|(_, _, help)| help.contains("`yunta schema workflow` lists every key"))
+        .map(|(said, _, _)| said.as_str())
+        .collect();
     assert!(
-        stderr.contains("`depends_on`"),
-        "the valid keys are listed: {stderr}"
+        listed.len() == 1 && listed[0].contains("unknown key `role`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn check_names_a_slip_in_a_kind_where_it_is_written_and_what_it_meant() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("slips.yaml");
+    std::fs::write(
+        &path,
+        "name: w\nnodez: x\nnodes:\n  - id: fix\n    kind: prompy\n    prompt: p\n  - id: checks\n    kind: parallel\n    nodes:\n      - { id: lint, kind: bash, run: \"true\" }\n      - id: test\n        kind: bsh\n        run: \"true\"\n",
+    )
+    .unwrap();
+    let out = yunta_in!(
+        dir.path(),
+        &dir.path().join("home"),
+        &["check", path.to_str().unwrap()]
+    );
+    assert!(
+        !out.status.success(),
+        "a file with slips must not pass check"
+    );
+    let stderr = yunta_testkit::stderr(&out);
+    let problems = problems(&stderr);
+    let about = |said: &str| {
+        problems
+            .iter()
+            .find(|(written, _, _)| written.contains(said))
+            .unwrap_or_else(|| panic!("`{said}` is named: {stderr}"))
+    };
+    let (_, place, help) = about("the document has an unknown key `nodez`");
+    assert!(
+        place.ends_with("slips.yaml:2:1")
+            && help == "did you mean `nodes`? · `yunta schema workflow` lists every key and kind",
+        "a key at the top, with the command that lists every key and kind: {stderr}"
+    );
+    let (_, place, help) = about("node `fix`: unknown kind `prompy`");
+    assert!(
+        place.ends_with("slips.yaml:5:11") && help == "did you mean `prompt`?",
+        "a kind where it is written, the command not said twice: {stderr}"
+    );
+    let (_, place, help) = about("node `test`: unknown kind `bsh`");
+    assert!(
+        place.ends_with("slips.yaml:12:15") && help == "did you mean `bash`?",
+        "a child's kind at its own line: {stderr}"
     );
 }

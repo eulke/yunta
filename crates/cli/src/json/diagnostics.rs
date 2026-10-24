@@ -7,16 +7,22 @@ use yunta_core::events::{ArtifactId, EventPayload, Failure, NodeEvent, StoredEve
 use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, NodeId, Problem, RuleWords};
 
 /// One problem of a document as a program reads it: the diagnostic as the
-/// log holds it, and the clause of a broken rule, beside it.
+/// log holds it, the clause of a broken rule, and what helps fix it,
+/// beside it.
 #[derive(serde::Serialize)]
 struct DiagnosticJson {
     #[serde(flatten)]
     diagnostic: Diagnostic,
     /// The clause of a rule the log keeps as a fault. Absent on an older
     /// log's rule, which carries its `detail` already, and on a parse
-    /// problem, whose `message` is the reader's own report.
+    /// problem, which carries the parser's `message`.
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    /// What helps fix it, the most direct first: the name a slip most
+    /// likely meant, or what took the place of a retired key. Absent when
+    /// nothing does.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    help: Vec<String>,
 }
 
 impl From<&Diagnostic> for DiagnosticJson {
@@ -35,6 +41,7 @@ impl From<&Diagnostic> for DiagnosticJson {
         DiagnosticJson {
             diagnostic: diagnostic.clone(),
             detail,
+            help: diagnostic.help(),
         }
     }
 }
