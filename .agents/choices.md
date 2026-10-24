@@ -13,3 +13,9 @@ protects: every run freezes the version it starts with.
 ### No Windows build
 The engine's process layer is POSIX: process groups, signals, and telling a live lock from a dead one. A binary
 that cannot stop a run's process tree is not published.
+
+### No visual workflow builder
+Not an editor that draws a workflow. A developer writes YAML faster, with completion, git and a diff; for anyone
+else the hard part is a criterion a command can verify, which no canvas writes. `yunta graph` draws what a workflow
+declares, and the YAML stays the only source a run reads: a drawing holding state the YAML did not would break
+versioning, packs and the manifest a run freezes.

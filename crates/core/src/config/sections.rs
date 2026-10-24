@@ -11,12 +11,22 @@ use crate::ids::{
 };
 use crate::workflow::{Effort, OnInterrupt};
 
-/// One binding candidate for a role in `runners:`.
+/// One candidate of a runner in `runners:`: the adapter, the model it asks
+/// that adapter's CLI for, and optionally an agent and an effort.
+///
+/// Three words, three things. An adapter is the integration with one agent
+/// CLI (`claude-code`, `codex`, `mock`); a runner is the binding a node asks
+/// for by name — the role a workflow needs, `runner: planner`, which the
+/// project's config fills with the CLIs it has; an agent is a set of
+/// instructions the run owns, added to the CLI's own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunnerCandidate {
     pub adapter: AdapterId,
     pub model: ModelName,
+    /// The agent this candidate's sessions work under; a node's own
+    /// `agent:` wins over it, so the candidates of one runner may each
+    /// pair their adapter with an agent of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentName>,
     /// How long the model reasons, unless the node says otherwise; absent
@@ -37,9 +47,9 @@ pub struct FormatRule {
     pub run: CommandName,
 }
 
-/// One server in `mcp_servers:` — the reference config's own
-/// shape: a streamable-HTTP endpoint plus the *name* of an env var
-/// carrying the bearer token, never the token itself (secrets are
+/// One server in `mcp_servers:` — a streamable-HTTP endpoint plus the
+/// *name* of an env var carrying the bearer token, never the token
+/// itself (secrets are
 /// env var names in config, values only ever come from the process
 /// environment at resolve time).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -129,9 +139,17 @@ pub struct ProjectConfig {
     pub branch_prefix: Option<String>,
 }
 
-/// `paths:` — where run/worktree state lives. `YUNTA_HOME` is
-/// an environment override applied when resolving the merged config, not
-/// a field of it.
+/// `paths:` — where a run's state lives: its run directory and its
+/// worktree.
+///
+/// What a team shares is versioned in its repository, under `.yunta/`:
+/// config, workflows, skills, agents, knowledge and packs. A run's state
+/// belongs to whoever runs it: by default under the user state root
+/// (`~/.yunta`, or `$YUNTA_HOME`), outside every repository, where an
+/// agent's git commands in its checkout never reach it. `YUNTA_HOME` is an
+/// environment override applied when resolving the merged config, not a
+/// field of it, and a run freezes the roots it resolved
+/// ([`crate::FrozenPaths`]), so a later change to either never loses it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathsConfig {
@@ -144,9 +162,15 @@ pub struct PathsConfig {
 /// Whether a unit of work gets a working tree of its own, or works in
 /// the one it was handed.
 ///
-/// `worktree` (the default) gives it its own `git worktree`; `none`
-/// works directly in the checkout it was given — legitimate for watching
-/// an agent edit live, or for CI already inside an ephemeral container.
+/// `worktree` (the default) gives it a checkout of its own, so runs work
+/// beside each other and beside the person; `none` works directly in the
+/// checkout it was given — legitimate for watching an agent edit live, for
+/// CI already inside an ephemeral container, or for a tree too costly to
+/// set up twice. A first-level run under `none` starts only from a clean
+/// checkout, since the diff its scope is audited by could not tell the
+/// agent's change from the person's, and holds that checkout's lock, so
+/// no second run works there at once; its manifest records the isolation
+/// it ran with.
 ///
 /// One word for every level, run and `kind: workflow` node alike:
 /// `none` is true wherever it is written, while a word naming a parent
@@ -199,7 +223,7 @@ pub fn is_default_isolation(isolation: &Isolation) -> bool {
     *isolation == Isolation::default()
 }
 
-/// `defaults:` — the reference config's whole group. Each field
+/// `defaults:` — what a run and its nodes fall back to. Each field
 /// has its consumer: `isolation`, `max_parallel_nodes`,
 /// `on_interrupt`, `runner` (a node that declares none),
 /// `timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed
@@ -213,8 +237,8 @@ pub struct DefaultsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerName>,
     /// Per-session budget of time the host is awake (`Budget.timeout`),
-    /// in minutes — the granularity the reference schema uses for whole
-    /// sessions. A suspended host spends none of it, and the run's log
+    /// in minutes, the scale of a whole session. A suspended host spends
+    /// none of it, and the run's log
     /// records the suspension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<u64>,
@@ -236,10 +260,10 @@ pub struct DefaultsConfig {
     pub on_interrupt: Option<OnInterrupt>,
 }
 
-/// `defaults.on_failure` values (reference schema): `pause` freezes the
+/// `defaults.on_failure` values: `pause` freezes the
 /// run resumable, `abort` closes it failed at once, and `continue` skips
 /// the failed node's dependents and closes failed once the rest of the
-/// graph has run.
+/// graph has run — `abort` for CI, `continue` for a run that explores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultOnFailure {
@@ -259,11 +283,12 @@ pub struct PricingEntry {
 
 /// `limits:` — declared budgets and guards. Every field is
 /// optional: an absent limit means "no cap", never a hidden default —
-/// except where the reference schema itself names one
+/// except where a limit has a default of its own
 /// ([`ConfigLayer::resolved_max_loop_iterations`](super::ConfigLayer::resolved_max_loop_iterations),
-/// [`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)), and that default
-/// lives here and nowhere else. Budgets are advisory ceilings the engine
-/// enforces by escalation/diagnostic, never OS enforcement.
+/// [`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)),
+/// which lives in its `resolved_*` method and nowhere else. Budgets are
+/// advisory ceilings the engine enforces by escalation/diagnostic, never OS
+/// enforcement.
 ///
 /// A limit is an integer: `2000000`, or `2_000_000` with its digits
 /// grouped, which reads as the same number — never as a string that
@@ -304,8 +329,8 @@ pub struct LimitsConfig {
 }
 
 /// `baseline:` — backs the `baseline_compare` check kind; the suite the engine
-/// runs and re-runs to catch regressions ("cero regresiones" as a data
-/// comparison, never an agent's claim).
+/// runs and re-runs to catch regressions ("no regressions" as a comparison
+/// of data, never an agent's claim).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BaselineConfig {
@@ -330,20 +355,17 @@ pub struct CoverageConfig {
     pub threshold: f64,
 }
 
-/// `skills:` — currently carries only `executors`, the one
-/// sub-field `kind: executor` needs to resolve its own `executor:` name
-/// to a binary on disk. `paths`/`always` (skill discovery and injection
-/// into a node's assembled context) are context-assembly work, with
-/// no consumer yet.
+/// `skills:` — the executors a `kind: executor` node runs, by the name its
+/// `executor:` gives; where the skills a node names are found; and the
+/// skills every session mounts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SkillsConfig {
     #[serde(default)]
     pub executors: Vec<ExecutorRegistration>,
-    /// Directories skill names resolve against, in order — repo first,
-    /// per the reference config. Absent means the convention
-    /// default, `.yunta/skills` (where `yunta init` installs the
-    /// mechanism skill).
+    /// Directories skill names resolve against, in order — the repo's
+    /// first. Absent means the convention default, `.yunta/skills`
+    /// (where `yunta init` installs the mechanism skill).
     #[serde(default)]
     pub paths: Vec<PathBuf>,
     /// Skill names mounted on every session, before any node's own
@@ -362,10 +384,13 @@ pub struct ExecutorRegistration {
     pub path: PathBuf,
 }
 
-/// Closed at `binary` today — `wasm` is reserved as a future
-/// additive variant once demand for it shows up, so this is an enum even
-/// with a single variant, not a bare string that would silently accept
-/// anything.
+/// What an executor is: a `binary`, written in any language, that speaks
+/// JSON over its stdin and stdout. An enum with one variant rather than a
+/// bare string, so a second kind lands with every match on it checked and
+/// nothing else is silently accepted. Not WASM: it would sandbox an
+/// executor at the price of a toolchain and of the languages one can be
+/// written in, while whether a pack's executors run at all is already
+/// `permissions.packs.executors`'s to decide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutorKind {

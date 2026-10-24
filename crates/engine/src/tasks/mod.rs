@@ -1,6 +1,16 @@
 //! What a tasks document means to the run that holds it: the
 //! registration every one entails, and what a document another run
 //! hands over carries into the tree this run works in.
+//!
+//! Every tasks document that enters a run registers its tasks through one
+//! routine, [`register`]: at the run's birth — from a `document` input, a
+//! promotion or a mount — or at the close of the node that produces it or
+//! acquires it from a child. A task this log registered before with other
+//! criteria or another scope starts again `pending`; one another run left
+//! `done` is `done` here only where the commit its work landed at is in
+//! the tree this run works in. `done` is the only status that crosses:
+//! what the other run left failed or blocked asked for the decision that
+//! handing the document over already is.
 
 mod code_words;
 mod crossing;

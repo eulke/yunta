@@ -6,7 +6,17 @@ use serde::{Deserialize, Serialize};
 use super::RunCommand;
 use crate::ids::NodeId;
 
-/// `hooks: {before, after}`.
+/// `hooks: {before, after}` — commands the engine runs around a node's own
+/// work: `before` as the node starts, `after` before its close verifies
+/// anything, so what an `after` hook rewrites is what the criteria, the
+/// scope and the artifacts are judged on. Grouped because the two only
+/// mean something together and share their rules: commands only, never an
+/// agent; safe to repeat, since they run again on every retry and every
+/// resume; each run recorded as `hook_executed`; their edits held to the
+/// node's scope like any other. A workflow declares them — on a node, or
+/// for every node in `node_defaults` — and no config layer adds one.
+/// Business logic, or anything that takes long, is a `bash` node with a
+/// state of its own instead.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hooks {
@@ -16,12 +26,10 @@ pub struct Hooks {
     pub after: Vec<HookStep>,
 }
 
-/// One hook command. `timeout_seconds` is unenforced (no timeout) when
-/// absent — additive over the earlier engine, which never had one.
-/// Field name/units aren't pinned by the spec's prose ("timeout corto
-/// configurable"); seconds fit hook-scale commands better than the
-/// minutes granularity `defaults.timeout_minutes` uses for whole agent
-/// sessions.
+/// One hook command: a script the workflow wrote, or a project command by
+/// name. `timeout_seconds` bounds it — in seconds, the scale of a hook,
+/// where a whole session's bound is in minutes — and absent, nothing
+/// does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HookStep {
@@ -48,10 +56,16 @@ pub enum HookFailurePolicy {
     Warn,
 }
 
-/// `on_failure: {goto, max_reroutes}` — node-level re-routing.
-/// `max_reroutes` is mandatory: a re-route without an explicit cap
-/// is how a correction cycle turns infinite, so the schema refuses it.
-/// Distinct from a hook's own `on_failure: fail|warn`.
+/// `on_failure: {goto, max_reroutes}` — where a failed node sends the run
+/// to be corrected. Re-routes are a second set of edges beside
+/// `depends_on`, which stays acyclic: control goes to `goto`, and once it
+/// and its subgraph complete, the failed node runs again. `max_reroutes`
+/// is mandatory and counted per failed node, and when it runs out the run
+/// pauses for a person: a re-route without an explicit cap is how a
+/// correction cycle turns infinite, so the schema refuses it. A failure no
+/// correction can change — a key the run's frozen config leaves unset, a
+/// limit that resets at a known time — is never re-routed. Distinct from a
+/// hook's own `on_failure: fail|warn`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OnFailure {

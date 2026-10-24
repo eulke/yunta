@@ -1,16 +1,30 @@
-//! Layered config types: every config key of each group of the
-//! reference config parses and round-trips — `runners`, `adapters`,
-//! `mcp_servers`, `skills`, `baseline`/`coverage`, `storage`, `limits`,
-//! `paths`, `defaults`, `permissions`, `pricing`, `forge`, `secrets` and
-//! `version`. Each field entered with its consumer or an explicit refusal
-//! in `check` — never accepted and silently ignored.
+//! Layered config: one file per layer — the repository's
+//! `.yunta/config.yaml`, the user's under the state root, the
+//! organization's — each parsed into a [`ConfigLayer`], whose fields are
+//! the config keys, and merged into one value of the same type. Every key
+//! has its consumer or a refusal in `check`; none is accepted and silently
+//! ignored.
 //!
-//! Merge semantics: maps merge key by key, more specific layer
-//! wins per key; arrays (like a role's candidate list) replace wholesale
-//! rather than concatenate. Precedence is repo > user > org — with one
+//! Merge semantics: maps merge key by key, the more specific layer
+//! winning per key; lists (a runner's candidates, the `format:` rules) are
+//! replaced whole rather than concatenated, except `secrets:`, to which
+//! every layer adds names. Precedence is repo > user > org — with one
 //! deliberate exception: `permissions` inverts it, the org
 //! layer is a ceiling and lower layers only narrow (see
 //! [`PermissionsConfig`] and [`permission_layer_conflicts`]).
+//!
+//! Adding a key: its field, with a `///` saying what it holds, on
+//! [`ConfigLayer`] or on the section type that holds it (`sections.rs`);
+//! its merge in `merge.rs`, which spells out every field it merges one by
+//! one, so such a key does not compile until its merge is chosen; its
+//! consumer, with the default it falls back to in a `resolved_*` method
+//! here — the one place that default lives — and a [`ConfigKey`] when a
+//! node cannot run without it; a value in
+//! `crates/core/tests/fixtures/reference-config.yaml`, which the user
+//! reference shows byte for byte: the CLI's `doc_claims` test fails until
+//! the reference's copy matches the file and every key path of the schema
+//! has a value there. Then `cargo xtask schema`, and
+//! `crates/core/schemas/config.json` changes with the key.
 
 mod env;
 mod keys;
@@ -298,9 +312,6 @@ impl ConfigLayer {
             .map(|minutes| std::time::Duration::from_secs(minutes * 60))
     }
 
-    /// `limits.max_loop_iterations`, with the reference default (`12`)
-    /// applied — the only net under a tasks document whose state oscillates
-    /// forever, so "absent" means the reference cap, never "unbounded".
     /// `limits.max_workflow_depth`, with the reference default (`4`)
     /// applied — how many `kind: workflow` nesting levels below the
     /// root run are allowed (a configurable maximum depth, checked
@@ -313,6 +324,9 @@ impl ConfigLayer {
             .unwrap_or(4)
     }
 
+    /// `limits.max_loop_iterations`, with the reference default (`12`)
+    /// applied — the only net under a tasks document whose state oscillates
+    /// forever, so "absent" means the reference cap, never "unbounded".
     pub fn resolved_max_loop_iterations(&self) -> u32 {
         self.limits
             .as_ref()

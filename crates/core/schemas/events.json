@@ -405,7 +405,7 @@
       ]
     },
     "ArtifactKind": {
-      "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.",
+      "description": "A document the engine reads and validates, as opposed to an artifact\nit only checks for existence. The kind fixes the document's shape, so\nit is what every door — the workflow's own `kind:`, `yunta schema`,\nthe `document_shape` tool, a failed read's report — names it by.\n\nThe bar for another kind is high: a document whose data the engine\nneeds, to decide or to count — never one it only carries. A file it\nonly carries is opaque: the engine knows that it exists and what it\nhashes to, and its structure is its writer's, which is why the\nknowledge a run distills stays prose for a person and an agent to read.",
       "type": "string",
       "enum": [
         "tasks",
@@ -9167,7 +9167,7 @@
       ]
     },
     "RuleCode": {
-      "description": "The stable name of a rule that only holds across a whole\ndocument.\n\nExhaustive, so a rule cannot be minted by typing a new string,\nand countable, so a receipt reports what a run keeps getting\nwrong without reading prose. A code says which rule broke and\nnothing about which document it broke in: `DuplicateId` is one\nrule asked of tasks documents, findings and questions alike, and what\nseparates the three is the\n[`ArtifactKind`](crate::ArtifactKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind\nand code does not.\n\nEvery variant belongs to some document's\n[`RULES`](crate::shape::Document::RULES), so a rule the engine\nenforces is a rule the writer was told about before writing.",
+      "description": "The stable name of a rule that only holds across a whole\ndocument.\n\nExhaustive, so a rule cannot be minted by typing a new string,\nand countable, so a receipt reports what a run keeps getting\nwrong without reading prose. A code says which rule broke and\nnothing about which document it broke in: `DuplicateId` is one\nrule asked of a workflow, a tasks document, findings and\nquestions alike, and what separates them is the\n[`DocumentKind`](crate::diagnostic::DocumentKind) on the report carrying\nit. Counting by code alone conflates them; counting by kind\nand code does not.\n\nEvery variant belongs to some document's\n[`RULES`](crate::shape::Document::RULES), so a rule the engine\nenforces is a rule the writer was told about before writing.",
       "oneOf": [
         {
           "type": "string",
@@ -9993,13 +9993,14 @@
       ]
     },
     "RunnerCandidate": {
-      "description": "One binding candidate for a role in `runners:`.",
+      "description": "One candidate of a runner in `runners:`: the adapter, the model it asks\nthat adapter's CLI for, and optionally an agent and an effort.\n\nThree words, three things. An adapter is the integration with one agent\nCLI (`claude-code`, `codex`, `mock`); a runner is the binding a node asks\nfor by name — the role a workflow needs, `runner: planner`, which the\nproject's config fills with the CLIs it has; an agent is a set of\ninstructions the run owns, added to the CLI's own.",
       "type": "object",
       "properties": {
         "adapter": {
           "$ref": "#/$defs/AdapterId"
         },
         "agent": {
+          "description": "The agent this candidate's sessions work under; a node's own\n`agent:` wins over it, so the candidates of one runner may each\npair their adapter with an agent of its own.",
           "anyOf": [
             {
               "$ref": "#/$defs/AgentName"

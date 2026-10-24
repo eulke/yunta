@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::Node;
 use crate::port::PermissionProfile;
 
+/// `permissions: read-only | edit | full` at node level — maps 1:1 onto
+/// the adapter's session profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum NodePermissions {

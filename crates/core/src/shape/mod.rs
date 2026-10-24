@@ -27,8 +27,9 @@ use crate::{ArtifactKind, FindingsFile, QuestionsFile, TasksFile};
 /// A document whose shape the system publishes, whose failures it
 /// explains, and whose rules it enforces.
 ///
-/// Sealed: the three kinds are the schema, and a fourth is a schema
-/// change rather than an extension point. Sealing is what lets the trait
+/// Sealed: the kinds are the schema, and another one is a schema change
+/// — the schema registry, the receipt and `yunta schema` move with it —
+/// rather than an extension point. Sealing is what lets the trait
 /// name [`Diagnostic`] and [`Rule`] in its signatures without those
 /// becoming a contract owed to implementors outside this crate.
 pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {

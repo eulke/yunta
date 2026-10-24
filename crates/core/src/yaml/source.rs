@@ -4,8 +4,9 @@
 //! it could not read one, and nothing about a value it read: a workflow
 //! that parses and then breaks a rule — two nodes of one id, a
 //! `depends_on` naming nothing — has no position to show. This is a
-//! second read of the same text, by a parser that keeps the position of
-//! every key and value, used only to say where a problem is.
+//! second read of the same text, by the parser `serde-saphyr` itself is
+//! built on, keeping the position of every key and value: one grammar,
+//! used here only to say where a problem is.
 
 use std::collections::HashMap;
 

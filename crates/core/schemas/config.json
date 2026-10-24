@@ -224,7 +224,7 @@
       "minLength": 1
     },
     "BaselineConfig": {
-      "description": "`baseline:` — backs the `baseline_compare` check kind; the suite the engine\nruns and re-runs to catch regressions (\"cero regresiones\" as a data\ncomparison, never an agent's claim).",
+      "description": "`baseline:` — backs the `baseline_compare` check kind; the suite the engine\nruns and re-runs to catch regressions (\"no regressions\" as a comparison\nof data, never an agent's claim).",
       "type": "object",
       "properties": {
         "held": {
@@ -286,7 +286,7 @@
       ]
     },
     "DefaultOnFailure": {
-      "description": "`defaults.on_failure` values (reference schema): `pause` freezes the\nrun resumable, `abort` closes it failed at once, and `continue` skips\nthe failed node's dependents and closes failed once the rest of the\ngraph has run.",
+      "description": "`defaults.on_failure` values: `pause` freezes the\nrun resumable, `abort` closes it failed at once, and `continue` skips\nthe failed node's dependents and closes failed once the rest of the\ngraph has run — `abort` for CI, `continue` for a run that explores.",
       "type": "string",
       "enum": [
         "pause",
@@ -295,7 +295,7 @@
       ]
     },
     "DefaultsConfig": {
-      "description": "`defaults:` — the reference config's whole group. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed\nnode does to the run).",
+      "description": "`defaults:` — what a run and its nodes fall back to. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed\nnode does to the run).",
       "type": "object",
       "properties": {
         "isolation": {
@@ -351,7 +351,7 @@
           ]
         },
         "timeout_minutes": {
-          "description": "Per-session budget of time the host is awake (`Budget.timeout`),\nin minutes — the granularity the reference schema uses for whole\nsessions. A suspended host spends none of it, and the run's log\nrecords the suspension.",
+          "description": "Per-session budget of time the host is awake (`Budget.timeout`),\nin minutes, the scale of a whole session. A suspended host spends\nnone of it, and the run's log\nrecords the suspension.",
           "type": [
             "integer",
             "null"
@@ -377,7 +377,7 @@
       ]
     },
     "ExecutorKind": {
-      "description": "Closed at `binary` today — `wasm` is reserved as a future\nadditive variant once demand for it shows up, so this is an enum even\nwith a single variant, not a bare string that would silently accept\nanything.",
+      "description": "What an executor is: a `binary`, written in any language, that speaks\nJSON over its stdin and stdout. An enum with one variant rather than a\nbare string, so a second kind lands with every match on it checked and\nnothing else is silently accepted. Not WASM: it would sandbox an\nexecutor at the price of a toolchain and of the languages one can be\nwritten in, while whether a pack's executors run at all is already\n`permissions.packs.executors`'s to decide.",
       "type": "string",
       "enum": [
         "binary"
@@ -478,7 +478,7 @@
       "pattern": "^[^/]+/[^/]+$"
     },
     "Isolation": {
-      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike:\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own declares `scope:`,\nwhich is what asks for one.)",
+      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it a checkout of its own, so runs work\nbeside each other and beside the person; `none` works directly in the\ncheckout it was given — legitimate for watching an agent edit live, for\nCI already inside an ephemeral container, or for a tree too costly to\nset up twice. A first-level run under `none` starts only from a clean\ncheckout, since the diff its scope is audited by could not tell the\nagent's change from the person's, and holds that checkout's lock, so\nno second run works there at once; its manifest records the isolation\nit ran with.\n\nOne word for every level, run and `kind: workflow` node alike:\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own declares `scope:`,\nwhich is what asks for one.)",
       "type": "string",
       "enum": [
         "worktree",
@@ -486,7 +486,7 @@
       ]
     },
     "LimitsConfig": {
-      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where the reference schema itself names one\n([`ConfigLayer::resolved_max_loop_iterations`](super::ConfigLayer::resolved_max_loop_iterations),\n[`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)), and that default\nlives here and nowhere else. Budgets are advisory ceilings the engine\nenforces by escalation/diagnostic, never OS enforcement.\n\nA limit is an integer: `2000000`, or `2_000_000` with its digits\ngrouped, which reads as the same number — never as a string that\nleaves a run without its limit.",
+      "description": "`limits:` — declared budgets and guards. Every field is\noptional: an absent limit means \"no cap\", never a hidden default —\nexcept where a limit has a default of its own\n([`ConfigLayer::resolved_max_loop_iterations`](super::ConfigLayer::resolved_max_loop_iterations),\n[`ConfigLayer::resolved_inline_context_bytes`](super::ConfigLayer::resolved_inline_context_bytes)),\nwhich lives in its `resolved_*` method and nowhere else. Budgets are\nadvisory ceilings the engine enforces by escalation/diagnostic, never OS\nenforcement.\n\nA limit is an integer: `2000000`, or `2_000_000` with its digits\ngrouped, which reads as the same number — never as a string that\nleaves a run without its limit.",
       "type": "object",
       "properties": {
         "inline_context_bytes": {
@@ -556,7 +556,7 @@
       "additionalProperties": false
     },
     "McpServerConfig": {
-      "description": "One server in `mcp_servers:` — the reference config's own\nshape: a streamable-HTTP endpoint plus the *name* of an env var\ncarrying the bearer token, never the token itself (secrets are\nenv var names in config, values only ever come from the process\nenvironment at resolve time).",
+      "description": "One server in `mcp_servers:` — a streamable-HTTP endpoint plus the\n*name* of an env var carrying the bearer token, never the token\nitself (secrets are\nenv var names in config, values only ever come from the process\nenvironment at resolve time).",
       "type": "object",
       "properties": {
         "auth_env": {
@@ -619,7 +619,7 @@
       ]
     },
     "PackPermissions": {
-      "description": "`permissions.packs` — governance over pack contents. Parsed and\nmerged here; enforced by `pack add` and `pack update`, which read the\nmerged value and name the layer that declared it when they refuse.",
+      "description": "`permissions.packs` — governance over pack contents. Parsed and\nmerged here; enforced by `pack add` and `pack update`, which read the\nmerged value and name the layer that declared it when they refuse.\n\nTwo settings and no matrix: which publishers may be installed, and\nwhether a pack's executable code may run. Trusting one publisher's\nexecutors and not another's is the allow-list with `executors:\nprompt`, which asks case by case.",
       "type": "object",
       "properties": {
         "executors": {
@@ -659,7 +659,7 @@
       "additionalProperties": false
     },
     "PathsConfig": {
-      "description": "`paths:` — where run/worktree state lives. `YUNTA_HOME` is\nan environment override applied when resolving the merged config, not\na field of it.",
+      "description": "`paths:` — where a run's state lives: its run directory and its\nworktree.\n\nWhat a team shares is versioned in its repository, under `.yunta/`:\nconfig, workflows, skills, agents, knowledge and packs. A run's state\nbelongs to whoever runs it: by default under the user state root\n(`~/.yunta`, or `$YUNTA_HOME`), outside every repository, where an\nagent's git commands in its checkout never reach it. `YUNTA_HOME` is an\nenvironment override applied when resolving the merged config, not a\nfield of it, and a run freezes the roots it resolved\n([`crate::FrozenPaths`]), so a later change to either never loses it.",
       "type": "object",
       "properties": {
         "runs": {
@@ -821,13 +821,14 @@
       "additionalProperties": false
     },
     "RunnerCandidate": {
-      "description": "One binding candidate for a role in `runners:`.",
+      "description": "One candidate of a runner in `runners:`: the adapter, the model it asks\nthat adapter's CLI for, and optionally an agent and an effort.\n\nThree words, three things. An adapter is the integration with one agent\nCLI (`claude-code`, `codex`, `mock`); a runner is the binding a node asks\nfor by name — the role a workflow needs, `runner: planner`, which the\nproject's config fills with the CLIs it has; an agent is a set of\ninstructions the run owns, added to the CLI's own.",
       "type": "object",
       "properties": {
         "adapter": {
           "$ref": "#/$defs/AdapterId"
         },
         "agent": {
+          "description": "The agent this candidate's sessions work under; a node's own\n`agent:` wins over it, so the candidates of one runner may each\npair their adapter with an agent of its own.",
           "anyOf": [
             {
               "$ref": "#/$defs/AgentName"
@@ -900,7 +901,7 @@
       "minLength": 1
     },
     "SkillsConfig": {
-      "description": "`skills:` — currently carries only `executors`, the one\nsub-field `kind: executor` needs to resolve its own `executor:` name\nto a binary on disk. `paths`/`always` (skill discovery and injection\ninto a node's assembled context) are context-assembly work, with\nno consumer yet.",
+      "description": "`skills:` — the executors a `kind: executor` node runs, by the name its\n`executor:` gives; where the skills a node names are found; and the\nskills every session mounts.",
       "type": "object",
       "properties": {
         "always": {
@@ -919,7 +920,7 @@
           }
         },
         "paths": {
-          "description": "Directories skill names resolve against, in order — repo first,\nper the reference config. Absent means the convention\ndefault, `.yunta/skills` (where `yunta init` installs the\nmechanism skill).",
+          "description": "Directories skill names resolve against, in order — the repo's\nfirst. Absent means the convention default, `.yunta/skills`\n(where `yunta init` installs the mechanism skill).",
           "type": "array",
           "default": [],
           "items": {

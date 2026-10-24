@@ -109,9 +109,11 @@ where new executor code first appears.
 team's own config must clear, not a ceiling the pack promises. `yunta doctor`
 validates every installed pack's `requires:` against the merged config
 alongside its usual adapter health check — see [adapters](adapters.md#yunta-doctor).
-Nothing here blocks `pack add` or `check` — a pack can be installed and
-configured for later, same as an adapter that isn't set up yet doesn't stop
-`yunta init`.
+`yunta check` and `yunta run` refuse a workflow of the pack while the project
+or the machine lacks what it requires — a runner with a candidate, an MCP
+server, a program on `PATH` — since its run could not get past it. Nothing
+here blocks `pack add`: a pack can be installed and configured for later,
+same as an adapter that isn't set up yet doesn't stop `yunta init`.
 
 What a pack's workflows ask the project's config for — a command by name, a
 forge, a suite — is said once the pack lands: `pack add` lists every key a node
@@ -206,7 +208,8 @@ Field by field:
   tests — is not a program: name it as a project command instead (see
   below). None of this is
   enforced at install time — `yunta doctor` reports gaps, naming your pack,
-  so an installing team can fix them before running anything.
+  so an installing team can fix them before running anything, and `yunta
+  check` and `yunta run` refuse your workflows until they do.
 - **`contents`** — every path your pack ships, relative to the pack's own
   root: `workflows`, `skills`, `agents` (definitions a node or runner names
   in `agent:` — see [adapters](adapters.md#agents)), `knowledge` (a pack can be

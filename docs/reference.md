@@ -460,13 +460,14 @@ the catalog of workflows: it asks `list_workflows`, which is always current.
 ## Notes
 
 - **`artifacts.produces`** is a list of plain strings. A string that names a
-  kind (the set is closed: `tasks`, `findings` and `questions`) declares that
-  document, and any other string is the name of an opaque file. A node produces
-  at most one document of each kind, so the kind identifies the document and
-  there is no name to choose: declaring a kind twice is refused by `yunta
-  check`, and the three kind names are reserved as file names. Declaring a kind
-  is all a node needs to receive that document's shape in its context.
-  `yunta schema <kind>` prints the shape, and `--json` its JSON Schema.
+  kind (the set is closed: `tasks`, `spec`, `findings` and `questions`, beside
+  `answers`, which only the engine writes) declares that document, and any
+  other string is the name of an opaque file. A node produces at most one
+  document of each kind, so the kind identifies the document and there is no
+  name to choose: declaring a kind twice is refused by `yunta check`, and the
+  kind names are reserved as file names. Declaring a kind is all a node needs
+  to receive that document's shape in its context. `yunta schema <kind>`
+  prints the shape, and `--json` its JSON Schema.
 - **`inputs:`** maps a name to its spec, with `type:` choosing the shape:
   `string`, `number`, `boolean`, `enum`, `path` or `document`. Each type takes
   only its own fields: `default` and `required` for every type, `min_length`
@@ -502,8 +503,8 @@ the catalog of workflows: it asks `list_workflows`, which is always current.
   node. The name resolves to the project's `.yunta/agents/<name>.md`, or to the
   definition a pack declares under `contents.agents` (`publisher/agent`): front
   matter with `name` and `description`, and the body as instructions. The same
-  definition runs on every adapter, and a name with no definition fails the node
-  before its session opens.
+  definition runs on every adapter, and a name with no definition refuses the
+  run before it is created, naming where it looked.
 - **`effort:`**, on a runner's candidate or on a node, whose own wins: `low`,
   `medium`, `high` or `xhigh`, the levels every CLI accepts. `claude-code`
   receives it as `--effort` and `codex` as `-c model_reasoning_effort`, a

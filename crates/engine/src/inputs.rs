@@ -2,15 +2,20 @@
 //! was handed on `--input k=v` plus each declared input's own `default`
 //! into the frozen, per-name string map the manifest carries and
 //! `{{inputs.*}}` templates read from. Everything here runs once, before
-//! the run's worktree or first token exist — everything is validated
-//! before the first token — a bad input is meant to be the cheapest
-//! possible failure, not the latest.
+//! the run's worktree or its first token exist: a bad input is meant to be
+//! the cheapest possible failure, not the latest. A default is resolved
+//! here and frozen with the rest, never by a node, and a `path` must exist
+//! now, whether it names a file or a directory — a name for something not
+//! there yet is a `string`.
 //!
 //! A `document` input resolves further: the file is read as the kind it
 //! declares, through the one door that runs the kind's shape and rules
 //! together, and becomes an artifact the run is born holding. The run
 //! therefore gets its tasks document from whoever started it, with no
-//! node standing in to copy a file the engine could read itself.
+//! node standing in to copy a file the engine could read itself. Its
+//! frozen value is the hash of the document the run holds,
+//! `sha256:<hash>`, not the path it was read from, so the run outlives the
+//! file.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;

@@ -1,13 +1,20 @@
 //! Runner resolution.
 //!
-//! A node names a runner; the merged config's `runners:` maps that name
-//! to an ordered candidate list. Resolution walks the list and picks the
-//! first candidate whose adapter is actually available, recording every
-//! discarded candidate with its reason — `runner_resolved` makes the
-//! choice auditable, never implicit. Capability-based discarding (a
-//! candidate that lacks a capability the node demands) is a separate,
-//! later concern; availability here is simply "is
-//! this adapter constructed in this invocation".
+//! A node names a runner; the run's frozen config maps that name to an
+//! ordered candidate list, mixing adapters, models and agents freely.
+//! Resolution walks the list and picks the first candidate whose adapter
+//! this invocation built — on the adapter the run is pinned to, when its
+//! manifest pins one — recording every discarded candidate with its reason:
+//! `runner_resolved` makes the choice auditable, never implicit. The config
+//! is frozen and the pin travels with the run, so a resume, a detached run
+//! and a successor resolve the same way.
+//!
+//! What a node needs of its adapter is not a reason to pass a candidate
+//! over here: `check` refuses, before the run, a workflow whose
+//! declarations no candidate can honor. Availability is the only fallback.
+//! Escalating quality — a cheap model first, a costly one if it fails — is
+//! a re-route to a node whose runner costs more, visible in the graph,
+//! never a second pick here.
 
 use thiserror::Error;
 use yunta_core::events::{DiscardedCandidate, RunnerRejection};

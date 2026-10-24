@@ -4,6 +4,18 @@
 //! the scheduler, the escalation paths, `status` and the refusals a run
 //! meets before it starts, so every reader of a moded run sees the same
 //! graph.
+//!
+//! A mode is the workflow's: `modes:` declares as many as its author
+//! wants, under any names, in the order a run may be promoted along, and
+//! the engine names none. A mode chooses how much deliberation a run gets,
+//! never how much verification — it keeps every `invariant` node, and what
+//! the nodes it keeps re-route to or read from, rules the workflow is held
+//! to where it is read. A node a mode leaves out is never scheduled, and a
+//! node that waited on it waits on what it waited on, so cutting a node
+//! out keeps the order of the work that remains. A node the project
+//! cannot run, declared `optional`, drops out the same way. The mode is
+//! chosen when the run is created and recorded on `run_created`; a run
+//! never changes it.
 
 use std::collections::{HashMap, HashSet};
 

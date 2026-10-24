@@ -2,9 +2,10 @@
 //! published to whoever writes one, and the rules that only hold across
 //! the whole document.
 //!
-//! All three live together because they are one schema. Split across
-//! crates, a caller could reach the types without the rules, and one
-//! did.
+//! All three live together because they are one schema: split across
+//! crates, a caller could reach the types without the rules. The rules
+//! are pure functions of the document — no clock, no ids, no
+//! filesystem — so the crate of the types is where they belong.
 
 use serde::{Deserialize, Serialize};
 
@@ -142,6 +143,14 @@ impl TasksFile {
 /// One criterion: a command, and whether it is a `guard` (passes before
 /// and after the work) or an ordinary criterion (fails before the work,
 /// passes after).
+///
+/// The criteria are a task's only verification: no model judges whether
+/// it is done. A criterion is deterministic in the tree it runs on — the
+/// same tree answers the same, which is what lets the engine keep its
+/// answer for that tree — so a command whose verdict depends on the clock,
+/// the network or a service is a `bash` node, never a criterion. What no
+/// command can verify is not a task: it goes behind a `gate`, for a person
+/// to close.
 // The event log freezes it as [`events::Criterion`], which reads what a
 // later writer adds; this type refuses it, because an agent wrote it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

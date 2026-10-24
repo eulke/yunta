@@ -103,3 +103,101 @@ D91	code	crates/engine/src/history.rs	with too little history the engine says no
 D95	code	crates/engine/src/stats.rs	Tokens are the unit, always
 D96	history	-	a plan for an exporter the code does not have
 D99	code	crates/core/src/workflow/node_policy.rs	but its effect has to be safe to repeat
+contrato-del-run.md#2.2	user	docs/guide.md	Repo beats user beats org for every key — with the single deliberate exception of `permissions:` above, which layers only ever narrow.
+contrato-del-run.md#2.3	code	crates/engine/src/inputs.rs	A `document` input resolves further: the file is read as the kind it declares
+contrato-del-run.md#4.1	code	crates/core/src/workflow/artifacts.rs	A node produces at most one document of each kind, so a kind identifies an interpreted artifact on its own and there is no file name to choose.
+contrato-del-run.md#5.1	code	crates/core/src/tasks/mod.rs	A criterion is deterministic in the tree it runs on
+contrato-del-run.md#5.7	code	crates/engine/src/tasks/mod.rs	A reset wins over a `done` that crossed
+contrato-del-run.md#5.8	code	crates/core/src/workflow/node_kind.rs	Nodes named by the author, run at once — distinct from a loop's own `concurrency:`, whose task count doesn't exist until the plan runs.
+contrato-del-run.md#5.9	code	crates/engine/src/run_tools/blackboard.rs	Everything a group produced becomes readable at the join, in an order derived from content rather than from arrival
+contrato-del-run.md#7.1	code	crates/core/src/workflow/node_kind.rs	`kind: check`'s closed builtin list. No budget builtin
+contrato-del-run.md#9.1	test	crates/engine/tests/run_context.rs	the_stable_and_run_stable_segments_hash_identically_across_runs_with_different_volatile_content
+contrato-del-run.md#9.2	code	crates/engine/src/run/context_resolve/knowledge.rs	the layered knowledge directories, most to least local, with the org layer assembled from the installed packs
+contrato-del-run.md#9.3	code	crates/core/src/workflow/node_kind.rs	A file is named relative to the workflow that names it
+contrato-del-run.md#10.1	code	crates/engine/src/modes.rs	A mode chooses how much deliberation a run gets, never how much verification
+contrato-del-run.md#10.2	code	crates/engine/src/run/promote.rs	There is no way back to an earlier mode.
+contrato-del-run.md#11.1	code	crates/engine/src/run/hooks_exec.rs	A `before` hook that fails ends the node before a token is spent.
+contrato-del-run.md#11.2	code	crates/core/src/workflow/hooks.rs	A failure no correction can change — a key the run's frozen config leaves unset, a limit that resets at a known time — is never re-routed.
+contrato-del-run.md#13.1	code	crates/engine/src/runner.rs	Resolution walks the list and picks the first candidate whose adapter this invocation built
+contrato-del-run.md#13.2	code	crates/core/src/workflow/node.rs	static fan-out: the manifest expands this node into one `<id>@<runner>` node per runner before anything runs.
+contrato-del-run.md#13.3	code	crates/engine/src/agents.rs	`agent:` on a node or a runner, resolved to a definition the run owns.
+glosario.md#La frontera de autoría	code	crates/core/src/yaml/mod.rs	Three kinds of YAML cross it.
+glosario.md#Artifacts	code	crates/engine/src/artifacts/mod.rs	resolves an artifact against the log and takes its bytes from the store, so nothing in the engine opens an artifact by file name.
+glosario.md#Gates	code	crates/core/src/events/gates/escalation.rs	The one way a `gate_waiting` payload comes to exist
+glosario.md#Documentos y su lectura	code	crates/core/src/shape/mod.rs	A document whose shape the system publishes, whose failures it explains, and whose rules it enforces.
+glosario.md#Reglas y contrato	code	crates/core/src/diagnostic/problem.rs	A rule has two readings and one statement.
+spec-tasks.md#1	code	crates/core/src/tasks/mod.rs	What a person approves is what the engine executes.
+spec-tasks.md#2	code	crates/core/src/tasks/mod.rs	One task: a unit of work its criteria verify on their own, the paths it may change, and what a person reviewing the plan reads about it.
+spec-tasks.md#2.1	code	crates/core/src/tasks/mod.rs	One criterion: a command, and whether it is a `guard`
+spec-tasks.md#2.2	code	crates/core/src/tasks/mod.rs	what changes and why, the shapes it creates or changes, and what it leaves out
+spec-tasks.md#3	code	crates/core/src/tasks/rules.rs	The list is what the shape publishes before a tasks document is written and what the functions below enforce after.
+spec-tasks.md#3.1	code	crates/core/src/tasks/rules.rs	What a person reviewing the plan needs it to say, demanded when the workflow has a gate show it
+spec-tasks.md#3.2	code	crates/core/src/tasks/specified.rs	What a tasks document is held to as part of the run it is handed over in
+spec-tasks.md#4	code	crates/core/src/text.rs	Every surface that lists what is wrong with one file goes through here
+spec-tasks.md#5	code	crates/core/src/tasks/shape.yaml	A tasks document: one task per independently-verifiable unit of work.
+spec-tasks.md#6	code	crates/core/src/tasks/mod.rs	What no command can verify is not a task: it goes behind a `gate`, for a person to close.
+D06	code	crates/core/src/config/sections.rs	What a team shares is versioned in its repository, under `.yunta/`: config, workflows, skills, agents, knowledge and packs.
+D20	code	crates/core/src/workflow/mod.rs	The engine imposes the phase order (distill before any cleanup)
+D21	code	crates/core/src/workflow/node.rs	A mode narrows deliberation, never verification.
+D22	code	crates/engine/src/run/promote.rs	A run never changes its mode or its manifest.
+D23	code	crates/engine/src/run/hooks_exec.rs	Hooks are the engine's, run in the node's own cycle and never handed to an adapter, so every adapter gets the same ones and none reimplements them.
+D24	code	crates/core/src/workflow/hooks.rs	Re-routes are a second set of edges beside `depends_on`, which stays acyclic
+D25	code	crates/engine/src/run/workflow_exec/mod.rs	each sub-workflow is a complete run (own run_id, manifest, event log and run.dir), never an inline expansion.
+D27	code	crates/core/src/config/sections.rs	Three words, three things.
+D28	code	crates/core/src/workflow/node.rs	a node names its runner with `runner:`
+D30	code	crates/engine/src/runner.rs	Escalating quality — a cheap model first, a costly one if it fails — is a re-route to a node whose runner costs more, visible in the graph, never a second pick here.
+D31	code	crates/core/src/workflow/expand.rs	A node with `runners: [a, b]` becomes one `<id>@<runner>` node per runner
+D34	code	crates/engine/src/check/mod.rs	`depends_on` references and acyclicity (never relaxed by `on_failure.goto`, a separate edge set)
+D36	code	crates/core/src/workflow/node.rs	instructions and capabilities the adapter mounts by its native mechanism: *how* to work, where `context:` injects *what* to work on
+D37	code	crates/core/src/workflow/node.rs	overrides the resolved candidate's own agent for this node
+D38	code	xtask/src/smells/prose.rs	is what a pack and an executor are not
+D39	code	crates/core/src/pack.rs	Nothing auto-updates — `update` always names an exact target ref — so this is purely the record of exactly what got vendored
+D42	code	crates/engine/src/run/context_resolve/mod.rs	The engine manages no cache: it keeps the prefix stable
+D44	code	crates/core/src/workflow/mod.rs	an ordered map, free in name and count: each workflow names its own, and no name is reserved as a schema word.
+D47	code	crates/engine/src/run/executor_exec.rs	The engine writes the node's `with:` and the run's paths to the executor's stdin as one JSON value
+D49	code	crates/core/src/workflow/node_kind.rs	the blackboard tools are never even mounted
+D52	code	crates/core/src/config/sections.rs	A run's state belongs to whoever runs it: by default under the user state root (`~/.yunta`, or `$YUNTA_HOME`), outside every repository
+D56	test	crates/engine/tests/promote_knowledge.rs	It is not automatic, and the engine does not perform it: it is a Yunta workflow like any other.
+D57	test	crates/cli/tests/factory_packs_structural.rs	Factory packs must stay removable without affecting the engine's capabilities
+D58	code	crates/cli/src/commands/new.rs	`new` creates the team's own content, `pack add` is the only verb that brings in someone else's, and the two stay disjoint on purpose.
+D63	code	crates/core/src/config/sections.rs	`container` is not a value at all; it is not designed.
+D71	code	crates/engine/src/pack_audit.rs	Inventory, never verdict: there is no pattern-matching for "suspicious" natural-language content — that would be trivially evadible and would give false confidence.
+D72	code	crates/core/src/config/permissions.rs	Two settings and no matrix: which publishers may be installed, and whether a pack's executable code may run.
+D74	code	crates/cli/src/commands/init.rs	the skill itself never embeds a catalog, since the catalog is consulted at the moment it's needed rather than baked in
+D75	agents	.agents/choices.md	No visual workflow builder
+D76	code	crates/core/src/workflow/read.rs	so it is refused, never warned about.
+D78	code	crates/core/src/workflow/node_kind.rs	a scalar is always literal text, even if its contents look like a path
+D79	code	crates/core/src/workflow/artifacts.rs	The bar for another kind is high: a document whose data the engine needs, to decide or to count — never one it only carries.
+D81	code	crates/core/src/workflow/mod.rs	A key nests under another only when the two mean something only together and share their rules
+D84	code	crates/engine/src/tasks/mod.rs	same `id` is the same task only with the same criteria and scope
+D85	code	crates/core/src/workflow/node_kind.rs	The builtin list is closed on purpose: a `check` builtin is by definition something the engine can already evaluate
+D87	code	crates/core/src/workflow/node_kind.rs	The word names this extension and nothing else: not the session that does a task's work, which is the task's runner.
+D88	code	crates/engine/src/artifacts/ingest.rs	Opaque artifacts are verified by existence and content hash only, never by format.
+D89	code	crates/cli/src/commands/test/mod.rs	derive the final state by replay and compare it against `expect`. No LLM, no network.
+D94	code	crates/cli/src/project.rs	(`/etc/yunta/config.yaml`, overridable via `YUNTA_ORG_CONFIG`)
+D97	code	crates/core/src/workflow/node_kind.rs	`any`: the group finishes with the first child to *succeed*
+D98	code	crates/engine/src/run_tools/blackboard.rs	While siblings are live, a member reads only its own posts
+D100	code	crates/engine/src/check/scopes.rs	never a detection the engine cannot make
+D109	code	crates/core/src/workflow/context.rs	a same-filename collision between two packs is a typed error at resolution time
+D114	code	crates/core/src/pack.rs	the word is `runner` in a manifest as in a workflow and on the log
+D115	test	crates/core/tests/strict_keys.rs	role_and_fresh_context_are_refused_with_the_key_that_replaces_them
+D120	code	crates/core/src/config/sections.rs	`continue` skips the failed node's dependents and closes failed once the rest of the graph has run
+D121	test	crates/core/tests/config.rs	telemetry_is_not_a_config_key
+D125	code	crates/engine/src/modes.rs	An excluded one is replaced by that node's own dependencies, transitively
+D126	code	crates/engine/src/run/internal_gate.rs	No surface → `Waiting`, with nothing recorded, so a resume re-asks.
+D127	code	crates/cli/src/commands/test/case.rs	Directory whose contents seed the sandbox worktree, relative to the case file; absent, the sandbox is an empty repository.
+D128	agents	.agents/open.md	A test case asserts where a run ends, never the path it took
+D130	code	crates/core/src/diagnostic/mod.rs	A diagnostic is a value, not a sentence.
+D135	code	crates/core/src/diagnostic/problem.rs	Counting by code alone conflates them; counting by kind and code does not.
+D136	code	crates/core/src/shape/mod.rs	they are in the same function because a caller that could get one without the other would eventually be written
+D139	code	crates/core/src/schema.rs	The repository keeps the rendered files under `crates/core/schemas/`, written by `cargo xtask schema` and checked by CI
+D143	test	crates/core/src/shape/mod.rs	Every rule code belongs to some document's published rules: a rule the engine can report is a rule a writer was told about.
+D159	code	crates/engine/src/tasks/mod.rs	Accepting a document says what the run holds; a `task_registered` says what the run has to do about it
+D186	code	crates/core/src/workflow/context.rs	A missing required file fails the node; a missing optional one is marked in the session's context and recorded on `context_assembled`.
+D190	code	crates/engine/src/check/mod.rs	A rule that cannot tell which it is looking at warns; one that can refuses.
+D203	code	crates/core/src/workflow/command.rs	the name is the workflow's, the text is the project's
+D204	code	crates/core/src/workflow/optional.rs	A required node that needs the same key is refused before the run instead.
+D205	code	crates/core/src/workflow/scope.rs	the engine resolves them when the node starts and records them on the log
+D218	code	crates/core/src/yaml/mod.rs	one grammar for reading a document and for pointing into it
+D219	code	crates/core/src/diagnostic/mod.rs	A document handed over as a structured value has no text, and no place in it.
+D244	code	crates/core/src/workflow/mod.rs	what the node says, else what its mode says, else every round
