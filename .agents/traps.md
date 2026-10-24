@@ -9,3 +9,10 @@ Paths: `crates/*/tests/**`, `crates/testkit/src/**`, `crates/engine/src/run_tool
 `crates/engine/src/run/loop_exec/batch.rs`
 Wrong: an ordering assertion that a sequential implementation also passes.
 Right: make the two sides wait on each other, so the test fails when the work does not overlap.
+
+### A doc comment on a unit variant reshapes a schema
+Paths: `crates/core/src/**`, `crates/core/schemas/**`
+Wrong: a `///` on each variant of a unit enum a schema publishes: schemars then writes one `const` branch per
+variant instead of the enum's `enum` list, a new shape for every reader of the schema.
+Right: explain the variants in the enum's own `///`, and compare a regenerated schema with its descriptions
+taken out before keeping it.

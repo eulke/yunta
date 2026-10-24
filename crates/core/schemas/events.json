@@ -41,9 +41,11 @@
       "minLength": 1
     },
     "AgentMessagePayload": {
+      "description": "What a session reported while it ran, and never the words it said: a\ntool it called, the usage it reported, or the digest of a note.",
       "type": "object",
       "properties": {
         "cached_input_tokens": {
+          "description": "The part of `input_tokens` the CLI read from its cache, when it\nsays: a part of the input, never added to it.",
           "type": [
             "integer",
             "null"
@@ -52,6 +54,7 @@
           "minimum": 0
         },
         "input_tokens": {
+          "description": "The usage a `usage` reports.",
           "type": [
             "integer",
             "null"
@@ -104,6 +107,7 @@
           ]
         },
         "tool_name": {
+          "description": "The tool a `tool_use` called.",
           "type": [
             "string",
             "null"
@@ -115,6 +119,7 @@
       ]
     },
     "AgentMessageType": {
+      "description": "Which report of a session an `agent_message` is: a tool it called, the\nusage it reported, or a note it wrote.",
       "type": "string",
       "enum": [
         "tool_use",
@@ -128,9 +133,11 @@
       "minLength": 1
     },
     "AgentSessionOpenedPayload": {
+      "description": "A session opened on an adapter's CLI: the first fact of every session,\nwith the id it is resumed by, what it runs with and what it may reach.",
       "type": "object",
       "properties": {
         "agent": {
+          "description": "The agent the session worked as, when the node or its runner named\none.",
           "anyOf": [
             {
               "$ref": "#/$defs/AgentName"
@@ -141,6 +148,7 @@
           ]
         },
         "capabilities": {
+          "description": "What the adapter declared it can do, as it stood when the session\nopened.",
           "$ref": "#/$defs/Capabilities"
         },
         "confinement": {
@@ -199,6 +207,7 @@
           ]
         },
         "session_id": {
+          "description": "The CLI's own id for the session: what a resume hands back to the\nadapter to pick the same conversation up.",
           "$ref": "#/$defs/SessionId"
         },
         "task_id": {
@@ -243,12 +252,15 @@
       "type": "object",
       "properties": {
         "artifact": {
+          "description": "What the artifact is: what a reader asks for it by.",
           "$ref": "#/$defs/ArtifactId"
         },
         "content_hash": {
+          "description": "The hash of the accepted bytes, the object under `objects/` that\nholds them.",
           "$ref": "#/$defs/ContentHash"
         },
         "origin": {
+          "description": "How the run came by it.",
           "$ref": "#/$defs/ArtifactOrigin"
         }
       },
@@ -538,7 +550,7 @@
       ]
     },
     "ArtifactSubmittedPayload": {
-      "description": "What a session offered as a whole document, and what the engine\nanswered.",
+      "description": "What a session offered as a whole document, and what the engine\nanswered. Every hand-over is kept, accepted or refused; one accepted is\nalso an `artifact_accepted` of origin `submitted`, the artifact the run\nholds.",
       "type": "object",
       "properties": {
         "artifact_kind": {
@@ -546,9 +558,11 @@
           "$ref": "#/$defs/ArtifactKind"
         },
         "name": {
+          "description": "The name of the document's view, `<kind>.yaml`: the node declares\nthe kind, so a hand-over names nothing of its own.",
           "type": "string"
         },
         "outcome": {
+          "description": "Accepted, with the hash of the canonical document the run stores; or\nrefused, with the whole report, so what was refused and why reads\noff the log.",
           "$ref": "#/$defs/SubmissionOutcome"
         },
         "probes": {
@@ -646,6 +660,7 @@
       "type": "object",
       "properties": {
         "command": {
+          "description": "The suite, as `baseline.suite` names it.",
           "type": "string"
         },
         "duration_ms": {
@@ -658,6 +673,7 @@
           "minimum": 0
         },
         "hash": {
+          "description": "The sha256 of what the suite printed to stdout, which the\nmeasuring run keeps under its `baseline/`.",
           "$ref": "#/$defs/ContentHash"
         },
         "origin": {
@@ -689,7 +705,7 @@
       ]
     },
     "BaselineHeldPayload": {
-      "description": "What one project command `baseline.held` names did on the tree the\nrun's lineage measured its suite on, and whose measurement it is.",
+      "description": "What one project command `baseline.held` names did on the tree the\nrun's lineage measured its suite on, and whose measurement it is. Green,\nit holds every task of the run as the suite does; red, it holds none.",
       "type": "object",
       "properties": {
         "command": {
@@ -911,9 +927,11 @@
       ]
     },
     "CapabilityDegradedPayload": {
+      "description": "A capability the engine consulted and an adapter does not declare, and\nwhat the engine did in its place: a fallback the log states, never a\nsilent one.",
       "type": "object",
       "properties": {
         "adapter": {
+          "description": "The adapter that does not declare it.",
           "$ref": "#/$defs/AdapterId"
         },
         "capability": {
@@ -980,6 +998,7 @@
       ]
     },
     "Channel": {
+      "description": "How a round of questions was answered.",
       "oneOf": [
         {
           "type": "string",
@@ -1076,9 +1095,11 @@
       "type": "object",
       "properties": {
         "child_run_id": {
+          "description": "The child run: a run of its own, with its own log, and the reference\nto it that never changes.",
           "$ref": "#/$defs/RunId"
         },
         "child_workflow_hash": {
+          "description": "The workflow the child froze, by hash: which version of it ran.\nReading the parent again never resolves the child's workflow anew;\nthe child's own manifest is its record.",
           "$ref": "#/$defs/ContentHash"
         }
       },
@@ -1088,6 +1109,7 @@
       ]
     },
     "ChildRunFinishedPayload": {
+      "description": "A child run reached its terminal state, and what it spent.",
       "type": "object",
       "properties": {
         "child_run_id": {
@@ -1097,6 +1119,7 @@
           "$ref": "#/$defs/ContentHash"
         },
         "terminal_state": {
+          "description": "How the child closed.",
           "$ref": "#/$defs/TerminalState"
         },
         "tokens": {
@@ -1372,6 +1395,7 @@
       "minLength": 1
     },
     "ContextAssembledPayload": {
+      "description": "What a session was handed before it opened: each context source the\nassembly resolved, by the hash of the bytes the run stored for it, and\none hash per stability segment, so two sessions' prefixes compare by\nhash and replay names what a session saw without running anything.",
       "type": "object",
       "properties": {
         "segment_hashes": {
@@ -1382,6 +1406,7 @@
           }
         },
         "sources": {
+          "description": "Every context source the assembly resolved.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ContextSourceRef"
@@ -1480,12 +1505,14 @@
       ]
     },
     "CriteriaCheckedPayload": {
+      "description": "What the engine's own run of a task's criteria answered, before or\nafter the work: the verdict on a task is this, never a session's word.",
       "type": "object",
       "properties": {
         "phase": {
           "$ref": "#/$defs/Phase"
         },
         "results": {
+          "description": "One result per criterion that ran or was answered by an earlier run\non the same tree.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/CriterionResult"
@@ -1495,7 +1522,7 @@
           "$ref": "#/$defs/TaskId"
         },
         "waiting": {
-          "description": "The guards the check did not run, by command: one of the task's\nown criteria was red, and a guard runs only once every one of\nthose passes. Absent when every guard ran, and in a log written\nbefore guards waited.",
+          "description": "The guards the check did not run, by command: a criterion that ran\nbefore them — one of the task's own, or a guard — was red, and the\ncheck cannot close the task whatever a later guard answers. Absent\nwhen every guard ran, and in a log written before guards waited.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1535,6 +1562,7 @@
       "type": "object",
       "properties": {
         "cmd": {
+          "description": "The command, as the task declares it.",
           "type": "string"
         },
         "conclusion": {
@@ -1554,6 +1582,7 @@
           "minimum": 0
         },
         "exit_code": {
+          "description": "The code the command exited with.",
           "type": "integer",
           "format": "int32"
         },
@@ -1576,6 +1605,7 @@
           ]
         },
         "reused": {
+          "description": "Whether the answer is one an earlier run of the same command gave on\nthe same tree, taken without running the command again.",
           "type": "boolean"
         },
         "tail": {
@@ -1614,19 +1644,22 @@
       ]
     },
     "CriterionType": {
+      "description": "A criterion's kind: a `guard` is green before the work, and the task has\nto keep it green.",
       "type": "string",
       "enum": [
         "guard"
       ]
     },
     "CriterionUnpassablePayload": {
-      "description": "A criterion of a task that its session declared no work of the plan\ncan pass. The engine ran it on the tree the session left and saw it\nred; the exit code it saw and the session's reason are recorded.",
+      "description": "A criterion of a task that its session declared no work of the plan\ncan pass. The engine ran it on the tree the session left and saw it\nred; the exit code it saw and the session's reason are recorded. Only\na session's first declaration is. The task does not close on it, and a\nloop left with nothing to run fails with `PlanUnpassable`, the failure\na re-route hands to whatever writes the plan again.",
       "type": "object",
       "properties": {
         "criterion": {
+          "description": "The criterion's command, as the plan writes it.",
           "type": "string"
         },
         "exit_code": {
+          "description": "The code it exited with on that tree: never zero, and never 126 or\n127, which name the environment rather than the work.",
           "type": "integer",
           "format": "int32"
         },
@@ -1634,6 +1667,7 @@
           "$ref": "#/$defs/TaskId"
         },
         "why": {
+          "description": "The session's reason, never empty.",
           "type": "string"
         }
       },
@@ -1985,6 +2019,7 @@
           "type": "boolean"
         },
         "deviations": {
+          "description": "What the session declared, as `deviation_declared` records it.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/DeviationDeclaredPayload"
@@ -2015,7 +2050,7 @@
       ]
     },
     "DeviationDeclaredPayload": {
-      "description": "A task session declared that its work departs from the plan: what\nthe plan said, what the session did or needs instead, and why. The\ntask does not close on it until a person answers.",
+      "description": "A task session declared that its work departs from the plan: what\nthe plan said, what the session did or needs instead, and why. The\ntask does not close on it until a person answers. The session's words\nare kept whole: unlike what it says while it works, a departure is\nsomething it states to the run on purpose.",
       "type": "object",
       "properties": {
         "from": {
@@ -2049,6 +2084,7 @@
       "type": "object",
       "properties": {
         "accepted": {
+          "description": "Accepted, the task closes as it stands once its criteria pass, less\nthe plan's criteria it departed from; sent back, its session picks\nthe work up again with what the person said.",
           "type": "boolean"
         },
         "respecified_by": {
@@ -2270,6 +2306,7 @@
       ]
     },
     "DiscardedCandidate": {
+      "description": "A candidate the resolution passed over before the one it chose, and\nwhy. A candidate after the chosen one was never tried, and is not one.",
       "type": "object",
       "properties": {
         "candidate": {
@@ -3000,6 +3037,7 @@
           ]
         },
         "options": {
+          "description": "The answers on offer, each by its id.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/GateOption"
@@ -3988,14 +4026,17 @@
       "type": "object",
       "properties": {
         "goto": {
+          "description": "The node `on_failure.goto` names.",
           "$ref": "#/$defs/NodeId"
         },
         "max_reroutes": {
+          "description": "The cap the re-routes reached.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
         },
         "next_mode": {
+          "description": "The mode a promotion would take the run to, when there is one.",
           "anyOf": [
             {
               "$ref": "#/$defs/ModeName"
@@ -4799,9 +4840,11 @@
           "minimum": 0
         },
         "failure": {
+          "description": "The failure, as `node_failed` records it.",
           "$ref": "#/$defs/Failure"
         },
         "remedies": {
+          "description": "What can change it: each a reserved option, with the precondition\nthat has to change first.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Remedy"
@@ -5352,7 +5395,7 @@
       ]
     },
     "FindingPostedPayload": {
-      "description": "The finding's author is the envelope's own `node_id` — not repeated\nhere.",
+      "description": "The finding's author is the envelope's own `node_id` — not repeated\nhere. A finding with no node is the engine's own, about the run: each\ndegradation it suffers is posted as one, never a warning that leaves\nthe log silent.",
       "type": "object",
       "properties": {
         "finding": {
@@ -5460,7 +5503,7 @@
       ]
     },
     "FindingWithdrawnPayload": {
-      "description": "The node's finding `id` no longer stands, and why — in the words of\nwhoever took it back.",
+      "description": "The node's finding `id` no longer stands, and why — in the words of\nwhoever took it back. A withdrawal is final: the id is never posted,\nupdated or withdrawn again, and a finding that comes back is a new id.",
       "type": "object",
       "properties": {
         "id": {
@@ -5781,7 +5824,7 @@
       }
     },
     "GateWaitingPayload": {
-      "description": "What an escalation is about, with the data its words are written from.\nOne per escalation, so a menu reads one way.",
+      "description": "An escalation waiting on a person: what it claims, the one menu that\nsays what it is about, and the options that answer it. The log keeps the\ndata of each, and no word of it: a label, a trade-off, a question or a\nfact a person reads is written from the data where it is shown.",
       "type": "object",
       "properties": {
         "evidence": {
@@ -5796,6 +5839,7 @@
           ]
         },
         "options": {
+          "description": "The answers on offer, each by its id.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/GateOption"
@@ -5957,12 +6001,15 @@
       ]
     },
     "HookExecutedPayload": {
+      "description": "A hook the engine ran around a node.",
       "type": "object",
       "properties": {
         "command": {
+          "description": "The hook's command, as the workflow wrote it.",
           "type": "string"
         },
         "exit_code": {
+          "description": "The code it exited with: `-1` for one a signal ended, and for one\nthat never ran because its command did not render.",
           "type": "integer",
           "format": "int32"
         },
@@ -5995,6 +6042,7 @@
       ]
     },
     "HookPhase": {
+      "description": "When a hook runs: before the node's work, or after it. Hooks are the\nengine's cycle around a node, never an adapter's.",
       "type": "string",
       "enum": [
         "before",
@@ -6002,7 +6050,7 @@
       ]
     },
     "HostSuspendedPayload": {
-      "description": "The host the run works on was suspended — the machine slept — for\n`slept_ms`. The event's timestamp is when the engine noticed, at or\njust after the host woke, so the suspension spans the `slept_ms`\nbefore it.",
+      "description": "The host the run works on was suspended — the machine slept — for\n`slept_ms`. The event's timestamp is when the engine noticed, at or\njust after the host woke, so the suspension spans the `slept_ms`\nbefore it. A fact about the machine, not something the run did: it\nwakes nothing, and every duration the run reports leaves the span out.",
       "type": "object",
       "properties": {
         "slept_ms": {
@@ -6545,6 +6593,7 @@
       ]
     },
     "LoopIterationPayload": {
+      "description": "A loop's iteration, and what the engine's own reading of the loop's\ncondition answered: never an agent's.",
       "type": "object",
       "properties": {
         "iteration": {
@@ -6553,6 +6602,7 @@
           "minimum": 0
         },
         "until_result": {
+          "description": "Whether every task of the loop's tasks document is done.",
           "type": "boolean"
         }
       },
@@ -6828,7 +6878,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged: each variant is read by the keys it requires, and each requires\nat least one key no other variant has. A payload that names none of them\nis refused rather than read as some variant. `Message` reads a log line\nthat carries `outcome:` alone, a failure written as a sentence, so it\ncomes last. A field the wire always names but may leave `null` is read\nwith `deserialize_with`, since serde reads a missing `Option` as `None`,\nwhich would let a payload match a variant it does not belong to.",
+      "description": "A node's attempt failed: why, as data, what it spent, and what its\nclose left in the run's tree.",
       "type": "object",
       "properties": {
         "commit": {
@@ -6850,7 +6900,7 @@
           }
         },
         "retryable": {
-          "description": "Read from a log that carried it; never written. What a retry can\nchange is the failure's own cause now, not a flag beside it.",
+          "description": "Read from a log that carried it; never written. What a retry can\nchange is the failure's own cause, never a flag beside it.",
           "type": [
             "boolean",
             "null"
@@ -6858,6 +6908,7 @@
           "writeOnly": true
         },
         "tokens_used": {
+          "description": "What the failed attempt spent.",
           "$ref": "#/$defs/TokenUsage"
         },
         "tree": {
@@ -7633,6 +7684,7 @@
       ]
     },
     "NodeFinishedPayload": {
+      "description": "A node closed on the engine's verdict: what it checked, or what a person\ndecided. An agent's summary may ride along as the outcome; it never\ndecides the close.",
       "type": "object",
       "properties": {
         "commit": {
@@ -7651,6 +7703,7 @@
           "$ref": "#/$defs/NodeOutcome"
         },
         "tokens_used": {
+          "description": "What the attempt spent that its close settles. A close a round of\nquestions deferred carries zero: the round settled what the session\nthat asked spent.",
           "$ref": "#/$defs/TokenUsage"
         },
         "tree": {
@@ -7705,6 +7758,7 @@
           "$ref": "#/$defs/Failure"
         },
         "max_reroutes": {
+          "description": "The cap `attempt` counts against, the node's\n`on_failure.max_reroutes`; absent where `attempt` is.",
           "type": [
             "integer",
             "null"
@@ -7718,6 +7772,7 @@
           "default": "on_failure"
         },
         "to_node": {
+          "description": "Where control goes.",
           "$ref": "#/$defs/NodeId"
         }
       },
@@ -7727,9 +7782,11 @@
       ]
     },
     "NodeStartedPayload": {
+      "description": "A node's attempt begins: its number, the tree it starts from, and what\nit found in the run's tree that nobody had committed.",
       "type": "object",
       "properties": {
         "attempt": {
+          "description": "The attempt, counted from one. Each time the node runs again — after\na re-route, a restart of an interrupted attempt, a person's choice —\nstarts the next.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -7861,7 +7918,7 @@
       ]
     },
     "OnInterrupt": {
-      "description": "A node's crash-recovery policy — the full triple of options.",
+      "description": "A node's crash-recovery policy — the full triple of options.\n\n`restart_node` runs the node again from its start, as a new attempt:\nthe context it is handed is rebuilt from the run's data, so the attempt\ncan always begin, but its effect has to be safe to repeat.\n`fail_if_uncertain` is for an effect that is not — a notification with\nno key to dedupe on, a charge: a resume that finds the node running with\nno terminal pauses for a person instead of guessing how it ended.",
       "oneOf": [
         {
           "type": "string",
@@ -8047,7 +8104,7 @@
           ]
         },
         {
-          "description": "A resume found nodes still running whose fate it cannot tell.",
+          "description": "A resume found nodes still running whose fate it cannot tell: each\ndeclares `on_interrupt: fail_if_uncertain`, because its effect is\nnot safe to repeat, and a person verifies how it ended before\nresuming. One such node holds back the whole resume.",
           "type": "object",
           "properties": {
             "nodes": {
@@ -8252,6 +8309,7 @@
       ]
     },
     "Phase": {
+      "description": "When a task's criteria ran: before its work, where each criterion but a\nguard is meant to be red, or after it, where every one has to pass.",
       "type": "string",
       "enum": [
         "pre",
@@ -8466,6 +8524,7 @@
           "$ref": "#/$defs/Evidence"
         },
         "suggested_mode": {
+          "description": "The mode a successor would run in: the one `modes:` declares right\nafter the run's own, the only way a promotion moves.",
           "$ref": "#/$defs/ModeName"
         }
       },
@@ -8493,6 +8552,7 @@
       ]
     },
     "ProposedCriterion": {
+      "description": "A command a session proposes with a scope request or a finding: one that\nfails when proposed and passes once the work it asks for is done.",
       "type": "object",
       "properties": {
         "cmd": {
@@ -8504,6 +8564,7 @@
       ]
     },
     "ProposedCriterionPrecheck": {
+      "description": "The code a proposed criterion exited with before the work.",
       "type": "object",
       "properties": {
         "exit_code": {
@@ -8558,7 +8619,7 @@
       ]
     },
     "PullRequestOpenedPayload": {
-      "description": "A pull request a `pull_request` node opened — or found open, carrying\nthis run's marker, when it ran again — on the project's forge.",
+      "description": "A pull request a `pull_request` node opened — or found open, carrying\nthis run's marker, when it ran again — on the project's forge. Written\nthe moment the forge answers, before the node closes: the pull request\nexists outside the run whatever the node does next.",
       "type": "object",
       "properties": {
         "base": {
@@ -8570,11 +8631,13 @@
           "type": "string"
         },
         "number": {
+          "description": "The number the forge gave it.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "url": {
+          "description": "Where a person reads it.",
           "type": "string"
         }
       },
@@ -8655,15 +8718,18 @@
       "minLength": 1
     },
     "QuestionsAnsweredPayload": {
+      "description": "The answers to a node's questions arrived, and how. The node is\n`Running` again, owed the close its questions deferred.",
       "type": "object",
       "properties": {
         "answers_hash": {
+          "description": "The hash of the answers artifact.",
           "$ref": "#/$defs/ContentHash"
         },
         "channel": {
           "$ref": "#/$defs/Channel"
         },
         "responder": {
+          "description": "Who answered, when the channel says.",
           "anyOf": [
             {
               "$ref": "#/$defs/Responder"
@@ -9377,12 +9443,15 @@
       ]
     },
     "RunCreatedPayload": {
+      "description": "The run is born: the manifest it froze, by hash, and what it decided\nonce, at birth, so that no wake reads a config or a workflow again to\nknow what the run is. The first event of every run's log.",
       "type": "object",
       "properties": {
         "base_branch": {
+          "description": "The branch the run starts from, as the manifest froze it.",
           "type": "string"
         },
         "base_commit": {
+          "description": "The commit the run starts from, as the manifest froze it.",
           "$ref": "#/$defs/CommitSha"
         },
         "checkout": {
@@ -9404,6 +9473,7 @@
           ]
         },
         "inputs": {
+          "description": "Every declared input as the manifest froze it, given or defaulted,\nalready validated.",
           "type": "object",
           "additionalProperties": true
         },
@@ -9415,9 +9485,11 @@
           }
         },
         "manifest_hash": {
+          "description": "The hash of the manifest the run froze: what the log's hash chain\nis anchored on.",
           "$ref": "#/$defs/ContentHash"
         },
         "mode": {
+          "description": "The mode the run was created in. A run never changes mode: a\npromotion creates a successor run.",
           "$ref": "#/$defs/ModeName"
         },
         "opens_on_base": {
@@ -9425,6 +9497,7 @@
           "type": "boolean"
         },
         "promoted_from": {
+          "description": "The run this one succeeds, when a promotion created it. The link\nlives here, never in the run's id.",
           "anyOf": [
             {
               "$ref": "#/$defs/RunId"
@@ -9435,6 +9508,7 @@
           ]
         },
         "yunta_schema": {
+          "description": "The workflow's `yunta_schema` range as declared, or the binary's own\nschema when the workflow declares none.",
           "anyOf": [
             {
               "$ref": "#/$defs/SchemaRange"
@@ -9698,6 +9772,7 @@
       ]
     },
     "RunFinishedPayload": {
+      "description": "A run closed: how, and the metrics it closed with. A closed run spends\nwhat these record, with nothing left in flight.",
       "type": "object",
       "properties": {
         "closed_by": {
@@ -9712,6 +9787,7 @@
           ]
         },
         "metrics": {
+          "description": "The run's spend at the close, derived from the log and never\nestimated: what settled and what was still in flight, together.",
           "$ref": "#/$defs/RunMetrics"
         },
         "terminal_state": {
@@ -9729,9 +9805,11 @@
       "minLength": 1
     },
     "RunMetrics": {
+      "description": "A run's spend in tokens, the only unit the engine counts in: a price is a\nsurface's estimate beside it, never this.",
       "type": "object",
       "properties": {
         "cptv": {
+          "description": "The cost per verified task: `tokens` over the tasks that reached\n`done`. Absent when none did.",
           "type": [
             "number",
             "null"
@@ -9739,6 +9817,7 @@
           "format": "double"
         },
         "tokens": {
+          "description": "The run's whole spend.",
           "$ref": "#/$defs/TokenUsage"
         }
       },
@@ -9771,6 +9850,7 @@
       ]
     },
     "RunResumedPayload": {
+      "description": "A run woke, once it verified it still holds what its log says: the\npolicy each node the log left running resolved to, what its commands\nrun with from here, and — when they changed while it was parked — its\ncheckout and its tree.",
       "type": "object",
       "properties": {
         "checkout": {
@@ -9833,13 +9913,14 @@
       ]
     },
     "RunToolFailedPayload": {
-      "description": "One failed call to a tool this binary serves on `yunta-run`.",
+      "description": "One failed call to a tool this binary serves on `yunta-run`, as the CLI\nreported rejecting it. Not a terminal: it does not say the node failed\nbecause of the call, and it holds no argument, answer or error text.",
       "type": "object",
       "properties": {
         "cause": {
           "$ref": "#/$defs/RunToolFailureCause"
         },
         "session_id": {
+          "description": "The session that made the call.",
           "$ref": "#/$defs/SessionId"
         },
         "tool": {
@@ -9853,7 +9934,7 @@
       ]
     },
     "RunToolFailureCause": {
-      "description": "The closed reason a run tool call failed, without adapter error text.",
+      "description": "The closed reason a run tool call failed, without adapter error text:\n`approval_blocked`, the call never reached the server because the CLI\nheld it back, or `call_failed`, the server received it and answered with\nan error.",
       "type": "string",
       "enum": [
         "approval_blocked",
@@ -9896,7 +9977,7 @@
       ]
     },
     "RunToolRefusedPayload": {
-      "description": "A call to a tool this binary serves that it refused, and why.",
+      "description": "A call to a tool this binary serves that it refused, and why, written by\nthe listener that refused it. A call a stop cut short — the run's, its\ntask's or its session's — was refused by nothing, and leaves none.",
       "type": "object",
       "properties": {
         "reason": {
@@ -10045,13 +10126,15 @@
       ]
     },
     "RunnerResolvedPayload": {
-      "description": "`runner` names the `runners:` entry the node resolved through. The\nreader also accepts `role`, the field's former name, so a log written\nunder it still replays.",
+      "description": "`runner` names the `runners:` entry the node resolved through. The\nreader also accepts `role`, the field's former name, so a log written\nunder it still replays.\n\nA node with a session resolves its runner before it assembles its\ncontext, which names the run tools the way that runner's CLI names\nthem: a node's `runner_resolved` comes before its `context_assembled`.",
       "type": "object",
       "properties": {
         "chosen": {
+          "description": "The candidate the node runs on, with the node's own `agent:` and\n`effort:` over the candidate's.",
           "$ref": "#/$defs/RunnerCandidate"
         },
         "discarded": {
+          "description": "Every candidate passed over before the chosen one, and why.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/DiscardedCandidate"
@@ -10113,6 +10196,7 @@
           }
         },
         "diff": {
+          "description": "Every path the work changed.",
           "type": "array",
           "items": {
             "type": "string"
@@ -10129,6 +10213,7 @@
           ]
         },
         "violations": {
+          "description": "The paths of the diff the work may not change: outside every glob of\nits scope, or denied to every run. Empty when the work stayed inside.",
           "type": "array",
           "items": {
             "type": "string"
@@ -10141,7 +10226,7 @@
       ]
     },
     "ScopeDerivedPayload": {
-      "description": "What a task may write beyond its declared scope because a shape it owns\nis named there — derived by the engine from the workflow's tasks and the\nrun's tree, never asked for and never decided.",
+      "description": "What a task may write beyond its declared scope because a shape it owns\nis named there — derived by the engine from the workflow's tasks and the\nrun's tree, never asked for and never decided. Not a grant: it counts\ntoward no cap.",
       "type": "object",
       "properties": {
         "at": {
@@ -10181,9 +10266,11 @@
       ]
     },
     "ScopeExpansionDeniedPayload": {
+      "description": "A request for scope refused, and why. Every refusal also posts a\nfinding that says so.",
       "type": "object",
       "properties": {
         "count_this_run": {
+          "description": "The engine's grants in this run when the request was refused.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -10231,9 +10318,11 @@
       ]
     },
     "ScopeExpansionGrantedPayload": {
+      "description": "A request for scope granted: who decided, and exactly what it allowed.",
       "type": "object",
       "properties": {
         "count_this_run": {
+          "description": "The engine's grants in this run once this decision is made: what\n`max_per_run` caps. A person's grant is not one of them.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -10287,15 +10376,18 @@
       ]
     },
     "ScopeExpansionRequestedPayload": {
+      "description": "What a session asked to write beyond its scope, as it asked it: never a\nrequest the engine rewrote. Written when the request is decided — at\nthe call, for a refusal no work could change, and otherwise at the\nclose of the attempt or the node that received it.",
       "type": "object",
       "properties": {
         "paths": {
+          "description": "The globs it asked to be allowed.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ScopeGlob"
           }
         },
         "proposed_criterion": {
+          "description": "A criterion it proposed with the request, when it proposed one.",
           "anyOf": [
             {
               "$ref": "#/$defs/ProposedCriterion"
@@ -10306,6 +10398,7 @@
           ]
         },
         "proposed_criterion_precheck": {
+          "description": "What the proposed criterion did when the decision ran it before any\nwork; absent when the decision did not run it.",
           "anyOf": [
             {
               "$ref": "#/$defs/ProposedCriterionPrecheck"
@@ -10316,6 +10409,7 @@
           ]
         },
         "reason": {
+          "description": "Its reason, in its own words.",
           "type": "string"
         },
         "task_id": {
@@ -10336,7 +10430,7 @@
       ]
     },
     "ScopeExpansionWithdrawnPayload": {
-      "description": "A request its task closed with, unanswered. Nobody decided it, so\nnothing was granted or denied: the request leaves with the task.",
+      "description": "A request its task closed with, unanswered. Nobody decided it, so\nnothing was granted or denied: the request leaves with the task,\nposting no finding and counting toward no cap. A task that does not\nclose keeps its request for a person.",
       "type": "object",
       "properties": {
         "paths": {
@@ -10415,7 +10509,7 @@
       ]
     },
     "ServiceUnreachablePayload": {
-      "description": "A session cut off from the service behind it: it waits for the service\nto answer, and goes on as the same session.",
+      "description": "A session cut off from the service behind it: it waits for the service\nto answer, and goes on as the same session. Past the wait's bound no\n`service_reachable` follows, and the session fails as any other does.",
       "type": "object",
       "properties": {
         "message": {
@@ -10423,6 +10517,7 @@
           "type": "string"
         },
         "session_id": {
+          "description": "The session that lost its service, the one that goes on.",
           "$ref": "#/$defs/SessionId"
         }
       },
@@ -10555,9 +10650,11 @@
           "$ref": "#/$defs/ArtifactId"
         },
         "content_hash": {
+          "description": "The exact bytes the person was shown.",
           "$ref": "#/$defs/ContentHash"
         },
         "producer": {
+          "description": "The node that produced it; absent for what no node produced, such as\nthe run's findings — a view the log derives, which the run's store\nkeeps under this hash.",
           "anyOf": [
             {
               "$ref": "#/$defs/NodeId"
@@ -11303,7 +11400,7 @@
       ]
     },
     "TaskCheckAnsweredPayload": {
-      "description": "What that judgement answered the session, and how long it took.\n\nA `task_check_started` with no answer after it is a check whose\nsession ended first, or whose answer never reached it.",
+      "description": "What that judgement answered the session, and how long it took.\n\nAudit: a check judges work in progress, and only the attempt's close\nmoves the task. The question is written before the judgement runs, so\na `task_check_started` with no answer after it is a check whose\nsession ended first, or whose answer never reached it.",
       "type": "object",
       "properties": {
         "closes": {
@@ -11318,6 +11415,7 @@
           }
         },
         "duration_ms": {
+          "description": "How long the whole judgement took, answers taken from earlier runs\nincluded.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -11330,6 +11428,7 @@
           }
         },
         "results": {
+          "description": "One result per criterion that ran or was answered by an earlier run\non the same tree, the guards the run holds every task to among them.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/CriterionResult"
@@ -11339,7 +11438,7 @@
           "$ref": "#/$defs/TaskId"
         },
         "waiting": {
-          "description": "The guards the check did not run, by command: one of the task's\nown criteria was red, and a guard runs only once every one of\nthose passes. Absent when every guard ran.",
+          "description": "The guards the check did not run, by command: a criterion that ran\nbefore them — one of the task's own, or a guard — was red. Absent\nwhen every guard ran.",
           "type": "array",
           "items": {
             "type": "string"
@@ -11935,21 +12034,25 @@
       ]
     },
     "TaskRegisteredPayload": {
+      "description": "A task of the run's tasks document, registered as the document states\nit: what a status change, a check and a session read the task by.",
       "type": "object",
       "properties": {
         "criteria": {
+          "description": "Its criteria, a frozen copy of what the document declares.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Criterion"
           }
         },
         "depends_on": {
+          "description": "The tasks it waits on; empty, and absent, when it waits on none.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/TaskId"
           }
         },
         "scope": {
+          "description": "The globs it may write.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ScopeGlob"
@@ -11966,7 +12069,7 @@
       ]
     },
     "TaskStatus": {
-      "description": "Exact variant names are provisional.",
+      "description": "Where a task of the run stands: the token the log writes, and the word\nevery surface, document and agent reads. Not a node's word: a task is\n`done` when its criteria pass and its work has landed, while a node\nfinishes when it ran, so a finished loop can leave tasks `blocked`.",
       "type": "string",
       "enum": [
         "pending",
@@ -11978,6 +12081,7 @@
       ]
     },
     "TaskStatusChangedPayload": {
+      "description": "A task moved, as the engine decided it, and the event that justifies\nthe move. Nothing else moves a task: no session has a tool that does.",
       "type": "object",
       "properties": {
         "caused_by": {
@@ -12120,7 +12224,7 @@
       "type": "string"
     },
     "TerminalState": {
-      "description": "Exact variant names are provisional; a `cancel` command\nexists, so `Cancelled` is included alongside the obvious two.",
+      "description": "How a run closed: its work done, a failure that ended it, a person who\nclosed it, or a promotion. `cancelled` is a person closing a stopped run\nnobody was going to continue (`yunta close`), and its `run_finished`\nnames who.",
       "oneOf": [
         {
           "type": "string",
@@ -12173,9 +12277,11 @@
       ]
     },
     "TokenUsage": {
+      "description": "Tokens a session reported, or a sum of such reports: what every budget\nand every spend the engine derives is counted in.",
       "type": "object",
       "properties": {
         "cached": {
+          "description": "The part of `input` the CLI read from its cache, when it says: a\npart of the input, never added to it.",
           "type": [
             "integer",
             "null"
@@ -12767,7 +12873,7 @@
       ]
     },
     "WriteFormattedPayload": {
-      "description": "What the engine formatted the moment a session wrote it.",
+      "description": "What the engine formatted the moment a session wrote it. The formatters\nof one write share the rail's format window, and one still running when\nit closes is cut: `-2` and `timed_out`.",
       "type": "object",
       "properties": {
         "changed": {
@@ -12784,6 +12890,7 @@
           "minimum": 0
         },
         "exit_code": {
+          "description": "How the command exited; `-2` when the window cut it.",
           "type": "integer",
           "format": "int32"
         },
@@ -12810,6 +12917,7 @@
           "$ref": "#/$defs/CommandName"
         },
         "session_id": {
+          "description": "The session that wrote them.",
           "$ref": "#/$defs/SessionId"
         },
         "timed_out": {
@@ -12826,13 +12934,15 @@
       ]
     },
     "WriteRefusedPayload": {
-      "description": "A write the fence refused before it happened.",
+      "description": "A write the fence refused before it happened. The engine writes it from\nthe session's rail, when the fence refuses a write the session's hook\nasked about, before it answers the hook; no adapter reports one, so a\nwrite a CLI's own sandbox denies is not here.",
       "type": "object",
       "properties": {
         "session_id": {
+          "description": "The session that was open when the fence refused the write.",
           "$ref": "#/$defs/SessionId"
         },
         "target": {
+          "description": "What it was going to write, relative to the worktree when under it.",
           "$ref": "#/$defs/ToolTarget"
         }
       },

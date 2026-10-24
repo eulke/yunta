@@ -1,9 +1,6 @@
-//! The runs this run started, folded once.
-//!
-//! Five places used to walk the child pair with their own rule: one to
-//! find the open child under a node, one to close it, one to aggregate
-//! its spend, two to draw it. Every surface that asks what a run bore
-//! reads it here.
+//! The runs this run started, folded once: the child open under a node,
+//! how each closed, and what they spent. Every surface that asks what a run
+//! bore reads it here.
 
 use std::collections::BTreeMap;
 

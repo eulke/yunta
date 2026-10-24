@@ -22,6 +22,8 @@ pub enum RunnerRejection {
     Recorded { sentence: LoggedWords },
 }
 
+/// A candidate the resolution passed over before the one it chose, and
+/// why. A candidate after the chosen one was never tried, and is not one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DiscardedCandidate {
     pub candidate: RunnerCandidate,

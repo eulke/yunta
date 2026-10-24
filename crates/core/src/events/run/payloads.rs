@@ -13,8 +13,10 @@ use crate::workflow::OnInterrupt;
 use super::metrics::RunMetrics;
 use super::pause::PauseReason;
 
-/// Exact variant names are provisional; a `cancel` command
-/// exists, so `Cancelled` is included alongside the obvious two.
+/// How a run closed: its work done, a failure that ended it, a person who
+/// closed it, or a promotion. `cancelled` is a person closing a stopped run
+/// nobody was going to continue (`yunta close`), and its `run_finished`
+/// names who.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalState {
@@ -33,8 +35,11 @@ pub enum TerminalState {
 /// opens on, and whose measurement it is.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BaselineCapturedPayload {
+    /// The suite, as `baseline.suite` names it.
     pub command: String,
     pub results: BaselineResults,
+    /// The sha256 of what the suite printed to stdout, which the
+    /// measuring run keeps under its `baseline/`.
     pub hash: ContentHash,
     /// Whose measurement this is. A log written before the field reads
     /// [`BaselineOrigin::Measured`], which is what such a log meant.
@@ -60,7 +65,8 @@ impl BaselineCapturedPayload {
 }
 
 /// What one project command `baseline.held` names did on the tree the
-/// run's lineage measured its suite on, and whose measurement it is.
+/// run's lineage measured its suite on, and whose measurement it is. Green,
+/// it holds every task of the run as the suite does; red, it holds none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BaselineHeldPayload {
     /// The command's name, as `commands:` declares it.
@@ -115,7 +121,8 @@ pub enum BaselineOrigin {
 /// The host the run works on was suspended — the machine slept — for
 /// `slept_ms`. The event's timestamp is when the engine noticed, at or
 /// just after the host woke, so the suspension spans the `slept_ms`
-/// before it.
+/// before it. A fact about the machine, not something the run did: it
+/// wakes nothing, and every duration the run reports leaves the span out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HostSuspendedPayload {
     pub slept_ms: u64,
@@ -135,8 +142,13 @@ impl HostSuspendedPayload {
     }
 }
 
+/// The run is born: the manifest it froze, by hash, and what it decided
+/// once, at birth, so that no wake reads a config or a workflow again to
+/// know what the run is. The first event of every run's log.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunCreatedPayload {
+    /// The hash of the manifest the run froze: what the log's hash chain
+    /// is anchored on.
     pub manifest_hash: ContentHash,
     /// The checkout of its own the run works in. Absent for a run working
     /// in a person's checkout, and from a log written before it was
@@ -144,13 +156,23 @@ pub struct RunCreatedPayload {
     /// the worktrees root its manifest froze.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<std::path::PathBuf>,
+    /// Every declared input as the manifest froze it, given or defaulted,
+    /// already validated.
     pub inputs: BTreeMap<String, serde_json::Value>,
+    /// The mode the run was created in. A run never changes mode: a
+    /// promotion creates a successor run.
     pub mode: ModeName,
+    /// The run this one succeeds, when a promotion created it. The link
+    /// lives here, never in the run's id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promoted_from: Option<RunId>,
+    /// The workflow's `yunta_schema` range as declared, or the binary's own
+    /// schema when the workflow declares none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yunta_schema: Option<crate::SchemaRange>,
+    /// The branch the run starts from, as the manifest froze it.
     pub base_branch: String,
+    /// The commit the run starts from, as the manifest froze it.
     pub base_commit: CommitSha,
     /// What the run's commands ran with when it was born. Absent from a
     /// log written before it was recorded. Boxed: every stored event is
@@ -255,6 +277,8 @@ pub struct PromotionSignaledPayload {
     /// The record the promotion rests on, kept apart so a surface can show
     /// it under its own heading.
     pub evidence: Evidence,
+    /// The mode a successor would run in: the one `modes:` declares right
+    /// after the run's own, the only way a promotion moves.
     pub suggested_mode: ModeName,
     /// The sentence an older writer stored in place of `cause`. Read from
     /// such a log and written back as read; this binary never sets it.
@@ -356,6 +380,10 @@ pub struct RunMovedPayload {
     pub checkout: std::path::PathBuf,
 }
 
+/// A run woke, once it verified it still holds what its log says: the
+/// policy each node the log left running resolved to, what its commands
+/// run with from here, and — when they changed while it was parked — its
+/// checkout and its tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunResumedPayload {
     /// Every node the log left running with no terminal event, and the
@@ -423,9 +451,13 @@ pub struct ResumePolicy {
     pub on_interrupt: OnInterrupt,
 }
 
+/// A run closed: how, and the metrics it closed with. A closed run spends
+/// what these record, with nothing left in flight.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunFinishedPayload {
     pub terminal_state: TerminalState,
+    /// The run's spend at the close, derived from the log and never
+    /// estimated: what settled and what was still in flight, together.
     pub metrics: RunMetrics,
     /// The person who closed a run nobody was going to continue. Absent
     /// for a run the engine closed by driving it to its end.

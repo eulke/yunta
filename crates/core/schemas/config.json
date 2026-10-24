@@ -593,7 +593,7 @@
       ]
     },
     "OnInterrupt": {
-      "description": "A node's crash-recovery policy — the full triple of options.",
+      "description": "A node's crash-recovery policy — the full triple of options.\n\n`restart_node` runs the node again from its start, as a new attempt:\nthe context it is handed is rebuilt from the run's data, so the attempt\ncan always begin, but its effect has to be safe to repeat.\n`fail_if_uncertain` is for an effect that is not — a notification with\nno key to dedupe on, a charge: a resume that finds the node running with\nno terminal pauses for a person instead of guessing how it ended.",
       "oneOf": [
         {
           "type": "string",

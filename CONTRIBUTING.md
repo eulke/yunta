@@ -16,6 +16,7 @@ cargo xtask schema                     # regenerates crates/core/schemas/ after 
 cargo run -p xtask -- smells --check   # no smell count rose above the baseline or the merge base's
 cargo run -p xtask -- smells           # lowers the baseline to what the tree counts; refuses a rise
 cargo run -p xtask -- docs --check     # the agent docs and the map hold their shapes
+cargo run -p xtask -- docs --check --complete   # and every rule of docs/design has its fate
 cargo run -p xtask -- docs --about <files>   # what the agent docs record about those files
 ```
 

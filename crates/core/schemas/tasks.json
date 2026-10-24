@@ -125,6 +125,7 @@
       ]
     },
     "CriterionType": {
+      "description": "A criterion's kind: a `guard` is green before the work, and the task has\nto keep it green.",
       "type": "string",
       "enum": [
         "guard"

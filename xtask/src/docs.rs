@@ -8,23 +8,28 @@
 //! paths and globs they name, each rule's tags, the map's terms in the module
 //! docs it points to, the crate table against the manifests, each crate
 //! root's map of its modules, the `Reached by:` notes of the tests, and the
-//! separation from the user docs. `--about` prints, for the files named or
-//! for the diff, the module chain and the rules, traps, open work and tests
-//! that reach those paths ([`about`](mod@about)).
+//! separation from the user docs, and the fates of the design corpus's rules
+//! ([`fates`]); `--complete` holds the corpus to them whole. `--about`
+//! prints, for the files named or for the diff, the module chain and the
+//! rules, traps, open work and tests that reach those paths
+//! ([`about`](mod@about)).
 
 mod about;
 mod agents;
 mod checks;
+mod fates;
 mod repo;
 
 use repo::Repo;
 
-/// `cargo xtask docs --check`: every problem the docs hold, or that they
-/// hold. What they record about a file is `--about`'s to print.
-pub fn check() -> Result<(), String> {
+/// `cargo xtask docs --check [--complete]`: every problem the docs hold, or
+/// that they hold. With `complete`, every rule of the design corpus is owed a
+/// fate too. What the docs record about a file is `--about`'s to print.
+pub fn check(complete: bool) -> Result<(), String> {
     let repo = Repo::open()?;
     let docs = agents::Docs::read(&repo)?;
-    let problems = checks::all(&repo, &docs)?;
+    let mut problems = checks::all(&repo, &docs)?;
+    problems.extend(fates::check(&repo, complete)?);
     if !problems.is_empty() {
         return Err(format!(
             "the agent docs do not hold — fix each, rewriting in place:\n{}",

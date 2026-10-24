@@ -7,23 +7,33 @@ use crate::events::session::payloads::TokenUsage;
 use crate::hash::ContentHash;
 use crate::ids::RunId;
 
+/// A loop's iteration, and what the engine's own reading of the loop's
+/// condition answered: never an agent's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LoopIterationPayload {
     pub iteration: u32,
+    /// Whether every task of the loop's tasks document is done.
     pub until_result: bool,
 }
 
 /// The parent's `kind: workflow` node is the envelope's own `node_id`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildRunCreatedPayload {
+    /// The child run: a run of its own, with its own log, and the reference
+    /// to it that never changes.
     pub child_run_id: RunId,
+    /// The workflow the child froze, by hash: which version of it ran.
+    /// Reading the parent again never resolves the child's workflow anew;
+    /// the child's own manifest is its record.
     pub child_workflow_hash: ContentHash,
 }
 
+/// A child run reached its terminal state, and what it spent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChildRunFinishedPayload {
     pub child_run_id: RunId,
     pub child_workflow_hash: ContentHash,
+    /// How the child closed.
     pub terminal_state: TerminalState,
     /// The child run's whole derived spend at its close — a child
     /// run's usage always aggregates up into its parent, so replay adds

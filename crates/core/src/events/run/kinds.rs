@@ -2,7 +2,8 @@
 
 use super::payloads::*;
 
-/// The run itself: it is born, it parks, it wakes, it closes, and it — one variant per kind.
+/// The run itself: it is born, it parks, it wakes, it moves, it closes, and
+/// it asks to be run wider than its mode — one variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunEvent {
     Created(RunCreatedPayload),

@@ -1,15 +1,17 @@
 //! The run manifest.
 //!
 //! `Manifest` freezes everything needed to interpret a run: the parsed
-//! workflow, the merged config, the content of every file-referenced
-//! prompt (editing the file mid-run must not alter the run)
-//! and the base commit. Editing any source on disk after the freeze
-//! changes nothing — the manifest is a value, and `manifest_hash` is a
-//! pure function of it.
+//! workflow, the merged config, the inputs, the content of every
+//! file-referenced prompt (editing the file mid-run must not alter the
+//! run), the base branch and commit, and each agent, skill, executor and
+//! knowledge layer the run's nodes interpret, by hash. Editing any source on
+//! disk after the freeze changes nothing — the manifest is a value, and
+//! `manifest_hash` is a pure function of it.
 //!
-//! Still waiting for their schema to exist: `mode`,
-//! resolved `yunta_schema`, and `base_branch` (the `project:` config
-//! group isn't wired through yet).
+//! What the run decides at birth beside it — its mode, its resolved
+//! `yunta_schema`, the nodes it leaves out — is frozen on `run_created`,
+//! which records that hash. A run never changes mode: a promotion creates a
+//! successor run.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -1,16 +1,52 @@
-//! Event log types: every `kind` the engine emits, as the event schema
-//! (`crates/core/schemas/events.json`) defines them. An event kind is a name
-//! and a payload; the payload fields are those of its payload struct.
+//! Event log types: every event kind the engine writes, each declared by
+//! the domain it happens to. A kind is a name and a shape: the payload fields
+//! are those of its payload struct, written beside the envelope's own
+//! (`run_id`, `seq`, `timestamp`, `node_id`). The envelope names the node
+//! an event is about and no payload repeats it, since a fact kept in two
+//! places can disagree.
 //!
-//! Versioning: `schema_version` is
-//! per `kind`, not global. Every kind starts at v1 here — there is no
-//! prior history. An incompatible change to a payload becomes a new
-//! `kind` name (e.g. `criteria_checked_v2`), never a migration of this
-//! enum's existing variant — the log is append-only, so an existing
-//! variant's shape never changes underneath it.
+//! A payload only grows. The logs released binaries wrote lack every field
+//! added after them and still replay, so a new field is optional, read with
+//! `#[serde(default)]`, and its `///` says what a log without it reads as.
+//! A field is never renamed, removed or retyped in place, and the log is
+//! never migrated: a shape that cannot grow out of the one before is a new
+//! kind with a name of its own (`criteria_checked_v2`), and every kind is
+//! written at [`KIND_VERSION`]. Words an older log stored where a field now
+//! holds data read back as [`LoggedWords`], shown and written back as
+//! stored.
 //!
-//! The hash chain over persisted rows lives in `yunta-storage`; nothing
-//! here carries a hash.
+//! A reader is tolerant and a writer strict. A field this binary does not
+//! know is ignored; a kind it does not know reads as [`EventBody::Unknown`],
+//! kept verbatim, written back as read and counted by name in `status`, the
+//! receipt and `stats`, so a run is interpreted as far as this binary
+//! understands it and never refused for the rest. A known kind whose fields
+//! do not fit its shape is corrupt. A writer writes only a typed payload, so
+//! every line it writes fits its kind.
+//!
+//! The log keeps what the engine knows as data and composes no sentence for
+//! it. Its strings are what the run received — inputs, commands and what
+//! they printed, the words of a session, a CLI, a person or a reviewer —
+//! identifiers, and the report an error raised, as the failing call wrote
+//! it; every word a person reads is written from the data where it is
+//! shown. Nor does a payload carry content whole: where an event names a
+//! file, a context source or a command's output, it carries the hash of the
+//! bytes the run stores and at most a bounded tail, and a note keeps only
+//! its size and the head of its digest. Every secret the run knows is taken
+//! out of a payload before storage writes it.
+//!
+//! Adding an event kind: its payload in its domain's `payloads.rs`, a
+//! variant in that domain's `kinds.rs`, its row in the registry
+//! (`registry.rs`: wire name, payload, variant, sample) and its sample under
+//! `samples/`; then every `match` the compiler names — the domain's ledger,
+//! which folds each variant by name, its `happening.rs`, replay's refusals
+//! and each surface that words a kind. The tests that hold the set name it
+//! too: the count and the names in `crates/core/tests/events.rs`, and the
+//! kinds that move no state in the engine's replay test. Then `cargo xtask
+//! schema` regenerates `crates/core/schemas/events.json` from these types,
+//! committed with them.
+//!
+//! The hash chain over persisted rows lives in `yunta-storage`; no payload
+//! carries a link of it.
 
 pub mod artifacts;
 pub mod children;

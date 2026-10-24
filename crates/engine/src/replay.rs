@@ -20,7 +20,13 @@
 //! node that was never `node_started` — marks the result `broken` with a
 //! diagnostic naming the exact event, rather than panicking or guessing.
 //! Replay stops at the first such event; the state accumulated up to
-//! that point is still returned.
+//! that point is still returned. There is no corrupt state between the
+//! two: the events derive a state, or the run is `broken`. A kind this
+//! binary does not know is neither: it is counted by name in
+//! `unknown_kinds` and the fold goes on.
+//!
+//! Replay reads the events and never their hash chain, which storage keeps
+//! and verifies apart.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -36,9 +42,8 @@ use yunta_core::events::{
 };
 use yunta_core::{NodeId, Seq};
 
-/// Re-exported where it has always been read from: the node states this
-/// module derives are `yunta_core::events`' to define now, and every
-/// caller keeps naming them here.
+/// The node states replay derives: defined beside the node ledger in
+/// `yunta_core::events`, and named here by the engine's callers.
 pub use yunta_core::events::{NodeState, NodeWait};
 
 mod activity;

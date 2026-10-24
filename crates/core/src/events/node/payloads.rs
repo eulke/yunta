@@ -13,88 +13,12 @@ use crate::events::{Failure, LoggedWords};
 use crate::hash::{CommitSha, ContentHash, TreeId};
 use crate::ids::{NodeId, RunnerName, TaskId};
 
+pub use super::criterion::{Criterion, CriterionResult, CriterionType, Phase};
 pub use super::outcome::{Approval, EngineFact, NodeOutcome};
 pub use super::runner::{DiscardedCandidate, RunnerRejection};
 
-/// A tasks document criterion, frozen into `task_registered` — the same shape
-/// the tasks parser produces.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct Criterion {
-    pub cmd: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<CriterionType>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum CriterionType {
-    Guard,
-}
-
-/// One criterion's outcome inside `criteria_checked.results`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct CriterionResult {
-    pub cmd: String,
-    pub exit_code: i32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<CriterionType>,
-    pub reused: bool,
-    /// Wall-clock milliseconds this execution took — the datum
-    /// the learned criterion ordering feeds on. `None` for a `reused: true`
-    /// result (nothing ran) and for events logged before this field
-    /// existed (additive, tolerant reader).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-    /// The run object holding everything the command printed — stdout,
-    /// then stderr — with the run's secrets taken out: for a red answer
-    /// `reused`, what the run that gave it printed. Absent when the
-    /// command printed nothing, for a green answer `reused`, and on a log
-    /// written before a run kept what its commands printed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<ContentHash>,
-    /// The last lines a criterion that did not pass printed: what a
-    /// reader of the log, a person deciding and the next session read to
-    /// know why, without opening the object. Empty for one that passed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tail: Vec<String>,
-    /// The git tree of what the checkout held when the command answered:
-    /// what the answer is kept for, so a later invocation can take it for
-    /// the same tree. Absent for a check the engine states rather than
-    /// runs, and on a log written before the field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tree: Option<TreeId>,
-    /// The commit the checkout stood on, kept only for a command that
-    /// runs `git`, whose answer can turn on history as well as on files.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head: Option<String>,
-    /// The line the command concluded with, when it printed one: its last
-    /// non-empty stdout line, else its last stderr line. Taken when the
-    /// result is recorded, so a replay reads what the live run read.
-    /// Absent when nothing was printed, and on a log written before the
-    /// field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conclusion: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Phase {
-    Pre,
-    Post,
-}
-
-impl Phase {
-    /// The word this phase is called by, as the log spells it — the one
-    /// place it is named, so a diagnostic and a surface cannot call the
-    /// same phase two things.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Phase::Pre => "pre",
-            Phase::Post => "post",
-        }
-    }
-}
-
+/// When a hook runs: before the node's work, or after it. Hooks are the
+/// engine's cycle around a node, never an adapter's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
@@ -138,16 +62,28 @@ pub struct ContextSourceRef {
 /// `runner` names the `runners:` entry the node resolved through. The
 /// reader also accepts `role`, the field's former name, so a log written
 /// under it still replays.
+///
+/// A node with a session resolves its runner before it assembles its
+/// context, which names the run tools the way that runner's CLI names
+/// them: a node's `runner_resolved` comes before its `context_assembled`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunnerResolvedPayload {
     #[serde(alias = "role")]
     pub runner: RunnerName,
+    /// The candidate the node runs on, with the node's own `agent:` and
+    /// `effort:` over the candidate's.
     pub chosen: RunnerCandidate,
+    /// Every candidate passed over before the chosen one, and why.
     pub discarded: Vec<DiscardedCandidate>,
 }
 
+/// A node's attempt begins: its number, the tree it starts from, and what
+/// it found in the run's tree that nobody had committed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeStartedPayload {
+    /// The attempt, counted from one. Each time the node runs again — after
+    /// a re-route, a restart of an interrupted attempt, a person's choice —
+    /// starts the next.
     pub attempt: u32,
     /// The tree this attempt starts from — what its own diff is judged
     /// against when it closes, so a node answers for what it changed and
@@ -214,6 +150,10 @@ impl NodeStartedPayload {
     }
 }
 
+/// What a session was handed before it opened: each context source the
+/// assembly resolved, by the hash of the bytes the run stored for it, and
+/// one hash per stability segment, so two sessions' prefixes compare by
+/// hash and replay names what a session saw without running anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextAssembledPayload {
     /// `Some` when this assembly built one *task's* brief inside a loop
@@ -223,6 +163,7 @@ pub struct ContextAssembledPayload {
     /// events logged before this field existed parse with `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<crate::ids::TaskId>,
+    /// Every context source the assembly resolved.
     pub sources: Vec<ContextSourceRef>,
     /// Keys are `"stable" | "run-stable" | "volatile"` (the fixed
     /// stability classes) — kept as plain strings rather than an enum key
@@ -230,15 +171,19 @@ pub struct ContextAssembledPayload {
     pub segment_hashes: BTreeMap<String, ContentHash>,
 }
 
+/// What the engine's own run of a task's criteria answered, before or
+/// after the work: the verdict on a task is this, never a session's word.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CriteriaCheckedPayload {
     pub task_id: TaskId,
     pub phase: Phase,
+    /// One result per criterion that ran or was answered by an earlier run
+    /// on the same tree.
     pub results: Vec<CriterionResult>,
-    /// The guards the check did not run, by command: one of the task's
-    /// own criteria was red, and a guard runs only once every one of
-    /// those passes. Absent when every guard ran, and in a log written
-    /// before guards waited.
+    /// The guards the check did not run, by command: a criterion that ran
+    /// before them — one of the task's own, or a guard — was red, and the
+    /// check cannot close the task whatever a later guard answers. Absent
+    /// when every guard ran, and in a log written before guards waited.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waiting: Vec<String>,
 }
@@ -250,7 +195,10 @@ pub struct CriteriaCheckedPayload {
 pub struct ScopeCheckedPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<TaskId>,
+    /// Every path the work changed.
     pub diff: Vec<PathBuf>,
+    /// The paths of the diff the work may not change: outside every glob of
+    /// its scope, or denied to every run. Empty when the work stayed inside.
     pub violations: Vec<PathBuf>,
     /// The paths of the diff no session of the run may write, whatever
     /// the scope allows: what the project denies to every run, and the
@@ -260,10 +208,16 @@ pub struct ScopeCheckedPayload {
     pub denied: Vec<PathBuf>,
 }
 
+/// A node closed on the engine's verdict: what it checked, or what a person
+/// decided. An agent's summary may ride along as the outcome; it never
+/// decides the close.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFinishedPayload {
     /// What the node resolved to: a fact the engine checked, or the agent's summary.
     pub outcome: NodeOutcome,
+    /// What the attempt spent that its close settles. A close a round of
+    /// questions deferred carries zero: the round settled what the session
+    /// that asked spent.
     pub tokens_used: TokenUsage,
     /// The run's tree as the node left it, after whatever it landed —
     /// what a check that verified the tree is measured against when
@@ -309,6 +263,8 @@ impl NodeFinishedPayload {
     }
 }
 
+/// A node's attempt failed: why, as data, what it spent, and what its
+/// close left in the run's tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeFailedPayload {
     /// What went wrong, as data. The prose a reader sees is produced
@@ -317,9 +273,10 @@ pub struct NodeFailedPayload {
     /// sentence.
     #[serde(flatten)]
     pub failure: Failure,
+    /// What the failed attempt spent.
     pub tokens_used: TokenUsage,
     /// Read from a log that carried it; never written. What a retry can
-    /// change is the failure's own cause now, not a flag beside it.
+    /// change is the failure's own cause, never a flag beside it.
     #[serde(default, rename = "retryable", skip_serializing)]
     pub legacy_retryable: Option<bool>,
     /// The run's tree as the failed attempt left it — a failure can move
@@ -371,10 +328,14 @@ impl NodeFailedPayload {
     }
 }
 
+/// A hook the engine ran around a node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HookExecutedPayload {
     pub phase: HookPhase,
+    /// The hook's command, as the workflow wrote it.
     pub command: String,
+    /// The code it exited with: `-1` for one a signal ended, and for one
+    /// that never ran because its command did not render.
     pub exit_code: i32,
     /// The run object holding everything the hook printed, as a
     /// criterion's `output`.
@@ -390,6 +351,7 @@ pub struct HookExecutedPayload {
 /// only the re-route's destination is extra information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeReroutedPayload {
+    /// Where control goes.
     pub to_node: NodeId,
     /// Why control left the node, as data: the failure the node ended
     /// with, or the message a gate's choice states.
@@ -400,6 +362,8 @@ pub struct NodeReroutedPayload {
     /// is not a retry and has no cap to count against.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
+    /// The cap `attempt` counts against, the node's
+    /// `on_failure.max_reroutes`; absent where `attempt` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_reroutes: Option<u32>,
     /// Which mechanism rerouted. Old logs, written before the
@@ -468,10 +432,14 @@ pub enum RerouteOrigin {
 }
 
 /// A pull request a `pull_request` node opened — or found open, carrying
-/// this run's marker, when it ran again — on the project's forge.
+/// this run's marker, when it ran again — on the project's forge. Written
+/// the moment the forge answers, before the node closes: the pull request
+/// exists outside the run whatever the node does next.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullRequestOpenedPayload {
+    /// Where a person reads it.
     pub url: String,
+    /// The number the forge gave it.
     pub number: u64,
     /// The branch the run pushed, which the pull request carries.
     pub head: String,

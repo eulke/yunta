@@ -2,7 +2,10 @@
 
 use super::payloads::*;
 
-/// One node of the graph: what it resolved to run on, what it started, — one variant per kind.
+/// One node of the graph: what it resolved to run on, what it started,
+/// what it closed or failed with, where it was re-routed, the pull
+/// request it opened, and the checks the engine ran around it — one
+/// variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeEvent {
     RunnerResolved(RunnerResolvedPayload),
