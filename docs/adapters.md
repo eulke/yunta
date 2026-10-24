@@ -306,28 +306,43 @@ yunta doctor
 Runs the exact same health probe `yunta run`/`yunta resume` run before
 spending anything — binary present, version compatible, auth valid — for
 every adapter your `runners:` names, and reports every one of them instead of
-stopping at the first failure. Each check is a row: `✓` when it holds, `▲` when
+stopping at the first failure. Each check is marked `✓` when it holds, `▲` when
 it is worth a look and stops nothing, `✗` when a run would stop on it — and
-`doctor` exits non-zero only for a `✗`:
+`doctor` exits non-zero only for a `✗`. The checks that hold fold into one row
+that names each; every other check has a row of its own, with what its finding
+means (`so`) and how to make it hold (`fix`) when the check knows. `--full`
+gives every check its own row:
 
 ```
-  ✓ claude-code  healthy (1.2.3)
-  ✗ codex        unhealthy: `codex` not found on PATH
+✗ yunta doctor · not ready · 1 problem · 1 thing worth a look
+┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+
+  ✓ 3 healthy  claude-code 2.1.305 · git · checkouts
+
+  ✗ codex      unhealthy: `codex` is not on PATH
+  ▲ first run  a new binary's first run takes 307 ms here, its next 1 ms
+    so         macOS assesses each new executable before its first run, and a
+               suite pays that for every test binary it links again
+    fix        add the terminal that runs yunta under System Settings > Privacy
+               & Security > Developer Tools, then open it again
+
+next
+  yunta doctor --session   opens a session per binding, a prompt each
 ```
 
 A config whose `runners:` names no adapter has nothing to probe, and `doctor`
-says so with the runner to declare, on the adapter CLIs this machine answers for
-and the model left for you to name:
+says so with the runner to declare as its fix, on the adapter CLIs this machine
+answers for and the model left for you to name:
 
 ```
-  ✗ runners  none declared, and `lint-fix` needs one
-
-declare a runner in .yunta/config.yaml; this machine answers for `claude-code`:
-  runners:
-    implementer:
-      - { adapter: claude-code, model: <model> }
-  defaults:
-    runner: implementer
+  ✗ runners    none declared, and `lint-fix` needs one
+    fix        declare a runner in .yunta/config.yaml; this machine answers for
+               `claude-code`:
+                 runners:
+                   implementer:
+                     - { adapter: claude-code, model: <model> }
+                 defaults:
+                   runner: implementer
 ```
 
 That is a `✗` only when a workflow in the catalog has an agent node that would
@@ -366,7 +381,8 @@ machinery a workflow is — once per *binding*: an adapter, a model and an agent
 binding and not the runner name, because a session exercises a binding:
 two runners naming the same one are not two things to check, and one a
 runner falls back to is checked too, since a run reaches it exactly when
-the first is down.
+the first is down. A binding whose session ended well folds into the row of
+what holds, named alone; with `--full`, each one has a row:
 
 ```
   ✓ claude-code/claude-sonnet-5 (executor, reviewer)  ok: 812 tokens

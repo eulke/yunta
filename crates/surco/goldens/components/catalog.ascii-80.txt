@@ -37,6 +37,19 @@ what it found
 error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   looked in ~/.yunta/runs
 
+  + 2 healthy  claude-code 2.1.302 ; git
+
+  ^ first run  a new binary's first run takes 469 ms here, its next 2 ms
+    so         macOS assesses each new executable before its first run, and a
+               suite pays that for every test binary it links again
+    fix        add the terminal that runs yunta under Developer Tools, then open
+               it again
+  ! runners    none declared, and `lint-fix` needs one
+    fix        declare a runner in .yunta/config.yaml:
+                 runners:
+                   implementer:
+                     - { adapter: claude-code, model: <model> }
+
   outside the declared globs:
     src/main.rs
     Cargo.lock (the lock file)

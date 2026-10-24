@@ -13,7 +13,7 @@
 //! alone — so each answers on its own line, and either one failing is a
 //! failing verdict.
 
-use surco::components::{Check, Checklist, Found, Headline};
+use surco::components::{Check, Checklist, Fix, Found, Headline};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
@@ -88,14 +88,21 @@ pub(crate) fn tallied(headline: Headline, checks: &[CheckRow]) -> Headline {
     headline.tally(count(Found::Problem), count(Found::Caution))
 }
 
-/// One check as a document carries it: what it found, what it checked,
-/// and what it found there.
+/// One check as a document carries it: everything a [`Check`] holds but
+/// the lines under its row, what names it in a fold only for the page.
 #[derive(serde::Serialize)]
 pub(crate) struct CheckRow {
     #[serde(serialize_with = "found_word")]
     pub(crate) found: Found,
     pub(crate) subject: String,
     pub(crate) said: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) so: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fix: Option<Fix>,
+    /// What names the check where the checks that hold fold into one row.
+    #[serde(skip)]
+    pub(crate) brief: Option<String>,
 }
 
 impl CheckRow {
@@ -104,6 +111,19 @@ impl CheckRow {
             found: check.found,
             subject: check.subject.clone(),
             said: check.said.clone(),
+            so: check.so.clone(),
+            fix: check.fix.clone(),
+            brief: check.brief.clone(),
+        }
+    }
+
+    /// The check this row carries.
+    fn check(&self) -> Check {
+        Check {
+            so: self.so.clone(),
+            fix: self.fix.clone(),
+            brief: self.brief.clone(),
+            ..Check::new(self.found, self.subject.as_str(), self.said.as_str())
         }
     }
 }
@@ -111,9 +131,7 @@ impl CheckRow {
 /// The rows a document carries, drawn as the checklist a reader sees.
 pub(crate) fn checklist(rows: &[CheckRow]) -> Checklist {
     let mut checklist = Checklist::default();
-    for row in rows {
-        checklist.push(row.found, row.subject.as_str(), row.said.as_str());
-    }
+    checklist.extend(rows.iter().map(CheckRow::check));
     checklist
 }
 
@@ -267,11 +285,11 @@ mod tests {
 
     #[test]
     fn a_check_names_what_it_found_as_a_word() {
-        let row = CheckRow {
-            found: Found::NotApplicable,
-            subject: "chain".to_string(),
-            said: "nothing to check".to_string(),
-        };
+        let row = CheckRow::of(&surco::components::Check::new(
+            Found::NotApplicable,
+            "chain",
+            "nothing to check",
+        ));
         let json = serde_json::to_value(&row).expect("a check serializes");
         assert_eq!(json["found"], "not_applicable");
     }

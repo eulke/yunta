@@ -83,7 +83,9 @@ pub(super) async fn dispatch(
             dig,
             ..
         } => list_command(runs, all, Depth::of(full, dig), output, look).await,
-        Command::Doctor { session, .. } => commands::doctor::doctor(session, output, look).await,
+        Command::Doctor { session, full, .. } => {
+            commands::doctor::doctor(session, full, output, look).await
+        }
         Command::Mcp => commands::mcp::mcp().await,
         Command::Gc { dry_run } => commands::gc::gc(dry_run, look).await,
         Command::Graph {

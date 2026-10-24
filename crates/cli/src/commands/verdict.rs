@@ -279,7 +279,7 @@ impl Verdict {
 #[derive(Debug)]
 pub(crate) struct Unrunnable {
     pub(crate) problems: Vec<Problem>,
-    pub(crate) declare: Vec<crate::detect::Declaration>,
+    pub(crate) declare: Vec<surco::components::Fix>,
 }
 
 impl Unrunnable {
@@ -291,11 +291,7 @@ impl Unrunnable {
             .cloned()
             .chain(warnings)
             .map(Block::from)
-            .chain(
-                self.declare
-                    .iter()
-                    .flat_map(crate::detect::Declaration::blocks),
-            )
+            .chain(self.declare.iter().flat_map(surco::components::Fix::blocks))
             .collect()
     }
 }

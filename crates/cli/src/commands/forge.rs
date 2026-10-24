@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use surco::components::{Check, Found};
+use surco::components::{Check, Fix, Found};
 use yunta_adapters::GitHubForge;
 use yunta_core::port::Forge;
 use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
@@ -77,33 +77,29 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> C
         .map(|(name, _)| name)
         .collect();
     let unset = format!("{named}: `{token_env}`, the variable its token is in, is not set");
+    let export = Fix::said(format!("export {token_env} to reach it"));
     if opening.is_empty() {
         return check(
             Found::Caution,
-            format!(
-                "{unset}; no workflow here opens a pull request, and a gate published there \
-                 asks on the console instead; export {token_env} to reach it"
-            ),
-        );
+            format!("{unset}, and no workflow here opens a pull request"),
+        )
+        .so("a gate published there asks on the console instead")
+        .fix(export);
     }
     check(
         Found::Problem,
         format!(
-            "{unset}, and {} {} a pull request through it; export {token_env} to reach it",
+            "{unset}, and {} {} a pull request through it",
             surco::text::listed(opening.iter().map(String::as_str)),
             surco::text::agreeing(opening.len(), "opens", "open"),
         ),
     )
+    .fix(export)
 }
 
 /// One finding about the forge.
 fn check(found: Found, said: String) -> Check {
-    Check {
-        found,
-        subject: "forge".to_string(),
-        said,
-        details: Vec::new(),
-    }
+    Check::new(found, "forge", said)
 }
 
 /// Whether a run of `workflow` under `config` reaches a `pull_request`
@@ -144,7 +140,7 @@ pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Result<Vec<Ch
             Found::Problem,
             format!("{named}: reachable, and its token cannot push there"),
         ),
-        Ok(_) => check(Found::Holds, format!("{named}: reachable")),
+        Ok(_) => check(Found::Holds, format!("{named}: reachable")).brief(named.as_str()),
         Err(error) => check(Found::Problem, format!("{named}: {}", describe(&error))),
     }];
     let remote = github.remote();

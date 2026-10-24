@@ -54,11 +54,22 @@ fn doctor_names_an_unset_forge_token() {
     let doctor = yunta_in!(&repo, &home, &["doctor"]);
 
     assert!(!doctor.status.success());
+    let text = stdout(&doctor);
+    assert_eq!(
+        yunta_testkit::checked(&text, "forge").as_deref(),
+        Some(
+            "github acme/web: `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, \
+             is not set, and `opens` opens a pull request through it"
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        yunta_testkit::hung(&text, "forge", "fix").as_deref(),
+        Some("export YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS to reach it"),
+        "{text}"
+    );
     assert!(
-        yunta_testkit::checked(&stdout(&doctor), "forge").is_some_and(|said| said.contains(
-            "github acme/web: `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, is not set, and `opens` opens a pull request through it"
-        )),
-        "{}",
-        stdout(&doctor)
+        yunta_testkit::hung(&text, "forge", "so").is_none(),
+        "{text}"
     );
 }

@@ -31,7 +31,7 @@ pub(crate) fn concerns(flaws: &[Flaw]) -> Vec<Block> {
             Block::Concern(Concern {
                 fact: flaw.to_string(),
                 so: flaw.so(),
-                fix: flaw.fix().to_string(),
+                fix: surco::components::Fix::said(flaw.fix()),
             })
         })
         .collect()

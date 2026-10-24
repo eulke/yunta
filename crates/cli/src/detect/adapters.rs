@@ -4,6 +4,7 @@
 //! A probe reports a version and never a model: a model is the project's
 //! choice, so what is proposed here leaves it for the person to name.
 
+use surco::components::Fix;
 use yunta_core::port::ProbeReport;
 use yunta_core::{AdapterId, AdapterSettings, RunnerName};
 
@@ -61,11 +62,7 @@ const PROPOSED_RUNNER: &str = "implementer";
 /// answered here, and `defaults.runner` when a node names no runner of
 /// its own (`needs_default`). Ready to paste: the one placeholder is the
 /// model, which only the project can choose.
-pub(crate) fn runner_step(
-    roles: &[RunnerName],
-    needs_default: bool,
-    healthy: &[AdapterId],
-) -> super::Declaration {
+pub(crate) fn runner_step(roles: &[RunnerName], needs_default: bool, healthy: &[AdapterId]) -> Fix {
     let proposed = [RunnerName::from_static(PROPOSED_RUNNER)];
     let roles = match roles.is_empty() {
         true => &proposed[..],
@@ -96,7 +93,7 @@ pub(crate) fn runner_step(
         paste.push("defaults:".to_string());
         paste.push(format!("  runner: {first}"));
     }
-    super::Declaration {
+    Fix {
         said: format!("declare a runner in .yunta/config.yaml; {where_from}:"),
         paste,
     }

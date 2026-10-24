@@ -896,7 +896,8 @@ git ignores goes, the source stays — the least recently used first. A run that
 still leave the disk under its floor stops and says how to make room; `yunta run`
 refuses to start one. `yunta gc` empties the builds nobody used within
 `storage.retention_days`, removes free checkouts that hold no build, and says what the
-pool keeps; `yunta doctor` says it too.
+pool keeps; `yunta doctor` says it too when it is worth a look, and `yunta doctor
+--full` always.
 
 Do not point several checkouts at one build directory. A build is right only at the
 path that made it: build tools name a project's own output the same way in any

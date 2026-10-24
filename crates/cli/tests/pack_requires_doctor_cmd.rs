@@ -75,8 +75,10 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
         "the missing program is named: {text}"
     );
     assert!(
-        text.contains("declare runner `reviewer` in .yunta/config.yaml:"),
-        "and under the list, the runner to declare: {text}"
+        yunta_testkit::hung(&text, "pack acme/review-pack", "fix")
+            .is_some_and(|fix| fix.starts_with("declare a runner in .yunta/config.yaml"))
+            && text.lines().any(|line| line.trim() == "reviewer:"),
+        "under the row, the runner to declare: {text}"
     );
 }
 
@@ -182,6 +184,39 @@ fn a_project_whose_cli_dies(root: &Path, repo: &Path, runners: &str) {
     git(repo, &["commit", "-q", "-m", "project"]);
 }
 
+/// With no runner declared here, the runner a pack lacks is declared on
+/// the adapter CLIs this machine answers for, as the project's own is.
+#[test]
+fn a_pack_runner_is_declared_on_an_adapter_this_machine_answers_for() {
+    let (root, upstream, home) = setup();
+    let repo = root.path().join("repo");
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add_out.status.success(), "{}", stderr(&add_out));
+    let bin = root.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(yunta_testkit_core::stubs::claude_code(), bin.join("claude"))
+        .unwrap();
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    let doctor = command
+        .arg("doctor")
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .expect("the yunta binary runs");
+    let text = stdout(&doctor);
+    assert_eq!(
+        yunta_testkit::hung(&text, "pack acme/review-pack", "fix").as_deref(),
+        Some("declare a runner in .yunta/config.yaml; this machine answers for `claude-code`:"),
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.trim() == "- { adapter: claude-code, model: <model> }"),
+        "{text}"
+    );
+}
+
 /// Runs `yunta doctor` with the stub armed to die, and hands back what
 /// it printed.
 fn doctor_with(repo: &Path, home: &Path, root: &Path, args: &[&str]) -> std::process::Output {
@@ -208,7 +243,8 @@ fn doctor_session_reports_a_binding_whose_cli_dies_at_startup_with_its_stderr() 
         "  executor:\n    - { adapter: codex, model: codex-model }\n",
     );
 
-    let plain = doctor_with(&repo, &home, root.path(), &["doctor"]);
+    // A check that holds has a row of its own only on the whole list.
+    let plain = doctor_with(&repo, &home, root.path(), &["doctor", "--full"]);
     assert!(plain.status.success(), "{}", stderr(&plain));
     assert!(
         yunta_testkit::checked(&stdout(&plain), "codex")

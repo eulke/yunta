@@ -102,6 +102,26 @@ fn runner_words(error: &CheckError) -> Option<String> {
     })
 }
 
+/// What `error` says a node lacks and what to declare for it, apart: for
+/// a key the config leaves unset; `None` for every other refusal.
+pub(crate) fn lacking(error: &CheckError) -> Option<(String, String)> {
+    match error {
+        CheckError::Unset { node, key, near } => Some((
+            format!(
+                "node `{node}`: {}{}",
+                key.fact(),
+                surco::text::near_miss(near.as_deref())
+            ),
+            key.remedy(),
+        )),
+        CheckError::BaselineWithoutSuite { sites } => Some((
+            format!("{sites}: {}", ConfigKey::BaselineSuite.fact()),
+            ConfigKey::BaselineSuite.remedy(),
+        )),
+        _ => None,
+    }
+}
+
 /// What the config must declare for a node to run, and what it cannot be.
 fn config_words(error: &CheckError) -> Option<String> {
     Some(match error {

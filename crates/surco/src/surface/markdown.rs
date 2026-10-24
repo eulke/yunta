@@ -288,23 +288,35 @@ fn decision(decision: &Decision) -> String {
 }
 
 fn checklist(list: &Checklist) -> String {
-    list.checks()
-        .map(
-            |Check {
-                 found,
-                 subject,
-                 said,
-                 details,
-             }| {
-                let mut row = format!("- {} **{subject}** {said}", GLYPHS.mark(found.mark()));
-                for detail in details.iter().flat_map(|detail| detail.lines()) {
-                    row.push_str(&format!("\n  - {detail}"));
-                }
-                row
-            },
+    let sep = format!(" {} ", GLYPHS.sep());
+    let fold = list.fold().map(|fold| {
+        format!(
+            "- {} **{}** {}",
+            GLYPHS.mark(crate::components::Found::Holds.mark()),
+            fold.subject,
+            fold.names.join(&sep)
         )
+    });
+    fold.into_iter()
+        .chain(list.unfolded().map(check_item))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// One check as a list item: its mark, its subject and what it found,
+/// with what it means, how to make it hold and what says more under it.
+fn check_item(check: &Check) -> String {
+    let mut row = format!(
+        "- {} **{}** {}",
+        GLYPHS.mark(check.found.mark()),
+        check.subject,
+        check.said
+    );
+    row.push_str(&hung(check.so.as_deref(), check.fix.as_ref()));
+    for detail in check.details.iter().flat_map(|detail| detail.lines()) {
+        row.push_str(&format!("\n  - {detail}"));
+    }
+    row
 }
 
 fn next(next: &Next) -> String {
@@ -347,12 +359,31 @@ fn line(line: &Line) -> String {
 /// it.
 fn concern(concern: &Concern) -> String {
     format!(
-        "- {} {}\n  - so: {}\n  - fix: {}",
+        "- {} {}{}",
         GLYPHS.mark(crate::glyphs::Mark::Caution),
         concern.fact,
-        concern.so,
-        concern.fix
+        hung(Some(&concern.so), Some(&concern.fix))
     )
+}
+
+/// What a finding means and how to make it hold, as the items under its
+/// own, each beside its label, the lines to paste fenced under the fix.
+fn hung(so: Option<&str>, fix: Option<&crate::components::Fix>) -> String {
+    use crate::surface::terminal::{FIX, SO};
+    let mut out = String::new();
+    if let Some(so) = so {
+        out.push_str(&format!("\n  - {SO}: {so}"));
+    }
+    if let Some(fix) = fix {
+        out.push_str(&format!("\n  - {FIX}: {}", fix.said));
+        if !fix.paste.is_empty() {
+            out.push_str(&format!(
+                "\n\n    ```\n    {}\n    ```",
+                fix.paste.join("\n    ")
+            ));
+        }
+    }
+    out
 }
 
 /// The problem's word in bold and what it says, then where it is and its

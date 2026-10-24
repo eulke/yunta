@@ -420,3 +420,48 @@ fn a_cut_command_copies_as_one_command() {
     assert!(parses(command), "{command}");
     assert_eq!(command.replace(" \\\n  ", " "), LONG);
 }
+
+#[test]
+fn a_list_where_everything_holds_folds_into_its_one_row() {
+    let mut list = Checklist::default().folded("healthy");
+    list.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
+    list.push_check(
+        Check::new(Found::Holds, "claude-code", "healthy (2.1.305)").brief("claude-code 2.1.305"),
+    );
+    assert_eq!(plain(list), ["  + 2 healthy  git ; claude-code 2.1.305"]);
+}
+
+#[test]
+fn a_list_where_nothing_holds_has_nothing_to_fold() {
+    let mut list = Checklist::default().folded("healthy");
+    list.push(
+        Found::Caution,
+        "first run",
+        "a new binary's first run takes 337 ms",
+    );
+    assert!(!list.folds());
+    assert_eq!(
+        plain(list),
+        ["  ^ first run  a new binary's first run takes 337 ms"]
+    );
+}
+
+#[test]
+fn the_fold_row_breaks_between_two_names_and_never_inside_one() {
+    let mut list = Checklist::default().folded("healthy");
+    for name in ["claude-code 2.1.305", "codex 0.157.0", "github acme/web"] {
+        list.push_check(Check::new(Found::Holds, name, "holds").brief(name));
+    }
+    let look = Look {
+        width: Look::plain().width.within(40),
+        ..Look::plain()
+    };
+    assert_eq!(
+        draw_with(list, &look),
+        [
+            "  + 3 healthy  claude-code 2.1.305 ;",
+            "               codex 0.157.0 ;",
+            "               github acme/web",
+        ]
+    );
+}

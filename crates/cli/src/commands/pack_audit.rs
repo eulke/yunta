@@ -273,12 +273,9 @@ impl PackTestSummary {
     pub fn blocks(&self) -> Vec<Block> {
         let mut failed = Checklist::default();
         for (case, said, problems) in &self.failures {
-            failed.push_check(Check {
-                found: Found::Problem,
-                subject: case.clone(),
-                said: said.clone(),
-                details: problems.clone(),
-            });
+            failed.push_check(
+                Check::new(Found::Problem, case.as_str(), said.as_str()).details(problems.clone()),
+            );
         }
         let failed = (!self.failures.is_empty()).then(|| failed.into());
         std::iter::once(Fields::new().push_if("tests", self.said()).into())

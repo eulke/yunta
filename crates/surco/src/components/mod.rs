@@ -24,7 +24,7 @@ mod runs;
 mod said;
 mod table;
 
-pub use checklist::{Check, Checklist, Found};
+pub use checklist::{Check, Checklist, Fix, Found};
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
 pub use document::{Code, Marked, Note, Prose, Section};

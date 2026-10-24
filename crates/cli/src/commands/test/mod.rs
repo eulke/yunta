@@ -232,12 +232,7 @@ async fn report(
     // The cases run one at a time and each row is drawn as its case ends:
     // the column every row shares is the list's, not the row's.
     let mut row = Checklist::aligned(names.to_vec());
-    row.push_check(Check {
-        found,
-        subject: name,
-        said,
-        details: problems,
-    });
+    row.push_check(Check::new(found, name, said).details(problems));
     document(look, Doc::new().with(row));
     passed
 }

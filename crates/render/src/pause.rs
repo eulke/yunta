@@ -126,11 +126,17 @@ fn no_room(available: u64, need: u64, keep_free: u64) -> String {
         need => format!(", and a build here takes about {} more", Bytes(need)),
     };
     format!(
-        "no room on the disk, which has {} free where {} stays free{building}; make room \
-         (`yunta gc`, close a parked run, or lower `storage.pool.keep_free`) and resume",
+        "no room on the disk, which has {} free where {} stays free{building}; {} and resume",
         Bytes(available),
-        Bytes(keep_free)
+        Bytes(keep_free),
+        make_room("yunta gc")
     )
+}
+
+/// What makes room on a disk the checkouts fill: `gc`, the command that
+/// reclaims, among the other ways.
+pub fn make_room(gc: &str) -> String {
+    format!("make room (`{gc}`, close a parked run, or lower `storage.pool.keep_free`)")
 }
 
 /// Why a run stops when it cannot tell how `nodes` ended.

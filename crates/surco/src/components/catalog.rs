@@ -13,6 +13,7 @@ use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
 use crate::paint::Ink;
 use crate::surface::{Markdown, Surface, Terminal};
+use crate::width::cell_width;
 use crate::words::Standing;
 
 fn goldens() -> PathBuf {
@@ -93,7 +94,7 @@ fn opening() -> Vec<Block> {
         Concern {
             fact: "the budget sits under this workflow's usual spend".to_string(),
             so: "the run may stop before it finishes".to_string(),
-            fix: "raise `limits.max_tokens_per_run`".to_string(),
+            fix: Fix::said("raise `limits.max_tokens_per_run`"),
         }
         .into(),
     ]
@@ -125,8 +126,43 @@ fn quoting() -> Vec<Block> {
     .into()]
     .into_iter()
     .chain(found())
-    .chain([named_paths()])
+    .chain([readiness().into(), named_paths()])
     .collect()
+}
+
+/// A report that folds what holds into one row, then each finding with
+/// what it means and how to make it hold, the lines to paste under one.
+fn readiness() -> Checklist {
+    let mut checks = Checklist::default().folded("healthy");
+    checks.push_check(
+        Check::new(Found::Holds, "claude-code", "healthy (2.1.302)").brief("claude-code 2.1.302"),
+    );
+    checks.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
+    checks.push_check(
+        Check::new(
+            Found::Caution,
+            "first run",
+            "a new binary's first run takes 469 ms here, its next 2 ms",
+        )
+        .so("macOS assesses each new executable before its first run, and a suite pays that for every test binary it links again")
+        .fix(Fix::said("add the terminal that runs yunta under Developer Tools, then open it again")),
+    );
+    checks.push_check(
+        Check::new(
+            Found::Problem,
+            "runners",
+            "none declared, and `lint-fix` needs one",
+        )
+        .fix(Fix {
+            said: "declare a runner in .yunta/config.yaml:".to_string(),
+            paste: vec![
+                "runners:".to_string(),
+                "  implementer:".to_string(),
+                "    - { adapter: claude-code, model: <model> }".to_string(),
+            ],
+        }),
+    );
+    checks
 }
 
 /// What a check found in a file, and what a command refused: a problem
@@ -276,9 +312,17 @@ fn every_block_matches_its_goldens_in_every_environment() {
     let doc = catalog();
     for environment in &ENVIRONMENTS {
         let look = Look::of(environment);
+        let drawn = Terminal::on(look).draw(&doc);
+        for line in crate::paint::strip_sgr(&drawn).lines() {
+            assert!(
+                cell_width(line) <= look.width.cells(),
+                "{}: past the line: {line}",
+                environment.name
+            );
+        }
         assert_golden(
             &environment.golden(&goldens().join("components"), "catalog"),
-            &Terminal::on(look).draw(&doc),
+            &drawn,
         );
     }
     assert_golden(&goldens().join("markdown/catalog.md"), &Markdown.draw(&doc));

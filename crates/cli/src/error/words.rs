@@ -9,7 +9,7 @@ mod wrapped;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use refusals::check;
+pub(crate) use refusals::{check, lacking};
 
 use yunta_core::events::{Claim, FailureMenu, Refusal};
 use yunta_core::inputs::InputsProblem;

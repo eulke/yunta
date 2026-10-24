@@ -85,13 +85,13 @@ pub(super) fn document_problems(
 /// A workflow that cannot run here, as plain text says it: its problems
 /// counted and quoted, then what to declare.
 pub(super) fn unrunnable(unrunnable: &Unrunnable) -> String {
+    use surco::width::INDENT;
     let mut said = yunta_render::blocks::diagnostic::plain(UNRUNNABLE, unrunnable.problems.clone());
-    for line in unrunnable
-        .declare
-        .iter()
-        .flat_map(|declaration| declaration.lines())
-    {
-        said.push_str(&format!("\n  {line}"));
+    for fix in &unrunnable.declare {
+        said.push_str(&format!("\n{INDENT}{}", fix.said));
+        for line in &fix.paste {
+            said.push_str(&format!("\n{INDENT}{INDENT}{INDENT}{line}"));
+        }
     }
     said
 }

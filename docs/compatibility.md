@@ -478,7 +478,8 @@ than `cancelled` or `needs you`, a node waiting on a person is `needs you` rathe
 
 Under `--json`, `list --runs`, `verify`, `close`, `cancel`, `resolve-gate` and `doctor`
 print one document each: the answer the command gives, with the fields its human view
-draws. `resolve-gate --json` takes an option, since the menu it would otherwise show is
+draws. From 8 on, `doctor` carries no `steps`: each row of `checks` carries `fix`
+(`said`, and `paste` when there are lines to paste) and `so` when the check has them. `resolve-gate --json` takes an option, since the menu it would otherwise show is
 for a terminal, so one without an option is refused. Each of these documents carries
 the same stamp.
 

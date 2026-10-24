@@ -87,7 +87,7 @@ them all. `yunta run` refuses a file with any of them.
 ## `yunta doctor` reports an adapter unhealthy
 
 ```
-  ✗ codex  unhealthy: `codex` not found on PATH
+  ✗ codex      unhealthy: `codex` is not on PATH
 ```
 
 The diagnostic names the actual problem: binary missing, version
@@ -273,8 +273,8 @@ a run commits every node's work, and git cannot name who commits here: …
 Every node's work becomes a commit on the run's branch, so a repository where
 git has no `user.name` and `user.email` — or is told not to guess them, with
 `user.useConfigOnly` — would fail the run at its first commit. Set both, globally
-or for this repository alone, and run again; `yunta doctor` says who git commits
-as.
+or for this repository alone, and run again; `yunta doctor --full` says who git
+commits as.
 
 ## `isolation: none` refuses to start
 
@@ -305,7 +305,11 @@ else: check `yunta status`.
 ## A suite takes minutes longer than its tests on macOS
 
 ```
-▲ first run    a new binary's first run takes 307 ms here, its next 4 ms: macOS assesses each new executable before its first run …
+  ▲ first run  a new binary's first run takes 307 ms here, its next 4 ms
+    so         macOS assesses each new executable before its first run, and a
+               suite pays that for every test binary it links again
+    fix        add the terminal that runs yunta under System Settings > Privacy
+               & Security > Developer Tools, then open it again
 ```
 
 `yunta doctor` links a binary nobody ran before and runs it twice. macOS

@@ -11,56 +11,18 @@ mod adapters;
 mod ecosystems;
 mod js;
 mod remote;
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use surco::components::{Prose, Said};
-use surco::doc::Block;
+use surco::components::Fix;
 use yunta_core::{AdapterId, CommandName, ConfigKey, GitHubRepo, RunnerName};
 use yunta_engine::process::Supervision;
 
 pub(crate) use adapters::{healthy, probe_known_adapters, runner_step, ProbedAdapter};
 pub(crate) use ecosystems::Ecosystem;
-
-/// What this project could declare, as a person is told it: the sentence
-/// that says what, and the lines to paste when the sentence does not carry
-/// them itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Declaration {
-    pub(crate) said: String,
-    pub(crate) paste: Vec<String>,
-}
-
-impl Declaration {
-    /// A declaration its sentence says whole.
-    fn said(said: String) -> Self {
-        Declaration {
-            said,
-            paste: Vec::new(),
-        }
-    }
-
-    /// The blocks a page draws it with: the sentence as the heading the
-    /// lines to paste hang from, or as prose when there is nothing to paste.
-    pub(crate) fn blocks(&self) -> Vec<Block> {
-        match self.paste.is_empty() {
-            true => vec![Prose(self.said.clone()).into()],
-            false => vec![
-                Block::Heading(self.said.clone()),
-                Said(self.paste.clone()).into(),
-            ],
-        }
-    }
-
-    /// As plain text says it: the sentence, then each line to paste one
-    /// step in.
-    pub(crate) fn lines(&self) -> Vec<String> {
-        std::iter::once(self.said.clone())
-            .chain(self.paste.iter().map(|line| format!("  {line}")))
-            .collect()
-    }
-}
 
 /// What one repository was found to have.
 #[derive(Debug, Default, PartialEq)]
@@ -114,7 +76,7 @@ impl Detected {
     /// `errors` name a runner the config lacks — the one suggestion that
     /// needs them.
     pub(crate) async fn for_errors(mut self, errors: &[yunta_engine::CheckError]) -> Self {
-        if !runners_wanted(errors).is_empty() || default_wanted(errors) {
+        if wants_runner(errors) {
             self.adapters = healthy(&probe_known_adapters().await);
         }
         self
@@ -146,30 +108,51 @@ impl Detected {
 
 /// What this repository answers for each key `errors` says a workflow
 /// needs and the config lacks, each once, in the order they are named.
-pub(crate) fn suggestions(
-    errors: &[yunta_engine::CheckError],
-    detected: &Detected,
-) -> Vec<Declaration> {
-    let mut said: Vec<Declaration> = Vec::new();
-    for error in errors {
-        let key = match error {
-            yunta_engine::CheckError::Unset { key, .. } => key.clone(),
-            yunta_engine::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
-            _ => continue,
-        };
-        if let Some(line) = detected.suggestion(&key) {
-            let declaration = Declaration::said(line);
-            if !said.contains(&declaration) {
-                said.push(declaration);
-            }
+pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detected) -> Vec<Fix> {
+    let mut said: Vec<Fix> = Vec::new();
+    for fix in errors.iter().filter_map(|error| answered(error, detected)) {
+        if !said.contains(&fix) {
+            said.push(fix);
         }
     }
-    let roles = runners_wanted(errors);
-    let needs_default = default_wanted(errors);
-    if !roles.is_empty() || needs_default {
-        said.push(runner_step(&roles, needs_default, &detected.adapters));
-    }
+    said.extend(runner_fix(errors, detected));
     said
+}
+
+/// What fixes `error` on its own: what this repository answers for the
+/// key it says a workflow lacks, or the runner to declare for it; `None`
+/// when nothing here does.
+pub(crate) fn fix_for(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix> {
+    answered(error, detected).or_else(|| runner_fix(std::slice::from_ref(error), detected))
+}
+
+/// Whether `errors` say a node names a runner the config lacks, or needs
+/// the default runner it lacks.
+fn wants_runner(errors: &[yunta_engine::CheckError]) -> bool {
+    !runners_wanted(errors).is_empty() || default_wanted(errors)
+}
+
+/// The runner to declare for `errors`, on the adapters this machine
+/// answers for, when they want one.
+fn runner_fix(errors: &[yunta_engine::CheckError], detected: &Detected) -> Option<Fix> {
+    wants_runner(errors).then(|| {
+        runner_step(
+            &runners_wanted(errors),
+            default_wanted(errors),
+            &detected.adapters,
+        )
+    })
+}
+
+/// What this repository answers for the key `error` says a workflow needs
+/// and the config lacks, when it answers it.
+fn answered(error: &yunta_engine::CheckError, detected: &Detected) -> Option<Fix> {
+    let key = match error {
+        yunta_engine::CheckError::Unset { key, .. } => key.clone(),
+        yunta_engine::CheckError::BaselineWithoutSuite { .. } => ConfigKey::BaselineSuite,
+        _ => return None,
+    };
+    detected.suggestion(&key).map(Fix::said)
 }
 
 /// The runners `errors` say a node names and the config does not

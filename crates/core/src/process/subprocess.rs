@@ -115,6 +115,11 @@ pub async fn probe_version(binary: &Path) -> ProbeReport {
         Ok(Ok(output)) => ProbeReport::Unhealthy {
             diagnostic: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         },
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound && missing(binary) => {
+            ProbeReport::Unhealthy {
+                diagnostic: absent(binary),
+            }
+        }
         Ok(Err(e)) => ProbeReport::Unhealthy {
             diagnostic: format!("`{}` could not be run: {e}", binary.display()),
         },
@@ -125,6 +130,23 @@ pub async fn probe_version(binary: &Path) -> ProbeReport {
                 PROBE_TIMEOUT.as_secs()
             ),
         },
+    }
+}
+
+/// Whether a CLI the system could not start is not there at all. A path
+/// is checked; for a bare name the system searched `PATH` and found
+/// nothing it could start, which a script whose `#!` names a missing
+/// interpreter answers the same way, and this binary has no other word.
+fn missing(binary: &Path) -> bool {
+    binary.components().count() == 1 || !binary.exists()
+}
+
+/// Why a CLI that is not there cannot be asked: a bare name is on no
+/// directory of `PATH`, and a path names no file.
+fn absent(binary: &Path) -> String {
+    match binary.components().count() {
+        1 => format!("`{}` is not on PATH", binary.display()),
+        _ => format!("`{}` does not exist", binary.display()),
     }
 }
 

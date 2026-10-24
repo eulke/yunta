@@ -114,9 +114,9 @@ fn doctor_names_what_a_pack_needs_with_the_detected_value() {
         yunta_testkit::checked(&said, "pack acme/lint-pack").is_some(),
         "the pack's gap is a row of its own: {said}"
     );
-    assert!(
-        said.lines()
-            .any(|l| l.trim() == "detected here: declare `commands: { lint: \"pnpm lint\" }`"),
-        "and the step under the list names the detected value: {said}"
+    assert_eq!(
+        yunta_testkit::hung(&said, "pack acme/lint-pack", "fix").as_deref(),
+        Some("detected here: declare `commands: { lint: \"pnpm lint\" }`"),
+        "and how to fix it names the detected value: {said}"
     );
 }

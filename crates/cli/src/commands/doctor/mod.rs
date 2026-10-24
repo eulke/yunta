@@ -22,58 +22,54 @@
 //! `requires.programs` present on `PATH`.
 
 mod first_run;
+mod packs;
 mod session;
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeSet;
 
 use super::verify::{checklist, tallied, CheckRow};
 use crate::context::Context;
-use crate::detect::Declaration;
-use crate::error::words;
 use crate::error::{CliError, Outcome};
 use crate::json::SCHEMA_VERSION;
 use crate::output::{emit, Answer, Mode};
-use surco::components::{Checklist, Found, Furrow, Headline, Next};
+use surco::components::{Check, Checklist, Fix, Found, Furrow, Headline, Next};
 use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
-use yunta_render::caution;
 
-pub async fn doctor(session: bool, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+pub async fn doctor(
+    session: bool,
+    full: bool,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let mut checks = Checklist::default();
-    // The configuration a check found missing, as the lines to paste.
-    let mut steps = Vec::new();
-    let healthy = probe_adapters(&ctx, &mut checks, &mut steps).await;
+    let (healthy, answered) = probe_adapters(&ctx, &mut checks).await;
     match super::committer::committer(&ctx).await {
         Ok(who) => checks.push(Found::Holds, "git", format!("commits as {who}")),
         Err(why) => checks.push(Found::Problem, "git", why.to_string()),
     }
     checks.extend(super::forge::forge_checks(&ctx).await?);
     checkouts(&ctx, &mut checks).await;
-    if let Some((found, said)) = first_run::first_run().await {
-        checks.push(found, "first run", said);
-    }
-    check_installed_pack_requires(
-        &ctx.env,
-        &ctx.cwd,
-        &ctx.project.config,
-        &mut checks,
-        &mut steps,
-    );
-    check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await?;
+    checks.extend(first_run::first_run().await);
+    // A runner a pack lacks is declared on an adapter that answers here.
+    packs::check_requires(&ctx, &answered, &mut checks);
+    packs::check_workflows(&ctx, &answered, &mut checks).await?;
     if session {
         probe_sessions(&ctx, &healthy, &mut checks).await;
     }
 
-    emit(output, &DoctorAnswer::of(session, &checks, steps), look)
+    emit(output, &DoctorAnswer::of(session, full, &checks), look)
 }
 
 /// What `doctor` found, as a document carries it: every check in the order
-/// it ran, and the lines to paste for each configuration a check found
-/// missing.
+/// it ran, each with what it means and how to make it hold when the check
+/// knows.
 #[derive(serde::Serialize)]
 pub(crate) struct DoctorAnswer {
     schema_version: u32,
@@ -81,15 +77,10 @@ pub(crate) struct DoctorAnswer {
     session: bool,
     holds: bool,
     checks: Vec<CheckRow>,
-    /// What to declare for each configuration a check found missing, as
-    /// the lines a person pastes.
-    #[serde(serialize_with = "pasted")]
-    steps: Vec<Declaration>,
-}
-
-/// The declarations as a document carries them: each one's lines, in order.
-fn pasted<S: serde::Serializer>(steps: &[Declaration], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(steps.iter().flat_map(Declaration::lines))
+    /// Whether the page lists every check on its own row: a glance folds
+    /// the ones that hold into one.
+    #[serde(skip)]
+    full: bool,
 }
 
 impl DoctorAnswer {
@@ -106,31 +97,42 @@ impl DoctorAnswer {
         )
     }
 
-    fn of(session: bool, checks: &Checklist, steps: Vec<Declaration>) -> Self {
+    fn of(session: bool, full: bool, checks: &Checklist) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             session,
             holds: checks.holds(),
             checks: checks.checks().map(CheckRow::of).collect(),
-            steps,
+            full,
         }
     }
 }
 
 impl Answer for DoctorAnswer {
     fn document(&self, _look: &Look) -> Doc {
-        let next = match self.session {
-            true => Vec::new(),
-            false => vec![(
-                format!("{} --session", super::advice::doctor()),
-                "opens a session per binding, a prompt each",
-            )],
+        let checks = match self.full {
+            true => checklist(&self.checks),
+            false => checklist(&self.checks).folded("healthy"),
         };
+        let doctor = super::advice::doctor();
+        let mut next = Vec::new();
+        if !self.session {
+            next.push((
+                format!("{doctor} --session"),
+                "opens a session per binding, a prompt each",
+            ));
+        }
+        // A glance that folds leaves out what each check that holds found.
+        if checks.folds() {
+            next.push((
+                format!("{doctor} --full"),
+                "every check on its own row, with what it found",
+            ));
+        }
         Doc::new()
             .with(self.headline())
             .with(Furrow(Vec::new()))
-            .with(checklist(&self.checks))
-            .with_all(self.steps.iter().flat_map(Declaration::blocks))
+            .with(checks)
             .with(Next { steps: next })
     }
 
@@ -159,30 +161,40 @@ async fn checkouts(ctx: &Context, checks: &mut Checklist) {
         limits,
         std::sync::Arc::new(ctx.clock),
     );
-    let kept = match pool.report(ctx.supervision()).await {
-        Ok(kept) => kept,
-        Err(e) => return checks.push(Found::Caution, "checkouts", e.to_string()),
-    };
-    let found = match (kept.available < kept.keep_free, kept.builds > kept.budget) {
-        (true, _) => Found::Problem,
-        (false, true) => Found::Caution,
-        (false, false) => Found::Holds,
-    };
-    checks.push(found, "checkouts", kept.to_string());
+    match pool.report(ctx.supervision()).await {
+        Ok(kept) => checks.push_check(kept_check(&kept)),
+        Err(e) => checks.push(Found::Caution, "checkouts", e.to_string()),
+    }
+}
+
+/// What the checkouts keep, as its check: a problem when the disk is
+/// already under the part kept free, and a caution when their builds are
+/// over their budget, each with what to do about it.
+fn kept_check(kept: &yunta_engine::PoolReport) -> Check {
+    let check = |found| Check::new(found, "checkouts", kept.to_string());
+    let gc = super::advice::gc();
+    match (kept.available < kept.keep_free, kept.builds > kept.budget) {
+        (true, _) => check(Found::Problem).fix(Fix::said(yunta_render::pause::make_room(&gc))),
+        (false, true) => check(Found::Caution)
+            .so("the next checkout taken empties the builds past the budget")
+            .fix(Fix::said(format!("run `{gc}` to empty them now"))),
+        (false, false) => check(Found::Holds),
+    }
 }
 
 /// Probes every adapter this project's `runners:` names, a check each.
-/// Hands back the ones that answered healthy — the only ones a session
-/// is worth opening on.
+/// Hands back the ones that answered healthy, the only ones a session is
+/// worth opening on, and the adapters a runner to declare would run on:
+/// those, or every adapter CLI this machine answers for when none of them
+/// did.
 async fn probe_adapters(
     ctx: &Context,
     checks: &mut Checklist,
-    steps: &mut Vec<Declaration>,
-) -> BTreeSet<AdapterId> {
+) -> (BTreeSet<AdapterId>, Vec<AdapterId>) {
     let adapters = ctx.adapters();
     if adapters.is_empty() {
-        no_runner_declared(ctx, checks, steps).await;
-        return BTreeSet::new();
+        let answered = no_runner_declared(ctx, checks).await;
+        return (BTreeSet::new(), answered);
     }
     let mut healthy = BTreeSet::new();
     let mut names: Vec<&AdapterId> = adapters.keys().collect();
@@ -191,57 +203,83 @@ async fn probe_adapters(
         let Some(adapter) = adapters.get(name) else {
             continue;
         };
-        match adapter.probe().await {
-            Ok(ProbeReport::Healthy { version }) => {
-                healthy.insert(name.clone());
-                let said = version
-                    .as_deref()
-                    .map(|v| format!(" ({v})"))
-                    .unwrap_or_default();
-                checks.push(Found::Holds, name.as_str(), format!("healthy{said}"));
-            }
-            Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                checks.push(
-                    Found::Problem,
-                    name.as_str(),
-                    format!("unhealthy: {diagnostic}"),
-                );
-            }
-            Err(e) => checks.push(Found::Problem, name.as_str(), format!("unhealthy: {e}")),
+        let check = probed(name, adapter.probe().await);
+        if check.found == Found::Holds {
+            healthy.insert(name.clone());
         }
+        checks.push_check(check);
     }
-    healthy
+    let answered = match healthy.is_empty() {
+        true => crate::detect::healthy(&crate::detect::probe_known_adapters().await),
+        false => healthy.iter().cloned().collect(),
+    };
+    (healthy, answered)
+}
+
+/// What probing the adapter `name` answered, as its check.
+fn probed(name: &AdapterId, answer: Result<ProbeReport, impl std::fmt::Display>) -> Check {
+    match answer {
+        Ok(ProbeReport::Healthy { version }) => {
+            let said = version
+                .as_deref()
+                .map(|v| format!(" ({v})"))
+                .unwrap_or_default();
+            Check::new(Found::Holds, name.as_str(), format!("healthy{said}"))
+                .brief(versioned(name, version.as_deref()))
+        }
+        Ok(ProbeReport::Unhealthy { diagnostic }) => Check::new(
+            Found::Problem,
+            name.as_str(),
+            format!("unhealthy: {diagnostic}"),
+        ),
+        Err(e) => Check::new(Found::Problem, name.as_str(), format!("unhealthy: {e}")),
+    }
+}
+
+/// What names a healthy adapter where the checks that hold fold: its id,
+/// and the version number its CLI reported, when it reported one.
+fn versioned(name: &AdapterId, version: Option<&str>) -> String {
+    let number = version.and_then(|version| {
+        version
+            .split_whitespace()
+            .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+    });
+    match number {
+        Some(number) => format!("{name} {number}"),
+        None => name.to_string(),
+    }
 }
 
 /// What `doctor` finds of a project whose `runners:` names no adapter
 /// this build supports: that nothing has an adapter to run on, and the
-/// runner to declare with the adapters this machine answers for. A
-/// problem when a workflow in the catalog needs one — it would stop the
-/// first time it reached an agent node — and a caution otherwise.
-async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut Vec<Declaration>) {
+/// runner to declare with the adapters this machine answers for, which it
+/// hands back. A problem when a workflow in the catalog needs one — it
+/// would stop the first time it reached an agent node — and a caution
+/// otherwise.
+async fn no_runner_declared(ctx: &Context, checks: &mut Checklist) -> Vec<AdapterId> {
     let needing = needing_a_runner(ctx);
     let errors: Vec<yunta_engine::CheckError> = needing
         .iter()
         .flat_map(|(_, errors)| errors.iter().cloned())
         .collect();
-    let detected = crate::detect::Detected::default().for_errors(&errors).await;
-    let mut step = crate::detect::suggestions(&errors, &detected);
-    if step.is_empty() {
-        let probed = crate::detect::probe_known_adapters().await;
-        step = vec![crate::detect::runner_step(
-            &[],
-            true,
-            &crate::detect::healthy(&probed),
-        )];
-    }
+    let answered = crate::detect::healthy(&crate::detect::probe_known_adapters().await);
+    let detected = crate::detect::Detected {
+        adapters: answered.clone(),
+        ..crate::detect::Detected::default()
+    };
+    // The errors are all about runners, so what answers them is the one
+    // runner to declare.
+    let fix = crate::detect::suggestions(&errors, &detected)
+        .pop()
+        .unwrap_or_else(|| crate::detect::runner_step(&[], true, &answered));
     let names: Vec<&str> = needing.iter().map(|(name, _)| name.as_str()).collect();
-    match names.is_empty() {
-        true => checks.push(
+    let check = match names.is_empty() {
+        true => Check::new(
             Found::Caution,
             "runners",
             "none declared: a workflow's agent nodes cannot run until one is",
         ),
-        false => checks.push(
+        false => Check::new(
             Found::Problem,
             "runners",
             format!(
@@ -250,8 +288,9 @@ async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut V
                 surco::text::agreeing(names.len(), "needs", "need")
             ),
         ),
-    }
-    steps.extend(step);
+    };
+    checks.push_check(check.fix(fix));
+    answered
 }
 
 /// Every catalog workflow that names a runner the config lacks, with
@@ -282,143 +321,6 @@ fn names_a_runner(error: &yunta_engine::CheckError) -> bool {
                 ..
             }
     )
-}
-
-/// Checks every installed pack's own `requires:` against this
-/// project's merged config — roles resolvable, `mcp_servers:` defined,
-/// and `requires.programs` present on `PATH` — a check per gap, and the
-/// runner each unresolvable role needs as a step. A project with no
-/// packs installed has nothing to check.
-fn check_installed_pack_requires(
-    env: &yunta_core::Env,
-    cwd: &std::path::Path,
-    config: &yunta_core::ConfigLayer,
-    checks: &mut Checklist,
-    steps: &mut Vec<Declaration>,
-) {
-    for publisher in yunta_engine::installed_publishers(cwd) {
-        let packs = yunta_engine::packs_for_publisher(cwd, &publisher);
-        // A broken pack is a real gap: its manifest is the only place its
-        // requirements are declared, so it is named, never skipped.
-        for err in &packs.broken {
-            checks.push(Found::Problem, "pack", err.to_string());
-        }
-        for (_, manifest) in packs.installed {
-            let gap = yunta_engine::check_pack_requires(&manifest, config);
-            check_gap(env, &gap, checks, steps);
-        }
-    }
-}
-
-/// The rows an installed pack's unmet `requires:` make, and the steps that
-/// declare each runner it lacks.
-fn check_gap(
-    env: &yunta_core::Env,
-    gap: &yunta_engine::PackRequiresGap,
-    checks: &mut Checklist,
-    steps: &mut Vec<Declaration>,
-) {
-    let pack = format!("pack {}", gap.pack);
-    for runner in &gap.missing_runners {
-        checks.push(
-            Found::Problem,
-            pack.as_str(),
-            format!(
-                "requires runner `{runner}`, which `runners:` does not define, or \
-                 defines with zero candidates"
-            ),
-        );
-        steps.push(Declaration {
-            said: format!("declare runner `{runner}` in .yunta/config.yaml:"),
-            paste: vec![
-                "runners:".to_string(),
-                format!("  {runner}:"),
-                format!(
-                    "    - {{ adapter: {}, model: <model> }}",
-                    super::first_built_adapter()
-                ),
-            ],
-        });
-    }
-    for runner in &gap.retired_permissions {
-        checks.push(
-            Found::Problem,
-            pack.as_str(),
-            yunta_engine::retired_permissions_sentence(runner),
-        );
-    }
-    for server in &gap.missing_mcp_servers {
-        checks.push(
-            Found::Problem,
-            pack.as_str(),
-            format!("requires mcp_server `{server}`, not defined under `mcp_servers:`"),
-        );
-    }
-    for program in gap
-        .required_programs
-        .iter()
-        .filter(|program| !super::refusals::command_on_path(env, program))
-    {
-        checks.push(
-            Found::Problem,
-            pack.as_str(),
-            format!("requires program `{program}`, not found on PATH"),
-        );
-    }
-}
-
-/// Checks every installed pack's workflows as `yunta run` would check
-/// them in this project, before anyone starts one: against this
-/// project's config — a key a node cannot run without, a comparison
-/// with no suite to measure — and with every `files:` path they read in
-/// the commit this repository is on, the part of a pack's needs no
-/// manifest declares, because only the workflow says it. Returns `false`
-/// (and prints a line per problem) when any has one; what the manifest
-/// `requires:` and a broken pack are `check_installed_pack_requires`'s
-/// to name.
-async fn check_installed_pack_workflows(
-    ctx: &Context,
-    checks: &mut Checklist,
-    steps: &mut Vec<Declaration>,
-) -> Result<(), CliError> {
-    let config = &ctx.project.config;
-    let isolation = config.resolved_isolation();
-    let facts = super::declared_facts(config);
-    let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await?;
-    for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
-        for (pack_dir, manifest) in
-            yunta_engine::packs_for_publisher(&ctx.cwd, &publisher).installed
-        {
-            for declared in &manifest.contents.workflows {
-                let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {
-                    continue;
-                };
-                let origin = yunta_engine::WorkflowOrigin::Pack {
-                    publisher: publisher.clone(),
-                    pack_name: manifest.name.clone(),
-                };
-                let refused = yunta_engine::check(&workflow, config, &facts)
-                    .into_iter()
-                    .chain(
-                        yunta_engine::check_workflow_refs(
-                            &workflow, config, &ctx.cwd, &origin, &facts,
-                        )
-                        .errors,
-                    );
-                let found = super::context_files_at_head(ctx, &workflow, isolation).await?;
-                let errors: Vec<yunta_engine::CheckError> = refused.chain(found.errors).collect();
-                let pack = format!("pack {}", manifest.reference());
-                for error in &errors {
-                    checks.push(Found::Problem, pack.as_str(), words::check(error));
-                }
-                for warning in &found.warnings {
-                    checks.push(Found::Caution, pack.as_str(), caution::line(warning));
-                }
-                steps.extend(crate::detect::suggestions(&errors, &detected));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Opens one session per binding whose adapter probed healthy, a check

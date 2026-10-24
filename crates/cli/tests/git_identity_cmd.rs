@@ -61,7 +61,8 @@ fn doctor_says_who_git_commits_as_and_when_it_cannot() {
 
     git(&repo, &["config", "user.name", "Ada"]);
     git(&repo, &["config", "user.email", "ada@example.com"]);
-    let with = yunta_in!(&repo, &home, &["doctor"]);
+    // A check that holds has a row of its own only on the whole list.
+    let with = yunta_in!(&repo, &home, &["doctor", "--full"]);
     assert_eq!(
         checked(&stdout(&with), "git").as_deref(),
         Some("commits as Ada <ada@example.com>"),

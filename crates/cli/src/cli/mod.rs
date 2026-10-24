@@ -237,6 +237,10 @@ enum Command {
         /// uses, run tools mounted) and reports how each one ended. Spends one prompt per binding.
         #[arg(long)]
         session: bool,
+        /// Lists every check on its own row: a glance folds the ones that
+        /// hold into one.
+        #[arg(long)]
+        full: bool,
         /// Prints the report as one versioned JSON document instead of the
         /// terminal view.
         #[arg(long)]

@@ -9,6 +9,7 @@ use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
 
 mod checklist;
+pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;
 mod decision;
 mod diagram;
