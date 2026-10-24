@@ -36,3 +36,9 @@ Not an adapter for 1Password, Vault or a cloud's store. A secret reaches a sessi
 the config names under `secrets:`, and the manager a team already uses fills the environment before the binary runs
 (`op run -- yunta run …`, `vault exec …`). An integration would be one adapter per provider, each with its own
 authentication, and an engine that keeps credentials.
+
+### No messages between agents
+Not a tool, a channel or a context source by which one session addresses another. What one node tells another
+passes through the engine and stays on the log: an artifact, the output a later node mounts, a finding, or the
+blackboard of a `coordination: blackboard` group, where a member reads only its own posts until the group joins. A
+message between live sessions would make a run's outcome depend on which session got there first.

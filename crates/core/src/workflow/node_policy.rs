@@ -51,7 +51,9 @@ impl Node {
 /// `inherit` loads the person's own — their settings, extensions, MCP
 /// servers and hooks — and adds the run's on top; `isolated` loads only
 /// what the run mounts, so a session behaves the same on any machine. The
-/// CLI's credentials are the person's either way.
+/// CLI's credentials are the person's either way, and the run's own hooks
+/// load either way: they come with the session's request, never from a
+/// configuration file the choice could leave out.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]

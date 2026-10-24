@@ -34,8 +34,8 @@ pub struct Capabilities {
     pub fence: FenceLevel,
     /// Distinguishes permission profiles (`read_only`/`edit`/`full`).
     pub permission_profiles: bool,
-    /// Supports the CLI's own named agents, selectable via the portable
-    /// `agent:` field.
+    /// Can add an agent's instructions (`SessionRequest.agent`), which the
+    /// run resolved from its own definition, to its CLI's own.
     pub custom_agents: bool,
     /// Emits trustworthy token usage in the stream.
     pub usage_reporting: bool,
@@ -165,7 +165,7 @@ impl Capability {
         Capability::MidSessionTokenCap,
     ];
 
-    /// The field name, as the log and the spec spell it.
+    /// The field name, as the log spells it.
     pub fn as_str(self) -> &'static str {
         match self {
             Capability::ResumeSession => "resume_session",

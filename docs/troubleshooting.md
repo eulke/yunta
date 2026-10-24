@@ -82,13 +82,15 @@ them all. `yunta run` refuses a file with any of them.
   ✗ codex  unhealthy — `codex` not found on PATH
 ```
 
-The diagnostic names the actual problem: binary missing, version
-incompatible, or auth invalid. Fix that specific thing and re-run — `doctor`
-runs the identical probe `yunta run` runs before spending anything, so a
-healthy `doctor` means the binary is there, answers and authenticates.
+The diagnostic names the actual problem: a binary missing or not answering, a
+version the adapter does not support, or a setting it does not read. Fix that
+specific thing and re-run — `doctor` runs the identical probe `yunta run` runs
+before spending anything, so a healthy `doctor` means the binary is there and
+answers.
 
-It does not mean a session opens. The probe asks for a version, which never
-touches the configuration a run writes the CLI; a CLI that refuses that
+It does not mean its credentials hold or a session opens. The probe asks for a
+version, which reaches no service and never touches the configuration a run
+writes the CLI; a CLI that refuses that
 configuration is healthy to a probe and dead to a run. `yunta doctor
 --session` opens one real session per binding, asks it to submit an empty
 `questions` document, and reports success only after the run accepts that

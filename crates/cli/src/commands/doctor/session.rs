@@ -1,7 +1,7 @@
 //! `yunta doctor --session`: one real session per binding.
 //!
-//! A `probe()` answers whether the CLI is there, answers `--version`
-//! and authenticates. It cannot answer whether a session opens, and
+//! A `probe()` answers whether the CLI is there and answers `--version`.
+//! It cannot answer whether a session opens or its credentials hold, and
 //! that is the question a run actually asks — a CLI that refuses the
 //! configuration this engine writes it says so on stderr and exits
 //! before its first line, and `--version` never touches that

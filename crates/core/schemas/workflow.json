@@ -179,7 +179,7 @@
       ]
     },
     "CliConfig": {
-      "description": "Whose configuration of the agent's CLI a session loads beside what the\nrun mounts for it.\n\n`inherit` loads the person's own — their settings, extensions, MCP\nservers and hooks — and adds the run's on top; `isolated` loads only\nwhat the run mounts, so a session behaves the same on any machine. The\nCLI's credentials are the person's either way.",
+      "description": "Whose configuration of the agent's CLI a session loads beside what the\nrun mounts for it.\n\n`inherit` loads the person's own — their settings, extensions, MCP\nservers and hooks — and adds the run's on top; `isolated` loads only\nwhat the run mounts, so a session behaves the same on any machine. The\nCLI's credentials are the person's either way, and the run's own hooks\nload either way: they come with the session's request, never from a\nconfiguration file the choice could leave out.",
       "type": "string",
       "enum": [
         "inherit",

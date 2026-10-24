@@ -3,11 +3,10 @@
 //!
 //! Telling an agent to call a tool is a promise, and a promise is only
 //! keepable where the tool was actually mounted. The notice is produced
-//! from the mount itself — rather than beside the published contract,
-//! which is assembled before any runner is resolved — which is what makes
-//! "instructed but not mounted" unrepresentable instead of merely
-//! avoided: an adapter that declares no `run_tools` opens no session, and
-//! no session produces no sentence.
+//! from the mount itself, which is what makes "instructed but not mounted"
+//! unrepresentable instead of merely avoided: a session whose adapter
+//! declares no `run_tools` is given no listener, and with no listener
+//! there is no sentence.
 //!
 //! The three paragraphs are the three ways an artifact comes to exist: a
 //! document the session submits, findings the engine accumulates from

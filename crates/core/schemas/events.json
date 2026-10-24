@@ -854,7 +854,7 @@
       "type": "object",
       "properties": {
         "custom_agents": {
-          "description": "Supports the CLI's own named agents, selectable via the portable\n`agent:` field.",
+          "description": "Can add an agent's instructions (`SessionRequest.agent`), which the\nrun resolved from its own definition, to its CLI's own.",
           "type": "boolean",
           "default": false
         },

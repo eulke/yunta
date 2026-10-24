@@ -1,11 +1,12 @@
 //! What the engine does when an adapter does not declare a capability.
 //!
-//! A capability the engine consults and nobody decided about is a
-//! capability that silently does nothing: three of them were consulted
-//! by no one at all, and the five that were each answered in their own
-//! words at their own call site. The answer belongs to the capability,
-//! so it is written once, here, and the engine reads it rather than
-//! deciding again.
+//! A capability the engine consults with no decided answer for its absence
+//! silently does nothing, and one answered at each call site is answered in
+//! different words at each. The answer belongs to the capability, so it is
+//! written once, here, and read wherever the capability is weighed: by
+//! `yunta check` before a run is born, by a resume for the adapters it builds
+//! before it takes a checkout, and by the engine at each node it dispatches.
+//! None of them decides it again.
 
 use serde::{Deserialize, Serialize};
 

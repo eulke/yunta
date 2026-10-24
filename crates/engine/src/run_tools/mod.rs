@@ -4,7 +4,9 @@
 //! listener and credential (a credential that survives its session is
 //! reuse surface). The engine is the server, the
 //! adapter translates the endpoint to its CLI's native external-MCP
-//! mechanism, the agent is the client.
+//! mechanism, the agent is the client. HTTP, because it is what an agent
+//! CLI already speaks as the client of an external MCP server: no adapter
+//! has a transport of its own to invent.
 //!
 //! **The data never lives in the listener.** Every tool reads or writes
 //! the run's own storage — which is why a blackboard stays readable

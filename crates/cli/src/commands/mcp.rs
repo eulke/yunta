@@ -2,22 +2,24 @@
 //! `document_shape`, `list_workflows`, `run_workflow`,
 //! `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`
 //! — none of which ever blocks for a run's own duration:
-//! `run_workflow`/`resume_run` hand off to a detached `yunta resume`
-//! and return immediately; a caller tracks progress by polling
+//! `run_workflow` creates the run and hands it to a detached `yunta
+//! resume`, the other three that move a run hand it over the same way,
+//! and each returns immediately; a caller tracks progress by polling
 //! `workflow_status` (pull, never push — the same model external gates
-//! already use).
+//! use). A run never depends on this server: it goes on when the client
+//! closes or the server is killed, and the server is no daemon.
 //!
-//! `list_workflows`/`workflow_status` reuse `yunta list`/`yunta status`
-//! verbatim by shelling out to this same binary — their rendering is
-//! already the structured text those commands produce, and a second
-//! copy of that rendering here would drift. `resume_run`/
-//! `resolve_gate`/`answer_questions` call the already-factored,
-//! already-tested primitives directly in-process
-//! (`spawn_detached_resume`, `commands::resolve_gate::resolve`,
-//! `yunta_engine::answer_questions`) rather than round-tripping through
-//! a subprocess for no reason. Each of the last two is the second
-//! surface of a door a run already answers through, never a second
-//! implementation of it.
+//! Each tool answers in-process, as the twin of the command a person runs
+//! — same `Context`, same engine call, same refusal — and never by running
+//! that command, whose output would land on the stdout the JSON-RPC
+//! replies travel on. `list_workflows` draws the catalog `yunta list`
+//! draws, `workflow_status` serializes the document `yunta status --json`
+//! prints, and `resolve_gate` and `answer_questions` are the second
+//! surface of a door a run already answers through
+//! (`commands::resolve_gate::resolve`, `yunta_engine::answer_questions`),
+//! never a second implementation of it. `document_shape` returns the
+//! contract every other door publishes for a document, the one place a
+//! client learns a format before writing it.
 //!
 //! Tool descriptions are written to help a client *decide*, not merely
 //! to describe — each names when reaching for a verified workflow

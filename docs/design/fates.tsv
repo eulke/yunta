@@ -259,3 +259,35 @@ D83	code	crates/core/src/workflow/scope.rs	A scope is what verifies an agent
 D92	agents	.agents/choices.md	No secret manager integration
 D93	code	crates/engine/src/verification_effectiveness.rs	Core metric is the pre-check red rate, not the total failure rate
 D50	code	crates/engine/src/human_interaction.rs	is enforced by this trait having no timeout parameter at all
+D101	test	crates/cli/tests/mcp_flow.rs	a_run_survives_yunta_mcp_being_killed_and_a_fresh_session_confirms_it
+D103	code	crates/engine/src/run_tools/mod.rs	HTTP, because it is what an agent CLI already speaks as the client of an external MCP server
+D145	code	crates/engine/src/run/context_resolve/shapes.rs	The block says it is the document's whole contract
+D148	code	crates/engine/src/run_tools/notice.rs	Telling an agent to call a tool is a promise, and a promise is only keepable where the tool was actually mounted.
+D154	test	crates/adapters/src/codex/config.rs	a_path_carrying_a_quote_and_a_backslash_reads_back_whole
+D161	code	crates/engine/src/mcp.rs	A client of an earlier revision ignores a field it does not know, so this one shape answers both eras
+D165	test	crates/engine/tests/no_adapter_crate_in_engine.rs	the_engine_library_never_links_the_crate_that_builds_concrete_adapters
+D178	code	crates/adapters/src/claude_code/mod.rs	The wildcard admits every tool of the one server, which keeps this adapter from having to know which tools the engine mounts
+D180	code	crates/core/src/port/session.rs	It is not `yunta`, which is what a person registering the control plane in their CLI's own configuration calls it.
+D202	test	crates/engine/tests/host_suspension.rs	no_session_opens_until_the_host_settles
+D224	test	crates/engine/tests/pull_request.rs	a_pull_request_carries_the_receipt_of_the_run_that_opened_it
+D250	code	crates/core/src/workflow/node_policy.rs	`isolated` loads only what the run mounts, so a session behaves the same on any machine.
+D253	code	crates/core/src/agent.rs	Every adapter hands the instructions to its CLI the same way, added to the CLI's own system instructions
+D26	agents	.agents/choices.md	What one node tells another passes through the engine and stays on the log
+D32	code	crates/core/src/port/session.rs	Two traits: an [`Adapter`] is the factory
+contrato-del-run.md#5.6	code	crates/engine/src/run/gate_exec.rs	Resolution is pulled, never pushed: no webhook and no daemon
+contrato-del-run.md#6.4	code	crates/engine/src/mcp.rs	Two servers answer MCP here: the per-run tool listener the engine starts for one session, and the control plane `yunta mcp` serves over stdio.
+contrato-del-run.md#Superficie de control (`yunta mcp`)	code	crates/cli/src/commands/mcp.rs	none of which ever blocks for a run's own duration
+contrato-del-run.md#MCP por-run	code	crates/engine/src/run_tools/catalog.rs	which tools a session sees depends on that session
+contrato-del-run.md#6.5	code	crates/engine/src/run_tools/mod.rs	a resume always mints a fresh listener and credential
+spec-adapter.md#1	code	crates/core/src/port/session.rs	Converts a session request into a stream of typed events — nothing more.
+spec-adapter.md#2	code	crates/core/src/port/session.rs	The engine knows an adapter by this trait, the request it hands over and the events it reads back
+spec-adapter.md#3	code	crates/core/src/port/session.rs	Mandatory first event of every session.
+spec-adapter.md#4	test	crates/adapters/tests/contract/main.rs	each case states one behaviour every CLI adapter must have
+spec-adapter.md#5	code	crates/core/src/port/policy.rs	The answer belongs to the capability, so it is written once, here
+spec-adapter.md#6	test	crates/adapters/tests/contract/cases.rs	The capabilities an adapter declares are the ones its CLI declares.
+spec-adapter.md#`claude-code`	code	crates/adapters/src/claude_code/mod.rs	Its fence judges each tool call
+spec-adapter.md#`codex`	code	crates/adapters/src/codex/mod.rs	What the run configures reaches the CLI as `-c` overrides of this invocation alone
+spec-adapter.md#`mock`	code	crates/adapters/src/mock/mod.rs	The `mock` adapter — a first-class adapter, not a test helper
+spec-adapter.md#7	code	crates/core/src/port/session.rs	the compiler is what keeps a concrete CLI out of the engine.
+spec-adapter.md#8	test	crates/adapters/tests/contract/main.rs	A subject that cannot express a fact fails the case; nothing is skipped.
+glosario.md#La frontera y la superficie	code	crates/core/src/port/mod.rs	A port is a trait the engine calls, never a network port

@@ -25,9 +25,10 @@ runners:
     - { adapter: codex, model: gpt-5-codex }
 ```
 
-A role can list more than one candidate — the engine picks the first whose
-adapter is healthy, so a role degrades gracefully across a team with mixed
-tooling instead of hard-failing.
+A role can list more than one candidate. The engine takes the first whose
+adapter this binary builds, and probes that adapter before the run starts: an
+unhealthy one refuses the run, naming what the probe found, rather than
+passing the role to its next candidate.
 
 `yunta run --adapter <id>` pins the run to one adapter: each role resolves to
 its candidate on that adapter, and the log records the candidates it passes
@@ -310,9 +311,10 @@ yunta doctor
 ```
 
 Runs the exact same health probe `yunta run`/`yunta resume` run before
-spending anything — binary present, version compatible, auth valid — for
-every adapter your `runners:` names, and reports every one of them instead of
-stopping at the first failure. Each check is a row: `✓` when it holds, `▲` when
+spending anything — the binary is there and answers `--version` (for `codex`,
+with a version it supports), and the adapter reads every setting it is given —
+for every adapter your `runners:` names, and reports every one of them as a
+check of its own instead of refusing. Each check is a row: `✓` when it holds, `▲` when
 it is worth a look and stops nothing, `✗` when a run would stop on it — and
 `doctor` exits non-zero only for a `✗`:
 
@@ -355,12 +357,12 @@ unresolved role.
 
 ### `--session`: opening one for real
 
-A probe asks the CLI for its version. That tells you the binary is there,
-answers and authenticates; it does not tell you a session opens, because
-`--version` never touches the configuration a run writes the CLI. A CLI
-that refuses that configuration says so on stderr and exits before its
-first line — from the outside, a node that failed with no exit and no
-tokens.
+A probe asks the CLI for its version. That tells you the binary is there and
+answers; it does not tell you its credentials hold or a session opens, because
+`--version` reaches no service and never touches the configuration a run writes
+the CLI. A CLI that refuses that configuration says so on stderr and exits
+before its first line — from the outside, a node that failed with no exit and
+no tokens.
 
 ```bash
 yunta doctor --session
@@ -401,9 +403,10 @@ same thing:
   stdio and offers `list_workflows`, `run_workflow`, `workflow_status`
   and the rest.
 - **The per-run server**, which the engine mounts into each session
-  itself and always calls `yunta-run`. It talks over streamable HTTP,
-  lives as long as the run does, and carries the tools a node uses to
-  post findings and submit documents.
+  itself and always calls `yunta-run`. It talks over streamable HTTP on
+  loopback, lives as long as the session it serves — each session, a
+  resumed one included, gets a listener and a token of its own — and
+  carries the tools a node uses to post findings and submit documents.
 
 When Codex receives that per-run endpoint, Yunta sets
 `mcp_servers.yunta-run.default_tools_approval_mode="approve"` for the spawned

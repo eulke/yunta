@@ -810,14 +810,16 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   its plan declares, and nothing else supplies, stops that criterion holding the
   task, and no task departs from the suite the run measured, which holds every one
   (a loop therefore needs a runner that
-  can hold these tools); `yunta_check_scope` and `yunta_request_scope_expansion` for
-  the session of a node that declares `scope:`, which audits its work against that
-  scope and asks a person to widen it rather than writing outside it;
+  can hold these tools); `yunta_check_scope` for the session of a node that declares
+  `scope:` and writes the checkout, which audits its work against that scope, and
+  `yunta_request_scope_expansion` for that session when a person may widen the scope
+  on this run, which asks for it rather than writing outside it;
   a `yunta_submit_<kind>` tool for each submittable kind the node declares under
   `artifacts.produces` (see [artifacts the engine reads](#artifacts-the-engine-reads));
   and `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own
-  children (scoped to that group, and only visible after `join` — never mid-flight
-  cross-talk that would anchor the group's judgments on each other).
+  children (scoped to that group: while the group runs, a member reads only its own
+  posts, and the whole board reaches the nodes after the `join`, ordered by what was
+  posted rather than when, so the outcome never depends on which session posted first).
 
 ## Authoring patterns
 
