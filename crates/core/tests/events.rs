@@ -69,12 +69,12 @@ fn a_done_task_carries_its_commit_and_nothing_else_does() {
 }
 
 #[test]
-fn there_are_exactly_62_kinds_with_distinct_names() {
+fn there_are_exactly_63_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 62);
+    assert_eq!(kinds.len(), 63);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 62, "expected 62 distinct kind names");
+    assert_eq!(names.len(), 63, "expected 63 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -141,6 +141,7 @@ const KIND_NAMES: &[&str] = &[
     "scope_expansion_granted",
     "scope_expansion_denied",
     "scope_derived",
+    "shapes_read",
     "scope_expansion_withdrawn",
     "node_finished",
     "node_failed",

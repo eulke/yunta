@@ -154,6 +154,8 @@ fn ansi(tone: Tone) -> (bool, bool, Option<u8>) {
         Tone::Running => (false, false, Some(36)),
         Tone::NeedsYou => (true, false, Some(35)),
         Tone::Caution => (false, false, Some(33)),
+        Tone::Added => (false, false, Some(32)),
+        Tone::Removed => (false, false, Some(31)),
     }
 }
 
@@ -262,7 +264,7 @@ mod tests {
         }
     }
 
-    const ROLES: [Tone; 8] = [
+    const ROLES: [Tone; 10] = [
         Tone::Plain,
         Tone::Strong,
         Tone::Muted,
@@ -271,6 +273,8 @@ mod tests {
         Tone::Running,
         Tone::NeedsYou,
         Tone::Caution,
+        Tone::Added,
+        Tone::Removed,
     ];
 
     /// Every tone around texts that carry what a line can: spaces, glyphs,
@@ -363,6 +367,21 @@ mod tests {
             ..ColorPolicy::default()
         };
         assert_eq!(no_color.ink(true), Ink::Plain, "no color, no escapes");
+    }
+
+    /// What a change puts into code is green and what it takes out red,
+    /// the colors git paints a word diff in.
+    #[test]
+    fn an_added_and_a_removed_word_are_painted_apart() {
+        assert_eq!(
+            Ink::Ansi16.word(Tone::Added, "{+b+}"),
+            "\x1b[32m{+b+}\x1b[0m"
+        );
+        assert_eq!(
+            Ink::Ansi16.word(Tone::Removed, "[-a-]"),
+            "\x1b[31m[-a-]\x1b[0m"
+        );
+        assert_eq!(Ink::Plain.word(Tone::Added, "{+b+}"), "{+b+}");
     }
 
     #[test]

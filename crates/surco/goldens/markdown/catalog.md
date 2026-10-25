@@ -78,6 +78,24 @@ graph LR
 pub fn greet() {}
 ```
 
+_1 line_
+
+`src/greet.rs › hello`: greets the person by name
+
+```rust
+pub fn hello({+name: &str+}) -> String;
+```
+
+_modified · 1 line_
+
+`src/greet.rs › bye`: says goodbye
+
+```rust
+pub fn bye(name: &str) -> String;
+```
+
+_new · 1 line_
+
 | step | task | |
 |---|---|---|
 | ● 1 | `cli-global` | Global and project flags |

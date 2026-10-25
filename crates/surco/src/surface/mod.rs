@@ -6,6 +6,7 @@
 //! and draws the words a block says whole — the word carries the meaning,
 //! so no medium may drop it.
 
+mod diff;
 mod markdown;
 mod terminal;
 

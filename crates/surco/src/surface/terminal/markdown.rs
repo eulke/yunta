@@ -9,6 +9,8 @@
 //! under where it starts, the way a formatter continues a line, so what
 //! follows reads as the same line and not as one of its own.
 
+use std::ops::Range;
+
 use crate::glyphs::Glyphs;
 use crate::line::{Line, Tone};
 use crate::look::Look;
@@ -150,14 +152,15 @@ impl Page<'_> {
         }
         let code = format!("{}{INDENT}", self.indent);
         let room = self.width.saturating_sub(cell_width(&code));
-        self.lines
-            .extend(continued(line, room, self.glyphs).into_iter().map(|piece| {
-                if piece.is_empty() {
-                    Line::new()
-                } else {
-                    Line::new().plain(format!("{code}{piece}"))
-                }
-            }));
+        let pieces = continued(&Line::new().plain(line), room, self.glyphs);
+        self.lines.extend(
+            pieces
+                .into_iter()
+                .map(|piece| match piece.text().is_empty() {
+                    true => Line::new(),
+                    false => piece.under(&code),
+                }),
+        );
     }
 
     /// The paragraph gathered so far, wrapped onto the page.
@@ -201,33 +204,52 @@ fn list_item(line: &str) -> Option<(&str, &str)> {
 /// space that fits, and between characters only where no space does —
 /// each piece after the first set under the line's own indent and opened
 /// with the continuation glyph, so a reader never takes it for a line of
-/// the code.
-pub fn continued(line: &str, width: usize, glyphs: Glyphs) -> Vec<String> {
-    if cell_width(line) <= width {
-        return vec![line.to_string()];
-    }
-    let lead = &line[..line.len() - line.trim_start().len()];
+/// the code. Each piece keeps the tones of what it is cut from, so a word
+/// a break cuts in two is painted on both sides of it.
+pub fn continued(line: &Line, width: usize, glyphs: Glyphs) -> Vec<Line> {
+    let text = line.text();
+    let lead = &text[..text.len() - text.trim_start().len()];
     let under = format!("{lead}  {} ", glyphs.continued());
+    breaks(&text, width, cell_width(&under))
+        .into_iter()
+        .enumerate()
+        .map(|(at, piece)| match at {
+            0 => line.slice(piece),
+            _ => line.slice(piece).under(&under),
+        })
+        .collect()
+}
+
+/// Where `text`, a line of code, breaks to fit `width`: the bytes of each
+/// piece, the first as wide as the line and each after it as wide as what
+/// the `under` cells it hangs from leave.
+fn breaks(text: &str, width: usize, under: usize) -> Vec<Range<usize>> {
+    let whole = 0..text.len();
+    if cell_width(text) <= width {
+        return vec![whole];
+    }
+    let end = text.trim_end().len();
     let mut pieces = Vec::new();
-    let mut rest = line.trim_end();
-    let mut prefix = "";
+    let mut start = 0;
+    let mut prefix = 0;
     loop {
-        let room = width.saturating_sub(cell_width(prefix)).max(1);
+        let room = width.saturating_sub(prefix).max(1);
+        let rest = &text[start..end];
         if cell_width(rest) <= room {
-            pieces.push(format!("{prefix}{rest}"));
+            pieces.push(start..end);
             return pieces;
         }
-        let (piece, after) = split_within(rest, room);
-        pieces.push(format!("{prefix}{piece}"));
-        rest = after;
-        prefix = &under;
+        let (head, next) = split_within(rest, room);
+        pieces.push(start..start + head);
+        start += next;
+        prefix = under;
     }
 }
 
-/// The longest head of `text` that fits `room` and ends before a space,
-/// and what follows that space; with no such space, the head cut between
-/// characters.
-fn split_within(text: &str, room: usize) -> (&str, &str) {
+/// How long the longest head of `text` is that fits `room` and ends before
+/// a space, and where what follows that space starts; with no such space,
+/// the head cut between characters, and where it ends.
+fn split_within(text: &str, room: usize) -> (usize, usize) {
     let body_starts = text.len() - text.trim_start().len();
     let fits = text
         .char_indices()
@@ -236,11 +258,14 @@ fn split_within(text: &str, room: usize) -> (&str, &str) {
         .take_while(|at| cell_width(text[..*at].trim_end()) <= room)
         .last();
     match fits {
-        Some(at) => (text[..at].trim_end(), text[at..].trim_start()),
+        Some(at) => (
+            text[..at].trim_end().len(),
+            text.len() - text[at..].trim_start().len(),
+        ),
         None => {
             let head = cut(text, room).into_iter().next().unwrap_or_default();
             let at = head.len().min(text.len());
-            (&text[..at], &text[at..])
+            (at, at)
         }
     }
 }

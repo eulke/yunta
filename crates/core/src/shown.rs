@@ -65,6 +65,11 @@ pub struct PlanReview {
     /// Each question the run asked that a person answered: a decision
     /// that `answers` one restates what they said.
     pub answered: Vec<Answered>,
+    /// What the tree the plan was registered against held of its shapes, as
+    /// the run read it then. `None` where it read none of them: a plan no
+    /// shape of which is named by one word of code, or a log from before the
+    /// run read them.
+    pub shapes_read: Option<crate::events::ShapesReadPayload>,
 }
 
 /// A question the run asked, and what a person answered.

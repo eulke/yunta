@@ -221,6 +221,23 @@ impl Glyphs {
         }
     }
 
+    /// What opens and closes the words a change puts into a line of code:
+    /// `{+name: &str+}`. These are git's word-diff marks, a family of their
+    /// own as a quote's are: they mean what they mean inside a line of code.
+    pub fn added(self) -> [&'static str; 2] {
+        match self {
+            Self::Unicode | Self::Ascii => ["{+", "+}"],
+        }
+    }
+
+    /// What opens and closes the words a change takes out of a line of
+    /// code, where they stood: `[-name: &str-]`. git's word-diff marks too.
+    pub fn removed(self) -> [&'static str; 2] {
+        match self {
+            Self::Unicode | Self::Ascii => ["[-", "-]"],
+        }
+    }
+
     /// The edge quoted output hangs from, so it reads as something a
     /// command printed and not as something this one says.
     pub fn gutter(self) -> char {

@@ -652,12 +652,29 @@ the plan made for you, what it chose instead of what and why; what you already
 answered when the run asked; its risks, what it leaves out and its design. Then the
 steps, each task under the step it runs in and the order they wait on each other in,
 drawn; and task by task a card: what you will see once it is done, the files it
-changes, the shapes of another task it builds on, what it keeps and what tests it —
-a line a test, in the spec's words, with its command — then the code the task
-writes, each shape and each change once. The proof comes last: how many tests the
-spec wrote and the command that shows them whole, the suite every task keeps
-passing, each guard that checks what a task keeps, and how many promises no guard
-checks. No test's code is part of the plan at the decision; `yunta status <run>
+changes, the shapes of another task it builds on, what it keeps, what it implies and
+what tests it — a line a test, in the spec's words, with its command — then the code
+the task writes, each shape and each change once. What a card implies, and what it
+says under its code, come from what the tree held of the plan's shapes when the
+plan was registered: the engine reads it then, from the top of the repository, and
+records it again only when a later registration of the plan reads something else;
+every surface draws that same reading. The search reads every file of a shape's
+language, whatever git's attributes say of it, so a `.ts` shape's `.tsx` callers
+count; it never enters a submodule, and a file with a NUL byte in its first 8000
+bytes is not code. A shape its file already holds implies the files beyond the plan
+whose code names it and no task changes, a line each after
+`Theme is named in 2 files no task changes:`, or says how many files carry its name
+when they are too many to follow. A shape its card calls `unchanged` implies
+nothing, and one whose code the engine does not compare, `exists, not compared`,
+always implies its files. The task that builds the shape may write each file
+listed. Under every block of code a line
+says its size and, before it, for a shape the engine read, what the code is to the
+tree: `new`; `modified`, with the words it puts in marked `{+…+}` and the words it
+takes out `[-…-]`; `unchanged`; `exists, not compared`; or
+`modified, too long to mark` — `modified · 1 line`, say. The proof comes last: how
+many tests the spec wrote and the command that shows them whole, the suite every
+task keeps passing, each guard that checks what a task keeps, and how many promises
+no guard checks. No test's code is part of the plan at the decision; `yunta status <run>
 --node plan` prints the whole plan, each file the spec wrote whole after the cards,
 before its proof. The log records the exact version you
 saw by its hash, so an approval is an approval of those bytes.

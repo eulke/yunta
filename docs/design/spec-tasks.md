@@ -77,12 +77,30 @@ leerlo (D223, D270). Un gate que muestra el plan lo muestra como el cambio que
 hace: su título con cuánto es, lo que decidió por la persona y lo que pidió; el
 cambio entero; los pasos con su orden dibujado; una tarjeta por tarea con lo que
 se va a ver, los archivos que cambia, los shapes de otra tarea sobre los que
-construye, lo que mantiene y qué la testea —cada test de la spec con su `proves`
-y su comando—, y el código de cada shape y de cada cambio una vez; al final la
-prueba: los tests de la spec contados y el comando que los muestra enteros, la
-suite que guarda todas las tareas y cada guard. Ningún código de test forma parte
-de la revisión; `yunta status <run> --node <planner>` imprime el plan entero, con
-cada archivo de la spec entero después de las tarjetas.
+construye, lo que mantiene, lo que implica y qué la testea —cada test de la spec
+con su `proves` y su comando—, y el código de cada shape y de cada cambio una vez;
+al final la prueba: los tests de la spec contados y el comando que los muestra
+enteros, la suite que guarda todas las tareas y cada guard. Ningún código de test
+forma parte de la revisión; `yunta status <run> --node <planner>` imprime el plan
+entero, con cada archivo de la spec entero después de las tarjetas.
+
+Lo que una tarjeta implica y lo que dice bajo su código salen de lo que el árbol
+tenía de las shapes del plan cuando se registró: el engine lo lee al registrarlo,
+no al dibujarlo, lo deja en el log (`shapes_read`) —de nuevo solo cuando una
+lectura posterior del mismo plan difiere de la que el log guarda—, y toda página
+que dibuja el plan lee eso mismo (D271). Cada shape que su archivo ya tiene
+implica (`implies`) los archivos fuera del plan cuyo código la nombra y que
+ninguna tarea cambia, uno por línea —su dueña puede escribir cada uno: están en su
+scope o en su alcance (D239)—, o dice cuántos archivos llevan su nombre cuando son
+demasiados para seguirlos. No implica nada una shape cuya tarjeta dice
+`unchanged` bajo su código, y siempre los implica una cuyo código el engine no
+compara (`exists, not compared`). Bajo cada bloque de código va su tamaño y, antes, para
+una shape que el engine leyó, qué es frente al árbol: `new`; `modified`, con las
+palabras que agrega marcadas `{+…+}` y las que quita `[-…-]`; `unchanged`;
+`exists, not compared`; o `modified, too long to mark`. Así, `modified · 1 line`
+dice una firma que el plan cambia, y `1 line` solo, un código del que no hay
+lectura. Un plan que se dibuja de un log anterior a esa lectura dice solo los
+tamaños.
 
 ## 3. Validación al registrar
 

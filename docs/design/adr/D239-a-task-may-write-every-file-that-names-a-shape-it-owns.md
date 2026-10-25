@@ -1,12 +1,14 @@
 ---
 number: D239
 title: "A task may write every file that names a shape it owns"
-status: accepted
+status: revised
 revises: [D73]
-revised_by: []
+revised_by: [D271]
 ---
 
 # D239 — A task may write every file that names a shape it owns
+
+*(Revised by D271: point 1's lookup is one search at the registration commit for every shape whose name is a word of code, among the files of each shape's language family (a `.ts` shape reaches `.tsx` files), from the top of the repository, and one batched read of the files it finds; the same reading records what the tree held of the plan's shapes in `shapes_read`.)*
 
 ## Context
 

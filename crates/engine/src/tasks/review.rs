@@ -31,6 +31,7 @@ pub fn review(
         answered: Vec::new(),
         spec_node: None,
         asked: None,
+        shapes_read: None,
     }
 }
 

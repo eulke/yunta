@@ -520,6 +520,18 @@ same document for the run it just handed off, which its log calls `created` or
 `running`: no surface reports an outcome of `detached`, because detaching is
 something an invocation did and not a state a run is in.
 
+`status --json` carries `shapes_read`, as does every surface that emits that
+document: what the tree held of the shapes of each plan the run holds, as the
+engine read it when the plan was registered, one entry per plan in the order the
+run first accepted them. Each entry is `{plan, at, shapes}`, the plan by its content
+hash and the commit the tree was read at, and each shape is
+`{name, owner, file, in_tree}`. `in_tree` is tagged by `type`: `new`, or `there`
+with an optional `code`, what the shape's file holds of the items it declares, and
+an `outside`, itself tagged by `type`: `files` with the `paths` beyond the plan
+whose code names the shape, or `common` with the number of `files` that carry its
+name when they are too many to follow. The key is absent when the run read none.
+It is an addition at version 8, and the stamp does not move for it.
+
 `stats --json` publishes what a run handed over and what it found beside what it
 spent: `submissions` (`{accepted, refused}`) counts every document offered,
 `findings` (`{posted, updated, withdrawn, refused}`) counts every finding call the

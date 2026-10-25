@@ -100,6 +100,16 @@ impl<'a> RunLog<'a> {
         self.append(node, payload, at).await
     }
 
+    /// `payload` as this log stores it, every secret the run declares taken
+    /// out: what [`RunLog::events`] reads back of it. A site that asks
+    /// whether the log already states a payload compares it in this form.
+    /// A payload that cannot be redacted is refused, as its append would be.
+    pub(crate) fn redacted(&self, payload: EventPayload) -> Result<EventPayload, StorageError> {
+        self.redactor
+            .payload(payload)
+            .map_err(StorageError::Unredactable)
+    }
+
     /// Appends `payload` stamped `at`, mirroring it to the observer.
     async fn append(
         &self,
@@ -108,10 +118,7 @@ impl<'a> RunLog<'a> {
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<Seq, StorageError> {
         // A payload that cannot be redacted is refused before the draft exists.
-        let payload = self
-            .redactor
-            .payload(payload)
-            .map_err(StorageError::Unredactable)?;
+        let payload = self.redacted(payload)?;
         let draft = EventDraft::new(self.run_id.clone(), node.cloned(), payload)?;
         let Some(observer) = self.observer else {
             return self.storage.append(draft, at).await;

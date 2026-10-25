@@ -3444,6 +3444,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "shapes_read"
+            }
+          },
+          "$ref": "#/$defs/ShapesReadPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "scope_expansion_withdrawn"
             }
           },
@@ -6033,6 +6046,49 @@
         "slept_ms"
       ]
     },
+    "InTree": {
+      "description": "What a shape's file held of it.",
+      "oneOf": [
+        {
+          "description": "Its file's code did not name it, or the file did not exist: the plan\nmakes it. A file with a NUL byte in its first 8000 bytes is not code.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "new"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Its file's code names it.",
+          "type": "object",
+          "properties": {
+            "code": {
+              "description": "What the file holds of the items the shape declares, read the\nway the shape writes them — a function to its signature where\nthe shape stops at one, an `impl` or a `trait` to the members the\nshape names, attributes where the shape writes some — in the\nshape's order. `None` where no item of it was read: a language\nwhose items are not read, or a file that only uses the name.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "outside": {
+              "description": "Who else names it.",
+              "$ref": "#/$defs/Outside"
+            },
+            "type": {
+              "type": "string",
+              "const": "there"
+            }
+          },
+          "required": [
+            "type",
+            "outside"
+          ]
+        }
+      ]
+    },
     "InputName": {
       "description": "An input name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -7899,6 +7955,50 @@
       "description": "An option id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
+    },
+    "Outside": {
+      "description": "The files beyond a plan whose code names one of its shapes.",
+      "oneOf": [
+        {
+          "description": "Each file whose code — not a string or a comment in it — names the\nshape, other than its own and every file a task of the plan changes,\nin path order. None is a fact too.",
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "files"
+            }
+          },
+          "required": [
+            "type",
+            "paths"
+          ]
+        },
+        {
+          "description": "So many files of its language carry the name — this many — that it\nis a word of the language more than a shape of the plan, and none of\nthem is read to follow it: only the shape's own file is read, for its\ncode and to see that its code names the shape.",
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "common"
+            }
+          },
+          "required": [
+            "type",
+            "files"
+          ]
+        }
+      ]
     },
     "OwedScope": {
       "description": "One task's request for scope, owed a person's decision: what it asked\nto be allowed to write, and why, in its session's own words. `reason` is\nabsent when a red criterion of the task located the refused writes, rather\nthan its session.",
@@ -10573,6 +10673,60 @@
         "adapter",
         "cause",
         "message"
+      ]
+    },
+    "ShapeRead": {
+      "description": "One shape of a plan, as the tree held it.",
+      "type": "object",
+      "properties": {
+        "file": {
+          "description": "Its file, as the repository names it.",
+          "type": "string"
+        },
+        "in_tree": {
+          "description": "What its file held of it.",
+          "$ref": "#/$defs/InTree"
+        },
+        "name": {
+          "description": "What the plan calls it; no other shape of the plan has its name.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "The task that builds it.",
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "name",
+        "owner",
+        "file",
+        "in_tree"
+      ]
+    },
+    "ShapesReadPayload": {
+      "description": "What the tree a plan was registered against held of the plan's shapes,\nread in the reading that derives each task's reach, at its commit.\nNobody asks for it and nothing is decided by it: every page that draws\nthe plan reads it here, so each says what the tree held when the plan\nwas written, wherever it is drawn.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "The commit the tree was read at: its HEAD when the plan was\nregistered, which a `scope_derived` the same registration writes\nnames too. A registration that changes no task's reach writes none.",
+          "$ref": "#/$defs/CommitSha"
+        },
+        "plan": {
+          "description": "The plan, by the hash of the bytes the run accepted.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "shapes": {
+          "description": "Each shape the reading followed, in the plan's order: one whose name\nis one word of code, in a file whose extension says its language.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShapeRead"
+          }
+        }
+      },
+      "required": [
+        "plan",
+        "at",
+        "shapes"
       ]
     },
     "Shown": {

@@ -12,7 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 52 rows and **62 `kind` names**.
+The current Run Contract event table has 53 rows and **63 `kind` names**.
+It had 52 rows and 62 kinds before `shapes_read` was added.
 It had 51 rows and 61 kinds before `best_effort_failed` was added.
 It had 49 rows and 59 kinds before `rail_failed` and `rail_summary` were added.
 It had 47 rows and 57 kinds before `scope_expansion_withdrawn` and
@@ -30,7 +31,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 59 names in this document. A changed shape takes a new name, never a higher version. |
+| `kind` | string | One of the 63 names in this document. A changed shape takes a new name, never a higher version. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | `KIND_VERSION`: 1 para todo kind — ver la política de versionado más abajo |
 
@@ -125,7 +126,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
-## 5. Los 62 tipos de evento, campo por campo
+## 5. Los 63 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -359,6 +360,48 @@ they are gone, and the task's next cycle reads the answer.
 
 Una tarea con este evento no cierra. Cuando el loop ya no tiene nada que correr, su nodo de implementación falla con `PlanUnpassable` y el planner recibe la declaración por la re-ruta (§11.2). El handover no la ve: una spec imposible sigue rechazada allí, porque la declaración es un hecho de la ejecución.
 
+### 5.11d `shapes_read` — engine
+**Fuente:** el plan por su hash, el commit, y por shape: si su archivo la tiene, su código ahí y los archivos fuera del plan que la nombran
+
+Lo que el árbol contra el que se registró un plan tenía de sus shapes. El engine
+lo lee en la misma lectura que deriva el alcance de cada tarea (§5.14a): al
+registrar el documento de tareas —al nacer el run o cuando un nodo lo produce—,
+en el HEAD del árbol del run, el commit que nombra también todo `scope_derived`
+que escribe ese mismo registro (D271). Nadie lo pide y nada se decide por él:
+toda página que dibuja el plan lo lee de acá —el prompt de un gate,
+`resolve-gate`, `status --node` y el plan que publica un forge—, y
+`status --json` lo lleva como dato, así que cada una dice qué tenía el árbol
+cuando se escribió el plan, dondequiera que se dibuje y sin correr git. Una
+lectura se escribe de nuevo solo cuando difiere de la que el log ya tiene para
+ese plan, comparadas las dos en la forma en que el log la guarda, redactada, y
+entonces la reemplaza.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `plan` | `ContentHash` | sí | el plan, por el hash de los bytes que el run aceptó |
+| `at` | sha de commit git | sí | el commit en que se leyó el árbol: el HEAD del árbol del run al registrar el plan, el mismo que nombra un `scope_derived` que escriba ese registro. Un registro que no cambia el alcance de ninguna tarea no escribe ninguno |
+| `shapes` | lista de `{name, owner, file, in_tree}` | sí | cada shape que sigue la lectura —una cuyo nombre es una palabra de código, en un archivo cuya extensión dice su lenguaje—, en el orden del plan: cómo la llama el plan, la tarea que la construye, su archivo como lo nombra el repositorio desde su raíz, y lo que ese archivo tenía de ella |
+| `shapes.in_tree.type` | enum `new \| there` | sí | `new`: el código de su archivo no la nombra, el archivo no es código —tiene un byte NUL entre sus primeros 8000— o no existe, y el plan la crea. `there`: el código de su archivo la nombra |
+| `shapes.in_tree.code` | string | no, en `there` | lo que el archivo tiene de los ítems que la shape declara, leído como la shape los escribe —una función hasta su firma donde la shape se detiene en una, un `impl` o un `trait` hasta los miembros que la shape nombra, los atributos solo donde la shape escribe alguno—, en el orden de la shape. Ausente donde no se leyó ningún ítem: un lenguaje cuyos ítems el engine no lee —lee los de Rust— o un archivo que solo usa el nombre |
+| `shapes.in_tree.outside.type` | enum `files \| common` | en `there` | quién más la nombra |
+| `shapes.in_tree.outside.paths` | lista de paths | en `files` | cada archivo cuyo código —no un string ni un comentario— nombra la shape, salvo el suyo y todo archivo que cambia una tarea del plan —por sus cambios, no por sus scopes—, en orden de path. Vacía también es un hecho |
+| `shapes.in_tree.outside.files` | entero | en `common` | cuántos archivos de su familia de lenguaje llevan el nombre, cuando son más de 20: demasiados para seguirlos. De ellos solo se lee el de la shape, por su código y para ver que su código la nombra; ningún otro se lee para seguir el nombre |
+
+`in_tree` se escribe así en cada una de sus formas.
+
+```json
+{"type":"new"}
+{"type":"there","code":"pub fn build_it(depth: u32);","outside":{"type":"files","paths":["src/other.rs"]}}
+{"type":"there","outside":{"type":"common","files":147}}
+```
+
+`code` no es el archivo (§6): lleva solo los ítems que la shape declara, y se
+redacta como el resto del payload, así que un secreto de ese código queda como su
+marcador. El diff entre `code` y el código del plan no se guarda: es una función
+de los dos, y cada página lo dibuja al leer el plan. Ninguna tarea cambia de
+estado por este evento, y el replay no lo ata a ninguna; `TaskLedger` guarda la
+última lectura de cada plan, por su hash.
+
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
 
@@ -402,16 +445,16 @@ Lo escribe el engine cuando decide el pedido: en la llamada de una tarea, si lo 
 
 Lo que una tarea puede escribir además de su scope porque ahí se nombra una shape
 que es suya: el engine lo lee del árbol del run al registrar el documento de
-tareas —al nacer el run o cuando un nodo lo produce— y nadie lo pide ni lo decide
-(D239). No es una concesión: no cuenta para `max_per_run` ni toca el registro de
-la tarea.
+tareas —al nacer el run o cuando un nodo lo produce—, en la misma lectura que
+da `shapes_read` (§5.11d), y nadie lo pide ni lo decide (D239, D271). No es
+una concesión: no cuenta para `max_per_run` ni toca el registro de la tarea.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | sí | la dueña de las shapes |
-| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado cuyo código —no un string ni un comentario— nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre los del tipo de archivo de la shape. Reemplaza lo que dijo una derivación anterior |
+| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado cuyo código —no un string ni un comentario— nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre todos los archivos de la familia de lenguaje del archivo de la shape, digan lo que digan de ellos los atributos de git —una shape de un `.ts` alcanza archivos `.tsx`, y una extensión que el engine no lee es su propia familia—, en todo el repositorio salvo sus submódulos, diga lo que diga `submodule.recurse`, nombrados desde su raíz y leídos en el commit en una sola búsqueda. Un archivo con un byte NUL entre sus primeros 8000 no es código, y no alcanza. Reemplaza lo que dijo una derivación anterior |
 | `shapes` | lista de strings | sí | las shapes que nombran esos archivos |
-| `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes que nombran más de 20 archivos: no alcanzan ninguno |
+| `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes cuyo nombre llevan más de 20 archivos de toda su familia de lenguaje: no alcanzan ninguno, aunque los de su sola extensión sean 20 o menos |
 | `at` | sha de commit git | sí | el commit en que se leyeron los archivos |
 
 ### 5.14b `scope_expansion_withdrawn` — engine

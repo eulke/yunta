@@ -7,7 +7,11 @@
 //! way its language writes them — see [`syntax`] — then walks back as
 //! code every hole a literal holds. A file of a type it does not know is
 //! read whole, so an unknown language never loses a real caller.
+//!
+//! [`items`] reads, on the same walk, what a Rust file holds of the items
+//! a shape declares, so a brace in a string or a comment never ends one.
 
+pub(super) mod items;
 mod syntax;
 
 use syntax::{is_word, Hole, Lang, Literal};
@@ -20,6 +24,14 @@ pub(crate) fn names_in_code(source: &str, kind: &str, word: &str) -> bool {
         None => source.as_bytes().to_vec(),
     };
     contains_word(&code, word.as_bytes())
+}
+
+/// Every extension of the files written in the language a file whose
+/// extension is `kind` is, `kind` among them: a name a file of one of
+/// them declares is followed into every one. An extension of no language
+/// the reading knows is a family of its own.
+pub(crate) fn family(kind: &str) -> Vec<&str> {
+    Lang::extensions(kind)
 }
 
 /// `source` with what is not code turned to spaces — newlines kept — so
@@ -140,6 +152,16 @@ fn contains_word(code: &[u8], word: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::names_in_code;
+    use super::syntax::Lang;
+
+    #[test]
+    fn a_family_is_every_extension_of_its_language_and_an_unknown_one_is_its_own() {
+        assert!(Lang::extensions("ts").contains(&"tsx"));
+        assert!(Lang::extensions("tsx").contains(&"ts"));
+        assert!(Lang::extensions("h").contains(&"cpp"));
+        assert_eq!(Lang::extensions("rs"), ["rs"]);
+        assert_eq!(Lang::extensions("yaml"), ["yaml"]);
+    }
 
     /// Whether each of `sources`, in a file of `kind`, names `PackStore`
     /// as code.

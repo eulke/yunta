@@ -61,9 +61,20 @@
   │ plan │──▶│ build │
   └──────┘   └───────┘
 
-  ␛[1msrc/lib.rs␛[0m                                                                                  ␛[2m1 line␛[0m
+  ␛[1msrc/lib.rs␛[0m
     the change
     ␛[2m│ ␛[0mpub fn greet() {}
+    ␛[2m1 line␛[0m
+
+  ␛[1msrc/greet.rs › hello␛[0m
+    greets the person by name
+    ␛[2m│ ␛[0mpub fn hello(␛[32m{+name: &str+}␛[0m) -> String;
+    ␛[2mmodified · 1 line␛[0m
+
+  ␛[1msrc/greet.rs › bye␛[0m
+    says goodbye
+    ␛[2m│ ␛[0mpub fn bye(name: &str) -> String;
+    ␛[2mnew · 1 line␛[0m
 
   ␛[36m●␛[0m 1  cli-global  Global and project flags
 

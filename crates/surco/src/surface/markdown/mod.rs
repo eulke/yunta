@@ -4,13 +4,15 @@
 //! character and the word is what carries the meaning.
 
 use crate::components::{
-    Check, Checklist, Code, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Lead,
-    Marked, Next, Paths, Problem, Refusal, Runs, Section, Table, Whole,
+    Check, Checklist, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Lead, Marked,
+    Next, Paths, Problem, Reads, Refusal, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::Glyphs;
 use crate::line::{Line, Tone};
 use crate::surface::Surface;
+
+mod code;
 
 /// A Markdown file or a forge's page.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -71,10 +73,10 @@ fn block(block: &Block, depth: usize) -> String {
         Block::Marked(marked) => self::marked(marked),
         Block::Concern(concern) => self::concern(concern),
         Block::Diagram(diagram) => {
-            let fence = fence(&diagram.source);
+            let fence = code::fence(&diagram.source);
             format!("{fence}mermaid\n{}\n{fence}", diagram.source)
         }
-        Block::Code(code) => self::code(code),
+        Block::Code(shown) => code::fenced(shown),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
 }
@@ -103,9 +105,10 @@ fn fields(fields: &Fields) -> String {
     let mut items: Vec<String> = Vec::new();
     let mut above = None;
     for field in fields.rows() {
-        let value = match field.tone {
-            Tone::Command => format!("`{}`", field.value),
-            _ => field.value.clone(),
+        let value = match field.reads {
+            Reads::Words => field.value.clone(),
+            Reads::Literal => literal(&field.value),
+            Reads::Command => format!("`{}`", field.value),
         };
         let value = match field.mark {
             Some(mark) => format!("{} {value}", GLYPHS.mark(mark)),
@@ -153,39 +156,6 @@ fn marked(marked: &Marked) -> String {
         .map(|item| format!("- {} {item}", GLYPHS.mark(marked.mark)))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Code under where it is and what it is there for, fenced in the
-/// language of its file.
-fn code(code: &Code) -> String {
-    let mut out = format!("`{}`", code.title(GLYPHS));
-    if let Some(what) = &code.what {
-        out.push_str(&format!(": {what}"));
-    }
-    if !code.lines.is_empty() {
-        let lines = code.lines.join("\n");
-        let fence = fence(&lines);
-        out.push_str(&format!("\n\n{fence}{}\n{lines}\n{fence}", code.language()));
-    }
-    if let Some(rest) = &code.rest {
-        out.push_str(&format!(
-            "\n\n{} more: {rest}",
-            crate::text::counted(code.whole - code.lines.len(), "line")
-        ));
-    }
-    out
-}
-
-/// The fence around `text` as code: one backtick more than the longest
-/// run that opens any of its lines, and three at least, so a fence the
-/// text holds — a Markdown file's own — never closes the one around it.
-fn fence(text: &str) -> String {
-    let longest = text
-        .lines()
-        .map(|line| line.trim_start().chars().take_while(|c| *c == '`').count())
-        .max()
-        .unwrap_or_default();
-    "`".repeat((longest + 1).max(3))
 }
 
 /// A table with its header: an id as code, a row's mark in front of its
@@ -369,8 +339,6 @@ fn line(line: &Line) -> String {
         .to_string()
 }
 
-/// Text for one table cell: on one line, and with the pipe that would
-/// end the cell escaped.
 /// A caution as a list item, with what it means and what fixes it under
 /// it.
 fn concern(concern: &Concern) -> String {
@@ -440,31 +408,31 @@ fn refusal(refusal: &Refusal) -> String {
     }
 }
 
+/// Text for one table cell: on one line, and with the pipe that would
+/// end the cell escaped.
 fn cell(text: &str) -> String {
     crate::text::one_line(text).replace('|', "\\|")
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::components::{Code, Section};
-    use crate::doc::Doc;
-    use crate::line::Line;
-    use crate::surface::{Markdown, Surface};
-
-    /// Code that holds a fence of its own is fenced longer, so what comes
-    /// after it is never read as code.
-    #[test]
-    fn a_fence_the_code_holds_never_closes_the_one_around_it() {
-        let code = Code::whole("notes/install.md", None, "```bash\nyunta run\n```\n");
-        let after = Section {
-            lead: None,
-            title: Line::new().plain("proof"),
-            blocks: Vec::new(),
-        };
-        let drawn = Markdown.draw(&Doc::new().with(code).with(after));
-        assert!(drawn.contains("````markdown\n```bash"), "{drawn}");
-        let open = drawn.matches("````").count();
-        assert_eq!(open, 2, "{drawn}");
-        assert!(drawn.trim_end().ends_with("### proof"), "{drawn}");
+/// `text` as Markdown says it as written, with a backslash before each sign
+/// Markdown would read as markup inside a line. A run of underscores
+/// between two letters or digits opens and closes nothing, so a name or a
+/// path keeps the ones it is most often written with.
+fn literal(text: &str) -> String {
+    let signs: Vec<char> = text.chars().collect();
+    let worded = |beside: Option<&char>| beside.is_some_and(|sign| sign.is_alphanumeric());
+    let mut out = String::with_capacity(text.len());
+    for (at, &sign) in signs.iter().enumerate() {
+        let inert = sign == '_'
+            && worded(signs[..at].iter().rev().find(|before| **before != '_'))
+            && worded(signs[at..].iter().find(|after| **after != '_'));
+        if matches!(sign, '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '&') && !inert {
+            out.push('\\');
+        }
+        out.push(sign);
     }
+    out
 }
+
+#[cfg(test)]
+mod tests;

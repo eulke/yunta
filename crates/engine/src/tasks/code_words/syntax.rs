@@ -18,6 +18,33 @@ pub(super) enum Lang {
     Python,
 }
 
+/// Each family the reading knows, with every extension its files carry. A
+/// file of one extension is written in the language a file of any other
+/// is, so a name a file of one declares is followed into all of them.
+const FAMILIES: &[(Lang, &[&str])] = &[
+    (Lang::Rust, &["rs"]),
+    (Lang::C, &["c", "h", "cc", "cpp", "hpp"]),
+    (Lang::Java, &["java"]),
+    (Lang::Go, &["go"]),
+    (Lang::Kotlin, &["kt", "kts"]),
+    (Lang::Scala, &["scala"]),
+    (Lang::Swift, &["swift"]),
+    (Lang::CSharp, &["cs"]),
+    (Lang::Dart, &["dart"]),
+    (
+        Lang::Js,
+        &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"],
+    ),
+    (Lang::Python, &["py"]),
+];
+
+/// The family one of whose extensions is `kind`.
+fn family(kind: &str) -> Option<&'static (Lang, &'static [&'static str])> {
+    FAMILIES
+        .iter()
+        .find(|(_, extensions)| extensions.contains(&kind))
+}
+
 /// A literal whose text is not code: where its text starts, what ends
 /// it, and how code is written into it.
 pub(super) struct Literal {
@@ -58,21 +85,21 @@ pub(super) enum Hole {
 }
 
 impl Lang {
+    /// The language a file whose extension is `kind` is written in, when
+    /// the reading knows it.
     pub(super) fn of(kind: &str) -> Option<Lang> {
-        Some(match kind {
-            "rs" => Lang::Rust,
-            "c" | "h" | "cc" | "cpp" | "hpp" => Lang::C,
-            "java" => Lang::Java,
-            "go" => Lang::Go,
-            "kt" | "kts" => Lang::Kotlin,
-            "scala" => Lang::Scala,
-            "swift" => Lang::Swift,
-            "cs" => Lang::CSharp,
-            "dart" => Lang::Dart,
-            "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" => Lang::Js,
-            "py" => Lang::Python,
-            _ => return None,
-        })
+        family(kind).map(|&(lang, _)| lang)
+    }
+
+    /// The extensions of the files written in the language a file whose
+    /// extension is `kind` is: every one its family carries, `kind` among
+    /// them. An extension the reading knows no language for is a family of
+    /// its own, `kind` alone.
+    pub(super) fn extensions(kind: &str) -> Vec<&str> {
+        match family(kind) {
+            Some(&(_, extensions)) => extensions.to_vec(),
+            None => vec![kind],
+        }
     }
 
     /// Where the comment that starts at `at` ends, if one does.
@@ -203,10 +230,25 @@ fn rust(source: &[u8], at: usize) -> Option<Literal> {
             return Some(Literal::new(open + 1, &close, false, Holes::None));
         }
     }
-    match prefixed {
-        true => quoted_or_char(source, from),
-        false => quoted_or_char(source, at),
+    quoted(source, from, b'"', Holes::None).or_else(|| rust_char(source, from))
+}
+
+/// A Rust char at `at`: an escape, as [`char_literal`] reads one, or one
+/// char between two quotes. A lifetime is a quote one char past which none
+/// stands, however near the next: `<'a>(&'a self` opens no char.
+fn rust_char(source: &[u8], at: usize) -> Option<Literal> {
+    let body = source
+        .get(at + 1..)
+        .filter(|_| source.get(at) == Some(&b'\''))?;
+    if body.first() == Some(&b'\\') {
+        return char_literal(source, at);
     }
+    // The fewest bytes that read as a char are one char's.
+    let width = (1..=4).find(|&end| {
+        body.get(..end)
+            .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
+    })?;
+    (body.get(width) == Some(&b'\'')).then(|| Literal::new(at + 1, b"'", true, Holes::None))
 }
 
 /// Scala's strings, an interpolator's — `s"…"`, `f"…"`, `raw"…"` —

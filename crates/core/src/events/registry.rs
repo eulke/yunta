@@ -112,6 +112,8 @@ event_kinds! {
         => Scope(ScopeEvent::Denied) sample samples::scope_expansion_denied;
     ScopeDerived(ScopeDerivedPayload) = "scope_derived"
         => Scope(ScopeEvent::Derived) sample samples::scope_derived;
+    ShapesRead(ShapesReadPayload) = "shapes_read"
+        => Tasks(TaskEvent::ShapesRead) sample samples::shapes_read;
     ScopeExpansionWithdrawn(ScopeExpansionWithdrawnPayload) = "scope_expansion_withdrawn"
         => Scope(ScopeEvent::Withdrawn) sample samples::scope_expansion_withdrawn;
     NodeFinished(NodeFinishedPayload) = "node_finished"

@@ -1,6 +1,7 @@
 //! The blocks a document is built from beyond a surface's own: a titled
 //! section of other blocks, a paragraph, a list whose items each carry
-//! the same mark, and a file's code.
+//! the same mark, and a file's code, with what it is to the code that
+//! stands where it goes when a reader is told.
 
 use std::path::Path;
 
@@ -56,6 +57,58 @@ pub struct Code {
     pub whole: usize,
     /// Where the rest is read, when not every line is shown.
     pub rest: Option<String>,
+    /// What the code is to the code that stands where it goes today, when a
+    /// reader is told: said under its lines with its size, and marked in its
+    /// words where it modifies that code.
+    pub against: Option<Against>,
+}
+
+/// What code a reader is shown is to the code that stands where it goes
+/// today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Against {
+    /// Nothing stands there: all of it is new.
+    New,
+    /// What stands there reads the same, word for word.
+    Unchanged,
+    /// It changes what stands there: its lines with the words it puts in and
+    /// takes out marked, or `None` where the two are too long to compare
+    /// word by word.
+    Modified(Option<Marks>),
+    /// Something of its name stands there, in code that is not compared.
+    Uncompared,
+}
+
+impl Against {
+    /// The words a reader is told it in: `new`, `unchanged`, `modified`,
+    /// `modified, too long to mark`, `exists, not compared`.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Against::New => "new",
+            Against::Unchanged => "unchanged",
+            Against::Modified(Some(_)) => "modified",
+            Against::Modified(None) => "modified, too long to mark",
+            Against::Uncompared => "exists, not compared",
+        }
+    }
+}
+
+/// Code read against the code it changes, word by word: each of its lines
+/// as the parts it reads in, one entry a line of the code's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Marks {
+    pub lines: Vec<Vec<Part>>,
+}
+
+/// A run of a modified line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Part {
+    /// Text the code keeps of today's, or what stands between words.
+    Kept(String),
+    /// Words the code puts in, with what stands between them.
+    Added(String),
+    /// Words of today's code it takes out, where they stood.
+    Removed(String),
 }
 
 impl Code {
@@ -69,7 +122,39 @@ impl Code {
             whole: lines.len(),
             lines,
             rest: None,
+            against: None,
         }
+    }
+
+    /// This code read against `today`, the code that stands where it goes,
+    /// word by word in its file's language; `None` where nothing stands
+    /// there, which makes all of it new. It reads the lines the code shows,
+    /// so it is told of code shown whole.
+    pub fn against(mut self, today: Option<&str>) -> Self {
+        self.against = Some(match today {
+            None => Against::New,
+            Some(today) => crate::code::compared(&self.at, &self.lines.join("\n"), today),
+        });
+        self
+    }
+
+    /// This code beside something of its name that stands where it goes,
+    /// which is not compared.
+    pub fn uncompared(mut self) -> Self {
+        self.against = Some(Against::Uncompared);
+        self
+    }
+
+    /// What is said under the code's lines, a part each: what it is to the
+    /// code that stands where it goes, when told, and how many lines it has.
+    /// A surface joins them with its separator.
+    pub fn footer(&self) -> Vec<String> {
+        let against = self
+            .against
+            .as_ref()
+            .map(|against| against.word().to_string());
+        let size = (self.whole > 0).then(|| crate::text::counted(self.whole, "line"));
+        against.into_iter().chain(size).collect()
     }
 
     /// This code, as what `within` names inside its file.

@@ -1,6 +1,7 @@
 //! The samples of the task kinds: a task's registration, its status, its
-//! check, the deviations it declared or resolved, and a criterion it
-//! declared no work of the plan can pass.
+//! check, the deviations it declared or resolved, a criterion it declared
+//! no work of the plan can pass, and what the tree held of its plan's
+//! shapes.
 
 use crate::events::*;
 
@@ -74,5 +75,31 @@ pub(crate) fn criterion_declared_unpassable() -> CriterionUnpassablePayload {
         criterion: "cargo test -p yunta".to_string(),
         exit_code: 101,
         why: "the crate it runs is written by another task".to_string(),
+    }
+}
+
+pub(crate) fn shapes_read() -> ShapesReadPayload {
+    ShapesReadPayload {
+        plan: crate::ContentHash::sha256(b"tasks"),
+        at: "0123456789abcdef0123456789abcdef01234567".into(),
+        shapes: vec![
+            ShapeRead {
+                name: "build_it".into(),
+                owner: "graph-cmd".into(),
+                file: "src/lib.rs".into(),
+                in_tree: InTree::There {
+                    code: Some("pub fn build_it(depth: u32);".into()),
+                    outside: Outside::Files {
+                        paths: vec!["src/other.rs".into()],
+                    },
+                },
+            },
+            ShapeRead {
+                name: "fresh".into(),
+                owner: "graph-cmd".into(),
+                file: "src/lib.rs".into(),
+                in_tree: InTree::New,
+            },
+        ],
     }
 }

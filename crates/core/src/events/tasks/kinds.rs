@@ -4,8 +4,9 @@ use super::payloads::*;
 
 /// The tasks document, as a run works it: a task registered, a task
 /// that moved, a check a task session asked for, a departure from the
-/// plan it declared and a person answered, and a criterion it declared
-/// no work of the plan can pass — one variant per kind.
+/// plan it declared and a person answered, a criterion it declared no
+/// work of the plan can pass, and what the tree held of its plan's
+/// shapes — one variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskEvent {
     Registered(TaskRegisteredPayload),
@@ -15,4 +16,5 @@ pub enum TaskEvent {
     DeviationDeclared(DeviationDeclaredPayload),
     DeviationResolved(DeviationResolvedPayload),
     CriterionDeclaredUnpassable(CriterionUnpassablePayload),
+    ShapesRead(ShapesReadPayload),
 }

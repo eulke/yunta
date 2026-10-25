@@ -17,13 +17,15 @@
 
 mod error;
 mod mutation;
+mod objects;
 mod program;
 mod repo;
 mod status;
 
 pub use error::{Cause, GitError, Invocation, Stopped};
 pub use mutation::{mutation_lock, MutationLock};
-pub use repo::{committer, common_dir, files_naming, push_branch, remote_url, run_branches};
+pub use objects::blobs;
+pub use repo::{committer, common_dir, push_branch, remote_url, run_branches, words_in};
 pub use status::{tree_state, Status};
 
 use std::path::Path;
@@ -118,7 +120,7 @@ pub async fn verify(
             said.trim()
                 .parse::<CommitSha>()
                 .map(Some)
-                .map_err(|_| unreadable(dir, &args, said.trim()))
+                .map_err(|_| unreadable(dir, &args, said.trim(), "is no commit id"))
         }
         Some(1) => Ok(None),
         _ => Err(exit_error(dir, &args, &output)),
@@ -185,14 +187,26 @@ pub async fn attempt_held(
     yes_or_no(dir, args, exits, sup).await
 }
 
+/// [`run_with`] with nothing for git to read on its stdin.
+async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, GitError> {
+    run_with(dir, args, None, sup).await
+}
+
 /// One governed `git`, run to its end: its exit status and both streams.
+/// `input`, when there is some, is what git reads on its stdin, which is
+/// closed once it is written.
 ///
 /// A git the token or the timeout stopped is an error and not an exit
 /// status: it never answered, and a caller that read "non-zero" out of a
 /// killed child would read a verdict into a run somebody stopped. A drain
 /// that stopped reading is an error too, since what git wrote may not be
 /// all there.
-async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, GitError> {
+async fn run_with(
+    dir: &Path,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    sup: Supervision<'_>,
+) -> Result<Output, GitError> {
     let fail = |cause| error_for(dir, args, cause);
     let program = program::program(sup.env, sup).await.map_err(&fail)?;
     // The repository's upkeep is left to the person's own git. An automatic
@@ -209,6 +223,9 @@ async fn run(dir: &Path, args: &[&str], sup: Supervision<'_>) -> Result<Output, 
         .stderr(Capture::Collect);
     for arg in args {
         command = command.arg(*arg);
+    }
+    if let Some(input) = input {
+        command = command.stdin(input);
     }
     let ran = match spawn_governed(command, sup).await {
         Ok(Outcome::Exited {
@@ -276,16 +293,24 @@ fn exit_error(dir: &Path, args: &[&str], output: &Output) -> GitError {
     )
 }
 
-/// The error for a git that exited zero with an answer that is no commit id.
-fn unreadable(dir: &Path, args: &[&str], said: &str) -> GitError {
+/// The error for a git that exited zero with an answer that cannot be read
+/// as one: what it printed, and `which`, what that is not.
+fn unreadable(dir: &Path, args: &[&str], said: &str, which: &str) -> GitError {
     error_for(
         dir,
         args,
         Cause::Spawn(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("git printed `{said}`, which is no commit id"),
+            format!("git printed `{said}`, which {which}"),
         )),
     )
+}
+
+/// The bytes before the first `delimiter` in `bytes`, and those after it;
+/// `None` where no `delimiter` stands.
+fn split_once(bytes: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
+    let at = bytes.iter().position(|&byte| byte == delimiter)?;
+    Some((bytes.get(..at)?, bytes.get(at + 1..)?))
 }
 
 /// The `io::Error` a spawn that did not run to its end stands for: the OS's

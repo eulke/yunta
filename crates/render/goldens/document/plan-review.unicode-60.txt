@@ -150,7 +150,7 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
                    cargo test --workspace --test \
                      global_pack_storage global_pack_storage
 
-      crates/cli/src/pack.rs › PackInstallScope      9 lines
+      crates/cli/src/pack.rs › PackInstallScope
         scope enum and root selection API
         │ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         │ pub enum PackInstallScope {
@@ -162,12 +162,14 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
         │     pub fn root(self, project_root: &Path,
         │       ↪ user_root: &Path) -> PathBuf;
         │ }
+        new · 9 lines
 
-      crates/cli/src/pack.rs › installed_packs        1 line
+      crates/cli/src/pack.rs › installed_packs
         scope-aware lock location and pack enumeration
         │ pub fn installed_packs(scope: PackInstallScope,
         │   ↪ project_root: &Path, user_root: &Path) ->
         │   ↪ Result<(PackLock, PathBuf), PackError>;
+        new · 1 line
 
     global-pack-catalog: Discover global packs after project
     packs
@@ -188,6 +190,13 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
                    inside their pack directory.
                    Frozen provenance records pack identity
                    and lock commit when available.
+      implies      resolve_workflow is named in 5 files no
+                   task changes:
+                   crates/cli/src/commands/mod.rs
+                   crates/engine/src/check/refs.rs
+                   crates/engine/src/frozen/read.rs
+                   crates/engine/src/lib.rs
+                   crates/engine/tests/catalog.rs
       tested by    Workflow lookup falls back to global
                    packs, prefers project packs, and keeps
                    declared content inside its pack.
@@ -198,14 +207,16 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
         accept global packs root and search local before
         global
         │ pub fn resolve_workflow(repo_root: &Path,
-        │   ↪ global_packs_root: &Path, name: &str) ->
+        │   ↪ {+global_packs_root: &Path+}, name: &str) ->
         │   ↪ Result<ResolvedWorkflow, CatalogError>;
+        modified · 1 line
 
       crates/engine/src/frozen/layers.rs › installed_layers
         include knowledge files from global installed packs
         │ pub(crate) async fn installed_layers(repo: &Path,
         │   ↪ global_packs_root: &Path) ->
         │   ↪ Result<Vec<LayerFile>, FrozenError>;
+        1 line
 
       crates/engine/src/frozen/prompt.rs › PromptOrigin
         represent global pack prompt origin with exact pack
@@ -215,14 +226,16 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
         │     Pack { pack: String, pack_dir: PathBuf, dir:
         │       ↪ PathBuf },
         │ }
+        4 lines
 
       crates/engine/src/frozen/provenance.rs
-        › pack_provenance                             1 line
+        › pack_provenance
         read manifest and lock provenance for a pack at the
         resolved directory
         │ pub(crate) async fn pack_provenance(repo: &Path,
         │   ↪ pack_dir: &Path, manifest_path: &Path) ->
         │   ↪ (Option<PackProvenance>, Vec<ProvenanceGap>);
+        1 line
 
   step 2 of 3
 
@@ -251,31 +264,33 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
                    cargo test --workspace --test \
                      global_pack_cmd global_pack_cmd
 
-      crates/cli/src/cli/mod.rs › PackAction         9 lines
+      crates/cli/src/cli/mod.rs › PackAction
         global option on supported pack lifecycle actions
         │ #[derive(Subcommand)]
         │ enum PackAction {
-        │     Add { source: String, #[arg(long)] global:
-        │       ↪ bool, #[arg(long)] yes: bool, #[arg(long)]
-        │       ↪ run_tests: bool },
+        │     Add { source: String, {+#[arg(long)] global:
+        │       ↪ bool+}, #[arg(long)] yes: bool,
+        │       ↪ #[arg(long)] run_tests: bool },
         │     Update { pack: PackRef, r#ref: String,
-        │       ↪ #[arg(long)] global: bool, #[arg(long)]
-        │       ↪ yes: bool },
+        │       ↪ {+#[arg(long)] global: bool+},
+        │       ↪ #[arg(long)] yes: bool },
         │     New { pack: PackRef },
-        │     Remove { pack: PackRef, #[arg(long)] global:
-        │       ↪ bool },
-        │     List { #[arg(long)] global: bool },
-        │     Audit { pack: PackRef, #[arg(long)] global:
-        │       ↪ bool },
+        │     Remove { pack: PackRef, {+#[arg(long)] global:
+        │       ↪ bool+} },
+        │     List {+{ #[arg(long)] global: bool }+},
+        │     Audit { pack: PackRef, {+#[arg(long)] global:
+        │       ↪ bool+} },
         │ }
+        modified · 9 lines
 
-      crates/cli/src/cli/dispatch.rs › pack_command   1 line
+      crates/cli/src/cli/dispatch.rs › pack_command
         dispatch scope to lifecycle operations
         │ async fn pack_command(action: PackAction, look:
         │   ↪ &Look) -> Result<Outcome, CliError>;
+        1 line
 
       crates/cli/src/commands/pack.rs
-        › add/update/remove/list                     4 lines
+        › add/update/remove/list
         use selected storage and preserve audit and policy
         sequence
         │ pub async fn add(source: &str, global: bool,
@@ -288,11 +303,13 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
         │   ↪ &Look) -> Result<Outcome, CliError>;
         │ pub fn list(global: bool, look: &Look) ->
         │   ↪ Result<Outcome, CliError>;
+        4 lines
 
-      crates/cli/src/commands/pack_audit.rs › audit   1 line
+      crates/cli/src/commands/pack_audit.rs › audit
         audit selected installation scope
         │ pub async fn audit(pack: &PackRef, global: bool,
         │   ↪ look: &Look) -> Result<Outcome, CliError>;
+        1 line
 
   step 3 of 3
 
@@ -308,7 +325,7 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
                      global_pack_docs_cmd \
                      global_pack_docs_cmd
 
-      docs/global-install.md                         8 lines
+      docs/global-install.md
         global install usage and behavior in the
         installation guide
         │ ```bash
@@ -324,6 +341,7 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
         │   ↪ projects using that user state root. Project
         │   ↪ packs shadow matching global workflows; each
         │   ↪ scope has its own lock.
+        8 lines
 
   proof
     spec tests   4 in 4 files, 37 lines

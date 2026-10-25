@@ -139,6 +139,7 @@ pub(super) fn review() -> PlanReview {
             answer: "hello".to_string(),
         }],
         asked: Some("greet people by their name".to_string()),
+        shapes_read: None,
     }
 }
 
@@ -183,7 +184,9 @@ fn farewell_review() -> TaskReview {
 
 /// A plan of four tasks in three steps, as a planner handed it over for a
 /// person to approve: each task held to a criterion of its own and a test
-/// the spec wrote, every choice made for the person.
+/// the spec wrote, every choice made for the person; and each shape as the
+/// tree it was written against held it: two it makes, a signature it
+/// widens that five files beyond the plan name, and an enum it changes.
 pub(super) fn global_packs() -> PlanReview {
     let plan: TasksFile =
         yunta_core::yaml::parse(include_str!("fixtures/global-packs.tasks.yaml")).unwrap();
@@ -219,6 +222,9 @@ pub(super) fn global_packs() -> PlanReview {
         handed_over: None,
         answered: Vec::new(),
         asked: Some("add pack global instalation support, not only project level as today".into()),
+        shapes_read: Some(
+            yunta_core::yaml::parse(include_str!("fixtures/global-packs.read.yaml")).unwrap(),
+        ),
     }
 }
 

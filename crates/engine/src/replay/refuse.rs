@@ -118,7 +118,10 @@ impl RunState {
             TaskEvent::DeviationDeclared(p) => &p.task_id,
             TaskEvent::DeviationResolved(p) => &p.task_id,
             TaskEvent::CriterionDeclaredUnpassable(p) => &p.task_id,
-            TaskEvent::Registered(_) | TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => {
+            TaskEvent::Registered(_)
+            | TaskEvent::CheckStarted(_)
+            | TaskEvent::CheckAnswered(_)
+            | TaskEvent::ShapesRead(_) => {
                 return Ok(());
             }
         };

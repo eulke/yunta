@@ -107,11 +107,15 @@ impl PackInstallScope {
 }
 ```
 
+_new · 9 lines_
+
 `crates/cli/src/pack.rs › installed_packs`: scope-aware lock location and pack enumeration
 
 ```rust
 pub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: &Path) -> Result<(PackLock, PathBuf), PackError>;
 ```
+
+_new · 1 line_
 
 #### global-pack-catalog: Discover global packs after project packs
 
@@ -121,20 +125,30 @@ pub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: 
   Multiple packs from one publisher declaring the same workflow name are reported as ambiguous.  
   Declared pack content paths must stay inside their pack directory.  
   Frozen provenance records pack identity and lock commit when available.
+- implies: resolve_workflow is named in 5 files no task changes:  
+  crates/cli/src/commands/mod.rs  
+  crates/engine/src/check/refs.rs  
+  crates/engine/src/frozen/read.rs  
+  crates/engine/src/lib.rs  
+  crates/engine/tests/catalog.rs
 - tested by: Workflow lookup falls back to global packs, prefers project packs, and keeps declared content inside its pack.  
   `cargo test --workspace --test global_pack_catalog global_pack_catalog`
 
 `crates/engine/src/catalog.rs › resolve_workflow`: accept global packs root and search local before global
 
 ```rust
-pub fn resolve_workflow(repo_root: &Path, global_packs_root: &Path, name: &str) -> Result<ResolvedWorkflow, CatalogError>;
+pub fn resolve_workflow(repo_root: &Path, {+global_packs_root: &Path+}, name: &str) -> Result<ResolvedWorkflow, CatalogError>;
 ```
+
+_modified · 1 line_
 
 `crates/engine/src/frozen/layers.rs › installed_layers`: include knowledge files from global installed packs
 
 ```rust
 pub(crate) async fn installed_layers(repo: &Path, global_packs_root: &Path) -> Result<Vec<LayerFile>, FrozenError>;
 ```
+
+_1 line_
 
 `crates/engine/src/frozen/prompt.rs › PromptOrigin`: represent global pack prompt origin with exact pack directory
 
@@ -145,11 +159,15 @@ pub(crate) enum PromptOrigin {
 }
 ```
 
+_4 lines_
+
 `crates/engine/src/frozen/provenance.rs › pack_provenance`: read manifest and lock provenance for a pack at the resolved directory
 
 ```rust
 pub(crate) async fn pack_provenance(repo: &Path, pack_dir: &Path, manifest_path: &Path) -> (Option<PackProvenance>, Vec<ProvenanceGap>);
 ```
+
+_1 line_
 
 ### step 2 of 3
 
@@ -169,20 +187,24 @@ pub(crate) async fn pack_provenance(repo: &Path, pack_dir: &Path, manifest_path:
 ```rust
 #[derive(Subcommand)]
 enum PackAction {
-    Add { source: String, #[arg(long)] global: bool, #[arg(long)] yes: bool, #[arg(long)] run_tests: bool },
-    Update { pack: PackRef, r#ref: String, #[arg(long)] global: bool, #[arg(long)] yes: bool },
+    Add { source: String, {+#[arg(long)] global: bool+}, #[arg(long)] yes: bool, #[arg(long)] run_tests: bool },
+    Update { pack: PackRef, r#ref: String, {+#[arg(long)] global: bool+}, #[arg(long)] yes: bool },
     New { pack: PackRef },
-    Remove { pack: PackRef, #[arg(long)] global: bool },
-    List { #[arg(long)] global: bool },
-    Audit { pack: PackRef, #[arg(long)] global: bool },
+    Remove { pack: PackRef, {+#[arg(long)] global: bool+} },
+    List {+{ #[arg(long)] global: bool }+},
+    Audit { pack: PackRef, {+#[arg(long)] global: bool+} },
 }
 ```
+
+_modified · 9 lines_
 
 `crates/cli/src/cli/dispatch.rs › pack_command`: dispatch scope to lifecycle operations
 
 ```rust
 async fn pack_command(action: PackAction, look: &Look) -> Result<Outcome, CliError>;
 ```
+
+_1 line_
 
 `crates/cli/src/commands/pack.rs › add/update/remove/list`: use selected storage and preserve audit and policy sequence
 
@@ -193,11 +215,15 @@ pub fn remove(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome, CliE
 pub fn list(global: bool, look: &Look) -> Result<Outcome, CliError>;
 ```
 
+_4 lines_
+
 `crates/cli/src/commands/pack_audit.rs › audit`: audit selected installation scope
 
 ```rust
 pub async fn audit(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome, CliError>;
 ```
+
+_1 line_
 
 ### step 3 of 3
 
@@ -221,6 +247,8 @@ yunta pack remove --global acme/review-pack
 Global packs are stored under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and are available to projects using that user state root. Project packs shadow matching global workflows; each scope has its own lock.
 ````
 
+_8 lines_
+
 ### the spec's tests
 
 `crates/cli/tests/global_pack_storage.rs`: what proves `global-pack-storage`
@@ -243,6 +271,8 @@ fn global_pack_storage_keeps_project_and_user_locks_separate() {
 }
 ```
 
+_15 lines_
+
 `crates/engine/tests/global_pack_catalog.rs`: what proves `global-pack-catalog`
 
 ```rust
@@ -255,6 +285,8 @@ fn global_pack_catalog_prefers_the_project_pack() {
     assert!(matches!(resolved.origin, WorkflowOrigin::Pack { .. }));
 }
 ```
+
+_8 lines_
 
 `crates/cli/tests/global_pack_cmd.rs`: what proves `global-pack-cli`
 
@@ -270,6 +302,8 @@ fn global_pack_cmd_lists_the_user_store() {
 }
 ```
 
+_9 lines_
+
 `crates/cli/tests/global_pack_docs_cmd.rs`: what proves `global-pack-docs`
 
 ```rust
@@ -279,6 +313,8 @@ fn global_pack_docs_cmd_names_the_global_flag() {
     assert!(guide.contains("pack add --global"));
 }
 ```
+
+_5 lines_
 
 ### proof
 

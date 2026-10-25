@@ -144,9 +144,10 @@ pub async fn produced(
 }
 
 /// The plan `bytes` hold, as the run in `state` will judge it: with the
-/// departures a person accepted, the suite the run measured, and how its
+/// departures a person accepted, the suite the run measured, how its
 /// planner got it accepted — a plan refused fifteen times reads
-/// differently.
+/// differently — and what the tree it was registered against held of its
+/// shapes, as the log states it for these bytes.
 fn plan_reviewed(
     shown: &Shown,
     bytes: &[u8],
@@ -162,6 +163,7 @@ fn plan_reviewed(
         .as_ref()
         .and_then(|node| state.artifacts.handed_over(node, ArtifactKind::Tasks))
         .cloned();
+    review.shapes_read = state.tasks.shapes_read(&shown.content_hash).cloned();
     Ok(review)
 }
 
@@ -212,7 +214,9 @@ async fn held<T: yunta_core::shape::Document>(
 
 /// `documents` with a spec shown beside a plan read on the plan's tasks:
 /// its tests are what judges them, and a second document after the plan
-/// would put each test a screen away from the task it holds.
+/// would put each test a screen away from the task it holds. The plan is
+/// judged again in place, so all it was read with stands beside the
+/// spec's judgement.
 fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     let has_plan = documents
         .iter()
@@ -230,19 +234,15 @@ fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     for document in &mut documents {
         let planner = document.shown.producer.clone();
         if let ShownContent::Tasks(review) = &mut document.content {
-            let read = crate::tasks::plan_review(
+            let judged = crate::tasks::plan_review(
                 review.plan.clone(),
                 Some(spec.clone()),
                 &review.held,
                 review.departed.clone(),
             );
-            **review = yunta_core::shown::PlanReview {
-                handed_over: review.handed_over.take(),
-                answered: std::mem::take(&mut review.answered),
-                asked: review.asked.take(),
-                spec_node: spec_document.shown.producer.clone().or(planner),
-                ..read
-            };
+            review.spec = judged.spec;
+            review.tasks = judged.tasks;
+            review.spec_node = spec_document.shown.producer.clone().or(planner);
         }
     }
     documents
@@ -261,6 +261,7 @@ fn departed(plan: &TasksFile, tasks: &TaskLedger) -> Vec<AcceptedDeparture> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use yunta_core::events::artifacts::HandedOver;
 
     /// A document `producer` produced, holding `content`.
     fn shown(producer: Option<&str>, kind: ArtifactKind, content: ShownContent) -> ShownDocument {
@@ -301,5 +302,59 @@ mod tests {
         };
         assert_eq!(spec_by(Some("specify")).as_deref(), Some("specify"));
         assert_eq!(spec_by(None).as_deref(), Some("planner"));
+    }
+
+    /// A plan judged beside its spec keeps everything it was read with: what
+    /// the tree held of its shapes, how its planner handed it over, and
+    /// what the person asked and answered.
+    #[test]
+    fn a_plan_judged_beside_its_spec_keeps_what_was_read_beside_it() {
+        use yunta_core::events::{ShapeRead, ShapesReadPayload};
+        let read = ShapesReadPayload {
+            plan: yunta_core::ContentHash::sha256(b"bytes"),
+            at: yunta_core::CommitSha::from("0123456789abcdef0123456789abcdef01234567"),
+            shapes: vec![ShapeRead {
+                name: "build_it".to_string(),
+                owner: "build".into(),
+                file: "src/a.rs".to_string(),
+                in_tree: yunta_core::events::InTree::New,
+            }],
+        };
+        let answered = vec![yunta_core::shown::Answered {
+            id: "q1".into(),
+            question: "Which depth?".to_string(),
+            answer: "two".to_string(),
+        }];
+        let mut plan = crate::tasks::plan_review(TasksFile::of(Vec::new()), None, &[], Vec::new());
+        plan.shapes_read = Some(read.clone());
+        plan.handed_over = Some(HandedOver::default());
+        plan.asked = Some("build it deeper".to_string());
+        plan.answered = answered.clone();
+        let spec = yunta_core::SpecFile { specs: Vec::new() };
+
+        let documents = beside_its_plan(vec![
+            shown(
+                Some("planner"),
+                ArtifactKind::Tasks,
+                ShownContent::Tasks(Box::new(plan)),
+            ),
+            shown(
+                Some("specify"),
+                ArtifactKind::Spec,
+                ShownContent::Spec(spec.clone()),
+            ),
+        ]);
+
+        let [document] = &documents[..] else {
+            panic!("the spec is read on the plan: {documents:?}");
+        };
+        let ShownContent::Tasks(review) = &document.content else {
+            panic!("the plan stays a plan: {document:?}");
+        };
+        assert_eq!(review.shapes_read, Some(read));
+        assert_eq!(review.handed_over, Some(HandedOver::default()));
+        assert_eq!(review.asked.as_deref(), Some("build it deeper"));
+        assert_eq!(review.answered, answered);
+        assert_eq!(review.spec, Some(spec));
     }
 }

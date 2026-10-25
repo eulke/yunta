@@ -5,6 +5,8 @@
 //! ([`crate::paint`]). Color only repeats what the words already say, so
 //! every paint writes the same text.
 
+use std::ops::Range;
+
 use crate::glyphs::{Glyphs, Mark};
 use crate::width::{cell_width, truncate};
 
@@ -26,6 +28,10 @@ pub enum Tone {
     NeedsYou,
     /// Worth a reader's attention and nothing anybody has to answer.
     Caution,
+    /// Words a change puts into a line of code, with their marks.
+    Added,
+    /// Words a change takes out of a line of code, with their marks.
+    Removed,
 }
 
 impl Tone {
@@ -136,6 +142,26 @@ impl Line {
             }
         }
         line
+    }
+
+    /// The part of the line in `range`, bytes of its text, each span it
+    /// cuts keeping its tone and link: a piece of a line broken to fit is
+    /// painted as the line is.
+    pub fn slice(&self, range: Range<usize>) -> Line {
+        let mut sliced = Line::new();
+        let mut start = 0;
+        for span in &self.0 {
+            let end = start + span.text.len();
+            let cut = range.start.max(start) - start..range.end.min(end).max(start) - start;
+            if let Some(text) = span.text.get(cut).filter(|text| !text.is_empty()) {
+                sliced.0.push(Span {
+                    text: text.to_string(),
+                    ..span.clone()
+                });
+            }
+            start = end;
+        }
+        sliced
     }
 
     /// The line as lines inside `cells`, broken between words, each part
@@ -252,6 +278,37 @@ mod tests {
         assert_eq!(cut.spans()[0], line.spans()[0]);
         assert_eq!(cut.spans().last().map(|span| span.tone), Some(Tone::Strong));
         assert_eq!(line.cut(80, Glyphs::Ascii), line);
+    }
+
+    #[test]
+    fn a_line_sliced_keeps_the_tone_of_every_span_it_cuts() {
+        let line = Line::new()
+            .plain("fn a(")
+            .push(Tone::Added, "{+b: u8+}")
+            .plain(");");
+        let tones = |line: &Line| -> Vec<(String, Tone)> {
+            line.spans()
+                .iter()
+                .map(|span| (span.text.clone(), span.tone))
+                .collect()
+        };
+        assert_eq!(
+            tones(&line.slice(3..9)),
+            [
+                ("a(".to_string(), Tone::Plain),
+                ("{+b:".to_string(), Tone::Added)
+            ]
+        );
+        assert_eq!(
+            tones(&line.slice(10..16)),
+            [
+                ("u8+}".to_string(), Tone::Added),
+                (");".to_string(), Tone::Plain)
+            ]
+        );
+        assert_eq!(tones(&line.slice(6..8)), [("+b".to_string(), Tone::Added)]);
+        assert_eq!(line.slice(0..16), line, "the whole line is the line");
+        assert_eq!(line.slice(5..5), Line::new(), "nothing cut is no span");
     }
 
     #[test]

@@ -138,3 +138,26 @@ fn the_ascii_set_is_ascii() {
         assert!(token.is_ascii(), "`{token}`");
     }
 }
+
+/// The marks of a word diff are a family of their own, kept out of
+/// `tokens`: they never stand beside the words of a line, only inside a
+/// line of code.
+#[test]
+fn the_marks_of_a_word_diff_are_ascii_and_apart_in_both_sets() {
+    for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
+        let marks: Vec<&str> = glyphs.added().into_iter().chain(glyphs.removed()).collect();
+        let apart: std::collections::BTreeSet<&str> = marks.iter().copied().collect();
+        assert_eq!(apart.len(), 4, "{glyphs}: {marks:?}");
+        assert!(
+            marks.iter().all(|mark| mark.is_ascii()),
+            "{glyphs}: {marks:?}"
+        );
+        let tokens = tokens(glyphs);
+        for mark in &marks {
+            assert!(
+                !tokens.iter().any(|token| token == mark),
+                "{glyphs}: `{mark}` says what a sign of the set says"
+            );
+        }
+    }
+}

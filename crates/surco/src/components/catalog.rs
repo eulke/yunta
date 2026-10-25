@@ -211,8 +211,37 @@ fn named_paths() -> Block {
     .into()
 }
 
-/// The blocks a plan and a run's rows are drawn with, and how a document
-/// closes: the decision, the facts, and what to type next.
+/// What an author wrote, and a file's code three ways: as written, read
+/// against the code it modifies, and new where nothing stands.
+fn written() -> Vec<Block> {
+    vec![
+        Block::Markdown("A change **in Markdown**, with `code`.\n\n- an item".to_string()),
+        Block::Diagram(Diagram::of("graph LR\n  plan --> build")),
+        Code::whole(
+            "src/lib.rs",
+            Some("the change".to_string()),
+            "pub fn greet() {}\n",
+        )
+        .into(),
+        Code::whole(
+            "src/greet.rs",
+            Some("greets the person by name".to_string()),
+            "pub fn hello(name: &str) -> String;",
+        )
+        .within(["hello"])
+        .against(Some("pub fn hello() -> String;"))
+        .into(),
+        Code::whole(
+            "src/greet.rs",
+            Some("says goodbye".to_string()),
+            "pub fn bye(name: &str) -> String;",
+        )
+        .within(["bye"])
+        .against(None)
+        .into(),
+    ]
+}
+
 /// Two runs of a field: one waiting on its reader, one a person stopped.
 fn field() -> Runs {
     let plowed = |done: usize, now: Standing, ahead: usize| {
@@ -245,6 +274,8 @@ fn field() -> Runs {
     }
 }
 
+/// The blocks a plan and a run's rows are drawn with, and how a document
+/// closes: the decision, the facts, and what to type next.
 fn closing() -> Vec<Block> {
     let column = |title, holds| Column { title, holds };
     let table = Table {
@@ -273,14 +304,6 @@ fn closing() -> Vec<Block> {
         }],
     };
     vec![
-        Block::Markdown("A change **in Markdown**, with `code`.\n\n- an item".to_string()),
-        Block::Diagram(Diagram::of("graph LR\n  plan --> build")),
-        Code::whole(
-            "src/lib.rs",
-            Some("the change".to_string()),
-            "pub fn greet() {}\n",
-        )
-        .into(),
         table.into(),
         nodes.into(),
         field().into(),
@@ -300,6 +323,7 @@ fn catalog() -> Doc {
     opening()
         .into_iter()
         .chain(quoting())
+        .chain(written())
         .chain(closing())
         .fold(Doc::new(), Doc::with)
 }

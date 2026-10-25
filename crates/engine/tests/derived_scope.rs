@@ -3,7 +3,10 @@
 //! registered, so the owner of a signature reaches its callers without
 //! anyone listing them or granting them.
 
-use yunta_core::events::{EventPayload, ScopeDerivedPayload, ScopeEvent, TaskStatus};
+use yunta_core::events::{
+    EventPayload, InTree, Outside, ScopeDerivedPayload, ScopeEvent, ShapesReadPayload, TaskEvent,
+    TaskStatus,
+};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{git, Bench};
 
@@ -87,4 +90,50 @@ async fn a_name_only_a_string_or_a_comment_says_derives_nothing() {
     bench.run(&workflow, &fixture).await;
 
     assert_eq!(derivation(&bench), None);
+}
+
+/// What the run read of the plan's shapes, when it read any.
+fn reading(bench: &Bench) -> Option<ShapesReadPayload> {
+    bench
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Tasks(TaskEvent::ShapesRead(read))) => Some(read.clone()),
+            _ => None,
+        })
+}
+
+/// A shape is followed into every file of its language: one declared in a
+/// `.ts` file reaches its caller in a `.tsx` one.
+#[tokio::test]
+async fn a_ts_shape_reaches_a_tsx_caller() {
+    let bench = Bench::new();
+    holding(
+        &bench,
+        &["a.ts".to_string()],
+        "export function buildIt() {}\n",
+    );
+    holding(&bench, &["caller.tsx".to_string()], "buildIt();\n");
+    let plan = plan_session(
+        "shapes:\n  - name: buildIt\n    owner: task-h\n    file: a.ts\n    code: \"export function buildIt(depth: number)\"\n\
+         tasks:\n  - id: task-h\n    title: \"h\"\n    scope: [\"a.ts\"]\n    criteria:\n      - cmd: \"grep -q depth a.ts\"\n",
+    );
+    let fixture = format!(
+        "{plan}  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.ts, content: \"export function buildIt(depth: number) {{}}\" }}\n    outcome: {{ type: completed, summary: did-h }}\n"
+    );
+
+    bench.run(&no_scope_expansion_workflow(), &fixture).await;
+
+    let derived = derivation(&bench).expect("the owner's reach is on the log");
+    assert_eq!(derived.paths, [yunta_core::ScopeGlob::from("caller.tsx")]);
+    let read = reading(&bench).expect("the plan's shapes were read");
+    assert_eq!(
+        read.shape("buildIt").map(|shape| &shape.in_tree),
+        Some(&InTree::There {
+            code: None,
+            outside: Outside::Files {
+                paths: vec!["caller.tsx".to_string()]
+            },
+        })
+    );
 }

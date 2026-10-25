@@ -23,6 +23,7 @@ mod flawed;
 mod head;
 mod proof;
 mod steps;
+mod tree;
 
 pub(crate) use card::codeless;
 pub(crate) use flawed::concerns;

@@ -46,6 +46,6 @@ pub(crate) use session::{
     stop_refused, write_formatted, write_refused,
 };
 pub(crate) use tasks::{
-    criterion_declared_unpassable, deviation_declared, deviation_resolved, task_check_answered,
-    task_check_started, task_registered, task_status_changed,
+    criterion_declared_unpassable, deviation_declared, deviation_resolved, shapes_read,
+    task_check_answered, task_check_started, task_registered, task_status_changed,
 };

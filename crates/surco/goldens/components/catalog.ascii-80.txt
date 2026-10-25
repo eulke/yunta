@@ -62,9 +62,20 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   | plan |-->| build |
   +------+   +-------+
 
-  src/lib.rs                                                              1 line
+  src/lib.rs
     the change
     | pub fn greet() {}
+    1 line
+
+  src/greet.rs :: hello
+    greets the person by name
+    | pub fn hello({+name: &str+}) -> String;
+    modified ; 1 line
+
+  src/greet.rs :: bye
+    says goodbye
+    | pub fn bye(name: &str) -> String;
+    new ; 1 line
 
   > 1  cli-global  Global and project flags
 

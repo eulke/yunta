@@ -17,6 +17,7 @@ mod capability_words;
 mod format_words;
 mod rail_words;
 mod scope_words;
+mod task_words;
 mod words;
 
 use surco::text::one_line;

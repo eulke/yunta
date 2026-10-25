@@ -1,12 +1,14 @@
 ---
 number: D270
 title: "A plan is read as the change it makes, and its proof is a step away"
-status: accepted
+status: revised
 revises: [D194, D223]
-revised_by: []
+revised_by: [D271]
 ---
 
 # D270 — A plan is read as the change it makes, and its proof is a step away
+
+*(Revised by D271: point 2's card also says, between what a task keeps and what tests it, what each shape its file already holds implies, and every code block says under it its size and, for a shape the engine read, what the code is to the tree.)*
 
 ## Context
 

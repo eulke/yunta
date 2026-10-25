@@ -5,27 +5,18 @@
 
 use std::path::Path;
 
+use super::lex::{self, Language, Lexed};
+
 /// `code`, the file at `path`, with each function that is not a test
 /// folded to `signature { ... N lines }`. A file in a language this does
 /// not read comes back whole.
 pub(crate) fn folded(path: &str, code: &str) -> String {
     let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
-    match extension {
-        Some("rs") => braced(code, Language::Rust),
-        Some("go") => braced(code, Language::Go),
-        Some("js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx") => braced(code, Language::Script),
-        Some("py") => indented(code),
+    match (Language::of(path), extension) {
+        (Some(language), _) => braced(code, language),
+        (None, Some("py")) => indented(code),
         _ => code.to_string(),
     }
-}
-
-/// A language whose blocks are braces, by how its source says what is
-/// code and what is a string or a comment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Language {
-    Rust,
-    Go,
-    Script,
 }
 
 /// What a function header is to a review.
@@ -214,107 +205,18 @@ fn braces(lines: &[&str], language: Language) -> Vec<Vec<(usize, char)>> {
         .collect()
 }
 
-/// Where the lexer stands at the end of a line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Lexed {
-    Code,
-    /// Inside a block comment, nested this deep.
-    Comment(usize),
-    /// Inside a string closed by this quote.
-    Quoted(char),
-    /// Inside a Rust raw string closed by a quote and this many hashes.
-    Raw(usize),
-}
-
 /// The code braces of `line`, and where the lexer stands after it.
 fn scan(line: &str, language: Language, mut state: Lexed) -> (Vec<(usize, char)>, Lexed) {
     let bytes = line.as_bytes();
     let mut found = Vec::new();
     let mut at = 0;
     while at < bytes.len() {
-        let (next, after) = match state {
-            Lexed::Comment(depth) => commented(bytes, at, depth, language),
-            Lexed::Quoted(quote) => quoted(bytes, at, quote, language),
-            Lexed::Raw(hashes) => raw(bytes, at, hashes),
-            Lexed::Code if bytes[at] == b'/' && bytes.get(at + 1) == Some(&b'/') => break,
-            Lexed::Code => {
-                if matches!(bytes[at], b'{' | b'}') {
-                    found.push((at, bytes[at] as char));
-                }
-                code(bytes, at, language)
-            }
-        };
-        state = next;
-        at = after;
-    }
-    // A string a line leaves open closes with it, except the ones a
-    // language lets run on.
-    if let Lexed::Quoted(quote) = state {
-        if quote != '`' && quote != '"' {
-            state = Lexed::Code;
+        if state == Lexed::Code && matches!(bytes[at], b'{' | b'}') {
+            found.push((at, bytes[at] as char));
         }
+        (state, at) = lex::step(bytes, at, state, language);
     }
-    (found, state)
-}
-
-/// One step through a block comment `depth` deep.
-fn commented(bytes: &[u8], at: usize, depth: usize, language: Language) -> (Lexed, usize) {
-    match (bytes[at], bytes.get(at + 1)) {
-        (b'*', Some(b'/')) if depth == 1 => (Lexed::Code, at + 2),
-        (b'*', Some(b'/')) => (Lexed::Comment(depth - 1), at + 2),
-        (b'/', Some(b'*')) if language == Language::Rust => (Lexed::Comment(depth + 1), at + 2),
-        _ => (Lexed::Comment(depth), at + 1),
-    }
-}
-
-/// One step through a string closed by `quote`. A backslash escapes what
-/// follows, except in Go's raw strings.
-fn quoted(bytes: &[u8], at: usize, quote: char, language: Language) -> (Lexed, usize) {
-    match bytes[at] {
-        b'\\' if !(language == Language::Go && quote == '`') => (Lexed::Quoted(quote), at + 2),
-        byte if byte == quote as u8 => (Lexed::Code, at + 1),
-        _ => (Lexed::Quoted(quote), at + 1),
-    }
-}
-
-/// One step through a Rust raw string closed by a quote and `hashes`.
-fn raw(bytes: &[u8], at: usize, hashes: usize) -> (Lexed, usize) {
-    let closes = bytes[at] == b'"'
-        && bytes.len() > at + hashes
-        && bytes[at + 1..=at + hashes].iter().all(|byte| *byte == b'#');
-    match closes {
-        true => (Lexed::Code, at + 1 + hashes),
-        false => (Lexed::Raw(hashes), at + 1),
-    }
-}
-
-/// One step through code: what opens a comment, a string or a character
-/// literal, or one byte of code.
-fn code(bytes: &[u8], at: usize, language: Language) -> (Lexed, usize) {
-    match (bytes[at], bytes.get(at + 1).copied()) {
-        (b'/', Some(b'*')) => (Lexed::Comment(1), at + 2),
-        (b'"', _) => (Lexed::Quoted('"'), at + 1),
-        (b'`', _) if language != Language::Rust => (Lexed::Quoted('`'), at + 1),
-        (b'\'', _) if language == Language::Script => (Lexed::Quoted('\''), at + 1),
-        // A character literal, never a lifetime: `'{'`, `'\n'`.
-        (b'\'', Some(b'\\')) => (Lexed::Quoted('\''), at + 1),
-        (b'\'', _) if bytes.get(at + 2) == Some(&b'\'') => (Lexed::Code, at + 3),
-        (b'r', Some(b'"' | b'#')) if language == Language::Rust && raw_opens(bytes, at) => {
-            let hashes = bytes[at + 1..]
-                .iter()
-                .take_while(|byte| **byte == b'#')
-                .count();
-            (Lexed::Raw(hashes), at + 2 + hashes)
-        }
-        _ => (Lexed::Code, at + 1),
-    }
-}
-
-/// Whether the `r` at `at` opens a raw string rather than ending a name.
-fn raw_opens(bytes: &[u8], at: usize) -> bool {
-    let named = at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
-    let hashes = bytes[at + 1..].iter().take_while(|b| **b == b'#').count();
-    !named && bytes.get(at + 1 + hashes) == Some(&b'"')
+    (found, lex::line_ended(state))
 }
 
 /// `code` with each Python function that is not a test folded to its

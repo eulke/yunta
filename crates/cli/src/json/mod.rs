@@ -126,6 +126,13 @@ pub(crate) struct RunDocument {
     /// about the workflow, and a map cannot carry one.
     nodes: Vec<NodeJson>,
     tasks: BTreeMap<String, &'static str>,
+    /// What the tree held of the shapes of each plan the run holds, as the
+    /// engine read it when the plan was registered: for each shape, whether
+    /// its file held it, its code there, and the files beyond the plan whose
+    /// code names it. One per plan, in the order the run first accepted
+    /// them; absent when the run read none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    shapes_read: Vec<yunta_core::events::ShapesReadPayload>,
     /// Why each failed node failed, in the form a program can act on
     /// rather than parse back out of a sentence: one entry per declared
     /// artifact that did not close, carrying what went wrong with it.
@@ -204,6 +211,7 @@ impl RunDocument {
                 .iter()
                 .map(|(id, record)| (id.to_string(), record.status.as_str()))
                 .collect(),
+            shapes_read: shapes_read(state),
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
             waiting_on: WaitingOnJson::of(&frame.phase, engine),
@@ -239,6 +247,18 @@ impl RunDocument {
     pub(crate) fn verdict(&self) -> Outcome {
         crate::render::exit(self.outcome)
     }
+}
+
+/// What the tree held of the shapes of each plan `state` holds, in the
+/// order the run first accepted them: the reading the log states for each
+/// plan's bytes. A plan none of whose shapes was read has none.
+fn shapes_read(state: &RunState) -> Vec<yunta_core::events::ShapesReadPayload> {
+    state
+        .artifacts
+        .of_kind(yunta_core::ArtifactKind::Tasks)
+        .filter_map(|held| state.tasks.shapes_read(&held.content_hash))
+        .cloned()
+        .collect()
 }
 
 /// Why the run stopped where it did, for the phases whose word alone

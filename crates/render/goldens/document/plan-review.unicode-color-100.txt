@@ -92,7 +92,7 @@
                    separate roots.
       ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_storage global_pack_storage␛[0m
 
-      ␛[1mcrates/cli/src/pack.rs › PackInstallScope␛[0m                                              ␛[2m9 lines␛[0m
+      ␛[1mcrates/cli/src/pack.rs › PackInstallScope␛[0m
         scope enum and root selection API
         ␛[2m│ ␛[0m#[derive(Debug, Clone, Copy, PartialEq, Eq)]
         ␛[2m│ ␛[0mpub enum PackInstallScope {
@@ -103,11 +103,13 @@
         ␛[2m│ ␛[0mimpl PackInstallScope {
         ␛[2m│ ␛[0m    pub fn root(self, project_root: &Path, user_root: &Path) -> PathBuf;
         ␛[2m│ ␛[0m}
+        ␛[2mnew · 9 lines␛[0m
 
-      ␛[1mcrates/cli/src/pack.rs › installed_packs␛[0m                                                ␛[2m1 line␛[0m
+      ␛[1mcrates/cli/src/pack.rs › installed_packs␛[0m
         scope-aware lock location and pack enumeration
         ␛[2m│ ␛[0mpub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: &Path) ->
         ␛[2m│ ␛[0m  ↪ Result<(PackLock, PathBuf), PackError>;
+        ␛[2mnew · 1 line␛[0m
 
     ␛[1mglobal-pack-catalog␛[0m: Discover global packs after project packs
       ␛[2myou will see␛[0m A workflow supplied by a global pack can be run from any project using the same
@@ -119,31 +121,41 @@
                    as ambiguous.
       ␛[2m            ␛[0m Declared pack content paths must stay inside their pack directory.
       ␛[2m            ␛[0m Frozen provenance records pack identity and lock commit when available.
+      ␛[2mimplies     ␛[0m resolve_workflow is named in 5 files no task changes:
+      ␛[2m            ␛[0m crates/cli/src/commands/mod.rs
+      ␛[2m            ␛[0m crates/engine/src/check/refs.rs
+      ␛[2m            ␛[0m crates/engine/src/frozen/read.rs
+      ␛[2m            ␛[0m crates/engine/src/lib.rs
+      ␛[2m            ␛[0m crates/engine/tests/catalog.rs
       ␛[2mtested by   ␛[0m Workflow lookup falls back to global packs, prefers project packs, and keeps
                    declared content inside its pack.
       ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_catalog global_pack_catalog␛[0m
 
-      ␛[1mcrates/engine/src/catalog.rs › resolve_workflow␛[0m                                         ␛[2m1 line␛[0m
+      ␛[1mcrates/engine/src/catalog.rs › resolve_workflow␛[0m
         accept global packs root and search local before global
-        ␛[2m│ ␛[0mpub fn resolve_workflow(repo_root: &Path, global_packs_root: &Path, name: &str) ->
+        ␛[2m│ ␛[0mpub fn resolve_workflow(repo_root: &Path, ␛[32m{+global_packs_root: &Path+}␛[0m, name: &str) ->
         ␛[2m│ ␛[0m  ↪ Result<ResolvedWorkflow, CatalogError>;
+        ␛[2mmodified · 1 line␛[0m
 
-      ␛[1mcrates/engine/src/frozen/layers.rs › installed_layers␛[0m                                   ␛[2m1 line␛[0m
+      ␛[1mcrates/engine/src/frozen/layers.rs › installed_layers␛[0m
         include knowledge files from global installed packs
         ␛[2m│ ␛[0mpub(crate) async fn installed_layers(repo: &Path, global_packs_root: &Path) ->
         ␛[2m│ ␛[0m  ↪ Result<Vec<LayerFile>, FrozenError>;
+        ␛[2m1 line␛[0m
 
-      ␛[1mcrates/engine/src/frozen/prompt.rs › PromptOrigin␛[0m                                      ␛[2m4 lines␛[0m
+      ␛[1mcrates/engine/src/frozen/prompt.rs › PromptOrigin␛[0m
         represent global pack prompt origin with exact pack directory
         ␛[2m│ ␛[0mpub(crate) enum PromptOrigin {
         ␛[2m│ ␛[0m    Repo { dir: PathBuf },
         ␛[2m│ ␛[0m    Pack { pack: String, pack_dir: PathBuf, dir: PathBuf },
         ␛[2m│ ␛[0m}
+        ␛[2m4 lines␛[0m
 
-      ␛[1mcrates/engine/src/frozen/provenance.rs › pack_provenance␛[0m                                ␛[2m1 line␛[0m
+      ␛[1mcrates/engine/src/frozen/provenance.rs › pack_provenance␛[0m
         read manifest and lock provenance for a pack at the resolved directory
         ␛[2m│ ␛[0mpub(crate) async fn pack_provenance(repo: &Path, pack_dir: &Path, manifest_path: &Path) ->
         ␛[2m│ ␛[0m  ↪ (Option<PackProvenance>, Vec<ProvenanceGap>);
+        ␛[2m1 line␛[0m
 
   ␛[1mstep 2 of 3␛[0m
 
@@ -162,25 +174,27 @@
                    separate.
       ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_cmd global_pack_cmd␛[0m
 
-      ␛[1mcrates/cli/src/cli/mod.rs › PackAction␛[0m                                                 ␛[2m9 lines␛[0m
+      ␛[1mcrates/cli/src/cli/mod.rs › PackAction␛[0m
         global option on supported pack lifecycle actions
         ␛[2m│ ␛[0m#[derive(Subcommand)]
         ␛[2m│ ␛[0menum PackAction {
-        ␛[2m│ ␛[0m    Add { source: String, #[arg(long)] global: bool, #[arg(long)] yes: bool, #[arg(long)]
-        ␛[2m│ ␛[0m      ↪ run_tests: bool },
-        ␛[2m│ ␛[0m    Update { pack: PackRef, r#ref: String, #[arg(long)] global: bool, #[arg(long)] yes:
-        ␛[2m│ ␛[0m      ↪ bool },
+        ␛[2m│ ␛[0m    Add { source: String, ␛[32m{+#[arg(long)] global: bool+}␛[0m, #[arg(long)] yes: bool,
+        ␛[2m│ ␛[0m      ↪ #[arg(long)] run_tests: bool },
+        ␛[2m│ ␛[0m    Update { pack: PackRef, r#ref: String, ␛[32m{+#[arg(long)] global: bool+}␛[0m, #[arg(long)]
+        ␛[2m│ ␛[0m      ↪ yes: bool },
         ␛[2m│ ␛[0m    New { pack: PackRef },
-        ␛[2m│ ␛[0m    Remove { pack: PackRef, #[arg(long)] global: bool },
-        ␛[2m│ ␛[0m    List { #[arg(long)] global: bool },
-        ␛[2m│ ␛[0m    Audit { pack: PackRef, #[arg(long)] global: bool },
+        ␛[2m│ ␛[0m    Remove { pack: PackRef, ␛[32m{+#[arg(long)] global: bool+}␛[0m },
+        ␛[2m│ ␛[0m    List ␛[32m{+{ #[arg(long)] global: bool }+}␛[0m,
+        ␛[2m│ ␛[0m    Audit { pack: PackRef, ␛[32m{+#[arg(long)] global: bool+}␛[0m },
         ␛[2m│ ␛[0m}
+        ␛[2mmodified · 9 lines␛[0m
 
-      ␛[1mcrates/cli/src/cli/dispatch.rs › pack_command␛[0m                                           ␛[2m1 line␛[0m
+      ␛[1mcrates/cli/src/cli/dispatch.rs › pack_command␛[0m
         dispatch scope to lifecycle operations
         ␛[2m│ ␛[0masync fn pack_command(action: PackAction, look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m1 line␛[0m
 
-      ␛[1mcrates/cli/src/commands/pack.rs › add/update/remove/list␛[0m                               ␛[2m4 lines␛[0m
+      ␛[1mcrates/cli/src/commands/pack.rs › add/update/remove/list␛[0m
         use selected storage and preserve audit and policy sequence
         ␛[2m│ ␛[0mpub async fn add(source: &str, global: bool, confirmed_executors: bool, run_tests: bool,
         ␛[2m│ ␛[0m  ↪ look: &Look) -> Result<Outcome, CliError>;
@@ -188,11 +202,13 @@
         ␛[2m│ ␛[0m  ↪ look: &Look) -> Result<Outcome, CliError>;
         ␛[2m│ ␛[0mpub fn remove(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome, CliError>;
         ␛[2m│ ␛[0mpub fn list(global: bool, look: &Look) -> Result<Outcome, CliError>;
+        ␛[2m4 lines␛[0m
 
-      ␛[1mcrates/cli/src/commands/pack_audit.rs › audit␛[0m                                           ␛[2m1 line␛[0m
+      ␛[1mcrates/cli/src/commands/pack_audit.rs › audit␛[0m
         audit selected installation scope
         ␛[2m│ ␛[0mpub async fn audit(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome,
         ␛[2m│ ␛[0m  ↪ CliError>;
+        ␛[2m1 line␛[0m
 
   ␛[1mstep 3 of 3␛[0m
 
@@ -204,7 +220,7 @@
                    separate locks.
       ␛[2m            ␛[0m ␛[1mcargo test --workspace --test global_pack_docs_cmd global_pack_docs_cmd␛[0m
 
-      ␛[1mdocs/global-install.md␛[0m                                                                 ␛[2m8 lines␛[0m
+      ␛[1mdocs/global-install.md␛[0m
         global install usage and behavior in the installation guide
         ␛[2m│ ␛[0m```bash
         ␛[2m│ ␛[0myunta pack add --global github.com/acme/review-pack@v1.2.0
@@ -216,6 +232,7 @@
         ␛[2m│ ␛[0mGlobal packs are stored under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and are available
         ␛[2m│ ␛[0m  ↪ to projects using that user state root. Project packs shadow matching global
         ␛[2m│ ␛[0m  ↪ workflows; each scope has its own lock.
+        ␛[2m8 lines␛[0m
 
   ␛[1mproof␛[0m
     ␛[2mspec tests  ␛[0m 4 in 4 files, 37 lines

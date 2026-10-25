@@ -303,7 +303,8 @@ pub(super) async fn record_artifacts(
 }
 
 /// Registers a tasks document's tasks, each as fresh work or as work a
-/// source run finished and this run's tree already has.
+/// source run finished and this run's tree already has, and reads in that
+/// tree what its tasks may reach and what it holds of the plan's shapes.
 async fn register_tasks(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -325,7 +326,7 @@ async fn register_tasks(
         None => Provenance::Fresh,
     };
     crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
-    crate::tasks::derive_reach(
+    crate::tasks::derive_from_tree(
         &ctx.log(),
         Some(&node.id),
         tasks,

@@ -10,10 +10,9 @@ use surco::figures::duration;
 use surco::glyphs::Mark;
 use surco::text::{detailed, one_line};
 use surco::words::Standing;
-use tasks::happening as tasks_happening;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
+    artifacts, children, findings, gates, node, run, session, AgentMessageType,
     GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage, ToolTarget,
 };
 use yunta_core::fence::Coverage;
@@ -31,7 +30,7 @@ pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String
         Happening::Run(it) => run_words(it),
         Happening::Node(it) => node_words(it, sep),
         Happening::Session(it) => (None, session_words(it, sep)),
-        Happening::Tasks(it) => (None, task_words(it)),
+        Happening::Tasks(it) => (None, super::task_words::task_words(it)),
         Happening::Scope(it) => (None, super::scope_words::scope_words(it)),
         Happening::Findings(it) => (None, finding_words(it)),
         Happening::Artifacts(it) => (None, artifact_words(it)),
@@ -310,40 +309,6 @@ fn message(
         (Some(it), _) => detailed(said, &format!("{} bytes, sha256 {}", it.bytes, it.sha256)),
         (None, Some(text)) => detailed(said, &one_line(text.as_str())),
         (None, None) => said,
-    }
-}
-
-fn task_words(happening: &tasks_happening::Happening) -> String {
-    use tasks_happening::Happening as H;
-    match happening {
-        H::Registered { task } => format!("task {task} registered"),
-        H::Moved { task, to } => format!("{task} is {}", to.as_str()),
-        H::Checking { task } => format!("{task} asked for a check"),
-        H::Checked {
-            task,
-            closes,
-            red,
-            duration_ms,
-        } => {
-            let took = duration(std::time::Duration::from_millis(*duration_ms));
-            match (closes, red) {
-                (true, _) => format!("{task} checked in {took}: it would close"),
-                (false, 0) => {
-                    format!("{task} checked in {took}: its work reaches paths it may not change")
-                }
-                (false, red) => format!("{task} checked in {took}: {red} of its criteria red"),
-            }
-        }
-        H::Departed { task, from } => format!("{task} departs from the plan: {from}"),
-        H::Answered { task, accepted } => match accepted {
-            true => format!("{task}'s departure from the plan was accepted"),
-            false => format!("{task}'s departure from the plan was sent back"),
-        },
-        H::Unpassable {
-            task,
-            criterion,
-            why,
-        } => detailed(format!("{task} declared `{criterion}` cannot pass"), why),
     }
 }
 
