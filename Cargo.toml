@@ -57,7 +57,7 @@ reqwest = { version = "0.13", default-features = false }
 rmcp = { version = "3.4", default-features = false }
 # Storage names the features it uses: the defaults add a wasm SQLite
 # backend, for a target this project never builds.
-rusqlite = { version = "0.40", default-features = false }
+rusqlite = { version = "0.41", default-features = false }
 schemars = "1"
 serde = "1"
 serde_json = "1"
