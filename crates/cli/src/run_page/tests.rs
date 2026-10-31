@@ -7,7 +7,7 @@ use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, EventPayload, NodeEvent, NodeFinishedPayload,
     NodeOutcome, NodeStartedPayload, SessionEvent, StoredEvent, TokenUsage,
 };
-use yunta_core::{RunId, Workflow};
+use yunta_core::{NodeId, RunId, Workflow};
 use yunta_engine::{derive, run_frame_of, RunFrame, RunState};
 use yunta_testkit_core::{fixed_now, Log};
 
@@ -197,6 +197,7 @@ fn running_page(scope: Scope) -> RunPage<'static> {
         state,
         paths: outline(),
         decision: None,
+        plans: Vec::new(),
     }
 }
 
@@ -210,4 +211,25 @@ fn the_closing_and_the_status_page_show_one_tokens_figure() {
         running_page(Scope::Closing).tokens(),
         running_page(Scope::Status).tokens()
     );
+}
+
+/// A plan node's row says the plan it accepted, not what its agent said last.
+#[test]
+fn a_plan_node_says_the_plan_it_had_accepted() {
+    let mut accepted = running_page(Scope::Status);
+    accepted.depth = Depth::Full;
+    accepted.plans = vec![(
+        NodeId::from_static("plan"),
+        "Install packs from a global registry".to_string(),
+    )];
+    let drawn = draw(&accepted, &Look::plain());
+    assert!(
+        drawn.contains("Install packs from a global registry"),
+        "{drawn}"
+    );
+    assert!(!drawn.contains("exit 0"), "{drawn}");
+
+    let mut said = running_page(Scope::Status);
+    said.depth = Depth::Full;
+    assert!(draw(&said, &Look::plain()).contains("exit 0"));
 }

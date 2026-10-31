@@ -150,6 +150,7 @@ impl Closing {
                 home: self.home.as_deref(),
             },
             decision: self.decided(),
+            plans: Vec::new(),
         }
     }
 

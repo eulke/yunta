@@ -256,6 +256,7 @@ impl Case {
             state: &self.state,
             paths: outline(),
             decision: self.decision.clone(),
+            plans: Vec::new(),
         }
     }
 }

@@ -10,10 +10,10 @@
 //! decision it waits on or what to type next. A section with nothing to
 //! say is not a section.
 //!
-//! A page opens at a glance. `--full` tells the whole story — every node
-//! with what it said, took and spent, every task, the runs it composed,
-//! every fact the glance leaves out — and `--dig` adds every trace the
-//! run keeps: its whole id, where it lives, the files that hold whole
+//! A page opens at a glance. `--full` tells the whole story — every node with
+//! what it said or the plan it accepted, took and spent, every task, the runs
+//! it composed, every fact the glance leaves out — and `--dig` adds every trace
+//! the run keeps: its whole id, where it lives, the files that hold whole
 //! outputs. The closing is the same page in its harvest form: how the run
 //! ended, what it took and where its work is. Nothing here paints: the
 //! caller draws the document once, with the look of its stream.
@@ -80,6 +80,10 @@ pub(crate) struct RunPage<'a> {
     /// Where the page's paths are shown from, and the tree the run works in.
     pub(crate) paths: Outline<'a>,
     pub(crate) decision: Option<Decided>,
+    /// The change each finished node's accepted plan says it makes, by that
+    /// node: the story says it in the node's row, in place of what the node
+    /// said last. Empty where the page draws no story.
+    pub(crate) plans: Vec<(NodeId, String)>,
 }
 
 impl RunPage<'_> {

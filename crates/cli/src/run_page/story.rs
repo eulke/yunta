@@ -1,6 +1,6 @@
 //! The whole story a reader asks for with `--full`: every node with what
-//! it said, how long it worked and what it spent, the calls that failed
-//! on the way, and every task.
+//! it said or the plan it accepted, how long it worked and what it spent,
+//! the calls that failed on the way, and every task.
 
 use surco::components::{Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
 use surco::doc::{Block, Depth};
@@ -33,8 +33,9 @@ impl RunPage<'_> {
     }
 
     /// Every node the frozen workflow declares, in declaration order, a
-    /// group's children one step under it: where it stands, what it said
-    /// or what holds it, how long it worked and what it spent.
+    /// group's children one step under it. Each row holds where the node
+    /// stands, what it said or the plan it had accepted, what holds it, how
+    /// long it worked and what it spent.
     fn node_table(&self, glyphs: Glyphs) -> NodeTable {
         let rows = self
             .frame
@@ -42,7 +43,10 @@ impl RunPage<'_> {
             .iter()
             .map(|node| {
                 let display = crate::render::node_display(node);
-                let said = display.modifier.map(|said| prose::first_sentence(&said));
+                let said = match self.plans.iter().find(|(id, _)| *id == node.id) {
+                    Some((_, summary)) => Some(summary.clone()),
+                    None => display.modifier.map(|said| prose::first_sentence(&said)),
+                };
                 let note = [said, handed(self.state, &node.id)]
                     .into_iter()
                     .flatten()

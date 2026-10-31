@@ -6,9 +6,9 @@ use surco::doc::Depth;
 /// more.
 #[derive(Debug, Clone, Copy, clap::Args)]
 pub(crate) struct DepthArg {
-    /// Tells the whole story: every node with what it said, how long it
-    /// worked and what it spent, every task, and every fact a glance
-    /// leaves out.
+    /// Tells the whole story: every node with what it said or the plan it
+    /// accepted, how long it worked and what it spent, every task, and every
+    /// fact a glance leaves out.
     #[arg(long)]
     full: bool,
     /// Tells the whole story with every trace the run keeps: its whole

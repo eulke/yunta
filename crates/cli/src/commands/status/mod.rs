@@ -21,7 +21,7 @@ use chrono::{DateTime, Utc};
 use yunta_core::caution::Caution;
 use yunta_core::events::{Escalation, StoredEvent};
 use yunta_core::{Clock, Manifest, NodeId, RunId};
-use yunta_engine::{RunFrame, RunState, ShownDocument};
+use yunta_engine::{NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
 
 use crate::commands::{advice, stats};
 use crate::context::Context;
@@ -167,6 +167,10 @@ async fn run_page_for<'a>(
         Mode::Human => decided(reading).await?,
         _ => None,
     };
+    let plans = match output {
+        Mode::Human => plans(reading, depth).await,
+        _ => Vec::new(),
+    };
     Ok(RunPage {
         scope: Scope::Status,
         depth,
@@ -183,6 +187,7 @@ async fn run_page_for<'a>(
             home: ctx.env.home.as_deref(),
         },
         decision: decided,
+        plans,
     })
 }
 
@@ -208,7 +213,7 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
     let beside = decision::Beside {
         evidence: matches!(
             reading.state.nodes.state(node),
-            Some(yunta_engine::NodeState::Failed { .. })
+            Some(NodeState::Failed { .. })
         ),
     };
     Ok(Some(Decided {
@@ -217,6 +222,39 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
         shown,
         beside,
     }))
+}
+
+/// The change each finished node's accepted plan says it makes, for the story
+/// a page at `depth` draws: none when it draws no story. A node still at work
+/// keeps what its row says of that work, and a node whose documents cannot be
+/// read keeps what it said: the page draws either way.
+async fn plans(reading: &Reading, depth: Depth) -> Vec<(NodeId, String)> {
+    if !depth.reaches(Depth::Full) {
+        return Vec::new();
+    }
+    let finished = reading.frame.nodes.iter().filter(|node| {
+        matches!(
+            node.state,
+            NodeStanding::Reached(NodeState::Finished { .. })
+        )
+    });
+    let mut summaries = Vec::new();
+    for node in finished {
+        let Ok(documents) = yunta_engine::produced_documents(
+            &reading.run_dir,
+            &node.id,
+            &reading.state,
+            reading.manifest.request(),
+        )
+        .await
+        else {
+            continue;
+        };
+        if let Some(change) = yunta_core::shown::change_shown(&documents) {
+            summaries.push((node.id.clone(), surco::text::one_line(change)));
+        }
+    }
+    summaries
 }
 
 /// What `yunta status` answers: the run's document for a program, and the
