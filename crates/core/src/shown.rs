@@ -17,6 +17,25 @@ pub struct ShownDocument {
     pub content: ShownContent,
 }
 
+/// The change the first plan among `documents` that says it changes something
+/// names: its summary, trimmed, when it holds a letter or a digit. It is the
+/// change a decision that shows it asks a person to approve. A summary of
+/// punctuation or whitespace alone, such as `...`, says no change, so the next
+/// plan is tried. `None` when no plan among them says one.
+pub fn change_shown(documents: &[ShownDocument]) -> Option<&str> {
+    documents
+        .iter()
+        .find_map(|document| match &document.content {
+            ShownContent::Tasks(review) => review
+                .plan
+                .summary
+                .as_deref()
+                .map(str::trim)
+                .filter(|summary| summary.chars().any(char::is_alphanumeric)),
+            _ => None,
+        })
+}
+
 /// A shown document's content: a tasks document read into its tasks, a
 /// spec into its specs, a findings document into its findings, any other
 /// as its text.
@@ -321,5 +340,54 @@ mod tests {
                  wrote for `t1`, is run by none of its tests (and 2 more)"
             )
         );
+    }
+
+    /// A shown document holding `content`.
+    fn shown(content: ShownContent) -> ShownDocument {
+        ShownDocument {
+            shown: Shown {
+                producer: None,
+                artifact: crate::events::ArtifactId::Interpreted {
+                    kind: crate::ArtifactKind::Tasks,
+                },
+                content_hash: crate::ContentHash::sha256(b"plan"),
+            },
+            path: std::path::PathBuf::from("artifacts/plan/tasks.yaml"),
+            content,
+        }
+    }
+
+    /// A plan whose summary is `summary`.
+    fn plan(summary: &str) -> ShownContent {
+        ShownContent::Tasks(Box::new(PlanReview {
+            plan: TasksFile {
+                summary: Some(summary.to_string()),
+                ..TasksFile::of(Vec::new())
+            },
+            departed: Vec::new(),
+            spec: None,
+            spec_node: None,
+            asked: None,
+            held: Vec::new(),
+            tasks: Vec::new(),
+            handed_over: None,
+            answered: Vec::new(),
+            shapes_read: None,
+        }))
+    }
+
+    /// The change is the first plan's trimmed summary that holds a letter or digit, else None.
+    #[test]
+    fn the_change_shown_is_what_the_first_plan_that_says_one_says() {
+        let documents = [
+            shown(ShownContent::Text("a brief".to_string())),
+            shown(plan("  \n ")),
+            shown(plan("  Make it.\n")),
+            shown(plan("Make another")),
+        ];
+        assert_eq!(change_shown(&documents), Some("Make it."));
+        assert_eq!(change_shown(&documents[..2]), None);
+        let punctuated = [shown(plan("...")), shown(plan("Make it"))];
+        assert_eq!(change_shown(&punctuated), Some("Make it"));
     }
 }

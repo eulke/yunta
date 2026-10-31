@@ -27,7 +27,7 @@ mod table;
 pub use checklist::{Check, Checklist, Fix, Found};
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
-pub use document::{Against, Code, Lead, Marked, Marks, Note, Part, Prose, Section};
+pub use document::{Against, Code, Fold, Lead, Marked, Marks, Note, Part, Prose, Section, Title};
 pub use evidence::{Evidence, Whole};
 pub use fields::{Fields, Reads};
 pub use headline::Headline;

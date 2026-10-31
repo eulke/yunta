@@ -1,4 +1,4 @@
-␛[1mplan of run 7E5PH4␛[0m
+␛[1mplan␛[0m: 4 tasks in 3 steps, 2 risks
 
 ␛[1;35m◆␛[0m ␛[1mfragua (standard)␛[0m␛[2m · ␛[0m␛[1;35mneeds you␛[0m␛[2m · for 32m10s␛[0m                                                  7E5PH4
 ␛[32m━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━␛[0m ␛[33m━━━━━━━━━━━━━━━━␛[0m ␛[1;35m━━━━━━━━━━━━━━━␛[0m ␛[2m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
@@ -53,6 +53,9 @@
     src/main.rs
     Cargo.lock (the lock file)
 
+  ␛[1mT001␛[0m: Make it
+    the file exists
+
   A change ␛[1min Markdown␛[0m, with ␛[1mcode␛[0m.
 
   - an item
@@ -87,14 +90,21 @@
   a line a page composed itself
 
   ␛[1mapprove␛[0m: builds the plan
-    ␛[2mthe four tasks run in three steps␛[0m
+    ␛[2mits tasks run, a step at a time␛[0m
     ␛[1myunta resolve-gate 7E5PH4 approve␛[0m
-  ␛[1madjust␛[0m
+  ␛[1madjust␛[0m: Back to `plan`
     ␛[2mthe plan is written again with what you say␛[0m
-    ␛[2masks: what to change␛[0m
+    ␛[2masks: what should change?␛[0m
     ␛[1myunta resolve-gate 7E5PH4 adjust --text "<answer>"␛[0m
   ␛[2mor␛[0m
     ␛[1myunta close 7E5PH4␛[0m   ␛[2mcloses it for good␛[0m
+
+  ␛[1mapprove␛[0m: approve this pull request
+    ␛[2mthe run goes on␛[0m
+  ␛[1mclose␛[0m: close this pull request
+    ␛[2mnothing runs; this decision stays open␛[0m
+  ␛[2mon the machine that holds the run␛[0m
+    ␛[1myunta resume 7E5PH4␛[0m   ␛[2mreads the answer and acts on it␛[0m
 
   ␛[2mthe run holds its own state on disk.␛[0m
 

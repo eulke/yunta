@@ -21,8 +21,8 @@
       ␛[2mUses one extra correction attempt beyond the declared max_reroutes (0); escalates again if␛[0m
       ␛[2m`fix-lint` doesn't fix it␛[0m
       ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
-    ␛[1mabort␛[0m: Abort the run
-      ␛[2mPauses here; nothing further executes␛[0m
+    ␛[1mabort␛[0m: Pause here
+      ␛[2mnothing runs; this decision stays open␛[0m
       ␛[1myunta resolve-gate 7E5PH4 abort␛[0m
     ␛[2mor␛[0m
       ␛[1myunta close 7E5PH4␛[0m   ␛[2mcloses it for good␛[0m

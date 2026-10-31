@@ -1,12 +1,14 @@
 //! What proves a plan, a step away from its change: the tests the spec
-//! wrote, counted, and where a review reads them whole; the suite every
-//! task keeps passing, once; each guard that checks what a task keeps, and
-//! the promises no guard checks; and, where no decision is put beside the
-//! plan, what keeps it from being proven.
+//! wrote, counted, with the command that shows them whole where a review
+//! leaves them out; the suite every task keeps passing, once; each guard
+//! that checks what a task keeps, and the promises no guard checks; and,
+//! where no decision is put beside the plan, what keeps it from being
+//! proven.
 
-use surco::components::{Fields, Marked};
+use surco::components::{Fields, Fold, Marked, Section};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
+use surco::line::Line;
 use surco::text::counted;
 use yunta_core::shown::PlanReview;
 use yunta_core::step::NextStep;
@@ -43,7 +45,7 @@ pub(super) fn proof(
     }
     match blocks.is_empty() {
         true => doc,
-        false => doc.with(titled("proof", blocks)),
+        false => doc.with(titled("proof", folded(blocks, review, form))),
     }
 }
 
@@ -57,7 +59,7 @@ fn measured(
 ) -> Fields {
     let mut fields = Fields::new();
     if let Some(spec) = &review.spec {
-        let tests: usize = spec.specs.iter().map(|spec| spec.tests.len()).sum();
+        let tests = crate::spec::test_count(spec);
         let files: Vec<&str> = spec
             .specs
             .iter()
@@ -90,6 +92,44 @@ fn measured(
         );
     }
     fields
+}
+
+/// `blocks` as the proof draws them: a forge's page folds them under what
+/// sums them up, when anything does; every other form draws them open.
+fn folded(blocks: Vec<Block>, review: &PlanReview, form: Form) -> Vec<Block> {
+    match form {
+        Form::Published => match summary(review) {
+            Some(words) => vec![Fold(Section {
+                lead: None,
+                title: Line::new().plain(words),
+                blocks,
+            })
+            .into()],
+            None => blocks,
+        },
+        Form::Review | Form::Whole => blocks,
+    }
+}
+
+/// What a folded proof is summed up by: what holds the plan, counted:
+/// `4 spec tests and the suite`, `2 guards and the suite`, `the suite`.
+/// `None` when none of them holds it, and the proof is not folded.
+fn summary(review: &PlanReview) -> Option<String> {
+    let tests = review.spec.as_ref().map_or(0, crate::spec::test_count);
+    let guards: usize = review.tasks.iter().map(|judged| judged.guards.len()).sum();
+    let parts: Vec<String> = [
+        (tests > 0).then(|| counted(tests, "spec test")),
+        (guards > 0).then(|| counted(guards, "guard")),
+        (!review.held.is_empty()).then(|| "the suite".to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    match parts.as_slice() {
+        [] => None,
+        [only] => Some(only.clone()),
+        [init @ .., last] => Some(format!("{} and {last}", init.join(", "))),
+    }
 }
 
 /// `fields` with each guard a task keeps a promise by: the task, what it

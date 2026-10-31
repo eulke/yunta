@@ -2,12 +2,20 @@
 //! by, what choosing it costs, and the question it asks. An option stores
 //! its id and where it leads, and its escalation's menu says the rest.
 
+use surco::components::DecisionOption;
 use surco::text;
 use yunta_core::events::{Asks, GateOption, GateWaitingPayload, Leads, Menu, ScopeWait};
 use yunta_core::listed_globs;
 use yunta_core::reserved::ReservedOption;
 
 use crate::blocks::{departure_words, remedy_words, reroute_words};
+
+/// The label of an option that pauses the run with its decision open.
+pub(crate) const PAUSE_HERE: &str = "Pause here";
+
+/// What choosing an option that pauses the run does: nothing runs, and its
+/// decision stays open.
+pub const STAYS_OPEN: &str = "nothing runs; this decision stays open";
 
 /// The label and the trade-off a person reads beside `option`: the words an
 /// older log stored with it, else the words its data and its menu give it.
@@ -42,6 +50,24 @@ pub fn asked(asks: &Asks) -> String {
     }
 }
 
+/// Every option `escalation` offers, as a decision draws it: its id, the
+/// words it is read by, what choosing it costs and what it asks.
+pub fn decision_options(escalation: &GateWaitingPayload) -> Vec<DecisionOption> {
+    escalation
+        .options()
+        .iter()
+        .map(|option| {
+            let (label, tradeoff) = option_words(escalation, option);
+            DecisionOption {
+                id: option.id.to_string(),
+                label: Some(label),
+                tradeoff,
+                asks: asks(option),
+            }
+        })
+        .collect()
+}
+
 /// The words the option's data gives it: where an author's option leads,
 /// else what its menu offers, else the abort every menu ends with.
 fn written(payload: &GateWaitingPayload, option: &GateOption) -> Option<(String, Option<String>)> {
@@ -65,7 +91,7 @@ fn written(payload: &GateWaitingPayload, option: &GateOption) -> Option<(String,
 }
 
 /// Where an author's option leads, and what going on settles.
-fn leading(leads: &Leads) -> (String, Option<String>) {
+pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
     match leads {
         Leads::Back { node, resumes } => {
             let tradeoff = if *resumes {
@@ -119,7 +145,8 @@ fn scoped(wait: &ScopeWait, id: ReservedOption) -> Option<(String, Option<String
     }
 }
 
-/// The continue and the abort of a run's token cap that is spent.
+/// The continue of a run's token cap that is spent. Its abort is the one
+/// every menu offers.
 fn over_budget(id: ReservedOption) -> Option<(String, Option<String>)> {
     match id {
         ReservedOption::Continue => Some((
@@ -129,10 +156,6 @@ fn over_budget(id: ReservedOption) -> Option<(String, Option<String>)> {
                  spending more"
                     .to_string(),
             ),
-        )),
-        ReservedOption::Abort => Some((
-            "Pause the run".to_string(),
-            Some("The run pauses with reason `budget`; a resume re-asks".to_string()),
         )),
         _ => None,
     }
@@ -176,10 +199,5 @@ fn at_the_console(id: ReservedOption) -> Option<(String, Option<String>)> {
 
 /// The abort every menu offers, which pauses the run.
 fn aborting(id: ReservedOption) -> Option<(String, Option<String>)> {
-    (id == ReservedOption::Abort).then(|| {
-        (
-            "Abort the run".to_string(),
-            Some("Pauses here; nothing further executes".to_string()),
-        )
-    })
+    (id == ReservedOption::Abort).then(|| (PAUSE_HERE.to_string(), Some(STAYS_OPEN.to_string())))
 }

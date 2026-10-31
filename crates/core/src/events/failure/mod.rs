@@ -245,7 +245,9 @@ pub enum Failure {
         comments: usize,
     },
     /// A pull request closed without approval; `closed_pull_request` is its
-    /// reference when the forge gave one.
+    /// reference when the forge gave one. Written by a binary from before a
+    /// closed pull request paused its gate; read from those logs, never
+    /// written.
     PullRequestClosed {
         #[serde(deserialize_with = "required_option")]
         closed_pull_request: Option<String>,

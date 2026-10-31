@@ -83,17 +83,13 @@ impl DecisionJson {
 
 /// Every option the gate offers, with the words a person reads beside it.
 fn options_of(escalation: &GateWaitingPayload) -> Vec<OptionJson> {
-    escalation
-        .options()
-        .iter()
-        .map(|option| {
-            let (label, tradeoff) = yunta_render::offers::option_words(escalation, option);
-            OptionJson {
-                id: option.id.to_string(),
-                label,
-                tradeoff,
-                asks: yunta_render::offers::asks(option),
-            }
+    yunta_render::offers::decision_options(escalation)
+        .into_iter()
+        .map(|option| OptionJson {
+            id: option.id,
+            label: option.label.unwrap_or_default(),
+            tradeoff: option.tradeoff,
+            asks: option.asks,
         })
         .collect()
 }

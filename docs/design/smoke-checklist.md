@@ -62,7 +62,7 @@ usuario.
 1. **Publish**: workflow con un `kind: gate` `external: { kind:
    pull_request, artifacts: [spec.md], branch: "{{run.branch}}" }` (el
    nodo previo produce `spec.md`). Correr → verificar: branch
-   `yunta/<run_id>` pusheado con el artifact commiteado, PR abierto, el
+   `yunta/run/<run_id>` pusheado con el artifact commiteado, PR abierto, el
    log con `gate_waiting.external_ref` = la URL del PR, y el run pausado.
 2. **Poll pendiente**: `yunta resume <run>` sin tocar el PR → sigue
    pausado, sin re-publicar (ni branch nuevo ni PR duplicado).

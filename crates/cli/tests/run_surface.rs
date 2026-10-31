@@ -300,7 +300,7 @@ fn the_closing_block_ends_with_the_decision_a_parked_run_waits_on() {
         "what it waits on: {text}"
     );
     assert!(
-        text.contains("Pauses here; nothing further executes")
+        text.contains("nothing runs; this decision stays open")
             && text.contains("Uses one extra correction attempt"),
         "every option carries the tradeoff that makes it a choice: {text}"
     );
@@ -665,9 +665,9 @@ fn the_budget_warning_survives_quiet_and_the_distribution_does_not() {
 #[test]
 fn a_parked_run_is_called_the_same_thing_on_every_surface() {
     // One stop, five surfaces, one word. The vocabulary lives in
-    // `surco::words::RunWord`, and this is what holds every surface to
-    // it: a reader who met `paused` on the block that closed the run
-    // meets `paused` again on the status page, in both documents a
+    // `surco::words::Standing`, and this is what holds every surface to
+    // it: a reader who met `needs you` on the block that closed the run
+    // meets `needs you` again on the status page, in both documents a
     // program reads, and in the listing's own grouping.
     const WORD: &str = "needs you";
 

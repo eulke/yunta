@@ -1,18 +1,18 @@
 # plan: 1 task
 
-Make it
+Make it.
 
 Writes the file the run is about.
 
-### steps
+## steps
 
 | step | task | what it does |
 |---|---|---|
 | 1 | `T001` | Make it |
 
-### step 1 of 1
+## step 1 of 1
 
-#### T001: Make it
+### T001: Make it
 
 - you will see: made.txt exists
 - changes: made.txt

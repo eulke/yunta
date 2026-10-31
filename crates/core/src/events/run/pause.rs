@@ -49,11 +49,21 @@ pub enum PauseReason {
     /// Nothing is runnable: `node` waits on `on`, which this pass left
     /// unresolved.
     Blocked { node: NodeId, on: Vec<NodeId> },
-    /// A gate was resolved to abort, with whatever the person wrote.
+    /// A person answered a decision with `abort`: the run pauses where it
+    /// is, its decision still open, with whatever they wrote.
     GateAborted {
         node: NodeId,
         free_text: Option<String>,
     },
+    /// A person closed, without merging, the pull request a gate waited on:
+    /// the decision pauses there, as `abort` pauses it at a terminal. The gate's
+    /// resolution records the close: no `node_failed` is written, and no
+    /// `node_started` unless the SHA-drift check reopened the gate before the
+    /// pull request closed. The gate forgets the pull request, and a resume
+    /// publishes it again, on the one a person reopened or a new one. It is a
+    /// pause of its own beside `GateAborted`: it names the pull request, and a
+    /// resume publishes the gate again, where after an abort it asks again.
+    PullRequestClosed { node: NodeId, url: String },
     /// A child run paused on its own log; the parent names it and keeps
     /// the child's pause.
     ChildPaused {
@@ -98,13 +108,15 @@ impl PauseReason {
     }
 
     /// Whether a person stopped the run: a cancel, before or after the
-    /// engine that drove it died, a gate answered with a pause, or a child
-    /// run stopped that way. Nobody owes an answer; a resume continues it.
+    /// engine that drove it died, a gate answered with a pause or whose pull
+    /// request they closed, or a child run stopped that way. Nobody owes an
+    /// answer; a resume continues it.
     pub fn by_a_person(&self) -> bool {
         match self {
             PauseReason::Cancelled
             | PauseReason::CancelledAfterCrash
-            | PauseReason::GateAborted { .. } => true,
+            | PauseReason::GateAborted { .. }
+            | PauseReason::PullRequestClosed { .. } => true,
             PauseReason::ChildPaused { child, .. } => child.by_a_person(),
             _ => false,
         }
@@ -159,6 +171,10 @@ mod tests {
             PauseReason::Recorded {
                 sentence: "waiting".into(),
             },
+            PauseReason::PullRequestClosed {
+                node: NodeId::from_static("approve"),
+                url: "https://mock.forge/pr/1".to_string(),
+            },
         ];
         for pause in pauses {
             let written = serde_json::to_value(&pause).unwrap();
@@ -178,5 +194,24 @@ mod tests {
         assert_eq!(reset.reset_wait(), Some((&node, at)));
         let budget = PauseReason::BudgetExhausted { spent: 5, cap: 4 };
         assert!(budget.reset_wait().is_none());
+    }
+
+    /// A closed pull request is a person pausing the decision, written by its
+    /// type with the gate and the pull request it names.
+    #[test]
+    fn a_closed_pull_request_is_a_pause_a_person_made() {
+        let closed = PauseReason::PullRequestClosed {
+            node: NodeId::from_static("approve"),
+            url: "https://mock.forge/pr/1".to_string(),
+        };
+        assert!(closed.by_a_person());
+        assert_eq!(
+            serde_json::to_value(&closed).unwrap(),
+            serde_json::json!({
+                "type": "pull_request_closed",
+                "node": "approve",
+                "url": "https://mock.forge/pr/1"
+            })
+        );
     }
 }

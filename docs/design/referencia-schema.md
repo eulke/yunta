@@ -195,7 +195,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: gate
     depends_on: [plan]
     assignee: lead
-    message: "Plan recorded. Do you approve?"
+                                    # sin message: ni con uno en blanco, pregunta «Approve the plan: <resumen>?»
     options: [approve, adjust]
     on: { adjust: plan }              # pide qué cambiar y retoma la sesión de `plan` con eso (D194)
     shows: [{ node: plan, kind: tasks }]   # el plan que se aprueba, atado a su hash en `gate_waiting`

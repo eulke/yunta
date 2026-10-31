@@ -45,8 +45,10 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
     let drawn = stdout(&receipt_out);
     let handle = yunta_testkit::handle(&run_id);
+    let first = drawn.lines().next().unwrap_or_default();
     assert!(
-        drawn.starts_with(&format!("✓ receipt for run {handle} · finished")),
+        first.starts_with("✓ receipt of bash-only-receipt (default) · finished")
+            && first.trim_end().ends_with(&handle),
         "{drawn}"
     );
     // A bash-only workflow has no tasks at all, and nothing to prove is
@@ -69,7 +71,9 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
     let run_dir = home.join("runs").join(&run_id);
     let written_md = std::fs::read_to_string(run_dir.join("receipt.md")).unwrap();
     assert!(
-        written_md.starts_with(&format!("# ✓ receipt for run {handle} · finished")),
+        written_md.starts_with(&format!(
+            "# ✓ receipt of bash-only-receipt (default) · finished · {handle}"
+        )),
         "{written_md}"
     );
     assert!(

@@ -38,7 +38,7 @@ own notes on what changed and how to migrate; workflows on the outgoing
 version keep working for one more schema generation before `check` starts
 rejecting them, with an error that names the field and the fix.
 
-## In-flight runs are never affected by an upgrade
+## In-flight runs are unaffected by an upgrade, with one exception
 
 A run's [manifest](guide.md) — workflow, config, inputs, and resolved
 runners — is hashed and frozen at creation. Upgrading the `yunta` binary mid-run, or between `yunta run`
@@ -49,6 +49,15 @@ generate today. The only thing a new binary version can change for an
 existing run is how `status`/`stats`/`graph` and the live view a `run` draws
 *render* information already in the log — never the log's content or the run's
 outcome.
+
+The guarantee above has one exception: a log written by a binary from before this
+release, where a closed pull request failed the gate. The fold forgets that pull
+request, so the gate's next publication opens a new one on the same branch, or
+reuses that pull request if a person reopened it. The binary that wrote the log
+polls the closed one instead, and under `on_failure` it fails the gate on it again
+until the re-routes run out. So an upgrade can change how that run's remaining nodes
+execute, and the run's outcome can differ. [The event log](#the-event-log) describes
+the replay.
 
 The manifest also records the repository the run was created in, as `project:
 { git_common_dir }` — the git directory its main checkout and every linked
@@ -220,7 +229,11 @@ its subject in the document's own words — ``task `t1`, criterion 1`` — which
 the whole of where it is: a diagnostic carries no line and column, and
 `events.json` publishes none. Every surface renders from that value — `status`
 and the receipt — so none of them can disagree about the facts, and nothing has
-to take a sentence apart to recover them.
+to take a sentence apart to recover them. A log from before a closed pull
+request paused its gate can carry `closed_pull_request:` in place of those forms.
+The value is the pull request's reference, or `null` when the forge gave none.
+The engine reads that form and never writes it. The gate paragraphs below say
+how a run that holds it replays.
 
 The later failure shapes have keys of their own too. `session_refused:` is a session
 that refused the request, with its adapter, its message and a cause: final,
@@ -258,13 +271,31 @@ pause is `awaiting_reset`, as corrupt, like any payload that is not its kind's
 shape. This policy makes no promise about a log a newer binary wrote.
 
 An engine claim in a `gate_waiting` summary is an object tagged by `claim`:
-`needs_decision`, `node_failed`, `awaits_review`, `forge_unreachable`,
-`recheck_unreachable`, `tokens_spent`, `loop_cap_spent`, `scope_asked` or `departs`,
-and so is the escalation that a `run_paused` carries when its
+`needs_decision`, `approve_plan` (with the `summary` of the plan the gate shows),
+`node_failed`, `awaits_review`, `forge_unreachable`, `recheck_unreachable`,
+`tokens_spent`, `loop_cap_spent`, `scope_asked` or `departs`, and so is the escalation
+that a `run_paused` carries when its
 pause is `escalation`. A binary from before those claims reads that payload as
 corrupt, as it reads the shapes above; this policy makes no promise about a log a
 newer binary wrote. A log written before them carries its summary as a plain string,
 and this binary reads that string as a summary a person or an agent wrote.
+
+A gate's pull request closed without merging is a pause a person made, as `abort`
+is. The log writes a `gate_resolved` with no payload field and no `node_started`
+or `node_failed`. The `run_paused` that follows carries `pull_request_closed`, with
+the gate's `node` and the pull request's `url`. The fold forgets the pull request
+the gate kept, so
+the next resume publishes the gate again, on the pull request a person reopened,
+or on a new one on the same branch. A log where a closed pull request failed its gate —
+`node_started`, that `gate_resolved`, and a `node_failed` carrying
+`closed_pull_request` — reads as it was written, except that the fold forgets the
+`external_ref` the gate kept for the closed pull request, so its next publication
+opens a new pull request on the same branch instead of polling the closed one. A
+pull request a person reopened is the one it reuses. A `published` menu carries
+`folder`, the folder of the branch the gate put its files in, and leaves it out for
+a gate whose files are at the branch's root, as every gate's are in a log written
+before the field. A binary from before this release reads `approve_plan` and
+`pull_request_closed` as corrupt, and passes over `folder`.
 
 A finding's `location` is where it is: a path with the lines of it when the
 finder named them (`src/lib.rs`, `src/lib.rs:142`, `src/lib.rs:142-150`). The path

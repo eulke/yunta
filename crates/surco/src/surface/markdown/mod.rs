@@ -4,15 +4,38 @@
 //! character and the word is what carries the meaning.
 
 use crate::components::{
-    Check, Checklist, Concern, Decision, Edge, Evidence, Fields, Headline, Holds, Lead, Marked,
-    Next, Paths, Problem, Reads, Refusal, Runs, Section, Table, Whole,
+    Check, Checklist, Concern, Edge, Evidence, Fields, Holds, Lead, Marked, Next, Paths, Problem,
+    Reads, Refusal, Runs, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
-use crate::glyphs::Glyphs;
+use crate::glyphs::{Glyphs, Mark};
 use crate::line::{Line, Tone};
 use crate::surface::Surface;
+use text::{cell, cell_code_span, code_span, literal, plain_text};
 
 mod code;
+mod decision;
+mod description;
+mod fence;
+mod fold;
+mod headline;
+mod text;
+
+pub use description::{Description, Leaves};
+
+/// How one page is written: as a file or as a forge's description, what it
+/// leaves out, and whether the block at hand stands inside a fold.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Page {
+    /// A forge's description, under the title the forge draws: its first
+    /// headline is a line, and a document's title a heading of the second
+    /// level.
+    description: bool,
+    /// What the page leaves out of its blocks.
+    leaves: Leaves,
+    /// Whether the block stands inside a fold, where an alert cannot.
+    folded: bool,
+}
 
 /// A Markdown file or a forge's page.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -26,79 +49,76 @@ impl Surface for Markdown {
     type Output = String;
 
     fn draw(&self, doc: &Doc) -> String {
-        let blocks: Vec<String> = doc
-            .blocks()
-            .iter()
-            .enumerate()
-            .map(|(at, drawn)| match (at, drawn) {
-                // A document's first headline is its title.
-                (0, Block::Headline(headline)) => format!("# {}", said(headline)),
-                // The furrow is a picture of what the facts below say in words.
-                (_, Block::Furrow(_)) => String::new(),
-                (_, Block::Title(title)) => format!("# {}", title.text().trim()),
-                _ => block(drawn, 0),
-            })
-            .filter(|drawn| !drawn.trim().is_empty())
-            .collect();
-        match blocks.is_empty() {
-            true => String::new(),
-            false => format!("{}\n", blocks.join("\n\n")),
-        }
+        drawn(
+            doc,
+            Page {
+                description: false,
+                leaves: Leaves::Nothing,
+                folded: false,
+            },
+        )
     }
 }
 
-/// One block, `depth` sections deep.
-fn block(block: &Block, depth: usize) -> String {
+/// `doc` written as `page` says, its blocks separated by a blank line.
+fn drawn(doc: &Doc, page: Page) -> String {
+    let blocks: Vec<String> = doc
+        .blocks()
+        .iter()
+        .enumerate()
+        .map(|(at, drawn)| match (at, drawn) {
+            // A document's first headline is its title.
+            (0, Block::Headline(headline)) => headline::first(headline, page),
+            // The furrow is a picture of what the facts below say in words.
+            (_, Block::Furrow(_)) => String::new(),
+            _ => block(drawn, 0, page),
+        })
+        .filter(|drawn| !drawn.trim().is_empty())
+        .collect();
+    match blocks.is_empty() {
+        true => String::new(),
+        false => format!("{}\n", blocks.join("\n\n")),
+    }
+}
+
+/// One block, `depth` sections deep, written as `page` says.
+fn block(block: &Block, depth: usize, page: Page) -> String {
     match block {
-        Block::Headline(headline) => self::headline(headline),
+        Block::Headline(headline) => headline::headline(headline),
         Block::Furrow(_) => String::new(),
-        Block::Gist(gist) => gist.0.clone(),
+        Block::Gist(gist) => plain_text(&gist.0),
         Block::Fields(fields) => self::fields(fields),
         Block::Table(table) => self::table(table),
         Block::Runs(runs) => self::runs(runs),
         Block::Evidence(evidence) => self::evidence(evidence),
-        Block::Said(said) => said.0.join("  \n"),
+        Block::Said(said) => said
+            .0
+            .iter()
+            .map(|line| plain_text(line))
+            .collect::<Vec<_>>()
+            .join("  \n"),
         Block::Paths(paths) => self::paths(paths),
-        Block::Decision(decision) => self::decision(decision),
+        Block::Decision(decision) => decision::decision(decision),
         Block::Checklist(list) => self::checklist(list),
         Block::Problem(problem) => self::problem(problem),
         Block::Refusal(refusal) => self::refusal(refusal),
         Block::Next(next) => self::next(next),
-        Block::Heading(title) => format!("{} {title}", "#".repeat(3 + depth)),
-        Block::Title(title) => format!("# {}", title.text().trim()),
-        Block::Section(section) => self::section(section, depth),
-        Block::Prose(prose) => prose.0.clone(),
-        Block::Note(note) => format!("_{}_", note.0),
-        Block::Markdown(text) => text.trim().to_string(),
-        Block::Marked(marked) => self::marked(marked),
+        Block::Heading(title) => format!("{} {}", "#".repeat(2 + depth), plain_text(title)),
+        Block::Title(title) => headline::title(title, page),
+        Block::Section(section) => self::section(section, depth, page),
+        Block::Fold(fold) => fold::fold(&fold.0, depth, page),
+        Block::Prose(prose) => plain_text(&prose.0),
+        Block::Note(note) => format!("_{}_", plain_text(&note.0)),
+        Block::Markdown(text) => fence::closed(text.trim()),
+        Block::Marked(marked) => self::marked(marked, page),
         Block::Concern(concern) => self::concern(concern),
         Block::Diagram(diagram) => {
             let fence = code::fence(&diagram.source);
             format!("{fence}mermaid\n{}\n{fence}", diagram.source)
         }
-        Block::Code(shown) => code::fenced(shown),
+        Block::Code(shown) => code::drawn(shown, page),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
-}
-
-fn headline(headline: &Headline) -> String {
-    format!("## {}", said(headline))
-}
-
-/// What a headline says: its mark, its subject, its word and the facts
-/// beside it, and what names it.
-fn said(headline: &Headline) -> String {
-    let sep = GLYPHS.sep();
-    let mut said = format!(
-        "{} {} {sep} {}",
-        GLYPHS.mark(headline.mark),
-        headline.subject,
-        headline.said
-    );
-    for fact in headline.facts.iter().chain(&headline.edge) {
-        said.push_str(&format!(" {sep} {fact}"));
-    }
-    said
 }
 
 fn fields(fields: &Fields) -> String {
@@ -106,9 +126,9 @@ fn fields(fields: &Fields) -> String {
     let mut above = None;
     for field in fields.rows() {
         let value = match field.reads {
-            Reads::Words => field.value.clone(),
+            Reads::Words => plain_text(&field.value),
             Reads::Literal => literal(&field.value),
-            Reads::Command => format!("`{}`", field.value),
+            Reads::Command => code_span(&field.value),
         };
         let value = match field.mark {
             Some(mark) => format!("{} {value}", GLYPHS.mark(mark)),
@@ -119,41 +139,77 @@ fn fields(fields: &Fields) -> String {
         let goes_on = field.label.is_empty() || above == Some(field.label);
         above = Some(field.label);
         match (goes_on, items.last_mut()) {
-            (true, Some(item)) => item.push_str(&format!("  \n  {value}")),
-            _ => items.push(format!("- {}: {value}", field.label)),
+            (true, Some(item)) => {
+                item.push_str("  \n");
+                item.push_str(&text::item("  ", "  ", &value));
+            }
+            _ => items.push(text::item(
+                &format!("- {}: ", plain_text(field.label)),
+                "  ",
+                &value,
+            )),
         }
     }
     items.join("\n")
 }
 
-/// A section: its title as a heading a level under the document's, and
-/// each of its blocks a level deeper.
-fn section(section: &Section, depth: usize) -> String {
-    let mark = match section.lead {
+/// What leads a section's title, with the space that sets it apart: its
+/// mark, or its place in a numbered list
+fn lead(section: &Section) -> String {
+    match section.lead {
         Some(Lead::Mark(mark)) => format!("{} ", GLYPHS.mark(mark)),
         Some(Lead::Ordinal(at)) => format!("{at}  "),
         None => String::new(),
-    };
+    }
+}
+
+/// A section: its title as a heading a level under the document's, and
+/// each of its blocks a level deeper.
+fn section(section: &Section, depth: usize, page: Page) -> String {
     let mut parts = vec![format!(
-        "{} {mark}{}",
-        "#".repeat(3 + depth),
-        section.title.text().trim()
+        "{} {}{}",
+        "#".repeat(2 + depth),
+        lead(section),
+        plain_text(section.title.text().trim())
     )];
     parts.extend(
         section
             .blocks
             .iter()
-            .map(|inner| block(inner, depth + 1))
+            .map(|inner| block(inner, depth + 1, page))
             .filter(|drawn| !drawn.trim().is_empty()),
     );
     parts.join("\n\n")
 }
 
-fn marked(marked: &Marked) -> String {
-    marked
-        .items
-        .iter()
-        .map(|item| format!("- {} {item}", GLYPHS.mark(marked.mark)))
+/// A list of items that each carry the same mark. A caution outside a fold
+/// is an alert; anywhere else, each item is a list item with its mark beside
+/// it, and each further line of an item kept under the item's first line.
+fn marked(marked: &Marked, page: Page) -> String {
+    match (marked.mark, page.folded) {
+        (Mark::Caution, false) if !marked.items.is_empty() => alert(marked),
+        _ => {
+            let first = format!("- {} ", GLYPHS.mark(marked.mark));
+            marked
+                .items
+                .iter()
+                .map(|item| text::item(&first, "  ", &plain_text(item)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+}
+
+/// A caution as an alert: its tag on a line of its own, then each item as a
+/// list item within the quote, each further line of it kept inside the quote
+fn alert(marked: &Marked) -> String {
+    std::iter::once("> [!CAUTION]".to_string())
+        .chain(
+            marked
+                .items
+                .iter()
+                .map(|item| text::item("> - ", ">   ", &plain_text(item))),
+        )
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -165,7 +221,7 @@ fn table(table: &Table) -> String {
     for column in &table.columns {
         match column.title {
             "" => out.push_str(" |"),
-            title => out.push_str(&format!(" {title} |")),
+            title => out.push_str(&format!(" {} |", cell(title))),
         }
     }
     out.push_str(&format!("\n|{}", "---|".repeat(table.columns.len())));
@@ -173,7 +229,7 @@ fn table(table: &Table) -> String {
         out.push_str("\n|");
         for (at, (said, column)) in row.cells.iter().zip(&table.columns).enumerate() {
             let mut said = match column.holds {
-                Holds::Id => format!("`{}`", said.text),
+                Holds::Id => cell_code_span(&said.text),
                 Holds::State | Holds::Words | Holds::Figure | Holds::Rest | Holds::Prose => {
                     cell(&said.text)
                 }
@@ -193,14 +249,14 @@ fn runs(runs: &Runs) -> String {
     let mut out = String::from("| | run | workflow | where it stands | |\n|---|---|---|---|---|");
     for row in &runs.rows {
         let edge = match &row.edge {
-            Edge::Age(age) => age.clone(),
-            Edge::Command(command) => format!("`{command}`"),
+            Edge::Age(age) => cell(age),
+            Edge::Command(command) => cell_code_span(command),
         };
         out.push_str(&format!(
-            "\n| {} {} | `{}` | {} ({}) | {} | {edge} |",
+            "\n| {} {} | {} | {} ({}) | {} | {edge} |",
             GLYPHS.mark(row.standing.mark()),
             row.standing.word(),
-            row.handle,
+            cell_code_span(&row.handle),
             cell(&row.workflow),
             cell(&row.mode),
             cell(&row.said),
@@ -210,7 +266,9 @@ fn runs(runs: &Runs) -> String {
 }
 
 fn evidence(evidence: &Evidence) -> String {
-    let mut out = format!("```\n{}\n```", evidence.quoted().join("\n"));
+    let quoted = evidence.quoted().join("\n");
+    let fence = code::fence(&quoted);
+    let mut out = format!("{fence}\n{quoted}\n{fence}");
     let mut rest = Vec::new();
     let above = evidence.above();
     if above > 0 {
@@ -218,8 +276,8 @@ fn evidence(evidence: &Evidence) -> String {
     }
     if let Some(whole) = &evidence.whole {
         rest.push(match whole {
-            Whole::File { shown, .. } => format!("whole output: `{shown}`"),
-            Whole::Command(command) => format!("whole output: `{command}`"),
+            Whole::File { shown, .. } => format!("whole output: {}", code_span(shown)),
+            Whole::Command(command) => format!("whole output: {}", code_span(command)),
         });
     }
     if !rest.is_empty() {
@@ -232,56 +290,30 @@ fn evidence(evidence: &Evidence) -> String {
 }
 
 fn paths(paths: &Paths) -> String {
-    std::iter::once(paths.heading.clone())
-        .chain(paths.paths.iter().map(|note| match &note.reason {
-            Some(reason) => format!("- `{}` ({reason})", note.path.display()),
-            None => format!("- `{}`", note.path.display()),
+    std::iter::once(plain_text(&paths.heading))
+        .chain(paths.paths.iter().map(|note| {
+            let path = code_span(&note.path.display().to_string());
+            match &note.reason {
+                Some(reason) => {
+                    format!("- {path} ({})", plain_text(&crate::text::one_line(reason)))
+                }
+                None => format!("- {path}"),
+            }
         }))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn decision(decision: &Decision) -> String {
-    let options = decision
-        .options
-        .iter()
-        .map(|option| {
-            let mut out = format!("- **{}**", option.id);
-            if let Some(label) = option.said_label() {
-                out.push_str(&format!(": {label}"));
-            }
-            if let Some(tradeoff) = &option.tradeoff {
-                out.push_str(&format!("  \n  {tradeoff}"));
-            }
-            if let Some(asks) = &option.asks {
-                out.push_str(&format!("  \n  asks: {asks}"));
-            }
-            if let Some(command) = decision.command(option) {
-                out.push_str(&format!("  \n  `{command}`"));
-            }
-            out
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    match decision.otherwise.is_empty() {
-        true => options,
-        false => format!(
-            "{options}\n\n{}\n\n{}",
-            crate::surface::terminal::OR,
-            steps(&decision.otherwise)
-        ),
-    }
-}
-
 fn checklist(list: &Checklist) -> String {
     let sep = format!(" {} ", GLYPHS.sep());
     let fold = list.fold().map(|fold| {
-        format!(
-            "- {} **{}** {}",
+        let names: Vec<String> = fold.names.iter().map(|name| plain_text(name)).collect();
+        let head = format!(
+            "- {} **{}** ",
             GLYPHS.mark(crate::components::Found::Holds.mark()),
-            fold.subject,
-            fold.names.join(&sep)
-        )
+            plain_text(&crate::text::one_line(&fold.subject))
+        );
+        text::item(&head, "  ", &names.join(&sep))
     });
     fold.into_iter()
         .chain(list.unfolded().map(check_item))
@@ -292,15 +324,14 @@ fn checklist(list: &Checklist) -> String {
 /// One check as a list item: its mark, its subject and what it found,
 /// with what it means, how to make it hold and what says more under it.
 fn check_item(check: &Check) -> String {
-    let mut row = format!(
-        "- {} **{}** {}",
-        GLYPHS.mark(check.found.mark()),
-        check.subject,
-        check.said
-    );
+    let subject = plain_text(&crate::text::one_line(&check.subject));
+    let head = format!("- {} **{subject}** ", GLYPHS.mark(check.found.mark()));
+    let mut row = text::item(&head, "  ", &plain_text(&check.said));
     row.push_str(&hung(check.so.as_deref(), check.fix.as_ref()));
     for detail in check.details.iter().flat_map(|detail| detail.lines()) {
-        row.push_str(&format!("\n  - {detail}"));
+        if !detail.trim().is_empty() {
+            row.push_str(&format!("\n  - {}", plain_text(detail)));
+        }
     }
     row
 }
@@ -316,23 +347,34 @@ fn next(next: &Next) -> String {
     )
 }
 
-/// Each command beside what it does, one to an item.
+/// Each command beside what it does, one to an item: the command on one line,
+/// and each further line of what it does kept under the item's first.
 fn steps(steps: &[(String, &'static str)]) -> String {
     steps
         .iter()
-        .map(|(command, gloss)| format!("- `{command}`: {gloss}"))
+        .map(|(command, gloss)| {
+            let command = crate::text::one_line(command);
+            text::item(
+                &format!("- {}: ", code_span(&command)),
+                "  ",
+                &plain_text(gloss),
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// One line of spans, its strong parts in bold.
+/// One line of spans, its strong parts in bold and its command parts in code,
+/// as written; every other part is words, written as `plain_text` writes them.
 fn line(line: &Line) -> String {
     line.spans()
         .iter()
         .map(|span| match span.tone {
-            Tone::Strong if !span.text.trim().is_empty() => format!("**{}**", span.text.trim()),
-            Tone::Command if !span.text.trim().is_empty() => format!("`{}`", span.text.trim()),
-            _ => span.text.clone(),
+            Tone::Strong if !span.text.trim().is_empty() => {
+                format!("**{}**", plain_text(span.text.trim()))
+            }
+            Tone::Command if !span.text.trim().is_empty() => code_span(span.text.trim()),
+            _ => plain_text(&span.text),
         })
         .collect::<String>()
         .trim()
@@ -342,12 +384,12 @@ fn line(line: &Line) -> String {
 /// A caution as a list item, with what it means and what fixes it under
 /// it.
 fn concern(concern: &Concern) -> String {
-    format!(
-        "- {} {}{}",
-        GLYPHS.mark(crate::glyphs::Mark::Caution),
-        concern.fact,
-        hung(Some(&concern.so), Some(&concern.fix))
-    )
+    let fact = text::item(
+        &format!("- {} ", GLYPHS.mark(crate::glyphs::Mark::Caution)),
+        "  ",
+        &plain_text(&concern.fact),
+    );
+    format!("{fact}{}", hung(Some(&concern.so), Some(&concern.fix)))
 }
 
 /// What a finding means and how to make it hold, as the items under its
@@ -356,13 +398,21 @@ fn hung(so: Option<&str>, fix: Option<&crate::components::Fix>) -> String {
     use crate::surface::terminal::{FIX, SO};
     let mut out = String::new();
     if let Some(so) = so {
-        out.push_str(&format!("\n  - {SO}: {so}"));
+        out.push('\n');
+        out.push_str(&text::item(&format!("  - {SO}: "), "    ", &plain_text(so)));
     }
     if let Some(fix) = fix {
-        out.push_str(&format!("\n  - {FIX}: {}", fix.said));
+        out.push('\n');
+        out.push_str(&text::item(
+            &format!("  - {FIX}: "),
+            "    ",
+            &plain_text(&fix.said),
+        ));
         if !fix.paste.is_empty() {
+            let paste = fix.paste.join("\n");
+            let fence = code::fence(&paste);
             out.push_str(&format!(
-                "\n\n    ```\n    {}\n    ```",
+                "\n\n    {fence}\n    {}\n    {fence}",
                 fix.paste.join("\n    ")
             ));
         }
@@ -374,22 +424,27 @@ fn hung(so: Option<&str>, fix: Option<&crate::components::Fix>) -> String {
 /// line with the part at fault marked under it, fenced as text; then what
 /// helps fix it after an italic `help:`, the items a separator apart.
 fn problem(problem: &Problem) -> String {
-    let mut out = format!("**{}** {}", problem.severity.word(), problem.said);
+    let mut out = format!(
+        "**{}** {}",
+        problem.severity.word(),
+        plain_text(&problem.said)
+    );
     if let Some(place) = &problem.at {
-        out.push_str(&format!("  \nat `{}`", place.named()));
+        out.push_str(&format!("  \nat {}", code_span(&place.named())));
         if let Some((source, before, len)) = place.fault() {
             let number = place.line;
             let pad = place.pad();
             let gutter = GLYPHS.gutter();
             let marks = GLYPHS.fault().to_string().repeat(len);
             let under = " ".repeat(crate::width::cell_width(&before));
-            out.push_str(&format!(
-                "\n\n```text\n{number} {gutter} {source}\n{pad} {gutter} {under}{marks}\n```"
-            ));
+            let body = format!("{number} {gutter} {source}\n{pad} {gutter} {under}{marks}");
+            let fence = code::fence(&body);
+            out.push_str(&format!("\n\n{fence}text\n{body}\n{fence}"));
         }
     }
     if !problem.help.is_empty() {
-        let help = problem.help.join(&format!(" {} ", GLYPHS.sep()));
+        let help: Vec<String> = problem.help.iter().map(|item| plain_text(item)).collect();
+        let help = help.join(&format!(" {} ", GLYPHS.sep()));
         out.push_str(&format!("\n\n_{}_ {help}", crate::surface::terminal::HELP));
     }
     out
@@ -400,38 +455,17 @@ fn refusal(refusal: &Refusal) -> String {
     let said = format!(
         "**{}** {}",
         crate::surface::terminal::REFUSED,
-        refusal.said.replace('\n', "  \n")
+        refusal
+            .said
+            .split('\n')
+            .map(plain_text)
+            .collect::<Vec<_>>()
+            .join("  \n")
     );
     match &refusal.detail {
-        Some(detail) => format!("{said}  \n_{detail}_"),
+        Some(detail) => format!("{said}  \n_{}_", plain_text(detail)),
         None => said,
     }
-}
-
-/// Text for one table cell: on one line, and with the pipe that would
-/// end the cell escaped.
-fn cell(text: &str) -> String {
-    crate::text::one_line(text).replace('|', "\\|")
-}
-
-/// `text` as Markdown says it as written, with a backslash before each sign
-/// Markdown would read as markup inside a line. A run of underscores
-/// between two letters or digits opens and closes nothing, so a name or a
-/// path keeps the ones it is most often written with.
-fn literal(text: &str) -> String {
-    let signs: Vec<char> = text.chars().collect();
-    let worded = |beside: Option<&char>| beside.is_some_and(|sign| sign.is_alphanumeric());
-    let mut out = String::with_capacity(text.len());
-    for (at, &sign) in signs.iter().enumerate() {
-        let inert = sign == '_'
-            && worded(signs[..at].iter().rev().find(|before| **before != '_'))
-            && worded(signs[at..].iter().find(|after| **after != '_'));
-        if matches!(sign, '\\' | '`' | '*' | '_' | '~' | '[' | ']' | '<' | '&') && !inert {
-            out.push('\\');
-        }
-        out.push(sign);
-    }
-    out
 }
 
 #[cfg(test)]

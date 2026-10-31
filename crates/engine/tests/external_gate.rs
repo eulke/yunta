@@ -7,13 +7,16 @@
 //! machine picks up the approval on a completely separate `execute_run`
 //! call, simulating `yunta resume`.
 
+#[path = "external_gate/closed.rs"]
+mod closed;
 mod common;
 #[path = "external_gate/console.rs"]
 mod console;
+#[path = "external_gate/page.rs"]
+mod page;
 
 use std::sync::Arc;
 
-use surco::golden::assert_golden;
 use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{Failure, FindingCause, FindingSays, GateEvent, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
@@ -305,28 +308,6 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
 }
 
 #[tokio::test]
-async fn a_closed_pr_fails_the_node_without_approval() {
-    let (bench, forge_state) = bench_on_a_forge();
-
-    bench.run(GATE_ONLY_WORKFLOW, NO_SESSIONS).await;
-    forge_state.close(bench.run_id.as_str());
-
-    let RunReport { state, .. } = bench.wake().await;
-    let failure = match state.nodes.state("approve") {
-        Some(NodeState::Failed { failure, .. }) => failure,
-        other => panic!("the gate fails when its pull request closes: {other:?}"),
-    };
-    assert!(
-        matches!(failure, Failure::PullRequestClosed { .. }),
-        "{failure:?}"
-    );
-    assert_eq!(
-        yunta_render::failure::sentence(failure),
-        "the pull request was closed without approval"
-    );
-}
-
-#[tokio::test]
 async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
     // A bench with no forge and no human answering: the gate takes the
     // same degrade-to-pause path a headless console already takes.
@@ -401,6 +382,9 @@ sessions:
     outcome: { type: completed, summary: "planned again" }
 "#;
 
+/// The gate's files on its pull request: the folder the run gives the gate, then each name.
+const TASKS_YAML: &str = ".yunta/gates/run-gate-1/approve-plan/tasks.yaml";
+const TASKS_MD: &str = ".yunta/gates/run-gate-1/approve-plan/tasks.md";
 /// The text a file on the run's pull request holds.
 fn published(forge: &MockForgeState, path: &str) -> String {
     let pr = forge.pull_requests().remove(0);
@@ -419,7 +403,7 @@ async fn a_published_gate_asks_its_question_and_publishes_the_plan_to_read() {
 
     let prs = forge_state.pull_requests();
     assert_eq!(prs.len(), 1);
-    assert_eq!(prs[0].title, "Is this plan the one to build?");
+    assert_eq!(prs[0].title, "Approve: Make it");
     assert!(
         prs[0]
             .body
@@ -427,18 +411,9 @@ async fn a_published_gate_asks_its_question_and_publishes_the_plan_to_read() {
         "{}",
         prs[0].body
     );
-    assert!(published(&forge_state, "tasks.yaml").contains("T001"));
-    let drawn = published(&forge_state, "tasks.md");
+    assert!(published(&forge_state, TASKS_YAML).contains("T001"));
+    let drawn = published(&forge_state, TASKS_MD);
     assert!(drawn.contains("Make it"), "{drawn}");
-    assert!(
-        drawn.contains("test -f made.txt"),
-        "the plan is published whole, with what proves each task: {drawn}"
-    );
-
-    // What a reviewer reads, byte for byte.
-    let goldens = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/forge");
-    assert_golden(&goldens.join("gate.md"), &prs[0].body);
-    assert_golden(&goldens.join("gate-tasks.md"), &drawn);
 }
 
 /// The planner's CLI runs tools and cannot resume a session, so its correction is a fresh one.
@@ -477,7 +452,7 @@ async fn changes_requested_publish_the_corrected_plan_on_the_same_pull_request()
         state.nodes.state("approve-plan")
     );
     assert_eq!(forge_state.pull_requests().len(), 1);
-    assert!(published(&forge_state, "tasks.md").contains("Say it"));
+    assert!(published(&forge_state, TASKS_MD).contains("Say it"));
 
     // A wake before anyone reviewed the correction finds the first review
     // still the last one on the pull request: it waits.

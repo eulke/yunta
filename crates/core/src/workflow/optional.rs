@@ -120,10 +120,7 @@ fn lacking(node: &Node, config: &ConfigLayer) -> Vec<ConfigKey> {
 /// `None` when anything else reaches it — a node nothing re-routes to
 /// starts the run on its own.
 fn only_through(workflow: &Workflow, node: &Node, gone: &HashSet<NodeId>) -> Option<NodeId> {
-    let waited_on = workflow
-        .nodes
-        .iter()
-        .any(|other| other.depends_on.contains(&node.id));
+    let waited_on = workflow.dependents(&node.id).next().is_some();
     if !node.depends_on.is_empty() || waited_on {
         return None;
     }

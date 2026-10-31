@@ -35,6 +35,16 @@ pub fn here(
     }
 }
 
+/// A decision a person answers at the prompt drawn under it: no option names
+/// a command, since that prompt is how it is chosen.
+pub fn at_the_prompt(options: Vec<DecisionOption>) -> Decision {
+    Decision {
+        chosen: Chosen::AtThePrompt,
+        options,
+        otherwise: Vec::new(),
+    }
+}
+
 /// The label and the tradeoff of a departure's answer, written from the
 /// departure's own facts: accepting it, and sending it back. `None` for an
 /// answer a departure does not offer.
@@ -104,4 +114,43 @@ pub(crate) fn departure_facts(menu: &DepartureMenu) -> Vec<Fact> {
         ));
     }
     facts
+}
+
+#[cfg(test)]
+mod tests {
+    use surco::components::DecisionOption;
+    use surco::doc::Doc;
+    use surco::look::Look;
+    use surco::surface::{Surface, Terminal};
+
+    use super::at_the_prompt;
+
+    /// A prompt draws each option with its words and what it asks, and no
+    /// command under any of them.
+    #[test]
+    fn a_prompt_draws_its_options_and_names_no_command() {
+        let decision = at_the_prompt(vec![
+            DecisionOption {
+                id: "approve".to_string(),
+                label: Some("On to `implement`".to_string()),
+                tradeoff: Some("resolves this gate".to_string()),
+                asks: None,
+            },
+            DecisionOption {
+                id: "adjust".to_string(),
+                label: None,
+                tradeoff: Some("sends what you say back to `plan`".to_string()),
+                asks: Some("what should change?".to_string()),
+            },
+        ]);
+        assert!(decision
+            .options
+            .iter()
+            .all(|option| decision.command(option).is_none()));
+        let drawn = Terminal::on(Look::plain()).draw(&Doc::new().with(decision));
+        assert!(drawn.contains("approve: On to `implement`"), "{drawn}");
+        assert!(drawn.contains("asks: what should change?"), "{drawn}");
+        assert!(!drawn.contains("yunta"), "{drawn}");
+        assert!(!drawn.contains("resolve-gate"), "{drawn}");
+    }
 }

@@ -23,7 +23,7 @@
     asks: what to change
     yunta resolve-gate 7E5PH4 adjust --text "<answer>"
 
-  progress     1 of 2 nodes done, 1 failed
+  progress     0 of 2 nodes done, 1 failed
   tokens       20.2k spent, 3 past runs, median 18k tokens
 
 next

@@ -9,6 +9,30 @@ use crate::doc::Block;
 use crate::glyphs::Mark;
 use crate::line::Line;
 
+/// What a whole document is, before anything it says: its name, and the
+/// facts it states beside it. A line too narrow for all of them breaks
+/// between two facts, never inside one, and goes on under the first fact.
+pub struct Title {
+    pub name: Line,
+    pub facts: Vec<String>,
+}
+
+impl Title {
+    /// A title that is its name alone.
+    pub fn named(name: Line) -> Self {
+        Title {
+            name,
+            facts: Vec::new(),
+        }
+    }
+}
+
+/// A section a reader opens when they want what it holds: a task's card
+/// under its step, a proof under its heading. A surface that folds draws
+/// it closed under its title; every other surface draws it as the section
+/// it is.
+pub struct Fold(pub Section);
+
 /// What follows a title, one step under it: a medium draws the title
 /// and then each block the way it draws any other.
 pub struct Section {
@@ -161,24 +185,6 @@ impl Code {
     pub fn within(mut self, within: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.within = within.into_iter().map(Into::into).collect();
         self
-    }
-
-    /// Where the code is, as its title says it: the file, then what in it,
-    /// each after the sign of the one it is inside of in `glyphs`.
-    pub fn title(&self, glyphs: crate::glyphs::Glyphs) -> String {
-        self.title_parts(glyphs).join(" ")
-    }
-
-    /// The title's parts, which a line too narrow for all of them breaks
-    /// between: the file, then `› name` for each thing in it.
-    pub fn title_parts(&self, glyphs: crate::glyphs::Glyphs) -> Vec<String> {
-        std::iter::once(self.at.clone())
-            .chain(
-                self.within
-                    .iter()
-                    .map(|inner| format!("{} {inner}", glyphs.within())),
-            )
-            .collect()
     }
 
     /// `code`, the file at `at`, as a review shows it: each test whole and

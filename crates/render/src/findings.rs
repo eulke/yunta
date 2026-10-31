@@ -18,11 +18,11 @@ pub fn document(held: &HeldFindings, of: &str) -> Doc {
     let mut sorted: Vec<Finding> = held.findings.iter().cloned().map(Finding::from).collect();
     sorted.sort_by_key(|finding| finding.severity);
     let counts = counted(sorted.iter().map(|finding| finding.severity));
-    let mut doc = Doc::new().with(Block::Title(heading(
+    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading(
         &format!("findings{of}"),
         &counts,
         String::new(),
-    )));
+    ))));
     for finding in sorted {
         let (title, detail) = found::said(&finding.says);
         doc = doc.with(Section {
@@ -49,11 +49,11 @@ pub fn run_document(view: &RunFindings) -> Doc {
         .iter()
         .filter(|standing| standing.settled.is_some())
         .count();
-    let mut doc = Doc::new().with(Block::Title(heading(
+    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(heading(
         "the run's findings",
         &counts,
         tally(answered, settled),
-    )));
+    ))));
     for standing in sorted {
         doc = doc.with(standing_section(standing));
     }

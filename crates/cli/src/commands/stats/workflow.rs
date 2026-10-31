@@ -115,11 +115,11 @@ pub(crate) fn verification_findings(findings: &yunta_engine::VerificationFinding
     }
     Some(
         Doc::new()
-            .with(Block::Title(
+            .with(Block::Title(surco::components::Title::named(
                 Line::new()
                     .push(Tone::Strong, "how its checks performed")
                     .push(Tone::Muted, ": advice, nothing here is acted on"),
-            ))
+            )))
             .with(advice(findings)),
     )
 }

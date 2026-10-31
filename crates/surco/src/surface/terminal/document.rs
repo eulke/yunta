@@ -1,9 +1,31 @@
-//! Prose, marked items, code, and what a message says whole.
+//! Prose, marked items, code, a title, and what a message says whole.
 
-use crate::components::{Code, Marked, Note, Paths, Prose, Said};
+use crate::components::{Code, Marked, Note, Paths, Prose, Said, Title};
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::width::{cell_width, indent, wrap, wrap_unbroken, INDENT};
+use crate::width::{cell_width, indent, joined, wrap, wrap_unbroken, INDENT};
+
+impl Title {
+    /// The title laid out for the width `look` allows. Its facts break
+    /// between one another, never inside one: the first shares the name's
+    /// line after a colon, and each further fact goes on a line under it.
+    /// A title with no facts wraps between its words, each span keeping its
+    /// tone.
+    pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
+        let width = look.width.cells();
+        if self.facts.is_empty() {
+            return self.name.wrap(width);
+        }
+        let lead = cell_width(&self.name.text()) + cell_width(": ");
+        let facts: Vec<&str> = self.facts.iter().map(String::as_str).collect();
+        let mut pieces = joined(&facts, ",", width.saturating_sub(lead)).into_iter();
+        let first = pieces.next().unwrap_or_default();
+        let hang = " ".repeat(lead);
+        let mut lines = vec![self.name.clone().plain(": ").plain(first)];
+        lines.extend(pieces.map(|piece| Line::new().plain(hang.as_str()).plain(piece)));
+        lines
+    }
+}
 
 impl Prose {
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
@@ -60,7 +82,7 @@ impl Code {
             0 => INDENT,
             _ => under.as_str(),
         };
-        let mut parts = self.title_parts(look.glyphs).into_iter();
+        let mut parts = crate::surface::code_title(self, look.glyphs).into_iter();
         let mut rows: Vec<String> = parts.next().into_iter().collect();
         for part in parts {
             let at = rows.len() - 1;

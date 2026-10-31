@@ -387,14 +387,15 @@ fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
     let attached = drawn
         .find("assignee: the release lead")
         .unwrap_or_else(|| panic!("the prompt drew no evidence at all:\n{drawn}"));
-    let options = drawn.find("  1  approve").unwrap_or_default();
+    let decision = drawn.find(DECISION).expect("the prompt never opened");
+    let options = decision + drawn[decision..].find("approve:").expect("no option rows");
     assert!(
         claim < attached,
         "the record is read under the claim it audits:\n{drawn}"
     );
     assert!(
         attached < options,
-        "the record a decision is audited against is read after the menu it audits:\n{drawn}"
+        "the record a decision is audited against is read after the options it audits:\n{drawn}"
     );
 }
 

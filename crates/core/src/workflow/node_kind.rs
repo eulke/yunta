@@ -104,9 +104,10 @@ pub enum NodeKind {
         /// Who the escalation names — a human on the forge (external),
         /// or whoever holds the interactive surface (internal).
         assignee: String,
-        /// The question the internal gate asks — becomes the
-        /// escalation's `summary`. Absent, a default derived from the node
-        /// id is used.
+        /// The question the gate asks, as written: its escalation's
+        /// `summary` and its pull request's question. Absent or blank, the
+        /// gate asks whether to approve the change a shown plan's summary
+        /// names, and otherwise asks for a decision by its node.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         /// Declared choices, free ids (for example `[approve, adjust]`).
@@ -310,12 +311,13 @@ pub struct ExternalGate {
     pub kind: ForgeKind,
     /// The artifacts of this run committed to `branch` for review, named
     /// the way `artifacts.produces` names them — the reference example:
-    /// `[spec.md]`. Each is published under the name the run's own view
+    /// `[spec.md]`. Each is published in the gate's folder on `branch`,
+    /// `.yunta/gates/<run>/<gate>/`, under the name the run's own view
     /// carries it by.
     pub artifacts: Vec<ArtifactSpec>,
     /// Template-rendered branch name the artifacts are pushed to and the
     /// PR is opened from (`{{run.branch}}`, the reference example, resolves
-    /// to `yunta/<run_id>` — a fresh push target, not necessarily the
+    /// to `yunta/run/<run_id>` — a fresh push target, not necessarily the
     /// worktree's own local checkout branch, since `isolation: none`
     /// never creates one).
     pub branch: String,

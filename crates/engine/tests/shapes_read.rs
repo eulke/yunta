@@ -476,7 +476,8 @@ async fn a_published_plan_says_what_its_shapes_imply() {
     bench.run(PUBLISHED, &plan_session(PLAN)).await;
 
     let published = forge.pull_requests().remove(0);
-    let drawn = String::from_utf8(published.files["tasks.md"].clone()).unwrap();
+    let path = format!(".yunta/gates/{}/approve-plan/tasks.md", bench.run_id);
+    let drawn = String::from_utf8(published.files[path.as_str()].clone()).unwrap();
     for said in [
         "- implies: build_it is named in 1 file no task changes:  \n  caller.rs",
         "pub fn build_it(depth: u32, {+width: u32+});",

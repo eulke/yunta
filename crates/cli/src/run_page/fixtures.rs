@@ -172,10 +172,7 @@ pub(crate) fn parked_on_lint() -> (RunPhase, Decided) {
         node: NodeId::from("lint"),
         escalation: exhausted_escalation().into_payload(),
         shown: Vec::new(),
-        beside: Beside {
-            claim: true,
-            evidence: true,
-        },
+        beside: Beside { evidence: true },
     };
     (phase, decided)
 }

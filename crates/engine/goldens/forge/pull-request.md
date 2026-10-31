@@ -2,12 +2,10 @@ What the run did.
 
 ---
 
-# ● receipt for run golden · running
+● **receipt of opens (default)** · running · golden
 
-the run is still open: this is its last step
+the run is still open: this is its last step.
 
-- workflow: opens
-- mode: default
 - run: run-pr-golden
 - cost: nothing spent
 

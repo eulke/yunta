@@ -27,8 +27,8 @@ pub fn document(
     form: Form,
     spell: &dyn Fn(&NextStep) -> String,
 ) -> Doc {
-    let tests: usize = file.specs.iter().map(|spec| spec.tests.len()).sum();
-    let mut doc = Doc::new().with(Block::Title(
+    let tests = test_count(file);
+    let mut doc = Doc::new().with(Block::Title(surco::components::Title::named(
         Line::new()
             .push(Tone::Strong, format!("spec{of}"))
             .plain(format!(
@@ -36,7 +36,7 @@ pub fn document(
                 counted(tests, "test"),
                 counted(file.specs.len(), "task")
             )),
-    ));
+    )));
     for spec in &file.specs {
         let mut fields = Fields::new();
         for test in &spec.tests {
@@ -66,6 +66,11 @@ pub fn document(
         });
     }
     doc
+}
+
+/// How many tests `file` holds, across every task it gives tests to.
+pub(crate) fn test_count(file: &SpecFile) -> usize {
+    file.specs.iter().map(|spec| spec.tests.len()).sum()
 }
 
 /// The command that shows a spec's tests, whole, for the run `run`: the

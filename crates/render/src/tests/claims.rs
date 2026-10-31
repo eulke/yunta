@@ -66,6 +66,13 @@ fn a_written_claim_reads_as_it_was_written_whatever_the_menu_holds() {
     assert_eq!(sentence(&claim, Some(&exhausted(1))), "Approve the plan?");
 }
 
+/// A question someone wrote over several lines reads on one line.
+#[test]
+fn a_question_written_over_lines_reads_as_one() {
+    let claim = Claim::Written("Ship it?\n  Now.".to_string());
+    assert_eq!(sentence(&claim, None), "Ship it? Now.");
+}
+
 #[test]
 fn an_awaiting_review_claim_names_its_node_and_its_assignee() {
     let claim = Claim::AwaitsReview {
@@ -165,5 +172,27 @@ fn a_task_whose_session_departs_from_the_plan_says_so() {
     assert_eq!(
         sentence(&claim, None),
         "task `greet`'s session departs from the plan"
+    );
+}
+
+/// The question a plan's approval asks names the change its summary says: on
+/// one line, with the marks it ends on taken off, so the question ends once.
+#[test]
+fn a_question_about_a_plan_names_its_change() {
+    let asked = |summary: &str| {
+        sentence(
+            &Claim::ApprovePlan {
+                summary: summary.to_string(),
+            },
+            None,
+        )
+    };
+    assert_eq!(asked("Make it"), "Approve the plan: Make it?");
+    assert_eq!(asked("Make it."), "Approve the plan: Make it?");
+    assert_eq!(asked("Make it!"), "Approve the plan: Make it?");
+    assert_eq!(asked("Ship v2?"), "Approve the plan: Ship v2?");
+    assert_eq!(
+        asked("line one\nline two"),
+        "Approve the plan: line one line two?"
     );
 }

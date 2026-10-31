@@ -118,7 +118,6 @@ nodes:
     kind: gate
     depends_on: [spec]
     assignee: lead
-    message: "Plan and its tests registered. Approve?"
     options: [approve, adjust]
     on: { adjust: plan }
     shows:

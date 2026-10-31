@@ -41,7 +41,7 @@ pub fn hanging(text: &str, prefix: &str) -> String {
 /// nothing said.
 ///
 /// ```
-/// # use crate::text::detailed;
+/// # use surco::text::detailed;
 /// assert_eq!(detailed("exit 1", "no such file"), "exit 1: no such file");
 /// assert_eq!(detailed("exit 1", ""), "exit 1");
 /// ```
@@ -64,7 +64,7 @@ pub fn detailed(headline: impl fmt::Display, detail: &str) -> String {
 /// those aside instead of introducing them.
 ///
 /// ```
-/// # use crate::text::aside;
+/// # use surco::text::aside;
 /// assert_eq!(aside("run_paused", "cap: 400; spent: 500"), "run_paused (cap: 400; spent: 500)");
 /// assert_eq!(aside("run_paused", ""), "run_paused");
 /// ```

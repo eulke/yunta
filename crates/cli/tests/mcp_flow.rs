@@ -89,8 +89,7 @@ nodes:
     // command that runs it in code.
     let said = tool_text(&catalog);
     assert!(
-        said.lines().any(|line| line.starts_with("### greet"))
-            && said.contains("`yunta run greet`"),
+        said.lines().any(|line| line.starts_with("## greet")) && said.contains("`yunta run greet`"),
         "got: {said}"
     );
 

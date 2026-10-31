@@ -4,20 +4,8 @@
 
 use super::*;
 
-#[tokio::test]
-async fn a_gate_that_declares_abort_pauses_the_run_when_abort_is_chosen() {
-    // Declaring `abort` places it on the menu; it never makes it an
-    // option that lets the run go on past the gate.
-    let bench = Bench::new();
-    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
-        option: "abort".into(),
-        by: "lead".into(),
-        free_text: Some("not this plan".to_string()),
-    });
-
-    let RunReport { terminal, state } = bench
-        .run_with_interaction(
-            r#"
+/// A gate that declares `abort` beside its other options, with a node after it.
+const DECLARED_ABORT_WORKFLOW: &str = r#"
 name: declared-abort
 nodes:
   - id: plan
@@ -33,11 +21,46 @@ nodes:
     kind: bash
     depends_on: [approve]
     run: "touch shipped"
-"#,
+"#;
+
+/// Runs `DECLARED_ABORT_WORKFLOW` with a person who chooses `abort` and leaves
+/// a note, and returns the bench the run was made on with the report it ended with.
+async fn run_declared_abort() -> (Bench, RunReport) {
+    let bench = Bench::new();
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "abort".into(),
+        by: "lead".into(),
+        free_text: Some("not this plan".to_string()),
+    });
+    let report = bench
+        .run_with_interaction(
+            DECLARED_ABORT_WORKFLOW,
             "dialect: claude-code\nsessions: []\n",
             &interaction,
         )
         .await;
+    (bench, report)
+}
+
+/// The question the run's gate logged, as the person who answered it saw it.
+fn logged_question(bench: &Bench) -> yunta_core::events::GateWaitingPayload {
+    let events = bench.events();
+    events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) => {
+                Some((**p).clone())
+            }
+            _ => None,
+        })
+        .expect("the question and its answer are on the log")
+}
+
+#[tokio::test]
+async fn a_gate_that_declares_abort_pauses_the_run_when_abort_is_chosen() {
+    // Declaring `abort` places it on the menu; it never makes it an
+    // option that lets the run go on past the gate.
+    let (bench, RunReport { terminal, state }) = run_declared_abort().await;
 
     match terminal {
         RunTerminal::Paused {
@@ -53,18 +76,11 @@ nodes:
         "the node after the gate never starts"
     );
     assert!(!bench.worktree.join("shipped").exists());
-    let events = bench.events();
-    let waiting = events
-        .iter()
-        .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) => Some(p),
-            _ => None,
-        })
-        .expect("the question and its answer are on the log");
+    let waiting = logged_question(&bench);
     let offered: Vec<(&str, Option<String>)> = waiting
         .options()
         .iter()
-        .map(|o| (o.id.as_str(), option_words(waiting, o).1))
+        .map(|o| (o.id.as_str(), option_words(&waiting, o).1))
         .collect();
     assert_eq!(
         offered,
@@ -75,7 +91,7 @@ nodes:
             ),
             (
                 "abort",
-                Some("Pauses here; nothing further executes".to_string()),
+                Some("nothing runs; this decision stays open".to_string()),
             ),
             (
                 "revise",
@@ -83,6 +99,27 @@ nodes:
             ),
         ],
         "abort sits where the author put it and says what it does"
+    );
+}
+
+/// A declared abort reads as the pause it makes: its label names the pause,
+/// and its tradeoff says what stays open.
+#[tokio::test]
+async fn a_declared_abort_reads_as_the_pause_it_makes() {
+    let (bench, _) = run_declared_abort().await;
+    let waiting = logged_question(&bench);
+    let abort = waiting
+        .options()
+        .iter()
+        .find(|o| o.id.as_str() == "abort")
+        .expect("abort is on the menu");
+    assert_eq!(
+        option_words(&waiting, abort),
+        (
+            "Pause here".to_string(),
+            Some("nothing runs; this decision stays open".to_string())
+        ),
+        "abort reads as the pause it makes"
     );
 }
 

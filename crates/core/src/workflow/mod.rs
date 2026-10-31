@@ -145,6 +145,17 @@ impl Workflow {
         }
     }
 
+    /// The nodes that wait on `id`: every top-level node whose `depends_on`
+    /// names it, in the order the file declares them. A parallel group's
+    /// children start when their group does, so a child's `depends_on` makes
+    /// it wait on nothing.
+    pub fn dependents<'a>(&'a self, id: &'a NodeId) -> impl Iterator<Item = &'a NodeId> + 'a {
+        self.nodes
+            .iter()
+            .filter(move |node| node.depends_on.contains(id))
+            .map(|node| &node.id)
+    }
+
     /// The mode a run starts at when nothing names one: the first declared,
     /// because promotion only ever moves forward. A workflow without
     /// `modes:` runs every node, under the default name.
@@ -374,5 +385,28 @@ nodes:
                 ("right", Some("fan")),
             ],
         );
+    }
+
+    /// A node's dependents are the top-level nodes that wait on it: a parallel
+    /// group's child starts with its group, whatever its `depends_on` names.
+    #[test]
+    fn a_group_child_is_never_among_a_nodes_dependents() {
+        let workflow: Workflow = yaml::parse(
+            r#"
+name: dependents
+nodes:
+  - { id: approve, kind: bash, run: x }
+  - { id: after, kind: bash, run: x, depends_on: [approve] }
+  - id: fan
+    kind: parallel
+    nodes:
+      - { id: left, kind: bash, run: x, depends_on: [approve] }
+      - { id: right, kind: bash, run: x }
+"#,
+        )
+        .unwrap();
+        let approve = NodeId::from_static("approve");
+        let dependents: Vec<&str> = workflow.dependents(&approve).map(NodeId::as_str).collect();
+        assert_eq!(dependents, ["after"]);
     }
 }

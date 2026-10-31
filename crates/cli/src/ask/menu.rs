@@ -12,12 +12,12 @@
 //! `abort`) share their first letter, so an initial is neither
 //! declarable nor derivable.
 //!
-//! What an option says beyond its name — on a decision, what it does
-//! and what choosing it costs — is read once, above the list, under the
-//! same number the list is picked by. The list itself is one short row
-//! per option, its name, because that is the only shape it redraws
-//! correctly and the name is what a person picks it by. It clears what it wrote
-//! by adding two counts: the line breaks its own drawing carries, and a
+//! An option's label is read once, above the list, under the same number
+//! the list is picked by. A decision's options carry none: what each does
+//! is on the page above the prompt. The list itself is one short row per
+//! option, its name, because that is the only shape it redraws correctly
+//! and the name is what a person picks it by. It clears what it wrote by
+//! adding two counts: the line breaks its own drawing carries, and a
 //! correction for a row it takes the terminal to have wrapped, measured
 //! against the terminal's width in bytes. An option drawn as a block
 //! answers the first count and collides with the second, and every
@@ -26,28 +26,27 @@
 //! width in bytes wraps nowhere and draws no correction, so what is
 //! cleared is what was written.
 //!
-//! The keys are named on a line of their own for the same reason: the
+//! The keys are named on lines of their own for the same reason: the
 //! filter is typed on the list's own top row, and a legend in front of
 //! it would push that row past the terminal's width after a few
 //! characters.
 
 use dialoguer::FuzzySelect;
-use surco::width::{wrap, INDENT, INDENT_WIDTH};
+use surco::width::{joined, wrap, INDENT, INDENT_WIDTH};
 
 use super::{Answered, Console, NoAnswer};
 
-/// The keys a list answers to, named above every one of them.
-const KEYS: &str = "arrows move, type to filter, enter chooses";
+/// The keys a list answers to, one entry each, so the line that names
+/// them can break between keys.
+const KEYS: [&str; 3] = ["arrows move", "type to filter", "enter chooses"];
 
-/// One option: what it is called, what choosing it means, and what the
-/// caller gets back for it.
+/// One option: what it is called, what it does when its name does not say
+/// it, and what the caller gets back for it.
 pub(crate) struct Choice<T> {
     /// What the option is picked by — the row the list holds.
     pub(crate) name: String,
     /// What it does, beside its name, when the name does not say it.
     pub(crate) label: Option<String>,
-    /// What is read under it, when the option carries something.
-    pub(crate) detail: Option<String>,
     pub(crate) value: T,
 }
 
@@ -57,7 +56,6 @@ impl<T> Choice<T> {
         Choice {
             name: name.into(),
             label: None,
-            detail: None,
             value,
         }
     }
@@ -79,8 +77,8 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
     let read = read(&choices, width);
     let rows = rows(&choices, width);
     // What is read above the list is whatever the list's own rows do
-    // not say: what an option does and carries underneath, and a name a
-    // row had to cut. An option a row holds whole is read on that row.
+    // not say: an option's label, and a name a row had to cut. An option
+    // a row holds whole is read on that row.
     if read
         .iter()
         .zip(&rows)
@@ -91,7 +89,10 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
         }
         console.say("")?;
     }
-    console.say(&format!("{KEYS}, {}", console.escape().said()))?;
+    let escape = console.escape().said();
+    for line in joined(&[KEYS[0], KEYS[1], KEYS[2], escape], ",", width) {
+        console.say(&line)?;
+    }
     let cursor = Cursor::taken(console);
     let picked = FuzzySelect::new()
         .with_prompt(verb)
@@ -113,9 +114,9 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
         .ok_or(NoAnswer::OffMenu)
 }
 
-/// Every option as it is read: its position, its text and what it
-/// carries underneath, each broken to `width` cells and every line after
-/// the first sitting under the text of the first.
+/// Every option as it is read: its position and its text, which is its
+/// name and label, each broken to `width` cells and every line after the
+/// first sitting under the text of the first.
 fn read<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
     let digits = digits(choices);
     let indent = " ".repeat(INDENT_WIDTH + digits + INDENT_WIDTH);
@@ -125,10 +126,7 @@ fn read<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
         .enumerate()
         .map(|(index, choice)| {
             let mut lines: Vec<String> = Vec::new();
-            let text = wrap(&choice.head(), room)
-                .into_iter()
-                .chain(choice.detail.iter().flat_map(|detail| wrap(detail, room)));
-            for line in text {
+            for line in wrap(&choice.head(), room) {
                 match lines.is_empty() {
                     true => lines.push(format!("{INDENT}{:>digits$}{INDENT}{line}", index + 1)),
                     false => lines.push(format!("{indent}{line}")),
@@ -210,39 +208,33 @@ mod tests {
     /// the gap after it are drawn.
     const ROOM: usize = LINE_WIDTH - INDENT_WIDTH - 1 - INDENT_WIDTH;
 
-    fn choices(details: bool) -> Vec<Choice<u8>> {
-        ["approve", "adjust", "abort"]
-            .iter()
-            .enumerate()
-            .map(|(index, name)| Choice {
-                detail: details.then(|| format!("what {name} costs")),
-                ..Choice::named(*name, index as u8)
-            })
-            .collect()
-    }
-
     #[test]
     fn every_option_is_numbered_from_one() {
+        let choices: Vec<Choice<u8>> = ["approve", "adjust", "abort"]
+            .iter()
+            .enumerate()
+            .map(|(index, name)| Choice::named(*name, index as u8))
+            .collect();
         assert_eq!(
-            read(&choices(false), LINE_WIDTH),
+            read(&choices, LINE_WIDTH),
             vec!["  1  approve", "  2  adjust", "  3  abort"]
         );
         assert_eq!(
-            rows(&choices(false), LINE_WIDTH),
+            rows(&choices, LINE_WIDTH),
             vec!["1  approve", "2  adjust", "3  abort"]
         );
     }
 
     #[test]
     fn an_option_too_long_for_one_line_is_broken_rather_than_left_to_the_terminal() {
-        // A tradeoff an exhausted re-route shows, which is half again as
-        // wide as a line has room for.
+        // A tradeoff an exhausted re-route shows, which runs past what a
+        // line has room for.
         let block = read(
             &[Choice {
-                label: Some("Re-route to `fix` once more".to_string()),
-                detail: Some(
-                    "Uses one extra correction attempt beyond the declared \
-                     max_reroutes (0); escalates again if `fix` doesn't fix it"
+                label: Some(
+                    "Re-route to `fix` once more: uses one extra correction attempt \
+                     beyond the declared max_reroutes (0); escalates again if `fix` \
+                     doesn't fix it"
                         .to_string(),
                 ),
                 ..Choice::named("retry", 0u8)
@@ -265,15 +257,25 @@ mod tests {
 
     #[test]
     fn a_second_line_sits_under_the_first_and_not_deeper() {
-        let read = read(&choices(true), LINE_WIDTH);
+        let long = Choice {
+            label: Some(
+                "resolves this gate, and the run goes on past it to `ship`, which runs next"
+                    .to_string(),
+            ),
+            ..Choice::named("approve", 0u8)
+        };
+        let read = read(std::slice::from_ref(&long), LINE_WIDTH);
         let first = read.first().map(String::as_str).unwrap_or_default();
-        let (head, detail) = first.split_once('\n').unwrap_or_default();
-        assert_eq!(head, "  1  approve");
-        assert_eq!(detail, "     what approve costs");
+        let (head, rest) = first.split_once('\n').unwrap_or_default();
         assert_eq!(
-            detail.len() - detail.trim_start().len(),
+            head,
+            "  1  approve: resolves this gate, and the run goes on past it to `ship`, which"
+        );
+        assert_eq!(rest, "     runs next");
+        assert_eq!(
+            rest.len() - rest.trim_start().len(),
             head.find("approve").unwrap_or_default(),
-            "what an option carries sits under the option's own text"
+            "a line the label breaks onto sits under the option's own text"
         );
     }
 
@@ -286,7 +288,7 @@ mod tests {
         const TERMINAL: usize = 40;
         let rows = rows(
             &[Choice {
-                detail: Some("no room for this on a row".to_string()),
+                label: Some("no room for this on a row".to_string()),
                 ..Choice::named(format!("retry-{}", "é".repeat(ROOM)), 0u8)
             }],
             TERMINAL,
@@ -307,7 +309,7 @@ mod tests {
     #[test]
     fn what_a_row_leaves_out_is_read_whole_above_the_list() {
         let long = Choice {
-            detail: Some("one more attempt".to_string()),
+            label: Some("one more attempt".to_string()),
             ..Choice::named("re-route-to-fix-once-more", 0u8)
         };
         let rows = rows(std::slice::from_ref(&long), 20);
@@ -326,14 +328,10 @@ mod tests {
     fn what_an_option_does_is_read_once_above_the_row_that_names_it() {
         let retry = Choice {
             label: Some("Re-route to `fix` once more".to_string()),
-            detail: Some("one more attempt".to_string()),
             ..Choice::named("retry", 0u8)
         };
         let read = read(std::slice::from_ref(&retry), LINE_WIDTH);
-        assert_eq!(
-            read,
-            ["  1  retry: Re-route to `fix` once more\n     one more attempt"]
-        );
+        assert_eq!(read, ["  1  retry: Re-route to `fix` once more"]);
         assert_eq!(rows(std::slice::from_ref(&retry), LINE_WIDTH), ["1  retry"]);
     }
 }

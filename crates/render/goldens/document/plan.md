@@ -1,6 +1,6 @@
 # plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
 
-Install packs in the user's Yunta state directory for use across projects
+Install packs in the user's Yunta state directory for use across projects.
 
 - you asked: add pack global instalation support, not only project level as today
 
@@ -12,47 +12,48 @@ prefers a project-local pack when the same workflow is available locally, then
 falls back to global packs. Pack locks and list/remove operations remain
 scoped to the selected installation level.
 
-### decided for you
+## decided for you
 
-#### 1  What scope and persistence does a global installation have?
+### 1  What scope and persistence does a global installation have?
 
 - chose: Store global packs under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and make them available to projects run by that user state root.
 - instead of: A system-wide shared directory  
   A configurable directory per installation
 - because: Yunta already defines and shares a user state root through YUNTA_HOME; using it keeps global availability aligned with existing user state and test isolation.
 
-#### 2  How does a user select global rather than project installation?
+### 2  How does a user select global rather than project installation?
 
 - chose: Add `--global` to `yunta pack add`; add `--global` selectors to pack list, remove, update and audit so lifecycle actions address the intended store.
 - instead of: A separate `pack install --global` command  
   Global installs as the default
 - because: The explicit flag preserves the established project-local default and makes the target visible on every mutating or inspection command.
 
-#### 3  What happens when local and global installations expose the same workflow or pack?
+### 3  What happens when local and global installations expose the same workflow or pack?
 
 - chose: Project-local catalog entries take precedence over global entries; global entries are fallback candidates. Ambiguity within either level remains an error. Permit same pack identity in both stores and keep independent lock entries.
 - instead of: Global overrides local  
   Refuse duplicate pack identities across levels
 - because: Local project state is the most specific choice, while independent stores allow a project to pin a different version without changing the user's installation.
 
-#### 4  Which lifecycle, permission, and compatibility behaviors are in scope?
+### 4  Which lifecycle, permission, and compatibility behaviors are in scope?
 
 - chose: Support global add, update, remove, list and audit with separate global locks; preserve existing audit, schema and executor checks for either target. Do not migrate existing project installs.
 - instead of: Only add global installs  
   Automatically migrate project installs
 - because: A useful persistent user-level install needs the existing management operations and safety gates; migration is unnecessary and could unexpectedly change checked-in project state.
 
-### risks
+## risks
 
-- ▲ Global lock state is user-specific and is not committed with a project, so different users may have different fallback pack versions.
-- ▲ Global catalog lookup must be threaded through every workflow, skill, agent, frozen-layer and prompt discovery path that currently reads only project packs.
+> [!CAUTION]
+> - Global lock state is user-specific and is not committed with a project, so different users may have different fallback pack versions.
+> - Global catalog lookup must be threaded through every workflow, skill, agent, frozen-layer and prompt discovery path that currently reads only project packs.
 
-### left out
+## left out
 
 - ◌ Migrating existing project installations to global storage.
 - ◌ Sharing global installs between operating system users.
 
-### design
+## design
 
 `PackInstallScope` selects the root before the existing staging, vendor,
 lock and management operations run. Project scope uses `<repo>/.yunta`;
@@ -62,7 +63,7 @@ first, then global packs, retaining the existing ambiguity rule within a
 source. Locks remain separate: project installs use `.yunta/yunta.lock`;
 global installs use `$YUNTA_HOME/yunta.lock`.
 
-### steps
+## steps
 
 | step | task | what it does |
 |---|---|---|
@@ -82,9 +83,9 @@ flowchart LR
   n1 --> n3
 ```
 
-### step 1 of 3
+## step 1 of 3
 
-#### global-pack-storage: Store packs and locks at a selected install scope
+### global-pack-storage: Store packs and locks at a selected install scope
 
 - you will see: Global storage resolves under the user's Yunta state directory, while project scope still resolves under the repository.
 - changes: crates/cli/src/pack.rs
@@ -117,7 +118,7 @@ pub fn installed_packs(scope: PackInstallScope, project_root: &Path, user_root: 
 
 _new · 1 line_
 
-#### global-pack-catalog: Discover global packs after project packs
+### global-pack-catalog: Discover global packs after project packs
 
 - you will see: A workflow supplied by a global pack can be run from any project using the same Yunta state root; a matching project pack continues to win.
 - changes: crates/engine/src/catalog.rs, crates/engine/src/frozen/layers.rs, crates/engine/src/frozen/prompt.rs, crates/engine/src/frozen/provenance.rs
@@ -169,9 +170,9 @@ pub(crate) async fn pack_provenance(repo: &Path, pack_dir: &Path, manifest_path:
 
 _1 line_
 
-### step 2 of 3
+## step 2 of 3
 
-#### global-pack-cli: Expose global pack lifecycle flags
+### global-pack-cli: Expose global pack lifecycle flags
 
 - you will see: Users can pass `--global` to install or manage a pack in their user store; commands without it retain repository-local behavior.
 - changes: crates/cli/src/cli/mod.rs, crates/cli/src/cli/dispatch.rs, crates/cli/src/commands/pack.rs, crates/cli/src/commands/pack_audit.rs
@@ -225,9 +226,9 @@ pub async fn audit(pack: &PackRef, global: bool, look: &Look) -> Result<Outcome,
 
 _1 line_
 
-### step 3 of 3
+## step 3 of 3
 
-#### global-pack-docs: Document global pack installation
+### global-pack-docs: Document global pack installation
 
 - you will see: The pack guide shows how to install and manage user-wide packs and explains where they live and how precedence works.
 - changes: docs/global-install.md
@@ -249,7 +250,7 @@ Global packs are stored under `$YUNTA_HOME/packs` (or `~/.yunta/packs`) and are 
 
 _8 lines_
 
-### the spec's tests
+## the spec's tests
 
 `crates/cli/tests/global_pack_storage.rs`: what proves `global-pack-storage`
 
@@ -316,7 +317,7 @@ fn global_pack_docs_cmd_names_the_global_flag() {
 
 _5 lines_
 
-### proof
+## proof
 
 - spec tests: 4 in 4 files, 37 lines
 - the suite: every task keeps it passing; green before this run changed anything  

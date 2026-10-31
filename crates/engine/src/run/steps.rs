@@ -1,4 +1,4 @@
-//! One handler per terminal or continuing [`ScheduleStep`] — the bodies the
+//! One handler per terminal or continuing [`schedule::Decision`] — the bodies the
 //! scheduler loop in [`super`] dispatches to, each named for the step it
 //! serves so the loop reads as the schedule it runs.
 

@@ -93,6 +93,14 @@ impl GitHubForgeBuilder {
     }
 }
 
+/// The open pull request a run's gate already holds: its reference, and the
+/// title and description the forge holds for it.
+pub(super) struct OpenPr {
+    pub(super) reference: PullRequestRef,
+    pub(super) title: String,
+    pub(super) body: String,
+}
+
 impl GitHubForge {
     /// A builder for a forge that writes its next steps with `spell`.
     pub fn configure(repo: GitHubRepo, token: Secret<String>, spell: Spell) -> GitHubForgeBuilder {
@@ -126,7 +134,7 @@ impl GitHubForge {
 
     /// Sends the request and reads its answer as a success, a rate
     /// limit or a refusal; no answer at all is a transport error.
-    async fn send(
+    pub(super) async fn send(
         &self,
         action: &'static str,
         request: reqwest::RequestBuilder,
@@ -184,17 +192,18 @@ impl GitHubForge {
     }
 
     /// The open pull request on `branch` carrying this run's marker —
-    /// the one a resumed gate keeps using. A PR someone closed or
-    /// merged is never picked up again.
+    /// the one a resumed gate keeps using, with the title and description
+    /// it holds. A PR someone closed or merged is never picked up again.
     pub(super) async fn find_open_pr(
         &self,
         branch: &str,
         run_id: &str,
-    ) -> Result<Option<PullRequestRef>, ForgeError> {
+    ) -> Result<Option<OpenPr>, ForgeError> {
         #[derive(Deserialize)]
         struct PrSummary {
             number: u64,
             html_url: String,
+            title: String,
             #[serde(default)]
             body: Option<String>,
         }
@@ -217,9 +226,13 @@ impl GitHubForge {
                     .as_deref()
                     .is_some_and(|body| super::marked(body, run_id))
             })
-            .map(|pr| PullRequestRef {
-                url: pr.html_url,
-                number: pr.number,
+            .map(|pr| OpenPr {
+                reference: PullRequestRef {
+                    url: pr.html_url,
+                    number: pr.number,
+                },
+                title: pr.title,
+                body: pr.body.unwrap_or_default(),
             }))
     }
 
@@ -312,6 +325,9 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 impl Forge for GitHubForge {
     async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
         let run_id = req.run_id.as_str();
+        // Drawn before anything is read or committed, so a description the forge
+        // would refuse leaves the branch as it was.
+        let body = super::gate_body(req, &*self.spell)?;
         let existing = self.find_open_pr(&req.branch, run_id).await?;
         if existing.is_none() {
             let base_sha = self.base_branch_sha(&req.base_branch).await?;
@@ -329,16 +345,19 @@ impl Forge for GitHubForge {
             self.commit_artifact(&path, &content, &req.branch, &message)
                 .await?;
         }
+        let title = super::gate_title(req);
         match existing {
-            Some(existing) => Ok(existing),
+            Some(open) => {
+                // A reused pull request shows this lap: its title and description
+                // are redrawn only when one of them differs from what the forge holds.
+                if open.title != title || !super::same_text(&open.body, &body) {
+                    self.update_pr(open.reference.number, &title, &body).await?;
+                }
+                Ok(open.reference)
+            }
             None => {
-                self.create_pr(
-                    &super::gate_title(req),
-                    &req.branch,
-                    &req.base_branch,
-                    &super::gate_body(req, &*self.spell),
-                )
-                .await
+                self.create_pr(&title, &req.branch, &req.base_branch, &body)
+                    .await
             }
         }
     }

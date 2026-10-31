@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use surco::words::Standing;
+use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::RunId;
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 use yunta_render::spend::Breakdown;
@@ -31,10 +31,12 @@ use surco::width::{indent, CHILD_DEPTH};
 /// up with the blocks a run's other surfaces nest.
 const DETAIL_DEPTH: usize = 2;
 
-/// The row that opens the region while something needs the person:
-/// the command that answers it, and what it is about. `None` while the
-/// run needs nobody — the footer says so, and a row saying nothing would
-/// cost the work a row.
+/// The row that opens the region while the frame stands as
+/// `Standing::NeedsYou`: the command that answers it, and what it is about.
+/// Any other standing draws none, since the footer says that nothing needs
+/// the person, or that the run waits for a reset: a pause a person chose
+/// stands as `Standing::Stopped`, and a reset that resumes on its own as
+/// `Standing::Waiting`. A row saying nothing would cost the work a row.
 ///
 /// The command comes before what it is about, so that a row cut to fit
 /// loses the subject and never the thing to run. A reader who lost the
@@ -46,16 +48,19 @@ pub(super) fn attention(
     answerable: bool,
     glyphs: Glyphs,
 ) -> Option<Line> {
-    let on = advice::parked(&frame.phase)?;
-    // A limit's reset is nobody's to answer: the run resumes on its own.
-    if advice::reset_pause(&frame.phase).is_some() {
+    if !matches!(frame.standing, Standing::NeedsYou) {
         return None;
     }
+    let on = advice::parked(&frame.phase)?;
     Some(
         Line::new()
             .push(
                 Tone::NeedsYou,
-                format!("{} needs you", glyphs.mark(Mark::NeedsYou)),
+                format!(
+                    "{} {}",
+                    glyphs.mark(Mark::NeedsYou),
+                    Standing::NeedsYou.word()
+                ),
             )
             .plain(": ")
             .push(Tone::Strong, answer_command(run_id, answerable))
@@ -93,9 +98,12 @@ pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
     }
     let line = Line::new().push(Tone::Muted, format!("{}{sep}", said.join(&sep)));
     match frame.standing {
-        Standing::Waiting => line.push(Tone::Muted, "waiting for a reset"),
+        Standing::Waiting => line.push(
+            Tone::Muted,
+            format!("{} for a reset", Standing::Waiting.word()),
+        ),
         Standing::NeedsYou => line.push(Tone::NeedsYou, Standing::NeedsYou.word()),
-        _ => line.push(Tone::Muted, "nothing needs you"),
+        _ => line.push(Tone::Muted, NOTHING_NEEDS_YOU),
     }
 }
 
@@ -403,6 +411,32 @@ mod tests {
             "it carries the command that answers it, whole: {row}"
         );
         assert!(row.contains("node `plan`"), "and what it is about: {row}");
+    }
+
+    /// A pause a person chose draws no row, and the footer says nothing needs them.
+    #[test]
+    fn a_run_a_person_paused_draws_no_attention_row() {
+        let paused = |reason: yunta_core::events::PauseReason| {
+            standing(
+                RunPhase::Waiting {
+                    on: yunta_engine::WaitingOn::Run { reason },
+                },
+                None,
+            )
+        };
+        let closed = paused(yunta_core::events::PauseReason::PullRequestClosed {
+            node: NodeId::from_static("approve"),
+            url: "https://forge/pr/1".to_string(),
+        });
+        let aborted = paused(yunta_core::events::PauseReason::GateAborted {
+            node: NodeId::from_static("approve"),
+            free_text: None,
+        });
+        for frame in [&closed, &aborted] {
+            assert!(attention(frame, &RUN, true, Glyphs::Ascii).is_none());
+            let line = Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
+            assert!(line.ends_with(" nothing needs you"), "{line}");
+        }
     }
 
     #[test]

@@ -199,3 +199,25 @@ fn an_item_wider_than_the_room_is_wrapped_on_lines_of_its_own() {
         ["git ;", "a node that declares", "questions asks them"]
     );
 }
+
+/// Keys a prompt names, a comma after each but the last, broken between
+/// two keys when the line has no room for the next.
+#[test]
+fn items_joined_by_a_separator_break_only_between_two_items() {
+    assert_eq!(
+        joined(
+            &[
+                "arrows move",
+                "type to filter",
+                "enter chooses",
+                "esc parks the run"
+            ],
+            ",",
+            60
+        ),
+        [
+            "arrows move, type to filter, enter chooses,",
+            "esc parks the run"
+        ]
+    );
+}

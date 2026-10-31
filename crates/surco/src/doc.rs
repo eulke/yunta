@@ -72,11 +72,14 @@ pub enum Block {
     /// What a command would not do.
     Refusal(Refusal),
     Next(Next),
-    /// What a whole document is, before anything it says.
-    Title(Line),
+    /// What a whole document is, before anything it says: its name and
+    /// the facts beside it.
+    Title(crate::components::Title),
     /// The title of what follows it, inside a document.
     Heading(String),
     Section(Section),
+    /// A section a reader opens when they want what it holds.
+    Fold(crate::components::Fold),
     Prose(Prose),
     /// A remark beside what the page says.
     Note(Note),
@@ -119,7 +122,9 @@ block_from!(
     Problem(Problem),
     Refusal(Refusal),
     Next(Next),
+    Title(crate::components::Title),
     Section(Section),
+    Fold(crate::components::Fold),
     Prose(Prose),
     Note(Note),
     Marked(Marked),

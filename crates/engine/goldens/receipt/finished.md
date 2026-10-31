@@ -1,7 +1,5 @@
-# ✓ receipt for run 1-0001 · finished
+# ✓ receipt of release-cycle (default) · finished · 1-0001
 
-- workflow: release-cycle
-- mode: default
 - run: run-2026-08-21-0001
 - cost: 1.54k tokens (1.2k in / 340 out (200 cached)) · cost per verified task: 770 tokens · 2 reroutes
 
@@ -11,7 +9,7 @@
 - ✓ **review** by 2 independent runners via `review` (claude-code, codex)
 - ✓ **event chain** 342 events, hash-linked, replayable
 
-### criteria
+## criteria
 
 - ✓ **T001** `test -f hello.txt` exits 0
 - ✓ **T002** `cargo test -p yunta-core` exits 0

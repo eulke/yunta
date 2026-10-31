@@ -10,10 +10,12 @@ mod diff;
 mod markdown;
 mod terminal;
 
-pub use markdown::Markdown;
+pub use markdown::{Description, Leaves, Markdown};
 pub use terminal::Terminal;
 
+use crate::components::Code;
 use crate::doc::Doc;
+use crate::glyphs::Glyphs;
 
 /// A medium a document is drawn on.
 pub trait Surface {
@@ -21,4 +23,17 @@ pub trait Surface {
     type Output;
 
     fn draw(&self, doc: &Doc) -> Self::Output;
+}
+
+/// Where `code` is, as the parts its title says it in: its file, then each
+/// thing in it after the sign `glyphs` puts before what stands inside another.
+/// A line too narrow for all of them breaks between two parts.
+pub(in crate::surface) fn code_title(code: &Code, glyphs: Glyphs) -> Vec<String> {
+    std::iter::once(code.at.clone())
+        .chain(
+            code.within
+                .iter()
+                .map(|inner| format!("{} {inner}", glyphs.within())),
+        )
+        .collect()
 }

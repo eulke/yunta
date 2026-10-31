@@ -117,6 +117,12 @@ impl Standing {
     }
 }
 
+/// What a page says when nothing needs the person.
+pub const NOTHING_NEEDS_YOU: &str = "nothing needs you";
+
+/// The plural of `needs you`, for a count of runs that need a person.
+pub const NEED_YOU: &str = "need you";
+
 const fn widest(words: &[Standing]) -> usize {
     match words {
         [] => 0,

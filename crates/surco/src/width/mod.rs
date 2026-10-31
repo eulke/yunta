@@ -105,20 +105,23 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// `items` on lines of `room` cells, `sep` after each but the last, a line
-/// broken only between two items: one never starts on a line and ends on
-/// the next. An item wider than the room is wrapped on lines of its own,
-/// never cut inside a word, its separator at the end of its last line: a
-/// separator never takes a line alone.
+/// `items` on lines of `room` cells, `sep` a space before it after each
+/// but the last: [`joined`] with a separator that stands apart.
 pub fn packed(items: &[&str], sep: char, room: usize) -> Vec<String> {
+    joined(items, &format!(" {sep}"), room)
+}
+
+/// `items` on lines of `room` cells, each but the last followed by `sep`,
+/// a line broken only between two items: one never starts on a line and
+/// ends on the next. An item wider than the room is wrapped on lines of its
+/// own, never cut inside a word, its separator at the end of its last line:
+/// a separator never takes a line alone.
+pub fn joined(items: &[&str], sep: &str, room: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
     for (at, item) in items.iter().enumerate() {
         let sep = (at + 1 < items.len()).then_some(sep);
-        let piece = match sep {
-            Some(sep) => format!("{item} {sep}"),
-            None => item.to_string(),
-        };
+        let piece = format!("{item}{}", sep.unwrap_or_default());
         if cell_width(&piece) > room {
             lines.extend((!line.is_empty()).then(|| std::mem::take(&mut line)));
             lines.extend(wrapped_with(item, sep, room));
@@ -139,14 +142,13 @@ pub fn packed(items: &[&str], sep: char, room: usize) -> Vec<String> {
 
 /// `item` wrapped on lines of `room` cells, never cut inside a word, with
 /// `sep` ending its last line when one follows it.
-fn wrapped_with(item: &str, sep: Option<char>, room: usize) -> Vec<String> {
+fn wrapped_with(item: &str, sep: Option<&str>, room: usize) -> Vec<String> {
     let Some(sep) = sep else {
         return wrap_unbroken(item, room);
     };
-    let mut lines = wrap_unbroken(item, room.saturating_sub(2));
+    let mut lines = wrap_unbroken(item, room.saturating_sub(cell_width(sep)));
     if let Some(last) = lines.last_mut() {
-        last.push(' ');
-        last.push(sep);
+        last.push_str(sep);
     }
     lines
 }

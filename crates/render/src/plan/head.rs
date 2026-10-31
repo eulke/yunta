@@ -2,7 +2,7 @@
 //! for its reader, what it does, what keeps it from being proven, and what
 //! the person asked for.
 
-use surco::components::{Fields, Marked, Prose};
+use surco::components::{Fields, Gist, Marked, Title};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::{Line, Tone};
@@ -18,13 +18,12 @@ use super::said;
 /// count of its tests is not part of it: how a plan is proven is said once,
 /// in its proof.
 pub(super) fn head(review: &PlanReview, steps: &[Vec<&Task>]) -> Doc {
-    let mut doc = Doc::new().with(Block::Title(
-        Line::new()
-            .push(Tone::Strong, "plan")
-            .plain(format!(": {}", facts(review, steps.len()).join(", "))),
-    ));
+    let mut doc = Doc::new().with(Block::Title(Title {
+        name: Line::new().push(Tone::Strong, "plan"),
+        facts: facts(review, steps.len()),
+    }));
     if let Some(summary) = said(&review.plan.summary) {
-        doc = doc.with(Prose(summary.to_string()));
+        doc = doc.with(Gist::new(summary));
     }
     let flaws = review.flaws().len();
     if flaws > 0 {

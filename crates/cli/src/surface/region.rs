@@ -264,7 +264,10 @@ mod tests {
 
     /// A run of `nodes` in `phase`, counted as the region counts them.
     fn frame(phase: RunPhase, nodes: Vec<yunta_engine::NodeFrame>) -> RunFrame {
+        let engine = yunta_engine::Engine::this(chrono::DateTime::UNIX_EPOCH);
+        let standing = yunta_engine::run_standing(&phase, &nodes, 0, &engine);
         RunFrame {
+            standing,
             phase,
             flow: Counter {
                 total: nodes.len(),

@@ -55,7 +55,7 @@ pub fn document(
                 None => (Line::new().push(Tone::Strong, named), text.as_str()),
             };
             Doc::new()
-                .with(Block::Title(title))
+                .with(Block::Title(surco::components::Title::named(title)))
                 .with(Block::Markdown(body.to_string()))
         }
     }
@@ -101,7 +101,7 @@ pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Opti
             .plan
             .risks
             .iter()
-            .map(|risk| format!("risk: {}", first_sentence(risk)))
+            .map(|risk| format!("risk: {risk}"))
             .collect();
         if !risks.is_empty() {
             blocks.push(
@@ -118,6 +118,17 @@ pub fn before_you_decide(withheld: &[Withheld], shown: &[ShownDocument]) -> Opti
         title: Line::new().push(Tone::Strong, "before you decide"),
         blocks,
     })
+}
+
+/// Whether the section `before_you_decide` draws over `shown` says why the
+/// options `withheld` names are not offered: it does when a plan among
+/// `shown` has a flaw, under which `unprovable` names each withheld option.
+pub fn says_why(withheld: &[Withheld], shown: &[ShownDocument]) -> bool {
+    !withheld.is_empty()
+        && shown.iter().any(|document| match &document.content {
+            ShownContent::Tasks(review) => !review.flaws().is_empty(),
+            _ => false,
+        })
 }
 
 /// What keeps `review` from being proven, under what the gate withholds
@@ -169,12 +180,13 @@ fn handed(review: &PlanReview) -> Option<String> {
     let broke: Vec<String> = handed
         .refused
         .iter()
-        .map(|(code, times)| format!("{code} {}", counted(*times, "time")))
+        // Each rule counts the refusals that broke it, and one refusal can break two.
+        .map(|(code, times)| format!("{code} in {times}"))
         .collect();
     Some(format!(
         "handed over {}; refused {}: {}",
         counted(handed.submissions, "time"),
-        handed.refusals,
+        counted(handed.refusals, "time"),
         broke.join(", ")
     ))
 }
@@ -192,11 +204,86 @@ fn codeless(review: &PlanReview) -> Option<String> {
     })
 }
 
-/// The first sentence of `text`, for a list that names each thing once.
-fn first_sentence(text: &str) -> &str {
-    let text = text.trim();
-    match text.find(". ") {
-        Some(end) => &text[..=end],
-        None => text,
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use surco::components::Section;
+    use surco::doc::Block;
+    use surco::glyphs::Mark;
+    use yunta_core::events::{ArtifactId, Shown};
+    use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};
+    use yunta_core::{ArtifactKind, ContentHash, TasksFile};
+
+    use super::before_you_decide;
+
+    /// A plan document that names `risks` and nothing else: no task and no
+    /// spec, so the only thing a decision weighs on it is what it names.
+    fn plan_naming(risks: &[&str]) -> ShownDocument {
+        let plan = TasksFile {
+            summary: None,
+            description: None,
+            design: None,
+            decisions: Vec::new(),
+            shapes: Vec::new(),
+            risks: risks.iter().map(|risk| risk.to_string()).collect(),
+            out_of_scope: Vec::new(),
+            tasks: Vec::new(),
+        };
+        ShownDocument {
+            shown: Shown {
+                producer: Some("plan".into()),
+                artifact: ArtifactId::Interpreted {
+                    kind: ArtifactKind::Tasks,
+                },
+                content_hash: ContentHash::sha256(b"plan"),
+            },
+            path: PathBuf::from("artifacts/plan/tasks.yaml"),
+            content: ShownContent::Tasks(Box::new(PlanReview {
+                plan,
+                departed: Vec::new(),
+                spec: None,
+                spec_node: None,
+                asked: None,
+                held: Vec::new(),
+                tasks: Vec::new(),
+                handed_over: None,
+                answered: Vec::new(),
+                shapes_read: None,
+            })),
+        }
+    }
+
+    /// The items of the caution marks `section` holds, in the order they are
+    /// drawn.
+    fn cautions(section: &Section) -> Vec<String> {
+        section
+            .blocks
+            .iter()
+            .flat_map(|block| match block {
+                Block::Marked(marked) if matches!(marked.mark, Mark::Caution) => {
+                    marked.items.clone()
+                }
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// A risk of two sentences is said whole as one item, and so is each risk
+    /// after it.
+    #[test]
+    fn each_risk_is_said_whole_as_its_own_item() {
+        let shown = [plan_naming(&[
+            "Two tasks write one file. Their order decides what it holds.",
+            "The spec's test is slow.",
+        ])];
+        let section = before_you_decide(&[], &shown).expect("a named risk weighs on the decision");
+        assert_eq!(
+            cautions(&section),
+            vec![
+                "risk: Two tasks write one file. Their order decides what it holds.",
+                "risk: The spec's test is slow.",
+            ]
+        );
     }
 }

@@ -13,5 +13,6 @@ stopped
   1 closed, the newest 8h00m ago
 
 next
-  yunta status T1Y0P2        opens the run that has waited longest
+  yunta status T1Y0P2
+    opens the run that has waited longest
   yunta list --runs --full   lists the closed runs too

@@ -1,7 +1,8 @@
 //! What a plan changes, said before how it is proven: what it does, in its
 //! author's words and drawings, the choices it made for the person and
-//! what they answered, what it risks and leaves out, and how it is built;
-//! and what was accepted departing from it.
+//! what they answered, what it leaves out, what it risks where the whole
+//! plan is shown, and how it is built; and what was accepted departing
+//! from it.
 
 use surco::components::{Fields, Lead, Marked, Section};
 use surco::doc::{Block, Doc};
@@ -11,12 +12,13 @@ use yunta_core::events::AcceptedDeparture;
 use yunta_core::shown::{Answered, PlanReview};
 use yunta_core::Decision;
 
-use super::{blank, said, titled};
+use super::{blank, said, titled, Form};
 
-/// `doc` with what `review`'s plan changes: its description whole, every
-/// diagram in it drawn; its decisions; what it risks and leaves out; and
-/// its design.
-pub(super) fn change(mut doc: Doc, review: &PlanReview) -> Doc {
+/// `doc` with what `review`'s plan changes, as `form` shows it: its
+/// description whole, every diagram in it drawn; its decisions; what it
+/// leaves out and, where the whole plan is shown, what it risks; and its
+/// design.
+pub(super) fn change(mut doc: Doc, review: &PlanReview, form: Form) -> Doc {
     let plan = &review.plan;
     if let Some(description) = said(&plan.description) {
         doc = doc
@@ -37,16 +39,22 @@ pub(super) fn change(mut doc: Doc, review: &PlanReview) -> Doc {
     if !yours.is_empty() {
         doc = doc.with(titled("you answered", yours));
     }
+    // Each risk is said beside the decision a page puts the plan under, so
+    // only the whole plan draws them here.
+    let risks: &[String] = match form {
+        Form::Whole => plan.risks.as_slice(),
+        Form::Review | Form::Published => &[],
+    };
     for (title, mark, items) in [
-        ("risks", Mark::Caution, &plan.risks),
-        ("left out", Mark::Absent, &plan.out_of_scope),
+        ("risks", Mark::Caution, risks),
+        ("left out", Mark::Absent, plan.out_of_scope.as_slice()),
     ] {
         if !items.is_empty() {
             doc = doc.with(titled(
                 title,
                 vec![Marked {
                     mark,
-                    items: items.clone(),
+                    items: items.to_vec(),
                 }
                 .into()],
             ));

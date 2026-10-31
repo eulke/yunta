@@ -10,7 +10,7 @@ use yunta_core::events::{
     Shown, TokenUsage, WhyWithheld, Withheld,
 };
 use yunta_core::reserved::ReservedOption;
-use yunta_core::shown::Flaw;
+use yunta_core::shown::{Flaw, ShownDocument};
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
 
 use super::gate_exec::{emit_started, GateStep};
@@ -63,21 +63,18 @@ impl<'a> InternalGate<'a> {
         })
     }
 
-    /// What the gate asks: its declared options (default: a single
-    /// `approve`), each saying where it sends the run — and asking what
-    /// should change when it sends the run back to a session — plus
-    /// `abort`, and the documents it shows as the run holds them now.
+    /// The escalation a gate puts to a person: `claim` as its question, its
+    /// declared options (default: a single `approve`), each saying where it
+    /// sends the run — and asking what should change when it sends the run
+    /// back to a session — plus `abort`, and the documents `shows` as the
+    /// run holds them now.
     ///
     /// `abort` is always the engine's: declaring it only places it on the
     /// menu, and choosing it pauses the run wherever it sits.
     ///
-    /// The menu before what it shows is read: [`InternalGate::asked`] is
-    /// the one way to the escalation a person gets.
-    fn escalation(
-        &self,
-        workflow: &Workflow,
-        state: &RunState,
-    ) -> Result<Escalation, GateEscalationError> {
+    /// [`InternalGate::asked`] reads the claim and what it shows first, and
+    /// is the one way to the escalation a person gets.
+    fn escalation(&self, workflow: &Workflow, claim: Claim, shows: Vec<Shown>) -> Escalation {
         let declared: Vec<OptionId> = if self.options.is_empty() {
             vec![ReservedOption::Approve.id()]
         } else {
@@ -85,11 +82,7 @@ impl<'a> InternalGate<'a> {
         };
         // Where the run goes once the gate is resolved: the nodes that
         // wait on it.
-        let next: Vec<&NodeId> = workflow
-            .iter_nodes()
-            .filter(|node| node.depends_on.contains(&self.node.id))
-            .map(|node| &node.id)
-            .collect();
+        let next: Vec<&NodeId> = workflow.dependents(&self.node.id).collect();
         let mut gate_options: Vec<GateOption> = declared
             .iter()
             .map(|id| self.option(workflow, &next, id))
@@ -101,17 +94,17 @@ impl<'a> InternalGate<'a> {
             .split_first()
             .map(|(first, rest)| (first.clone(), rest.to_vec()))
             .unwrap_or_else(|| (GateOption::reserved(ReservedOption::Abort), Vec::new()));
-        // An author's own `message:` is the claim; the assignee is the
-        // record of who it is addressed to.
-        Ok(Escalation::new(
-            claim(self.node, self.message),
+        // The claim is the question; the assignee is the record of who it
+        // is addressed to.
+        Escalation::new(
+            claim,
             Menu::Gate(AuthorGate {
                 assignee: self.assignee.to_string(),
                 node: Some(self.node.id.clone()),
             }),
             NonEmpty::from((first, rest)),
         )
-        .showing(self.shown(state)?))
+        .showing(shows)
     }
 
     /// One declared option: `abort` when its spelling is the reserved one,
@@ -143,8 +136,8 @@ impl<'a> InternalGate<'a> {
     /// What the gate asks, read from the documents it shows as the run
     /// in `run_dir` holds them — the one way both the live prompt and a
     /// later rebuild of its menu come by it. What could not be read is
-    /// the outer error; a menu that cannot be built from what was read,
-    /// the inner one.
+    /// the outer error; what it shows that the run does not hold, or
+    /// cannot write out, the inner one.
     ///
     /// A plan that cannot be proven as it is written is never offered to
     /// go on with: the options that take the run past the gate are
@@ -155,14 +148,13 @@ impl<'a> InternalGate<'a> {
         run_dir: &std::path::Path,
         state: &RunState,
     ) -> Result<Result<Escalation, GateEscalationError>, RunError> {
-        let escalation = match self.escalation(workflow, state) {
-            Ok(escalation) => escalation,
-            Err(unbuilt) => return Ok(Err(unbuilt)),
+        let shows = match self.shown(state) {
+            Ok(shows) => shows,
+            Err(error) => return Ok(Err(error)),
         };
         // A plan is proven by itself and its spec: the run's findings, a
         // view the gate writes only once it asks, prove nothing about it.
-        let read: Vec<Shown> = escalation
-            .shows()
+        let read: Vec<Shown> = shows
             .iter()
             .filter(|shown| !super::gate_findings::shows_view(shown))
             .cloned()
@@ -172,6 +164,10 @@ impl<'a> InternalGate<'a> {
             .into_iter()
             .map(|(_, flaw)| flaw)
             .collect();
+        // The question is put together from the documents just read, so it
+        // costs no read of its own.
+        let claim = claim(self.node, self.message, &documents);
+        let escalation = self.escalation(workflow, claim, shows);
         Ok(Ok(self.withholding(escalation, NonEmpty::new(flaws))))
     }
 
@@ -232,14 +228,21 @@ impl<'a> InternalGate<'a> {
     }
 }
 
-/// The claim a gate makes: its author's `message:` as written, or that the
-/// gate needs a decision, which names only the node. An internal gate's
-/// escalation and a forge's pull request both ask this claim.
-pub(super) fn claim(node: &Node, message: Option<&str>) -> Claim {
-    match message {
+/// The question a gate asks: its author's `message:` as written, where a blank
+/// one counts as none. With none, whether to approve the change the plan among
+/// `shown` names, when one names it; else that the gate needs a decision, by
+/// its node. An internal gate's escalation and a forge's pull request both ask
+/// it.
+pub(super) fn claim(node: &Node, message: Option<&str>, shown: &[ShownDocument]) -> Claim {
+    match message.filter(|message| !message.trim().is_empty()) {
         Some(message) => Claim::Written(message.to_string()),
-        None => Claim::NeedsDecision {
-            node: node.id.clone(),
+        None => match yunta_core::shown::change_shown(shown) {
+            Some(summary) => Claim::ApprovePlan {
+                summary: summary.to_string(),
+            },
+            None => Claim::NeedsDecision {
+                node: node.id.clone(),
+            },
         },
     }
 }
@@ -286,22 +289,10 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     if gate.shows_the_run_findings() {
         super::gate_findings::keep(ctx, &state).await?;
     }
-    // A decision `resolve_gate` pre-seeded onto the log while this run
-    // was parked is consumed here — never re-asked, and its escalation
-    // pair is already recorded. Re-validated against the re-derived
-    // escalation: a mismatch means ask normally.
-    let pre_seeded = super::escalation::pre_seeded_resolution(&state, &node.id, &escalation);
-    let already_recorded = pre_seeded.is_some();
-    let choice = match pre_seeded {
-        Some((choice, _)) => choice,
-        None => match ctx.ask_human(Some(&node.id), None, &escalation).await? {
-            Some(choice) => choice,
-            None => {
-                return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
-                    escalation,
-                ))))
-            }
-        },
+    let Some((choice, already_recorded)) = choice_at(ctx, node, &escalation, &state).await? else {
+        return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
+            escalation,
+        ))));
     };
     let aborted = aborts(&choice.option);
     if !aborted {
@@ -322,6 +313,25 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     }
     land(ctx, &gate, choice, &shown).await?;
     Ok(GateStep::Resolved)
+}
+
+/// The choice that settles a gate now, and whether its escalation and answer
+/// are already on the log. A decision `resolve_gate` seeded onto the log while
+/// the run was parked is consumed here and never re-asked, provided the
+/// escalation derived now still accepts it; otherwise the person is asked.
+/// `None` means no surface can ask yet.
+async fn choice_at(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    escalation: &Escalation,
+    state: &RunState,
+) -> Result<Option<(HumanChoice, bool)>, RunError> {
+    let pre_seeded = super::escalation::pre_seeded_resolution(state, &node.id, escalation);
+    if let Some((choice, _)) = pre_seeded {
+        return Ok(Some((choice, true)));
+    }
+    let answer = ctx.ask_human(Some(&node.id), None, escalation).await?;
+    Ok(answer.map(|choice| (choice, false)))
 }
 
 /// Why a gate's question could not be put together, said in words here.

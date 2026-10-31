@@ -1,7 +1,7 @@
-plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
-
+plan: 4 tasks in 3 steps, 4 decided for you, 2 risks,
+      2 left out
   Install packs in the user's Yunta state directory for use
-  across projects
+  across projects.
 
   you asked    add pack global instalation support, not only
                project level as today
@@ -76,15 +76,6 @@ plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out
                    and safety gates; migration is
                    unnecessary and could unexpectedly change
                    checked-in project state.
-
-  risks
-    ▲ Global lock state is user-specific and is not
-      committed with a project, so different users may have
-      different fallback pack versions.
-    ▲ Global catalog lookup must be threaded through every
-      workflow, skill, agent, frozen-layer and prompt
-      discovery path that currently reads only project
-      packs.
 
   left out
     ◌ Migrating existing project installations to global

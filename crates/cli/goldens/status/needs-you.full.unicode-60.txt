@@ -34,8 +34,8 @@ tasks
       max_reroutes (0); escalates again if `fix-lint`
       doesn't fix it
       yunta resolve-gate 7E5PH4 retry
-    abort: Abort the run
-      Pauses here; nothing further executes
+    abort: Pause here
+      nothing runs; this decision stays open
       yunta resolve-gate 7E5PH4 abort
     or
       yunta close 7E5PH4   closes it for good

@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::tests::words;
 use super::*;
 use crate::diagram::Diagram;
 use crate::doc::{Block, Doc};
@@ -12,7 +13,7 @@ use crate::golden::{assert_golden, ENVIRONMENTS};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
 use crate::paint::Ink;
-use crate::surface::{Markdown, Surface, Terminal};
+use crate::surface::{Description, Markdown, Surface, Terminal};
 use crate::width::cell_width;
 use crate::words::Standing;
 
@@ -26,14 +27,14 @@ fn decision() -> Decision {
         DecisionOption {
             id: "approve".to_string(),
             label: Some("builds the plan".to_string()),
-            tradeoff: Some("the four tasks run in three steps".to_string()),
+            tradeoff: Some("its tasks run, a step at a time".to_string()),
             asks: None,
         },
         DecisionOption {
             id: "adjust".to_string(),
-            label: None,
+            label: Some("Back to `plan`".to_string()),
             tradeoff: Some("the plan is written again with what you say".to_string()),
-            asks: Some("what to change".to_string()),
+            asks: Some("what should change?".to_string()),
         },
     ];
     let commands = [
@@ -53,6 +54,35 @@ fn decision() -> Decision {
     }
 }
 
+/// A decision a reviewer answers on the forge that holds the pull request,
+/// with the one step typed elsewhere after its options.
+fn on_the_forge() -> Decision {
+    let option = |id: &str, label: &str, tradeoff: &str| DecisionOption {
+        id: id.to_string(),
+        label: Some(label.to_string()),
+        tradeoff: Some(tradeoff.to_string()),
+        asks: None,
+    };
+    Decision {
+        chosen: Chosen::OnTheForge {
+            forge: "GitHub".to_string(),
+            elsewhere: "on the machine that holds the run".to_string(),
+        },
+        options: vec![
+            option("approve", "approve this pull request", "the run goes on"),
+            option(
+                "close",
+                "close this pull request",
+                "nothing runs; this decision stays open",
+            ),
+        ],
+        otherwise: vec![(
+            "yunta resume 7E5PH4".to_string(),
+            "reads the answer and acts on it",
+        )],
+    }
+}
+
 /// The first blocks of the catalog: what a document is, what it is about,
 /// and what it found.
 fn opening() -> Vec<Block> {
@@ -61,7 +91,11 @@ fn opening() -> Vec<Block> {
     checks.push(Found::Caution, "forge", "github acme/web, reachable");
     checks.push(Found::NotApplicable, "review", "no fan-out review");
     vec![
-        Block::Title(Line::new().push(Tone::Strong, "plan of run 7E5PH4")),
+        Title {
+            name: Line::new().push(Tone::Strong, "plan"),
+            facts: vec!["4 tasks in 3 steps".to_string(), "2 risks".to_string()],
+        }
+        .into(),
         Headline::new(Mark::NeedsYou, "fragua (standard)", "needs you")
             .fact("for 32m10s")
             .edge("7E5PH4")
@@ -211,6 +245,16 @@ fn named_paths() -> Block {
     .into()
 }
 
+/// One task's card, which a reader opens for what proves the task.
+fn planned() -> Vec<Block> {
+    vec![Fold(Section {
+        lead: None,
+        title: Line::new().push(Tone::Strong, "T001").plain(": Make it"),
+        blocks: vec![Prose("the file exists".to_string()).into()],
+    })
+    .into()]
+}
+
 /// What an author wrote, and a file's code three ways: as written, read
 /// against the code it modifies, and new where nothing stands.
 fn written() -> Vec<Block> {
@@ -275,7 +319,7 @@ fn field() -> Runs {
 }
 
 /// The blocks a plan and a run's rows are drawn with, and how a document
-/// closes: the decision, the facts, and what to type next.
+/// closes: the decisions, the facts, and what to type next.
 fn closing() -> Vec<Block> {
     let column = |title, holds| Column { title, holds };
     let table = Table {
@@ -309,6 +353,7 @@ fn closing() -> Vec<Block> {
         field().into(),
         Block::Lines(vec![Line::new().plain("  a line a page composed itself")]),
         decision().into(),
+        on_the_forge().into(),
         Note("the run holds its own state on disk.".to_string()).into(),
         Fields::new().push_if("tokens", "20.2k spent").into(),
         Next {
@@ -323,6 +368,7 @@ fn catalog() -> Doc {
     opening()
         .into_iter()
         .chain(quoting())
+        .chain(planned())
         .chain(written())
         .chain(closing())
         .fold(Doc::new(), Doc::with)
@@ -349,16 +395,6 @@ fn every_block_matches_its_goldens_in_every_environment() {
     assert_golden(&goldens().join("markdown/catalog.md"), &Markdown.draw(&doc));
 }
 
-/// The words of `text` once markup, glyphs and the padding of columns
-/// are gone: what carries the meaning, whichever medium drew it.
-fn words(text: &str) -> std::collections::BTreeSet<String> {
-    text.split_whitespace()
-        .map(|token| token.trim_matches(|c| matches!(c, '*' | '_' | '`' | '|' | ':' | ',' | '.')))
-        .filter(|token| token.chars().any(char::is_alphanumeric))
-        .map(str::to_string)
-        .collect()
-}
-
 #[test]
 fn markdown_says_every_word_the_terminal_says_of_every_block() {
     let look = Look {
@@ -366,8 +402,15 @@ fn markdown_says_every_word_the_terminal_says_of_every_block() {
         ink: Ink::Plain,
         width: Width::of(Some(120), None),
     };
-    let terminal = words(&Terminal::on(look).draw(&catalog()));
-    let markdown = words(&Markdown.draw(&catalog()));
-    let lost: Vec<&String> = terminal.difference(&markdown).collect();
-    assert!(lost.is_empty(), "Markdown dropped {lost:?}");
+    let doc = catalog();
+    let terminal = words(&Terminal::on(look).draw(&doc));
+    let forms = [
+        ("Markdown", Markdown.draw(&doc)),
+        ("Description", Description::default().draw(&doc)),
+    ];
+    for (form, drawn) in &forms {
+        let said = words(drawn);
+        let lost: Vec<&String> = terminal.difference(&said).collect();
+        assert!(lost.is_empty(), "{form} dropped {lost:?}");
+    }
 }

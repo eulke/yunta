@@ -203,10 +203,9 @@ async fn decided(reading: &Reading) -> Result<Option<Decided>, CliError> {
         &reading.state,
     )
     .await?;
-    // The page's ask made the claim, and a failed node's evidence is
-    // quoted above it.
+    // A failed node's evidence is quoted above the decision, so the
+    // decision does not repeat it.
     let beside = decision::Beside {
-        claim: true,
         evidence: matches!(
             reading.state.nodes.state(node),
             Some(yunta_engine::NodeState::Failed { .. })

@@ -78,7 +78,7 @@ regex.workspace = true
 async-trait.workspace = true
 # `kind: gate`'s `on:` mapping is the same ordered map the schema itself
 # uses (`yunta-core` already depends on it — no new node in the
-# workspace graph); named here because gate_exec's own signature takes
+# workspace graph); named here because internal_gate's own signature takes
 # it.
 indexmap.workspace = true
 # `stats::compute_run_stats` derives wall-clock and blocked-time per
@@ -90,9 +90,6 @@ chrono.workspace = true
 # A canonical artifact is written through the run's own `scratch/` and
 # renamed into place, so a reader never meets half a document.
 tempfile.workspace = true
-# A document a session hands over is refused at the path of the value
-# that refused it, the same way a document read from a file is.
-serde_path_to_error.workspace = true
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }

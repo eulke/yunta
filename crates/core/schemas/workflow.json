@@ -371,14 +371,14 @@
       "type": "object",
       "properties": {
         "artifacts": {
-          "description": "The artifacts of this run committed to `branch` for review, named\nthe way `artifacts.produces` names them — the reference example:\n`[spec.md]`. Each is published under the name the run's own view\ncarries it by.",
+          "description": "The artifacts of this run committed to `branch` for review, named\nthe way `artifacts.produces` names them — the reference example:\n`[spec.md]`. Each is published in the gate's folder on `branch`,\n`.yunta/gates/<run>/<gate>/`, under the name the run's own view\ncarries it by.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ArtifactSpec"
           }
         },
         "branch": {
-          "description": "Template-rendered branch name the artifacts are pushed to and the\nPR is opened from (`{{run.branch}}`, the reference example, resolves\nto `yunta/<run_id>` — a fresh push target, not necessarily the\nworktree's own local checkout branch, since `isolation: none`\nnever creates one).",
+          "description": "Template-rendered branch name the artifacts are pushed to and the\nPR is opened from (`{{run.branch}}`, the reference example, resolves\nto `yunta/run/<run_id>` — a fresh push target, not necessarily the\nworktree's own local checkout branch, since `isolation: none`\nnever creates one).",
           "type": "string"
         },
         "kind": {
@@ -1235,7 +1235,7 @@
               "const": "gate"
             },
             "message": {
-              "description": "The question the internal gate asks — becomes the\nescalation's `summary`. Absent, a default derived from the node\nid is used.",
+              "description": "The question the gate asks, as written: its escalation's\n`summary` and its pull request's question. Absent or blank, the\ngate asks whether to approve the change a shown plan's summary\nnames, and otherwise asks for a decision by its node.",
               "type": [
                 "string",
                 "null"

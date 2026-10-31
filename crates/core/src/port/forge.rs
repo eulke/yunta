@@ -65,6 +65,14 @@ pub enum ForgeError {
     /// A gate handle the forge does not know.
     #[error("forge: no gate #{number}")]
     UnknownGate { number: u64 },
+    /// A pull request's description drawn longer than the forge keeps, measured
+    /// in UTF-8 bytes: it is refused before anything is committed, so the forge
+    /// is never asked for it.
+    #[error(
+        "forge: the description is {len} bytes; a description is kept to {limit} bytes, so it \
+         fits the {limit} characters the forge keeps"
+    )]
+    BodyTooLong { limit: usize, len: usize },
 }
 
 /// What `publish` needs to commit and open a PR. The trait itself does
@@ -79,9 +87,12 @@ pub struct PublishRequest {
     /// of opening a duplicate — idempotent across `resume` invocations.
     /// A closed or merged PR is never reused.
     pub run_id: RunId,
+    /// Where on `branch` the gate's files go.
+    pub folder: crate::events::GateFolder,
     /// What the pull request asks, and what each answer does to the run.
     pub decision: GateDecision,
-    /// (path relative to the repo root, raw content).
+    /// Each artifact by its name in `folder`, and its bytes as the run holds
+    /// them.
     pub artifacts: Vec<(String, Vec<u8>)>,
     /// The documents among `artifacts` a person reads drawn — a plan with
     /// the tests that hold its tasks, a spec, a review's findings — each
@@ -96,8 +107,9 @@ pub struct PublishRequest {
 pub struct GateDecision {
     /// The gate that asks.
     pub node: NodeId,
-    /// What it asks: the author's `message:` as written, or that the gate
-    /// needs a decision.
+    /// What it asks: the author's `message:` as written, where a blank one is
+    /// none. With none, to approve the change a shown plan names; when no
+    /// shown plan names one, that the gate needs a decision, by its node.
     pub question: Claim,
     /// Who it is addressed to.
     pub assignee: String,

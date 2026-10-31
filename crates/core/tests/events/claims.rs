@@ -13,6 +13,7 @@ fn a_plain_string_summary_reads_back_as_a_written_claim() {
         Claim::Written("Ready to open the PR?".to_string()),
         PublishedGate {
             url: "https://example.test/pull/1".to_string(),
+            folder: None,
         },
         "https://example.test/pull/1",
     )
@@ -185,6 +186,7 @@ fn a_published_gate_keeps_its_awaiting_review_claim_on_the_log() {
         claim.clone(),
         PublishedGate {
             url: "https://example.test/pull/1".to_string(),
+            folder: None,
         },
         "https://example.test/pull/1",
     )
@@ -231,4 +233,36 @@ fn a_recheck_claim_round_trips_as_the_object_with_the_reference_it_checks() {
     );
     let parsed: Claim = serde_json::from_value(json).unwrap();
     assert_eq!(parsed, claim);
+}
+
+/// A plan question is written as its object with its summary, and reads back equal.
+#[test]
+fn a_question_about_a_plan_round_trips_as_the_object_with_its_summary() {
+    let claim = Claim::ApprovePlan {
+        summary: "Make it".to_string(),
+    };
+    let json = serde_json::to_value(&claim).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"claim": "approve_plan", "summary": "Make it"})
+    );
+    assert_eq!(serde_json::from_value::<Claim>(json).unwrap(), claim);
+}
+
+/// A folder round-trips, and a publication from before folders reads and writes none.
+#[test]
+fn a_publication_names_its_folder_and_one_from_before_folders_names_none() {
+    let with: PublishedGate =
+        serde_json::from_value(serde_json::json!({"url": "u", "folder": "f"})).unwrap();
+    assert_eq!(with.folder.as_deref(), Some("f"));
+    assert_eq!(
+        serde_json::to_value(&with).unwrap(),
+        serde_json::json!({"url": "u", "folder": "f"})
+    );
+    let before: PublishedGate = serde_json::from_value(serde_json::json!({"url": "u"})).unwrap();
+    assert_eq!(before.folder, None);
+    assert_eq!(
+        serde_json::to_value(&before).unwrap(),
+        serde_json::json!({"url": "u"})
+    );
 }

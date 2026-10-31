@@ -146,7 +146,7 @@ fn closing_decision(text: &str) -> Vec<&str> {
 /// it does, and the command that chooses each, carrying the run's handle.
 fn names_every_option(block: &str, handle: &str) -> bool {
     block.contains("retry: Re-route to `fix-lint` once more")
-        && block.contains("abort: Abort the run")
+        && block.contains("abort: Pause here")
         && block.contains(&format!("yunta resolve-gate {handle} retry"))
         && block.contains(&format!("yunta resolve-gate {handle} abort"))
 }
@@ -334,7 +334,7 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         text.contains("retry: Run it again (attempt 2) once something outside the tree changes"),
         "{text}"
     );
-    assert!(text.contains("abort: Abort the run"), "{text}");
+    assert!(text.contains("abort: Pause here"), "{text}");
     for option in ["retry", "abort"] {
         assert!(
             text.contains(&format!("yunta resolve-gate {} {option}", handle(&run_id))),

@@ -240,6 +240,7 @@ fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
             Claim::Written("answer before going on".to_string()),
             PublishedGate {
                 url: reference.to_string(),
+                folder: None,
             },
             reference,
         ),

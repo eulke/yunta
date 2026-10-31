@@ -1,4 +1,4 @@
-# plan of run 7E5PH4
+# plan: 4 tasks in 3 steps, 2 risks
 
 ## ◆ fragua (standard) · needs you · for 32m10s · 7E5PH4
 
@@ -6,19 +6,20 @@ approve-plan asks you to approve the plan before anything is built.
 
 The run plans the change, asks before it builds, and builds what you approve.
 
-### what it found
+## what it found
 
-- ✓ **git** commits as Ada <ada@example.com>
+- ✓ **git** commits as Ada \<ada@example.com>
 - ▲ **forge** github acme/web, reachable
 - ◌ **review** no fan-out review
 
-- ▲ A name with a newline in it breaks the line it is printed on.
+> [!CAUTION]
+> - A name with a newline in it breaks the line it is printed on.
 
 - ▲ the budget sits under this workflow's usual spend
   - so: the run may stop before it finishes
   - fix: raise `limits.max_tokens_per_run`
 
-### ✗ node `lint`: exit 101
+## ✗ node `lint`: exit 101
 
 ```
 line 1
@@ -62,6 +63,14 @@ _looked in ~/.yunta/runs_
 outside the declared globs:
 - `src/main.rs`
 - `Cargo.lock` (the lock file)
+
+<details>
+
+<summary><b>T001</b>: Make it</summary>
+
+the file exists
+
+</details>
 
 A change **in Markdown**, with `code`.
 
@@ -111,17 +120,23 @@ _new · 1 line_
 
 a line a page composed itself
 
-- **approve**: builds the plan  
-  the four tasks run in three steps  
-  `yunta resolve-gate 7E5PH4 approve`
-- **adjust**  
-  the plan is written again with what you say  
-  asks: what to change  
-  `yunta resolve-gate 7E5PH4 adjust --text "<answer>"`
+| option | what it does | what happens | command |
+|---|---|---|---|
+| **approve** | builds the plan | its tasks run, a step at a time | `yunta resolve-gate 7E5PH4 approve` |
+| **adjust** | Back to `plan` | the plan is written again with what you say<br>asks: what should change? | `yunta resolve-gate 7E5PH4 adjust --text "<answer>"` |
 
 or
 
 - `yunta close 7E5PH4`: closes it for good
+
+| answer | on GitHub | what happens |
+|---|---|---|
+| **approve** | approve this pull request | the run goes on |
+| **close** | close this pull request | nothing runs; this decision stays open |
+
+on the machine that holds the run
+
+- `yunta resume 7E5PH4`: reads the answer and acts on it
 
 _the run holds its own state on disk._
 

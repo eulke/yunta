@@ -53,14 +53,25 @@ are valid there. A mistyped key never silently becomes a default.
   way `produces:` does — a kind, or an opaque file name — and the engine commits the
   bytes the run holds for each to `branch` and opens a PR for review there, under the
   name that artifact's identity gives it. A run that holds none of one fails the node
-  instead of publishing a partial review. The PR is titled by the gate's `message:`, and
-  its body says how a review answers it and what each answer does: approving or merging
-  lets the run go on, requesting changes sends each comment to the node `on_failure`
-  names as a finding, closing fails the gate. A plan, a spec or a review's findings is
-  also published drawn to read — `tasks.md` beside `tasks.yaml`. After changes are
-  requested, the corrected lap commits what changed to the same PR and waits for a review
-  of it; a review of an earlier commit decides nothing. The run reads the review the
-  next time it wakes on the machine that holds it (`yunta resume <run>`).
+  instead of publishing a partial review. The PR is titled by the change it asks about
+  — `Approve: <summary>` when it publishes a plan, its question otherwise — and its
+  description is the gate's page, as a terminal shows it: each document it publishes as
+  a review reads it, with the order of a plan's steps in Mermaid and a task's card and
+  the proof folded; then the decision under its question: the files it carries, what
+  weighs on it, with the plan's risks in an alert, and a table of the answers a review
+  gives — approving or merging lets the run go on, requesting changes sends each
+  comment to the node `on_failure` names as a finding, closing pauses the run as
+  `abort` does — with the commands of the machine that holds the run after it. A
+  description longer than GitHub keeps leaves out the lines of each code block first,
+  and says so at its top. The files go in `.yunta/gates/<run>/<gate>/` on the branch:
+  each document drawn to read — `tasks.md`, the whole plan — beside the bytes the run
+  holds, `tasks.yaml`. After changes are requested, the corrected lap commits what
+  changed to the same PR, draws its title and description again, and waits for a
+  review of it; a review of an earlier commit decides nothing. A closed PR stops the
+  run with the decision open: the next resume, yours or a scheduled job's, publishes
+  the gate again, on the PR if someone reopened it or on a new one, and
+  `yunta close <run>` ends the run. The run reads the review the next time it wakes on
+  the machine that holds it (`yunta resume <run>`).
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
   interrupted). Children needing to compare notes mid-flight (not just after `join`)
@@ -649,7 +660,8 @@ what you asked the run for, quoted from the input the workflow declares as the
 request. Then the change: its description whole, with each diagram its author drew —
 in boxes on a terminal, as the Mermaid itself on a forge and in a file; each choice
 the plan made for you, what it chose instead of what and why; what you already
-answered when the run asked; its risks, what it leaves out and its design. Then the
+answered when the run asked; what it leaves out and its design; its risks are said
+once, beside the decision. Then the
 steps, each task under the step it runs in and the order they wait on each other in,
 drawn; and task by task a card: what you will see once it is done, the files it
 changes, the shapes of another task it builds on, what it keeps, what it implies and
@@ -672,11 +684,12 @@ says its size and, before it, for a shape the engine read, what the code is to t
 tree: `new`; `modified`, with the words it puts in marked `{+…+}` and the words it
 takes out `[-…-]`; `unchanged`; `exists, not compared`; or
 `modified, too long to mark` — `modified · 1 line`, say. The proof comes last: how
-many tests the spec wrote and the command that shows them whole, the suite every
-task keeps passing, each guard that checks what a task keeps, and how many promises
-no guard checks. No test's code is part of the plan at the decision; `yunta status <run>
---node plan` prints the whole plan, each file the spec wrote whole after the cards,
-before its proof. The log records the exact version you
+many tests the spec wrote and the command that shows them whole — on a forge's page
+the proof names no such command, since the whole plan is a file of the pull request —
+then the suite every task keeps passing, each guard that checks what a task keeps,
+and how many promises no guard checks. No test's code is part of the plan at the
+decision; `yunta status <run> --node plan` prints the whole plan, each file the spec
+wrote whole after the cards, before its proof. The log records the exact version you
 saw by its hash, so an approval is an approval of those bytes.
 A gate after the work that shows the same plan — before a pull request, say —
 reads first every departure from it a person accepted while its tasks were built:
@@ -706,13 +719,20 @@ decision that restates what a person answered names the question it `answers`. T
 engine refuses a plan it will show without the summary, the descriptions, the code
 and the `proves`, and tells the planner what is missing in the same answer.
 
+A gate with no `message:`, or a blank one, that shows a plan asks to approve the change
+its summary names — `Approve the plan: <summary>?`. Its page opens on one headline,
+`◆ decision · needs you`, reads each document it shows, and ends on the question, what
+weighs on it and each option with what it does; the menu under it is how you choose.
+`abort` reads `Pause here`: nothing runs, and the decision stays open, so the next
+resume asks again.
+
 What weighs on the decision is said last, between the question and its options:
 on a terminal the last lines printed are the first ones read. Under "before you
 decide" come what the gate does not offer and why, how the planner got the plan
 accepted when that took more than one handover, how many changes show no code, and
-the first sentence of each risk. `yunta
-status` prints the same block above the options of a parked run, and a gate's pull
-request says it before how to answer.
+each risk the plan names. `yunta status` prints the same block above the options of
+a parked run, and a gate's pull request says it under its question, above the table
+of answers.
 
 The spec governs. A plan that cannot be proven as it is written is refused when it
 is handed over: a criterion that passes once a name is written in a file its task

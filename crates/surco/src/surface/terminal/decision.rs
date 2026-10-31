@@ -1,13 +1,14 @@
-//! Every option of a decision, what it costs, and the command that chooses it.
+//! Every option of a decision, what it costs, and the command that chooses it, if any.
 
-use crate::components::Decision;
+use crate::components::{Chosen, Decision};
 use crate::line::{Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, wrap, INDENT};
 
 impl Decision {
-    /// Each option with what it costs and the command that chooses it,
-    /// then — after `or` — what moves the run without choosing one.
+    /// Each option with what it costs and the command that chooses it, if any,
+    /// then — under the title `otherwise_title` gives — what moves the run
+    /// without choosing one.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let under = format!("{INDENT}{INDENT}");
         let room = look.width.cells().saturating_sub(cell_width(&under));
@@ -34,9 +35,23 @@ impl Decision {
             }
         }
         if !self.otherwise.is_empty() {
-            lines.push(Line::new().plain(INDENT).push(Tone::Muted, super::OR));
+            lines.push(
+                Line::new()
+                    .plain(INDENT)
+                    .push(Tone::Muted, self.otherwise_title()),
+            );
             lines.extend(super::next::steps(&self.otherwise, &under, look));
         }
         lines
+    }
+
+    /// The title the other ways out stand under: `or` when each option is
+    /// chosen at a terminal, by a command or at its prompt, and what is typed
+    /// elsewhere when a forge holds the choice.
+    pub(in crate::surface) fn otherwise_title(&self) -> &str {
+        match &self.chosen {
+            Chosen::Here { .. } | Chosen::AtThePrompt => super::OR,
+            Chosen::OnTheForge { elsewhere, .. } => elsewhere.as_str(),
+        }
     }
 }

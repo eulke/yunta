@@ -4751,7 +4751,7 @@
           ]
         },
         {
-          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one.",
+          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one. Written by a binary from before a\nclosed pull request paused its gate; read from those logs, never\nwritten.",
           "type": "object",
           "properties": {
             "closed_pull_request": {
@@ -7635,7 +7635,7 @@
           ]
         },
         {
-          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one.",
+          "description": "A pull request closed without approval; `closed_pull_request` is its\nreference when the forge gave one. Written by a binary from before a\nclosed pull request paused its gate; read from those logs, never\nwritten.",
           "type": "object",
           "properties": {
             "closed_pull_request": {
@@ -8252,7 +8252,7 @@
           ]
         },
         {
-          "description": "A gate was resolved to abort, with whatever the person wrote.",
+          "description": "A person answered a decision with `abort`: the run pauses where it\nis, its decision still open, with whatever they wrote.",
           "type": "object",
           "properties": {
             "free_text": {
@@ -8272,6 +8272,27 @@
           "required": [
             "type",
             "node"
+          ]
+        },
+        {
+          "description": "A person closed, without merging, the pull request a gate waited on:\nthe decision pauses there, as `abort` pauses it at a terminal. The gate's\nresolution records the close: no `node_failed` is written, and no\n`node_started` unless the SHA-drift check reopened the gate before the\npull request closed. The gate forgets the pull request, and a resume\npublishes it again, on the one a person reopened or a new one. It is a\npause of its own beside `GateAborted`: it names the pull request, and a\nresume publishes the gate again, where after an abort it asks again.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/NodeId"
+            },
+            "type": {
+              "type": "string",
+              "const": "pull_request_closed"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "node",
+            "url"
           ]
         },
         {
@@ -8664,9 +8685,16 @@
       ]
     },
     "PublishedGate": {
-      "description": "Where the forge published the pull request a gate waits on.",
+      "description": "Where the forge published the pull request a gate waits on, and where on\nits branch the gate put its files.",
       "type": "object",
       "properties": {
+        "folder": {
+          "description": "The folder the gate's files are in, from the repository's root. Absent\nfor a gate that put them at the branch's root: one published before\ngates had a folder, and every later lap of it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "url": {
           "type": "string"
         }
@@ -10913,6 +10941,22 @@
           "required": [
             "claim",
             "node"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "const": "approve_plan"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "claim",
+            "summary"
           ]
         },
         {

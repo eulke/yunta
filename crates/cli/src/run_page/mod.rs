@@ -31,7 +31,7 @@ use surco::components::{Furrow, Gist, Headline, Next, Note, Prose};
 use surco::doc::{Block, Depth, Doc};
 use surco::figures::duration;
 use surco::look::Look;
-use surco::words::Standing;
+use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::caution::Caution;
 use yunta_core::events::{Failure, GateWaitingPayload, NodeState, PauseReason};
 use yunta_core::{NodeId, RunId};
@@ -221,7 +221,7 @@ impl RunPage<'_> {
             ),
             (_, RunPhase::Promoted { to: Some(mode) }) => format!("promoted to `{mode}`"),
             (_, RunPhase::Created | RunPhase::Running) => {
-                "nothing needs you: it is moving".to_string()
+                format!("{NOTHING_NEEDS_YOU}: it is moving")
             }
             (
                 _,

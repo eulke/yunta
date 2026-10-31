@@ -22,7 +22,7 @@
     ␛[2masks: what to change␛[0m
     ␛[1myunta resolve-gate 7E5PH4 adjust --text "<answer>"␛[0m
 
-  ␛[2mprogress    ␛[0m 1 of 2 nodes done, 1 failed
+  ␛[2mprogress    ␛[0m 0 of 2 nodes done, 1 failed
   ␛[2mtokens      ␛[0m 20.2k spent, 3 past runs, median 18k tokens
 
 ␛[2mnext␛[0m

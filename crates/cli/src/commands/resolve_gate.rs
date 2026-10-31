@@ -85,8 +85,9 @@ async fn record(
     Ok(())
 }
 
-/// What happens to a recorded decision, in the words both doors say.
-const APPLIED: &str = "a resume in the background applies the decision and drives the run on";
+/// What a resume does with a recorded decision, in the words both doors
+/// say: it applies it, and the menu it was chosen from says what that does.
+const APPLIED: &str = "a resume in the background applies it";
 
 /// What a recorded decision is said to be, at either door.
 fn resolved_as(option: &OptionId) -> String {
@@ -99,7 +100,7 @@ fn sentence(run_id: &RunId, option: &OptionId) -> String {
 }
 
 /// What a recorded decision is answered with: the option, and that a
-/// resume of its own applies it.
+/// resume in the background applies it.
 fn resolved(run_id: &RunId, option: &OptionId) -> Doc {
     let handle = run_id.handle();
     Doc::new()
@@ -125,7 +126,8 @@ fn needs_an_option(
     match option {
         None if output == Mode::Json => Err(CliError::msg(format!(
             "`--json` needs the option: the menu a decision waits on is for a terminal; \
-             name the option, as in `yunta resolve-gate {run_id} <option> --json`"
+             name the option, as in `{}`, and add `--json`",
+            advice::resolve_gate(run_id.as_str())
         ))),
         _ => Ok(()),
     }
@@ -304,7 +306,7 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
 mod tests {
     use yunta_core::{OptionId, RunId};
 
-    use super::{answer, GateState};
+    use super::{answer, sentence, GateState};
     use crate::output::Answer;
     use crate::render::draw;
     use surco::look::Look;
@@ -323,7 +325,7 @@ mod tests {
             resolved.starts_with("+ run AAAAAA ; resolved `retry`\n"),
             "{resolved}"
         );
-        assert!(resolved.contains("applies the decision"), "{resolved}");
+        assert!(resolved.contains("applies it"), "{resolved}");
         assert!(resolved.contains("yunta status AAAAAA"), "{resolved}");
         let declined = said(GateState::Declined);
         assert!(
@@ -336,5 +338,37 @@ mod tests {
         );
         assert!(declined.contains("yunta resolve-gate AAAAAA"), "{declined}");
         assert_eq!(said(GateState::Interrupted), "");
+    }
+
+    /// Every recorded decision is answered alike: a resume in the background
+    /// applies it, in the words the page and the MCP sentence share.
+    #[test]
+    fn every_answer_says_a_resume_applies_it() {
+        let run = RunId::from_static("01AAAAAAAAAAAAAAAAAAAAAAAA");
+        let abort = OptionId::from_static("abort");
+        let reply = answer(
+            &run,
+            GateState::Resolved {
+                option: abort.clone(),
+            },
+        );
+        let page = draw(reply.document(&Look::plain()), &Look::plain());
+        let said = page.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            said.contains("a resume in the background applies it"),
+            "{page}"
+        );
+        assert!(!said.contains("stays open"), "{page}");
+        assert!(!said.contains("drives the run on"), "{page}");
+        assert_eq!(
+            sentence(&run, &abort),
+            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `abort`; a resume in the background \
+             applies it"
+        );
+        assert_eq!(
+            sentence(&run, &OptionId::from_static("approve")),
+            "run 01AAAAAAAAAAAAAAAAAAAAAAAA: resolved `approve`; a resume in the background \
+             applies it"
+        );
     }
 }

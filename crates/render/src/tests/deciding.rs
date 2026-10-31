@@ -7,10 +7,11 @@ use std::path::PathBuf;
 use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use surco::surface::{Markdown, Surface, Terminal};
-use yunta_core::shown::PlanReview;
 use yunta_testkit_core::spell;
 
-use super::documents::{goldens, review, run};
+use super::console_page::greet_escalation;
+use super::documents::{goldens, review, run, shown_plan};
+use super::publication::description;
 use crate::plan::Form;
 
 #[test]
@@ -34,7 +35,7 @@ fn what_weighs_on_a_decision_matches_its_goldens() {
         ),
     ];
     review.handed_over = Some(handed);
-    let shown = [shown(review)];
+    let shown = [shown_plan(review)];
     let withheld = [yunta_core::events::Withheld {
         option: "approve".into(),
         because: yunta_core::events::WhyWithheld::Logged(
@@ -56,27 +57,15 @@ fn what_weighs_on_a_decision_matches_its_goldens() {
     );
 }
 
-/// `review` as a gate shows it.
-fn shown(review: PlanReview) -> yunta_core::shown::ShownDocument {
-    yunta_core::shown::ShownDocument {
-        shown: yunta_core::events::Shown {
-            producer: Some("plan".into()),
-            artifact: yunta_core::events::ArtifactId::Interpreted {
-                kind: yunta_core::ArtifactKind::Tasks,
-            },
-            content_hash: yunta_core::ContentHash::sha256(b"plan"),
-        },
-        path: PathBuf::from("artifacts/plan/tasks.yaml"),
-        content: yunta_core::shown::ShownContent::Tasks(Box::new(review)),
-    }
-}
-
+/// What weighs on a review is said before the answers it weighs on, and each
+/// risk of the plan is said there whole.
 #[test]
-fn a_pull_request_says_what_weighs_on_its_review_before_how_to_answer_it() {
+fn a_pull_request_says_what_weighs_on_its_review_before_its_answers() {
     let request = yunta_core::port::PublishRequest {
         branch: "yunta/7E5PH4".to_string(),
         base_branch: "main".to_string(),
         run_id: "01K3W48MFW7H0ZZA5PZ07E5PH4".parse().unwrap(),
+        folder: yunta_core::events::GateFolder::Root,
         decision: yunta_core::port::GateDecision {
             node: "approve-plan".into(),
             question: yunta_core::events::Claim::Written("Plan registered. Approve?".to_string()),
@@ -85,16 +74,16 @@ fn a_pull_request_says_what_weighs_on_its_review_before_how_to_answer_it() {
             corrected_by: Some("plan".into()),
         },
         artifacts: Vec::new(),
-        shown: vec![shown(review())],
+        shown: vec![shown_plan(review())],
     };
 
-    let body = Markdown.draw(&crate::published::gate(&request, &*spell()));
+    let body = description(&request);
 
     let before = body.find("before you decide").expect("what weighs on it");
-    let answer = body.find("how to answer").expect("how to answer it");
-    assert!(before < answer, "{body}");
+    let answers = body.find("| answer |").expect("the answers a review gives");
+    assert!(before < answers, "{body}");
     assert!(
-        body[before..answer].contains("risk: A name with a newline"),
+        body[before..answers].contains("risk: A name with a newline"),
         "{body}"
     );
 }
@@ -138,4 +127,40 @@ fn a_markdown_document_shown_is_titled_by_its_first_heading() {
 
     let plain = read("A pack installs for the user.\n");
     assert_eq!(plain.lines().next(), Some("brief.md of `brief`"), "{plain}");
+}
+
+/// With no plan on the page, nothing else says why the gate withholds approve,
+/// so the record names the option and the reason it is withheld.
+#[test]
+fn a_withheld_reason_is_recorded_when_no_plan_is_shown() {
+    let escalation = greet_escalation(&review());
+    let record = crate::gate::record(&escalation, &[]);
+    assert!(
+        record
+            .iter()
+            .any(|line| line.starts_with("withheld: `approve`, because")),
+        "{}",
+        record.join("\n")
+    );
+}
+
+/// A plan on the page that has the flaws says why approve is withheld, once,
+/// under the section that names them; the record leaves the reason out.
+#[test]
+fn a_plan_with_flaws_says_why_an_option_is_withheld_once_under_the_section() {
+    let shown = [shown_plan(review())];
+    let escalation = greet_escalation(&review());
+    let record = crate::gate::record(&escalation, &shown);
+    assert!(
+        !record.iter().any(|line| line.contains("withheld")),
+        "{}",
+        record.join("\n")
+    );
+    let section = crate::gate::asked(&escalation, &shown);
+    let drawn = Terminal::on(Look::plain()).draw(&surco::doc::Doc::new().with(section));
+    assert_eq!(
+        drawn.matches("is not offered, because").count(),
+        1,
+        "{drawn}"
+    );
 }

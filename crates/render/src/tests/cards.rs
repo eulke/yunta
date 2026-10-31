@@ -12,13 +12,15 @@ use super::documents::{global_packs, read, review, run};
 use crate::plan::{document, Form};
 
 /// What follows a card of the plan of global packs, on a terminal or in a
-/// file: the next card, the next step or the proof.
+/// file: the next card, the next step or the proof, and in a file the next
+/// section, a heading of the second level.
 const AFTER_A_CARD: &[&str] = &[
     "\n    global-pack-",
     "\n  step ",
     "\n  proof",
     "\n#### ",
     "\n### ",
+    "\n## ",
 ];
 
 /// The card of `task` in `drawn`, up to what follows it.

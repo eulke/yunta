@@ -3,12 +3,14 @@ number: D270
 title: "A plan is read as the change it makes, and its proof is a step away"
 status: revised
 revises: [D194, D223]
-revised_by: [D271]
+revised_by: [D271, D272]
 ---
 
 # D270 — A plan is read as the change it makes, and its proof is a step away
 
 *(Revised by D271: point 2's card also says, between what a task keeps and what tests it, what each shape its file already holds implies, and every code block says under it its size and, for a shape the engine read, what the code is to the tree.)*
+
+*(Revised by D272: where a decision is put beside the plan, its risks are said beside the decision, once, and on a forge's page the proof names no command to show the spec's tests, since the whole plan is published beside it.)*
 
 ## Context
 

@@ -12,7 +12,7 @@
 //! terminal `RunReport` the schedule loop recognizes — `Finish` and
 //! `Pause` alike, via [`RunCtx::export_events_jsonl`] — unconditionally,
 //! independent of whether the workflow declares `on_finish:` at all. The
-//! `ScheduleStep::Broken` path exports too, best-effort before its
+//! `Decision::Broken` path exports too, best-effort before its
 //! `Err` — a corrupt log is exactly the one a forensic reader most wants
 //! on disk. `on_finish.distill` is a deterministic transform — see
 //! `distill.rs`; the close sequence is distill → `run_finished` →
@@ -40,6 +40,7 @@ mod finding_proofs;
 mod flawed;
 mod gate_exec;
 pub(crate) mod gate_findings;
+mod gate_publish;
 mod hooks_exec;
 mod internal_gate;
 mod invocation;

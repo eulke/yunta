@@ -9,11 +9,11 @@
 //! does not have to be guessed from the exported JSONL.
 //!
 //! **One block, wherever it is shown.** `yunta status` and the block a
-//! run leaves on the terminal show the same decision the same way: what
-//! it is about, every option with the tradeoff that makes it a choice,
-//! and the command that chooses it. What a surface already says beside
-//! it — the claim on its second line, a failed node's evidence above — it
-//! does not say twice.
+//! run leaves on the terminal show the same decision the same way: the
+//! record the engine attached to it, what it is about, what weighs on it,
+//! every option with the tradeoff that makes it a choice, and the command
+//! that chooses it. A failed node's evidence is said once: by the block,
+//! or by the page above it when the page quotes it.
 //!
 //! **Two pauses reconstruct a menu, and only two**: a node whose
 //! re-routes are exhausted, and an unresolved internal gate. A budget
@@ -26,13 +26,11 @@
 
 use std::path::Path;
 
-use surco::components::{Decision, DecisionOption, Gist, Note, Prose, Section};
+use surco::components::{Decision, Note, Prose, Section};
 use surco::doc::Block;
-use surco::glyphs::Mark;
-use surco::line::{Line, Tone};
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::RunId;
-use yunta_render::escalation;
+use yunta_engine::ShownDocument;
 
 use crate::commands::advice;
 use crate::run_page::Decided;
@@ -53,26 +51,23 @@ pub(crate) fn run_tree_line(tree: &Path) -> String {
 /// What the surface showing a decision says beside it already.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Beside {
-    /// The claim the escalation makes — a page that asks with the run's
-    /// pause already said it.
-    pub(crate) claim: bool,
     /// The record the engine attached — a page that quotes a failed
     /// node's evidence already shows it.
     pub(crate) evidence: bool,
 }
 
-/// The decision a parked run waits on, as the section a page ends on:
-/// what the decision says happened and what it is about — less what the
-/// page says beside it — what weighs on it, every option with the command
-/// that chooses it, and `otherwise`: what moves the run without choosing
-/// one.
+/// The decision a parked run waits on, as the section a page ends on: the
+/// record the engine attached to it and what it is about, less what the
+/// page says beside it. Then what weighs on it, every option with the
+/// command that chooses it, and `otherwise`: what moves the run without
+/// choosing one.
 pub(crate) fn section(
     run_id: &RunId,
     decided: &Decided,
     otherwise: Vec<(String, &'static str)>,
 ) -> Section {
     let escalation = &decided.escalation;
-    let mut blocks = account(escalation, decided.beside);
+    let mut blocks = account(escalation, decided.beside, &decided.shown);
     for shown in escalation.shows() {
         let about = format!("about: {}", yunta_engine::view_of(shown).display());
         blocks.push(Prose(about).into());
@@ -88,29 +83,22 @@ pub(crate) fn section(
     let mut menu = menu(run_id, escalation);
     menu.otherwise = otherwise;
     blocks.push(menu.into());
-    Section {
-        lead: Some(surco::components::Lead::Mark(Mark::NeedsYou)),
-        title: Line::new().push(Tone::Strong, format!("decision on node `{}`", decided.node)),
-        blocks,
-    }
+    yunta_render::gate::decision(format!("decision on node `{}`", decided.node), blocks)
 }
 
-/// What a decision says happened, less what the surface showing it says
-/// beside it: the claim, and the record the engine attached to audit it
-/// against.
-pub(crate) fn account(escalation: &GateWaitingPayload, beside: Beside) -> Vec<Block> {
-    let mut blocks: Vec<Block> = Vec::new();
-    if !beside.claim {
-        blocks.push(Gist::new(claim_words(escalation)).into());
+/// The record the engine attached to a decision, to audit it against, less
+/// what the surface showing it says beside it: a page that quotes a failed
+/// node's evidence draws none of it again. Which reasons the record leaves
+/// to "before you decide" is decided by `gate::record`, from the plans on
+/// the page, so the status page and the prompt say each reason once.
+fn account(escalation: &GateWaitingPayload, beside: Beside, shown: &[ShownDocument]) -> Vec<Block> {
+    match beside.evidence {
+        true => Vec::new(),
+        false => yunta_render::gate::record(escalation, shown)
+            .into_iter()
+            .map(|fact| Note(fact).into())
+            .collect(),
     }
-    if !beside.evidence {
-        blocks.extend(
-            escalation::evidence(escalation)
-                .into_iter()
-                .map(|fact| Note(fact).into()),
-        );
-    }
-    blocks
 }
 
 /// The claim of a decision in the words a reader sees: what the escalation
@@ -122,35 +110,30 @@ pub(crate) fn claim_words(escalation: &GateWaitingPayload) -> String {
 /// Every option of a decision: what it costs and the command that
 /// chooses it.
 fn menu(run_id: &RunId, escalation: &GateWaitingPayload) -> Decision {
-    let options = escalation
-        .options()
-        .iter()
-        .map(|option| {
-            let (label, tradeoff) = yunta_render::offers::option_words(escalation, option);
-            DecisionOption {
-                id: option.id.to_string(),
-                label: Some(label),
-                tradeoff,
-                asks: yunta_render::offers::asks(option),
-            }
-        })
-        .collect();
+    let options = yunta_render::offers::decision_options(escalation);
     yunta_render::blocks::decision::here(run_id, options, &advice::spell)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use yunta_core::events::{
-        AuthorGate, Claim, Escalation, ExhaustedReroute, Failure, FailureMenu, GateOption, Menu,
+        ArtifactId, AuthorGate, Claim, Escalation, ExhaustedReroute, Failure, FailureMenu,
+        GateOption, Menu, Shown, WhyWithheld, Withheld,
     };
     use yunta_core::reserved::ReservedOption;
+    use yunta_core::shown::{
+        DeniedChange, Flaw, PlanReview, ShownContent, ShownDocument, TaskReview,
+    };
     use yunta_core::NonEmpty;
 
     use super::*;
     use surco::doc::Doc;
+    use surco::line::Line;
     use surco::look::Look;
     use surco::width::cell_width;
-    use yunta_core::NodeId;
+    use yunta_core::{ArtifactKind, ContentHash, NodeId, TaskId, TasksFile};
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const NODE: NodeId = NodeId::from_static("lint");
@@ -195,25 +178,92 @@ mod tests {
         .into_payload()
     }
 
-    const NOTHING_BESIDE: Beside = Beside {
-        claim: false,
-        evidence: false,
-    };
+    const NOTHING_BESIDE: Beside = Beside { evidence: false };
 
+    /// The lines of the section a page ends on for `escalation`, with nothing shown.
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
-        let look = Look::plain();
-        let decided = Decided {
+        drawn_with(&Decided {
             node: NODE,
             escalation: escalation.clone(),
             shown: Vec::new(),
             beside,
-        };
+        })
+    }
+
+    /// The lines of the section a page ends on for `decided`, drawn plain.
+    fn drawn_with(decided: &Decided) -> Vec<String> {
         let close = (advice::close(RUN.handle()), "closes it for good");
-        let doc = Doc::new().with(section(&RUN, &decided, vec![close]));
-        crate::render::surface_lines(doc, &look)
+        let doc = Doc::new().with(section(&RUN, decided, vec![close]));
+        crate::render::surface_lines(doc, &Look::plain())
             .iter()
             .map(Line::text)
             .collect()
+    }
+
+    /// A gate that withholds `continue` for a flaw of the plan it is about.
+    fn withholding_for_a_flaw() -> GateWaitingPayload {
+        let flaw = Flaw::HollowSpecTest {
+            task: TaskId::from("T001"),
+            cmd: "test -f a.txt".to_string(),
+        };
+        Escalation::new(
+            Claim::NeedsDecision { node: NODE },
+            Menu::Gate(AuthorGate {
+                assignee: "lead".to_string(),
+                node: None,
+            }),
+            NonEmpty::from((
+                GateOption::reserved(ReservedOption::Abort),
+                vec![GateOption::reserved(ReservedOption::Continue)],
+            )),
+        )
+        .withholding(vec![Withheld {
+            option: "continue".into(),
+            because: WhyWithheld::Unprovable {
+                flaws: NonEmpty::from((flaw, Vec::new())),
+            },
+        }])
+        .into_payload()
+    }
+
+    /// A plan of one task whose change is on a test another task's spec wrote,
+    /// so the plan cannot be proven as it is written.
+    fn flawed_plan() -> ShownDocument {
+        let plan: TasksFile = yunta_core::yaml::parse(
+            "tasks:\n  - id: T001\n    title: Make it\n    scope: [a.txt]\n    criteria: []\n",
+        )
+        .expect("the plan reads");
+        let review = PlanReview {
+            plan,
+            departed: Vec::new(),
+            spec: None,
+            spec_node: None,
+            asked: None,
+            held: Vec::new(),
+            tasks: vec![TaskReview {
+                task: TaskId::from("T001"),
+                criteria: Vec::new(),
+                denied: vec![DeniedChange {
+                    at: "tests/a.rs".to_string(),
+                    owner: TaskId::from("T002"),
+                }],
+                guards: Vec::new(),
+            }],
+            handed_over: None,
+            answered: Vec::new(),
+            shapes_read: None,
+        };
+        ShownDocument {
+            shown: Shown {
+                producer: Some("plan".into()),
+                artifact: ArtifactId::Interpreted {
+                    kind: ArtifactKind::Tasks,
+                },
+                content_hash: ContentHash::sha256(b"plan"),
+            },
+            path: PathBuf::from("artifacts/plan/tasks.yaml"),
+            content: ShownContent::Tasks(Box::new(review)),
+        }
     }
 
     #[test]
@@ -247,23 +297,81 @@ mod tests {
 
     #[test]
     fn what_a_page_already_says_beside_a_decision_is_not_said_twice() {
-        // The record is said under the claim, a fact to a line.
+        // The record is said as a fact to a line; the page above the decision
+        // says its claim.
         let quoted = |line: &String| line.trim() == "exit 1";
         let all = drawn(&escalation(), NOTHING_BESIDE);
-        assert!(all.iter().any(|line| line.contains("are exhausted")));
         assert!(all.iter().any(quoted), "{all:#?}");
-        let page = drawn(
-            &escalation(),
-            Beside {
-                claim: true,
-                evidence: true,
-            },
+        assert!(
+            !all.iter().any(|line| line.contains("are exhausted")),
+            "{all:#?}"
+        );
+        let page = drawn(&escalation(), Beside { evidence: true });
+        assert!(!page.iter().any(quoted), "{page:#?}");
+    }
+
+    /// The lines of a page read as one text, each run of spaces as one space:
+    /// a sentence a terminal broke over lines reads whole.
+    fn as_text(lines: &[String]) -> String {
+        lines
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// With a plan on the page that says why an option is withheld, the record
+    /// leaves the reason out, and the section says it once, under its title.
+    #[test]
+    fn a_withheld_reason_is_said_once_by_before_you_decide() {
+        let withheld = withholding_for_a_flaw();
+        let record = account(&withheld, NOTHING_BESIDE, &[flawed_plan()]);
+        let page = Doc::new().with_all(record);
+        let drawn: Vec<String> = crate::render::surface_lines(page, &Look::plain())
+            .iter()
+            .map(Line::text)
+            .collect();
+        assert!(
+            drawn.iter().any(|line| line.contains("assignee: lead")),
+            "{drawn:#?}"
         );
         assert!(
-            !page
-                .iter()
-                .any(|line| line.contains("are exhausted") || quoted(line)),
-            "{page:#?}"
+            !drawn.iter().any(|line| line.contains("withheld")),
+            "{drawn:#?}"
+        );
+        // The section a page ends on says the reason once, under its title.
+        let decided = Decided {
+            node: NODE,
+            escalation: withheld,
+            shown: vec![flawed_plan()],
+            beside: NOTHING_BESIDE,
+        };
+        let lines = drawn_with(&decided);
+        let reason = "is not offered, because";
+        let title = lines
+            .iter()
+            .position(|line| line.contains("before you decide"));
+        let said = lines.iter().position(|line| line.contains(reason));
+        assert!(title.is_some() && title < said, "{lines:#?}");
+        assert_eq!(
+            lines.iter().filter(|line| line.contains(reason)).count(),
+            1,
+            "{lines:#?}"
+        );
+    }
+
+    /// With no plan on the page nothing else says why an option is withheld,
+    /// so the record names the option and the reason, whole.
+    #[test]
+    fn a_withheld_reason_is_said_by_the_record_when_no_plan_is_shown() {
+        let lines = drawn(&withholding_for_a_flaw(), NOTHING_BESIDE);
+        let reason = "withheld: `continue`, because the plan cannot be proven as it is \
+                      written: the spec's test of `T001`, `test -f a.txt`, runs none of \
+                      the files the spec wrote";
+        assert!(as_text(&lines).contains(reason), "{lines:#?}");
+        assert!(
+            !lines.iter().any(|line| line.contains("before you decide")),
+            "{lines:#?}"
         );
     }
 

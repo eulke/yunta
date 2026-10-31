@@ -100,6 +100,9 @@ pub fn sentence(pause: &PauseReason) -> String {
         ),
         PauseReason::Blocked { node, on } => blocked(node, on),
         PauseReason::GateAborted { node, free_text } => gate_aborted(node, free_text.as_deref()),
+        PauseReason::PullRequestClosed { node, url } => {
+            format!("node `{node}`'s pull request was closed, its decision still open ({url})")
+        }
         PauseReason::ChildPaused { node, run, child } => child_paused(node, run, child),
         PauseReason::Questions { node, pending } => {
             format!("node `{node}` {}", asked_questions(pending.as_slice()))
@@ -158,10 +161,11 @@ fn blocked(node: &NodeId, on: &[NodeId]) -> String {
     )
 }
 
-/// A gate resolved to abort, with whatever the person wrote alongside it.
+/// A gate a person paused the run at: its decision stays open, and whatever
+/// the person wrote with the pause follows it.
 fn gate_aborted(node: &NodeId, free_text: Option<&str>) -> String {
     text::detailed(
-        format!("node `{node}`'s gate was resolved to abort"),
+        format!("a person paused the run at node `{node}`, its decision still open"),
         free_text.unwrap_or_default(),
     )
 }
@@ -178,10 +182,11 @@ fn child_paused(node: &NodeId, run: &RunId, child: &PauseReason) -> String {
 
 #[cfg(test)]
 mod tests {
+    use surco::words::Standing;
     use yunta_core::events::{Failure, PauseReason};
     use yunta_core::{NodeId, QuestionId, RunId};
 
-    use super::sentence;
+    use super::{sentence, standing};
 
     #[test]
     fn a_node_that_waits_for_a_reset_names_the_moment_it_resumes() {
@@ -210,6 +215,57 @@ mod tests {
     #[test]
     fn a_pause_a_person_chose_reads_as_the_choice() {
         assert_eq!(sentence(&PauseReason::Cancelled), "interrupted by a person");
+    }
+
+    /// A person's pause at a gate says the decision is still open, and adds any note.
+    #[test]
+    fn a_person_paused_the_run_with_its_decision_open() {
+        let paused = PauseReason::GateAborted {
+            node: NodeId::from("approve-plan"),
+            free_text: None,
+        };
+        assert_eq!(
+            sentence(&paused),
+            "a person paused the run at node `approve-plan`, its decision still open"
+        );
+        let with_note = PauseReason::GateAborted {
+            node: NodeId::from("approve-plan"),
+            free_text: Some("not this quarter".to_string()),
+        };
+        assert_eq!(
+            sentence(&with_note),
+            "a person paused the run at node `approve-plan`, its decision still open: \
+             not this quarter"
+        );
+    }
+
+    /// A closed pull request names the node, leaves its decision open, and gives the URL.
+    #[test]
+    fn a_closed_pull_request_reads_as_a_pause_with_its_decision_open() {
+        let closed = PauseReason::PullRequestClosed {
+            node: NodeId::from("approve"),
+            url: "https://mock.forge/pr/1".to_string(),
+        };
+        assert_eq!(
+            sentence(&closed),
+            "node `approve`'s pull request was closed, its decision still open \
+             (https://mock.forge/pr/1)"
+        );
+    }
+
+    /// A person's gate pause and a closed pull request both have the stopped standing.
+    #[test]
+    fn both_pauses_read_as_stopped() {
+        let gate = PauseReason::GateAborted {
+            node: NodeId::from("approve"),
+            free_text: None,
+        };
+        let closed = PauseReason::PullRequestClosed {
+            node: NodeId::from("approve"),
+            url: "https://mock.forge/pr/1".to_string(),
+        };
+        assert_eq!(standing(&gate), Standing::Stopped);
+        assert_eq!(standing(&closed), Standing::Stopped);
     }
 
     #[test]

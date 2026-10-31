@@ -116,6 +116,7 @@ mod pause_reason_tests {
                 | PauseReason::AwaitingReset { .. }
                 | PauseReason::Blocked { .. }
                 | PauseReason::GateAborted { .. }
+                | PauseReason::PullRequestClosed { .. }
                 | PauseReason::ChildPaused { .. }
                 | PauseReason::Questions { .. }
                 | PauseReason::AnswersRefused { .. }
@@ -135,6 +136,7 @@ mod pause_reason_tests {
                 },
                 PublishedGate {
                     url: "https://example.invalid/pull/1".to_string(),
+                    folder: None,
                 },
                 "https://example.invalid/pull/1",
             ))),
@@ -182,6 +184,10 @@ mod pause_reason_tests {
             PauseReason::GateAborted {
                 node: NodeId::from("approve"),
                 free_text: Some("not this quarter".to_string()),
+            },
+            PauseReason::PullRequestClosed {
+                node: NodeId::from("approve"),
+                url: "https://mock.forge/pr/1".to_string(),
             },
             PauseReason::ChildPaused {
                 node: NodeId::from("fanout"),

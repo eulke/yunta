@@ -248,13 +248,9 @@ fn a_table_fits_its_line_and_cuts_what_the_line_leaves_first() {
 
 /// Every block with something to say, as one surface would put them.
 fn every_block() -> Doc {
-    let headline = Headline::new(
-        Mark::NeedsYou,
-        "run 7E5PH4".to_string(),
-        "needs you on a decision".to_string(),
-    );
+    let headline = Headline::new(Mark::NeedsYou, "run 7E5PH4", "needs you on a decision");
     let fields = Fields::new()
-        .push_if("progress", "1 of 2 nodes done, 1 failed")
+        .push_if("progress", "0 of 2 nodes done, 1 failed")
         .push_if("tokens", "20.2k spent, 3 past runs, median 18k tokens");
     let table = NodeTable {
         rows: vec![
@@ -318,11 +314,24 @@ fn markdown_matches_its_golden() {
     );
 }
 
-/// The words of `text` once markup, glyphs and the padding of columns
-/// are gone: what carries the meaning, whichever medium drew it.
-fn words(text: &str) -> std::collections::BTreeSet<String> {
-    text.split_whitespace()
-        .map(|token| token.trim_matches(|c| matches!(c, '*' | '`' | '|' | ':')))
+/// The words of `text` once markup, glyphs and the padding of columns are
+/// gone: what carries the meaning. A tag a Markdown surface writes is a
+/// break between words. An escaped `<` becomes its entity before tags are
+/// matched; an entity reads as the sign it names. Asterisks and backticks
+/// are markup anywhere; an underscore, bar or colon is trimmed at its ends.
+pub(super) fn words(text: &str) -> std::collections::BTreeSet<String> {
+    const TAGS: [&str; 5] = ["details", "summary", "b", "code", "br"];
+    let plain = TAGS.iter().fold(text.replace("\\<", "&lt;"), |text, tag| {
+        text.replace(&format!("<{tag}>"), " ")
+            .replace(&format!("</{tag}>"), " ")
+    });
+    plain
+        .replace(['*', '`'], "")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c| matches!(c, '_' | '|' | ':')))
         .filter(|token| token.chars().any(char::is_alphanumeric))
         .map(str::to_string)
         .collect()
@@ -402,7 +411,7 @@ fn a_cut_command_copies_as_one_command() {
 fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
     let mut list = Checklist::default();
     list.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
-    list.push(Found::Caution, "forge", "github acme/web — reachable");
+    list.push(Found::Caution, "forge", "github acme/web, reachable");
     list.push(
         Found::Problem,
         "codex/codex-model (executor, planner fallback, reviewer)",
@@ -413,7 +422,7 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
         plain(list),
         [
             "  + git    commits as Ada <ada@example.com>",
-            "  ^ forge  github acme/web — reachable",
+            "  ^ forge  github acme/web, reachable",
             "  ! codex/codex-model (executor, planner fallback, reviewer)",
             "           session died",
         ]

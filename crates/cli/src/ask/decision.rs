@@ -8,9 +8,6 @@
 //! person, a budget or loop cap — they differ in what they say, never
 //! in how they are answered.
 
-use surco::components::Headline;
-use surco::doc::{Block, Doc};
-use surco::words::Standing;
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, OptionId, RunId};
 use yunta_engine::ShownDocument;
@@ -20,7 +17,6 @@ use super::keys::{Stroke, Strokes};
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
 use crate::commands::advice;
-use crate::commands::status::decision::{account, Beside};
 
 /// What settles an option that asks for nothing: the decision as it
 /// stands, or a note sent with it.
@@ -94,18 +90,14 @@ fn noted(console: &Console) -> Answered<Option<String>> {
     }
 }
 
-/// Draws what the decision is about: the documents it shows, then that
-/// it needs the person, the claim, the record the engine attached to
-/// audit it against, and what weighs on it.
+/// Draws the decision as one page, laid out by the render crate: the
+/// documents it is about, then the question the engine asked, the record
+/// it attached to audit that question, what weighs on it, and each option
+/// with what it does and costs.
 ///
-/// The documents come first and the question last, beside the menu: on a
-/// terminal the last lines printed are the ones on the screen when the
-/// menu asks, and a plan a screen tall would push the question off it.
-/// The record goes above the options because a menu offered without it
-/// asks for a decision on a claim nobody checked, and what weighs on the
-/// decision goes last, against the options it weighs on. It is drawn as it is
-/// on every surface that shows the decision, so a person who reads the
-/// same run's page later reads the same block.
+/// The decision comes last, beside the menu: on a terminal the last lines
+/// printed are the ones on the screen when the menu asks, and a plan a
+/// screen tall would push the question off it.
 fn present(
     console: &Console,
     escalation: &GateWaitingPayload,
@@ -113,69 +105,44 @@ fn present(
 ) -> std::io::Result<()> {
     let look = console.look();
     let documents = shown.map_or(&[][..], |(_, documents)| documents);
-    if let Some((run, _)) = shown {
-        for document in documents {
-            console.say("")?;
-            let doc = yunta_render::shown::document(
-                document,
-                run,
-                yunta_render::shown::Form::Review,
-                &advice::spell,
-            );
-            for line in crate::render::draw(doc, &look).lines() {
-                console.say(line)?;
-            }
-        }
-    }
-    let nothing_beside = Beside {
-        claim: false,
-        evidence: false,
-    };
-    let before = yunta_render::shown::before_you_decide(escalation.withheld(), documents);
-    let doc = Doc::new()
-        .with(Headline::new(
-            Standing::NeedsYou.mark(),
-            "decision",
-            Standing::NeedsYou.word(),
-        ))
-        .with_all(account(escalation, nothing_beside))
-        .with_all(before.map(Block::from));
-    console.say("")?;
-    for line in crate::render::draw(doc, &look).lines() {
+    let page = yunta_render::gate::page(
+        yunta_render::gate::GatePage {
+            shown,
+            waits: None,
+            note: None,
+            form: yunta_render::shown::Form::Review,
+            decision: yunta_render::gate::asked(escalation, documents),
+        },
+        &advice::spell,
+    );
+    for line in crate::render::draw(page, &look).lines() {
         console.say(line)?;
     }
     console.say("")
 }
 
-/// The menu: every option by its id, with what it does and what
-/// choosing it costs read above the list.
+/// The menu's options, each named by its id alone. What an option does
+/// and what choosing it costs is on the page above the prompt, so the
+/// list does not say it again.
 fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
     escalation
         .options()
         .iter()
-        .map(|option| {
-            let (words, detail) = yunta_render::offers::option_words(escalation, option);
-            // A label that says nothing beyond the id is left off the row, which names it.
-            let label =
-                Some(words).filter(|words| !words.is_empty() && words != option.id.as_str());
-            Choice {
-                label,
-                detail,
-                ..Choice::named(option.id.as_str(), option.id.clone())
-            }
-        })
+        .map(|option| Choice::named(option.id.as_str(), option.id.clone()))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use surco::doc::Doc;
+    use surco::look::Look;
     use yunta_core::events::{AuthorGate, Claim, Escalation, GateOption, Leads, Menu};
     use yunta_core::reserved::ReservedOption;
     use yunta_core::{NodeId, NonEmpty};
 
-    /// A gate an author declared, offering `option` and nothing else.
-    fn escalation_with(option: GateOption) -> GateWaitingPayload {
+    /// A gate an author declared, offering `offered`.
+    fn escalation_with(offered: NonEmpty<GateOption>) -> GateWaitingPayload {
         Escalation::new(
             Claim::NeedsDecision {
                 node: NodeId::from_static("approve"),
@@ -184,7 +151,7 @@ mod tests {
                 assignee: "lead".to_string(),
                 node: None,
             }),
-            NonEmpty::from((option, Vec::new())),
+            offered,
         )
         .into_payload()
     }
@@ -200,25 +167,71 @@ mod tests {
         )
     }
 
+    /// The rows name each option by its id alone, with no label: the page says what each does.
     #[test]
-    fn an_option_is_named_by_its_id_and_carries_what_it_does_and_costs() {
-        let drawn = options(&escalation_with(leading()));
-        let first = drawn.first().expect("the menu offers the option");
-        assert_eq!(first.name, "approve");
-        assert_eq!(first.label.as_deref(), Some("On to `ship`"));
-        assert_eq!(
-            first.detail.as_deref(),
-            Some("resolves this gate; `ship` runs next"),
-            "every option declares what it trades off, and the menu shows it"
+    fn options_are_named_by_their_id_alone() {
+        let escalation = escalation_with(NonEmpty::from((
+            leading(),
+            vec![GateOption::reserved(ReservedOption::Abort)],
+        )));
+        let drawn = options(&escalation);
+        let names: Vec<&str> = drawn.iter().map(|choice| choice.name.as_str()).collect();
+        let values: Vec<&str> = drawn.iter().map(|choice| choice.value.as_str()).collect();
+        assert_eq!(names, ["approve", "abort"]);
+        assert_eq!(values, ["approve", "abort"]);
+        assert!(
+            drawn.iter().all(|choice| choice.label.is_none()),
+            "what each option does and costs is on the page, not in the list"
         );
     }
 
+    /// The lines the page above the prompt draws for `escalation`, each trimmed.
+    fn page_lines(escalation: &GateWaitingPayload) -> Vec<String> {
+        let section = yunta_render::gate::asked(escalation, &[]);
+        crate::render::surface_lines(Doc::new().with(section), &Look::plain())
+            .iter()
+            .map(|line| line.text().trim().to_string())
+            .collect()
+    }
+
+    /// The page above the prompt says what each option does and what choosing
+    /// it costs: the words the list no longer carries.
     #[test]
-    fn a_label_that_only_repeats_the_id_is_left_off_the_row() {
-        let drawn = options(&escalation_with(GateOption::reserved(
-            ReservedOption::Approve,
+    fn the_page_above_the_prompt_says_what_each_option_does_and_costs() {
+        let escalation = escalation_with(NonEmpty::from((
+            leading(),
+            vec![GateOption::reserved(ReservedOption::Abort)],
         )));
-        let first = drawn.first().expect("the menu offers the option");
-        assert_eq!(first.label, None, "the row already names the option");
+        let lines = page_lines(&escalation);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("approve: On to `ship`")),
+            "{lines:#?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("resolves this gate; `ship` runs next")),
+            "{lines:#?}"
+        );
+    }
+
+    /// An option whose words are its id is drawn once, by its id.
+    #[test]
+    fn an_option_whose_label_is_its_id_is_drawn_once() {
+        let escalation = escalation_with(NonEmpty::from((
+            GateOption::reserved(ReservedOption::Approve),
+            Vec::new(),
+        )));
+        let lines = page_lines(&escalation);
+        assert!(
+            lines.iter().any(|line| line.as_str() == "approve"),
+            "{lines:#?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("approve: approve")),
+            "{lines:#?}"
+        );
     }
 }

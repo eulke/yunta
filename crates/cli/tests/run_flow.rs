@@ -2145,7 +2145,7 @@ on_finish:
     );
     // The run branch pointed at the base commit (nothing was committed),
     // so `git branch -d` agreed to delete it.
-    let branches = git_output(&repo, &["branch", "--list", &format!("yunta/{run_id}")]);
+    let branches = git_output(&repo, &["branch", "--list", &format!("yunta/run/{run_id}")]);
     assert!(branches.is_empty(), "a merged run branch is deleted");
 }
 

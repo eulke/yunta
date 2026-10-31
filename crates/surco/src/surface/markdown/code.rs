@@ -1,18 +1,26 @@
 //! A file's code as Markdown: where it is and what it is there for, its
 //! lines fenced in the language of its file, marked where it modifies the
 //! code that stands where it goes, and what is said of it under the fence.
+//! Where a description leaves code lines out, the lines and the fence go,
+//! and the title and what is said of the code stay.
 
-use super::GLYPHS;
+use super::{code_span, plain_text, Leaves, Page, GLYPHS};
 use crate::components::Code;
+
+/// Code as `page` says it: fenced with its lines, or, where the page leaves
+/// code lines out, only its title and what is said under it.
+pub(super) fn drawn(code: &Code, page: Page) -> String {
+    match page.leaves >= Leaves::CodeLines {
+        true => without_lines(code),
+        false => fenced(code),
+    }
+}
 
 /// Code under where it is and what it is there for, fenced in the language
 /// of its file; then, in italics, what it is to the code that stands where
 /// it goes and how long it is, and where the rest is read.
-pub(super) fn fenced(code: &Code) -> String {
-    let mut out = format!("`{}`", code.title(GLYPHS));
-    if let Some(what) = &code.what {
-        out.push_str(&format!(": {what}"));
-    }
+fn fenced(code: &Code) -> String {
+    let mut out = title(code);
     if !code.lines.is_empty() {
         let lines: Vec<String> = crate::surface::diff::lines(code, GLYPHS)
             .iter()
@@ -22,18 +30,42 @@ pub(super) fn fenced(code: &Code) -> String {
         let fence = fence(&lines);
         out.push_str(&format!("\n\n{fence}{}\n{lines}\n{fence}", code.language()));
     }
-    let footer = code.footer();
-    if !footer.is_empty() {
-        let said = footer.join(&format!(" {} ", GLYPHS.sep()));
-        out.push_str(&format!("\n\n_{said}_"));
-    }
+    out.push_str(&footer(code));
     if let Some(rest) = &code.rest {
         out.push_str(&format!(
-            "\n\n{} more: {rest}",
-            crate::text::counted(code.whole - code.lines.len(), "line")
+            "\n\n{} more: {}",
+            crate::text::counted(code.whole - code.lines.len(), "line"),
+            code_span(rest)
         ));
     }
     out
+}
+
+/// Code with its lines left out: its title and what is said under it, which
+/// still says how long the code is.
+fn without_lines(code: &Code) -> String {
+    format!("{}{}", title(code), footer(code))
+}
+
+/// Where the code is and what it is there for: its title in backticks, then
+/// what it is for after a colon, when it is for anything.
+fn title(code: &Code) -> String {
+    let mut out = code_span(&crate::surface::code_title(code, GLYPHS).join(" "));
+    if let Some(what) = &code.what {
+        out.push_str(&format!(": {}", plain_text(what)));
+    }
+    out
+}
+
+/// What is said under the code's lines, in italics after a blank line: what
+/// it is to the code that stands where it goes and how long it is. Empty
+/// when nothing is said.
+fn footer(code: &Code) -> String {
+    let said = code.footer();
+    match said.is_empty() {
+        true => String::new(),
+        false => format!("\n\n_{}_", said.join(&format!(" {} ", GLYPHS.sep()))),
+    }
 }
 
 /// The fence around `text` as code: one backtick more than the longest
@@ -45,8 +77,12 @@ pub(super) fn fence(text: &str) -> String {
         .map(|line| line.trim_start().chars().take_while(|c| *c == '`').count())
         .max()
         .unwrap_or_default();
-    "`".repeat((longest + 1).max(3))
+    "`".repeat((longest + 1).max(MIN_FENCE))
 }
+
+/// The fewest signs that open or close a fence: CommonMark opens and closes a
+/// fence with three signs, so a shorter run is ordinary text.
+pub(super) const MIN_FENCE: usize = 3;
 
 #[cfg(test)]
 mod tests {
@@ -69,7 +105,7 @@ mod tests {
         assert!(drawn.contains("````markdown\n```bash"), "{drawn}");
         let open = drawn.matches("````").count();
         assert_eq!(open, 2, "{drawn}");
-        assert!(drawn.trim_end().ends_with("### proof"), "{drawn}");
+        assert!(drawn.trim_end().ends_with("\n\n## proof"), "{drawn}");
     }
 
     #[test]

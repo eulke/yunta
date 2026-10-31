@@ -8,6 +8,6 @@
         ␛[2mso␛[0m           it passes once `greet` is done, whatever this task does
         ␛[2mfix␛[0m          judge the task by a test of its own
 
-    ␛[2m◌␛[0m handed over 16 times; refused 15: criterion-already-passes 12 times, shared-criterion 3 times
+    ␛[2m◌␛[0m handed over 16 times; refused 15 times: criterion-already-passes in 12, shared-criterion in 3
     ␛[2m◌␛[0m 1 of 2 changes shows no code
     ␛[33m▲␛[0m risk: A name with a newline in it breaks the line it is printed on.

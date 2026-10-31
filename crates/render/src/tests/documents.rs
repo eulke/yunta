@@ -3,13 +3,17 @@
 
 use std::path::{Path, PathBuf};
 
-use surco::golden::{assert_golden, ENVIRONMENTS};
+use surco::golden::{assert_golden, Environment, ENVIRONMENTS};
 use surco::look::Look;
 use surco::surface::{Markdown, Surface, Terminal};
-use yunta_core::shown::{Answered, DeniedChange, HeldTo, JudgedCriterion, PlanReview, TaskReview};
+use yunta_core::shown::{
+    Answered, DeniedChange, HeldTo, JudgedCriterion, PlanReview, ShownContent, ShownDocument,
+    TaskReview,
+};
 use yunta_core::{RunId, SpecFile, TasksFile};
 use yunta_testkit_core::spell;
 
+use super::console_page::{assert_fits, unpainted};
 use crate::plan::{document, Form};
 
 pub(super) fn goldens() -> PathBuf {
@@ -233,14 +237,57 @@ pub(super) fn read(review: &PlanReview, form: Form) -> String {
     Terminal::on(Look::plain()).draw(&document(review, &run(), form, &*spell()))
 }
 
+/// `review` as the plan a gate shows: the run's tasks document, at the path
+/// the run holds it.
+pub(super) fn shown_plan(review: PlanReview) -> ShownDocument {
+    ShownDocument {
+        shown: yunta_core::events::Shown {
+            producer: Some("plan".into()),
+            artifact: yunta_core::events::ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Tasks,
+            },
+            content_hash: yunta_core::ContentHash::sha256(b"plan"),
+        },
+        path: PathBuf::from("artifacts/plan/tasks.yaml"),
+        content: ShownContent::Tasks(Box::new(review)),
+    }
+}
+
+/// The lines a plan under review opens on at `environment`, unpainted: its title
+/// breaks between facts only where they do not fit, and its summary hangs from
+/// it as a gist, wrapped to the width.
+fn head_of(environment: &Environment) -> &'static [&'static str] {
+    match environment.name {
+        "unicode-60" => &[
+            "plan: 4 tasks in 3 steps, 4 decided for you, 2 risks,",
+            "      2 left out",
+            "  Install packs in the user's Yunta state directory for use",
+            "  across projects.",
+        ],
+        "ascii-80" | "unicode-color-100" => &[
+            "plan: 4 tasks in 3 steps, 4 decided for you, 2 risks, 2 left out",
+            "  Install packs in the user's Yunta state directory for use across projects.",
+        ],
+        other => panic!("no expected head for the environment {other}"),
+    }
+}
+
+/// The plan under review, drawn in each environment: it opens on its head and
+/// every line fits the width in every environment, then the whole matches its
+/// golden in each one.
 #[test]
 fn a_plan_under_review_matches_its_goldens() {
     let doc = document(&global_packs(), &run(), Form::Review, &*spell());
     for environment in &ENVIRONMENTS {
-        assert_golden(
-            &environment.golden(&goldens(), "plan-review"),
-            &Terminal::on(Look::of(environment)).draw(&doc),
-        );
+        let head = head_of(environment);
+        let plain = Terminal::on(unpainted(environment)).draw(&doc);
+        let opening: Vec<&str> = plain.lines().take(head.len()).collect();
+        assert_eq!(opening, head, "{plain}");
+        assert_fits(&doc, environment);
+    }
+    for environment in &ENVIRONMENTS {
+        let drawn = Terminal::on(Look::of(environment)).draw(&doc);
+        assert_golden(&environment.golden(&goldens(), "plan-review"), &drawn);
     }
 }
 
@@ -335,6 +382,25 @@ fn a_whole_plan_holds_each_file_the_spec_wrote_after_its_cards_and_its_proof_las
     assert!(
         !drawn.contains("--node specify"),
         "tests drawn need no command:\n{drawn}"
+    );
+}
+
+/// A plan's risks are said once, beside the decision a page puts the plan
+/// under: a review of the plan leaves them out, the whole plan draws each one,
+/// and its file opens on its title with the summary as its second paragraph.
+#[test]
+fn forms_say_their_risks_where_their_decision_is() {
+    let review = global_packs();
+    let reviewed = read(&review, Form::Review);
+    assert!(!reviewed.contains("Global lock state"), "{reviewed}");
+    let whole = read(&review, Form::Whole);
+    assert_eq!(whole.matches("Global lock state").count(), 1, "{whole}");
+    let file = Markdown.draw(&document(&review, &run(), Form::Whole, &*spell()));
+    assert!(file.starts_with("# plan: "), "{file}");
+    let summary = file.split("\n\n").nth(1).unwrap_or_default();
+    assert_eq!(
+        summary, "Install packs in the user's Yunta state directory for use across projects.",
+        "{file}"
     );
 }
 

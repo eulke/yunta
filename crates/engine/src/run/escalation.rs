@@ -1,7 +1,7 @@
 //! The escalation object, built once and shared. Three
 //! constructors — one per shape with a menu — used by both
 //! the live pause path (`run/exec.rs`'s `GateExhaustedReroutes` and
-//! `EscalateFailure` arms and `gate_exec::resolve_internal_gate`, which
+//! `EscalateFailure` arms and `steps::resolve_internal_gate`, which
 //! await a `HumanInteraction` with the built object synchronously) and [`current_escalation`]
 //! (which rebuilds the identical object for a run already paused, no
 //! live process involved) — one construction site each, not two copies

@@ -7,7 +7,7 @@
 //! what the planner's session picks its work back up with.
 
 use yunta_core::events::{
-    ArtifactId, Asks, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
+    ArtifactId, Asks, Claim, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
 };
 use yunta_core::{ArtifactKind, HeldEntry};
 use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal, ShownContent};
@@ -138,6 +138,43 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
     assert!(
         shown[0][0].path.ends_with("artifacts/plan/tasks.yaml"),
         "a plan points to the document the engine runs"
+    );
+}
+
+/// The question a gate asks a person who approves it, as its log records it.
+async fn question_asked_by(workflow: &str) -> Claim {
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["approve"]);
+    bench
+        .run_with_interaction(workflow, PLANNER, &interaction)
+        .await;
+    waiting(&bench)[0].summary().clone()
+}
+
+/// A gate asks its own message as written. With no message, it asks to approve
+/// the change its plan names. A blank message is none.
+#[tokio::test]
+async fn a_gate_asks_its_message_as_written_or_else_about_the_change_its_plan_names() {
+    let messageless = REVIEWED_PLAN.replace("    message: \"Plan registered. Approve?\"\n", "");
+    assert_eq!(
+        question_asked_by(&messageless).await,
+        Claim::ApprovePlan {
+            summary: "Make it".to_string()
+        }
+    );
+    let blank = REVIEWED_PLAN.replace(
+        "    message: \"Plan registered. Approve?\"\n",
+        "    message: \"  \"\n",
+    );
+    assert_eq!(
+        question_asked_by(&blank).await,
+        Claim::ApprovePlan {
+            summary: "Make it".to_string()
+        }
+    );
+    assert_eq!(
+        question_asked_by(REVIEWED_PLAN).await,
+        Claim::Written("Plan registered. Approve?".to_string())
     );
 }
 

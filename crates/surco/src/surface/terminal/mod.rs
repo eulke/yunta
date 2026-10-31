@@ -101,8 +101,9 @@ impl Terminal {
                         .map(|part| Line::new().push(Tone::Muted, part)),
                 )
                 .collect(),
-            Block::Title(title) => vec![title.clone()],
+            Block::Title(title) => title.lines(look),
             Block::Section(section) => self.section(section),
+            Block::Fold(fold) => self.section(&fold.0),
             Block::Prose(block) => block.lines(look),
             Block::Note(block) => block.lines(look),
             Block::Markdown(text) => self.markdown(text),
@@ -172,8 +173,8 @@ impl Terminal {
             let Some(first) = drawn.first() else {
                 continue;
             };
-            // A section inside this one ends a block of its own: what
-            // follows it stands apart from it.
+            // A section or a fold inside this one ends a block of its own:
+            // what follows it stands apart from it.
             if after_section && !first.text().is_empty() {
                 lines.push(Line::new());
             }
@@ -183,7 +184,7 @@ impl Terminal {
                 true => line,
                 false => line.under(INDENT),
             }));
-            after_section = matches!(block, Block::Section(_));
+            after_section = matches!(block, Block::Section(_) | Block::Fold(_));
         }
         lines
     }
@@ -200,3 +201,6 @@ impl Surface for Terminal {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests;

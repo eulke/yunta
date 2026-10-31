@@ -27,6 +27,7 @@ pub mod evidence;
 pub mod failure;
 mod findings;
 pub mod found;
+pub mod gate;
 pub mod inputs;
 pub mod offers;
 pub mod outcome;
@@ -47,6 +48,7 @@ mod tests {
     mod cards;
     mod cautions;
     mod claims;
+    mod console_page;
     mod deciding;
     mod documents;
     mod failure;
@@ -56,5 +58,6 @@ mod tests {
     mod grant;
     mod inputs;
     mod offers;
+    mod publication;
     mod retry;
 }

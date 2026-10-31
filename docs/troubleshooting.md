@@ -364,12 +364,14 @@ limit that names no reset time is not a wait: the run says `needs you`.
 
 ## A run says it `stopped`
 
-A person stopped it: `yunta cancel` on the running run, or `abort` chosen at a
-gate. Nothing is asked of anyone and nothing is wrong with it: `yunta resume
-<run>` continues it where it stopped, and `yunta close <run>` closes it for good.
-A node whose attempt was open when its run stopped says `stopped` too, and the
-resume starts that attempt again. A run that was closed after a stop keeps the
-word, and nothing resumes it.
+A person stopped it: `yunta cancel` on the running run, `abort` chosen at a
+gate, or a gate's pull request closed on its forge. Nothing is asked of anyone and
+nothing is wrong with it: `yunta resume <run>` continues it where it stopped — a
+gate asks its decision again, and one whose pull request was closed publishes
+again, on the pull request if someone reopened it or on a new one — and
+`yunta close <run>` closes it for good. A node whose attempt was open when its run
+stopped says `stopped` too, and the resume starts that attempt again. A run that
+was closed after a stop keeps the word, and nothing resumes it.
 
 ## A node failed and `resume` pauses on the same failure
 
@@ -493,7 +495,7 @@ run is broken: run `01J...` works in `/home/me/.yunta/worktrees/01J...`, whose
 HEAD `9f1c...` no longer has the run's base commit `4a77...` behind it: every
 task, scope check and criterion this run's log records was established against
 a tree that this one is not a continuation of. Put it back on the run's own
-branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/01J...`), or
+branch (`git -C /home/me/.yunta/worktrees/01J... checkout yunta/run/01J...`), or
 on any commit that still descends from `4a77...` (`git -C
 /home/me/.yunta/worktrees/01J... reflog` shows where the run left it). If those
 commits are gone for good, start a new run against the tree as it is now.
@@ -512,7 +514,7 @@ What to do:
 
 - **Put the tree back.** `git -C <worktree> reflog` shows every commit that
   tree has been on, including where the run left it. `git -C <worktree>
-  checkout yunta/<run_id>` returns it to the run's own branch; any commit
+  checkout yunta/run/<run_id>` returns it to the run's own branch; any commit
   that still descends from the base commit works.
 - **Under `isolation: none`** the run works directly on your checkout, so a
   `git pull --rebase` or a rebase while the run was paused is the usual way
@@ -533,10 +535,10 @@ that is gone.
 ## `resume` cannot find the run's worktree
 
 ```
-the run's branch `yunta/01J...` has no worktree at
+the run's branch `yunta/run/01J...` has no worktree at
 `/home/me/.yunta/worktrees/01J...` (there is nothing at that path); the
 run's history and artifacts are intact; bring the checkout back with `git
-worktree add /home/me/.yunta/worktrees/01J... yunta/01J...`, run from the
+worktree add /home/me/.yunta/worktrees/01J... yunta/run/01J...`, run from the
 repository the run was created in, and resume again
 ```
 

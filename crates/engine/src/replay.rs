@@ -256,29 +256,6 @@ impl RunState {
         answered && owed
     }
 
-    /// Whether nothing has been derived from this state's log beyond the
-    /// fact that a node was heard from — a node record carrying a
-    /// timestamp and no derivation behind it.
-    ///
-    /// What a kind of event states about the run, told apart from the
-    /// envelope every event carries. The kinds that move no state are listed
-    /// explicitly beside this check. The clock and the activity are not
-    /// compared, as in equality.
-    pub fn derives_nothing(&self) -> bool {
-        let heard_from_only = self.nodes.iter().all(|(_, record)| {
-            *record
-                == yunta_core::events::NodeRecord {
-                    last_event_at: record.last_event_at,
-                    ..Default::default()
-                }
-        });
-        let rest = RunState {
-            nodes: NodeLedger::default(),
-            ..self.clone()
-        };
-        heard_from_only && rest == RunState::default()
-    }
-
     /// Folds one event into every ledger its domain reaches.
     ///
     /// The order is fixed. The event is refused first, so a refused event

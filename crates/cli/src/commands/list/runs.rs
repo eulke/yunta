@@ -17,7 +17,7 @@ use surco::figures::duration;
 use surco::glyphs::{Glyphs, Mark};
 use surco::look::Look;
 use surco::text::counted;
-use surco::words::Standing;
+use surco::words::{Standing, NEED_YOU, NOTHING_NEEDS_YOU};
 
 use super::inbox::{Group, Inbox, RunRow};
 use crate::commands::advice;
@@ -111,12 +111,15 @@ impl ListRunsAnswer {
         let (needs, stalled) = (self.count(Group::NeedsYou), self.count(Group::Stalled));
         let (mark, said) = match (needs, stalled) {
             (0, 0) if self.count(Group::InFlight) > 0 => {
-                (Mark::Running, "nothing needs you".to_string())
+                (Mark::Running, NOTHING_NEEDS_YOU.to_string())
             }
-            (0, 0) => (Mark::Done, "nothing needs you".to_string()),
-            (0, stalled) => (Mark::Caution, format!("{stalled} stalled")),
-            (1, _) => (Mark::NeedsYou, "1 needs you".to_string()),
-            (needs, _) => (Mark::NeedsYou, format!("{needs} need you")),
+            (0, 0) => (Mark::Done, NOTHING_NEEDS_YOU.to_string()),
+            (0, stalled) => (
+                Mark::Caution,
+                format!("{stalled} {}", Standing::Stalled.word()),
+            ),
+            (1, _) => (Mark::NeedsYou, format!("1 {}", Standing::NeedsYou.word())),
+            (needs, _) => (Mark::NeedsYou, format!("{needs} {NEED_YOU}")),
         };
         let subject = match self.inbox.here {
             true => "runs of this repository",
@@ -124,7 +127,7 @@ impl ListRunsAnswer {
         };
         let mut headline = Headline::new(mark, subject, said);
         if needs > 0 && stalled > 0 {
-            headline = headline.fact(format!("{stalled} stalled"));
+            headline = headline.fact(format!("{stalled} {}", Standing::Stalled.word()));
         }
         for (group, word) in [
             (Group::Stopped, Standing::Stopped.word()),
@@ -155,9 +158,10 @@ impl ListRunsAnswer {
         };
         let mut closed = of(Group::Closed, false);
         closed.reverse();
+        let needs_heading = format!("{}, oldest first", Standing::NeedsYou.word());
         let mut parts = vec![
             ("asking now", of(Group::NeedsYou, true)),
-            ("needs you, oldest first", of(Group::NeedsYou, false)),
+            (needs_heading.as_str(), of(Group::NeedsYou, false)),
             (Standing::Stalled.word(), of(Group::Stalled, false)),
             (Standing::Stopped.word(), of(Group::Stopped, false)),
             (Standing::Running.word(), of(Group::InFlight, false)),

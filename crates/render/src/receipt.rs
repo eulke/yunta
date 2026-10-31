@@ -6,7 +6,7 @@
 //! derivation is what makes "the receipt IS the evidence" checkable: the
 //! engine reads the log, this reads the receipt.
 
-use surco::components::{Checklist, Fields, Found, Headline, Next, Prose, Section, Whole};
+use surco::components::{Checklist, Fields, Found, Gist, Headline, Next, Section, Whole};
 use surco::doc::{Block, Doc};
 use surco::figures::Tokens;
 use surco::glyphs::{Glyphs, Mark};
@@ -57,21 +57,19 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
     let word = receipt.terminal_state.map_or(Standing::Running, |state| {
         standing(state, receipt.blocking_findings)
     });
-    let mut doc = Doc::new().with(Headline::new(
+    let headline = Headline::new(
         word.mark(),
-        format!("receipt for run {handle}"),
+        format!("receipt of {} ({})", receipt.workflow, receipt.mode),
         word.word().to_string(),
-    ));
+    )
+    .edge(handle);
+    let mut doc = Doc::new().with(headline);
     if receipt.terminal_state.is_none() {
-        doc = doc.with(Prose(
-            "the run is still open: this is its last step".to_string(),
-        ));
+        doc = doc.with(Gist::new("the run is still open: this is its last step"));
     }
     let mut doc = doc
         .with(
             Fields::new()
-                .push_if("workflow", receipt.workflow.to_string())
-                .push_if("mode", receipt.mode.to_string())
                 .push_if("run", receipt.run_id.to_string())
                 .push_if("cost", cost(receipt, glyphs)),
         )

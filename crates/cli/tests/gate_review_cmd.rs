@@ -3,7 +3,7 @@
 //! words is asked again, and one with words sends the plan back to the
 //! planner before the gate asks once more.
 
-use yunta_testkit::{run_id_from, stderr, yunta_in, yunta_on_terminal, Checkout, Terminal};
+use yunta_testkit::{run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout, Terminal};
 
 const REVIEWED_PLAN: &str = r#"
 name: reviewed-plan
@@ -62,12 +62,17 @@ const RUN: [&str; 7] = [
 ];
 
 fn checkout(root: &std::path::Path) -> Checkout {
+    checkout_with(root, REVIEWED_PLAN)
+}
+
+/// A checkout whose workflow is `workflow`, planned by the `PLANNER` fixture.
+fn checkout_with(root: &std::path::Path, workflow: &str) -> Checkout {
     Checkout::under(root)
         .config(
             "defaults:\n  isolation: none\nrunners:\n  planner:\n    \
              - { adapter: mock, model: mock-model }\n",
         )
-        .workflow("wf", REVIEWED_PLAN)
+        .workflow("wf", workflow)
         .file("fixture.yaml", PLANNER)
         .committed()
 }
@@ -168,6 +173,19 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
             && drawn.contains("tested by    the file exists"),
         "resolve-gate offered a decision without the plan it decides on:\n{drawn}"
     );
+    // Nothing is drawn above the page on this surface, so its first line is
+    // the headline.
+    let first = drawn.lines().find(|line| !line.trim().is_empty());
+    assert!(
+        first.is_some_and(|line| line.starts_with("◆ decision · needs you")),
+        "resolve-gate does not open its page on the headline:\n{drawn}"
+    );
+    // The plan is read straight after the headline.
+    let second = drawn.lines().filter(|line| !line.trim().is_empty()).nth(1);
+    assert!(
+        second.is_some_and(|line| line.starts_with("plan: 1 task")),
+        "resolve-gate does not read the plan straight after its headline:\n{drawn}"
+    );
 }
 
 #[test]
@@ -208,23 +226,126 @@ fn status_node_prints_a_plan_whole() {
     );
 }
 
+/// The id of the one run under `home`, which is the run this test started.
+/// The engine created its directory, so the id is read from there, not from
+/// the console that a check then compares with it.
+fn the_only_run_under(home: &std::path::Path) -> String {
+    let mut runs = std::fs::read_dir(yunta_testkit::runs_root(home))
+        .expect("the run's directory exists under the home")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned());
+    let id = runs.next().expect("a run was started under the home");
+    assert!(runs.next().is_none(), "more than one run is under the home");
+    id
+}
+
+/// Checks what a gate's page opens on, once it is drawn. `--quiet` says the
+/// run's id alone on the first line, and that id is the one run under
+/// `home`. The page follows it: its headline, with the run's handle at the
+/// headline's far edge, then the plan the page reads first.
+fn opens_on_its_headline(drawn: &str, home: &std::path::Path) {
+    let id = the_only_run_under(home);
+    let lines: Vec<&str> = drawn
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert!(
+        lines.first().is_some_and(|line| line.trim() == id),
+        "the first line is not the id of the run that was started:\n{drawn}"
+    );
+    assert!(
+        lines.get(1).is_some_and(|line| {
+            line.starts_with("◆ decision · needs you")
+                && line.trim_end().ends_with(yunta_testkit::handle(&id))
+        }),
+        "the page does not open on its headline, with the run's handle at its edge:\n{drawn}"
+    );
+    assert!(
+        lines
+            .get(2)
+            .is_some_and(|line| line.starts_with("plan: 1 task")),
+        "the plan is not read straight after the headline:\n{drawn}"
+    );
+}
+
 #[test]
 fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
     let root = tempfile::tempdir().unwrap();
-    let terminal = reviewing(root.path());
+    let checkout = checkout(root.path());
+    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
     terminal.wait_for("3  abort", "the gate never put its options on the console");
     let drawn = terminal.drawn();
+    opens_on_its_headline(&drawn, &checkout.home);
+    // The page reads its headline and then the plan. The question is asked
+    // after the plan, and its options follow it.
+    let headline = drawn
+        .find("◆ decision · needs you")
+        .expect("the page has no headline");
     let plan = drawn.find("plan: 1 task").expect("the plan was shown");
     let question = drawn
-        .find("◆ decision · needs you")
+        .find("◆ Plan registered. Approve?")
         .expect("the decision was put");
     assert!(
-        plan < question,
-        "the plan is read first and the question asked last, beside the menu:\n{drawn}"
+        headline < plan && plan < question,
+        "the page opens on its headline, reads the plan, then asks the question:\n{drawn}"
+    );
+    let asked = &drawn[question..];
+    assert!(
+        !asked.contains("T001: Make it"),
+        "nothing of the plan sits between the question and its options:\n{drawn}"
     );
     assert!(
-        !drawn[question..].contains("T001: Make it"),
-        "nothing of the plan sits between the question and its options:\n{drawn}"
+        asked.contains("abort: Pause here"),
+        "the decision offers to pause the run among its options:\n{drawn}"
+    );
+    assert!(
+        asked
+            .lines()
+            .any(|line| line.trim_start().starts_with("approve:")),
+        "the decision draws its options as rows, approve among them:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains("  1  approve:"),
+        "the options are rows of the decision, not a numbered list:\n{drawn}"
+    );
+}
+
+/// `REVIEWED_PLAN` with its gate's `message:` taken out, so the gate asks to
+/// approve the change its plan's summary names.
+fn without_message() -> String {
+    REVIEWED_PLAN.replace("    message: \"Plan registered. Approve?\"\n", "")
+}
+
+/// A gate with no `message:` asks to approve the change its plan's summary
+/// names, on a terminal and in the status of a run parked on it.
+#[test]
+fn a_gate_with_no_message_asks_to_approve_its_plan() {
+    let workflow = without_message();
+    assert!(
+        !workflow.contains("message:"),
+        "the gate still has a message:\n{workflow}"
+    );
+
+    let on_terminal = tempfile::tempdir().unwrap();
+    let checkout = checkout_with(on_terminal.path(), &workflow);
+    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
+    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    let drawn = terminal.drawn();
+    assert!(
+        drawn.contains("◆ Approve the plan: Make it?"),
+        "the decision asks to approve the change the plan makes:\n{drawn}"
+    );
+
+    let parked_in = tempfile::tempdir().unwrap();
+    let checkout = checkout_with(parked_in.path(), &workflow);
+    let parked = yunta_in!(&checkout.repo, &checkout.home, &RUN);
+    assert_eq!(parked.status.code(), Some(3), "{}", stderr(&parked));
+    let run_id = run_id_from(&parked);
+    let status = yunta_in!(&checkout.repo, &checkout.home, &["status", &run_id]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    let said = stdout(&status);
+    assert!(
+        said.contains("Approve the plan: Make it?"),
+        "the status of the parked run says what it waits on:\n{said}"
     );
 }
 

@@ -3,25 +3,23 @@
 //! Six places used to walk the gate kinds with their own rule — two of
 //! them the same function copied byte for byte. Every surface that asks
 //! what a node is waiting on, what was published, what was decided or
-//! what was asked reads it here rather than walking those four kinds
-//! itself: a second fold is a second answer.
+//! whom a person is asked about reads it here rather than walking those
+//! four kinds itself: a second fold is a second answer.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::events::gates::kinds::GateEvent;
-use crate::events::gates::menu::Menu;
+use crate::events::gates::menu::{GateFolder, Menu, PublishedGate};
 use crate::events::gates::payloads::{
-    GateResolvedPayload, GateWaitingPayload, QuestionsAnsweredPayload, QuestionsAskedPayload,
+    GateResolvedPayload, GateWaitingPayload, QuestionsAnsweredPayload,
 };
 use crate::events::meta::EventMeta;
 use crate::hash::CommitSha;
-use crate::ids::{NodeId, Seq};
+use crate::ids::{NodeId, RunId, Seq};
 
-/// One round of questions: what a node asked, and the answer it got.
+/// One round of questions a node asked, and the answer it got.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuestionRound {
-    pub asked: QuestionsAskedPayload,
-    pub asked_at: Seq,
     /// The answer, once one was recorded. A round with none is the round
     /// the node is waiting on.
     pub answered: Option<QuestionsAnsweredPayload>,
@@ -41,9 +39,13 @@ pub struct GateRecord {
     /// decision.
     pub task_answers: BTreeSet<Seq>,
     /// The forge's handle of the gate this node published and a wake
-    /// polls: the latest, until a review asked for changes on it — the
-    /// corrected lap publishes again.
+    /// polls: the latest, until a review asked for changes on it or it
+    /// closed.
     pub external_ref: Option<String>,
+    /// Where this gate's latest publication put its files: the folder its
+    /// `gate_waiting` names, or the branch's root for one that names none.
+    /// `None` for a gate never published.
+    pub folder: Option<GateFolder>,
     /// The commit the latest approving review covered.
     pub approved_sha: Option<CommitSha>,
     /// Every round of questions this node asked, oldest first.
@@ -54,9 +56,6 @@ pub struct GateRecord {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GateLedger {
     per_node: BTreeMap<NodeId, GateRecord>,
-    /// Run-level escalations: the token budget gates the whole
-    /// invocation, not any node.
-    run_level: Vec<(GateWaitingPayload, Seq)>,
     /// Whom a person is being asked about: the node, or `None` for a
     /// run-level ask. An asking opens it, and a resolution or an answer
     /// closes it.
@@ -89,6 +88,15 @@ impl GateLedger {
         self.asking.clear();
     }
 
+    /// Where `node`'s next publication puts its files: where its latest put
+    /// them, or, for a gate never published, the folder `run` gives it.
+    pub fn folder(&self, run: &RunId, node: &NodeId) -> GateFolder {
+        self.per_node
+            .get(node)
+            .and_then(|record| record.folder.clone())
+            .unwrap_or_else(|| GateFolder::of(run, node))
+    }
+
     /// The forge's handle of the gate `node` published and a wake polls.
     pub fn last_external_ref(&self, node: &NodeId) -> Option<&str> {
         self.per_node
@@ -113,11 +121,6 @@ impl GateLedger {
             .is_some_and(|round| round.answered.is_some())
     }
 
-    /// Every run-level escalation, oldest first.
-    pub fn run_level(&self) -> &[(GateWaitingPayload, Seq)] {
-        &self.run_level
-    }
-
     /// Folds one gate-domain event.
     pub fn apply(&mut self, event: &GateEvent, meta: &EventMeta<'_>) {
         self.track(event, meta);
@@ -129,9 +132,6 @@ impl GateLedger {
         let Some(node) = meta.node else {
             // A run-level escalation: it gates the whole invocation, so
             // no node record answers for it.
-            if let GateEvent::Waiting(p) = event {
-                self.run_level.push((p.as_ref().clone(), meta.seq));
-            }
             return;
         };
         self.per_node
@@ -176,6 +176,7 @@ impl GateRecord {
             GateEvent::Waiting(p) => {
                 if let Some(reference) = p.external_ref() {
                     self.external_ref = Some(reference.to_string());
+                    self.folder = Some(published_folder(p));
                 }
                 self.waiting = Some((p.as_ref().clone(), seq));
             }
@@ -186,12 +187,13 @@ impl GateRecord {
                     GateResolvedPayload::Approved { sha, .. } => {
                         self.approved_sha = Some(sha.clone());
                     }
-                    // Changes requested end that round of review: what
-                    // the correction makes is published, then reviewed.
-                    GateResolvedPayload::ChangesRequested { .. } => self.external_ref = None,
-                    GateResolvedPayload::Chosen(_)
-                    | GateResolvedPayload::Closed
-                    | GateResolvedPayload::Unrecognized(_) => {}
+                    // A request for changes ends that round of review, and
+                    // a closed pull request ends the gate's: what comes next
+                    // is published again.
+                    GateResolvedPayload::ChangesRequested { .. } | GateResolvedPayload::Closed => {
+                        self.external_ref = None
+                    }
+                    GateResolvedPayload::Chosen(_) | GateResolvedPayload::Unrecognized(_) => {}
                 }
                 self.resolved.push((p.clone(), seq));
                 // The escalation still standing is the question this answers.
@@ -204,9 +206,7 @@ impl GateRecord {
                 }
                 self.waiting = None;
             }
-            GateEvent::QuestionsAsked(p) => self.rounds.push(QuestionRound {
-                asked: p.clone(),
-                asked_at: seq,
+            GateEvent::QuestionsAsked(_) => self.rounds.push(QuestionRound {
                 answered: None,
                 answered_at: None,
             }),
@@ -218,6 +218,18 @@ impl GateRecord {
             }
             GateEvent::AskingOpened(_) => {}
         }
+    }
+}
+
+/// Where a publication put its gate's files: the folder its `gate_waiting`
+/// names, or the branch's root for one that names none.
+fn published_folder(waiting: &GateWaitingPayload) -> GateFolder {
+    match waiting.menu() {
+        Some(Menu::Published(PublishedGate {
+            folder: Some(folder),
+            ..
+        })) => GateFolder::Run(folder.clone()),
+        _ => GateFolder::Root,
     }
 }
 
@@ -348,5 +360,46 @@ mod tests {
         let record = ledger.get(&node).expect("the node has a gate record");
         assert!(record.task_answers.is_empty());
         assert_eq!(record.resolved.len(), 1);
+    }
+
+    /// A closed pull request ends the gate's round: a wake no longer polls
+    /// it and nobody waits on it. Its next publication goes where it last
+    /// published, or in its run's folder when it never published.
+    #[test]
+    fn a_closed_pull_request_ends_the_gate_s_round_and_its_folder_stays() {
+        let node = NodeId::from("approve");
+        let run = RunId::from_static("run-1");
+        let published = |folder: Option<&str>| {
+            GateEvent::Waiting(Box::new(
+                Escalation::published_to(
+                    Claim::AwaitsReview {
+                        node: node.clone(),
+                        assignee: None,
+                    },
+                    PublishedGate {
+                        url: "https://mock.forge/pr/1".to_string(),
+                        folder: folder.map(str::to_string),
+                    },
+                    "https://mock.forge/pr/1",
+                )
+                .into_payload(),
+            ))
+        };
+        let mut ledger = GateLedger::default();
+        assert_eq!(ledger.folder(&run, &node), GateFolder::of(&run, &node));
+        apply_at(&mut ledger, &node, 1, published(None));
+        assert_eq!(ledger.folder(&run, &node), GateFolder::Root);
+        assert!(ledger.awaiting().contains(&node));
+        apply_at(
+            &mut ledger,
+            &node,
+            2,
+            GateEvent::Resolved(GateResolvedPayload::Closed),
+        );
+        assert_eq!(ledger.last_external_ref(&node), None);
+        assert!(!ledger.awaiting().contains(&node));
+        assert_eq!(ledger.folder(&run, &node), GateFolder::Root);
+        apply_at(&mut ledger, &node, 3, published(Some("f")));
+        assert_eq!(ledger.folder(&run, &node), GateFolder::Run("f".to_string()));
     }
 }

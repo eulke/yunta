@@ -1,16 +1,17 @@
 //! A plan as a person reads it: what it changes before how it is proven.
 //! It opens with what the plan is and what the person asked for, and with
 //! every departure from it a person accepted; then the change — what it
-//! does, what it decided for them and what they answered, what it risks
-//! and leaves out, how it is designed; then the steps it takes, and each
-//! task's card with the code it writes; then what proves it.
+//! does, what it decided for them and what they answered, what it leaves
+//! out, what it risks where the whole plan is shown, and how it is
+//! designed; then the steps it takes, and each task's card with the code
+//! it writes; then what proves it.
 //!
 //! A person deciding on a change reads the change. The code a task writes
 //! sits in its card, once; the code of the tests that prove it is not part
 //! of the read — the whole plan has each file the spec wrote after every
 //! card, and a review names the command that shows them.
 
-use surco::components::{Code, Section};
+use surco::components::{Code, Fold, Section};
 use surco::doc::{Block, Doc};
 use surco::line::{Line, Tone};
 use yunta_core::shown::PlanReview;
@@ -31,9 +32,14 @@ pub(crate) use flawed::concerns;
 /// How much of a plan a reader is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form {
-    /// Where a decision is made on it: the change, and what proves each
-    /// task in a line; no test's code.
+    /// At a terminal, where a decision is made on it: the change, and what
+    /// proves each task in a line; no test's code, the command that shows
+    /// the spec's tests whole, and its risks said beside the decision.
     Review,
+    /// On a forge's page, where a decision is made on it: what a review
+    /// shows, each card and the proof folded, and no command that shows the
+    /// spec's tests whole, since the whole plan is published beside it.
+    Published,
     /// Everything the plan says, and each file the spec wrote, whole, after
     /// the cards.
     Whole,
@@ -53,21 +59,31 @@ pub fn document(
     if !review.departed.is_empty() {
         doc = doc.with(change::departures(&review.departed));
     }
-    let doc = change::change(doc, review);
+    let doc = change::change(doc, review, form);
     let doc = steps::steps(doc, &steps);
     let total = steps.len();
     let doc = steps.iter().enumerate().fold(doc, |doc, (at, step)| {
-        let cards = step
+        let cards: Vec<Block> = step
             .iter()
-            .map(|task| card::card(task, review).into())
+            .map(|task| card_block(card::card(task, review), form))
             .collect();
         doc.with(titled(&format!("step {} of {total}", at + 1), cards))
     });
     let doc = match form {
-        Form::Review => doc,
+        Form::Review | Form::Published => doc,
         Form::Whole => tests_whole(doc, review),
     };
     proof::proof(doc, review, form, (run, spell))
+}
+
+/// `card` as a block of its step: a forge's page folds each card under its
+/// title, so a reader opens the ones they want; every other form draws it
+/// open.
+fn card_block(card: Section, form: Form) -> Block {
+    match form {
+        Form::Published => Fold(card).into(),
+        Form::Review | Form::Whole => card.into(),
+    }
 }
 
 /// Each file the spec wrote, whole, after every card, with the task its

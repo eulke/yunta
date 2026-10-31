@@ -1,6 +1,7 @@
 //! The claim an escalation states above its record: what the node or the
 //! gate says happened or is asked. An engine claim is data, and the words
-//! a reader sees are written here; a claim someone wrote is its own words.
+//! a reader sees are written here; a claim someone wrote is its own words,
+//! said on one line.
 
 use surco::text;
 use yunta_core::events::{Claim, ExhaustedReroute, FailureMenu};
@@ -14,6 +15,7 @@ use crate::found;
 pub fn sentence(claim: &Claim, menu: Option<&FailureMenu>) -> String {
     match claim {
         Claim::NeedsDecision { node } => format!("gate `{node}` needs a decision"),
+        Claim::ApprovePlan { summary } => format!("Approve the plan: {}?", change(summary)),
         Claim::NodeFailed { node } => match menu.and_then(|menu| menu.reroute.as_ref()) {
             Some(reroute) => exhausted(node, reroute),
             None => format!("node `{node}` failed"),
@@ -30,7 +32,7 @@ pub fn sentence(claim: &Claim, menu: Option<&FailureMenu>) -> String {
             found::stated_reason(reason.as_deref())
         ),
         Claim::Departs { task } => format!("task `{task}`'s session departs from the plan"),
-        Claim::Written(said) => said.clone(),
+        Claim::Written(said) => text::one_line(said),
     }
 }
 
@@ -71,4 +73,15 @@ fn exhausted(node: &NodeId, reroute: &ExhaustedReroute) -> String {
         reroute.goto,
         text::agreeing(max, "is", "are")
     )
+}
+
+/// The change a plan's summary names, as a question or a title says it: on
+/// one line, trimmed, with the stops it ends on taken off, so the sentence
+/// that quotes it ends it.
+pub(crate) fn change(summary: &str) -> String {
+    text::one_line(summary)
+        .trim()
+        .trim_end_matches(['.', '!', '?'])
+        .trim_end()
+        .to_string()
 }

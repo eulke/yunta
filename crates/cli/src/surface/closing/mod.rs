@@ -154,8 +154,7 @@ impl Closing {
     }
 
     /// The decision a parked run stopped on, with what the page says beside
-    /// it already: the claim its ask made, and the record a failed node's
-    /// evidence quotes.
+    /// it already: the record a failed node's evidence quotes.
     fn decided(&self) -> Option<Decided> {
         let (node, escalation) = self.decision.as_ref()?;
         Some(Decided {
@@ -163,7 +162,6 @@ impl Closing {
             escalation: escalation.clone(),
             shown: self.shown.clone(),
             beside: Beside {
-                claim: true,
                 evidence: failed(&self.frame).any(|(failed_node, _)| failed_node.id == *node),
             },
         })
