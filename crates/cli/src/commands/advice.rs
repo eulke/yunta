@@ -198,6 +198,36 @@ pub(crate) fn doctor() -> String {
     "yunta doctor".to_string()
 }
 
+/// Prepares a repository for yunta.
+pub(crate) fn init() -> String {
+    "yunta init".to_string()
+}
+
+/// Lists the workflows this repository can run.
+pub(crate) fn list() -> String {
+    "yunta list".to_string()
+}
+
+/// Lists this repository's runs, what needs you first.
+pub(crate) fn list_runs() -> String {
+    "yunta list --runs".to_string()
+}
+
+/// Lists every run on this machine.
+pub(crate) fn list_every_run() -> String {
+    format!("{} --all", list_runs())
+}
+
+/// Lists this repository's runs, the closed ones too.
+pub(crate) fn list_closed_runs() -> String {
+    format!("{} --full", list_runs())
+}
+
+/// What yunta does, and every command it takes.
+pub(crate) fn help() -> String {
+    "yunta --help".to_string()
+}
+
 /// Starts a workflow, named the way the catalog names it.
 pub(crate) fn run(workflow: &str) -> String {
     format!("yunta run {workflow}")
@@ -251,20 +281,7 @@ pub(crate) fn after(
         Standing::NeedsYou if matches!(frame.phase, RunPhase::Created | RunPhase::Running) => {
             vec![(cancel(run), "stops it and everything under it")]
         }
-        Standing::NeedsYou => match decision {
-            None => vec![
-                (resume(run), "hands it back once that is settled"),
-                (close(run), "closes it for good"),
-            ],
-            Some(decision) => {
-                let mut steps = Vec::new();
-                if waits_for_tree(decision) {
-                    steps.push((resume(run), "offers a retry once the run's tree changed"));
-                }
-                steps.push((close(run), "closes it for good"));
-                steps
-            }
-        },
+        Standing::NeedsYou => after_needs_you(run, decision),
         Standing::Finished | Standing::Reported => vec![(receipt(run), "certifies what it did")],
         Standing::Broken => vec![(verify(run), "says where its log stops reading")],
         Standing::Created | Standing::Running => {
@@ -280,6 +297,29 @@ pub(crate) fn after(
         | Standing::Rerouted
         | Standing::Skipped
         | Standing::NeverRan => Vec::new(),
+    }
+}
+
+/// What a person types next for a run that needs them. With the decision it
+/// stopped on, a retry is offered when that failure waits for the run's tree
+/// to change; either way the run can be closed for good.
+fn after_needs_you(
+    run: &str,
+    decision: Option<&GateWaitingPayload>,
+) -> Vec<(String, &'static str)> {
+    match decision {
+        None => vec![
+            (resume(run), "hands it back once that is settled"),
+            (close(run), "closes it for good"),
+        ],
+        Some(decision) => {
+            let mut steps = Vec::new();
+            if waits_for_tree(decision) {
+                steps.push((resume(run), "offers a retry once the run's tree changed"));
+            }
+            steps.push((close(run), "closes it for good"));
+            steps
+        }
     }
 }
 

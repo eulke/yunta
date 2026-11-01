@@ -1,0 +1,116 @@
+␛[1;38;2;14;12;18mplan␛[0m: 4 tasks in 3 steps, 2 risks
+
+␛[1;38;2;158;47;155m◆␛[0m ␛[1;38;2;14;12;18mfragua (standard)␛[0m␛[38;2;123;117;111m · ␛[0m␛[1;38;2;255;255;255;48;2;158;47;155mneeds you␛[0m␛[38;2;123;117;111m · for 32m10s␛[0m                                                  7E5PH4
+␛[38;2;45;134;73m━━━━━━━━━━━━━━━━␛[0m ␛[38;2;45;134;73m━━━━━━━━━━━━━━━━␛[0m ␛[38;2;148;101;0m━━━━━━━━━━━━━━━━␛[0m ␛[1;38;2;158;47;155m━━━━━━━━━━━━━━━␛[0m ␛[38;2;123;117;111m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌␛[0m ␛[38;2;123;117;111m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+  approve-plan asks you to approve the plan before anything is built.
+
+  Then the run builds the change and checks what it built.
+
+␛[38;2;123;117;111mwhat it found␛[0m
+  ␛[38;2;45;134;73m✓␛[0m ␛[1;38;2;14;12;18mgit␛[0m     commits as Ada <ada@example.com>
+  ␛[38;2;148;101;0m▲␛[0m ␛[1;38;2;14;12;18mforge␛[0m   github acme/web, reachable
+  ␛[38;2;123;117;111m◌␛[0m ␛[1;38;2;14;12;18mreview␛[0m  no fan-out review
+
+  ␛[38;2;148;101;0m▲␛[0m A name with a newline in it breaks the line it is printed on.
+
+  ␛[38;2;148;101;0m▲␛[0m the budget sits under this workflow's usual spend
+    ␛[38;2;123;117;111mso␛[0m           the run may stop before it finishes
+    ␛[38;2;123;117;111mfix␛[0m          raise `limits.max_tokens_per_run`
+
+  ␛[38;2;194;65;47m✗␛[0m ␛[1;38;2;14;12;18mnode `lint`␛[0m: exit 101
+  ␛[38;2;123;117;111m  │ ␛[0mline 1
+  ␛[38;2;123;117;111m  │ ␛[0mline 2
+  ␛[38;2;123;117;111m  │ ␛[0mline 3
+    ␛[38;2;123;117;111mwhole output: ␛[0m␛[1;38;2;14;12;18myunta status 7E5PH4 --node lint␛[0m
+    error: unused import
+      --> src/lib.rs:3:5
+
+  ␛[38;2;194;65;47merror␛[0m  node `fix`: unknown key `promt` for a `prompt` node
+   ␛[38;2;123;117;111m-->␛[0m .yunta/workflows/lint-fix.yaml:9:5
+   ␛[38;2;123;117;111m │␛[0m
+  ␛[38;2;123;117;111m9␛[0m␛[38;2;123;117;111m │ ␛[0m    promt: "Fix what lint reported."
+   ␛[38;2;123;117;111m │ ␛[0m    ␛[38;2;194;65;47m^^^^^␛[0m
+    ␛[1;38;2;14;12;18mhelp:␛[0m did you mean `prompt`? · `yunta schema workflow` lists every key
+
+  ␛[38;2;148;101;0mwarning␛[0m  the program `cargo-nextest` is not on this machine's PATH
+
+␛[38;2;194;65;47merror:␛[0m no run is called `7E5PH5`; did you mean `7E5PH4`?
+  ␛[38;2;123;117;111mlooked in ~/.yunta/runs␛[0m
+
+  ␛[38;2;45;134;73m✓␛[0m ␛[1;38;2;14;12;18m2 healthy␛[0m  claude-code 2.1.302 · git
+
+  ␛[38;2;148;101;0m▲␛[0m ␛[1;38;2;14;12;18mfirst run␛[0m  a new binary's first run takes 469 ms here, its next 2 ms
+    ␛[38;2;123;117;111mso␛[0m         macOS assesses each new executable before its first run, and a suite pays that for
+               every test binary it links again
+    ␛[38;2;123;117;111mfix␛[0m        add the terminal that runs yunta under Developer Tools, then open it again
+  ␛[38;2;194;65;47m✗␛[0m ␛[1;38;2;14;12;18mrunners␛[0m    none declared, and `lint-fix` needs one
+    ␛[38;2;123;117;111mfix␛[0m        declare a runner in .yunta/config.yaml:
+                 runners:
+                   implementer:
+                     - { adapter: claude-code, model: <model> }
+
+  outside the declared globs:
+    src/main.rs
+    Cargo.lock (the lock file)
+
+  ␛[1;38;2;14;12;18mT001␛[0m: Make it
+    the file exists
+
+  A change ␛[1;38;2;14;12;18min Markdown␛[0m, with ␛[1m`code`␛[0m.
+
+  - an item
+
+␛[48;2;244;242;238m    ␛[0m␛[48;2;244;242;238mfn main() {}␛[0m␛[48;2;244;242;238m␛[K␛[0m
+
+  ┌──────┐   ┌───────┐
+  │ plan │──▶│ build │
+  └──────┘   └───────┘
+
+  ␛[1;38;2;14;12;18msrc/lib.rs␛[0m
+    the change
+␛[48;2;244;242;238m    ␛[0m␛[38;2;123;117;111;48;2;244;242;238m│ ␛[0m␛[48;2;244;242;238mpub fn greet() {}␛[0m␛[48;2;244;242;238m␛[K␛[0m
+    ␛[38;2;123;117;111m1 line␛[0m
+
+  ␛[1;38;2;14;12;18msrc/greet.rs › hello␛[0m
+    greets the person by name
+␛[48;2;244;242;238m    ␛[0m␛[38;2;123;117;111;48;2;244;242;238m│ ␛[0m␛[48;2;244;242;238mpub fn hello(␛[0m␛[38;2;45;134;73;48;2;223;240;227m{+name: &str+}␛[0m␛[48;2;244;242;238m) -> String;␛[0m␛[48;2;244;242;238m␛[K␛[0m
+    ␛[38;2;123;117;111mmodified · 1 line␛[0m
+
+  ␛[1;38;2;14;12;18msrc/greet.rs › bye␛[0m
+    says goodbye
+␛[48;2;244;242;238m    ␛[0m␛[38;2;123;117;111;48;2;244;242;238m│ ␛[0m␛[48;2;244;242;238mpub fn bye(name: &str) -> String;␛[0m␛[48;2;244;242;238m␛[K␛[0m
+    ␛[38;2;123;117;111mnew · 1 line␛[0m
+
+  ␛[38;2;29;124;151m●␛[0m 1  cli-global  Global and project flags
+
+␛[38;2;123;117;111m              node                                                                      time  tokens␛[0m
+  ␛[38;2;45;134;73m✓␛[0m ␛[38;2;45;134;73mfinished ␛[0m plan  ␛[38;2;123;117;111m4 tasks                                                          ␛[0m  1m31s   1.94M
+
+  ␛[1;38;2;158;47;155m◆␛[0m ␛[1;38;2;14;12;18mEKPBGE␛[0m  ␛[38;2;123;117;111mfragua (standard)␛[0m  ␛[38;2;45;134;73m━␛[0m␛[38;2;45;134;73m━━␛[0m␛[38;2;45;134;73m━␛[0m␛[38;2;45;134;73m━␛[0m␛[38;2;45;134;73m━━␛[0m␛[1;38;2;158;47;155m━␛[0m␛[38;2;123;117;111m┄␛[0m␛[38;2;123;117;111m┄┄␛[0m␛[38;2;123;117;111m┄␛[0m␛[38;2;123;117;111m┄␛[0m␛[38;2;123;117;111m┄┄␛[0m␛[38;2;123;117;111m┄␛[0m␛[38;2;123;117;111m┄␛[0m␛[38;2;123;117;111m┄┄␛[0m␛[38;2;123;117;111m┄␛[0m  implement asks at its ter…                  ␛[38;2;123;117;111m32m␛[0m
+  ␛[38;2;123;117;111m■␛[0m ␛[1;38;2;14;12;18m60Y934␛[0m  ␛[38;2;123;117;111mfragua (quick)   ␛[0m  ␛[38;2;45;134;73m━━━␛[0m␛[38;2;45;134;73m━━━␛[0m␛[38;2;123;117;111m━━━␛[0m␛[38;2;123;117;111m┄┄␛[0m␛[38;2;123;117;111m┄┄┄␛[0m␛[38;2;123;117;111m┄┄┄␛[0m␛[38;2;123;117;111m┄┄┄␛[0m  stopped while it ran        ␛[1;38;2;14;12;18myunta resume 60Y934␛[0m
+
+  a line a page composed itself
+
+␛[48;2;246;233;243m  ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243mapprove␛[0m␛[48;2;246;233;243m: ␛[0m␛[48;2;246;233;243mbuilds the plan␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[38;2;123;117;111;48;2;246;233;243mits tasks run, a step at a time␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243myunta resolve-gate 7E5PH4 approve␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m  ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243madjust␛[0m␛[48;2;246;233;243m: ␛[0m␛[48;2;246;233;243mBack to `plan`␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[38;2;123;117;111;48;2;246;233;243mthe plan is written again with what you say␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[38;2;123;117;111;48;2;246;233;243masks: what should change?␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243myunta resolve-gate 7E5PH4 adjust --text "<answer>"␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m  ␛[0m␛[38;2;123;117;111;48;2;246;233;243mor␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243myunta close 7E5PH4␛[0m␛[48;2;246;233;243m   ␛[0m␛[38;2;123;117;111;48;2;246;233;243mcloses it for good␛[0m␛[48;2;246;233;243m␛[K␛[0m
+
+␛[48;2;246;233;243m  ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243mapprove␛[0m␛[48;2;246;233;243m: ␛[0m␛[48;2;246;233;243mapprove this pull request␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[38;2;123;117;111;48;2;246;233;243mthe run goes on␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m  ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243mclose␛[0m␛[48;2;246;233;243m: ␛[0m␛[48;2;246;233;243mclose this pull request␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[38;2;123;117;111;48;2;246;233;243mnothing runs; this decision stays open␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m  ␛[0m␛[38;2;123;117;111;48;2;246;233;243mon the machine that holds the run␛[0m␛[48;2;246;233;243m␛[K␛[0m
+␛[48;2;246;233;243m    ␛[0m␛[1;38;2;14;12;18;48;2;246;233;243myunta resume 7E5PH4␛[0m␛[48;2;246;233;243m   ␛[0m␛[38;2;123;117;111;48;2;246;233;243mreads the answer and acts on it␛[0m␛[48;2;246;233;243m␛[K␛[0m
+
+  ␛[38;2;123;117;111mthe run holds its own state on disk.␛[0m
+
+  ␛[38;2;123;117;111mtokens      ␛[0m 20.2k spent
+
+␛[38;2;123;117;111mnext␛[0m
+  ␛[1;38;2;14;12;18myunta status 7E5PH4␛[0m   ␛[38;2;123;117;111mwhere it stands␛[0m

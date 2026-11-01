@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
+use super::catalog::catalog;
 use super::*;
 use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
-use crate::golden::{assert_golden, ENVIRONMENTS};
-use crate::line::Tone;
+use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
+use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
-use crate::paint::{strip_sgr, Ink};
+use crate::paint::{strip_sgr, Paint};
 use crate::surface::{Markdown, Surface, Terminal};
 use crate::width::{cell_width, INDENT, LABEL_WIDTH};
 
@@ -21,7 +22,7 @@ fn draw_with(block: impl Into<Block>, look: &Look) -> Vec<String> {
     Terminal::on(*look)
         .block(&block.into())
         .iter()
-        .map(|line| look.ink.paint(line))
+        .map(|line| look.paint.line(line))
         .collect()
 }
 
@@ -157,38 +158,38 @@ fn a_node_id_keeps_its_column_and_a_note_is_cut_to_the_line() {
 
 #[test]
 fn every_block_reads_the_same_once_its_color_is_taken_out() {
-    let look = Look::of(&ENVIRONMENTS[0]);
-    let flat = Look {
-        ink: Ink::Plain,
-        ..look
-    };
-    let linked = Look {
-        ink: Ink::Linked,
-        ..look
-    };
-    let blocks = Doc::new().with(decision()).with(evidence(3));
-    assert_eq!(strip_sgr(&paint(&blocks, &look)), paint(&blocks, &flat));
-    assert_eq!(strip_sgr(&paint(&blocks, &linked)), paint(&blocks, &flat));
+    let doc = catalog();
+    for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
+        let mut look = Look::of(&ENVIRONMENTS[0]);
+        look.glyphs = glyphs;
+        look.paint = Paint::Plain;
+        let flat = paint(&doc, &look);
+        let paints = [Paint::ANSI16, Paint::LINKED]
+            .into_iter()
+            .chain(RICH.map(|environment| environment.paint));
+        for colors in paints {
+            look.paint = colors;
+            let painted = paint(&doc, &look);
+            assert!(
+                painted.contains(char::from(0x1b)),
+                "{glyphs:?} / {colors:?} paints nothing"
+            );
+            assert_eq!(strip_sgr(&painted), flat, "{glyphs:?} / {colors:?}");
+        }
+    }
 }
 
+/// A path in the evidence links to its file; whether the link is written is
+/// the paint's to decide, which its own tests hold.
 #[test]
-fn a_path_is_a_link_only_when_links_are_on() {
-    let painted = |ink| {
-        let look = Look {
-            ink,
-            ..Look::of(&ENVIRONMENTS[0])
-        };
-        paint(&Doc::new().with(evidence(3)), &look)
-    };
-    let target =
-        "\x1b]8;;file:///home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c\x1b\\";
-    assert!(
-        painted(Ink::Linked).contains(target),
-        "a terminal that opens links gets the file as one"
-    );
-    for ink in [Ink::Ansi16, Ink::Plain] {
-        assert!(!painted(ink).contains("\x1b]8"), "{ink:?}");
-    }
+fn an_evidence_path_links_to_the_file_it_names() {
+    let lines = Terminal::on(Look::of(&ENVIRONMENTS[0])).block(&evidence(3).into());
+    let target = "file:///home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c";
+    let linked = lines
+        .iter()
+        .flat_map(Line::spans)
+        .any(|span| span.link == Some(target.to_string()));
+    assert!(linked, "{lines:?}");
 }
 
 /// Two tasks of a plan in a table: a mark on the one that cannot be
@@ -341,7 +342,7 @@ pub(super) fn words(text: &str) -> std::collections::BTreeSet<String> {
 fn markdown_says_every_word_the_terminal_does() {
     let look = Look {
         glyphs: Glyphs::Unicode,
-        ink: Ink::Plain,
+        paint: Paint::Plain,
         width: Width::of(Some(120), None),
     };
     let terminal = words(&paint(&every_block(), &look));

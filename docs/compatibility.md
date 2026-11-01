@@ -472,12 +472,26 @@ node waiting on a person is `needs you` now.
 
 Every command takes `--color auto|always|never`, decided for each stream on its
 own: stdout and stderr can be a terminal and a pipe at once. Under `auto`, in
-order, `NO_COLOR` (set and not empty) turns color off, `CLICOLOR_FORCE` (set,
-not `0`) turns it on even for a pipe, `CLICOLOR=0` turns it off, and otherwise a
-stream gets color when it is a terminal and `TERM` is not `dumb`. Only the sixteen
-ANSI colors are used, so a terminal draws them in its own palette. A painted line
-reads the same once its color is taken out: color repeats the words, it never
-replaces them. `NO_COLOR` changes nothing but color — the live view is drawn on a
+order, `YUNTA_LOOK=plain` turns color off, `NO_COLOR` (set and not empty) turns
+it off, `CLICOLOR_FORCE` (set, not `0`) turns it on even for a pipe, `CLICOLOR=0`
+turns it off, and otherwise a stream gets color when it is a terminal and `TERM`
+is not `dumb`. The help, and a command line refused before it runs, follow the
+same rule.
+
+A stream with color is drawn in one of two layers. The sixteen ANSI colors are
+drawn in the terminal's own palette. 24-bit colors are tuned to the terminal's
+ground, and also draw a background behind what has to stand apart: the decision
+that waits on you, code, the words a change adds and removes, and the word that
+says where a run stands. `YUNTA_LOOK=16` or `YUNTA_LOOK=24` names the layer;
+otherwise a terminal whose `COLORTERM` is `truecolor` or `24bit` gets 24 bits,
+and any other the sixteen. The ground is read from `COLORFGBG`, whose last field
+is the background's color number: 7 and 9 to 15 are light, anything else dark,
+and so is a terminal that sets no `COLORFGBG`. Nothing is asked of the terminal.
+
+A painted line reads the same once its color is taken out, in every layer:
+color and backgrounds repeat the words, they never replace them, and a
+background reaches the edge of its line by erasing to it, never by writing
+spaces. `NO_COLOR` changes nothing but color — the live view is drawn on a
 terminal either way.
 
 A stream with color also gets links where a path names a file a reader opens —

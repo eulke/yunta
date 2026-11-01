@@ -18,7 +18,7 @@
 //! clears one row too few.
 
 use crate::glyphs::Glyphs;
-use crate::paint::Ink;
+use crate::paint::Paint;
 use crate::width::LINE_WIDTH;
 
 /// How one stream's lines are drawn: the characters they are drawn
@@ -26,7 +26,7 @@ use crate::width::LINE_WIDTH;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
     pub glyphs: Glyphs,
-    pub ink: Ink,
+    pub paint: Paint,
     pub width: Width,
 }
 
@@ -37,7 +37,7 @@ impl Look {
     pub fn plain() -> Self {
         Look {
             glyphs: Glyphs::Ascii,
-            ink: Ink::Plain,
+            paint: Paint::Plain,
             width: Width::of(None, None),
         }
     }
@@ -50,10 +50,7 @@ impl Look {
                 true => Glyphs::Unicode,
                 false => Glyphs::Ascii,
             },
-            ink: match environment.color {
-                true => Ink::Ansi16,
-                false => Ink::Plain,
-            },
+            paint: environment.paint,
             width: Width::of(Some(environment.width), None),
         }
     }

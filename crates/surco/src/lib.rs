@@ -30,6 +30,7 @@ pub mod golden;
 pub mod line;
 pub mod look;
 pub mod paint;
+mod palette;
 pub mod paths;
 pub mod prose;
 pub mod surface;

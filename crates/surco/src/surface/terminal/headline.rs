@@ -1,7 +1,7 @@
 //! What a document is about, on its first line.
 
 use crate::components::Headline;
-use crate::line::{Line, Tone};
+use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, truncate};
 
@@ -10,7 +10,9 @@ impl Headline {
     /// the edge at the line's far edge. A narrow line drops the facts from
     /// the last, then cuts the subject; the word and the edge are never
     /// cut, since one says where it stands and the other is what a reader
-    /// types next.
+    /// types next. The word is filled as a pill in the mark's tone: a layer
+    /// drawing 24-bit color paints it as a badge, and every other layer draws
+    /// the word alone, in the tone's color where that layer has one.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let glyphs = look.glyphs;
         let tone = Tone::of(self.mark);
@@ -34,7 +36,7 @@ impl Headline {
             .plain(" ")
             .push(Tone::Strong, subject)
             .push(Tone::Muted, sep.as_str())
-            .push(tone, self.said.as_str());
+            .push_filled(tone, Fill::Pill, self.said.as_str());
         for fact in &self.facts {
             let takes = cell_width(&sep) + cell_width(fact);
             if used + takes > room {
@@ -52,5 +54,35 @@ impl Headline {
             line = line.plain(" ".repeat(gap)).plain(edge);
         }
         vec![line]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::components::Headline;
+    use crate::glyphs::Mark;
+    use crate::line::{Fill, Tone};
+    use crate::look::Look;
+
+    /// The standing word is the one span of a headline that is filled, as a
+    /// pill in its mark's tone. The words around it read the same, unfilled.
+    #[test]
+    fn the_standing_word_is_the_only_filled_span_of_a_headline() {
+        let headline =
+            Headline::new(Mark::NeedsYou, "fragua (standard)", "needs you").fact("for 32m10s");
+        let lines = headline.lines(&Look::plain());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text(),
+            "? fragua (standard) ; needs you ; for 32m10s"
+        );
+        let filled: Vec<(&str, Tone, Option<Fill>)> = lines[0]
+            .spans()
+            .iter()
+            .filter(|span| span.fill.is_some())
+            .map(|span| (span.text.as_str(), span.tone, span.fill))
+            .collect();
+        assert_eq!(filled, [("needs you", Tone::NeedsYou, Some(Fill::Pill))]);
+        assert_eq!(lines[0].fill(), None);
     }
 }

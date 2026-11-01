@@ -53,6 +53,10 @@ pub const ALL_MARKS: [Mark; 9] = [
 /// sets: the way a shell writes it.
 pub const HOME: char = '~';
 
+/// The mark an escape is written as where a reader reads it, so a golden or
+/// a failure shows a change of color as a change of text.
+pub const ESCAPE: char = '␛';
+
 /// How far the plow has come along one node's stretch of a run's furrow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Plow {
@@ -145,9 +149,10 @@ impl Glyphs {
         }
     }
 
-    /// The mark that closes a value cut to fit its column: one cell in
-    /// Unicode and three in ASCII, where a single dot is a mark of its own;
-    /// the arithmetic that places a cut measures it.
+    /// The mark of what a line leaves out: the end of a value cut to fit its
+    /// column, or a value a reader fills in. One cell in Unicode and three in
+    /// ASCII, where a single dot is a mark of its own; the arithmetic that
+    /// places a cut measures it.
     pub fn ellipsis(self) -> &'static str {
         match self {
             Self::Unicode => "…",
@@ -303,9 +308,10 @@ impl Glyphs {
         }
     }
 
-    /// A node's stretch of a run's furrow. In ASCII each stroke means what
-    /// the same character means elsewhere: a bar's fill, the mark of what
-    /// never ran, the mark of what a run leaves out.
+    /// A node's stretch of a run's furrow: plowed where the run reached the
+    /// node, whatever it came to; ahead where the node never ran; skipped
+    /// where the run leaves it out. In ASCII the last two are the marks of
+    /// what never ran and of what a run leaves out.
     pub fn furrow(self, plow: Plow) -> char {
         match (self, plow) {
             (Self::Unicode, Plow::Plowed) => '━',
@@ -314,15 +320,6 @@ impl Glyphs {
             (Self::Ascii, Plow::Plowed) => '=',
             (Self::Ascii, Plow::Ahead) => '.',
             (Self::Ascii, Plow::Skipped) => 'o',
-        }
-    }
-
-    /// A rule across the line: the furrow where a stream has neither
-    /// color nor Unicode to tell one node's stretch from another's.
-    pub fn rule(self) -> char {
-        match self {
-            Self::Unicode => '─',
-            Self::Ascii => '-',
         }
     }
 

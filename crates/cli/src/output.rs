@@ -9,9 +9,10 @@
 //! stdout, with stderr left empty.
 //!
 //! Warnings and notes reach stderr through [`warn`] and [`note`], and a JSON
-//! document reaches stdout through [`print_json`], and a shell's completion
-//! script or a hook's answer through [`completions`] and [`hook_reply`].
-//! Nothing else in the CLI calls a print macro.
+//! document reaches stdout through [`print_json`]. A shell's completion
+//! script, a hook's answer and what clap made of the arguments go through
+//! [`completions`], [`hook_reply`] and [`clap_answer`]. Nothing else in the
+//! CLI calls a print macro.
 
 use std::fmt::Display;
 
@@ -116,6 +117,17 @@ pub(crate) fn hook_reply(stdout: &[u8], stderr: &[u8]) -> std::io::Result<()> {
         .and_then(|()| std::io::stderr().write_all(stderr))
 }
 
+/// What clap made of the arguments, as it rendered it, to the stream its
+/// kind names: a usage error to stderr, the help and the version to stdout.
+pub(crate) fn clap_answer(error: &clap::Error) -> std::io::Result<()> {
+    use std::io::Write;
+    let rendered = error.render().ansi().to_string();
+    match error.use_stderr() {
+        true => std::io::stderr().write_all(rendered.as_bytes()),
+        false => std::io::stdout().write_all(rendered.as_bytes()),
+    }
+}
+
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
 /// command prints its document, reporting a serialization failure as the
 /// one error it can hit rather than unwrapping it.
@@ -216,7 +228,7 @@ pub(crate) fn refused(error: &CliError, mode: Mode, look: &Look) {
 /// terminal looks.
 pub(crate) fn on_stderr(look: &Look, doc: Doc) {
     let stderr = Look {
-        ink: render::stderr_ink(),
+        paint: render::stderr_paint(),
         width: render::stderr_width(),
         ..*look
     };

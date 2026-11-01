@@ -52,6 +52,9 @@ pub const TERMINAL_VARS: &[&str] = &[
     "VTE_VERSION",
     "KITTY_WINDOW_ID",
     "WT_SESSION",
+    "COLORTERM",
+    "COLORFGBG",
+    "YUNTA_LOOK",
 ];
 
 /// The ambient environment a run resolves against, captured once at a

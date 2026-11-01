@@ -7,8 +7,8 @@ use crate::words::Standing;
 /// them: the furrow a run plows, under its headline.
 ///
 /// A surface draws it as it can: a stroke a node long for each node,
-/// painted in the tone of its word where there is color, and a plain rule
-/// where there is neither color nor Unicode. What it shows is said in
+/// painted in the tone of its word where there is color, and the same
+/// strokes where there is none. What it shows is said in
 /// words beside it too — how many nodes are done — so a reader of the
 /// plainest stream loses nothing.
 pub struct Furrow(pub Vec<Standing>);

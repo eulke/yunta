@@ -236,7 +236,7 @@ mod tests {
                     Region::open(
                         Screen::immediate(screen.clone()),
                         Glyphs::Ascii,
-                        surco::paint::Ink::Plain,
+                        surco::paint::Paint::Plain,
                         Box::new(scrollback.clone()),
                     )
                     .expect("the region's row template parses"),

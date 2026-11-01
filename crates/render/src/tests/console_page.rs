@@ -3,7 +3,7 @@
 use surco::doc::{Block, Doc};
 use surco::golden::{assert_golden, Environment, ENVIRONMENTS};
 use surco::look::Look;
-use surco::paint::Ink;
+use surco::paint::Paint;
 use surco::surface::{Surface, Terminal};
 use surco::width::cell_width;
 use yunta_core::events::{
@@ -71,7 +71,7 @@ pub(super) fn greet_escalation(review: &PlanReview) -> GateWaitingPayload {
 /// width, without the color a golden keeps.
 pub(super) fn unpainted(environment: &Environment) -> Look {
     Look {
-        ink: Ink::Plain,
+        paint: Paint::Plain,
         ..Look::of(environment)
     }
 }

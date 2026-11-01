@@ -1,29 +1,24 @@
 //! The furrow and the gist, as they hang from a terminal page's headline.
 
 use crate::components::{Furrow, Gist};
-use crate::glyphs::{Glyphs, Plow};
+use crate::glyphs::Plow;
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::paint::Ink;
 use crate::width::{cell_width, wrap_unbroken, INDENT};
 use crate::words::Standing;
 
 impl Furrow {
-    /// One stroke for each node, as wide as the line shares out, a gap
-    /// between two: plowed where the node has stood somewhere, in the tone
-    /// of its word; dashed where it never ran; dotted where the run leaves
-    /// it out. With neither color nor Unicode it is a rule, and the words
-    /// beside it say how far the run has come. A furrow with no node is
-    /// ground not yet plowed: the dim line a page about no one run stands
-    /// under.
+    /// One stroke for each node, as wide as the line shares out, a gap between
+    /// two: plowed where the run reached the node, in the tone of its word;
+    /// another stroke, muted, where it never ran, and a third, muted, where the
+    /// run leaves it out. The strokes are the same with color and without:
+    /// color repeats what the words beside them say. A furrow with no node is
+    /// ground not yet plowed: the dim line a page about no one run
+    /// stands under.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let width = look.width.cells();
-        let plain = look.glyphs == Glyphs::Ascii && look.ink == Ink::Plain;
-        if plain || self.0.is_empty() {
-            let stroke = match plain {
-                true => look.glyphs.rule(),
-                false => look.glyphs.furrow(Plow::Ahead),
-            };
+        if self.0.is_empty() {
+            let stroke = look.glyphs.furrow(Plow::Ahead);
             return vec![Line::new().push(Tone::Muted, stroke.to_string().repeat(width))];
         }
         let apart = width >= self.0.len() * 2;
@@ -32,8 +27,8 @@ impl Furrow {
 }
 
 /// Where each of `nodes` stands, as strokes sharing `cells` between them:
-/// plowed in the tone of the node's word, dashed ahead, dotted left out —
-/// a space between two strokes when `apart`.
+/// plowed in the tone of the node's word, ahead and left out muted, with a
+/// space between two strokes when `apart`.
 pub(super) fn strokes(nodes: &[Standing], cells: usize, apart: bool, look: &Look) -> Line {
     let count = nodes.len();
     let gaps = match apart {

@@ -1065,6 +1065,21 @@ nodes:
         "  greet: Says hello\n    inputs       --input greeting=… (string, optional): What to say\n    run          yunta run greet",
         "list shows the workflow, its description, its one optional input and how to run it"
     );
+
+    // The same catalog under the ASCII look: the input's placeholder is three
+    // dots, and no Unicode character is written beside the input.
+    let ascii = [("YUNTA_GLYPHS".to_string(), "ascii".to_string())];
+    let ascii_list = yunta_in!(&repo, &home, &["list"], &ascii);
+    assert!(
+        ascii_list.status.success(),
+        "stderr: {}",
+        stderr(&ascii_list)
+    );
+    assert_eq!(
+        stdout(&ascii_list).trim_end(),
+        "  greet: Says hello\n    inputs       --input greeting=... (string, optional): What to say\n    run          yunta run greet",
+        "under the ASCII look the input's placeholder is three dots, not an ellipsis character"
+    );
 }
 
 #[test]

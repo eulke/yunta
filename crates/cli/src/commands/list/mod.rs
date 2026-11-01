@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{InputSpec, Workflow};
 
+use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::output::document;
@@ -43,11 +44,8 @@ pub async fn field(look: &Look) -> Result<Outcome, CliError> {
         ))
         .with(Next {
             steps: vec![
-                (
-                    "yunta list --runs --all".to_string(),
-                    "every run on this machine",
-                ),
-                ("yunta --help".to_string(), "what yunta does"),
+                (advice::list_every_run(), "every run on this machine"),
+                (advice::help(), "what yunta does"),
             ],
         });
     document(look, page);
@@ -79,7 +77,8 @@ pub async fn list_workflows(look: &Look) -> Result<Outcome, CliError> {
 /// terminal and the `list_workflows` control-plane tool answers with it
 /// as Markdown, so the two never drift. Given a project's storage, each
 /// workflow carries its prior estimation; a broken pack is named, never
-/// silently dropped. `glyphs` draws the separators of an estimation.
+/// silently dropped. `glyphs` draws each input's placeholder and the
+/// separators of an estimation.
 pub(crate) async fn catalog(
     cwd: &Path,
     history_source: Option<&Context>,
@@ -139,11 +138,11 @@ async fn listed(
     if let Some(description) = workflow.description.as_deref() {
         title = title.plain(format!(": {description}"));
     }
-    let mut fields = input_fields(&workflow);
+    let mut fields = input_fields(&workflow, glyphs);
     if let Some(ctx) = history_source {
         fields = estimation_field(fields, ctx, &workflow, glyphs).await;
     }
-    fields = fields.push_command("run", format!("yunta run {name}"));
+    fields = fields.push_command("run", advice::run(name));
     Section {
         lead: None,
         title,
@@ -169,7 +168,9 @@ async fn read_entry(entry: &CatalogEntry) -> Result<Workflow, Vec<Block>> {
 }
 
 /// One row per input the workflow takes, the first one carrying the label.
-fn input_fields(workflow: &Workflow) -> Fields {
+/// Each shows its value as a placeholder, which is the look's ellipsis: three
+/// dots under the ASCII look.
+fn input_fields(workflow: &Workflow, glyphs: surco::glyphs::Glyphs) -> Fields {
     let mut fields = Fields::new();
     for (n, (input_name, spec)) in workflow.inputs.iter().enumerate() {
         let optionality = if spec.is_required() {
@@ -184,7 +185,8 @@ fn input_fields(workflow: &Workflow) -> Fields {
         fields = fields.push_if(
             if n == 0 { "inputs" } else { "" },
             format!(
-                "--input {input_name}=… ({}, {optionality}){description}",
+                "--input {input_name}={} ({}, {optionality}){description}",
+                glyphs.ellipsis(),
                 input_type_label(spec)
             ),
         );

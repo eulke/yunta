@@ -58,6 +58,9 @@ pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
         "VTE_VERSION",
         "KITTY_WINDOW_ID",
         "WT_SESSION",
+        "COLORTERM",
+        "COLORFGBG",
+        "YUNTA_LOOK",
     ] {
         cmd.drops(name);
     }
@@ -187,12 +190,6 @@ pub fn run_id_from(output: &Output) -> String {
                 stderr(output)
             )
         })
-}
-
-/// The same, from output a test collected some other way — a log file
-/// the command was spawned onto.
-pub fn run_id_in(text: &str) -> String {
-    find_run_id(text).unwrap_or_else(|| panic!("no `run <id>:` line in output:\n{text}"))
 }
 
 /// What every line a person reads calls the run whose id is `id`.

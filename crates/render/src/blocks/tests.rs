@@ -31,7 +31,7 @@ fn a_decision_prints_one_command_per_option_with_the_handle() {
     let drawn: Vec<String> = surco::surface::Terminal::on(look)
         .block(&decision.into())
         .iter()
-        .map(|line| look.ink.paint(line))
+        .map(|line| look.paint.line(line))
         .collect();
     let commands: Vec<&String> = drawn
         .iter()

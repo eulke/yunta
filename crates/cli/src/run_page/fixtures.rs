@@ -5,17 +5,19 @@
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use surco::doc::Depth;
 use surco::words::Standing;
 use yunta_core::events::{
-    Claim, CommandExit, Escalation, EventPayload, ExhaustedReroute, Failure, FailureMenu,
-    GateOption, Menu, NodeEvent, NodeFinishedPayload, NodeOutcome, NodeStartedPayload, NodeState,
-    NodeWait, PauseReason, TaskEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage,
+    AccountLimit, Claim, CommandExit, Escalation, EventPayload, ExhaustedReroute, Failure,
+    FailureMenu, GateOption, LimitSource, Menu, NodeEvent, NodeFinishedPayload, NodeOutcome,
+    NodeStartedPayload, NodeState, NodeWait, PauseReason, TaskEvent, TaskRegisteredPayload,
+    TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::reserved::ReservedOption;
-use yunta_core::{CommitSha, ContentHash, Isolation, NodeId, NonEmpty, RunId, Seq, TaskId};
+use yunta_core::{
+    AdapterId, CommitSha, ContentHash, Isolation, NodeId, NonEmpty, RunId, Seq, TaskId,
+};
 use yunta_engine::{
     Counter, NodeFrame, NodeStanding, RunFrame, RunPhase, RunState, TaskCounter, WaitingOn,
 };
@@ -90,6 +92,30 @@ pub(crate) fn failed_lint() -> NodeFrame {
             tokens: TokenUsage::default(),
         },
     )
+}
+
+/// A node a session's usage limit stopped, which the run waits on: its log
+/// says it failed, and it stands `waiting`, as the engine words a node a
+/// reset holds, until the limit resets at `resets_at` and it runs again.
+fn failed_on_limit(id: &str, resets_at: DateTime<Utc>) -> NodeFrame {
+    NodeFrame {
+        standing: Standing::Waiting,
+        ..reached(
+            id,
+            NodeState::Failed {
+                failure: Failure::Limit {
+                    limit: AccountLimit {
+                        source: LimitSource::Session {
+                            adapter: AdapterId::from_static("claude-code"),
+                        },
+                        resets_at: Some(resets_at),
+                        message: "You've hit your usage limit".to_string(),
+                    },
+                },
+                tokens: TokenUsage::default(),
+            },
+        )
+    }
 }
 
 /// A frame for `nodes` standing at `phase`, its word decided as the
@@ -268,6 +294,7 @@ pub(crate) fn cases() -> Vec<Case> {
     let failed = RunPhase::Failed {
         failure: Some(lint_failure()),
     };
+    let reset = fixed_now() + chrono::Duration::hours(2);
     vec![
         needs_you(),
         Case::new(
@@ -298,10 +325,19 @@ pub(crate) fn cases() -> Vec<Case> {
             "waiting",
             PauseReason::AwaitingReset {
                 node: NodeId::from("build"),
-                at: fixed_now() + chrono::Duration::hours(2),
+                at: reset,
             },
+            vec![
+                finished("plan"),
+                failed_on_limit("build", reset),
+                ahead("test"),
+            ],
         ),
-        parked_on_run("stopped", PauseReason::Cancelled),
+        parked_on_run(
+            "stopped",
+            PauseReason::Cancelled,
+            vec![finished("plan"), ahead("build"), ahead("test")],
+        ),
     ]
 }
 
@@ -330,17 +366,10 @@ fn needs_you() -> Case {
     case
 }
 
-/// A run its own pause holds, `reason`, past its first node.
-fn parked_on_run(name: &'static str, reason: PauseReason) -> Case {
+/// A run its own pause holds, `reason`, with `nodes` where they stand.
+fn parked_on_run(name: &'static str, reason: PauseReason, nodes: Vec<NodeFrame>) -> Case {
     let phase = RunPhase::Waiting {
         on: WaitingOn::Run { reason },
     };
-    Case::new(
-        name,
-        frame(
-            phase,
-            vec![finished("plan"), ahead("build"), ahead("test")],
-            0,
-        ),
-    )
+    Case::new(name, frame(phase, nodes, 0))
 }

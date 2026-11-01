@@ -273,7 +273,7 @@ impl ListRunsAnswer {
     fn next(&self) -> Next {
         let mut steps = Vec::new();
         if self.is_empty() {
-            steps.push(("yunta list".to_string(), "the workflows you can run"));
+            steps.push((advice::list(), "the workflows you can run"));
         }
         let longest = self
             .inbox
@@ -285,16 +285,10 @@ impl ListRunsAnswer {
         }
         let left_out = self.count(Group::Closed) > 0 || !self.inbox.unreadable.is_empty();
         if left_out && !self.depth.reaches(Depth::Full) {
-            steps.push((
-                "yunta list --runs --full".to_string(),
-                "lists the closed runs too",
-            ));
+            steps.push((advice::list_closed_runs(), "lists the closed runs too"));
         }
         if self.inbox.elsewhere > 0 {
-            steps.push((
-                "yunta list --runs --all".to_string(),
-                "every run on this machine",
-            ));
+            steps.push((advice::list_every_run(), "every run on this machine"));
         }
         Next { steps }
     }

@@ -3,8 +3,10 @@
 
 use std::path::Path;
 
+use crate::glyphs::HOME;
+
 /// `path` as a line shows it: relative to `cwd` when it is under it,
-/// under `~` when it is under `home`, and whole otherwise.
+/// under the home mark when it is under `home`, and whole otherwise.
 pub fn shown(path: &Path, cwd: &Path, home: Option<&Path>) -> String {
     if let Ok(inside) = path.strip_prefix(cwd) {
         return match inside.as_os_str().is_empty() {
@@ -13,7 +15,10 @@ pub fn shown(path: &Path, cwd: &Path, home: Option<&Path>) -> String {
         };
     }
     if let Some(under) = home.and_then(|home| path.strip_prefix(home).ok()) {
-        return Path::new("~").join(under).display().to_string();
+        return Path::new(&HOME.to_string())
+            .join(under)
+            .display()
+            .to_string();
     }
     path.display().to_string()
 }

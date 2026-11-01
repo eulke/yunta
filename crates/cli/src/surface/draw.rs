@@ -49,7 +49,7 @@ mod chronicle_tests {
 
     use super::super::chronicle;
     use surco::look::Look;
-    use surco::paint::Ink;
+    use surco::paint::Paint;
 
     #[test]
     fn what_a_watched_terminal_keeps_above_its_region_is_what_the_append_only_surface_writes() {
@@ -99,8 +99,8 @@ mod chronicle_tests {
             .filter(|moment| chronicle::kept(&moment.happening))
             .flat_map(|moment| chronicle::graduation(moment, "Y0P5", &Look::plain()))
             .map(|row| {
-                Ink::Plain
-                    .paint(&row)
+                Paint::Plain
+                    .line(&row)
                     .trim_start_matches(['x', '+', '>', '!', '?', ' '])
                     .to_string()
             })

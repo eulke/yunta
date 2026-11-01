@@ -35,11 +35,11 @@ fn ready() -> Checklist {
 #[test]
 fn a_glance_folds_what_holds_and_says_how_to_make_a_caution_hold() {
     let answer = DoctorAnswer::of(false, false, &ready());
-    let rule = "-".repeat(80);
+    let furrow = ".".repeat(80);
     assert_eq!(
         draw(answer.document(&Look::plain()), &Look::plain()),
         format!(
-            "+ yunta doctor ; ready ; 1 thing worth a look\n{rule}\n\n  \
+            "+ yunta doctor ; ready ; 1 thing worth a look\n{furrow}\n\n  \
              + 2 healthy  claude-code 2.1.305 ; git\n\n  \
              ^ first run  a new binary's first run takes 337 ms here, its next 4 ms\n    \
              so         macOS assesses each new executable before its first run\n    \

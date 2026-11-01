@@ -1,6 +1,6 @@
 //! Every block a document is made of, each once, drawn in every
-//! environment and as Markdown: what a new surface has to draw, and what a
-//! change to one block is seen against.
+//! environment, the 24-bit ones among them, and as Markdown: what a new
+//! surface has to draw, and what a change to one block is seen against.
 
 use std::path::{Path, PathBuf};
 
@@ -9,10 +9,10 @@ use super::*;
 use crate::diagram::Diagram;
 use crate::doc::{Block, Doc};
 use crate::glyphs::{Glyphs, Mark};
-use crate::golden::{assert_golden, ENVIRONMENTS};
+use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
-use crate::paint::Ink;
+use crate::paint::Paint;
 use crate::surface::{Description, Markdown, Surface, Terminal};
 use crate::width::cell_width;
 use crate::words::Standing;
@@ -90,13 +90,14 @@ fn opening() -> Vec<Block> {
     checks.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
     checks.push(Found::Caution, "forge", "github acme/web, reachable");
     checks.push(Found::NotApplicable, "review", "no fan-out review");
+    let needs_you = Standing::NeedsYou.word();
     vec![
         Title {
             name: Line::new().push(Tone::Strong, "plan"),
             facts: vec!["4 tasks in 3 steps".to_string(), "2 risks".to_string()],
         }
         .into(),
-        Headline::new(Mark::NeedsYou, "fragua (standard)", "needs you")
+        Headline::new(Mark::NeedsYou, "fragua (standard)", needs_you)
             .fact("for 32m10s")
             .edge("7E5PH4")
             .into(),
@@ -111,11 +112,7 @@ fn opening() -> Vec<Block> {
         .into(),
         Gist("approve-plan asks you to approve the plan before anything is built.".to_string())
             .into(),
-        Prose(
-            "The run plans the change, asks before it builds, and builds what you approve."
-                .to_string(),
-        )
-        .into(),
+        Prose("Then the run builds the change and checks what it built.".to_string()).into(),
         Block::Heading("what it found".to_string()),
         checks.into(),
         Marked {
@@ -259,7 +256,10 @@ fn planned() -> Vec<Block> {
 /// against the code it modifies, and new where nothing stands.
 fn written() -> Vec<Block> {
     vec![
-        Block::Markdown("A change **in Markdown**, with `code`.\n\n- an item".to_string()),
+        Block::Markdown(
+            "A change **in Markdown**, with `code`.\n\n- an item\n\n```rust\nfn main() {}\n```"
+                .to_string(),
+        ),
         Block::Diagram(Diagram::of("graph LR\n  plan --> build")),
         Code::whole(
             "src/lib.rs",
@@ -311,7 +311,7 @@ fn field() -> Runs {
                 workflow: "fragua".to_string(),
                 mode: "quick".to_string(),
                 furrow: plowed(2, Standing::Stopped, 4),
-                said: "stopped while it ran".to_string(),
+                said: format!("{} while it ran", Standing::Stopped.word()),
                 edge: Edge::Command("yunta resume 60Y934".to_string()),
             },
         ],
@@ -340,7 +340,7 @@ fn closing() -> Vec<Block> {
     let nodes = NodeTable {
         rows: vec![NodeRow {
             mark: Mark::Done,
-            word: "finished",
+            word: Standing::Finished.word(),
             id: "plan".to_string(),
             note: "4 tasks".to_string(),
             took: "1m31s".to_string(),
@@ -363,8 +363,9 @@ fn closing() -> Vec<Block> {
     ]
 }
 
-/// Every block the document is made of, each once.
-fn catalog() -> Doc {
+/// Every block the document is made of, each once: what the golden tests
+/// and the color tests draw.
+pub(super) fn catalog() -> Doc {
     opening()
         .into_iter()
         .chain(quoting())
@@ -377,7 +378,9 @@ fn catalog() -> Doc {
 #[test]
 fn every_block_matches_its_goldens_in_every_environment() {
     let doc = catalog();
-    for environment in &ENVIRONMENTS {
+    // First, so that a color golden that fails does not keep it from being compared.
+    assert_golden(&goldens().join("markdown/catalog.md"), &Markdown.draw(&doc));
+    for environment in ENVIRONMENTS.iter().chain(&RICH) {
         let look = Look::of(environment);
         let drawn = Terminal::on(look).draw(&doc);
         for line in crate::paint::strip_sgr(&drawn).lines() {
@@ -392,14 +395,13 @@ fn every_block_matches_its_goldens_in_every_environment() {
             &drawn,
         );
     }
-    assert_golden(&goldens().join("markdown/catalog.md"), &Markdown.draw(&doc));
 }
 
 #[test]
 fn markdown_says_every_word_the_terminal_says_of_every_block() {
     let look = Look {
         glyphs: Glyphs::Unicode,
-        ink: Ink::Plain,
+        paint: Paint::Plain,
         width: Width::of(Some(120), None),
     };
     let doc = catalog();

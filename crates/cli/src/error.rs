@@ -99,9 +99,6 @@ pub enum CliError {
     #[error(transparent)]
     Git(yunta_engine::GitError),
 
-    #[error(transparent)]
-    ManifestRead(#[from] yunta_engine::ManifestReadError),
-
     /// A manifest that could not be frozen. A stop the token made while git
     /// answered it is the command's cancellation, not a failed manifest: see
     /// the conversion below.
@@ -409,11 +406,11 @@ impl CliError {
                 Some(format!("looked in {}", roots.join(" and "))),
                 vec![
                     (
-                        "yunta list --runs".to_string(),
+                        crate::commands::advice::list_runs(),
                         "this repository's runs, what needs you first",
                     ),
                     (
-                        "yunta list --runs --all".to_string(),
+                        crate::commands::advice::list_every_run(),
                         "every run on this machine",
                     ),
                 ],
@@ -433,5 +430,5 @@ impl CliError {
 
 /// `warning`, as stderr is painted.
 pub(crate) fn warning_word() -> String {
-    crate::render::stderr_ink().word(surco::line::Tone::Caution, "warning")
+    crate::render::stderr_paint().word(surco::line::Tone::Caution, "warning")
 }

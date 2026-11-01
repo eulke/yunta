@@ -18,7 +18,7 @@ use std::io::Write;
 use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::look::Look;
-use surco::paint::Ink;
+use surco::paint::Paint;
 use yunta_engine::Moment;
 
 use super::{chronicle, write_line};
@@ -27,7 +27,7 @@ use super::{chronicle, write_line};
 pub(super) struct Lines {
     out: Box<dyn Write + Send>,
     /// How the stream this writes to is painted.
-    ink: Ink,
+    paint: Paint,
 }
 
 impl Lines {
@@ -40,7 +40,7 @@ impl Lines {
         );
         Self {
             out,
-            ink: crate::render::stderr_ink(),
+            paint: crate::render::stderr_paint(),
         }
     }
 
@@ -64,16 +64,16 @@ impl Lines {
     pub(super) fn moment(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
         let look = Look {
             glyphs,
-            ink: self.ink,
+            paint: self.paint,
             width: crate::render::stderr_width(),
         };
-        let said = self.ink.paint(&chronicle::line(moment, &look));
+        let said = self.paint.line(&chronicle::line(moment, &look));
         write_line(
             &mut self.out,
             &format!("[{}] {said}", duration(moment.elapsed)),
         );
         for line in chronicle::evidence(moment, run, &look) {
-            write_line(&mut self.out, &self.ink.paint(&line));
+            write_line(&mut self.out, &self.paint.line(&line));
         }
     }
 }

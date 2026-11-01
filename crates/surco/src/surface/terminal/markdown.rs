@@ -1,20 +1,20 @@
 //! Markdown as a terminal shows it, cut to the width it is read at.
 //!
-//! A diagram is read apart, before what is left reaches here. Prose is
-//! wrapped here, under the indent of the block it sits in, its emphasis
-//! drawn strong and its code in the tone a command is drawn in, the
-//! markers that only meant something rendered dropped where a tone says
-//! it. Code keeps its spacing: re-flowing code changes what it says. A line
-//! of code wider than the column breaks after a space and goes on one step
-//! under where it starts, the way a formatter continues a line, so what
-//! follows reads as the same line and not as one of its own.
+//! A diagram is read apart, before what is left reaches here. Prose is wrapped
+//! here, under the indent of the block it sits in, its emphasis drawn strong
+//! without its markers and its code in the tone a command is drawn in, inside
+//! its backticks: a stream writes the same words painted or not. Code keeps its
+//! spacing: re-flowing code changes what it says. It stands on the ground every
+//! block of code takes, its blank lines included. A line of code wider than the
+//! column breaks after a space and goes on one step under where it starts, the
+//! way a formatter continues a line, so what follows reads as the same line and
+//! not as one of its own.
 
 use std::ops::Range;
 
 use crate::glyphs::Glyphs;
 use crate::line::{Line, Tone};
 use crate::look::Look;
-use crate::paint::Ink;
 use crate::width::{cell_width, cut, INDENT};
 
 /// `text` wrapped to `width` under `indent`, with `lead` before its first
@@ -32,11 +32,10 @@ fn hanging(indent: &str, lead: &str, text: &Line, width: usize) -> Vec<Line> {
         .collect()
 }
 
-/// Prose as the spans it reads as: `**emphasis**` strong and `` `code` ``
-/// in a command's tone. Where a stream paints tones the markers go;
-/// where it does not, a code span keeps its backticks, since nothing else
-/// would set it apart. A marker with no partner is text.
-fn spans(text: &str, paints: bool) -> Line {
+/// Prose as the spans it reads as: `**emphasis**` strong, its markers
+/// dropped, and `` `code` `` in a command's tone, its backticks kept in every
+/// layer. A marker with no partner is text.
+fn spans(text: &str) -> Line {
     let mut line = Line::new();
     let pieces: Vec<&str> = text.split('`').collect();
     // An odd count of pieces is backticks in pairs: every odd piece is code.
@@ -44,7 +43,6 @@ fn spans(text: &str, paints: bool) -> Line {
     for (at, piece) in pieces.iter().enumerate() {
         let code = at % 2 == 1;
         match (code, paired || at + 1 < pieces.len()) {
-            (true, true) if paints => line = line.push(Tone::Command, *piece),
             (true, true) => line = line.push(Tone::Command, format!("`{piece}`")),
             (true, false) => line = line.plain(format!("`{piece}")),
             (false, _) => line = emphasis(line, piece),
@@ -75,7 +73,6 @@ pub fn markdown(text: &str, indent: &str, look: &Look) -> Vec<Line> {
         indent,
         width: look.width.cells(),
         glyphs: look.glyphs,
-        paints: look.ink != Ink::Plain,
         lines: Vec::new(),
         paragraph: String::new(),
         fenced: false,
@@ -92,8 +89,6 @@ struct Page<'a> {
     indent: &'a str,
     width: usize,
     glyphs: Glyphs,
-    /// Whether the stream paints tones.
-    paints: bool,
     lines: Vec<Line>,
     /// The paragraph gathered so far, drawn once it ends.
     paragraph: String,
@@ -132,7 +127,7 @@ impl Page<'_> {
             }
             Some((mark, item)) => {
                 self.flush();
-                let item = spans(item, self.paints);
+                let item = spans(item);
                 self.lines
                     .extend(hanging(self.indent, mark, &item, self.width));
             }
@@ -157,8 +152,8 @@ impl Page<'_> {
             pieces
                 .into_iter()
                 .map(|piece| match piece.text().is_empty() {
-                    true => Line::new(),
-                    false => piece.under(&code),
+                    true => super::document::as_code(Line::new()),
+                    false => super::document::as_code(piece.under(&code)),
                 }),
         );
     }
@@ -166,7 +161,7 @@ impl Page<'_> {
     /// The paragraph gathered so far, wrapped onto the page.
     fn flush(&mut self) {
         if !self.paragraph.trim().is_empty() {
-            let paragraph = spans(self.paragraph.trim(), self.paints);
+            let paragraph = spans(self.paragraph.trim());
             self.lines
                 .extend(hanging(self.indent, "", &paragraph, self.width));
         }
@@ -273,14 +268,16 @@ fn split_within(text: &str, room: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::line::Fill;
     use crate::look::Width;
+    use crate::paint::Paint;
 
     /// `text` drawn `width` wide with `glyphs`, unpainted, as the text of
     /// each line.
     fn drawn(text: &str, width: usize, glyphs: Glyphs) -> Vec<String> {
         let look = Look {
             glyphs,
-            ink: Ink::Plain,
+            paint: Paint::Plain,
             width: Width::of(None, None).within(width),
         };
         markdown(text, "", &look).iter().map(Line::text).collect()
@@ -318,20 +315,34 @@ mod tests {
     }
 
     #[test]
-    fn emphasis_and_code_are_tones_and_code_keeps_its_ticks_where_nothing_paints() {
-        let painted = spans("run **this** with `yunta status`", true);
-        assert_eq!(painted.text(), "run this with yunta status");
-        assert!(painted
+    fn emphasis_and_code_are_tones_and_code_keeps_its_ticks() {
+        let line = spans("run **this** with `yunta status`");
+        assert_eq!(line.text(), "run this with `yunta status`");
+        assert!(line
             .spans()
             .iter()
             .any(|span| span.tone == Tone::Strong && span.text == "this"));
-        assert!(painted
+        assert!(line
             .spans()
             .iter()
-            .any(|span| span.tone == Tone::Command && span.text == "yunta status"));
-        let plain = spans("run **this** with `yunta status`", false);
-        assert_eq!(plain.text(), "run this with `yunta status`");
-        assert_eq!(spans("a lone ` tick", true).text(), "a lone ` tick");
-        assert_eq!(spans("a lone ** star", true).text(), "a lone ** star");
+            .any(|span| span.tone == Tone::Command && span.text == "`yunta status`"));
+        assert_eq!(spans("a lone ` tick").text(), "a lone ` tick");
+        assert_eq!(spans("a lone ** star").text(), "a lone ** star");
+    }
+
+    /// Every line between a fence and its close, blank or not, is filled as
+    /// code, and the prose before it is not.
+    #[test]
+    fn a_fenced_block_stands_on_the_code_ground_its_blank_lines_included() {
+        let look = Look::plain();
+        let lines = markdown(
+            "Read this:\n\n```rust\nfn main() {}\n\nlet x = 1;\n```",
+            "",
+            &look,
+        );
+        assert_eq!(lines[0].text(), "Read this:");
+        assert_eq!(lines[0].fill(), None);
+        let block = &lines[2..5];
+        assert!(block.iter().all(|line| line.fill() == Some(Fill::Code)));
     }
 }

@@ -108,7 +108,6 @@ fn tokens(glyphs: Glyphs) -> Vec<String> {
             glyphs.bar_filled(),
             glyphs.bar_empty(),
             glyphs.continued(),
-            glyphs.rule(),
             HOME,
         ]
         .map(String::from),

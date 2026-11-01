@@ -23,7 +23,7 @@ use indicatif::style::TemplateError;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
 use surco::glyphs::Glyphs;
 use surco::line::Line;
-use surco::paint::Ink;
+use surco::paint::Paint;
 use yunta_core::RunId;
 use yunta_engine::RunFrame;
 
@@ -52,7 +52,7 @@ pub(super) struct Region {
     footer: ProgressBar,
     glyphs: Glyphs,
     /// How the stream the rows go on is painted.
-    ink: Ink,
+    paint: Paint,
     /// The style every row is drawn with, parsed once so adding a row
     /// later cannot fail.
     style: ProgressStyle,
@@ -71,7 +71,7 @@ impl Region {
     pub(super) fn open(
         screen: Screen,
         glyphs: Glyphs,
-        ink: Ink,
+        paint: Paint,
         scrollback: Box<dyn Write + Send>,
     ) -> Result<Self, TemplateError> {
         let style = ProgressStyle::with_template(ROW)?;
@@ -85,7 +85,7 @@ impl Region {
             body: Vec::new(),
             footer,
             glyphs,
-            ink,
+            paint,
             style,
             above,
         })
@@ -186,7 +186,7 @@ impl Region {
     pub(super) fn look(&self) -> surco::look::Look {
         surco::look::Look {
             glyphs: self.glyphs,
-            ink: self.ink,
+            paint: self.paint,
             width: crate::render::row_width(usize::from(self.screen.width())),
         }
     }
@@ -211,7 +211,7 @@ impl Region {
     /// on the words and painted after, so the paint never counts as
     /// width.
     fn fit(&self, line: &Line) -> String {
-        self.ink.paint(&line.cut(self.width(), self.glyphs))
+        self.paint.line(&line.cut(self.width(), self.glyphs))
     }
 
     /// The cells one row of this region may take: the width a line on
@@ -249,7 +249,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
-            surco::paint::Ink::Plain,
+            surco::paint::Paint::Plain,
             Box::new(scrollback.clone()),
         )
         .expect("the region's row template parses")

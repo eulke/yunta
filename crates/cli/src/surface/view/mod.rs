@@ -251,10 +251,10 @@ mod tests {
     use yunta_testkit::run_frame;
 
     use super::*;
-    use surco::paint::Ink;
+    use surco::paint::Paint;
 
     fn drawn(rows: Vec<Line>) -> Vec<String> {
-        rows.iter().map(|row| Ink::Plain.paint(row)).collect()
+        rows.iter().map(|row| Paint::Plain.line(row)).collect()
     }
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn the_footer_says_nothing_needs_you_while_the_run_moves() {
-        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
+        let paint = |frame: &RunFrame| Paint::Plain.line(&footer(frame, Glyphs::Ascii));
         let moving = paint(&standing(RunPhase::Running, None));
         assert!(moving.ends_with(" nothing needs you"), "{moving}");
         assert!(moving.contains("3s"), "how long it has taken: {moving}");
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn the_footer_names_what_the_run_spent_in_and_out() {
-        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
+        let paint = |frame: &RunFrame| Paint::Plain.line(&footer(frame, Glyphs::Ascii));
         let spent = RunFrame {
             tokens: yunta_core::events::TokenUsage {
                 input: 18_000,
@@ -404,7 +404,7 @@ mod tests {
         )
         .is_none());
         let row = attention(&standing(parked(), None), &RUN, true, Glyphs::Ascii)
-            .map(|row| Ink::Plain.paint(&row))
+            .map(|row| Paint::Plain.line(&row))
             .unwrap_or_default();
         assert!(
             row.contains(&format!("needs you: yunta resolve-gate {} (", RUN.handle())),
@@ -434,7 +434,7 @@ mod tests {
         });
         for frame in [&closed, &aborted] {
             assert!(attention(frame, &RUN, true, Glyphs::Ascii).is_none());
-            let line = Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
+            let line = Paint::Plain.line(&footer(frame, Glyphs::Ascii));
             assert!(line.ends_with(" nothing needs you"), "{line}");
         }
     }
@@ -451,14 +451,14 @@ mod tests {
         };
         let frame = standing(reset, None);
         assert!(attention(&frame, &RUN, true, Glyphs::Ascii).is_none());
-        let line = Ink::Plain.paint(&footer(&frame, Glyphs::Ascii));
+        let line = Paint::Plain.line(&footer(&frame, Glyphs::Ascii));
         assert!(line.ends_with(" waiting for a reset"), "{line}");
         assert!(!line.contains("needs you"), "{line}");
     }
 
     #[test]
     fn the_estimate_appears_beside_the_time_once_the_workflow_has_a_history() {
-        let paint = |frame: &RunFrame| Ink::Plain.paint(&footer(frame, Glyphs::Ascii));
+        let paint = |frame: &RunFrame| Paint::Plain.line(&footer(frame, Glyphs::Ascii));
         let known = yunta_engine::PriorEstimation {
             sample_count: 3,
             tokens: yunta_engine::Percentiles {

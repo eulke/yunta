@@ -23,8 +23,13 @@ pub struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
     /// When to color what is printed: on a terminal that draws it
-    /// (`auto`, honoring `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE`),
-    /// `always`, or `never`.
+    /// (`auto`, honoring `YUNTA_LOOK`, `NO_COLOR`, `CLICOLOR` and
+    /// `CLICOLOR_FORCE`), `always`, or `never`.
+    ///
+    /// The colors are 24-bit where `YUNTA_LOOK=24` asks for them or
+    /// `COLORTERM` says the terminal draws them, tuned to the ground
+    /// `COLORFGBG` names; otherwise they are the sixteen of the terminal's
+    /// theme.
     #[arg(long, global = true, value_enum, default_value_t)]
     pub(crate) color: surco::paint::ColorWhen,
 }

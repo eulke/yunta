@@ -110,11 +110,11 @@ mod tests {
         report.did("removed", "~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4");
         report.did("purged", "12 events of run ABCDEF");
         report.now = Some("1 checkout, builds 0 B of a 10 GB budget; 40 GB free".to_string());
-        let rule = "-".repeat(80);
+        let furrow = ".".repeat(80);
         assert_eq!(
             draw(report.page(), &Look::plain()),
             format!(
-                "+ yunta gc ; reclaimed 1 run\n{rule}\n\n  \
+                "+ yunta gc ; reclaimed 1 run\n{furrow}\n\n  \
                  removed      ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4\n               \
                  ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4\n  \
                  purged       12 events of run ABCDEF\n  \

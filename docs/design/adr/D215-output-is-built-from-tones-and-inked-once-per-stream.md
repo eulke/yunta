@@ -1,12 +1,14 @@
 ---
 number: D215
 title: "Output is built from tones and inked once per stream"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D273]
 ---
 
 # D215 — Output is built from tones and inked once per stream
+
+*(Revised by D273: point 2's module also paints in 24 bits tuned to the terminal's ground, and only there draws backgrounds; point 3's test draws every block in every layer, in Unicode and in ASCII; point 4 also reads `YUNTA_LOOK`, `COLORTERM` and `COLORFGBG`.)*
 
 ## Context
 

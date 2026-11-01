@@ -71,7 +71,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
-            surco::paint::Ink::Plain,
+            surco::paint::Paint::Plain,
             Box::new(out.clone()),
         )
         .expect("the region's row template parses")

@@ -35,7 +35,7 @@ mod wait;
 pub use bench::{no_secrets, Bench, MOCK_CONFIG};
 pub use bin::{
     checked, checks, full_run_id, handle, hermetic, hung, pool_checkouts, pool_checkouts_in,
-    run_id_from, run_id_in, run_yunta, stderr, stdout, unwrapped, Spawning,
+    run_id_from, run_yunta, stderr, stdout, unwrapped, Spawning,
 };
 pub use checkout::Checkout;
 pub use child::{CliChild, ProcessGroupCleanup};

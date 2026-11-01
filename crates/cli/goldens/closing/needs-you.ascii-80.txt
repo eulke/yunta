@@ -1,5 +1,5 @@
 ? fragua (quick) ; needs you ; after 7m41s ; exit 3                       7E5PH4
---------------------------------------------------------------------------------
+================================================================================
   node `lint` failed and its 0 re-routes to `fix-lint` are exhausted.
 
   ! lint ; exit 101

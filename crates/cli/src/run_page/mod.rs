@@ -313,9 +313,16 @@ impl RunPage<'_> {
 }
 
 /// The nodes that stand failed, each with its failure, in declaration order.
+/// A node whose log says it failed can stand otherwise: one a reset holds is
+/// `waiting`, and the pause says what holds it; one a re-route corrects is
+/// `rerouted`. Neither is listed.
 pub(crate) fn failed(frame: &RunFrame) -> impl Iterator<Item = (&NodeFrame, &Failure)> {
     frame.nodes.iter().filter_map(|node| match &node.state {
-        NodeStanding::Reached(NodeState::Failed { failure, .. }) => Some((node, failure)),
+        NodeStanding::Reached(NodeState::Failed { failure, .. })
+            if node.standing == Standing::Failed =>
+        {
+            Some((node, failure))
+        }
         _ => None,
     })
 }

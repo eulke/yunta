@@ -49,14 +49,14 @@ pub(crate) fn answer(
     );
     console.say("")?;
     for line in crate::render::block_lines(headline, &look) {
-        console.say(&look.ink.paint(&line))?;
+        console.say(&look.paint.line(&line))?;
     }
-    console.say(&look.ink.paint(&Line::new().plain(INDENT).plain(format!(
+    console.say(&look.paint.line(&Line::new().plain(INDENT).plain(format!(
         "{} before it goes on",
         surco::text::counted(total, "answer")
     ))))?;
     console.say(
-        &look.ink.paint(
+        &look.paint.line(
             &Line::new()
                 .plain(INDENT)
                 .push(Tone::Muted, console.escape().said()),
@@ -72,7 +72,7 @@ pub(crate) fn answer(
         if !question.required {
             asking = asking.push(Tone::Muted, " (optional)");
         }
-        console.say(&look.ink.paint(&asking))?;
+        console.say(&look.paint.line(&asking))?;
         answers.extend(asked(console, question)?);
     }
     Ok(QuestionsReply {
@@ -104,7 +104,7 @@ fn asked(console: &Console, question: &Question) -> Answered<Option<Answer>> {
                 .push(Tone::Failed, look.glyphs.mark(Mark::Failed).to_string())
                 .plain(" ")
                 .plain(violation);
-            console.say(&look.ink.paint(&line))?;
+            console.say(&look.paint.line(&line))?;
         }
     }
 }

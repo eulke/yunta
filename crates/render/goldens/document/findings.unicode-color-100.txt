@@ -2,8 +2,8 @@
 
   ␛[31m✗␛[0m ␛[31mblocking␛[0m: An empty argument list panics
     unwrap, at src/main.rs:2
-    The first argument is read with ␛[1munwrap␛[0m.
+    The first argument is read with ␛[1m`unwrap`␛[0m.
 
   ␛[33m▲␛[0m ␛[33mmajor␛[0m: A name with a newline breaks the line
     newline, at src/greet.rs:4
-    ␛[1mhello␛[0m prints the name as given, so ␛[1mana\nbob␛[0m greets on two lines.
+    ␛[1m`hello`␛[0m prints the name as given, so ␛[1m`ana\nbob`␛[0m greets on two lines.

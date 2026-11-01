@@ -1,11 +1,12 @@
 ␛[36m●␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[36mwaiting␛[0m␛[2m · for 32m10s␛[0m                                                       7E5PH4
-␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
+␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
   node `build` waits for its limit to reset at 2026-01-01 02:00 UTC, and the run resumes on its own
   then.
 
   ␛[2mprogress    ␛[0m 1 of 3 nodes done
   ␛[2mnodes       ␛[0m ␛[32m✓ ␛[0m1 finished: plan
-  ␛[2m            ␛[0m ␛[2m◌ ␛[0m2 never ran: build, test
+  ␛[2m            ␛[0m ␛[36m● ␛[0m1 waiting: build
+  ␛[2m            ␛[0m ␛[2m◌ ␛[0m1 never ran: test
 
 ␛[2mnext␛[0m
   ␛[1myunta resume 7E5PH4       ␛[0m   ␛[2mwaits for the reset, then drives on␛[0m

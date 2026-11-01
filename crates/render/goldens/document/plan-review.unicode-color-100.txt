@@ -5,10 +5,10 @@
 
   Add user-wide pack installation alongside project-local vendoring. A global pack lives under the
   existing YUNTA_HOME (or ~/.yunta) state root, so every project using that same user state can
-  discover it. ␛[1myunta␛[0m ␛[1mpack␛[0m ␛[1madd␛[0m ␛[1m--global␛[0m installs there; local installs continue to use the repository
-  tree. Resolution prefers a project-local pack when the same workflow is available locally, then
-  falls back to global packs. Pack locks and list/remove operations remain scoped to the selected
-  installation level.
+  discover it. ␛[1m`yunta␛[0m ␛[1mpack␛[0m ␛[1madd␛[0m ␛[1m--global`␛[0m installs there; local installs continue to use the
+  repository tree. Resolution prefers a project-local pack when the same workflow is available
+  locally, then falls back to global packs. Pack locks and list/remove operations remain scoped to
+  the selected installation level.
 
   ␛[1mdecided for you␛[0m
 
@@ -52,12 +52,12 @@
     ␛[2m◌␛[0m Sharing global installs between operating system users.
 
   ␛[1mdesign␛[0m
-    ␛[1mPackInstallScope␛[0m selects the root before the existing staging, vendor, lock and management
-    operations run. Project scope uses ␛[1m<repo>/.yunta␛[0m; global scope uses the Yunta user state root.
+    ␛[1m`PackInstallScope`␛[0m selects the root before the existing staging, vendor, lock and management
+    operations run. Project scope uses ␛[1m`<repo>/.yunta`␛[0m; global scope uses the Yunta user state root.
     Runtime catalog readers receive the global packs root from the process environment and inspect
     local packs first, then global packs, retaining the existing ambiguity rule within a source.
-    Locks remain separate: project installs use ␛[1m.yunta/yunta.lock␛[0m; global installs use
-    ␛[1m$YUNTA_HOME/yunta.lock␛[0m.
+    Locks remain separate: project installs use ␛[1m`.yunta/yunta.lock`␛[0m; global installs use
+    ␛[1m`$YUNTA_HOME/yunta.lock`␛[0m.
 
   ␛[1msteps␛[0m
     1  global-pack-storage  Store packs and locks at a selected install scope

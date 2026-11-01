@@ -6,14 +6,17 @@
 //! two whole: an assertion that looks for a phrase passes while the rest
 //! of the screen around it changes, and the screen is what a person
 //! reads. A difference fails naming the first line that differs, with the
-//! lines above it, and every escape is written as `␛` — in the file and
-//! in the failure — so a change of color reads as a change of text.
+//! lines above it, and every escape is written as [`ESCAPE`] — in the file
+//! and in the failure — so a change of color reads as a change of text.
 //!
 //! `YUNTA_BLESS=1` writes what was rendered instead of comparing, for a
 //! change that means to change what a surface prints. The new files are
 //! reviewed in the diff like any other change.
 
 use std::path::{Path, PathBuf};
+
+use crate::glyphs::ESCAPE;
+use crate::paint::{Ground, Layer, Paint};
 
 /// What a terminal a golden is rendered for looks like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,8 +25,8 @@ pub struct Environment {
     pub name: &'static str,
     /// Whether the terminal draws Unicode marks, or only ASCII.
     pub unicode: bool,
-    /// Whether the stream gets color.
-    pub color: bool,
+    /// How the stream is painted.
+    pub paint: Paint,
     /// The cells a line may take.
     pub width: usize,
 }
@@ -35,20 +38,44 @@ pub const ENVIRONMENTS: [Environment; 3] = [
     Environment {
         name: "unicode-color-100",
         unicode: true,
-        color: true,
+        paint: Paint::ANSI16,
         width: 100,
     },
     Environment {
         name: "ascii-80",
         unicode: false,
-        color: false,
+        paint: Paint::Plain,
         width: 80,
     },
     Environment {
         name: "unicode-60",
         unicode: true,
-        color: false,
+        paint: Paint::Plain,
         width: 60,
+    },
+];
+
+/// The environments a block is also rendered in where a terminal draws 24
+/// bits, on a dark ground and on a light one: a block's goldens show its
+/// fills there.
+pub const RICH: [Environment; 2] = [
+    Environment {
+        name: "truecolor-dark-100",
+        unicode: true,
+        paint: Paint::Color {
+            layer: Layer::Truecolor(Ground::Dark),
+            links: false,
+        },
+        width: 100,
+    },
+    Environment {
+        name: "truecolor-light-100",
+        unicode: true,
+        paint: Paint::Color {
+            layer: Layer::Truecolor(Ground::Light),
+            links: false,
+        },
+        width: 100,
     },
 ];
 
@@ -68,9 +95,9 @@ pub fn assert_golden(path: &Path, actual: &str) {
     }
 }
 
-/// `text` with every escape it carries written as `␛`.
+/// `text` with every escape it carries written as [`ESCAPE`].
 pub fn visible(text: &str) -> String {
-    text.replace('\x1b', "␛")
+    text.replace('\x1b', &ESCAPE.to_string())
 }
 
 /// Compares `actual` with the golden at `path`, or writes it there when

@@ -33,7 +33,7 @@
     ␛[2m◌␛[0m Greeting in other languages.
 
   ␛[1mdesign␛[0m
-    ␛[1mGreeter␛[0m owns the words; ␛[1mmain␛[0m reads the name and prints.
+    ␛[1m`Greeter`␛[0m owns the words; ␛[1m`main`␛[0m reads the name and prints.
 
   ␛[1msteps␛[0m
     1  greet     Greet by name

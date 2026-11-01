@@ -100,9 +100,10 @@ impl RunRef {
                 .newest()
                 .cloned()
                 .ok_or_else(|| {
-                    CliError::msg(
-                        "no run in this repository; `yunta list --runs --all` lists every run",
-                    )
+                    CliError::msg(format!(
+                        "no run in this repository; `{}` lists every run",
+                        advice::list_every_run()
+                    ))
                 }),
             RunRef::Needs => waiting_run(ctx).await,
         }
@@ -150,9 +151,10 @@ async fn typed_run(ctx: &Context, typed: &str) -> Result<RunId, CliError> {
 async fn waiting_run(ctx: &Context) -> Result<RunId, CliError> {
     let inbox = Inbox::gather(ctx, false).await?;
     match inbox.needing_a_person().as_slice() {
-        [] => Err(CliError::msg(
-            "no run of this repository needs you; `yunta list --runs` lists them",
-        )),
+        [] => Err(CliError::msg(format!(
+            "no run of this repository needs you; `{}` lists them",
+            advice::list_runs()
+        ))),
         [one] => Ok(one.run_id.clone()),
         several => Err(CliError::AmbiguousRun {
             said: format!(

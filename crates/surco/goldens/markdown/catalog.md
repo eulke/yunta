@@ -4,7 +4,7 @@
 
 approve-plan asks you to approve the plan before anything is built.
 
-The run plans the change, asks before it builds, and builds what you approve.
+Then the run builds the change and checks what it built.
 
 ## what it found
 
@@ -75,6 +75,10 @@ the file exists
 A change **in Markdown**, with `code`.
 
 - an item
+
+```rust
+fn main() {}
+```
 
 ```mermaid
 graph LR

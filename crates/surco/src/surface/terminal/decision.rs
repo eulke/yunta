@@ -1,14 +1,16 @@
 //! Every option of a decision, what it costs, and the command that chooses it, if any.
 
 use crate::components::{Chosen, Decision};
-use crate::line::{Line, Tone};
+use crate::line::{Fill, Line, Tone};
 use crate::look::Look;
 use crate::width::{cell_width, wrap, INDENT};
 
 impl Decision {
     /// Each option with what it costs and the command that chooses it, if any,
-    /// then — under the title `otherwise_title` gives — what moves the run
-    /// without choosing one.
+    /// then, under the title `otherwise_title` gives, what moves the run
+    /// without choosing one. Every line is filled as a tint: a decision is
+    /// what waits on the reader, so it stands apart from the page where a
+    /// layer draws 24-bit color.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let under = format!("{INDENT}{INDENT}");
         let room = look.width.cells().saturating_sub(cell_width(&under));
@@ -43,6 +45,9 @@ impl Decision {
             lines.extend(super::next::steps(&self.otherwise, &under, look));
         }
         lines
+            .into_iter()
+            .map(|line| line.filled(Fill::Tint))
+            .collect()
     }
 
     /// The title the other ways out stand under: `or` when each option is
@@ -53,5 +58,37 @@ impl Decision {
             Chosen::Here { .. } | Chosen::AtThePrompt => super::OR,
             Chosen::OnTheForge { elsewhere, .. } => elsewhere.as_str(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::components::{Chosen, Decision, DecisionOption};
+    use crate::line::Fill;
+    use crate::look::Look;
+
+    /// A decision with one option that has a cost, and one way out.
+    fn decision() -> Decision {
+        Decision {
+            chosen: Chosen::AtThePrompt,
+            options: vec![DecisionOption {
+                id: "approve".to_string(),
+                label: None,
+                tradeoff: Some("its tasks run".to_string()),
+                asks: None,
+            }],
+            otherwise: vec![("yunta close <run>".to_string(), "closes it for good")],
+        }
+    }
+
+    /// Every line a decision draws is filled as a tint, its way out included.
+    #[test]
+    fn every_line_a_decision_draws_is_filled_as_a_tint() {
+        let lines = decision().lines(&Look::plain());
+        assert!(
+            lines.len() > 1,
+            "an option and a way out are more than one line"
+        );
+        assert!(lines.iter().all(|line| line.fill() == Some(Fill::Tint)));
     }
 }

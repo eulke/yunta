@@ -4,7 +4,7 @@
 ␛[32m━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━␛[0m ␛[33m━━━━━━━━━━━━━━━━␛[0m ␛[1;35m━━━━━━━━━━━━━━━␛[0m ␛[2m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
   approve-plan asks you to approve the plan before anything is built.
 
-  The run plans the change, asks before it builds, and builds what you approve.
+  Then the run builds the change and checks what it built.
 
 ␛[2mwhat it found␛[0m
   ␛[32m✓␛[0m ␛[1mgit␛[0m     commits as Ada <ada@example.com>
@@ -56,9 +56,11 @@
   ␛[1mT001␛[0m: Make it
     the file exists
 
-  A change ␛[1min Markdown␛[0m, with ␛[1mcode␛[0m.
+  A change ␛[1min Markdown␛[0m, with ␛[1m`code`␛[0m.
 
   - an item
+
+    fn main() {}
 
   ┌──────┐   ┌───────┐
   │ plan │──▶│ build │

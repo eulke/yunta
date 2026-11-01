@@ -1,5 +1,5 @@
 //! A document on a terminal: each block laid out in columns at the
-//! stream's width, with its glyph set, painted by its ink.
+//! stream's width, with its glyph set, painted by its paint.
 
 use crate::components::{Lead, Section};
 use crate::doc::{Block, Doc};
@@ -197,7 +197,7 @@ impl Surface for Terminal {
     fn draw(&self, doc: &Doc) -> String {
         self.lines(doc)
             .iter()
-            .map(|line| format!("{}\n", self.look.ink.paint(line)))
+            .map(|line| format!("{}\n", self.look.paint.line(line)))
             .collect()
     }
 }

@@ -248,13 +248,52 @@ fn asked(console: &Console, prompt: &str, default: &str) -> String {
         .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
     // A terminal that cannot be drawn on cannot be asked either: the
     // default stands, as it does for a line left empty.
-    if console.say(&look.ink.paint(&asking)).is_err() {
+    if console.say(&look.paint.line(&asking)).is_err() {
         return default.to_string();
     }
     match ask_line(console, crate::ask::ANSWER) {
         Ok(typed) if !typed.value.is_empty() => typed.value,
         _ => default.to_string(),
     }
+}
+
+/// The project's name and base branch, as `init` answers them: asked on
+/// `console` when there is one, each prompt keeping its detected value when
+/// it is left empty, and the detected values as they stand otherwise.
+fn project_answers(
+    console: Option<&Console>,
+    default_name: String,
+    default_branch: String,
+) -> (String, String) {
+    match console {
+        Some(console) => {
+            // What Escape does, said once above the prompts it applies
+            // to — the same place every other surface says it.
+            // best-effort: the notice informs only; a refused write falls back to the defaults.
+            let _ = console.say(console.escape().said());
+            (
+                asked(console, "project name", &default_name),
+                asked(console, "base branch", &default_branch),
+            )
+        }
+        None => (default_name, default_branch),
+    }
+}
+
+/// The console `init` asks on, when `-i` asked for one and a terminal
+/// answers, and `None` otherwise. `-i` degrades with a warning rather than
+/// hanging on a terminal that will never produce a line. There is no run
+/// drawing here, so what opening the console has to say goes out through a
+/// door onto nothing, which is stderr.
+async fn open_console(interactive: bool) -> Option<Console> {
+    let console = match interactive {
+        true => Console::open(&Diagnostics::none(), Escape::KeepsDefault).await,
+        false => None,
+    };
+    if interactive && console.is_none() {
+        crate::ask::no_terminal("using detected defaults");
+    }
+    console
 }
 
 pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome, CliError> {
@@ -276,17 +315,7 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
         )));
     }
 
-    // `-i` degrades with a warning rather than hanging on a terminal
-    // that will never produce a line. There is no run drawing here, so
-    // what opening the console has to say goes out through a door onto
-    // nothing, which is stderr.
-    let console = match interactive {
-        true => Console::open(&Diagnostics::none(), Escape::KeepsDefault).await,
-        false => None,
-    };
-    if interactive && console.is_none() {
-        crate::ask::no_terminal("using detected defaults");
-    }
+    let console = open_console(interactive).await;
 
     let default_name = repo
         .file_name()
@@ -295,19 +324,8 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     let default_branch = detect_base_branch(&repo, supervision).await?;
     let detected = crate::detect::Detected::in_repo(&repo, supervision).await?;
 
-    let (project_name, base_branch) = match &console {
-        Some(console) => {
-            // What Escape does, said once above the prompts it applies
-            // to — the same place every other surface says it.
-            // best-effort: the notice informs only; a refused write falls back to the defaults.
-            let _ = console.say(console.escape().said());
-            (
-                asked(console, "project name", &default_name),
-                asked(console, "base branch", &default_branch),
-            )
-        }
-        None => (default_name, default_branch),
-    };
+    let (project_name, base_branch) =
+        project_answers(console.as_ref(), default_name, default_branch);
 
     let probed = crate::detect::probe_known_adapters().await;
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
@@ -378,11 +396,10 @@ struct Wrote<'a> {
     probed: &'a [crate::detect::ProbedAdapter],
 }
 
-/// The page `init` ends with: what it wrote and detected, as fields; each
-/// adapter this machine answers for, as a check; the lines to paste into
-/// the project's CLAUDE.md; and the runner to declare, because no agent
-/// node runs until one is.
-fn report(init: &Wrote<'_>) -> Doc {
+/// What `init` wrote and detected, as the fields the page opens with: the
+/// files it wrote and the ones it left as they were, the ecosystem it found
+/// and its cache tip, and the forge `origin` is on.
+fn detected_fields(init: &Wrote<'_>) -> Fields {
     let detected = init.detected;
     let ecosystem = match &detected.ecosystem {
         Some(ecosystem) => format!(
@@ -398,7 +415,7 @@ fn report(init: &Wrote<'_>) -> Doc {
                  declare `commands:` and `baseline.suite` by hand"
             .to_string(),
     };
-    let fields = Fields::new()
+    Fields::new()
         .push_if("wrote", init.wrote.join(", "))
         .push_if("skipped", init.skipped.join(", "))
         .push_if("ecosystem", ecosystem)
@@ -419,7 +436,14 @@ fn report(init: &Wrote<'_>) -> Doc {
                     format!("github {repo}, from `origin`; its token is read from `GITHUB_TOKEN`")
                 })
                 .unwrap_or_default(),
-        );
+        )
+}
+
+/// The page `init` ends with: what it wrote and detected, as fields; each
+/// adapter this machine answers for, as a check; the lines to paste into
+/// the project's CLAUDE.md; and the runner to declare, because no agent
+/// node runs until one is.
+fn report(init: &Wrote<'_>) -> Doc {
     let mut adapters = Checklist::default();
     for adapter in init.probed {
         match adapter.healthy {
@@ -441,12 +465,12 @@ fn report(init: &Wrote<'_>) -> Doc {
     // to choose. Until a runner is declared, no agent node can run, so
     // that is the step this ends with.
     let runner = crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed));
-    let headline =
-        Headline::new(Mark::Done, "yunta init", "done").fact(format!("in {}", init.repo.display()));
+    let headline = Headline::new(Mark::Done, super::advice::init(), "done")
+        .fact(format!("in {}", init.repo.display()));
     Doc::new()
         .with(headline)
         .with(Furrow(Vec::new()))
-        .with(fields)
+        .with(detected_fields(init))
         .with(adapters)
         .with(Block::Heading(
             "for this repo's CLAUDE.md, to paste yourself: Yunta never writes to that file"

@@ -5,8 +5,7 @@ plan: 4 tasks in 3 steps, 2 risks
   approve-plan asks you to approve the plan before anything
   is built.
 
-  The run plans the change, asks before it builds, and
-  builds what you approve.
+  Then the run builds the change and checks what it built.
 
 what it found
   ✓ git     commits as Ada <ada@example.com>
@@ -67,6 +66,8 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   A change in Markdown, with `code`.
 
   - an item
+
+    fn main() {}
 
   ┌──────┐   ┌───────┐
   │ plan │──▶│ build │

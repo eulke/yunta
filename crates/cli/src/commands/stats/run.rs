@@ -218,10 +218,11 @@ mod tests {
 
     const RUN: yunta_core::RunId = yunta_core::RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
-    /// The usage the golden page reads, with the cache figure it reports.
+    /// The usage the golden page reads, with the cache figure it reports: the
+    /// sum of what its two nodes spent.
     const PAGE_USAGE: TokenUsage = TokenUsage {
         input: 18_000,
-        output: 2_200,
+        output: 1_800,
         cached: Some(25_200),
     };
 
@@ -281,8 +282,10 @@ mod tests {
         pricing: Option<&BTreeMap<String, yunta_core::PricingEntry>>,
         look: &Look,
     ) -> String {
+        // The header reads the run's own time, as its stats measured it.
         let frame = RunFrame {
             nodes: nodes.to_vec(),
+            elapsed: stats.wall_clock,
             ..yunta_testkit::run_frame(&RUN)
         };
         let page = RunStatsPage {
@@ -368,9 +371,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_run_page_matches_its_goldens() {
-        let node = |id: &str, input: u64, secs: u64| NodeStat {
+    /// One node that ran to its finish: `input` tokens in, a tenth as many
+    /// out, and `secs` seconds of work, a quarter of it spent blocked.
+    fn node_stat(id: &str, input: u64, secs: u64) -> NodeStat {
+        NodeStat {
             node_id: yunta_core::NodeId::from(id),
             runner: Some(yunta_core::RunnerName::from("implementer")),
             tokens: yunta_core::events::TokenUsage {
@@ -383,19 +387,34 @@ mod tests {
             open_attempt: None,
             blocked: Duration::from_secs(secs / 4),
             models: Vec::new(),
-        };
+        }
+    }
+
+    /// The run the golden page is drawn from: one task done, its two nodes
+    /// run, and the cost, cache rate and rework the page reads.
+    fn golden_run() -> RunStats {
         let spend = settled(PAGE_USAGE);
-        let run = RunStats {
+        // The cost per verified task is the page's input and output over its
+        // one task done; the run took 7m30s, longer than the 7m5s its two
+        // nodes took between them.
+        RunStats {
+            cptv: Some(19_800.0),
             rework_rate: Some(0.12),
             cache_rate: Some(1.4),
             total_tokens: spend.so_far(),
             spend,
             rails: BTreeMap::new(),
+            wall_clock: Some(Duration::from_secs(450)),
             ..stats(vec![
-                node("plan", 4_000, 40),
-                node("implement-the-whole-feature", 14_000, 300),
+                node_stat("plan", 4_000, 40),
+                node_stat("implement-the-whole-feature", 14_000, 300),
             ])
-        };
+        }
+    }
+
+    /// The frame of each node of `run`, every one run to its finish in a log
+    /// the engine derives its state from.
+    fn finished_frames(run: &RunStats) -> Vec<NodeFrame> {
         // Both nodes ran and finished, as the log the page reads says.
         let mut log = yunta_testkit_core::Log::for_run(RUN.as_str());
         for id in ["plan", "implement-the-whole-feature"] {
@@ -414,8 +433,7 @@ mod tests {
         }
         let state = yunta_engine::derive(&log.build());
         // Each node as a frame stands it: finished, the word its row opens with.
-        let nodes: Vec<NodeFrame> = run
-            .nodes
+        run.nodes
             .iter()
             .map(|stat| {
                 yunta_testkit::node_frame(
@@ -429,7 +447,13 @@ mod tests {
                     ),
                 )
             })
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn a_run_page_matches_its_goldens() {
+        let run = golden_run();
+        let nodes = finished_frames(&run);
         let goldens: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/stats");
         for environment in &ENVIRONMENTS {
             assert_golden(

@@ -174,7 +174,7 @@ mod tests {
             let drawn: Vec<String> = problem
                 .lines(&look)
                 .iter()
-                .map(|row| look.ink.paint(row))
+                .map(|row| look.paint.line(row))
                 .collect();
             let gutter = drawn
                 .iter()

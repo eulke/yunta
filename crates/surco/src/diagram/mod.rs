@@ -111,7 +111,7 @@ mod tests {
         let drawn: Vec<String> = Terminal::on(look)
             .block(&Block::Diagram(diagram))
             .iter()
-            .map(|line| look.ink.paint(line))
+            .map(|line| look.paint.line(line))
             .collect();
         assert!(
             drawn

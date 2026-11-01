@@ -277,7 +277,7 @@ impl Console {
     pub(crate) fn look(&self) -> surco::look::Look {
         surco::look::Look {
             glyphs: crate::render::glyphs(),
-            ink: crate::render::stderr_ink(),
+            paint: crate::render::stderr_paint(),
             width: crate::render::row_width(usize::from(self.term.size().1)),
         }
     }

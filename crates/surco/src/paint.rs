@@ -1,19 +1,21 @@
 //! How a line is painted on a stream, and whether a stream gets paint
 //! at all.
 //!
-//! The plain ink writes the text and nothing else; the ANSI ink wraps
-//! each span in the color its tone takes. Color only repeats what the
-//! words already say, so the two inks write the same text: a captured
-//! stream reads the same whoever captured it, and that is held by a test
-//! rather than by care. Whether a stream gets color, and links with it,
-//! is a policy read once from the command line and the environment by
-//! whoever runs the process, then asked per stream.
+//! A stream is painted plain, or in one layer of color: the sixteen colors of
+//! its terminal's theme, or 24-bit colors tuned to the ground its terminal
+//! draws on. Color only repeats what the words already say, so a stream
+//! writes the same text plain and in either layer: a captured stream reads
+//! the same whoever captured it, and that is held by a test rather than by
+//! care. A link comes with color, in either layer, and is not a layer of its
+//! own. Whether a stream gets color, in which layer and with links, is a
+//! policy read once from the command line and the environment by whoever
+//! runs the process, then asked per stream.
 //!
 //! This is the one place in the crate that writes an SGR escape or a
 //! terminal link.
 
-use crate::glyphs::{Glyphs, Mark};
-use crate::line::{Line, Tone};
+use crate::line::{Fill, Line, Span, Tone};
+use crate::palette::{self, Rgb};
 
 /// When `--color` paints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -43,9 +45,16 @@ pub struct ColorPolicy {
     pub dumb: bool,
     /// Whether a path is a link: `YUNTA_HYPERLINKS` set to `1` or `0`
     /// says outright; otherwise a terminal that announces it opens links
-    /// — iTerm, WezTerm, VS Code's, a VTE from 0.50 on, kitty, Windows
-    /// Terminal — gets them.
+    /// (iTerm, WezTerm, VS Code's, a VTE from 0.50 on, kitty, Windows
+    /// Terminal) gets them.
     pub links: Links,
+    /// The layer [`LOOK_VAR`] names, when it names one.
+    pub look: Option<LookChoice>,
+    /// Whether the terminal draws 24-bit colors: `COLORTERM` is `truecolor`
+    /// or `24bit`.
+    pub truecolor: bool,
+    /// The ground the terminal draws on, from `COLORFGBG`.
+    pub ground: Ground,
 }
 
 /// Whether a stream that gets color gets links too.
@@ -62,18 +71,68 @@ pub enum Links {
     Unknown,
 }
 
+/// The variable that names a stream's layer outright: `plain`, `16` or `24`.
+pub const LOOK_VAR: &str = "YUNTA_LOOK";
+
+/// The layer [`LOOK_VAR`] names outright.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LookChoice {
+    /// `plain`: no color, unless `--color always` asks for it.
+    Plain,
+    /// `16`: the sixteen colors of the terminal's theme.
+    Ansi16,
+    /// `24`: 24-bit colors, tuned to the ground.
+    Truecolor,
+}
+
+/// Whether a terminal draws on a dark ground or a light one, which the
+/// 24-bit colors are tuned to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Ground {
+    /// A dark ground: what a terminal that says nothing is taken to draw on.
+    #[default]
+    Dark,
+    /// A light ground.
+    Light,
+}
+
+/// The colors a stream with color draws: the sixteen of its terminal's theme,
+/// or 24-bit colors tuned to its ground.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer {
+    /// The sixteen colors of the terminal's theme.
+    Ansi16,
+    /// 24-bit colors, tuned to the ground the terminal draws on.
+    Truecolor(Ground),
+}
+
+/// How a stream's lines are painted: plain, or in a layer of color where a
+/// path may be a link to the file it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Paint {
+    /// The text and nothing else: no color and no links.
+    Plain,
+    /// Color in `layer`; a path is a link to its file where `links` is true.
+    Color { layer: Layer, links: bool },
+}
+
 impl ColorPolicy {
-    /// The ink a stream gets, `terminal` saying whether it is one.
+    /// The paint a stream gets, `terminal` saying whether it is one.
     ///
-    /// The command line decides first; then a reader who asked for no
-    /// color; then one who asked to force it; then one who turned it
-    /// off; and then whether the stream is a terminal that draws it.
-    pub fn ink(&self, terminal: bool) -> Ink {
+    /// The command line decides first; then `YUNTA_LOOK=plain`; then a
+    /// reader who asked for no color, one who asked to force it, and one who
+    /// turned it off, and then whether the stream is a terminal that draws
+    /// it. A stream with color draws in the layer `YUNTA_LOOK` names, or else
+    /// in 24-bit colors when its terminal draws them, or else in the sixteen.
+    pub fn paint(&self, terminal: bool) -> Paint {
         match self.color(terminal) {
-            false => Ink::Plain,
-            true => match (self.links, terminal) {
-                (Links::Forced, _) | (Links::Announced, true) => Ink::Linked,
-                _ => Ink::Ansi16,
+            false => Paint::Plain,
+            true => Paint::Color {
+                layer: self.layer(),
+                links: matches!(
+                    (self.links, terminal),
+                    (Links::Forced, _) | (Links::Announced, true)
+                ),
             },
         }
     }
@@ -85,6 +144,9 @@ impl ColorPolicy {
             ColorWhen::Never => return false,
             ColorWhen::Auto => {}
         }
+        if self.look == Some(LookChoice::Plain) {
+            return false;
+        }
         if self.no_color {
             return false;
         }
@@ -93,69 +155,178 @@ impl ColorPolicy {
         }
         !(self.off || !terminal || self.dumb)
     }
+
+    /// The layer a stream with color draws in: the one `YUNTA_LOOK` names,
+    /// else 24-bit colors when the terminal draws them, else the sixteen.
+    fn layer(&self) -> Layer {
+        match self.look {
+            Some(LookChoice::Ansi16) => Layer::Ansi16,
+            Some(LookChoice::Truecolor) => Layer::Truecolor(self.ground),
+            Some(LookChoice::Plain) | None => match self.truecolor {
+                true => Layer::Truecolor(self.ground),
+                false => Layer::Ansi16,
+            },
+        }
+    }
 }
 
-/// How a stream's lines are painted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Ink {
-    /// The text and nothing else.
-    Plain,
-    /// The text, each span in the color of its tone.
-    Ansi16,
-    /// As [`Ink::Ansi16`], and a path a link to the file it names — for
-    /// a terminal that opens one.
-    Linked,
+/// The layer `value` names for [`LOOK_VAR`]: `plain`, `16` or `24`, with
+/// case and surrounding space ignored. Any other value names none.
+pub fn look_of(value: Option<&str>) -> Option<LookChoice> {
+    match value?.trim().to_ascii_lowercase().as_str() {
+        "plain" => Some(LookChoice::Plain),
+        "16" => Some(LookChoice::Ansi16),
+        "24" => Some(LookChoice::Truecolor),
+        _ => None,
+    }
 }
 
-impl Ink {
-    /// `line`, painted.
-    pub fn paint(self, line: &Line) -> String {
-        line.spans()
+/// The ground COLORFGBG names: its last field is the background's color
+/// number, 0 to 6 or 8 dark and 7 or 9 to 15 light; anything else, or none,
+/// reads as dark, since no terminal is asked.
+pub fn ground_of(colorfgbg: Option<&str>) -> Ground {
+    let background = colorfgbg
+        .and_then(|value| value.rsplit(';').next())
+        .and_then(|field| field.trim().parse::<u8>().ok());
+    match background {
+        Some(7 | 9..=15) => Ground::Light,
+        _ => Ground::Dark,
+    }
+}
+
+impl Paint {
+    /// The sixteen colors of the terminal's theme, and no links.
+    pub const ANSI16: Paint = Paint::Color {
+        layer: Layer::Ansi16,
+        links: false,
+    };
+
+    /// The sixteen colors of the terminal's theme, and a path a link to the
+    /// file it names.
+    pub const LINKED: Paint = Paint::Color {
+        layer: Layer::Ansi16,
+        links: true,
+    };
+
+    /// `line`, painted: each span in its tone, and as a link where the paint
+    /// has links on. Only a layer with 24-bit color paints fills: each span on
+    /// the fill it carries or else the line's, and a filled line erased to its
+    /// edge, so the fill reaches the edge with no space written.
+    pub fn line(self, line: &Line) -> String {
+        let fill = line.fill();
+        let painted: String = line
+            .spans()
             .iter()
-            .map(|span| {
-                let word = self.word(span.tone, &span.text);
-                match (self, &span.link) {
-                    // OSC 8: the text between the two sequences opens
-                    // the target; a terminal without links shows the
-                    // text alone.
-                    (Ink::Linked, Some(target)) => {
-                        format!("\x1b]8;;{target}\x1b\\{word}\x1b]8;;\x1b\\")
-                    }
-                    _ => word,
-                }
-            })
-            .collect()
+            .map(|span| self.span(span, fill))
+            .collect();
+        match self.erase(fill) {
+            Some(erase) => format!("{painted}{erase}"),
+            None => painted,
+        }
     }
 
     /// `text` in `tone`, painted.
     pub fn word(self, tone: Tone, text: &str) -> String {
-        match (self, sgr(tone)) {
-            (Ink::Ansi16 | Ink::Linked, Some(sgr)) => format!("\x1b[{sgr}m{text}\x1b[0m"),
-            _ => text.to_string(),
+        match self {
+            Paint::Plain => text.to_string(),
+            Paint::Color {
+                layer: Layer::Ansi16,
+                ..
+            } => match sgr(tone) {
+                Some(sgr) => format!("\x1b[{sgr}m{text}\x1b[0m"),
+                None => text.to_string(),
+            },
+            Paint::Color {
+                layer: Layer::Truecolor(ground),
+                ..
+            } => truecolor(ground, tone, None, None, text),
         }
     }
 
-    /// `mark`'s glyph, painted in the tone the mark takes.
-    pub fn mark(self, glyphs: Glyphs, mark: Mark) -> String {
-        self.word(Tone::of(mark), &glyphs.mark(mark).to_string())
+    /// `span` in this paint: a layer with 24-bit color paints it on the fill
+    /// it carries or else `fill`, the line's; a link is written only where the
+    /// paint has links on.
+    fn span(self, span: &Span, fill: Option<Fill>) -> String {
+        let word = match self {
+            Paint::Color {
+                layer: Layer::Truecolor(ground),
+                ..
+            } => truecolor(ground, span.tone, span.fill, fill, &span.text),
+            Paint::Plain
+            | Paint::Color {
+                layer: Layer::Ansi16,
+                ..
+            } => self.word(span.tone, &span.text),
+        };
+        match (self, &span.link) {
+            // OSC 8: the text between the two sequences opens the target; a
+            // terminal without links shows the text alone.
+            (Paint::Color { links: true, .. }, Some(target)) => {
+                format!("\x1b]8;;{target}\x1b\\{word}\x1b]8;;\x1b\\")
+            }
+            _ => word,
+        }
+    }
+
+    /// The erase that ends a filled line in a layer that draws fills: the
+    /// background is set, then the rest of the line is erased with it. None
+    /// when the line has no background to draw, which a pill's line never has.
+    fn erase(self, fill: Option<Fill>) -> Option<String> {
+        match self {
+            Paint::Plain
+            | Paint::Color {
+                layer: Layer::Ansi16,
+                ..
+            } => None,
+            Paint::Color {
+                layer: Layer::Truecolor(ground),
+                ..
+            } => {
+                let background = color_parameter(48, palette::fill(ground, fill?)?);
+                Some(format!("\x1b[{background}m\x1b[K\x1b[0m"))
+            }
+        }
+    }
+}
+
+/// A color of the sixteen, which every terminal draws in its own theme.
+#[derive(Clone, Copy)]
+enum Ansi {
+    Red,
+    Green,
+    Yellow,
+    Magenta,
+    Cyan,
+}
+
+impl Ansi {
+    /// The SGR parameter that sets this color for text.
+    fn code(self) -> u8 {
+        match self {
+            Ansi::Red => 31,
+            Ansi::Green => 32,
+            Ansi::Yellow => 33,
+            Ansi::Magenta => 35,
+            Ansi::Cyan => 36,
+        }
     }
 }
 
 /// How `tone` is painted on sixteen colors: bold, dim, and the ANSI color
 /// it takes, so every terminal draws it in its own palette. The one table
 /// both the SGR escapes and clap's styles are written from.
-fn ansi(tone: Tone) -> (bool, bool, Option<u8>) {
+fn ansi(tone: Tone) -> (bool, bool, Option<Ansi>) {
     match tone {
         Tone::Plain => (false, false, None),
         Tone::Strong | Tone::Command => (true, false, None),
         Tone::Muted => (false, true, None),
-        Tone::Done => (false, false, Some(32)),
-        Tone::Failed => (false, false, Some(31)),
-        Tone::Running => (false, false, Some(36)),
-        Tone::NeedsYou => (true, false, Some(35)),
-        Tone::Caution => (false, false, Some(33)),
-        Tone::Added => (false, false, Some(32)),
-        Tone::Removed => (false, false, Some(31)),
+        Tone::Done => (false, false, Some(Ansi::Green)),
+        Tone::Failed => (false, false, Some(Ansi::Red)),
+        Tone::Running => (false, false, Some(Ansi::Cyan)),
+        Tone::NeedsYou => (true, false, Some(Ansi::Magenta)),
+        Tone::Caution => (false, false, Some(Ansi::Yellow)),
+        Tone::Added => (false, false, Some(Ansi::Green)),
+        Tone::Removed => (false, false, Some(Ansi::Red)),
     }
 }
 
@@ -165,36 +336,88 @@ fn sgr(tone: Tone) -> Option<String> {
     let parameters: Vec<String> = [bold.then(|| "1".to_string()), dim.then(|| "2".to_string())]
         .into_iter()
         .flatten()
-        .chain(color.map(|color| color.to_string()))
+        .chain(color.map(|color| color.code().to_string()))
         .collect();
     (!parameters.is_empty()).then(|| parameters.join(";"))
 }
 
-/// The styles `clap` draws its own help and usage errors in, in the tones
-/// every page takes: a heading and a value to fill in muted, what a reader
-/// types strong, an error failed, a valid value done, an invalid one a
-/// caution. Each is the color [`Ink::Ansi16`] paints its tone in.
-#[cfg(feature = "clap")]
-pub fn clap_styles() -> clap::builder::Styles {
-    use clap::builder::styling::{AnsiColor, Style};
-    let style = |tone: Tone| {
-        let (bold, dim, color) = ansi(tone);
-        let color = color.and_then(|code| match code {
-            31 => Some(AnsiColor::Red),
-            32 => Some(AnsiColor::Green),
-            33 => Some(AnsiColor::Yellow),
-            35 => Some(AnsiColor::Magenta),
-            36 => Some(AnsiColor::Cyan),
-            _ => None,
-        });
-        let style = Style::new().fg_color(color.map(Into::into));
-        let style = if bold { style.bold() } else { style };
-        if dim {
-            style.dimmed()
-        } else {
-            style
-        }
+/// `text` in `tone` on `ground`, on the fill its span carries (`own`) or else
+/// the line's (`line`): its SGR parameters and a reset after it, or the text
+/// alone when nothing is drawn.
+fn truecolor(
+    ground: Ground,
+    tone: Tone,
+    own: Option<Fill>,
+    line: Option<Fill>,
+    text: &str,
+) -> String {
+    let parameters = truecolor_parameters(ground, tone, own, line);
+    if parameters.is_empty() {
+        return text.to_string();
+    }
+    format!("\x1b[{}m{text}\x1b[0m", parameters.join(";"))
+}
+
+/// The SGR parameters that draw `tone` on `ground`: bold where Ansi16 is
+/// bold, the text's color, and the background of the fill that paints it.
+/// A span's own fill wins over the line's. A pill is its tone's color with
+/// pill ink on it, in bold; a pill in a tone the palette leaves to the
+/// terminal has no color to paint, so it is its word on the line's fill.
+fn truecolor_parameters(
+    ground: Ground,
+    tone: Tone,
+    own: Option<Fill>,
+    line: Option<Fill>,
+) -> Vec<String> {
+    let bold = ansi(tone).0;
+    let text = palette::tone(ground, tone);
+    let (bold, text, background) = match (own, text) {
+        (Some(Fill::Pill), Some(color)) => (true, Some(palette::pill_ink(ground)), Some(color)),
+        _ => (
+            bold,
+            text,
+            own.and_then(|fill| palette::fill(ground, fill))
+                .or_else(|| line.and_then(|fill| palette::fill(ground, fill))),
+        ),
     };
+    bold.then(|| "1".to_string())
+        .into_iter()
+        .chain(text.map(|color| color_parameter(38, color)))
+        .chain(background.map(|color| color_parameter(48, color)))
+        .collect()
+}
+
+/// The SGR parameter that sets `color` in 24 bits: the text's color when
+/// `target` is 38, the background's when it is 48.
+fn color_parameter(target: u8, Rgb(red, green, blue): Rgb) -> String {
+    format!("{target};2;{red};{green};{blue}")
+}
+
+/// The styles `clap` draws its own help and usage errors in, in `paint`'s
+/// colors and the tones every page takes: a heading and a value to fill in
+/// muted, what a reader types strong, an error failed, a valid value done, an
+/// invalid one a caution. A plain paint gets styles that write no escape, the
+/// sixteen colors get the color `ansi` gives each tone, and 24 bits get each
+/// tone's color on its ground, bold where the sixteen colors are bold.
+#[cfg(feature = "clap")]
+pub fn clap_styles(paint: Paint) -> clap::builder::Styles {
+    match paint {
+        Paint::Plain => clap::builder::Styles::plain(),
+        Paint::Color {
+            layer: Layer::Ansi16,
+            ..
+        } => clap_roles(ansi16_style),
+        Paint::Color {
+            layer: Layer::Truecolor(ground),
+            ..
+        } => clap_roles(|tone| truecolor_style(ground, tone)),
+    }
+}
+
+/// The styles `clap` draws its seven roles in: each role takes the style
+/// `style` gives its tone, and the other roles keep the styles `clap` gives.
+#[cfg(feature = "clap")]
+fn clap_roles(style: impl Fn(Tone) -> clap::builder::styling::Style) -> clap::builder::Styles {
     clap::builder::Styles::styled()
         .header(style(Tone::Muted))
         .usage(style(Tone::Muted))
@@ -205,192 +428,72 @@ pub fn clap_styles() -> clap::builder::Styles {
         .invalid(style(Tone::Caution))
 }
 
-/// `text` with every SGR escape and every link taken out: what a painted
-/// line reads as once color and links are gone.
+/// The style of `tone` in the sixteen colors: its ANSI color, bold and dim as
+/// [`ansi`] says, so every terminal draws it in its own palette.
+#[cfg(feature = "clap")]
+fn ansi16_style(tone: Tone) -> clap::builder::styling::Style {
+    use clap::builder::styling::{AnsiColor, Style};
+    let (bold, dim, color) = ansi(tone);
+    let color = color.map(|code| match code {
+        Ansi::Red => AnsiColor::Red,
+        Ansi::Green => AnsiColor::Green,
+        Ansi::Yellow => AnsiColor::Yellow,
+        Ansi::Magenta => AnsiColor::Magenta,
+        Ansi::Cyan => AnsiColor::Cyan,
+    });
+    let style = Style::new().fg_color(color.map(Into::into));
+    let style = if bold { style.bold() } else { style };
+    if dim {
+        style.dimmed()
+    } else {
+        style
+    }
+}
+
+/// The style of `tone` in 24 bits on `ground`: its color there, bold where the
+/// sixteen colors are bold, and never dimmed.
+#[cfg(feature = "clap")]
+fn truecolor_style(ground: Ground, tone: Tone) -> clap::builder::styling::Style {
+    use clap::builder::styling::{Color, RgbColor, Style};
+    let color = palette::tone(ground, tone)
+        .map(|Rgb(red, green, blue)| Color::Rgb(RgbColor(red, green, blue)));
+    let style = Style::new().fg_color(color);
+    if ansi(tone).0 {
+        style.bold()
+    } else {
+        style
+    }
+}
+
+/// `text` with every SGR escape, every erase and every link taken out: what
+/// a painted line reads as once color, fills and links are gone.
 #[cfg(test)]
 pub fn strip_sgr(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    // A link opens and closes with `ESC ] 8 ; ; <target> ESC \`; what it
-    // wraps is the text a reader reads.
-    let mut unlinked = String::with_capacity(text.len());
-    while let Some(at) = rest.find("\x1b]8;;") {
-        unlinked.push_str(&rest[..at]);
-        let after = &rest[at..];
-        rest = match after.find("\x1b\\") {
-            Some(end) => &after[end + 2..],
-            None => "",
-        };
-    }
-    unlinked.push_str(rest);
-    let mut rest = unlinked.as_str();
-    while let Some(at) = rest.find("\x1b[") {
+    while let Some(at) = rest.find('\x1b') {
         out.push_str(&rest[..at]);
-        let after = &rest[at + 2..];
-        match after.find('m') {
-            Some(end) => rest = &after[end + 1..],
-            None => {
-                rest = after;
-                break;
-            }
-        }
+        rest = skip_escape(&rest[at..]);
     }
     out.push_str(rest);
     out
 }
 
+/// The text after the escape at the start of `escape`. An OSC, which is how a
+/// link opens and closes, runs to its string terminator; a CSI, which is how
+/// color and an erase are written, runs to its final byte. What an escape
+/// wraps is left for the caller to keep.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(feature = "clap")]
-    #[test]
-    fn clap_draws_each_tone_in_the_escape_a_page_paints_it_in() {
-        let styles = clap_styles();
-        for (style, tone) in [
-            (styles.get_header(), Tone::Muted),
-            (styles.get_usage(), Tone::Muted),
-            (styles.get_literal(), Tone::Strong),
-            (styles.get_placeholder(), Tone::Muted),
-            (styles.get_error(), Tone::Failed),
-            (styles.get_valid(), Tone::Done),
-            (styles.get_invalid(), Tone::Caution),
-        ] {
-            assert_eq!(
-                style.render().to_string(),
-                format!("\x1b[{}m", sgr(tone).unwrap_or_default()),
-                "{tone:?}"
-            );
-        }
-    }
-
-    const ROLES: [Tone; 10] = [
-        Tone::Plain,
-        Tone::Strong,
-        Tone::Muted,
-        Tone::Done,
-        Tone::Failed,
-        Tone::Running,
-        Tone::NeedsYou,
-        Tone::Caution,
-        Tone::Added,
-        Tone::Removed,
-    ];
-
-    /// Every tone around texts that carry what a line can: spaces, glyphs,
-    /// backticks, a cell-wide character, an empty word.
-    #[test]
-    fn plain_text_equals_inked_text_with_escapes_stripped() {
-        let texts = [
-            "",
-            "needs you",
-            "✓ finished",
-            "`yunta resume 7E5PH4`",
-            "名前 · 3s",
-        ];
-        for (at, first) in ROLES.iter().enumerate() {
-            for second in ROLES.iter().skip(at) {
-                for text in texts {
-                    let line = Line::new()
-                        .push(*first, text)
-                        .plain(" · ")
-                        .push(*second, text);
-                    assert_eq!(
-                        strip_sgr(&Ink::Ansi16.paint(&line)),
-                        Ink::Plain.paint(&line),
-                        "{first:?} / {second:?} / {text:?}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn no_color_wins_over_auto_but_not_over_always() {
-        let no_color = ColorPolicy {
-            no_color: true,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(no_color.ink(true), Ink::Plain);
-        let always = ColorPolicy {
-            when: ColorWhen::Always,
-            ..no_color
-        };
-        assert_eq!(always.ink(false), Ink::Ansi16);
-    }
-
-    #[test]
-    fn clicolor_force_paints_a_pipe() {
-        let forced = ColorPolicy {
-            force: true,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(forced.ink(false), Ink::Ansi16);
-    }
-
-    #[test]
-    fn color_is_decided_per_stream() {
-        let auto = ColorPolicy::default();
-        assert_eq!(auto.ink(true), Ink::Ansi16);
-        assert_eq!(auto.ink(false), Ink::Plain);
-        let dumb = ColorPolicy {
-            dumb: true,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(dumb.ink(true), Ink::Plain);
-        let off = ColorPolicy {
-            off: true,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(off.ink(true), Ink::Plain);
-    }
-
-    #[test]
-    fn links_are_drawn_where_the_terminal_announces_them_or_a_reader_forces_them() {
-        let with = |links| ColorPolicy {
-            links,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(with(Links::Announced).ink(true), Ink::Linked);
-        assert_eq!(with(Links::Announced).ink(false), Ink::Plain);
-        assert_eq!(with(Links::Unknown).ink(true), Ink::Ansi16);
-        assert_eq!(with(Links::Refused).ink(true), Ink::Ansi16);
-        let forced = ColorPolicy {
-            when: ColorWhen::Always,
-            links: Links::Forced,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(forced.ink(false), Ink::Linked, "a pipe asked for both");
-        let no_color = ColorPolicy {
-            no_color: true,
-            links: Links::Forced,
-            ..ColorPolicy::default()
-        };
-        assert_eq!(no_color.ink(true), Ink::Plain, "no color, no escapes");
-    }
-
-    /// What a change puts into code is green and what it takes out red,
-    /// the colors git paints a word diff in.
-    #[test]
-    fn an_added_and_a_removed_word_are_painted_apart() {
-        assert_eq!(
-            Ink::Ansi16.word(Tone::Added, "{+b+}"),
-            "\x1b[32m{+b+}\x1b[0m"
-        );
-        assert_eq!(
-            Ink::Ansi16.word(Tone::Removed, "[-a-]"),
-            "\x1b[31m[-a-]\x1b[0m"
-        );
-        assert_eq!(Ink::Plain.word(Tone::Added, "{+b+}"), "{+b+}");
-    }
-
-    #[test]
-    fn a_person_and_a_caution_are_painted_apart() {
-        assert_ne!(
-            Ink::Ansi16.word(Tone::NeedsYou, "x"),
-            Ink::Ansi16.word(Tone::Caution, "x")
-        );
-        assert_eq!(Tone::of(Mark::NeedsYou), Tone::NeedsYou);
-        assert_eq!(Tone::of(Mark::Reroute), Tone::Caution);
+fn skip_escape(escape: &str) -> &str {
+    let mut bytes = escape.char_indices().skip(1);
+    match bytes.next() {
+        Some((_, ']')) => escape.find("\x1b\\").map_or("", |end| &escape[end + 2..]),
+        Some((_, '[')) => bytes
+            .find(|(_, c)| ('@'..='~').contains(c))
+            .map_or("", |(end, _)| &escape[end + 1..]),
+        _ => &escape[1..],
     }
 }
+
+#[cfg(test)]
+mod tests;
