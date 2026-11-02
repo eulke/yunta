@@ -301,11 +301,13 @@ pub enum InTree {
     /// Its file's code names it.
     There {
         /// What the file holds of the items the shape declares, read the
-        /// way the shape writes them — a function to its signature where
-        /// the shape stops at one, an `impl` or a `trait` to the members the
-        /// shape names, attributes where the shape writes some — in the
-        /// shape's order. `None` where no item of it was read: a language
-        /// whose items are not read, or a file that only uses the name.
+        /// way the shape writes them: a function to its signature where the
+        /// shape writes it with no body, a block of members (an `impl`, a
+        /// `trait`, a class) to the members the shape names, attributes and
+        /// decorators where the shape writes some; in the shape's order.
+        /// Items are read in Rust, Go, JavaScript or TypeScript, and Python.
+        /// `None` where no item of it was read: a file in another language,
+        /// or one that only uses the name.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         code: Option<String>,
         /// Who else names it.

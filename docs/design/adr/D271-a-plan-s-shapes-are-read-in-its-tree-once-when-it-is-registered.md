@@ -1,12 +1,14 @@
 ---
 number: D271
 title: "A plan's shapes are read in its tree once, when it is registered, and every page draws that reading"
-status: accepted
+status: revised
 revises: [D239, D270]
-revised_by: []
+revised_by: [D274]
 ---
 
 # D271 — A plan's shapes are read in its tree once, when it is registered, and every page draws that reading
+
+*(Revised by D274: point 2 reads a shape's items in Rust, Go, JavaScript or TypeScript, and Python, and a function the shape writes with no body, or a block of members, ends as the shape ends it; the consequence that the engine and Surco each read Rust with a lexer of their own no longer holds, as one lexer reads both texts.)*
 
 ## Context
 

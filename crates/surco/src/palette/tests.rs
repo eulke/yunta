@@ -7,7 +7,9 @@ const GROUND: Tuned = Tuned {
     light: Rgb(251, 250, 246),
 };
 
-/// Every tone the palette gives a color of its own.
+/// Every tone the palette colors outside code: what a line is about, what a
+/// reader skims past, each state, and each change. The words of code are in
+/// `SYNTAX`, where a comment, which recedes, has a floor of its own.
 const COLORED: [Tone; 9] = [
     Tone::Strong,
     Tone::Muted,
@@ -18,6 +20,18 @@ const COLORED: [Tone; 9] = [
     Tone::Caution,
     Tone::Added,
     Tone::Removed,
+];
+
+/// Every kind of word code is colored as.
+const SYNTAX: [Syntax; 8] = [
+    Syntax::Keyword,
+    Syntax::Type,
+    Syntax::Function,
+    Syntax::Text,
+    Syntax::Number,
+    Syntax::Comment,
+    Syntax::Attribute,
+    Syntax::Macro,
 ];
 
 /// The contrast between two colors, from 1 to 21, as the web's
@@ -49,8 +63,8 @@ fn contrast_measures_black_on_white_as_twenty_one_to_one() {
     assert!((contrast(white, white) - 1.0).abs() < 1e-9);
 }
 
-/// Every colored tone reads on the ground it is tuned for, and on the tint
-/// and the code ground a whole line sits on.
+/// Every tone in `COLORED` reads on the ground it is tuned for, and on the
+/// tint and the code ground a whole line sits on.
 #[test]
 fn every_colored_tone_reads_on_its_ground_and_on_a_line_fill() {
     for ground in [Ground::Dark, Ground::Light] {
@@ -91,6 +105,33 @@ fn a_pills_word_reads_on_the_color_of_every_tone() {
             let color = tone(ground, colored).expect("a colored tone has a color");
             let on_pill = contrast(pill_ink(ground), color);
             assert!(on_pill >= 4.5, "{ground:?} / {colored:?}: {on_pill:.2}");
+        }
+    }
+}
+
+/// Every word of code reads on its ground and on the code ground: a comment,
+/// which recedes, at 2.5:1 against both, every other word at 4.3:1 against
+/// its ground and 3.8:1 against the code ground.
+#[test]
+fn every_word_of_code_reads_on_its_ground_and_on_the_code_ground() {
+    for ground in [Ground::Dark, Ground::Light] {
+        let code = fill(ground, Fill::Code).expect("the code ground has a color");
+        for syntax in SYNTAX {
+            let color = tone(ground, Tone::Code(syntax)).expect("a word of code has a color");
+            let (floor_on_ground, floor_on_code) = match syntax {
+                Syntax::Comment => (2.5, 2.5),
+                _ => (4.3, 3.8),
+            };
+            let on_ground = contrast(color, GROUND.on(ground));
+            let on_code = contrast(color, code);
+            assert!(
+                on_ground >= floor_on_ground,
+                "{ground:?} / {syntax:?}: {on_ground:.2}"
+            );
+            assert!(
+                on_code >= floor_on_code,
+                "{ground:?} / {syntax:?} on code: {on_code:.2}"
+            );
         }
     }
 }

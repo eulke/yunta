@@ -8,9 +8,6 @@ use super::code::MIN_FENCE;
 /// The most spaces a line may be indented past its container: four make it code.
 const MAX_INDENT: usize = 3;
 
-/// The most signs an ATX heading has: one for each of six levels.
-const MAX_HEADING: usize = 6;
-
 /// The fewest signs a thematic break has: a break is three or more of one
 /// sign, so a shorter run is text.
 const MIN_BREAK: usize = 3;
@@ -156,7 +153,7 @@ fn classify(line: &str, container: usize, restricted: bool) -> Start {
     if let Some(run) = opening(body, indent) {
         return Start::Fence(run);
     }
-    if heading(body) || thematic(body) {
+    if crate::code::heading_level(body).is_some() || thematic(body) {
         return Start::Break(false);
     }
     if let Some(rest) = body.strip_prefix('>') {
@@ -166,13 +163,6 @@ fn classify(line: &str, container: usize, restricted: bool) -> Start {
         return Start::Break(false);
     }
     item(body, indent, restricted).unwrap_or(Start::Text)
-}
-
-/// Whether a body is an ATX heading: one to six signs, then a space or nothing.
-fn heading(body: &str) -> bool {
-    let rest = body.trim_start_matches('#');
-    let signs = body.len() - rest.len();
-    (1..=MAX_HEADING).contains(&signs) && matches!(rest.bytes().next(), None | Some(b' ' | b'\t'))
 }
 
 /// Whether a body is three or more of one of `-`, `*` or `_`, spaces apart or not.

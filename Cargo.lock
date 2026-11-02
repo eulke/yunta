@@ -3002,6 +3002,7 @@ dependencies = [
  "regex",
  "serde_json",
  "yunta-core",
+ "yunta-surco",
 ]
 
 [[package]]

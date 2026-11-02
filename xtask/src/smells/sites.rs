@@ -165,7 +165,8 @@ const ESCAPES: [Mark; 2] = [
 /// escapes it writes: each escape sequence begins with the escape byte, so a
 /// control sequence introducer (`\x1b[`) and an operating system command
 /// (`\x1b]`, which is how a link opens) are read through the byte. The owners
-/// are paint.rs and its tests; the files that send a terminal a control that
+/// are the paint module, paint.rs and the files under paint/ with their tests
+/// (clap's styles among them); the files that send a terminal a control that
 /// is not paint, the bracketed-paste switch and the testkit's terminal, which
 /// sends the keys and the cursor and row controls of a real one; the CLI's
 /// integration tests, which send keys to a terminal or check its paint; and
@@ -176,8 +177,9 @@ fn count_escape_outside_paint(root: &Path) -> usize {
         &ESCAPES,
         &[
             "crates/surco/src/paint.rs",
-            // The paint module's own tests write the escapes they check.
-            "crates/surco/src/paint/tests.rs",
+            // The paint module's own files, and the tests that write the
+            // escapes they check.
+            "crates/surco/src/paint/",
             "crates/cli/src/ask/keys.rs",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",

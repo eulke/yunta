@@ -19,7 +19,7 @@
 //! escape only in [`paint`], and a state word only in [`words`].
 
 pub mod bars;
-mod code;
+pub mod code;
 pub mod components;
 pub mod diagram;
 pub mod doc;

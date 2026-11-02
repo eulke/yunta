@@ -6067,7 +6067,7 @@
           "type": "object",
           "properties": {
             "code": {
-              "description": "What the file holds of the items the shape declares, read the\nway the shape writes them — a function to its signature where\nthe shape stops at one, an `impl` or a `trait` to the members the\nshape names, attributes where the shape writes some — in the\nshape's order. `None` where no item of it was read: a language\nwhose items are not read, or a file that only uses the name.",
+              "description": "What the file holds of the items the shape declares, read the\nway the shape writes them: a function to its signature where the\nshape writes it with no body, a block of members (an `impl`, a\n`trait`, a class) to the members the shape names, attributes and\ndecorators where the shape writes some; in the shape's order.\nItems are read in Rust, Go, JavaScript or TypeScript, and Python.\n`None` where no item of it was read: a file in another language,\nor one that only uses the name.",
               "type": [
                 "string",
                 "null"

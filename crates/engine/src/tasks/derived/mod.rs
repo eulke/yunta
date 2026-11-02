@@ -26,6 +26,7 @@ mod shapes;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use surco::code::Language;
 use yunta_core::{CommitSha, NodeId, Shape, TasksFile};
 
 use super::code_words;
@@ -154,7 +155,7 @@ fn globs(followed: &[&Shape]) -> Vec<String> {
     let extensions: BTreeSet<&str> = followed
         .iter()
         .filter_map(|shape| extension(&shape.file))
-        .flat_map(code_words::family)
+        .flat_map(Language::family)
         .collect();
     extensions
         .into_iter()
@@ -165,7 +166,7 @@ fn globs(followed: &[&Shape]) -> Vec<String> {
 /// The files `found` lists for `shape`'s name that are written in its
 /// file's language.
 fn of_its_language(shape: &Shape, found: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<String> {
-    let family = extension(&shape.file).map_or_else(Vec::new, code_words::family);
+    let family = extension(&shape.file).map_or_else(Vec::new, Language::family);
     found
         .get(&shape.name)
         .into_iter()

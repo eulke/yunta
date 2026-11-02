@@ -4,18 +4,26 @@
 //! here, under the indent of the block it sits in, its emphasis drawn strong
 //! without its markers and its code in the tone a command is drawn in, inside
 //! its backticks: a stream writes the same words painted or not. Code keeps its
-//! spacing: re-flowing code changes what it says. It stands on the ground every
-//! block of code takes, its blank lines included. A line of code wider than the
-//! column breaks after a space and goes on one step under where it starts, the
-//! way a formatter continues a line, so what follows reads as the same line and
-//! not as one of its own.
+//! spacing: re-flowing code changes what it says. Its fences and its code spans
+//! are the ones the lexer reads, so a page and the colors of code agree on
+//! where code starts and ends. It stands on the ground every block of code
+//! takes, its blank lines included. Its words are colored in the language its
+//! fence names. A line of code wider than the column breaks after a space and
+//! goes on one step under where it starts, the way a formatter continues a
+//! line, so what follows reads as the same line and not as one of its own.
+//!
+//! How prose reads, its emphasis and its code spans, and which lines are list
+//! items and headings, is read in [`prose`].
+
+mod prose;
 
 use std::ops::Range;
 
 use crate::glyphs::Glyphs;
-use crate::line::{Line, Tone};
+use crate::line::Line;
 use crate::look::Look;
 use crate::width::{cell_width, cut, INDENT};
+use prose::{heading_spans, list_item, marked_spans, spans};
 
 /// `text` wrapped to `width` under `indent`, with `lead` before its first
 /// line and the lines after it starting where the text did.
@@ -32,42 +40,9 @@ fn hanging(indent: &str, lead: &str, text: &Line, width: usize) -> Vec<Line> {
         .collect()
 }
 
-/// Prose as the spans it reads as: `**emphasis**` strong, its markers
-/// dropped, and `` `code` `` in a command's tone, its backticks kept in every
-/// layer. A marker with no partner is text.
-fn spans(text: &str) -> Line {
-    let mut line = Line::new();
-    let pieces: Vec<&str> = text.split('`').collect();
-    // An odd count of pieces is backticks in pairs: every odd piece is code.
-    let paired = pieces.len() % 2 == 1;
-    for (at, piece) in pieces.iter().enumerate() {
-        let code = at % 2 == 1;
-        match (code, paired || at + 1 < pieces.len()) {
-            (true, true) => line = line.push(Tone::Command, format!("`{piece}`")),
-            (true, false) => line = line.plain(format!("`{piece}")),
-            (false, _) => line = emphasis(line, piece),
-        }
-    }
-    line
-}
-
-/// `text` onto `line`, its `**emphasis**` strong.
-fn emphasis(mut line: Line, text: &str) -> Line {
-    let parts: Vec<&str> = text.split("**").collect();
-    let paired = parts.len() % 2 == 1;
-    for (at, part) in parts.iter().enumerate() {
-        line = match (at % 2 == 1, paired) {
-            (true, true) => line.push(Tone::Strong, *part),
-            (true, false) => line.plain(format!("**{part}")),
-            (false, _) => line.plain(*part),
-        };
-    }
-    line
-}
-
 /// `text` as a terminal shows it: paragraphs and list items wrapped to the
-/// look's width under `indent`, and code as written — continued where it
-/// is wider, never re-flowed.
+/// look's width under `indent`, and code as written, continued where it is
+/// wider, never re-flowed.
 pub fn markdown(text: &str, indent: &str, look: &Look) -> Vec<Line> {
     let mut page = Page {
         indent,
@@ -75,12 +50,23 @@ pub fn markdown(text: &str, indent: &str, look: &Look) -> Vec<Line> {
         glyphs: look.glyphs,
         lines: Vec::new(),
         paragraph: String::new(),
-        fenced: false,
+        fence: None,
     };
-    for line in text.lines() {
-        page.read(line);
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        page.read(text, at, line.trim_end_matches(['\n', '\r']));
+        at += line.len();
     }
     page.done()
+}
+
+/// A fenced block of code being read: the language its fence names, where
+/// the marks of the line that closes it stand, and its lines so far, drawn
+/// together once the fence closes.
+struct Fenced {
+    language: Option<crate::code::Language>,
+    closing: Option<usize>,
+    lines: Vec<String>,
 }
 
 /// The lines drawn so far, and what the next line of Markdown is read
@@ -92,19 +78,27 @@ struct Page<'a> {
     lines: Vec<Line>,
     /// The paragraph gathered so far, drawn once it ends.
     paragraph: String,
-    /// Whether a line is inside a fenced block of code.
-    fenced: bool,
+    /// The fenced block of code being read, if a line is inside one.
+    fence: Option<Fenced>,
 }
 
 impl Page<'_> {
-    fn read(&mut self, line: &str) {
+    /// Reads `line`, which starts at offset `at` of `text`: a line of the
+    /// fenced block being read, the opening line of a fence, a blank line, a
+    /// heading, a list item, or a line of a paragraph.
+    fn read(&mut self, text: &str, at: usize, line: &str) {
         let trimmed = line.trim();
-        if self.fenced {
-            return self.code(line, trimmed);
+        if self.fence.is_some() {
+            return self.code(at, line);
         }
-        if trimmed.starts_with("```") {
+        let marks = at + line.len() - line.trim_start().len();
+        if let Some(fence) = crate::code::Fence::at(text.as_bytes(), marks) {
             self.flush();
-            self.fenced = true;
+            self.fence = Some(Fenced {
+                language: crate::code::Language::named(&text[fence.info]),
+                closing: fence.closing.map(|closing| closing.start),
+                lines: Vec::new(),
+            });
             return;
         }
         if trimmed.is_empty() {
@@ -121,13 +115,13 @@ impl Page<'_> {
         match list_item(trimmed) {
             Some(("", heading)) => {
                 self.flush();
-                let heading = Line::new().push(Tone::Strong, heading);
+                let words = heading_spans(trimmed, trimmed.len() - heading.len());
                 self.lines
-                    .extend(hanging(self.indent, "", &heading, self.width));
+                    .extend(hanging(self.indent, "", &words, self.width));
             }
-            Some((mark, item)) => {
+            Some((mark, _)) => {
                 self.flush();
-                let item = spans(item);
+                let item = marked_spans(trimmed, mark.len());
                 self.lines
                     .extend(hanging(self.indent, mark, &item, self.width));
             }
@@ -138,24 +132,50 @@ impl Page<'_> {
         }
     }
 
-    /// A line inside a fenced block: its closing fence, or a line of
-    /// code.
-    fn code(&mut self, line: &str, trimmed: &str) {
-        if trimmed.starts_with("```") {
-            self.fenced = false;
+    /// A line inside a fenced block, which starts at offset `at`: the line
+    /// that holds the fence's closing marks, which draws the block, or a line
+    /// of its code, kept until then.
+    fn code(&mut self, at: usize, line: &str) {
+        let closes = self
+            .fence
+            .as_ref()
+            .and_then(|fenced| fenced.closing)
+            .is_some_and(|marks| (at..=at + line.len()).contains(&marks));
+        if closes {
+            self.close();
             return;
         }
+        if let Some(fenced) = self.fence.as_mut() {
+            fenced.lines.push(line.to_string());
+        }
+    }
+
+    /// Draws the fenced block being read, if any: each line in the tones of
+    /// what its words are in the fence's language, continued where it is
+    /// wider than the room, and filled as code, its blank lines included.
+    fn close(&mut self) {
+        let Some(fence) = self.fence.take() else {
+            return;
+        };
         let code = format!("{}{INDENT}", self.indent);
         let room = self.width.saturating_sub(cell_width(&code));
-        let pieces = continued(&Line::new().plain(line), room, self.glyphs);
-        self.lines.extend(
-            pieces
-                .into_iter()
-                .map(|piece| match piece.text().is_empty() {
-                    true => super::document::as_code(Line::new()),
-                    false => super::document::as_code(piece.under(&code)),
-                }),
-        );
+        let text = fence.lines.join("\n");
+        let colored = crate::code::highlighted(&text, fence.language);
+        let mut start = 0;
+        for line in &fence.lines {
+            let range = start..start + line.len();
+            start = range.end + 1;
+            let painted = crate::code::painted(&text, range, &colored);
+            let pieces = continued(&painted, room, self.glyphs);
+            self.lines.extend(
+                pieces
+                    .into_iter()
+                    .map(|piece| match piece.text().is_empty() {
+                        true => super::document::as_code(Line::new()),
+                        false => super::document::as_code(piece.under(&code)),
+                    }),
+            );
+        }
     }
 
     /// The paragraph gathered so far, wrapped onto the page.
@@ -169,30 +189,13 @@ impl Page<'_> {
     }
 
     fn done(mut self) -> Vec<Line> {
+        self.close();
         self.flush();
         while self.lines.last().is_some_and(|line| line.text().is_empty()) {
             self.lines.pop();
         }
         self.lines
     }
-}
-
-/// A list item's marker and its text — or a heading, as a line of its
-/// own — for a line that is one.
-fn list_item(line: &str) -> Option<(&str, &str)> {
-    for mark in ["- ", "* ", "+ "] {
-        if let Some(item) = line.strip_prefix(mark) {
-            return Some((mark, item));
-        }
-    }
-    let digits = line.chars().take_while(char::is_ascii_digit).count();
-    if digits > 0 && line[digits..].starts_with(". ") {
-        return Some(line.split_at(digits + 2));
-    }
-    if line.starts_with('#') {
-        return Some(("", line.trim_start_matches('#').trim_start()));
-    }
-    None
 }
 
 /// `line` of code in pieces that each fit `width`: broken after the last
@@ -268,7 +271,7 @@ fn split_within(text: &str, room: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::line::Fill;
+    use crate::line::{Fill, Syntax, Tone};
     use crate::look::Width;
     use crate::paint::Paint;
 
@@ -314,22 +317,6 @@ mod tests {
         assert!(drawn.iter().all(|line| cell_width(line) <= 12));
     }
 
-    #[test]
-    fn emphasis_and_code_are_tones_and_code_keeps_its_ticks() {
-        let line = spans("run **this** with `yunta status`");
-        assert_eq!(line.text(), "run this with `yunta status`");
-        assert!(line
-            .spans()
-            .iter()
-            .any(|span| span.tone == Tone::Strong && span.text == "this"));
-        assert!(line
-            .spans()
-            .iter()
-            .any(|span| span.tone == Tone::Command && span.text == "`yunta status`"));
-        assert_eq!(spans("a lone ` tick").text(), "a lone ` tick");
-        assert_eq!(spans("a lone ** star").text(), "a lone ** star");
-    }
-
     /// Every line between a fence and its close, blank or not, is filled as
     /// code, and the prose before it is not.
     #[test]
@@ -344,5 +331,96 @@ mod tests {
         assert_eq!(lines[0].fill(), None);
         let block = &lines[2..5];
         assert!(block.iter().all(|line| line.fill() == Some(Fill::Code)));
+    }
+
+    /// A fence that names its language colors its code in that language, so
+    /// `fn` reads as a keyword and the name after it as a function.
+    #[test]
+    fn a_fenced_block_is_colored_in_the_language_its_fence_names() {
+        let look = Look::plain();
+        let lines = markdown("```rust\nfn a() {}\n```", "", &look);
+        let words = lines[0].spans();
+        assert!(words
+            .iter()
+            .any(|span| span.text == "fn" && span.tone == Tone::Code(Syntax::Keyword)));
+        assert!(words
+            .iter()
+            .any(|span| span.text == "a" && span.tone == Tone::Code(Syntax::Function)));
+    }
+
+    /// A fence that names no language leaves its code plain, so no word in it
+    /// is colored as code.
+    #[test]
+    fn a_fence_that_names_no_language_draws_its_code_plain() {
+        let look = Look::plain();
+        let lines = markdown("```\nfn a() {}\n```", "", &look);
+        assert!(lines[0]
+            .spans()
+            .iter()
+            .all(|span| !matches!(span.tone, Tone::Code(_))));
+    }
+
+    /// A fence the text never closes is drawn to the end of the text, and its
+    /// last line is filled as code.
+    #[test]
+    fn a_fence_left_open_is_drawn_where_the_text_ends() {
+        let look = Look::plain();
+        let lines = markdown("Read:\n\n```rust\nfn a() {}", "", &look);
+        let last = lines.last().expect("the open fence draws its line");
+        assert_eq!(last.text().trim(), "fn a() {}");
+        assert_eq!(last.fill(), Some(Fill::Code));
+    }
+
+    /// A fence closes only at a line of its own marks, as many or more, so a
+    /// shorter fence inside a longer one is its code, and a tilde fence is a
+    /// fence.
+    #[test]
+    fn a_fence_closes_only_at_a_line_of_as_many_of_its_marks() {
+        assert_eq!(
+            drawn("````md\n```rust\nfn a() {}\n```\n````", 40, Glyphs::Unicode),
+            ["  ```rust", "  fn a() {}", "  ```"]
+        );
+        assert_eq!(drawn("~~~\nx\n~~~", 40, Glyphs::Unicode), ["  x"]);
+    }
+
+    /// A list item and a heading read their marks in their whole line: a run
+    /// of backticks or a tilde right after them is text, a code span is code,
+    /// and a heading's other words are strong.
+    #[test]
+    fn a_list_item_and_a_heading_read_their_marks_in_their_line() {
+        let lines = markdown(
+            "- ```rust\n- ~~~ `a`\n# ```rust\n# `a` **b**",
+            "",
+            &Look::plain(),
+        );
+        assert_eq!(
+            lines.iter().map(Line::text).collect::<Vec<_>>(),
+            ["- ```rust", "- ~~~ `a`", "```rust", "`a` b"]
+        );
+        let code: Vec<&str> = lines
+            .iter()
+            .flat_map(|line| line.spans())
+            .filter(|span| span.tone == Tone::Command)
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(code, ["`a`", "`a`"]);
+    }
+
+    /// A heading opens with one to six `#` that a space, a tab or the line's
+    /// end follows; any other line that starts with `#` is prose.
+    #[test]
+    fn a_heading_opens_with_one_to_six_marks_and_a_blank() {
+        assert_eq!(drawn("## Part", 40, Glyphs::Unicode), ["Part"]);
+        assert_eq!(drawn("#\tTab", 40, Glyphs::Unicode), ["Tab"]);
+        assert_eq!(drawn("###### six", 40, Glyphs::Unicode), ["six"]);
+        assert_eq!(
+            drawn("#123 is fixed", 40, Glyphs::Unicode),
+            ["#123 is fixed"]
+        );
+        assert!(drawn("#", 40, Glyphs::Unicode).is_empty());
+        assert_eq!(
+            drawn("####### seven", 40, Glyphs::Unicode),
+            ["####### seven"]
+        );
     }
 }

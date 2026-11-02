@@ -1,30 +1,32 @@
-//! What a Rust file holds of the items a shape declares, read the way the
-//! shape writes them: a function to its signature where the shape stops at
-//! one, an `impl`, a `trait` or a module to the members the shape names,
-//! and attributes only where the shape writes some.
+//! What a file holds of the items a shape declares, read the way the shape
+//! writes them: a function to its signature where the shape writes it with
+//! no body, a block of members (an `impl`, a `trait`, a module, a class) to
+//! the members the shape names, and attributes or decorators only where the
+//! shape writes some.
 //!
-//! Both texts are split into items the same way, see [`text`]; a file's
-//! are searched at its top, one level into each `impl` and `trait`, and
-//! one level into each inline module that is not a test's.
-
-mod text;
+//! Both texts are split into items by surco's item reader, in Rust, Go,
+//! JavaScript or TypeScript, and Python; a file's are searched at its top,
+//! one level into each `impl`, `trait`, class and interface, and one level
+//! into each inline module that is not a test's.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
 
-use text::{Item, Kind, Text};
+use surco::code::items::{Item, Kind, Text};
+use surco::code::Language;
 
-/// What `source`, a Rust file, holds of the items `planned` declares, each
-/// read as `planned` writes it, in its order, joined by a blank line; `None`
-/// when it holds none of them.
-pub(crate) fn as_planned(source: &str, planned: &str) -> Option<String> {
-    let today = Text::of(source);
-    let plan = Text::of(planned);
+/// What `source`, a file in `language`, holds of the items `planned`
+/// declares, each read as `planned` writes it, in its order, joined by a
+/// blank line; `None` when it holds none of them, or when the items of its
+/// language are not read.
+pub(crate) fn as_planned(source: &str, planned: &str, language: Language) -> Option<String> {
+    let today = Text::of(source, language)?;
+    let plan = Text::of(planned, language)?;
     let held = Held::of(&today);
     // Where each of today's items an earlier planned item read starts.
     let mut read = BTreeSet::new();
     let mut readings = Vec::new();
-    for wanted in plan.items(plan.whole()) {
+    for wanted in plan.items() {
         if let Some((among, found)) = held.found(&today, (&plan, &wanted), &read) {
             let reading = reading((&today, among, found), (&plan, &wanted), "", &mut read);
             readings.push(reading);
@@ -35,16 +37,23 @@ pub(crate) fn as_planned(source: &str, planned: &str) -> Option<String> {
 
 /// Today's `item`, one of the items `among`, read the way the plan writes
 /// `planned`, its first line set in by `indent`: a function to its
-/// signature where the plan ends it at its `;`, an `impl`, a `trait` or a
-/// module to the members the plan names, each set in one level further,
-/// and any other item whole. Its attributes are read only where the plan
-/// writes some. What it reads joins `read`.
+/// signature where the plan writes it with no body, ended as the plan ends
+/// it; a block of members to the members the plan names, each set in one
+/// level further; and any other item whole. Its attributes are read only
+/// where the plan writes some. What it reads joins `read`. An item a group
+/// declares, where the plan writes it alone, reads with the group's keyword.
 fn reading(
     (today, among, item): (&Text, &[Item], &Item),
     (plan, planned): (&Text, &Item),
     indent: &str,
     read: &mut BTreeSet<usize>,
 ) -> String {
+    // A group writes its keyword once for every item it declares; an item
+    // the plan writes alone reads with it, as the plan writes it.
+    let lead = match (&item.lead, &planned.lead) {
+        (Some(lead), None) => format!("{} ", today.slice(lead.start, lead.end)),
+        _ => String::new(),
+    };
     match (&planned.bounds.body, &item.bounds.body) {
         (Some(wanted), Some(_)) if planned.kind.holds_members() => {
             let members = (plan, planned, wanted.clone());
@@ -53,19 +62,22 @@ fn reading(
         (None, _) if planned.kind == Kind::Fn => {
             read.insert(item.start);
             let signature = today.signature(from(item, planned), item.bounds.stop);
-            format!("{indent}{signature};")
+            // A signature ends as the plan ends it: at its `;`, or with
+            // nothing, as Go and a script's arrow write it.
+            let ends = plan.slice(planned.bounds.stop, planned.bounds.end);
+            format!("{indent}{lead}{signature}{ends}")
         }
         _ => {
             read.insert(item.start);
             let whole = today.slice(from(item, planned), item.bounds.end);
-            format!("{indent}{whole}")
+            format!("{indent}{lead}{whole}")
         }
     }
 }
 
-/// Today's `item`, an `impl`, a `trait` or a module, read to the members
-/// the plan's `planned` names in `wanted`, under the header of the block
-/// that holds them.
+/// Today's `item`, a block of members, read to the members the plan's
+/// `planned` names in `wanted`, under the header of the block that holds
+/// them, and closed as the plan closes it.
 fn with_members(
     (today, among, item): (&Text, &[Item], &Item),
     (plan, planned, wanted): (&Text, &Item, Range<usize>),
@@ -79,7 +91,7 @@ fn with_members(
     let inner = format!("{indent}    ");
     let mut holding: Vec<&Item> = Vec::new();
     let mut lines = Vec::new();
-    for member in plan.items(wanted) {
+    for member in plan.inside(planned) {
         let twins = members.iter().filter(|found| found.is(&member));
         let Some(found) = chosen(today, twins, (plan, &member), read) else {
             continue;
@@ -102,10 +114,12 @@ fn with_members(
         .map_or(item, |block| *block);
     read.insert(header.start);
     let open = today.slice(from(header, planned), header.bounds.stop + 1);
-    let close = format!("{indent}}}");
+    // A block closes as the plan closes it: with its `}`, or with nothing
+    // where its body ends with its lines, as a Python class does.
+    let close = plan.slice(wanted.end, planned.bounds.end).trim();
     std::iter::once(format!("{indent}{open}"))
         .chain(lines)
-        .chain(std::iter::once(close))
+        .chain((!close.is_empty()).then(|| format!("{indent}{close}")))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -138,7 +152,8 @@ fn chosen<'i>(
 }
 
 /// What a file holds, split for the search: its items, the members of its
-/// `impl`s and `trait`s, and the items of its inline modules but a test's.
+/// `impl`s, `trait`s, classes and interfaces, and the items of its inline
+/// modules but a test's.
 struct Held {
     items: Vec<Item>,
     members: Vec<Item>,
@@ -147,12 +162,13 @@ struct Held {
 
 impl Held {
     fn of(text: &Text) -> Held {
-        let items = text.items(text.whole());
-        let members = text.members(
-            items
-                .iter()
-                .filter(|item| matches!(item.kind, Kind::Impl | Kind::Trait)),
-        );
+        let items = text.items();
+        let members = text.members(items.iter().filter(|item| {
+            matches!(
+                item.kind,
+                Kind::Impl | Kind::Trait | Kind::Class | Kind::Interface
+            )
+        }));
         // A test's module holds the test's own helpers: a shape is never
         // one of them.
         let searched =
@@ -167,7 +183,7 @@ impl Held {
 
     /// The item `planned` is read against, with the items it stands among:
     /// one of its kind and name at the file's top; for a function, then a
-    /// method of its name in an `impl` or a `trait`, and only there for one
+    /// method of its name in a block of methods, and only there for one
     /// that takes `self`; then one of its kind and name in an inline
     /// module. Of twins, such as a `cfg` pair, the one [`chosen`] picks.
     fn found(

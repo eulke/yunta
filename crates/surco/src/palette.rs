@@ -1,16 +1,18 @@
 //! The colors a 24-bit stream draws in, tuned for a dark ground and a light
-//! one: the roles the sixteen colors stand for, the fills, and the ink of a
-//! pill.
+//! one: the roles the sixteen colors stand for, the colors of code, the fills,
+//! and the ink of a pill.
 //!
 //! Every color keeps a floor of contrast, measured as the web's accessibility
-//! guidelines measure it, and the tests hold each floor: a tone the palette
-//! colors keeps 4.3:1 against the ground it is tuned for and 3.8:1 against the
-//! tint and the code ground a whole line sits on; a word a change marks keeps
-//! 3.8:1 against the fill that marks it; and a pill's ink keeps 4.5:1 against
-//! the color of every tone. A color retuned to taste keeps these, or a test
-//! names the one it lost.
+//! guidelines measure it, and the tests hold each floor: a tone outside code
+//! keeps 4.3:1 against the ground it is tuned for and 3.8:1 against the tint
+//! and the code ground a whole line sits on; a word a change marks keeps 3.8:1
+//! against the fill that marks it; a word of code keeps 4.3:1 against its
+//! ground and 3.8:1 against the code ground, and a comment, which recedes,
+//! 2.5:1 against both; and a pill's ink keeps 4.5:1 against the color of every
+//! tone outside code. A color retuned to taste keeps these, or a test names
+//! the one it lost.
 
-use crate::line::{Fill, Tone};
+use crate::line::{Fill, Syntax, Tone};
 use crate::paint::Ground;
 
 /// A color in 24 bits: red, green and blue, each from 0 to 255.
@@ -91,6 +93,55 @@ const REMOVED_TEXT: Tuned = Tuned {
     light: Rgb(194, 65, 47),
 };
 
+/// A keyword of code: `fn`, `pub`, `let`.
+const KEYWORD: Tuned = Tuned {
+    dark: Rgb(147, 169, 215),
+    light: Rgb(61, 90, 166),
+};
+
+/// A type in code: `PathBuf`, `bool`.
+const TYPE: Tuned = Tuned {
+    dark: Rgb(220, 191, 141),
+    light: Rgb(138, 89, 17),
+};
+
+/// A function in code: the name a declaration gives or a call calls.
+const FUNCTION: Tuned = Tuned {
+    dark: Rgb(159, 212, 202),
+    light: Rgb(29, 120, 106),
+};
+
+/// The text of a string or a character in code.
+const QUOTED: Tuned = Tuned {
+    dark: Rgb(201, 183, 148),
+    light: Rgb(118, 102, 58),
+};
+
+/// A number in code.
+const NUMBER: Tuned = Tuned {
+    dark: Rgb(220, 163, 127),
+    light: Rgb(163, 87, 42),
+};
+
+/// A comment in code, which recedes: its floor of contrast is its own.
+const COMMENT: Tuned = Tuned {
+    dark: Rgb(111, 106, 115),
+    light: Rgb(155, 150, 143),
+};
+
+/// An attribute or a decorator in code; on a light ground, the keyword's
+/// color.
+const ATTRIBUTE: Tuned = Tuned {
+    dark: Rgb(163, 167, 179),
+    light: Rgb(61, 90, 166),
+};
+
+/// A macro in code; on a light ground, the function's color.
+const MACRO: Tuned = Tuned {
+    dark: Rgb(185, 198, 219),
+    light: Rgb(29, 120, 106),
+};
+
 /// The tint behind a choice that waits on a person, set apart from the page.
 const TINT: Tuned = Tuned {
     dark: Rgb(36, 26, 43),
@@ -136,8 +187,23 @@ pub(crate) fn tone(ground: Ground, tone: Tone) -> Option<Rgb> {
         Tone::Caution => CAUTION,
         Tone::Added => ADDED_TEXT,
         Tone::Removed => REMOVED_TEXT,
+        Tone::Code(syntax) => code(syntax),
     };
     Some(color.on(ground))
+}
+
+/// The color a word of code takes, by what it is.
+fn code(syntax: Syntax) -> Tuned {
+    match syntax {
+        Syntax::Keyword => KEYWORD,
+        Syntax::Type => TYPE,
+        Syntax::Function => FUNCTION,
+        Syntax::Text => QUOTED,
+        Syntax::Number => NUMBER,
+        Syntax::Comment => COMMENT,
+        Syntax::Attribute => ATTRIBUTE,
+        Syntax::Macro => MACRO,
+    }
 }
 
 /// The background `fill` paints on `ground`. A pill has no background of its

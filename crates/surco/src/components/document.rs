@@ -3,8 +3,6 @@
 //! the same mark, and a file's code, with what it is to the code that
 //! stands where it goes when a reader is told.
 
-use std::path::Path;
-
 use crate::doc::Block;
 use crate::glyphs::Mark;
 use crate::line::Line;
@@ -221,17 +219,6 @@ impl Code {
     /// The language a fence names for the file the code is in, by its
     /// extension, so a viewer that colors code colors it right.
     pub fn language(&self) -> &str {
-        match Path::new(&self.at).extension().and_then(|ext| ext.to_str()) {
-            Some("rs") => "rust",
-            Some("py") => "python",
-            Some("ts") => "typescript",
-            Some("js") => "javascript",
-            Some("go") => "go",
-            Some("yaml" | "yml") => "yaml",
-            Some("toml") => "toml",
-            Some("sh") => "sh",
-            Some("md") => "markdown",
-            _ => "",
-        }
+        crate::code::fence(&self.at)
     }
 }

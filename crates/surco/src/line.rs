@@ -33,6 +33,34 @@ pub enum Tone {
     Added,
     /// Words a change takes out of a line of code, with their marks.
     Removed,
+    /// A word of code, by what it is.
+    Code(Syntax),
+}
+
+/// What a word of code is to a reader of code, which decides its color
+/// where code is colored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Syntax {
+    /// A word the language reserves, `fn`, `pub`, `let`, or one that names a
+    /// part of a document's structure: a key, a flag, a heading below the
+    /// first level.
+    Keyword,
+    /// A type, `PathBuf`, `bool`, a name that opens with a capital, or what
+    /// names a whole part of a document: a table's header, a heading of the
+    /// first level.
+    Type,
+    /// A function: the name a declaration gives or a call calls.
+    Function,
+    /// The text of a string or a character, its quotes included.
+    Text,
+    /// A number.
+    Number,
+    /// A comment, which recedes.
+    Comment,
+    /// An attribute or a decorator: `#[test]`, `@cached`.
+    Attribute,
+    /// A macro: `format!`.
+    Macro,
 }
 
 impl Tone {

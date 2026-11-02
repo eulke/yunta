@@ -1,4 +1,9 @@
-use super::as_planned;
+use surco::code::Language;
+
+/// What `source`, a Rust file, holds of the items `planned` declares.
+fn as_planned(source: &str, planned: &str) -> Option<String> {
+    super::as_planned(source, planned, Language::Rust)
+}
 
 /// A function with a doc comment, an attribute and a body, its parameters
 /// laid out a line each.
@@ -317,5 +322,99 @@ fn the_arrow_of_a_function_type_in_an_impl_s_generics_closes_nothing() {
         )
         .as_deref(),
         Some("impl<F: Fn() -> u8> Runner<F> {\n    pub fn run(&self) -> u8;\n}")
+    );
+}
+
+/// A Go method is read by its receiver's type and its name, and a function
+/// the plan writes with no body reads today's signature, with no `;` where
+/// the plan writes none.
+#[test]
+fn a_go_method_planned_to_its_signature_reads_today_s_signature() {
+    let source = "package store\n\nfunc (s *Store) Load(name string) error {\n\treturn nil\n}\n";
+    let planned = "func (s *Store) Load(name string, force bool) error";
+    assert_eq!(
+        super::as_planned(source, planned, Language::Go).as_deref(),
+        Some("func (s *Store) Load(name string) error")
+    );
+}
+
+/// A script's class is read to the methods the plan names, under today's
+/// header, and closed as the plan closes it.
+#[test]
+fn a_script_class_planned_with_one_method_reads_that_method() {
+    let source = "export class Store {\n  load(name: string): string {\n    return name;\n  }\n\n  save(): void {}\n}\n";
+    let planned = "export class Store {\n  load(name: string, force: boolean): string;\n}";
+    assert_eq!(
+        super::as_planned(source, planned, Language::Script).as_deref(),
+        Some("export class Store {\n    load(name: string): string;\n}")
+    );
+}
+
+/// A Python class is read to the methods the plan names, and no brace
+/// closes it.
+#[test]
+fn a_python_class_planned_with_one_method_reads_that_method() {
+    let source = "class Store:\n    def load(self, name):\n        return name\n\n    def save(self):\n        pass\n";
+    let planned = "class Store:\n    def load(self, name, force):\n        return name\n";
+    assert_eq!(
+        super::as_planned(source, planned, Language::Python).as_deref(),
+        Some("class Store:\n    def load(self, name):\n        return name")
+    );
+}
+
+/// A Python method the plan writes alone is looked up among the methods of
+/// today's classes, since it takes `self`.
+#[test]
+fn a_python_method_planned_alone_is_read_among_methods() {
+    let source = "def load(name):\n    return name\n\nclass Store:\n    def load(self, name):\n        return name\n";
+    let planned = "def load(self, name, force):\n    return name";
+    assert_eq!(
+        super::as_planned(source, planned, Language::Python).as_deref(),
+        Some("def load(self, name):\n        return name")
+    );
+}
+
+/// A Go group writes its keyword once; a member the plan writes alone reads
+/// with it, so an unchanged declaration reads as it is.
+#[test]
+fn a_go_group_member_planned_alone_reads_with_its_keyword() {
+    let source = "package errs\n\nvar (\n\tErrNotFound = errors.New(\"not found\")\n)\n";
+    let planned = "var ErrNotFound = errors.New(\"not found\")";
+    assert_eq!(
+        super::as_planned(source, planned, Language::Go).as_deref(),
+        Some("var ErrNotFound = errors.New(\"not found\")")
+    );
+}
+
+/// A Python signature the plan writes with its colon and no body reads
+/// today's signature, ended with the plan's colon.
+#[test]
+fn a_python_signature_planned_with_its_colon_reads_today_s_signature() {
+    let source = "def load(name):\n    return name\n";
+    assert_eq!(
+        super::as_planned(source, "def load(name, force):", Language::Python).as_deref(),
+        Some("def load(name):")
+    );
+}
+
+/// Twins whose attributes differ only by a string, as two features do, are
+/// told apart by that string.
+#[test]
+fn cfg_twins_are_told_apart_by_the_strings_in_their_attributes() {
+    let source = "#[cfg(feature = \"a\")]\nfn f() -> u8 {\n    1\n}\n\n#[cfg(feature = \"b\")]\nfn f() -> u8 {\n    2\n}\n";
+    assert_eq!(
+        as_planned(source, "#[cfg(feature = \"b\")]\nfn f() -> u8;").as_deref(),
+        Some("#[cfg(feature = \"b\")]\nfn f() -> u8;")
+    );
+}
+
+/// A script's arrow the plan writes with an expression for its body reads
+/// today's whole arrow, whatever body it has.
+#[test]
+fn a_script_arrow_planned_with_an_expression_reads_today_s_whole_arrow() {
+    let source = "export const f = (x) => {\n  return x + 1;\n};\n";
+    assert_eq!(
+        super::as_planned(source, "export const f = (x) => x + 2;", Language::Script).as_deref(),
+        Some("export const f = (x) => {\n  return x + 1;\n};")
     );
 }

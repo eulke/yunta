@@ -1,14 +1,13 @@
-//! `cargo xtask smells [--check]` — the smell ratchet.
+//! `cargo xtask smells [--check]`: the smell ratchet.
 //!
-//! The audit that this repository's rebuild answered measured a set of
-//! patterns (unwrap outside tests, `Result<_, String>`, wall-clock reads,
-//! git runners, discarded results, oversized files and functions, copied
-//! test helpers). Each is now at or near zero, held there by typed errors,
-//! injected clocks, one git module, and a shared test crate. This ratchet
-//! keeps them there: it counts every pattern against a committed baseline
-//! and, under `--check`, fails naming any count that rose. A number can
-//! only ever go down — the day one does, the baseline moves with it in the
-//! same change.
+//! It counts a set of patterns (unwrap outside tests, `Result<_, String>`,
+//! wall-clock reads, git runners, discarded results, oversized files and
+//! functions, copied test helpers). Each is at or near zero, held there by
+//! typed errors, injected clocks, one git module, and a shared test crate.
+//! The ratchet keeps them there: it counts every pattern against a
+//! committed baseline and, under `--check`, fails naming any count that
+//! rose. A number can only ever go down; the day one does, the baseline
+//! moves with it in the same change.
 //!
 //! Beside them it counts the rules this repository states about itself:
 //! the words it retired, the tense its texts are written in, the sites
@@ -16,16 +15,14 @@
 //! its code names, and a threshold with no reason written beside it. A
 //! rule nothing measures is a rule a change is free to break.
 //!
-//! Counting is line-based (a line matching the pattern), the same measure
-//! the rebuild's own acceptance commands used, so a contributor and CI see
-//! the same number `grep -c` would.
+//! Counting is line-based (a line matching the pattern), so a contributor
+//! and CI see the same number `grep -c` would.
 
 mod cli;
 mod corpus;
 mod disk;
 mod prose;
 mod references;
-mod scan;
 mod shape;
 mod sites;
 mod strings;
@@ -37,8 +34,7 @@ use yunta_core::durable::{self, Durability};
 
 use corpus::{crate_src_dirs, crate_test_dirs, is_test_source, rs_files, Corpus};
 use disk::{count_engine_fs_outside_runtime, count_sync_fs_in_async, discarded_results};
-use scan::blanked_lines;
-use shape::{functions_over, production_only};
+use shape::{code_lines, functions_over, production_only};
 use strings::{in_glyphs, production_lines, string_counts};
 use thresholds::numeric_consts_without_reason;
 
@@ -285,7 +281,7 @@ fn wildcards_in_apply(source: &str) -> usize {
     let mut count = 0;
     let mut depth = 0usize;
     let mut inside = false;
-    for code in blanked_lines(source) {
+    for code in code_lines(source) {
         if !inside && code.contains("fn apply") {
             inside = true;
             depth = 0;
@@ -322,7 +318,7 @@ pub fn check() -> Result<(), String> {
     let path = baseline_path();
     let baseline = parse_baseline(&std::fs::read_to_string(&path).map_err(|e| {
         format!(
-            "cannot read `{}` — run `cargo xtask smells`: {e}",
+            "cannot read `{}`; run `cargo xtask smells`: {e}",
             path.display()
         )
     })?);
@@ -340,7 +336,7 @@ pub fn check() -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "these smell counts rose above `{}` — fix them, or lower the baseline in the same \
+        "these smell counts rose above `{}`; fix them, or lower the baseline in the same \
          change if the rise is deliberate:\n{}",
         path.display(),
         risen.join("\n")
@@ -400,7 +396,7 @@ mod tests {
         let held: Vec<&String> = baseline.keys().collect();
         assert_eq!(
             measured, held,
-            "a counter enters with the number it measures when it lands — one with no line in \
+            "a counter enters with the number it measures when it lands: one with no line in \
              the baseline gates nothing, and a line with no counter gates a pattern nobody reads"
         );
     }

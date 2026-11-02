@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 
+use surco::code::Language;
 use yunta_core::events::{
     ArtifactId, EventPayload, InTree, Outside, ShapeRead, ShapesReadPayload, TaskEvent,
 };
@@ -97,12 +98,12 @@ fn in_tree(shape: &Shape, named: &Named, reading: &Reading, changed: &BTreeSet<S
         },
         Named::Common { files, .. } => Outside::Common { files: *files },
     };
-    // Only a Rust file's items are read as a shape writes them.
-    let code = match file.ends_with(".rs") {
-        true => reading
+    // A file's items are read as the shape writes them, in each language
+    // surco's item reader reads.
+    let code = Language::of(&file).and_then(|language| {
+        reading
             .source(&file)
-            .and_then(|source| super::code_words::items::as_planned(source, &shape.code)),
-        false => None,
-    };
+            .and_then(|source| super::code_words::items::as_planned(source, &shape.code, language))
+    });
     InTree::There { code, outside }
 }

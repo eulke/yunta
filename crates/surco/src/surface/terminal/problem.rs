@@ -87,7 +87,8 @@ impl Place {
     }
 
     /// Where the problem is, then its line between a gutter and the line's
-    /// number, and the part at fault marked under it in `tone`.
+    /// number, and the part at fault marked under it in `tone`. The quoted
+    /// line's words take the tones of what they are in the file's language.
     fn lines(&self, tone: Tone, look: &Look) -> Vec<Line> {
         let number = self.line.to_string();
         let pad = self.pad();
@@ -112,7 +113,11 @@ impl Place {
                 .plain(INDENT)
                 .push(Tone::Muted, number)
                 .push(Tone::Muted, gutter.as_str())
-                .plain(source),
+                .then(crate::code::painted(
+                    &source,
+                    0..source.len(),
+                    &crate::code::highlighted(&source, crate::code::Language::of(&self.path)),
+                )),
             Line::new()
                 .plain(INDENT)
                 .plain(pad.as_str())
@@ -154,6 +159,7 @@ impl Refusal {
 #[cfg(test)]
 mod tests {
     use crate::components::{Place, Problem};
+    use crate::line::{Syntax, Tone};
     use crate::look::Look;
 
     #[test]
@@ -187,5 +193,32 @@ mod tests {
                 .expect("a help line");
             assert_eq!(help, gutter, "line {line}: {drawn:#?}");
         }
+    }
+
+    /// A quoted line takes the tones of its words in its file's language, so
+    /// the key of a YAML entry reads as a keyword.
+    #[test]
+    fn a_quoted_line_is_colored_in_its_file_s_language() {
+        let problem = Problem::error(
+            "unknown key `promt`",
+            Some(Place {
+                path: ".yunta/workflows/a.yaml".to_string(),
+                line: 9,
+                col: 5,
+                source: Some("    promt: p".to_string()),
+                len: 5,
+            }),
+        );
+        let look = Look::plain();
+        let rows = problem.lines(&look);
+        let quoted = rows
+            .iter()
+            .find(|row| row.text().ends_with("promt: p"))
+            .expect("the quoted line");
+        assert_eq!(quoted.text(), "  9 |     promt: p");
+        assert!(quoted
+            .spans()
+            .iter()
+            .any(|span| span.text == "promt" && span.tone == Tone::Code(Syntax::Keyword)));
     }
 }

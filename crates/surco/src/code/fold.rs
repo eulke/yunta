@@ -1,77 +1,214 @@
 //! A test file as a review reads it: each test whole, and each function
 //! that only sets one up folded to its signature and how long it is. The
 //! test is what a reader judges; a helper is a name it calls, and its
-//! body is one command away.
+//! body is one command away. Where a function starts and ends is the item
+//! reader's; which function is a test is read here.
 
-use std::path::Path;
-
-use super::lex::{self, Language, Lexed};
+use super::items::{Item, Kind, Text};
+use super::Language;
+use crate::glyphs::Glyphs;
 
 /// `code`, the file at `path`, with each function that is not a test
-/// folded to `signature { ... N lines }`. A file in a language this does
-/// not read comes back whole.
+/// folded to its signature: `signature { ... N lines }` where braces hold
+/// its body, and `signature: ... N lines` in Python. A function whose body
+/// hides fewer than two lines stays whole, and a file in a language whose
+/// items are not read comes back whole.
 pub(crate) fn folded(path: &str, code: &str) -> String {
-    let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
-    match (Language::of(path), extension) {
-        (Some(language), _) => braced(code, language),
-        (None, Some("py")) => indented(code),
-        _ => code.to_string(),
-    }
-}
-
-/// What a function header is to a review.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Header {
-    /// A test, shown whole.
-    Test,
-    /// A function that sets a test up, folded.
-    Helper,
-}
-
-/// What `line` opens in `language`, read with the attributes above it.
-fn header(language: Language, line: &str, above: &[&str]) -> Option<Header> {
-    let line = line.trim_start();
-    match language {
-        Language::Rust => rust_header(line, above),
-        Language::Go => go_header(line),
-        Language::Script => script_header(line),
-    }
-}
-
-/// A Rust `fn`: a test when an attribute above it names one.
-fn rust_header(line: &str, above: &[&str]) -> Option<Header> {
-    if !strip_qualifiers(line).starts_with("fn ") {
-        return None;
-    }
-    let tested = above
-        .iter()
-        .rev()
-        .map(|line| line.trim())
-        .take_while(|line| line.starts_with("#[") || line.starts_with("///"))
-        .any(|attribute| {
-            attribute.starts_with("#[")
-                && !attribute.starts_with("#[cfg(")
-                && attribute.contains("test")
-        });
-    Some(if tested { Header::Test } else { Header::Helper })
-}
-
-/// A Go `func`: a test when its name says the runner calls it.
-fn go_header(line: &str) -> Option<Header> {
-    let rest = line.strip_prefix("func ")?;
-    let name = match rest.strip_prefix('(') {
-        Some(receiver) => receiver.split_once(')')?.1.trim_start(),
-        None => rest,
+    let Some(text) = Language::of(path).and_then(|language| Text::of(code, language)) else {
+        return code.to_string();
     };
-    let tested = ["Test", "Benchmark", "Example", "Fuzz"]
-        .iter()
-        .any(|prefix| name.starts_with(prefix));
-    Some(if tested { Header::Test } else { Header::Helper })
+    let file = File::of(code);
+    let mut out = Vec::new();
+    // The blocks of members the walk stands in, innermost last, each with
+    // where its body ends: their lines are read as their members.
+    let mut within: Vec<(Kind, usize)> = Vec::new();
+    let mut line = 0;
+    while line < file.lines.len() {
+        let at = file.starts[line];
+        while within.last().is_some_and(|&(_, end)| at >= end) {
+            within.pop();
+        }
+        line = step(&text, &file, line, &mut within, &mut out);
+    }
+    let mut folded = out.join("\n");
+    if code.ends_with('\n') {
+        folded.push('\n');
+    }
+    folded
 }
 
-/// A script's test call, or a function it declares or binds to a name.
-fn script_header(line: &str) -> Option<Header> {
-    if [
+/// A file's lines, and the offset each starts at.
+struct File<'a> {
+    lines: Vec<&'a str>,
+    starts: Vec<usize>,
+}
+
+impl<'a> File<'a> {
+    /// Reads `code` into its lines, and records the offset each one starts at.
+    fn of(code: &'a str) -> File<'a> {
+        File {
+            lines: code.lines().collect(),
+            starts: std::iter::once(0)
+                .chain(code.match_indices('\n').map(|(at, _)| at + 1))
+                .collect(),
+        }
+    }
+
+    /// The line that holds offset `at`.
+    fn line_of(&self, at: usize) -> usize {
+        let line = self.starts.partition_point(|&start| start <= at);
+        line.saturating_sub(1)
+            .min(self.lines.len().saturating_sub(1))
+    }
+
+    /// Lines `from` up to `to`, as the file writes them.
+    fn copied(&self, from: usize, to: usize) -> impl Iterator<Item = String> + '_ {
+        self.lines[from..to].iter().map(|line| line.to_string())
+    }
+}
+
+/// Writes the statement at `line` onto `out`, a helper function folded,
+/// and answers the line to read next. A test, and an item that holds no
+/// members, is written whole; a block of members is written a line at a
+/// time, its lines read as its members, and so is any other statement, so
+/// the functions inside it are read too.
+fn step(
+    text: &Text,
+    file: &File,
+    line: usize,
+    within: &mut Vec<(Kind, usize)>,
+    out: &mut Vec<String>,
+) -> usize {
+    let holder = within.last().map(|&(kind, _)| kind);
+    let (item, next) = text.item_at(file.starts[line], holder);
+    // An item that starts on a later line is read when the walk reaches it.
+    let item = item.filter(|item| file.line_of(item.start) == line);
+    match item {
+        Some(item) if item.kind == Kind::Fn && !tested(text, &item) => {
+            fold(text, file, &item, line, out)
+        }
+        Some(item) if item.kind.holds_members() => {
+            if let Some(body) = &item.bounds.body {
+                within.push((item.kind, body.end));
+            }
+            out.push(file.lines[line].to_string());
+            line + 1
+        }
+        Some(item) => {
+            let last = file.line_of(item.bounds.end.saturating_sub(1));
+            whole(file, line, last, out)
+        }
+        None if text.language() == Language::Script && calls_a_test(file.lines[line]) => {
+            whole(file, line, file.line_of(next.saturating_sub(1)), out)
+        }
+        None => {
+            out.push(file.lines[line].to_string());
+            line + 1
+        }
+    }
+}
+
+/// Writes lines `line` through `last` onto `out` as the file writes them,
+/// and answers the line after them.
+fn whole(file: &File, line: usize, last: usize, out: &mut Vec<String>) -> usize {
+    let last = last.max(line);
+    out.extend(file.copied(line, last + 1));
+    last + 1
+}
+
+/// Writes `item`, a function that is not a test, onto `out` from `line`,
+/// folded to its signature where its body hides two lines or more, and
+/// answers the line after it. Only a body braces hold folds to them, or a
+/// Python body to its head; a script's arrow whose body is an expression
+/// stays whole.
+fn fold(text: &Text, file: &File, item: &Item, line: usize, out: &mut Vec<String>) -> usize {
+    let last = file.line_of(item.bounds.end.saturating_sub(1)).max(line);
+    let Some(body) = &item.bounds.body else {
+        return whole(file, line, last, out);
+    };
+    let open = file.line_of(item.bounds.stop);
+    let open_at = item.bounds.stop - file.starts[open];
+    let python = text.language() == Language::Python;
+    if !python && file.lines[open].as_bytes().get(open_at) != Some(&b'{') {
+        return whole(file, line, last, out);
+    }
+    let close = file.line_of(body.end);
+    let close_at = body.end - file.starts[close];
+    // A body that no brace closes, or that another bracket closes, is not
+    // one braces hold, so it stays whole.
+    if !python && file.lines[close].as_bytes().get(close_at) != Some(&b'}') {
+        return whole(file, line, last, out);
+    }
+    let hidden = match python {
+        true => last - open,
+        false => hidden_lines(file, (open, open_at), (close, close_at)),
+    };
+    // A body of one line is the whole function, and folding it would hide
+    // what it says to save nothing.
+    if hidden < 2 {
+        return whole(file, line, last, out);
+    }
+    out.extend(file.copied(line, open));
+    let lines = crate::text::counted(hidden, "line");
+    let ellipsis = Glyphs::Ascii.ellipsis();
+    match python {
+        true => {
+            let (head, rest) = file.lines[open].split_at(open_at + 1);
+            out.push(format!("{head} {ellipsis} {lines}{}", rest.trim_end()));
+            last + 1
+        }
+        false => {
+            let head = &file.lines[open][..open_at];
+            let tail = file.lines[close].get(close_at + 1..).unwrap_or_default();
+            out.push(format!("{head}{{ {ellipsis} {lines} }}{tail}"));
+            // The walk resumes past the `}`'s line: code the span holds after
+            // it, such as an indented `;`, is read on its own, not dropped.
+            close + 1
+        }
+    }
+}
+
+/// How many lines a body braces hold hides when folded: the lines between
+/// the line of its `{`, at `open`, and the line of its `}`, at `close`, and
+/// each of those two where code stands past the `{` or before the `}`.
+fn hidden_lines(file: &File, open: (usize, usize), close: (usize, usize)) -> usize {
+    let ((open, open_at), (close, close_at)) = (open, close);
+    if close <= open {
+        return 0;
+    }
+    let past_open = !file.lines[open][open_at + 1..].trim().is_empty();
+    let before_close = !file.lines[close][..close_at].trim().is_empty();
+    close - open - 1 + usize::from(past_open) + usize::from(before_close)
+}
+
+/// Whether `item`, a function, is a test: in Rust, one an attribute of it
+/// names, as `#[test]` or `#[tokio::test]` do and `#[cfg(test)]` does not;
+/// in Go, one whose own name the test runner calls, a method's after its
+/// receiver's type, as testify runs `Suite.TestLogin`; in Python, one whose
+/// name starts with `test`. A script's tests are calls, not functions.
+fn tested(text: &Text, item: &Item) -> bool {
+    match text.language() {
+        Language::Rust => text
+            .attributes(item)
+            .split("#[")
+            .skip(1)
+            .any(|attribute| !attribute.starts_with("cfg(") && attribute.contains("test")),
+        Language::Go => {
+            let name = item.name.rsplit('.').next().unwrap_or_default();
+            ["Test", "Benchmark", "Example", "Fuzz"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        }
+        Language::Python => item.name.starts_with("test"),
+        _ => false,
+    }
+}
+
+/// Whether `line` of a script calls a test: `test(` or `it(`, alone or as
+/// `.each` or `.only`.
+fn calls_a_test(line: &str) -> bool {
+    let line = line.trim_start();
+    [
         "test(",
         "it(",
         "test.each",
@@ -81,194 +218,6 @@ fn script_header(line: &str) -> Option<Header> {
     ]
     .iter()
     .any(|call| line.starts_with(call))
-    {
-        return Some(Header::Test);
-    }
-    let line = line
-        .trim_start_matches("export ")
-        .trim_start_matches("default ")
-        .trim_start_matches("async ");
-    let function = line.starts_with("function ") || line.starts_with("function*");
-    let bound = ["const ", "let ", "var "]
-        .iter()
-        .any(|binding| line.starts_with(binding))
-        && line.contains('=')
-        && (line.contains("=>") || line.contains("function"));
-    (function || bound).then_some(Header::Helper)
-}
-
-/// `line` without the qualifiers a Rust item may open with.
-fn strip_qualifiers(line: &str) -> &str {
-    let mut line = line;
-    loop {
-        let before = line;
-        for qualifier in [
-            "pub(crate) ",
-            "pub(super) ",
-            "pub ",
-            "async ",
-            "const ",
-            "unsafe ",
-        ] {
-            line = line.strip_prefix(qualifier).unwrap_or(line);
-        }
-        if let Some(rest) = line.strip_prefix("extern \"C\" ") {
-            line = rest;
-        }
-        if line == before {
-            return line;
-        }
-    }
-}
-
-/// `code` with each helper's body folded, in a language of braces.
-fn braced(code: &str, language: Language) -> String {
-    let lines: Vec<&str> = code.lines().collect();
-    let braces = braces(&lines, language);
-    let mut out: Vec<String> = Vec::new();
-    let mut at = 0;
-    while at < lines.len() {
-        let found = header(language, lines[at], &lines[..at])
-            .and_then(|kind| Some((kind, body(&lines, &braces, at)?)));
-        let Some((kind, (open, close))) = found else {
-            out.push(lines[at].to_string());
-            at += 1;
-            continue;
-        };
-        // The lines between the braces: one is the whole function, and
-        // folding it would hide what it says to save nothing.
-        let hidden = (close.0 - open.0).saturating_sub(1);
-        if kind == Header::Test || hidden < 2 {
-            out.extend(lines[at..=close.0].iter().map(|line| line.to_string()));
-        } else {
-            out.extend(lines[at..open.0].iter().map(|line| line.to_string()));
-            let head = &lines[open.0][..open.1];
-            let tail = &lines[close.0][close.1 + 1..];
-            out.push(format!(
-                "{head}{{ ... {} }}{tail}",
-                crate::text::counted(hidden, "line")
-            ));
-        }
-        at = close.0 + 1;
-    }
-    let mut folded = out.join("\n");
-    if code.ends_with('\n') {
-        folded.push('\n');
-    }
-    folded
-}
-
-/// A place in a file: its line, and the byte in it.
-type At = (usize, usize);
-
-/// Where the body of the function whose header is on line `from` opens
-/// and closes; `None` for a declaration with no body — a signature that
-/// ends in `;` before any brace opens.
-fn body(lines: &[&str], braces: &[Vec<(usize, char)>], from: usize) -> Option<(At, At)> {
-    let mut open = None;
-    let mut depth = 0usize;
-    for (line, found) in braces.iter().enumerate().skip(from) {
-        for &(byte, brace) in found {
-            match (brace, open) {
-                ('{', None) => {
-                    open = Some((line, byte));
-                    depth = 1;
-                }
-                ('{', Some(_)) => depth += 1,
-                ('}', Some(opened)) => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some((opened, (line, byte)));
-                    }
-                }
-                _ => {}
-            }
-        }
-        if open.is_none() && lines[line].trim_end().ends_with(';') {
-            return None;
-        }
-    }
-    None
-}
-
-/// Each line's braces that are code — not inside a string, a character,
-/// or a comment — as (byte, brace) pairs.
-fn braces(lines: &[&str], language: Language) -> Vec<Vec<(usize, char)>> {
-    let mut state = Lexed::Code;
-    lines
-        .iter()
-        .map(|line| {
-            let (found, after) = scan(line, language, state);
-            state = after;
-            found
-        })
-        .collect()
-}
-
-/// The code braces of `line`, and where the lexer stands after it.
-fn scan(line: &str, language: Language, mut state: Lexed) -> (Vec<(usize, char)>, Lexed) {
-    let bytes = line.as_bytes();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at < bytes.len() {
-        if state == Lexed::Code && matches!(bytes[at], b'{' | b'}') {
-            found.push((at, bytes[at] as char));
-        }
-        (state, at) = lex::step(bytes, at, state, language);
-    }
-    (found, lex::line_ended(state))
-}
-
-/// `code` with each Python function that is not a test folded to its
-/// signature.
-fn indented(code: &str) -> String {
-    let lines: Vec<&str> = code.lines().collect();
-    let mut out: Vec<String> = Vec::new();
-    let mut at = 0;
-    while at < lines.len() {
-        let line = lines[at];
-        let trimmed = line.trim_start();
-        let def = trimmed
-            .strip_prefix("async ")
-            .unwrap_or(trimmed)
-            .strip_prefix("def ");
-        let Some(def) = def else {
-            out.push(line.to_string());
-            at += 1;
-            continue;
-        };
-        let indent = line.len() - trimmed.len();
-        let signed = (at..lines.len())
-            .find(|end| lines[*end].trim_end().ends_with(':'))
-            .unwrap_or(at);
-        let mut end = signed;
-        for (next, body) in lines.iter().enumerate().skip(signed + 1) {
-            if body.trim().is_empty() {
-                continue;
-            }
-            if body.len() - body.trim_start().len() <= indent {
-                break;
-            }
-            end = next;
-        }
-        let hidden = end - signed;
-        if def.starts_with("test") || hidden < 2 {
-            out.extend(lines[at..=end].iter().map(|line| line.to_string()));
-        } else {
-            out.extend(lines[at..signed].iter().map(|line| line.to_string()));
-            out.push(format!(
-                "{} ... {}",
-                lines[signed].trim_end(),
-                crate::text::counted(hidden, "line")
-            ));
-        }
-        at = end + 1;
-    }
-    let mut folded = out.join("\n");
-    if code.ends_with('\n') {
-        folded.push('\n');
-    }
-    folded
 }
 
 #[cfg(test)]
@@ -360,5 +309,82 @@ async fn a_raw_string_holds_its_braces() {
     fn a_file_in_a_language_it_does_not_read_comes_back_whole() {
         let code = "test \"$(cat greeting.txt)\" = Hello\nhelper() {\n  a\n  b\n  c\n}\n";
         assert_eq!(folded("tests/greet.sh", code), code);
+    }
+
+    /// A script's helper inside a `describe` block folds, and its test
+    /// stays whole.
+    #[test]
+    fn a_script_s_helper_inside_a_describe_block_folds() {
+        let code = "describe('greet', () => {\n  const setup = () => {\n    const a = 1;\n    const b = 2;\n    return a + b;\n  };\n\n  it('adds', () => {\n    expect(setup()).toBe(3);\n  });\n});\n";
+        assert_eq!(
+            folded("greet.test.js", code),
+            "describe('greet', () => {\n  const setup = () => { ... 3 lines };\n\n  it('adds', () => {\n    expect(setup()).toBe(3);\n  });\n});\n"
+        );
+    }
+
+    /// A Python helper method folds inside its class, and a test method
+    /// stays whole.
+    #[test]
+    fn a_python_helper_method_folds_inside_its_class() {
+        let code = "class TestStore:\n    def make(self):\n        s = Store()\n        s.add(1)\n        return s\n\n    def test_adds(self):\n        assert self.make().count == 1\n";
+        assert_eq!(
+            folded("tests/test_store.py", code),
+            "class TestStore:\n    def make(self): ... 3 lines\n\n    def test_adds(self):\n        assert self.make().count == 1\n"
+        );
+    }
+
+    /// A script class's helper method folds inside its class, read as a
+    /// member of it.
+    #[test]
+    fn a_script_class_s_helper_method_folds() {
+        let code = "export class Fixture {\n  build(): Store {\n    const s = new Store();\n    s.add(1);\n    return s;\n  }\n}\n";
+        assert_eq!(
+            folded("fixture.test.ts", code),
+            "export class Fixture {\n  build(): Store { ... 3 lines }\n}\n"
+        );
+    }
+
+    /// A Go suite's method whose own name says it is a test stays whole.
+    #[test]
+    fn a_go_suite_s_test_method_stays_whole() {
+        let code = "package suite\n\nfunc (s *Suite) TestLogin() {\n\ta := 1\n\tb := 2\n\ts.Equal(a, b)\n}\n";
+        assert_eq!(folded("suite_test.go", code), code);
+    }
+
+    /// A Python helper's fold stands right after its colon, before the
+    /// comment its head carries.
+    #[test]
+    fn a_python_fold_stands_before_the_comment_on_its_head() {
+        let code = "def helper():  # sets up\n    a = 1\n    b = 2\n    return a + b\n";
+        assert_eq!(
+            folded("tests/test_a.py", code),
+            "def helper(): ... 3 lines  # sets up\n"
+        );
+    }
+
+    /// Code on the brace lines is hidden and counted, beside the lines
+    /// between them.
+    #[test]
+    fn code_on_the_brace_lines_counts_among_the_hidden_lines() {
+        let code = "func helper() { a := 1\n\tb := 2\n\tc := 3\n\treturn a + b + c }\n";
+        assert_eq!(folded("a_test.go", code), "func helper() { ... 4 lines }\n");
+    }
+
+    /// A body no brace closes, as a file cut short leaves one, stays whole.
+    #[test]
+    fn a_body_no_brace_closes_stays_whole() {
+        let code = "fn helper() -> u8 {\n    let a = 1;\n    let b = 2;\n    a + b\n";
+        assert_eq!(folded("tests/a.rs", code), code);
+    }
+
+    /// What a statement holds past its folded body's `}`, on lines of its
+    /// own, is written after the fold, not dropped.
+    #[test]
+    fn code_past_a_folded_body_s_brace_is_kept() {
+        let code = "function helper() {\n  one();\n  two();\n  three();\n}\n  ;\n";
+        assert_eq!(
+            folded("a.test.ts", code),
+            "function helper() { ... 3 lines }\n  ;\n"
+        );
     }
 }

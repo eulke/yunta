@@ -17,6 +17,12 @@
 use crate::line::{Fill, Line, Span, Tone};
 use crate::palette::{self, Rgb};
 
+#[cfg(feature = "clap")]
+mod help;
+
+#[cfg(feature = "clap")]
+pub use help::clap_styles;
+
 /// When `--color` paints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -327,6 +333,9 @@ fn ansi(tone: Tone) -> (bool, bool, Option<Ansi>) {
         Tone::Caution => (false, false, Some(Ansi::Yellow)),
         Tone::Added => (false, false, Some(Ansi::Green)),
         Tone::Removed => (false, false, Some(Ansi::Red)),
+        // Code's colors are material of the 24-bit layer: in the sixteen
+        // colors a word of code reads plain.
+        Tone::Code(_) => (false, false, None),
     }
 }
 
@@ -391,78 +400,6 @@ fn truecolor_parameters(
 /// `target` is 38, the background's when it is 48.
 fn color_parameter(target: u8, Rgb(red, green, blue): Rgb) -> String {
     format!("{target};2;{red};{green};{blue}")
-}
-
-/// The styles `clap` draws its own help and usage errors in, in `paint`'s
-/// colors and the tones every page takes: a heading and a value to fill in
-/// muted, what a reader types strong, an error failed, a valid value done, an
-/// invalid one a caution. A plain paint gets styles that write no escape, the
-/// sixteen colors get the color `ansi` gives each tone, and 24 bits get each
-/// tone's color on its ground, bold where the sixteen colors are bold.
-#[cfg(feature = "clap")]
-pub fn clap_styles(paint: Paint) -> clap::builder::Styles {
-    match paint {
-        Paint::Plain => clap::builder::Styles::plain(),
-        Paint::Color {
-            layer: Layer::Ansi16,
-            ..
-        } => clap_roles(ansi16_style),
-        Paint::Color {
-            layer: Layer::Truecolor(ground),
-            ..
-        } => clap_roles(|tone| truecolor_style(ground, tone)),
-    }
-}
-
-/// The styles `clap` draws its seven roles in: each role takes the style
-/// `style` gives its tone, and the other roles keep the styles `clap` gives.
-#[cfg(feature = "clap")]
-fn clap_roles(style: impl Fn(Tone) -> clap::builder::styling::Style) -> clap::builder::Styles {
-    clap::builder::Styles::styled()
-        .header(style(Tone::Muted))
-        .usage(style(Tone::Muted))
-        .literal(style(Tone::Strong))
-        .placeholder(style(Tone::Muted))
-        .error(style(Tone::Failed))
-        .valid(style(Tone::Done))
-        .invalid(style(Tone::Caution))
-}
-
-/// The style of `tone` in the sixteen colors: its ANSI color, bold and dim as
-/// [`ansi`] says, so every terminal draws it in its own palette.
-#[cfg(feature = "clap")]
-fn ansi16_style(tone: Tone) -> clap::builder::styling::Style {
-    use clap::builder::styling::{AnsiColor, Style};
-    let (bold, dim, color) = ansi(tone);
-    let color = color.map(|code| match code {
-        Ansi::Red => AnsiColor::Red,
-        Ansi::Green => AnsiColor::Green,
-        Ansi::Yellow => AnsiColor::Yellow,
-        Ansi::Magenta => AnsiColor::Magenta,
-        Ansi::Cyan => AnsiColor::Cyan,
-    });
-    let style = Style::new().fg_color(color.map(Into::into));
-    let style = if bold { style.bold() } else { style };
-    if dim {
-        style.dimmed()
-    } else {
-        style
-    }
-}
-
-/// The style of `tone` in 24 bits on `ground`: its color there, bold where the
-/// sixteen colors are bold, and never dimmed.
-#[cfg(feature = "clap")]
-fn truecolor_style(ground: Ground, tone: Tone) -> clap::builder::styling::Style {
-    use clap::builder::styling::{Color, RgbColor, Style};
-    let color = palette::tone(ground, tone)
-        .map(|Rgb(red, green, blue)| Color::Rgb(RgbColor(red, green, blue)));
-    let style = Style::new().fg_color(color);
-    if ansi(tone).0 {
-        style.bold()
-    } else {
-        style
-    }
 }
 
 /// `text` with every SGR escape, every erase and every link taken out: what

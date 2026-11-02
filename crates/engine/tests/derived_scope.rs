@@ -130,7 +130,7 @@ async fn a_ts_shape_reaches_a_tsx_caller() {
     assert_eq!(
         read.shape("buildIt").map(|shape| &shape.in_tree),
         Some(&InTree::There {
-            code: None,
+            code: Some("export function buildIt()".to_string()),
             outside: Outside::Files {
                 paths: vec!["caller.tsx".to_string()]
             },
