@@ -166,9 +166,9 @@ pub use verification_effectiveness::{
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
 pub use view::{
-    chronicle, node_word, run_frame, run_frame_of, run_standing, ChildLink, Counter, Degradation,
-    Happening, Moment, NodeFrame, NodeStanding, Reroute, RunFrame, RunPhase, RunningTask,
-    TaskCounter, WaitingOn,
+    chronicle, node_word, run_frame, run_frame_of, run_standing, ChildLink, Counter, Declares,
+    Degradation, GateAsks, Happening, Moment, NodeFrame, NodeStanding, Reroute, RunFrame, RunPhase,
+    RunningTask, TaskCounter, WaitingOn,
 };
 pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{

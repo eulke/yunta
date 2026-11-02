@@ -1,4 +1,4 @@
-␛[2m■␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[2mstopped␛[0m␛[2m · for 32m10s␛[0m                                                       7E5PH4
+␛[2m■␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[2m stopped ␛[0m␛[2m· for 32m10s␛[0m                                                       7E5PH4
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
   interrupted by a person.
 

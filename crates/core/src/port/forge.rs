@@ -98,6 +98,10 @@ pub struct PublishRequest {
     /// the tests that hold its tasks, a spec, a review's findings — each
     /// published beside its bytes.
     pub shown: Vec<ShownDocument>,
+    /// What the run changed from its base to its newest tree, as git last
+    /// counted it, said beside the decision; `None` when no count stands on
+    /// the newest tree.
+    pub changed: Option<crate::events::ChangesCountedPayload>,
 }
 
 /// What a gate published to a forge asks, and what each answer a review

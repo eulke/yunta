@@ -15,7 +15,7 @@ use surco::doc::Doc;
 use surco::glyphs::Mark;
 use surco::look::Look;
 use surco::words::Standing;
-use yunta_core::events::HumanChoice;
+use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::step::NextStep;
 use yunta_core::{OptionId, Responder, RunId};
 
@@ -266,27 +266,18 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
     };
     let escalation = escalation.into_payload();
     let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
-        let commands: Vec<String> = escalation
-            .options()
-            .iter()
-            .map(|option| {
-                let step = NextStep::ResolveGate {
-                    run: run_id.clone(),
-                    option: Some(option.id.clone()),
-                    text: option.asks().is_some(),
-                };
-                format!("  {}", advice::spell(&step))
-            })
-            .collect();
-        return Err(CliError::msg(format!(
-            "run {called} waits on a decision, and no option was given; choose one:\n{}",
-            commands.join("\n")
-        )));
+        return Err(off_terminal(run_id, &escalation));
     };
     let asked = open.manifest.doc.request();
     let shown =
         yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state, asked).await?;
-    match crate::ask::decide(&console, &ctx.env, &escalation, Some((run_id, &shown))) {
+    match crate::ask::decide(
+        &console,
+        &ctx.env,
+        &escalation,
+        Some((run_id, &shown)),
+        state.current_change(),
+    ) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(GateState::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(GateState::Interrupted)),
@@ -300,6 +291,29 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
             "the menu ended without an answer ({why}): nothing recorded"
         ))),
     }
+}
+
+/// What `resolve-gate` says off a terminal, where nobody can be asked: that
+/// the run waits on a decision, and the command that chooses each option it
+/// offers, one to a line.
+fn off_terminal(run_id: &RunId, escalation: &GateWaitingPayload) -> CliError {
+    let commands: Vec<String> = escalation
+        .options()
+        .iter()
+        .map(|option| {
+            let step = NextStep::ResolveGate {
+                run: run_id.clone(),
+                option: Some(option.id.clone()),
+                text: option.asks().is_some(),
+            };
+            format!("  {}", advice::spell(&step))
+        })
+        .collect();
+    CliError::msg(format!(
+        "run {} waits on a decision, and no option was given; choose one:\n{}",
+        run_id.handle(),
+        commands.join("\n")
+    ))
 }
 
 #[cfg(test)]

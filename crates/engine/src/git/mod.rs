@@ -17,6 +17,7 @@
 
 mod error;
 mod mutation;
+mod numstat;
 mod objects;
 mod program;
 mod repo;
@@ -24,6 +25,7 @@ mod status;
 
 pub use error::{Cause, GitError, Invocation, Stopped};
 pub use mutation::{mutation_lock, MutationLock};
+pub use numstat::{numstat, Numstat};
 pub use objects::blobs;
 pub use repo::{committer, common_dir, push_branch, remote_url, run_branches, words_in};
 pub use status::{tree_state, Status};

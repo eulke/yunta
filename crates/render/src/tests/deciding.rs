@@ -75,6 +75,7 @@ fn a_pull_request_says_what_weighs_on_its_review_before_its_answers() {
         },
         artifacts: Vec::new(),
         shown: vec![shown_plan(review())],
+        changed: None,
     };
 
     let body = description(&request);

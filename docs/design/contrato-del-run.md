@@ -76,7 +76,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-La tabla actual contiene 63 tipos de evento en 53 filas; algunas filas agrupan variantes relacionadas:
+La tabla actual contiene 64 tipos de evento en 54 filas; algunas filas agrupan variantes relacionadas:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -128,6 +128,7 @@ La tabla actual contiene 63 tipos de evento en 53 filas; algunas filas agrupan v
 | `run_tool_failed` | adapter (recorded by engine) | session ID, known `yunta-run` tool, closed failure cause; no arguments, response, or raw error text |
 | `run_tool_refused` | engine | el tool conocido de `yunta-run` que nombró la llamada, y el motivo cerrado por el que el engine la rechazó |
 | `host_suspended` | engine | cuánto durmió el host (ms), notado al despertar; no despierta el run y las duraciones lo descuentan |
+| `changes_counted` | engine | el cambio del run desde su commit de partida hasta su árbol más reciente, como lo cuenta git (archivos, líneas agregadas y líneas eliminadas); se cuenta cuando un gate pide a una persona, antes de abrir un pull request y cuando el engine termina el run (`done`, `failed` o `promoted`); un cierre de persona no cuenta |
 | `service_unreachable` / `service_reachable` | engine | la sesión que perdió su servicio y lo que dijo su CLI / cuánto esperó (ms, tiempo despierto) hasta que el servicio respondió y la misma sesión siguió |
 | `best_effort_failed` | engine | un paso que el run siguió tras fallar: cuál era y la causa que dio su fuente, tal cual (hoy, el cierre del cliente MCP tras su única consulta) |
 | `run_paused` / `run_resumed` / `run_finished` | engine | pausa tipada / estado terminal, métricas |

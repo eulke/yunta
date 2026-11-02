@@ -73,9 +73,10 @@ fn a_decision_on_a_forge_ends_with_what_is_typed_elsewhere() {
     let [.., elsewhere, step] = lines.as_slice() else {
         panic!("a forge's decision draws its options and what follows: {lines:?}");
     };
-    assert_eq!(elsewhere.trim(), "on the machine", "{lines:?}");
+    // Every line of a decision opens with its edge.
+    assert_eq!(elsewhere.trim(), "| on the machine", "{lines:?}");
     assert!(
-        step.trim().starts_with("yunta resume x") && step.trim().ends_with("reads it"),
+        step.trim().starts_with("|   yunta resume x") && step.trim().ends_with("reads it"),
         "{lines:?}"
     );
 }

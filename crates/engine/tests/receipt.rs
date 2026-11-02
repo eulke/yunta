@@ -14,8 +14,9 @@ use yunta_core::diagnostic::{
     ArtifactCode, ArtifactFailure, DiagnosticCode, FileCode, ParseCode, RuleCode,
 };
 use yunta_core::events::{
-    ArtifactId, EventBody, EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeStartedPayload,
-    RunEvent, RunFinishedPayload, RunMetrics, StoredEvent, TerminalState, TokenUsage,
+    ArtifactId, ChangesCountedPayload, EventBody, EventPayload, Failure, NodeEvent,
+    NodeFailedPayload, NodeStartedPayload, RunEvent, RunFinishedPayload, RunMetrics, StoredEvent,
+    TerminalState, TokenUsage,
 };
 use yunta_core::step::NextStep;
 use yunta_core::{ArtifactKind, NodeId, RunId};
@@ -69,6 +70,12 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             files_touched: 4,
             violations: Vec::new(),
         },
+        changed: Some(ChangesCountedPayload {
+            tree: "deadbeef".into(),
+            files: 9,
+            added: 412,
+            removed: 87,
+        }),
         runners: vec![
             RunnerUsage {
                 node_id: NodeId::from("review@reviewer"),

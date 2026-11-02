@@ -7,6 +7,7 @@ use crate::line::{Line, Tone};
 use crate::look::Look;
 use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
+use crate::words::Standing;
 
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
@@ -35,6 +36,16 @@ pub struct Terminal {
 impl Terminal {
     pub fn on(look: Look) -> Self {
         Terminal { look }
+    }
+
+    /// The strokes of a run's furrow in at most `room` cells, two a node at
+    /// most, where each of `nodes` stands, as a page's furrow draws them: a
+    /// gap between two strokes when there are cells for one, and a cell for
+    /// the nodes it covers, with the word that matters most among them, when
+    /// there are more nodes than cells.
+    pub fn furrow(&self, nodes: &[Standing], room: usize) -> Line {
+        let cells = room.min(nodes.len() * page::CELLS_A_NODE);
+        page::strokes(nodes, cells, page::spaced(nodes.len(), cells), &self.look)
     }
 
     /// `doc` laid out for this stream, unpainted, in the rhythm a page
@@ -85,6 +96,7 @@ impl Terminal {
             Block::Gist(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
             Block::Table(block) => block.lines(look),
+            Block::Nodes(block) => block.table(look.glyphs).lines(look),
             Block::Runs(block) => block.lines(look),
             Block::Evidence(block) => block.lines(look),
             Block::Said(block) => block.lines(look),

@@ -24,6 +24,7 @@ pub mod baseline;
 mod bash_exec;
 mod budget;
 pub(crate) mod capability;
+mod change_count;
 mod check_exec;
 mod cleanup;
 mod close;

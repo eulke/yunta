@@ -1,4 +1,4 @@
-␛[33m▲␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[33mreported␛[0m␛[2m · in 7m41s␛[0m␛[2m · 32m10s ago␛[0m                                           7E5PH4
+␛[33m▲␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[33m reported ␛[0m␛[2m· in 7m41s␛[0m␛[2m · 32m10s ago␛[0m                                           7E5PH4
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
   finished holding 1 blocking finding.
 

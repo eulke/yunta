@@ -2,6 +2,7 @@
 
 - run: run-2026-08-21-0001
 - cost: 1.54k tokens (1.2k in / 340 out (200 cached)) · cost per verified task: 770 tokens · 2 reroutes
+- changed: 9 files, +412 −87
 
 - ✓ **criteria** 3 of 3 green, each command below
 - ◌ **baseline** not used by this workflow

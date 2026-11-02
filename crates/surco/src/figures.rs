@@ -155,6 +155,14 @@ impl Ratio {
     }
 }
 
+/// Seconds in a minute: the base the wider units of a duration and an age
+/// are built from.
+const MINUTE: u64 = 60;
+/// Seconds in an hour.
+const HOUR: u64 = 60 * MINUTE;
+/// Seconds in a day.
+const DAY: u64 = 24 * HOUR;
+
 /// The cells the widest [`duration`] takes, for a column that holds one.
 pub const DURATION_WIDEST: usize = 6;
 
@@ -167,16 +175,26 @@ pub const DURATION_WIDEST: usize = 6;
 /// days — `9s`, `59m59s`, `23h59m`, `99d23h`, `100d` — so a column that
 /// right-aligns to it never moves under the reader as a run ages.
 pub fn duration(duration: Duration) -> String {
-    /// Seconds in a minute: the base the wider units below are built from.
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * MINUTE;
-    const DAY: u64 = 24 * HOUR;
     let total = duration.as_secs();
     match total {
         t if t < MINUTE => format!("{t}s"),
         t if t < HOUR => format!("{}m{:02}s", t / MINUTE, t % MINUTE),
         t if t < DAY => format!("{}h{:02}m", t / HOUR, (t % HOUR) / MINUTE),
         t if t < 100 * DAY => format!("{}d{:02}h", t / DAY, (t % DAY) / HOUR),
+        t => format!("{}d", t / DAY),
+    }
+}
+
+/// How long ago something was, in the one unit that reads it at a glance:
+/// seconds below a minute, minutes below an hour, hours below a day, and
+/// days past it, each counted down — `45s`, `32m`, `8h`, `22d`. An edge and
+/// a closing line say ages so; a figure read against others in a column, a
+/// duration, keeps its second unit.
+pub fn age(age: Duration) -> String {
+    match age.as_secs() {
+        t if t < MINUTE => format!("{t}s"),
+        t if t < HOUR => format!("{}m", t / MINUTE),
+        t if t < DAY => format!("{}h", t / HOUR),
         t => format!("{}d", t / DAY),
     }
 }
@@ -322,5 +340,14 @@ mod tests {
     #[test]
     fn a_call_of_a_second_or_more_reads_in_the_duration_drawer_words() {
         assert_eq!(latency(Duration::from_secs(90)), "1m30s");
+    }
+
+    /// An age reads in one unit, counted down.
+    #[test]
+    fn an_age_reads_in_one_unit_counted_down() {
+        assert_eq!(age(Duration::from_secs(45)), "45s");
+        assert_eq!(age(Duration::from_secs(32 * 60 + 10)), "32m");
+        assert_eq!(age(Duration::from_secs(8 * 3600 + 59 * 60)), "8h");
+        assert_eq!(age(Duration::from_secs(22 * 86_400 + 3600)), "22d");
     }
 }

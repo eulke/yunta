@@ -51,11 +51,11 @@ fn typed(repo: &Path, home: &Path, command: &str) -> std::process::Output {
 }
 
 /// The command a line of `text` opens with, as a person copies it: the
-/// first line that, trimmed, opens with `command`, up to the gloss two
-/// spaces set beside it.
+/// first line that, trimmed and past a decision's edge, opens with
+/// `command`, up to the gloss two spaces set beside it.
 fn line_starting<'a>(text: &'a str, command: &str) -> &'a str {
     text.lines()
-        .map(str::trim)
+        .map(|line| line.trim().trim_start_matches(['|', '▎']).trim_start())
         .find(|line| line.starts_with(command))
         .and_then(|line| line.split("  ").next())
         .unwrap_or_else(|| panic!("no `{command}` line in:\n{text}"))

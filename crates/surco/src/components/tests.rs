@@ -124,26 +124,32 @@ fn evidence_shows_at_most_six_lines_and_says_where_the_rest_is() {
     );
 }
 
+/// A node's row with nothing but where it stands, its id and its note.
+fn node(mark: Mark, word: &'static str, id: &str, note: &str) -> NodeRow {
+    NodeRow {
+        mark,
+        word,
+        id: id.to_string(),
+        branch: None,
+        returns: None,
+        note: note.to_string(),
+        took: String::new(),
+        took_by_person: false,
+        spent: String::new(),
+    }
+}
+
 #[test]
 fn a_node_id_keeps_its_column_and_a_note_is_cut_to_the_line() {
     let table = NodeTable {
         rows: vec![
-            NodeRow {
-                mark: Mark::Failed,
-                word: "failed",
-                id: "review@claude-code".to_string(),
-                note: "exit 101 ".repeat(20),
-                took: String::new(),
-                spent: String::new(),
-            },
-            NodeRow {
-                mark: Mark::Done,
-                word: "finished",
-                id: "lint".to_string(),
-                note: String::new(),
-                took: String::new(),
-                spent: String::new(),
-            },
+            node(
+                Mark::Failed,
+                "failed",
+                "review@claude-code",
+                &"exit 101 ".repeat(20),
+            ),
+            node(Mark::Done, "finished", "lint", ""),
         ],
     };
     let drawn = plain(table);
@@ -255,22 +261,8 @@ fn every_block() -> Doc {
         .push_if("tokens", "20.2k spent, 3 past runs, median 18k tokens");
     let table = NodeTable {
         rows: vec![
-            NodeRow {
-                mark: Mark::Failed,
-                word: "failed",
-                id: "lint".to_string(),
-                note: "exit 101".to_string(),
-                took: String::new(),
-                spent: String::new(),
-            },
-            NodeRow {
-                mark: Mark::Absent,
-                word: "never ran",
-                id: "fix-lint".to_string(),
-                note: String::new(),
-                took: String::new(),
-                spent: String::new(),
-            },
+            node(Mark::Failed, "failed", "lint", "exit 101"),
+            node(Mark::Absent, "never ran", "fix-lint", ""),
         ],
     };
     let next = Next {

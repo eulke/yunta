@@ -3,14 +3,16 @@
 //! and the ink of a pill.
 //!
 //! Every color keeps a floor of contrast, measured as the web's accessibility
-//! guidelines measure it, and the tests hold each floor: a tone outside code
-//! keeps 4.3:1 against the ground it is tuned for and 3.8:1 against the tint
-//! and the code ground a whole line sits on; a word a change marks keeps 3.8:1
-//! against the fill that marks it; a word of code keeps 4.3:1 against its
-//! ground and 3.8:1 against the code ground, and a comment, which recedes,
-//! 2.5:1 against both; and a pill's ink keeps 4.5:1 against the color of every
-//! tone outside code. A color retuned to taste keeps these, or a test names
-//! the one it lost.
+//! guidelines measure it, and the tests hold each floor: every tone outside
+//! code but faint keeps 4.3:1 against the ground it is tuned for and 3.8:1
+//! against the tint and the code ground a whole line sits on; a word a change
+//! marks keeps 3.8:1 against the fill that marks it; a word of code keeps 4.3:1
+//! against its ground and 3.8:1 against the code ground, and a comment, which
+//! recedes, 2.5:1 against both; and a pill's ink keeps 4.5:1 against the color
+//! of every tone outside code but faint. A faint stroke, which says nothing by
+//! itself, keeps 1.6:1 against its ground: seen, and behind every tone that
+//! says something. A color retuned to taste keeps these, or a test names the
+//! one it lost.
 
 use crate::line::{Fill, Syntax, Tone};
 use crate::paint::Ground;
@@ -47,6 +49,15 @@ const STRONG: Tuned = Tuned {
 const MUTED: Tuned = Tuned {
     dark: Rgb(142, 136, 127),
     light: Rgb(123, 117, 111),
+};
+
+/// Faint: a stroke that says nothing by itself, behind every tone that
+/// says something. Its values sit close to the 1.6:1 floor on each ground,
+/// about 2.0:1 dark and 1.7:1 light: low enough to recede below every tone
+/// that says something, and high enough to stay seen.
+const FAINT: Tuned = Tuned {
+    dark: Rgb(75, 70, 80),
+    light: Rgb(200, 194, 187),
 };
 
 /// Done: a node or a run that finished.
@@ -180,6 +191,7 @@ pub(crate) fn tone(ground: Ground, tone: Tone) -> Option<Rgb> {
         Tone::Plain | Tone::Command => return None,
         Tone::Strong => STRONG,
         Tone::Muted => MUTED,
+        Tone::Faint => FAINT,
         Tone::Done => DONE,
         Tone::Failed => FAILED,
         Tone::Running => RUNNING,

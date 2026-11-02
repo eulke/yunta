@@ -3,8 +3,8 @@
 //!
 //! At a glance a page says how far the run has come, where its nodes and
 //! tasks stand, what it cautions and what it could not read. A closing
-//! adds what the run took and where its work is; `--full` says every
-//! fact; `--dig` adds where the run itself is kept.
+//! adds what the run took, what it changed and where its work is; `--full`
+//! says every fact; `--dig` adds where the run itself is kept.
 
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::paths;
-use surco::text::counted;
+use surco::text::{counted, counted_as};
 use yunta_core::Isolation;
 use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation};
 
@@ -44,7 +44,9 @@ impl RunPage<'_> {
             fields = fields.push_if("left out", left);
         }
         if harvest {
-            fields = fields.push_if("tokens", self.spent(glyphs));
+            fields = fields
+                .push_if("tokens", self.spent(glyphs))
+                .push_if("changed", self.changed(glyphs));
         }
         fields = fields.push_if("caution", caution_row(self.frame));
         if harvest {
@@ -99,6 +101,16 @@ impl RunPage<'_> {
             ),
             None => self.tokens().unwrap_or_default(),
         }
+    }
+
+    /// What the run changed from its base to its newest tree, as git last
+    /// counted it on the tree the run stands on. Nothing for a run whose
+    /// change was not counted there, or that touched no file.
+    pub(super) fn changed(&self, glyphs: Glyphs) -> String {
+        self.state
+            .current_change()
+            .and_then(|change| yunta_render::changes::of(change, glyphs))
+            .unwrap_or_default()
     }
 
     /// The run's longest nodes, longest first. `None` for a run where no
@@ -164,7 +176,11 @@ impl RunPage<'_> {
     fn degraded(&self) -> String {
         match self.frame.degraded.len() {
             0 => String::new(),
-            n => counted(n, "capability the adapter lacks"),
+            n => counted_as(
+                n,
+                "capability the adapter lacks",
+                "capabilities the adapter lacks",
+            ),
         }
     }
 

@@ -1,6 +1,7 @@
 //! The gate's page at a terminal, as the person answering it reads it.
 
 use surco::doc::{Block, Doc};
+use surco::glyphs::Glyphs;
 use surco::golden::{assert_golden, Environment, ENVIRONMENTS};
 use surco::look::Look;
 use surco::paint::Paint;
@@ -17,6 +18,7 @@ use yunta_testkit_core::spell;
 
 use super::documents::{review, run, shown_plan};
 use super::publication::gate_goldens;
+use crate::changes;
 use crate::gate::{self, GatePage};
 use crate::plan::Form;
 
@@ -114,9 +116,10 @@ fn assert_headline_and_decision(page: &Doc, plain: &str) {
     );
 }
 
-/// The page a gate of the greet plan shows above its prompt at a terminal: the
-/// plan the question is about, and the decision the page ends on.
-fn console_page() -> Doc {
+/// The page a gate of the greet plan shows above its prompt at a terminal that
+/// draws `glyphs`: the plan the question is about, and the decision the page
+/// ends on.
+fn console_page(glyphs: Glyphs) -> Doc {
     let review = review();
     let shown = vec![shown_plan(review.clone())];
     let escalation = greet_escalation(&review);
@@ -127,6 +130,7 @@ fn console_page() -> Doc {
             shown: Some((&run, shown.as_slice())),
             waits: None,
             note: None,
+            changed: changes::said(9, 412, 87, glyphs),
             form: Form::Review,
             decision: gate::asked(&escalation, &shown),
         },
@@ -137,16 +141,19 @@ fn console_page() -> Doc {
 /// A gate's page at a terminal matches its goldens in every environment, fits
 /// each width, opens on its headline and ends on its decision. Every structural
 /// check runs in every environment before the first golden is compared, so a
-/// page that is wrong says how in each environment, goldens or not.
+/// page that is wrong says how in each environment, goldens or not. Each page
+/// is built with the glyphs of the environment it is drawn in, since the
+/// changed row is text the page is given.
 #[test]
 fn a_gate_s_page_at_a_terminal_matches_its_goldens() {
-    let page = console_page();
     for environment in &ENVIRONMENTS {
+        let page = console_page(Look::of(environment).glyphs);
         assert_fits(&page, environment);
         let plain = Terminal::on(unpainted(environment)).draw(&page);
         assert_headline_and_decision(&page, &plain);
     }
     for environment in &ENVIRONMENTS {
+        let page = console_page(Look::of(environment).glyphs);
         let drawn = Terminal::on(Look::of(environment)).draw(&page);
         assert_golden(&environment.golden(&gate_goldens(), "console"), &drawn);
     }

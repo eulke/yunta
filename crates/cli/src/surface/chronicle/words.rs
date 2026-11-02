@@ -7,7 +7,7 @@
 //! formats a domain type with `Debug`.
 
 use surco::figures::duration;
-use surco::glyphs::Mark;
+use surco::glyphs::{Glyphs, Mark};
 use surco::text::{detailed, one_line};
 use surco::words::Standing;
 use yunta_core::best_effort::BestEffortStep;
@@ -25,9 +25,10 @@ use super::super::view;
 
 /// What the moment carries beyond its subject, and the state it is
 /// marked with.
-pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String) {
+pub(super) fn carried(happening: &Happening, glyphs: Glyphs) -> (Option<Mark>, String) {
+    let sep = glyphs.sep();
     match happening {
-        Happening::Run(it) => run_words(it),
+        Happening::Run(it) => run_words(it, glyphs),
         Happening::Node(it) => node_words(it, sep),
         Happening::Session(it) => (None, session_words(it, sep)),
         Happening::Tasks(it) => (None, super::task_words::task_words(it)),
@@ -43,7 +44,7 @@ pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String
     }
 }
 
-fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
+fn run_words(happening: &run::happening::Happening, glyphs: Glyphs) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
         H::Created { mode, base_branch } => format!("created: mode `{mode}` off {base_branch}"),
@@ -67,6 +68,15 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
              been awake {}",
             duration(*slept),
             duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
+        ),
+        H::ChangesCounted {
+            files,
+            added,
+            removed,
+        } => format!(
+            "the change counted: {}",
+            yunta_render::changes::said(*files, *added, *removed, glyphs)
+                .unwrap_or_else(|| "no file changed".to_string())
         ),
         H::Closed { terminal, .. } => view::closed_as(*terminal).word().to_string(),
         H::PromotionSignaled {

@@ -71,7 +71,8 @@ pub fn document(receipt: &Receipt, spell: &dyn Fn(&NextStep) -> String, glyphs: 
         .with(
             Fields::new()
                 .push_if("run", receipt.run_id.to_string())
-                .push_if("cost", cost(receipt, glyphs)),
+                .push_if("cost", cost(receipt, glyphs))
+                .push_if("changed", changed(receipt, glyphs)),
         )
         .with(checks(receipt));
     for failed in &receipt.failed {
@@ -327,6 +328,16 @@ fn cost(receipt: &Receipt, glyphs: Glyphs) -> String {
         counted(cost.reroutes, "reroute")
     ));
     said
+}
+
+/// What the run changed from its base to its newest tree, as git last
+/// counted it; nothing when nothing counted it, or it touched no file.
+fn changed(receipt: &Receipt, glyphs: Glyphs) -> String {
+    receipt
+        .changed
+        .as_ref()
+        .and_then(|change| crate::changes::of(change, glyphs))
+        .unwrap_or_default()
 }
 
 /// What the run's comparisons against its baseline found — or, when the

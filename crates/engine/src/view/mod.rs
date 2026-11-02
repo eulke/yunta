@@ -37,7 +37,7 @@ use crate::stats::stats_observed_at;
 use node::Reading;
 
 pub use chronicle::{chronicle, Happening, Moment};
-pub use node::{node_word, NodeFrame, NodeStanding, RunningTask};
+pub use node::{node_word, Declares, GateAsks, NodeFrame, NodeStanding, RunningTask};
 
 pub use phase::{RunPhase, WaitingOn};
 pub use yunta_core::events::{ChildLink, Degradation, Reroute};
@@ -202,6 +202,7 @@ pub fn run_frame_of(
             .iter()
             .map(|stat| (&stat.node_id, stat))
             .collect(),
+        people: &stats.people_by_node,
         included: mode_included_nodes(workflow, &mode),
         left_out: state.run.left_out(),
         state,

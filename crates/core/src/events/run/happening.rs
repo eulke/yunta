@@ -46,6 +46,13 @@ pub enum Happening {
     HostSuspended {
         slept: std::time::Duration,
     },
+    /// The run's change was counted: `files` touched, `added` lines and
+    /// `removed` lines.
+    ChangesCounted {
+        files: u32,
+        added: u64,
+        removed: u64,
+    },
     Closed {
         terminal: TerminalState,
         tokens: TokenUsage,
@@ -89,6 +96,11 @@ impl From<&RunEvent> for Happening {
             },
             RunEvent::HostSuspended(p) => Happening::HostSuspended {
                 slept: p.duration(),
+            },
+            RunEvent::ChangesCounted(p) => Happening::ChangesCounted {
+                files: p.files,
+                added: p.added,
+                removed: p.removed,
             },
             RunEvent::PromotionSignaled(p) => Happening::PromotionSignaled {
                 to: p.suggested_mode.clone(),

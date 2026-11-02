@@ -1,10 +1,10 @@
 //! The page a gate's decision is shown on: one headline, where the decision
-//! waits, what the page leaves out, each document in the form the page
-//! shows it, and the decision a person answers last. A terminal draws it
-//! above the prompt that answers the decision, and a forge draws it as the
-//! description of the pull request a reviewer answers on.
+//! waits, what the page leaves out, what the run changed, each document in
+//! the form the page shows it, and the decision a person answers last. A
+//! terminal draws it above the prompt that answers the decision, and a forge
+//! draws it as the description of the pull request a reviewer answers on.
 
-use surco::components::{Gist, Headline, Lead, Note, Section};
+use surco::components::{Fields, Gist, Headline, Lead, Note, Section};
 use surco::doc::{Block, Doc};
 use surco::line::{Line, Tone};
 use surco::words::Standing;
@@ -27,14 +27,17 @@ pub struct GatePage<'a> {
     pub waits: Option<String>,
     /// What the page leaves out and where it is whole, when it leaves anything.
     pub note: Option<String>,
+    /// What the run changed from its base to its newest tree, as the fact
+    /// the page says it in, when the run's change was counted.
+    pub changed: Option<String>,
     /// How much of each document the page shows.
     pub form: Form,
     /// The decision the page ends on.
     pub decision: Section,
 }
 
-/// The page: one headline, then where it waits, what it leaves out, each
-/// document in its form, and the decision last.
+/// The page: one headline, then where it waits, what it leaves out, what the
+/// run changed, each document in its form, and the decision last.
 pub fn page(page: GatePage<'_>, spell: &dyn Fn(&NextStep) -> String) -> Doc {
     let headline = Headline::new(
         Standing::NeedsYou.mark(),
@@ -51,6 +54,9 @@ pub fn page(page: GatePage<'_>, spell: &dyn Fn(&NextStep) -> String) -> Doc {
     }
     if let Some(note) = page.note {
         doc = doc.with(Note(note));
+    }
+    if let Some(changed) = page.changed {
+        doc = doc.with(Fields::new().push_if("changed", changed));
     }
     if let Some((run, documents)) = page.shown {
         for document in documents {

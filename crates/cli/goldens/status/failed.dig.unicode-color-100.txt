@@ -1,4 +1,4 @@
-␛[31m✗␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[31mfailed␛[0m␛[2m · after 7m41s␛[0m␛[2m · 32m10s ago␛[0m                                          7E5PH4
+␛[31m✗␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[31m failed ␛[0m␛[2m· after 7m41s␛[0m␛[2m · 32m10s ago␛[0m                                          7E5PH4
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
   node `lint` failed: exit 101.
 

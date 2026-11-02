@@ -22,7 +22,7 @@
 //! Replay stops at the first such event; the state accumulated up to
 //! that point is still returned.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -172,6 +172,17 @@ impl RunState {
     pub fn time_spent(&self, until: Option<DateTime<Utc>>) -> TimeSpent {
         let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
         self.clock.spent(&open, self.run.suspensions(), until)
+    }
+
+    /// Each node's share of a person's time, booked as
+    /// [`time_spent`](Self::time_spent) books the run's: every stretch a
+    /// person was asked about the node, and with `until` the stretch from
+    /// the last applied event to it, classified by what is open now. Two
+    /// nodes asked at once each hold the stretch the run counts once. A node
+    /// no person was asked about is absent.
+    pub fn people_at(&self, until: Option<DateTime<Utc>>) -> BTreeMap<NodeId, Duration> {
+        let open = Open::of(&self.run, &self.nodes, &self.gates, &self.tasks);
+        self.clock.people_at(&open, self.run.suspensions(), until)
     }
 
     /// The awake time from the first event to `until`, or to the last

@@ -50,7 +50,7 @@ pub(super) fn say(moment: &Moment, glyphs: Glyphs) -> Said {
         Some(node) => node.to_string(),
         None => "run".to_string(),
     };
-    let (mark, carried) = carried(&moment.happening, glyphs.sep());
+    let (mark, carried) = carried(&moment.happening, glyphs);
     let text = joined(
         &subject,
         &one_line(&carried),
@@ -98,7 +98,8 @@ fn of_its_subject(happening: &Happening) -> bool {
         Happening::Run(
             run::happening::Happening::HostSuspended { .. }
             | run::happening::Happening::BaselineCaptured { .. }
-            | run::happening::Happening::BaselineHeld { .. },
+            | run::happening::Happening::BaselineHeld { .. }
+            | run::happening::Happening::ChangesCounted { .. },
         ) => false,
         Happening::Run(_) => true,
         Happening::Node(

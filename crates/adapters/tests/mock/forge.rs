@@ -34,6 +34,7 @@ fn gate_request(run_id: &str) -> PublishRequest {
         },
         artifacts: Vec::new(),
         shown: Vec::new(),
+        changed: None,
     }
 }
 

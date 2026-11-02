@@ -131,14 +131,6 @@ impl Glyphs {
         Self::Unicode
     }
 
-    /// The character a full step of a bar is drawn with.
-    pub fn bar_filled(self) -> char {
-        match self {
-            Self::Unicode => '█',
-            Self::Ascii => '=',
-        }
-    }
-
     /// The character an empty step of a bar is drawn with — always
     /// something visible, so a bar at zero is still a bar and not a gap
     /// the eye reads as a missing row.
@@ -243,11 +235,30 @@ impl Glyphs {
         }
     }
 
+    /// The signs before the lines a change adds and the lines it takes out:
+    /// `+412 −87`. A family of their own, as the word diff's marks are.
+    pub fn changed(self) -> [char; 2] {
+        match self {
+            Self::Unicode => ['+', '−'],
+            Self::Ascii => ['+', '-'],
+        }
+    }
+
     /// The edge quoted output hangs from, so it reads as something a
     /// command printed and not as something this one says.
     pub fn gutter(self) -> char {
         match self {
             Self::Unicode => '│',
+            Self::Ascii => '|',
+        }
+    }
+
+    /// The edge down the left of the one decision a run waits on, drawn in
+    /// every layer: the tint behind the decision shows only in 24 bits. It
+    /// shares its ASCII form with the gutter, which is an edge too.
+    pub fn decision_edge(self) -> char {
+        match self {
+            Self::Unicode => '▎',
             Self::Ascii => '|',
         }
     }
@@ -308,6 +319,27 @@ impl Glyphs {
         }
     }
 
+    /// What says a node sends its failure to another node, which runs it
+    /// again: `lint ↺ fix-lint`. One cell in Unicode and two in ASCII; the
+    /// arithmetic that lays out a row measures it.
+    pub fn returns(self) -> &'static str {
+        match self {
+            Self::Unicode => "↺",
+            Self::Ascii => "<>",
+        }
+    }
+
+    /// What hangs a child of a group from the group above it in a list of
+    /// nodes: every child but the last, and the `last`.
+    pub fn branch(self, last: bool) -> &'static str {
+        match (self, last) {
+            (Self::Unicode, false) => "├─",
+            (Self::Unicode, true) => "└─",
+            (Self::Ascii, false) => "+-",
+            (Self::Ascii, true) => "`-",
+        }
+    }
+
     /// A node's stretch of a run's furrow: plowed where the run reached the
     /// node, whatever it came to; ahead where the node never ran; skipped
     /// where the run leaves it out. In ASCII the last two are the marks of
@@ -328,6 +360,26 @@ impl Glyphs {
         match self {
             Self::Unicode => &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'],
             Self::Ascii => &['_', '.', ':', '-', '=', '+', '*', '#'],
+        }
+    }
+
+    /// The steps a fine bar is drawn in, the smallest first and a whole cell
+    /// last: a bar a value long is whole cells and the step of the cell it
+    /// ends in. ASCII has no step finer than a cell, so a bar there is whole
+    /// cells alone.
+    pub fn fine_steps(self) -> &'static [char] {
+        match self {
+            Self::Unicode => &['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'],
+            Self::Ascii => &['#'],
+        }
+    }
+
+    /// What marks a bar cut short, drawn over its track: the bar would run
+    /// past its scale, and a note says how far.
+    pub fn cut(self) -> &'static str {
+        match self {
+            Self::Unicode => "╱╱",
+            Self::Ascii => "//",
         }
     }
 

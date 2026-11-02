@@ -15,13 +15,13 @@
   3 lines above
   whole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c
 
-  retry: runs `fix-lint` once more
-    one more correction attempt beyond `max_reroutes`
-    yunta resolve-gate 7E5PH4 retry
-  adjust
-    the run goes on with what you say
-    asks: what to change
-    yunta resolve-gate 7E5PH4 adjust --text "<answer>"
+| retry: runs `fix-lint` once more
+|   one more correction attempt beyond `max_reroutes`
+|   yunta resolve-gate 7E5PH4 retry
+| adjust
+|   the run goes on with what you say
+|   asks: what to change
+|   yunta resolve-gate 7E5PH4 adjust --text "<answer>"
 
   progress     0 of 2 nodes done, 1 failed
   tokens       20.2k spent, 3 past runs, median 18k tokens

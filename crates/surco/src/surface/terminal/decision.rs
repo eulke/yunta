@@ -8,8 +8,9 @@ use crate::width::{cell_width, wrap, INDENT};
 impl Decision {
     /// Each option with what it costs and the command that chooses it, if any,
     /// then, under the title `otherwise_title` gives, what moves the run
-    /// without choosing one. Every line is filled as a tint: a decision is
-    /// what waits on the reader, so it stands apart from the page where a
+    /// without choosing one. A decision is what waits on the reader, so every
+    /// line opens with its edge, in the person's tone and in every layer, in
+    /// place of the line's first two spaces, and is filled as a tint where a
     /// layer draws 24-bit color.
     pub(in crate::surface) fn lines(&self, look: &Look) -> Vec<Line> {
         let under = format!("{INDENT}{INDENT}");
@@ -44,9 +45,15 @@ impl Decision {
             );
             lines.extend(super::next::steps(&self.otherwise, &under, look));
         }
+        let edge = Line::new()
+            .push(Tone::NeedsYou, look.glyphs.decision_edge().to_string())
+            .plain(" ");
         lines
             .into_iter()
-            .map(|line| line.filled(Fill::Tint))
+            .map(|line| {
+                let rest = line.slice(INDENT.len()..line.text().len());
+                edge.clone().then(rest).filled(Fill::Tint)
+            })
             .collect()
     }
 
@@ -90,5 +97,23 @@ mod tests {
             "an option and a way out are more than one line"
         );
         assert!(lines.iter().all(|line| line.fill() == Some(Fill::Tint)));
+    }
+
+    /// Every line a decision draws opens with its edge, in the person's tone,
+    /// in place of its first two spaces, so each line keeps its width.
+    #[test]
+    fn every_line_a_decision_draws_opens_with_its_edge() {
+        let look = Look::plain();
+        let edge = look.glyphs.decision_edge();
+        let lines = decision().lines(&look);
+        assert_eq!(lines[0].text(), format!("{edge} approve"));
+        for line in &lines {
+            assert!(
+                line.text().starts_with(&format!("{edge} ")),
+                "{}",
+                line.text()
+            );
+            assert_eq!(line.spans()[0].tone, crate::line::Tone::NeedsYou);
+        }
     }
 }

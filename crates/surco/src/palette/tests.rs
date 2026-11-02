@@ -7,9 +7,10 @@ const GROUND: Tuned = Tuned {
     light: Rgb(251, 250, 246),
 };
 
-/// Every tone the palette colors outside code: what a line is about, what a
-/// reader skims past, each state, and each change. The words of code are in
-/// `SYNTAX`, where a comment, which recedes, has a floor of its own.
+/// Every tone the palette colors outside code, except faint, which has a
+/// floor of its own: what a line is about, what a reader skims past, each
+/// state, and each change. The words of code are in `SYNTAX`, where a comment,
+/// which recedes, has a floor of its own too.
 const COLORED: [Tone; 9] = [
     Tone::Strong,
     Tone::Muted,
@@ -131,6 +132,24 @@ fn every_word_of_code_reads_on_its_ground_and_on_the_code_ground() {
             assert!(
                 on_code >= floor_on_code,
                 "{ground:?} / {syntax:?} on code: {on_code:.2}"
+            );
+        }
+    }
+}
+
+/// A faint stroke reads on the ground it is tuned for at its own floor:
+/// seen, and fainter than every tone that says something.
+#[test]
+fn a_faint_stroke_is_seen_and_recedes_behind_every_other_tone() {
+    for ground in [Ground::Dark, Ground::Light] {
+        let faint = tone(ground, Tone::Faint).expect("faint has a color");
+        let on_ground = contrast(faint, GROUND.on(ground));
+        assert!(on_ground >= 1.6, "{ground:?}: {on_ground:.2}");
+        for colored in COLORED {
+            let color = tone(ground, colored).expect("a colored tone has a color");
+            assert!(
+                contrast(color, GROUND.on(ground)) > on_ground,
+                "{ground:?} / {colored:?} reads fainter than faint"
             );
         }
     }

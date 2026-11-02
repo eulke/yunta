@@ -88,12 +88,12 @@ const BLANK_LINE: &str = "\n\n";
 enum Level {
     /// The documents, with what `Leaves` names left out of each.
     Documents(Leaves),
-    /// None of the documents: the headline, where the decision waits, the note
-    /// and the decision the page ends on.
+    /// None of the documents: the headline, where the decision waits, the note,
+    /// what the run changed and the decision the page ends on.
     NoDocuments,
-    /// The decision alone: the headline, where it waits, the note, and the
-    /// decision under its question with the files and each answer, without
-    /// what weighs on it.
+    /// The decision alone: the headline, where it waits, the note, what the run
+    /// changed, and the decision under its question with the files and each
+    /// answer, without what weighs on it.
     Decision,
 }
 
@@ -164,6 +164,10 @@ fn draw(
                 request.decision.node, request.decision.assignee
             )),
             note: note(publication, level),
+            changed: request
+                .changed
+                .as_ref()
+                .and_then(|change| crate::changes::of(change, Glyphs::Unicode)),
             form: Form::Published,
             decision: decision(request, publication, question, level),
         },

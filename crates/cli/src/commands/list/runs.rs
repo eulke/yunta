@@ -13,7 +13,7 @@
 
 use surco::components::{Edge, Fields, Furrow, Gist, Headline, Next, Note, RunLine, Runs, Said};
 use surco::doc::{Block, Depth, Doc};
-use surco::figures::duration;
+use surco::figures::age;
 use surco::glyphs::{Glyphs, Mark};
 use surco::look::Look;
 use surco::text::counted;
@@ -191,7 +191,7 @@ impl ListRunsAnswer {
         };
         let edge = match (row.group, &row.command) {
             (Group::Stalled | Group::Stopped, Some(command)) => Edge::Command(command.clone()),
-            _ => Edge::Age(duration(row.age)),
+            _ => Edge::Age(age(row.age)),
         };
         row.line(handle, edge)
     }
@@ -213,9 +213,9 @@ impl ListRunsAnswer {
         ]
     }
 
-    /// What a glance leaves out, counted: the runs that closed and when the
-    /// newest did, the runs that do not read back, and the runs this
-    /// listing leaves to other projects.
+    /// What a glance leaves out, in one line: how recent the newest closed
+    /// run is (the headline counts the closed runs), the runs that do not
+    /// read back, and the runs this listing leaves to other projects.
     fn footer(&self, glyphs: Glyphs) -> Option<Block> {
         let full = self.depth.reaches(Depth::Full);
         let mut said = Vec::new();
@@ -224,12 +224,8 @@ impl ListRunsAnswer {
             .rows
             .iter()
             .filter(|row| row.group == Group::Closed);
-        if let (false, Some(newest)) = (full, closed.clone().map(|row| row.age).min()) {
-            said.push(format!(
-                "{} closed, the newest {} ago",
-                closed.count(),
-                duration(newest)
-            ));
+        if let (false, Some(newest)) = (full, closed.map(|row| row.age).min()) {
+            said.push(format!("the newest closed {} ago", age(newest)));
         }
         if !full && !self.inbox.unreadable.is_empty() {
             said.push(format!("{} could not be read", self.unreadable_handles()));

@@ -31,7 +31,7 @@ use crate::error::{CliError, Outcome};
 use crate::output::{emit, Answer, Mode};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::RunStatsPage;
-use surco::doc::Doc;
+use surco::doc::{Depth, Doc};
 use surco::figures::{duration, Tokens};
 use surco::look::Look;
 pub(crate) use workflow::verification_findings;
@@ -42,11 +42,12 @@ use workflow::WorkflowPage;
 pub async fn stats(
     run_id: Option<&RunId>,
     workflow: Option<&WorkflowName>,
+    depth: Depth,
     output: Mode,
     look: &Look,
 ) -> Result<Outcome, CliError> {
     match (run_id, workflow) {
-        (Some(run_id), None) => stats_run(run_id, output, look).await,
+        (Some(run_id), None) => stats_run(run_id, depth, output, look).await,
         (None, Some(workflow)) => stats_workflow(workflow, output, look).await,
         (None, None) => Err(CliError::msg(
             "`yunta stats` needs a run id or `--workflow <name>`",
@@ -103,17 +104,24 @@ impl Answer for RunStatsAnswer<'_> {
     }
 }
 
-async fn stats_run(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+async fn stats_run(
+    run_id: &RunId,
+    depth: Depth,
+    output: Mode,
+    look: &Look,
+) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let open = ctx.open_run(run_id).await?;
     let events = open.events;
     let manifest = open.manifest.doc;
 
     let state = yunta_engine::derive(&events);
-    let run_stats = compute_run_stats_of(&manifest.workflow, &state);
+    // The page reads the run at one instant, its headline's: a run still
+    // going counts the wait or the work open now.
+    let now = ctx.clock.now();
+    let run_stats = compute_run_stats_of(&manifest.workflow, &state, Some(now));
     let mode = state.run.mode().as_str();
     let pricing = ctx.project.config.pricing.clone();
-    let now = ctx.clock.now();
     let frame = yunta_engine::run_frame_of(
         run_id,
         &manifest.workflow,
@@ -128,6 +136,7 @@ async fn stats_run(run_id: &RunId, output: Mode, look: &Look) -> Result<Outcome,
             frame: &frame,
             stats: &run_stats,
             pricing: pricing.as_ref(),
+            depth,
         },
     };
     emit(output, &answer, look)

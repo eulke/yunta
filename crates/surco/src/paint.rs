@@ -326,6 +326,9 @@ fn ansi(tone: Tone) -> (bool, bool, Option<Ansi>) {
         Tone::Plain => (false, false, None),
         Tone::Strong | Tone::Command => (true, false, None),
         Tone::Muted => (false, true, None),
+        // In sixteen colors faint is dim, as muted is: the layer has no
+        // step between them.
+        Tone::Faint => (false, true, None),
         Tone::Done => (false, false, Some(Ansi::Green)),
         Tone::Failed => (false, false, Some(Ansi::Red)),
         Tone::Running => (false, false, Some(Ansi::Cyan)),

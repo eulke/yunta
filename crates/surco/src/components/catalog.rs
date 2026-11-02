@@ -318,6 +318,75 @@ fn field() -> Runs {
     }
 }
 
+/// The two nodes a plan leaves: the plan itself, and the approval a person
+/// gave it, whose time is a person's and so reads in the person's tone.
+fn planned_rows() -> Vec<NodeRow> {
+    vec![
+        NodeRow {
+            mark: Mark::Done,
+            word: Standing::Finished.word(),
+            id: "plan".to_string(),
+            branch: None,
+            returns: None,
+            note: "4 tasks in 3 steps".to_string(),
+            took: "1m31s".to_string(),
+            took_by_person: false,
+            spent: "1.94M".to_string(),
+        },
+        NodeRow {
+            mark: Mark::Done,
+            word: Standing::Finished.word(),
+            id: "approve-plan".to_string(),
+            branch: None,
+            returns: None,
+            note: "approved on its third round".to_string(),
+            took: "6h27m".to_string(),
+            took_by_person: true,
+            spent: String::new(),
+        },
+    ]
+}
+
+/// The nodes after the plan: a parallel group's two children, which hang
+/// from its branch, and a lint node whose failure returns to fix-lint.
+fn fan_out_rows() -> Vec<NodeRow> {
+    vec![
+        NodeRow {
+            mark: Mark::Absent,
+            word: Standing::NeverRan.word(),
+            id: "review".to_string(),
+            branch: Some(Branch::Child),
+            returns: None,
+            note: String::new(),
+            took: String::new(),
+            took_by_person: false,
+            spent: String::new(),
+        },
+        NodeRow {
+            mark: Mark::Absent,
+            word: Standing::NeverRan.word(),
+            id: "conform".to_string(),
+            branch: Some(Branch::Last),
+            returns: None,
+            note: String::new(),
+            took: String::new(),
+            took_by_person: false,
+            spent: String::new(),
+        },
+        NodeRow {
+            mark: Mark::Absent,
+            word: Standing::NeverRan.word(),
+            id: "lint".to_string(),
+            branch: None,
+            returns: Some("fix-lint".to_string()),
+            note: "sends a failure back at most once".to_string(),
+            took: String::new(),
+            took_by_person: false,
+            spent: String::new(),
+        },
+    ]
+}
+
 /// The blocks a plan and a run's rows are drawn with, and how a document
 /// closes: the decisions, the facts, and what to type next.
 fn closing() -> Vec<Block> {
@@ -338,14 +407,7 @@ fn closing() -> Vec<Block> {
         }],
     };
     let nodes = NodeTable {
-        rows: vec![NodeRow {
-            mark: Mark::Done,
-            word: Standing::Finished.word(),
-            id: "plan".to_string(),
-            note: "4 tasks".to_string(),
-            took: "1m31s".to_string(),
-            spent: "1.94M".to_string(),
-        }],
+        rows: planned_rows().into_iter().chain(fan_out_rows()).collect(),
     };
     vec![
         table.into(),

@@ -4,11 +4,12 @@ use crate::line::Syntax;
 use std::path::Path;
 
 /// Every tone a line can carry, the command included.
-const TONES: [Tone; 19] = [
+const TONES: [Tone; 20] = [
     Tone::Plain,
     Tone::Strong,
     Tone::Command,
     Tone::Muted,
+    Tone::Faint,
     Tone::Done,
     Tone::Failed,
     Tone::Running,

@@ -990,6 +990,40 @@
         }
       ]
     },
+    "ChangesCountedPayload": {
+      "description": "What the run's change stands at, counted by git from the run's base\ncommit to its newest tree: how many files it touches and how many lines\nit adds and removes, a binary file counting as a file with no lines. It\nis counted when a gate asks a person, before a pull request opens, and\nwhen the engine finishes the run (`done`, `failed` or `promoted`), never\nonce per node: the event names the gate or the pull request node it was\ncounted for, and no node at the run's end. A person's close of a stopped\nrun (`yunta close`) records no count.",
+      "type": "object",
+      "properties": {
+        "added": {
+          "description": "How many lines the change adds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "files": {
+          "description": "How many files the change touches: a renamed file once, binary\nfiles included.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "removed": {
+          "description": "How many lines the change removes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "tree": {
+          "description": "The tree the change was counted to.",
+          "$ref": "#/$defs/TreeId"
+        }
+      },
+      "required": [
+        "tree",
+        "files",
+        "added",
+        "removed"
+      ]
+    },
     "Channel": {
       "oneOf": [
         {
@@ -3916,6 +3950,19 @@
             }
           },
           "$ref": "#/$defs/HostSuspendedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "changes_counted"
+            }
+          },
+          "$ref": "#/$defs/ChangesCountedPayload",
           "required": [
             "kind"
           ]

@@ -80,7 +80,7 @@ fn an_unrecognized_override_leaves_the_environment_to_decide() {
 #[test]
 fn every_glyph_of_either_set_occupies_exactly_one_cell() {
     for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
-        let mut drawn: Vec<char> = vec![glyphs.bar_filled(), glyphs.bar_empty()];
+        let mut drawn: Vec<char> = vec![glyphs.bar_empty()];
         drawn.extend(glyphs.ramp());
         drawn.extend(ALL_MARKS.map(|mark| glyphs.mark(mark)));
         for ch in drawn {
@@ -105,7 +105,6 @@ fn tokens(glyphs: Glyphs) -> Vec<String> {
             glyphs.sep(),
             glyphs.gutter(),
             glyphs.times(),
-            glyphs.bar_filled(),
             glyphs.bar_empty(),
             glyphs.continued(),
             HOME,
@@ -158,5 +157,42 @@ fn the_marks_of_a_word_diff_are_ascii_and_apart_in_both_sets() {
                 "{glyphs}: `{mark}` says what a sign of the set says"
             );
         }
+    }
+}
+
+/// The glyphs of a fine bar, a trace, a count of lines and a decision's
+/// edge are one cell a character in both sets, and ASCII in the ASCII set.
+#[test]
+fn the_glyphs_of_bars_traces_counts_and_edges_are_one_cell_a_character() {
+    for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
+        let mut drawn: Vec<char> = glyphs.fine_steps().to_vec();
+        drawn.extend(glyphs.changed());
+        drawn.push(glyphs.decision_edge());
+        drawn.extend(glyphs.cut().chars());
+        drawn.extend(glyphs.returns().chars());
+        drawn.extend(glyphs.branch(false).chars());
+        drawn.extend(glyphs.branch(true).chars());
+        for ch in &drawn {
+            assert_eq!(
+                crate::width::cell_width(&ch.to_string()),
+                1,
+                "{ch:?} is not one cell wide under {glyphs}"
+            );
+        }
+        if glyphs == Glyphs::Ascii {
+            assert!(drawn.iter().all(char::is_ascii), "{drawn:?}");
+        }
+    }
+}
+
+/// A fine bar climbs eight steps to a whole cell in Unicode; ASCII has the
+/// whole cell alone. A group's last child hangs from a branch of its own.
+#[test]
+fn a_fine_bar_climbs_eighths_and_a_last_child_hangs_apart() {
+    assert_eq!(Glyphs::Unicode.fine_steps().len(), 8);
+    assert_eq!(Glyphs::Unicode.fine_steps().last(), Some(&'█'));
+    assert_eq!(Glyphs::Ascii.fine_steps(), &['#']);
+    for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
+        assert_ne!(glyphs.branch(false), glyphs.branch(true), "{glyphs}");
     }
 }

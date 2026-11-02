@@ -32,7 +32,7 @@ pub use evidence::{Evidence, Whole};
 pub use fields::{Fields, Reads};
 pub use headline::Headline;
 pub use next::Next;
-pub use node_table::{NodeRow, NodeTable};
+pub use node_table::{Branch, NodeRow, NodeTable};
 pub use page::{Furrow, Gist};
 pub use problem::{Place, Problem, Refusal, Severity};
 pub use runs::{Edge, RunLine, Runs};

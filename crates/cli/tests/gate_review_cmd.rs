@@ -298,9 +298,13 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
         "the decision offers to pause the run among its options:\n{drawn}"
     );
     assert!(
-        asked
-            .lines()
-            .any(|line| line.trim_start().starts_with("approve:")),
+        asked.lines().any(|line| {
+            // A decision's lines open with its edge.
+            line.trim_start()
+                .trim_start_matches(['|', '▎'])
+                .trim_start()
+                .starts_with("approve:")
+        }),
         "the decision draws its options as rows, approve among them:\n{drawn}"
     );
     assert!(

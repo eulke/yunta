@@ -1,4 +1,4 @@
-␛[36m●␛[0m ␛[1mpaced (default)␛[0m␛[2m · ␛[0m␛[36mrunning␛[0m␛[2m · 7m30s so far␛[0m                                                    9G5FAV
+␛[36m●␛[0m ␛[1mpaced (default)␛[0m␛[2m ·␛[0m␛[36m running ␛[0m␛[2m· 7m30s so far␛[0m                                                    9G5FAV
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
 
   ␛[2mtask cost   ␛[0m 19.8k tokens per verified task · 1 task done
@@ -6,12 +6,12 @@
   ␛[2mcache       ␛[0m 1.4× cached tokens per input token
   ␛[2mtokens      ␛[0m 18k in / 1.8k out (25.2k cached)
   ␛[2mdocuments   ␛[0m 3 accepted, 1 refused
-  ␛[2mfindings    ␛[0m 5 posted, 1 updated, 1 withdrawn, 0 refused; 4 standing
+  ␛[2mfindings    ␛[0m 5 posted, 1 updated, 1 withdrawn; 4 standing
   ␛[2manswers     ␛[0m 2 given, 1 proved; 1 settled
 
 nodes:
-  ␛[32m✓␛[0m finished  plan                        ██████░░░░░░░░░░░░░░   4.4k tokens     50s   20% blocked
-  ␛[32m✓␛[0m finished  implement-the-whole-feature ████████████████████  15.4k tokens   6m15s   20% blocked
+  ␛[32m✓␛[0m finished  plan                            40s ␛[32m██▋␛[0m                      4.4k tokens
+  ␛[32m✓␛[0m finished  implement-the-whole-feature   5m00s ␛[32m████████████████████␛[0m    15.4k tokens
 
 runners:
-  implementer ████████████████████  19.8k tokens
+  implementer ␛[36m████████████████████␛[0m  19.8k tokens

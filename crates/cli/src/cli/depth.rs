@@ -6,13 +6,14 @@ use surco::doc::Depth;
 /// more.
 #[derive(Debug, Clone, Copy, clap::Args)]
 pub(crate) struct DepthArg {
-    /// Tells the whole story: every node with what it said or the plan it
-    /// accepted, how long it worked and what it spent, every task, and every
-    /// fact a glance leaves out.
+    /// Says what a glance leaves out: on a run's page every node with what
+    /// it said, every task and every fact; on a run's stats its rails and
+    /// each node's blocked share and models.
     #[arg(long)]
     full: bool,
-    /// Tells the whole story with every trace the run keeps: its whole
-    /// id, where it is kept, and the files that hold whole outputs.
+    /// Says what `--full` says, and shows more: on a run's page its whole
+    /// id, where it is kept, the session of each failed call and the files
+    /// that hold whole outputs; on a run's stats each node's whole id.
     #[arg(long)]
     dig: bool,
 }

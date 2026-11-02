@@ -156,6 +156,7 @@ mod tests {
             },
             artifacts: Vec::new(),
             shown: Vec::new(),
+            changed: None,
         }
     }
 

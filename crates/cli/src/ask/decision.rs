@@ -8,7 +8,7 @@
 //! person, a budget or loop cap — they differ in what they say, never
 //! in how they are answered.
 
-use yunta_core::events::{GateWaitingPayload, HumanChoice};
+use yunta_core::events::{ChangesCountedPayload, GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, OptionId, RunId};
 use yunta_engine::ShownDocument;
 
@@ -25,14 +25,16 @@ const SETTLE: &str = "enter records it, n adds a note";
 /// Puts `escalation` to the person, with the documents it shows, and
 /// returns what they decided. `shown` pairs the run the documents belong
 /// to with the documents; a caller that holds no run shows none. `env`
-/// is the ambient identity the decision is attributed to.
+/// is the ambient identity the decision is attributed to. `changed` is what
+/// the run changed, which the page says.
 pub(crate) fn decide(
     console: &Console,
     env: &Env,
     escalation: &GateWaitingPayload,
     shown: Option<(&RunId, &[ShownDocument])>,
+    changed: Option<&ChangesCountedPayload>,
 ) -> Answered<HumanChoice> {
-    present(console, escalation, shown)?;
+    present(console, escalation, shown, changed)?;
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
     let asks = escalation
@@ -102,6 +104,7 @@ fn present(
     console: &Console,
     escalation: &GateWaitingPayload,
     shown: Option<(&RunId, &[ShownDocument])>,
+    changed: Option<&ChangesCountedPayload>,
 ) -> std::io::Result<()> {
     let look = console.look();
     let documents = shown.map_or(&[][..], |(_, documents)| documents);
@@ -110,6 +113,7 @@ fn present(
             shown,
             waits: None,
             note: None,
+            changed: changed.and_then(|change| yunta_render::changes::of(change, look.glyphs)),
             form: yunta_render::shown::Form::Review,
             decision: yunta_render::gate::asked(escalation, documents),
         },
@@ -225,8 +229,9 @@ mod tests {
             Vec::new(),
         )));
         let lines = page_lines(&escalation);
+        let approve = "| approve";
         assert!(
-            lines.iter().any(|line| line.as_str() == "approve"),
+            lines.iter().any(|line| line.as_str() == approve),
             "{lines:#?}"
         );
         assert!(

@@ -56,8 +56,11 @@ pub enum Block {
     /// The page's gist, under the headline.
     Gist(Gist),
     Fields(Fields),
-    /// Rows under named columns; a run's nodes are one.
+    /// Rows under named columns.
     Table(Table),
+    /// A run's nodes, one to a row: a table each surface builds in its own
+    /// glyphs, since a row's branch and return are drawn in them.
+    Nodes(NodeTable),
     /// A field of runs, a row to each.
     Runs(Runs),
     Evidence(Evidence),
@@ -113,6 +116,7 @@ block_from!(
     Gist(Gist),
     Fields(Fields),
     Table(Table),
+    Nodes(NodeTable),
     Runs(Runs),
     Evidence(Evidence),
     Said(Said),
@@ -133,12 +137,6 @@ block_from!(
     Code(Code),
     Lines(Vec<Line>),
 );
-
-impl From<NodeTable> for Block {
-    fn from(nodes: NodeTable) -> Self {
-        Block::Table(nodes.table())
-    }
-}
 
 /// What a surface says: its blocks, in the order a reader reads them.
 #[derive(Default)]

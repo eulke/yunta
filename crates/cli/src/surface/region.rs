@@ -30,9 +30,11 @@ use yunta_engine::RunFrame;
 use super::scrollback::Scrollback;
 use super::{view, Screen};
 
-/// The region's rows carry text and nothing else: no bar, no percentage,
-/// and above all no spinner. What says a node is alive is the age of its
-/// last event, which is measured and grows while the node says nothing.
+/// The region's rows carry text, and beside the footer's words the run's
+/// furrow: no bar, no percentage, and above all no spinner. The furrow is no
+/// bar of one quantity and no percentage: it is where each node stands, which
+/// the counter beside it says in words. What says a node is alive is the age
+/// of its last event, which is measured and grows while the node says nothing.
 const ROW: &str = "{msg}";
 
 /// A run drawn as rows that stay in place, and the work that has left
@@ -111,7 +113,7 @@ impl Region {
             bar.set_message(text);
         }
         self.footer
-            .set_message(self.fit(&view::footer(frame, self.glyphs)));
+            .set_message(self.fit(&view::footer(frame, &self.look())));
     }
 
     /// Puts the attention row at the top while there is something to

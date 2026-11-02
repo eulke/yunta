@@ -3048,7 +3048,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "unicode-width",
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",

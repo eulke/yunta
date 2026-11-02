@@ -206,14 +206,9 @@ impl Bench {
         self
     }
 
-    /// Mints the ids of the runs this one gives birth to from `ids` —
-    /// for a test that asserts on a child's or a successor's id.
-    pub fn with_ids(self, ids: SeqIdSource) -> Self {
-        self.with_id_source(Arc::new(ids))
-    }
-
-    /// The same, from any source of ids — for a test about what a run
-    /// does when the ids it is handed collide or run out.
+    /// Mints the ids of the runs this one gives birth to from any source
+    /// of ids — for a test about what a run does when the ids it is
+    /// handed collide or run out.
     pub fn with_id_source(mut self, ids: Arc<dyn yunta_core::IdSource>) -> Self {
         self.ids = ids;
         self

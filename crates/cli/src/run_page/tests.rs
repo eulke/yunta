@@ -1,14 +1,21 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use surco::doc::{Block, Depth};
 use surco::golden::{assert_golden, ENVIRONMENTS};
-use surco::look::Look;
+use surco::look::{Look, Width};
+use surco::words::Standing;
 use yunta_core::events::{
-    AgentMessagePayload, AgentMessageType, EventPayload, NodeEvent, NodeFinishedPayload,
-    NodeOutcome, NodeStartedPayload, SessionEvent, StoredEvent, TokenUsage,
+    AgentMessagePayload, AgentMessageType, ChangesCountedPayload, EventPayload, Failure, NodeEvent,
+    NodeFinishedPayload, NodeOutcome, NodeStartedPayload, RunEvent, SessionEvent, StoredEvent,
+    TokenUsage,
 };
-use yunta_core::{NodeId, RunId, Workflow};
-use yunta_engine::{derive, run_frame_of, RunFrame, RunState};
+use yunta_core::{NodeId, OnFailure, RunId, Workflow};
+use yunta_engine::{
+    derive, run_frame_of, Declares, GateAsks, NodeFrame, NodeStanding, NodeState, RunFrame,
+    RunState,
+};
+use yunta_testkit::{node_frame, run_frame};
 use yunta_testkit_core::{fixed_now, Log};
 
 use super::fixtures::{cases, outline, Case, RUN};
@@ -175,10 +182,9 @@ fn spend_log() -> Vec<StoredEvent> {
         .build()
 }
 
-/// The page of the run `spend_log` writes. Both scopes are drawn from the
-/// same frame.
-fn running_page(scope: Scope) -> RunPage<'static> {
-    let state: &'static RunState = Box::leak(Box::new(derive(&spend_log())));
+/// The page of the run `events` write, in `scope`.
+fn page_of(events: Vec<StoredEvent>, scope: Scope) -> RunPage<'static> {
+    let state: &'static RunState = Box::leak(Box::new(derive(&events)));
     let frame: &'static RunFrame = Box::leak(Box::new(run_frame_of(
         &RUN,
         &workflow(),
@@ -199,6 +205,12 @@ fn running_page(scope: Scope) -> RunPage<'static> {
         decision: None,
         plans: Vec::new(),
     }
+}
+
+/// The page of the run `spend_log` writes. Both scopes are drawn from the
+/// same frame.
+fn running_page(scope: Scope) -> RunPage<'static> {
+    page_of(spend_log(), scope)
 }
 
 #[test]
@@ -232,4 +244,210 @@ fn a_plan_node_says_the_plan_it_had_accepted() {
     let mut said = running_page(Scope::Status);
     said.depth = Depth::Full;
     assert!(draw(&said, &Look::plain()).contains("exit 0"));
+}
+
+/// The log of a run whose change git counted on its one tree as `files`
+/// files, `added` lines in and `removed` out.
+fn counted(files: u32, added: u64, removed: u64) -> Vec<StoredEvent> {
+    Log::for_run(RUN.as_str())
+        .event(EventPayload::Run(RunEvent::ChangesCounted(
+            ChangesCountedPayload {
+                tree: "deadbeef".into(),
+                files,
+                added,
+                removed,
+            },
+        )))
+        .build()
+}
+
+/// A closing says what the run changed, as git last counted it, in a row
+/// of its own; a run whose change was never counted, or touched no file,
+/// says nothing of it.
+#[test]
+fn a_closing_says_what_the_run_changed() {
+    let row = |page: &RunPage<'_>| {
+        draw(page, &Look::plain())
+            .lines()
+            .find(|line| line.trim_start().starts_with("changed"))
+            .map(|line| line.trim().to_string())
+    };
+    let changed = row(&page_of(counted(9, 412, 87), Scope::Closing)).unwrap_or_default();
+    assert!(changed.ends_with("9 files, +412 -87"), "{changed}");
+    assert_eq!(row(&running_page(Scope::Closing)), None);
+    assert_eq!(row(&page_of(counted(0, 0, 0), Scope::Closing)), None);
+}
+
+/// A node the run finished with the outcome `exit 0`, and no tokens spent.
+fn finished() -> NodeStanding {
+    NodeStanding::Reached(NodeState::Finished {
+        outcome: NodeOutcome::Summary("exit 0".to_string()),
+        tokens: TokenUsage::default(),
+    })
+}
+
+/// A gate that writes no question of its own: a person decides what its
+/// node shows.
+fn gate() -> Declares {
+    Declares {
+        gate: Some(GateAsks {
+            question: None,
+            on_forge: false,
+        }),
+        ..Declares::default()
+    }
+}
+
+/// Five nodes of the trace, each in the state its row says of it: one
+/// finished on its third attempt after two reroutes, one that asked a
+/// person over two rounds, a gate a person decided once and now waits on,
+/// and two nodes the run has not started.
+fn trace_nodes() -> Vec<NodeFrame> {
+    let paused = || NodeStanding::Paused { attempt: 1 };
+    vec![
+        // Finished, so its row says its attempts as a count: a node running
+        // or paused on an attempt says that attempt in its state instead.
+        NodeFrame {
+            reroutes: 2,
+            attempt: Some(3),
+            ..node_frame(&NodeId::from_static("build"), finished())
+        },
+        NodeFrame {
+            people: Duration::from_secs(724),
+            question_rounds: 2,
+            ..node_frame(&NodeId::from_static("ask"), paused())
+        },
+        NodeFrame {
+            standing: Standing::NeedsYou,
+            people: Duration::from_secs(60),
+            decisions: 1,
+            declares: gate(),
+            ..node_frame(&NodeId::from_static("approve"), paused())
+        },
+        NodeFrame {
+            declares: Declares {
+                on_failure: Some(OnFailure {
+                    goto: NodeId::from_static("fix-lint"),
+                    max_reroutes: 2,
+                }),
+                ..Declares::default()
+            },
+            ..node_frame(&NodeId::from_static("lint"), NodeStanding::ToGo)
+        },
+        NodeFrame {
+            declares: gate(),
+            ..node_frame(&NodeId::from_static("check"), NodeStanding::ToGo)
+        },
+    ]
+}
+
+/// Three nodes a correction or a retry has touched: one whose failure is
+/// being corrected, and two on their second attempt, one paused and one
+/// running.
+fn corrected_nodes() -> Vec<NodeFrame> {
+    let failed = NodeStanding::Reached(NodeState::Failed {
+        failure: Failure::Message {
+            outcome: "exit 1".into(),
+        },
+        tokens: TokenUsage::default(),
+    });
+    vec![
+        NodeFrame {
+            standing: Standing::Rerouted,
+            reroutes: 1,
+            declares: Declares {
+                on_failure: Some(OnFailure {
+                    goto: NodeId::from_static("fix-tidy"),
+                    max_reroutes: 1,
+                }),
+                ..Declares::default()
+            },
+            ..node_frame(&NodeId::from_static("tidy"), failed)
+        },
+        NodeFrame {
+            attempt: Some(2),
+            ..node_frame(
+                &NodeId::from_static("retry"),
+                NodeStanding::Paused { attempt: 2 },
+            )
+        },
+        NodeFrame {
+            attempt: Some(2),
+            ..node_frame(
+                &NodeId::from_static("scan"),
+                NodeStanding::Reached(NodeState::Running { attempt: 2 }),
+            )
+        },
+    ]
+}
+
+/// The status page of a run whose frame holds `nodes`, read at `Depth::Full`
+/// where its trace is drawn.
+fn trace_page(nodes: Vec<NodeFrame>) -> RunPage<'static> {
+    let mut page = page_of(Vec::new(), Scope::Status);
+    page.depth = Depth::Full;
+    page.frame = Box::leak(Box::new(RunFrame {
+        nodes,
+        ..run_frame(&RUN)
+    }));
+    page
+}
+
+/// The line of `drawn` that names node `id` as a word of its own, or
+/// nothing when no line does.
+fn row_of(drawn: &str, id: &str) -> String {
+    drawn
+        .lines()
+        .find(|line| line.split_whitespace().any(|word| word == id))
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The trace says beside each node what the run did with it, each fact
+/// once: a gate's round, its reroutes and attempts, a wait on a person,
+/// and what a node not yet run will do, where its failure goes said by
+/// its arrow alone.
+#[test]
+fn the_trace_says_each_nodes_rounds_returns_and_waits() {
+    let mut nodes = trace_nodes();
+    nodes.extend(corrected_nodes());
+    // A plain line is 80 cells, where the note column is 41 once the time
+    // column is there: `ask`'s note, 59 cells, is cut short in it, so the
+    // trace is drawn at the 120 cells a line may take.
+    let look = Look {
+        width: Width::of(None, Some(120)),
+        ..Look::plain()
+    };
+    let drawn = draw(&trace_page(nodes), &look);
+    let row = |id: &str| row_of(&drawn, id);
+
+    let build = row("build");
+    assert!(build.contains("rerouted twice"), "{build}");
+    assert!(build.contains("3 attempts"), "{build}");
+    assert!(!build.contains("re-routed"), "{build}");
+    let ask = row("ask");
+    assert!(
+        ask.contains("waited on you 12m04s over 2 rounds of questions"),
+        "{ask}"
+    );
+    let approve = row("approve");
+    assert!(approve.contains("1m00s"), "{approve}");
+    assert!(approve.contains("its 2nd round"), "{approve}");
+    assert!(!approve.contains("waited on you"), "{approve}");
+    let lint = row("lint");
+    assert!(lint.contains("lint <> fix-lint"), "{lint}");
+    assert!(
+        lint.contains("sends a failure back at most twice"),
+        "{lint}"
+    );
+    assert!(!drawn.contains("sends its failure to"), "{drawn}");
+    assert!(row("check").contains("a gate: you decide"), "{drawn}");
+    let tidy = row("tidy");
+    assert_eq!(tidy.matches("rerouted").count(), 1, "{tidy}");
+    assert!(tidy.contains("exit 1 ; once"), "{tidy}");
+    for id in ["retry", "scan"] {
+        let on_attempt = row(id);
+        assert!(on_attempt.contains("attempt 2"), "{on_attempt}");
+        assert!(!on_attempt.contains("2 attempts"), "{on_attempt}");
+    }
 }

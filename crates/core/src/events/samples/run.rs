@@ -1,6 +1,6 @@
 //! The samples of the run's own kinds: its birth, the suite it measured and
 //! the commands it held, its promotion, the machine's suspension, its pauses
-//! and resumes, its moves, and its close.
+//! and resumes, its moves, its change counted, and its close.
 
 use std::collections::BTreeMap;
 
@@ -65,6 +65,16 @@ pub(crate) fn promotion_signaled() -> PromotionSignaledPayload {
 pub(crate) fn host_suspended() -> HostSuspendedPayload {
     HostSuspendedPayload {
         slept_ms: 3_600_000,
+    }
+}
+
+/// A change of nine files, 412 lines in and 87 out, as git counts it.
+pub(crate) fn changes_counted() -> ChangesCountedPayload {
+    ChangesCountedPayload {
+        tree: "deadbeef".into(),
+        files: 9,
+        added: 412,
+        removed: 87,
     }
 }
 

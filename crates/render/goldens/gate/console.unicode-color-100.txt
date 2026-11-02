@@ -1,4 +1,6 @@
-␛[1;35m◆␛[0m ␛[1mdecision␛[0m␛[2m · ␛[0m␛[1;35mneeds you␛[0m                                                                        7E5PH4
+␛[1;35m◆␛[0m ␛[1mdecision␛[0m␛[2m ·␛[0m␛[1;35m needs you ␛[0m                                                                       7E5PH4
+
+  ␛[2mchanged     ␛[0m 9 files, +412 −87
 
 ␛[1mplan␛[0m: 2 tasks in 2 steps, 1 decided for you, 1 risk, 1 left out
   Greet a person by name, and say goodbye too.
@@ -99,8 +101,8 @@
       ␛[2m◌␛[0m 1 of 2 changes shows no code
       ␛[33m▲␛[0m risk: A name with a newline in it breaks the line it is printed on.
 
-    ␛[1madjust␛[0m: Back to `plan`
-      ␛[2msends what you say back to `plan`, and asks again once it completes␛[0m
-      ␛[2masks: what should change?␛[0m
-    ␛[1mabort␛[0m: Pause here
-      ␛[2mnothing runs; this decision stays open␛[0m
+  ␛[1;35m▎␛[0m ␛[1madjust␛[0m: Back to `plan`
+  ␛[1;35m▎␛[0m   ␛[2msends what you say back to `plan`, and asks again once it completes␛[0m
+  ␛[1;35m▎␛[0m   ␛[2masks: what should change?␛[0m
+  ␛[1;35m▎␛[0m ␛[1mabort␛[0m: Pause here
+  ␛[1;35m▎␛[0m   ␛[2mnothing runs; this decision stays open␛[0m

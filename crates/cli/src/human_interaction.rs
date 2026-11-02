@@ -117,7 +117,7 @@ impl HumanInteraction for ConsoleInteraction {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let escalation = escalation.clone();
         let env = self.env.clone();
-        self.prompted(move |console| decide(console, &env, &escalation, None))
+        self.prompted(move |console| decide(console, &env, &escalation, None, None))
             .await
     }
 
@@ -131,9 +131,18 @@ impl HumanInteraction for ConsoleInteraction {
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();
         let run = asking.run.clone();
+        let changed = asking.changed.cloned();
         let env = self.env.clone();
-        self.prompted(move |console| decide(console, &env, &escalation, Some((&run, &shown))))
-            .await
+        self.prompted(move |console| {
+            decide(
+                console,
+                &env,
+                &escalation,
+                Some((&run, &shown)),
+                changed.as_ref(),
+            )
+        })
+        .await
     }
 
     /// Question by question, each answered the way its own

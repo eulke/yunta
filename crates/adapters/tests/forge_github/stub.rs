@@ -431,5 +431,6 @@ pub(super) fn request(branch: &str, run_id: &str) -> PublishRequest {
         },
         artifacts: vec![("spec.md".to_string(), b"# spec".to_vec())],
         shown: Vec::new(),
+        changed: None,
     }
 }

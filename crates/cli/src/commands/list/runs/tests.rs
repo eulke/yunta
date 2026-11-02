@@ -135,10 +135,9 @@ fn a_glance_counts_the_closed_runs_and_the_whole_story_lists_them_newest_first()
         .collect();
     let glance = render(closed.clone());
     assert!(listed(&glance).is_empty(), "{glance}");
-    assert!(
-        glance.contains("12 closed, the newest 1m00s ago"),
-        "{glance}"
-    );
+    // The headline counts the closed runs; the line says how recent the newest is.
+    assert!(glance.contains("the newest closed 1m ago"), "{glance}");
+    assert!(glance.contains("12 closed"), "{glance}");
     let full = render_at(closed, Vec::new(), Depth::Full);
     assert_eq!(listed(&full).len(), 12, "{full}");
     assert_eq!(listed(&full).first(), Some(&"T1Y0P0"), "{full}");
@@ -196,7 +195,7 @@ fn every_row_fits_the_line_and_its_age_ends_in_one_column() {
         .filter(|line| line.contains("review"))
         .collect();
     assert_eq!(rows.len(), 2, "{text}");
-    assert!(rows[0].ends_with("5d13h"), "{text}");
+    assert!(rows[0].ends_with("5d"), "{text}");
     assert_eq!(cell_width(rows[0]), cell_width(rows[1]), "{text}");
     for line in text.lines() {
         assert!(cell_width(line) <= Look::plain().width.cells(), "{line}");

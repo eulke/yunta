@@ -16,7 +16,7 @@ use std::time::Duration;
 use surco::words::Standing;
 use yunta_core::events::{TerminalState, TokenUsage};
 use yunta_core::{ModeName, NodeId, RunId};
-use yunta_engine::{ChildLink, Counter, NodeFrame, NodeStanding, RunFrame, RunPhase};
+use yunta_engine::{ChildLink, Counter, Declares, NodeFrame, NodeStanding, RunFrame, RunPhase};
 
 /// How long a built node has been working, and how long ago it last
 /// said anything — a node alive and speaking, which is what a surface
@@ -68,6 +68,11 @@ pub fn node_frame(id: &NodeId, state: NodeStanding) -> NodeFrame {
         sessions: Vec::new(),
         activity: Vec::new(),
         reroute: None,
+        reroutes: 0,
+        people: Duration::ZERO,
+        decisions: 0,
+        question_rounds: 0,
+        declares: Declares::default(),
     }
 }
 

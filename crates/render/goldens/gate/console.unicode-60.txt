@@ -1,5 +1,7 @@
 ◆ decision · needs you                                7E5PH4
 
+  changed      9 files, +412 −87
+
 plan: 2 tasks in 2 steps, 1 decided for you, 1 risk,
       1 left out
   Greet a person by name, and say goodbye too.
@@ -114,9 +116,9 @@ plan: 2 tasks in 2 steps, 1 decided for you, 1 risk,
       ▲ risk: A name with a newline in it breaks the line it
         is printed on.
 
-    adjust: Back to `plan`
-      sends what you say back to `plan`, and asks again once
-      it completes
-      asks: what should change?
-    abort: Pause here
-      nothing runs; this decision stays open
+  ▎ adjust: Back to `plan`
+  ▎   sends what you say back to `plan`, and asks again once
+  ▎   it completes
+  ▎   asks: what should change?
+  ▎ abort: Pause here
+  ▎   nothing runs; this decision stays open

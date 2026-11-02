@@ -1,4 +1,4 @@
-␛[36m●␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[36mwaiting␛[0m␛[2m · for 32m10s␛[0m                                                       7E5PH4
+␛[36m●␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[36m waiting ␛[0m␛[2m· for 32m10s␛[0m                                                       7E5PH4
 ␛[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m ␛[2m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄␛[0m
   node `build` waits for its limit to reset at 2026-01-01 02:00 UTC, and the run resumes on its own
   then.

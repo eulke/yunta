@@ -12,7 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 53 rows and **63 `kind` names**.
+The current Run Contract event table has 54 rows and **64 `kind` names**.
+It had 53 rows and 63 kinds before `changes_counted` was added.
 It had 52 rows and 62 kinds before `shapes_read` was added.
 It had 51 rows and 61 kinds before `best_effort_failed` was added.
 It had 49 rows and 59 kinds before `rail_failed` and `rail_summary` were added.
@@ -31,7 +32,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 63 names in this document. A changed shape takes a new name, never a higher version. |
+| `kind` | string | One of the 64 names in this document. A changed shape takes a new name, never a higher version. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | `KIND_VERSION`: 1 para todo kind — ver la política de versionado más abajo |
 
@@ -126,7 +127,7 @@ rechazada: la registra el engine desde el riel de la sesión.
 | `ToolUse` / `Usage` / `Note` | `agent_message` (con `message_type` distinguiendo) | es el único otro `kind` atribuido al adapter; `agent_message` es genérico ("resumen/uso de tokens") |
 | `Completed` / `Failed` | **ninguno directo** — dispara la verificación del engine, que emite `node_finished` / `node_failed` | la palabra del agente nunca es evidencia: no existe verifier-agente, la verificación es fase del engine, no un evento que el adapter pueda producir por sí mismo; el contrato del adapter solo obliga a que el *stream* termine con uno de los dos, no que se persista tal cual |
 
-## 5. Los 63 tipos de evento, campo por campo
+## 5. Los 64 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -1021,6 +1022,17 @@ the run reports leaves the span out (D199).
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `slept_ms` | `u64` | yes | How long the host slept, in milliseconds. |
+
+### 5.25c `changes_counted` — engine
+
+El cambio del run tal como lo cuenta git, desde su commit de partida hasta su árbol más reciente: `git diff --numstat` con renombres detectados, de modo que un archivo renombrado cuenta una vez, y un archivo binario cuenta como archivo sin líneas. El engine lo cuenta cuando un gate pregunta a una persona, antes de abrir un pull request y cuando el engine termina el run (`done`, `failed` o `promoted`), nunca una vez por nodo: el evento nombra el gate o el nodo `pull_request` para el que se contó, y ningún nodo al terminar el run. Un cierre de una persona (`yunta close`) no registra ninguna cuenta. Si ningún nodo ni el último `run_resumed` registra un árbol, el run no registra ninguna cuenta. El engine lee la última cuenta para no contar otra vez un árbol ya contado, y la crónica del run la muestra como un momento. La página de cierre, `status --full`, la página de un gate (en la terminal y en el pull request que publica), el cuerpo de un pull request y el recibo la dicen mientras la cuenta esté sobre el árbol más reciente del run; una cuenta de cero archivos no se dice. Los archivos tocados del recibo siguen contando lo que vieron sus auditorías.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `tree` | `TreeId` | sí | el árbol al que se contó el cambio. |
+| `files` | `u32` | sí | cuántos archivos toca el cambio: un archivo renombrado cuenta una vez, y los binarios también. |
+| `added` | `u64` | sí | cuántas líneas agrega el cambio. |
+| `removed` | `u64` | sí | cuántas líneas elimina el cambio. |
 
 ### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** pausa / estado terminal, métricas

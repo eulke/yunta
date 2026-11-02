@@ -85,29 +85,33 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   > 1  cli-global  Global and project flags
 
               node                                                  time  tokens
-  + finished  plan  4 tasks                                        1m31s   1.94M
+  + finished  plan              4 tasks in 3 steps                 1m31s   1.94M
+  + finished  approve-plan      approved on its third round        6h27m
+  . never ran +- review
+  . never ran `- conform
+  . never ran lint <> fix-lint  sends a failure back at most once
 
   ? EKPBGE  fragua (standard)  implement asks at its ter...                  32m
   # 60Y934  fragua (quick)     stopped while it ran          yunta resume 60Y934
 
   a line a page composed itself
 
-  approve: builds the plan
-    its tasks run, a step at a time
-    yunta resolve-gate 7E5PH4 approve
-  adjust: Back to `plan`
-    the plan is written again with what you say
-    asks: what should change?
-    yunta resolve-gate 7E5PH4 adjust --text "<answer>"
-  or
-    yunta close 7E5PH4   closes it for good
+| approve: builds the plan
+|   its tasks run, a step at a time
+|   yunta resolve-gate 7E5PH4 approve
+| adjust: Back to `plan`
+|   the plan is written again with what you say
+|   asks: what should change?
+|   yunta resolve-gate 7E5PH4 adjust --text "<answer>"
+| or
+|   yunta close 7E5PH4   closes it for good
 
-  approve: approve this pull request
-    the run goes on
-  close: close this pull request
-    nothing runs; this decision stays open
-  on the machine that holds the run
-    yunta resume 7E5PH4   reads the answer and acts on it
+| approve: approve this pull request
+|   the run goes on
+| close: close this pull request
+|   nothing runs; this decision stays open
+| on the machine that holds the run
+|   yunta resume 7E5PH4   reads the answer and acts on it
 
   the run holds its own state on disk.
 

@@ -115,7 +115,11 @@ _new · 1 line_
 
 | | node | | time | tokens |
 |---|---|---|---|---|
-| ✓ finished | `plan` | 4 tasks | 1m31s | 1.94M |
+| ✓ finished | `plan` | 4 tasks in 3 steps | 1m31s | 1.94M |
+| ✓ finished | `approve-plan` | approved on its third round | 6h27m |  |
+| ◌ never ran | `├─ review` |  |  |  |
+| ◌ never ran | `└─ conform` |  |  |  |
+| ◌ never ran | `lint ↺ fix-lint` | sends a failure back at most once |  |  |
 
 | | run | workflow | where it stands | |
 |---|---|---|---|---|

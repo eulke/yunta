@@ -37,6 +37,8 @@ use yunta_engine::{
 
 const RUN: &str = "run-1";
 
+#[path = "view/declared.rs"]
+mod declared;
 #[path = "view/standing.rs"]
 mod standing;
 #[path = "view/stops.rs"]

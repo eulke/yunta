@@ -108,6 +108,29 @@ impl Standing {
         }
     }
 
+    /// How much a reader needs to see this word, the most urgent highest:
+    /// what a person owes first, then what went wrong, what moves, what
+    /// rests, and what never ran last. A stroke that stands for several
+    /// nodes takes the most urgent of them.
+    pub const fn urgency(self) -> u8 {
+        match self {
+            Standing::NeedsYou => 13,
+            Standing::Failed => 12,
+            Standing::Broken => 11,
+            Standing::Stalled => 10,
+            Standing::Rerouted => 9,
+            Standing::Running => 8,
+            Standing::Waiting => 7,
+            Standing::Created => 6,
+            Standing::Stopped => 5,
+            Standing::Reported => 4,
+            Standing::Promoted => 3,
+            Standing::Finished => 2,
+            Standing::Skipped => 1,
+            Standing::NeverRan => 0,
+        }
+    }
+
     /// The standing `word` names, read back: what a `yunta test` case wrote,
     /// in the words a surface prints.
     pub fn named(word: &str) -> Option<Standing> {
@@ -122,6 +145,13 @@ pub const NOTHING_NEEDS_YOU: &str = "nothing needs you";
 
 /// The plural of `needs you`, for a count of runs that need a person.
 pub const NEED_YOU: &str = "need you";
+
+/// A person's part of a run's time, and the wait of a gate a person was
+/// asked about: what the run spent waiting on the reader.
+pub const WAITING_ON_YOU: &str = "waiting on you";
+
+/// What a node that is not a gate spent waiting on a person's answers.
+pub const WAITED_ON_YOU: &str = "waited on you";
 
 const fn widest(words: &[Standing]) -> usize {
     match words {
@@ -191,5 +221,31 @@ mod tests {
         assert_eq!(Standing::Waiting.mark(), Mark::Running);
         assert_eq!(Standing::Stopped.mark(), Mark::Stopped);
         assert_ne!(Standing::Stopped.mark(), Standing::Skipped.mark());
+    }
+
+    /// The words in the order a reader most needs to see them.
+    #[test]
+    fn the_most_urgent_word_comes_first() {
+        let mut words = Standing::ALL;
+        words.sort_by_key(|word| std::cmp::Reverse(word.urgency()));
+        assert_eq!(
+            words,
+            [
+                Standing::NeedsYou,
+                Standing::Failed,
+                Standing::Broken,
+                Standing::Stalled,
+                Standing::Rerouted,
+                Standing::Running,
+                Standing::Waiting,
+                Standing::Created,
+                Standing::Stopped,
+                Standing::Reported,
+                Standing::Promoted,
+                Standing::Finished,
+                Standing::Skipped,
+                Standing::NeverRan,
+            ]
+        );
     }
 }

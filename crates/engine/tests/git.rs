@@ -18,6 +18,9 @@ use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::ScopeExpansionError;
 use yunta_engine::{RunError, ScopeCheckError, WorktreeError};
 
+#[path = "git/numstat.rs"]
+mod numstat;
+
 /// A git run in `/repo` with the given arguments.
 fn invocation(args: &[&str]) -> Invocation {
     Invocation {

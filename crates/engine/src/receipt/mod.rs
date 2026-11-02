@@ -189,6 +189,7 @@ fn receipt(
         criteria,
         baseline,
         scope,
+        changed: state.current_change().cloned(),
         runners,
         cost: CostSummary {
             tokens: metrics.tokens,

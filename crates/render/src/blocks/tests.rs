@@ -40,8 +40,8 @@ fn a_decision_prints_one_command_per_option_with_the_handle() {
     assert_eq!(
         commands,
         [
-            "    yunta resolve-gate 7E5PH4 retry",
-            "    yunta resolve-gate 7E5PH4 adjust --text \"<answer>\""
+            "|   yunta resolve-gate 7E5PH4 retry",
+            "|   yunta resolve-gate 7E5PH4 adjust --text \"<answer>\""
         ]
     );
     assert!(

@@ -60,6 +60,7 @@ pub(super) async fn assemble(
         decision: decision(ctx, node, assignee, message, &shown),
         artifacts,
         shown,
+        changed: state.current_change().cloned(),
     };
     Ok(Assembly::Ready(Box::new(request)))
 }

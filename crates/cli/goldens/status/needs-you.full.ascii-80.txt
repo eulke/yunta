@@ -27,12 +27,12 @@ tasks
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
 
   ? decision on node `lint`
-    retry: Re-route to `fix-lint` once more
-      Uses one extra correction attempt beyond the declared max_reroutes (0);
-      escalates again if `fix-lint` doesn't fix it
-      yunta resolve-gate 7E5PH4 retry
-    abort: Pause here
-      nothing runs; this decision stays open
-      yunta resolve-gate 7E5PH4 abort
-    or
-      yunta close 7E5PH4   closes it for good
+  | retry: Re-route to `fix-lint` once more
+  |   Uses one extra correction attempt beyond the declared max_reroutes (0);
+  |   escalates again if `fix-lint` doesn't fix it
+  |   yunta resolve-gate 7E5PH4 retry
+  | abort: Pause here
+  |   nothing runs; this decision stays open
+  |   yunta resolve-gate 7E5PH4 abort
+  | or
+  |   yunta close 7E5PH4   closes it for good

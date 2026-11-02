@@ -276,8 +276,8 @@ mod tests {
         assert_eq!(
             commands,
             [
-                "yunta resolve-gate T1Y0P5 retry",
-                "yunta resolve-gate T1Y0P5 abort"
+                "|   yunta resolve-gate T1Y0P5 retry",
+                "|   yunta resolve-gate T1Y0P5 abort"
             ]
         );
     }
@@ -286,7 +286,7 @@ mod tests {
     fn an_option_whose_label_is_its_id_is_shown_once() {
         let drawn = drawn(&gate(), NOTHING_BESIDE);
         assert!(
-            drawn.iter().any(|line| line.trim() == "approve"),
+            drawn.iter().any(|line| line.trim() == "| approve"),
             "{drawn:#?}"
         );
         assert!(
@@ -394,10 +394,10 @@ mod tests {
     #[test]
     fn what_moves_the_run_without_an_option_comes_after_every_option() {
         let drawn = drawn(&escalation(), NOTHING_BESIDE);
-        let or = drawn.iter().position(|line| line.trim() == "or");
+        let or = drawn.iter().position(|line| line.trim() == "| or");
         let abort = drawn
             .iter()
-            .position(|line| line.trim() == "yunta resolve-gate T1Y0P5 abort");
+            .position(|line| line.trim() == "|   yunta resolve-gate T1Y0P5 abort");
         assert!(or > abort && abort.is_some(), "{drawn:#?}");
         assert!(
             drawn

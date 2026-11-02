@@ -2,14 +2,14 @@
 //! what the log says it has done, and what it is doing at the instant
 //! the caller reads it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use surco::words::Standing;
 
 use yunta_core::events::{ArtifactId, PauseReason, RunPhaseRaw, TaskStatus, TokenUsage};
-use yunta_core::{Node, NodeId, TaskId};
+use yunta_core::{Node, NodeId, NodeKind, OnFailure, TaskId};
 
 use crate::live::{last_event_age, open_sessions, recent_tool_calls, OpenSession, ToolCall};
 use crate::process_registry::Engine;
@@ -48,16 +48,18 @@ pub struct NodeFrame {
     /// for a node that never started.
     pub attempt: Option<u32>,
     /// How long this node has spent working: every stretch of work that
-    /// closed, plus the one open at `now`. Time spent waiting on a person
-    /// is not work and is left out. `None` for a node that never started.
+    /// closed, plus the one still open at the instant the run's clock reads:
+    /// now while the run is going, its last applied event once it has
+    /// finished or broken. Time spent waiting on a person is not work and is
+    /// left out. `None` for a node that never started.
     pub elapsed: Option<Duration>,
     /// How long ago this node wrote its last event — what a view shows
     /// instead of a spinner, since it is measured and grows while the
     /// node says nothing. `None` for a node with no events.
     pub last_event_age: Option<Duration>,
-    /// What this node's attempts have spent, first and retries alike, the
-    /// attempt open at `now` included as it reports. A child run's spend
-    /// is in no node's row, only in [`RunFrame::tokens`](super::RunFrame::tokens).
+    /// What this node's attempts have spent, first and retries alike. A child
+    /// run's spend is in no node's row, only in
+    /// [`RunFrame::tokens`](super::RunFrame::tokens).
     pub tokens: TokenUsage,
     /// Every artifact this node produced, by the identity the log holds
     /// it under, in the order the log accepted them.
@@ -83,6 +85,41 @@ pub struct NodeFrame {
     /// The last re-route this node took; `None` for one that never
     /// rerouted.
     pub reroute: Option<Reroute>,
+    /// How many times its own `on_failure` re-routed it: what its
+    /// `max_reroutes` counts. A person's choice at a gate that sends the run
+    /// somewhere is a decision, not counted here.
+    pub reroutes: u32,
+    /// How long a person was asked about this node, booked as the run's
+    /// clock books a person's time, the stretch open at the frame's instant
+    /// included. Zero for a node no person was asked about.
+    pub people: Duration,
+    /// How many times a person decided this node's gate: its own
+    /// resolutions, each round a choice sends back counted.
+    pub decisions: usize,
+    /// How many rounds of questions this node asked a person.
+    pub question_rounds: usize,
+    /// What the frozen workflow declares of it that the log cannot say
+    /// before it runs.
+    pub declares: Declares,
+}
+
+impl NodeFrame {
+    /// Whether the time this node's row shows is a person's: a gate a
+    /// person was asked about waits on that person and does no work of its
+    /// own.
+    pub fn person_took(&self) -> bool {
+        self.declares.gate.is_some() && !self.people.is_zero()
+    }
+
+    /// The rounds a person has had with this node: for a gate, each time a
+    /// person decided it and the round it waits in now; for any other node,
+    /// its rounds of questions.
+    pub fn person_rounds(&self) -> usize {
+        match self.declares.gate {
+            Some(_) => self.decisions + usize::from(self.standing == Standing::NeedsYou),
+            None => self.question_rounds,
+        }
+    }
 }
 
 /// A task in `running`, and whether an agent is on it: one no
@@ -92,6 +129,46 @@ pub struct NodeFrame {
 pub struct RunningTask {
     pub id: TaskId,
     pub in_session: bool,
+}
+
+/// What the frozen workflow declares of a node that a reader wants before
+/// the node runs: where its failure goes, and what it will ask a person.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Declares {
+    /// Where its `on_failure` sends a failure, and how many times at most.
+    pub on_failure: Option<OnFailure>,
+    /// What it asks a person, for a gate.
+    pub gate: Option<GateAsks>,
+}
+
+/// What a gate declares it asks a person.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GateAsks {
+    /// Its question as written; `None` where it writes none, and asks
+    /// whether to approve what it shows, or for a decision by its node.
+    pub question: Option<String>,
+    /// Whether a forge carries the gate: its `external:` names one, so a
+    /// person approves the pull request it opens.
+    pub on_forge: bool,
+}
+
+impl Declares {
+    /// What `node` declares.
+    fn of(node: &Node) -> Self {
+        let gate = match &node.kind {
+            NodeKind::Gate {
+                message, external, ..
+            } => Some(GateAsks {
+                question: message.clone().filter(|message| !message.trim().is_empty()),
+                on_forge: external.is_some(),
+            }),
+            _ => None,
+        };
+        Declares {
+            on_failure: node.on_failure.clone(),
+            gate,
+        }
+    }
 }
 
 /// Where one declared node stands — the three cases a frozen DAG and a
@@ -163,6 +240,8 @@ fn sent_to_correction(record: &NodeRecord) -> bool {
 /// the node ledger already folds it.
 pub(super) struct Reading<'a> {
     pub(super) stats: HashMap<&'a NodeId, &'a NodeStat>,
+    /// Each node's share of a person's time, from the run's stats.
+    pub(super) people: &'a BTreeMap<NodeId, Duration>,
     pub(super) included: Included,
     /// What the run's birth left out, as `run_created` recorded it.
     pub(super) left_out: &'a [yunta_core::LeftOut],
@@ -181,24 +260,17 @@ impl Reading<'_> {
     /// group it is declared inside.
     pub(super) fn node(&self, node: &Node, group: Option<&Node>) -> NodeFrame {
         let stat = self.stats.get(&node.id);
+        let record = self.state.nodes.get(&node.id);
+        let gate = self.state.gates.get(&node.id);
         let state = self.standing(node, group);
-        let correcting = self.open
-            && self
-                .state
-                .nodes
-                .get(&node.id)
-                .is_some_and(sent_to_correction);
+        let correcting = self.open && record.is_some_and(sent_to_correction);
         NodeFrame {
             id: node.id.clone(),
             kind: node.kind.kind_name(),
             group: group.map(|group| group.id.clone()),
             standing: self.word(&node.id, &state, correcting),
             state,
-            runner: self
-                .state
-                .nodes
-                .get(&node.id)
-                .and_then(|r| r.runner.clone()),
+            runner: record.and_then(|record| record.runner.clone()),
             attempt: stat.map(|stat| stat.attempts),
             elapsed: stat.map(|stat| stat.active_so_far()),
             last_event_age: last_event_age(self.state, &node.id, self.now),
@@ -214,11 +286,12 @@ impl Reading<'_> {
             // No cap here: the frame carries the attempt's calls and the
             // surface trims them to what it can draw.
             activity: recent_tool_calls(self.state, &node.id, usize::MAX),
-            reroute: self
-                .state
-                .nodes
-                .get(&node.id)
-                .and_then(|r| r.last_reroute.clone()),
+            reroute: record.and_then(|record| record.last_reroute.clone()),
+            reroutes: record.map_or(0, |record| record.on_failure_reroutes),
+            people: self.people.get(&node.id).copied().unwrap_or_default(),
+            decisions: gate.map_or(0, |gate| gate.own_resolutions().count()),
+            question_rounds: gate.map_or(0, |gate| gate.rounds.len()),
+            declares: Declares::of(node),
         }
     }
 

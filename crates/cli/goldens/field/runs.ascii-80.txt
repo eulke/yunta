@@ -2,15 +2,15 @@
 ................................................................................
 
 asking now
-  ? T1Y0P1  review (default)  ====..  node `implement` asks at its te...  32m00s
+  ? T1Y0P1  review (default)  ====..  node `implement` asks at its terminal  32m
 
 needs you, oldest first
-  ? T1Y0P2  review (default)  ====..  node `lint` failed and its 0 re...  22d00h
+  ? T1Y0P2  review (default)  ====..  node `lint` failed and its 0 re-ro...  22d
 
 stopped
   # T1Y0P3  review (default)  ====..  interrupted by a p...  yunta resume T1Y0P3
 
-  1 closed, the newest 8h00m ago
+  the newest closed 8h ago
 
 next
   yunta status T1Y0P2        opens the run that has waited longest

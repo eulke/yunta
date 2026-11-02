@@ -1,4 +1,4 @@
-␛[1;35m◆␛[0m ␛[1mfragua (quick)␛[0m␛[2m · ␛[0m␛[1;35mneeds you␛[0m␛[2m · after 7m41s␛[0m␛[2m · exit 3␛[0m                                           7E5PH4
+␛[1;35m◆␛[0m ␛[1mfragua (quick)␛[0m␛[2m ·␛[0m␛[1;35m needs you ␛[0m␛[2m· after 7m41s␛[0m␛[2m · exit 3␛[0m                                           7E5PH4
 ␛[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━␛[0m
   node `lint` failed and its 0 re-routes to `fix-lint` are exhausted.
 
@@ -15,14 +15,14 @@
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
 
   ␛[1;35m◆␛[0m ␛[1mdecision on node `lint`␛[0m
-    ␛[1mretry␛[0m: Re-route to `fix-lint` once more
-      ␛[2mUses one extra correction attempt beyond the declared max_reroutes (0); escalates again if␛[0m
-      ␛[2m`fix-lint` doesn't fix it␛[0m
-      ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
-    ␛[1mabort␛[0m: Pause here
-      ␛[2mnothing runs; this decision stays open␛[0m
-      ␛[1myunta resolve-gate 7E5PH4 abort␛[0m
-    ␛[2mor␛[0m
-      ␛[1myunta close 7E5PH4␛[0m   ␛[2mcloses it for good␛[0m
+  ␛[1;35m▎␛[0m ␛[1mretry␛[0m: Re-route to `fix-lint` once more
+  ␛[1;35m▎␛[0m   ␛[2mUses one extra correction attempt beyond the declared max_reroutes (0); escalates again if␛[0m
+  ␛[1;35m▎␛[0m   ␛[2m`fix-lint` doesn't fix it␛[0m
+  ␛[1;35m▎␛[0m   ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
+  ␛[1;35m▎␛[0m ␛[1mabort␛[0m: Pause here
+  ␛[1;35m▎␛[0m   ␛[2mnothing runs; this decision stays open␛[0m
+  ␛[1;35m▎␛[0m   ␛[1myunta resolve-gate 7E5PH4 abort␛[0m
+  ␛[1;35m▎␛[0m ␛[2mor␛[0m
+  ␛[1;35m▎␛[0m   ␛[1myunta close 7E5PH4␛[0m   ␛[2mcloses it for good␛[0m
     ␛[2mthe run holds its own state on disk, so close this terminal whenever you like and answer from␛[0m
     ␛[2manywhere.␛[0m

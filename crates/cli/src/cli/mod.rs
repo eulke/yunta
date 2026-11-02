@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use surco::look::Look;
-use yunta_core::{AdapterId, ModeName, OptionId, PackRef, Responder};
+use yunta_core::{AdapterId, ModeName, OptionId, Responder};
 
 use crate::commands::run_ref::{RunArg, RunRef};
 use crate::error::{CliError, Outcome};
@@ -36,9 +36,11 @@ pub struct Cli {
 
 mod depth;
 mod dispatch;
+mod pack;
 
 use depth::DepthArg;
 use dispatch::dispatch;
+use pack::PackAction;
 
 impl Cli {
     /// The output mode of the parsed subcommand, read from its own flags.
@@ -75,47 +77,7 @@ enum Command {
         config: Option<PathBuf>,
     },
     /// Create a run from a workflow and execute it.
-    Run {
-        /// Path to the workflow YAML file.
-        workflow: PathBuf,
-        /// Sets a declared input: `--input name=value`, repeatable.
-        #[arg(long = "input", value_name = "name=value")]
-        input: Vec<String>,
-        /// Runs every session with this adapter instead of `runners:`'s
-        /// own resolution: each role resolves to its candidate on it, and
-        /// the log records every candidate passed over. The run keeps it
-        /// through every resume. `mock` needs `--fixture` and runs
-        /// attached, never with `--detach`.
-        #[arg(long)]
-        adapter: Option<AdapterId>,
-        /// With `--adapter mock`: the fixture that scripts every session,
-        /// in the same format a `.yunta/tests/` fixture uses.
-        #[arg(long, requires = "adapter")]
-        fixture: Option<PathBuf>,
-        /// Selects a workflow mode. Omitted with `modes:` declared
-        /// defaults to the first declared mode; a workflow with no
-        /// `modes:` at all ignores this entirely.
-        #[arg(long)]
-        mode: Option<ModeName>,
-        /// Prints the run id and nothing else: no progress, and no
-        /// closing block. The verdict travels in the exit code. A
-        /// diagnostic and the budget warning are printed either way:
-        /// quiet is about progress, not about problems.
-        #[arg(long, conflicts_with = "json")]
-        quiet: bool,
-        /// Creates the run, then hands it off to a detached `yunta
-        /// resume` child and returns immediately with the run id; the
-        /// workflow keeps running independent of this invocation (the
-        /// same thing `run_workflow` triggers internally so the MCP
-        /// control plane never blocks for a run's duration).
-        #[arg(long)]
-        detach: bool,
-        /// Prints the run's outcome as one versioned JSON document
-        /// instead of the human progress and closing block: the same
-        /// DTO the MCP control plane returns.
-        #[arg(long)]
-        json: bool,
-    },
+    Run(RunArgs),
     /// Show where a run stands: nodes, tasks, tokens.
     Status {
         #[command(flatten)]
@@ -157,26 +119,7 @@ enum Command {
     /// resume that applies it: exhausted re-routes (retry/abort/promote)
     /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
     /// pause reason; the option must be on that decision's own menu.
-    ResolveGate {
-        #[command(flatten)]
-        run: RunArg,
-        /// The chosen option id, as printed by `yunta status`. Without
-        /// one, the run's own menu is put to this terminal.
-        option: Option<OptionId>,
-        /// Who's answering, for the audit trail
-        /// (`gate_resolved.resolved_by`). Omitted, the decision is recorded
-        /// as `unverified:$USER`, an ambient identity, not a claimed one.
-        #[arg(long)]
-        by: Option<Responder>,
-        /// Free-form context alongside the choice.
-        #[arg(long = "text")]
-        free_text: Option<String>,
-        /// Prints the answer as one versioned JSON document instead of the
-        /// terminal view. The option is then required: the run's own menu
-        /// is put to a terminal.
-        #[arg(long)]
-        json: bool,
-    },
+    ResolveGate(ResolveGateArgs),
     /// Stop a running run and its sessions.
     ///
     /// Sends every running node's session an ordered interrupt,
@@ -210,28 +153,7 @@ enum Command {
     ///
     /// Lists workflows under `.yunta/workflows/`, or local runs with
     /// `--runs`.
-    List {
-        /// Lists local runs and their derived state instead of
-        /// workflows: the runs of the repository this is run in.
-        #[arg(long)]
-        runs: bool,
-        /// With `--runs`: every run on this machine, whichever repository
-        /// it was created in.
-        #[arg(long, requires = "runs")]
-        all: bool,
-        /// With `--runs`: the runs as one versioned JSON document instead
-        /// of the terminal view.
-        #[arg(long, requires = "runs", conflicts_with_all = ["full", "dig"])]
-        json: bool,
-        /// With `--runs`: lists the runs that closed and the ones that do
-        /// not read back, which a glance only counts.
-        #[arg(long, requires = "runs")]
-        full: bool,
-        /// With `--runs`: what `--full` lists, each run named by its whole
-        /// id.
-        #[arg(long, requires = "runs")]
-        dig: bool,
-    },
+    List(ListArgs),
     /// Check adapters, git, the forge and packs.
     ///
     /// Health-checks every adapter this project's `runners:` names:
@@ -341,6 +263,10 @@ enum Command {
         /// Prints machine-readable JSON instead of the terminal view.
         #[arg(long)]
         json: bool,
+        /// How much of the run's stats to tell: `--full` adds its rails and
+        /// each node's blocked share and models.
+        #[command(flatten)]
+        depth: DepthArg,
     },
     /// Prepare this repository for Yunta.
     ///
@@ -396,33 +322,132 @@ enum Command {
     ///
     /// Writes `.yunta/workflows/<name>.yaml` from a commented schema
     /// skeleton and runs `check` on it.
-    New {
-        /// The workflow's name; it becomes `.yunta/workflows/<name>.yaml`.
-        name: String,
-        /// Which skeleton to start from: one-node, lint-fix or tasks.
-        #[arg(long)]
-        shape: Option<String>,
-        /// Prompts to choose a shape when `--shape` is omitted (degrades
-        /// to `one-node` without a TTY).
-        #[arg(short, long)]
-        interactive: bool,
-        /// Overwrites an existing workflow file of the same name.
-        #[arg(long)]
-        force: bool,
-    },
+    New(NewArgs),
+}
+
+/// What `yunta run` takes: the workflow, the inputs it declares, and
+/// how it runs.
+#[derive(Args)]
+struct RunArgs {
+    /// Path to the workflow YAML file.
+    workflow: PathBuf,
+    /// Sets a declared input: `--input name=value`, repeatable.
+    #[arg(long = "input", value_name = "name=value")]
+    input: Vec<String>,
+    /// Runs every session with this adapter instead of `runners:`'s
+    /// own resolution: each role resolves to its candidate on it, and
+    /// the log records every candidate passed over. The run keeps it
+    /// through every resume. `mock` needs `--fixture` and runs
+    /// attached, never with `--detach`.
+    #[arg(long)]
+    adapter: Option<AdapterId>,
+    /// With `--adapter mock`: the fixture that scripts every session,
+    /// in the same format a `.yunta/tests/` fixture uses.
+    #[arg(long, requires = "adapter")]
+    fixture: Option<PathBuf>,
+    /// Selects a workflow mode. Omitted with `modes:` declared
+    /// defaults to the first declared mode; a workflow with no
+    /// `modes:` at all ignores this entirely.
+    #[arg(long)]
+    mode: Option<ModeName>,
+    /// Prints the run id and nothing else: no progress, and no
+    /// closing block. The verdict travels in the exit code. A
+    /// diagnostic and the budget warning are printed either way:
+    /// quiet is about progress, not about problems.
+    #[arg(long, conflicts_with = "json")]
+    quiet: bool,
+    /// Creates the run, then hands it off to a detached `yunta
+    /// resume` child and returns immediately with the run id; the
+    /// workflow keeps running independent of this invocation (the
+    /// same thing `run_workflow` triggers internally so the MCP
+    /// control plane never blocks for a run's duration).
+    #[arg(long)]
+    detach: bool,
+    /// Prints the run's outcome as one versioned JSON document
+    /// instead of the human progress and closing block: the same
+    /// DTO the MCP control plane returns.
+    #[arg(long)]
+    json: bool,
+}
+
+/// What `yunta resolve-gate` takes: the run, and how its gate is
+/// answered.
+#[derive(Args)]
+struct ResolveGateArgs {
+    #[command(flatten)]
+    run: RunArg,
+    /// The chosen option id, as printed by `yunta status`. Without
+    /// one, the run's own menu is put to this terminal.
+    option: Option<OptionId>,
+    /// Who's answering, for the audit trail
+    /// (`gate_resolved.resolved_by`). Omitted, the decision is recorded
+    /// as `unverified:$USER`, an ambient identity, not a claimed one.
+    #[arg(long)]
+    by: Option<Responder>,
+    /// Free-form context alongside the choice.
+    #[arg(long = "text")]
+    free_text: Option<String>,
+    /// Prints the answer as one versioned JSON document instead of the
+    /// terminal view. The option is then required: the run's own menu
+    /// is put to a terminal.
+    #[arg(long)]
+    json: bool,
+}
+
+/// What `yunta list` takes: which listing to show, and how much of it.
+#[derive(Args)]
+struct ListArgs {
+    /// Lists local runs and their derived state instead of
+    /// workflows: the runs of the repository this is run in.
+    #[arg(long)]
+    runs: bool,
+    /// With `--runs`: every run on this machine, whichever repository
+    /// it was created in.
+    #[arg(long, requires = "runs")]
+    all: bool,
+    /// With `--runs`: the runs as one versioned JSON document instead
+    /// of the terminal view.
+    #[arg(long, requires = "runs", conflicts_with_all = ["full", "dig"])]
+    json: bool,
+    /// With `--runs`: lists the runs that closed and the ones that do
+    /// not read back, which a glance only counts.
+    #[arg(long, requires = "runs")]
+    full: bool,
+    /// With `--runs`: what `--full` lists, each run named by its whole
+    /// id.
+    #[arg(long, requires = "runs")]
+    dig: bool,
+}
+
+/// What `yunta new` takes: the workflow's name, the skeleton it starts
+/// from, and whether an existing file is overwritten.
+#[derive(Args)]
+struct NewArgs {
+    /// The workflow's name; it becomes `.yunta/workflows/<name>.yaml`.
+    name: String,
+    /// Which skeleton to start from: one-node, lint-fix or tasks.
+    #[arg(long)]
+    shape: Option<String>,
+    /// Prompts to choose a shape when `--shape` is omitted (degrades
+    /// to `one-node` without a TTY).
+    #[arg(short, long)]
+    interactive: bool,
+    /// Overwrites an existing workflow file of the same name.
+    #[arg(long)]
+    force: bool,
 }
 
 impl Command {
     /// Whether this subcommand answers with one JSON document.
     fn json(&self) -> bool {
         match self {
-            Command::Run { json, .. }
-            | Command::Status { json, .. }
+            Command::Run(args) => args.json,
+            Command::ResolveGate(args) => args.json,
+            Command::List(args) => args.json,
+            Command::Status { json, .. }
             | Command::Resume { json, .. }
-            | Command::ResolveGate { json, .. }
             | Command::Cancel { json, .. }
             | Command::Close { json, .. }
-            | Command::List { json, .. }
             | Command::Doctor { json, .. }
             | Command::Verify { json, .. }
             | Command::Receipt { json, .. }
@@ -435,66 +460,9 @@ impl Command {
     /// Whether this subcommand prints the run id and nothing else.
     fn quiet(&self) -> bool {
         match self {
-            Command::Run { quiet, .. } | Command::Resume { quiet, .. } => *quiet,
+            Command::Run(args) => args.quiet,
+            Command::Resume { quiet, .. } => *quiet,
             _ => false,
         }
     }
-}
-
-#[derive(Subcommand)]
-enum PackAction {
-    /// Clones, vendors to `.yunta/packs/<publisher>/<name>/`, and locks a
-    /// pack. `<source>` is a git URL or `host/publisher/name` shorthand,
-    /// optionally suffixed `@<ref>` (tag, branch or commit-ish).
-    Add {
-        source: String,
-        /// Confirms installing a pack that ships executors (executable
-        /// code, not just declarative YAML), required whenever the
-        /// pack's `declares.executors` is non-empty; review the audit
-        /// this command prints first.
-        #[arg(long)]
-        yes: bool,
-        /// Runs the pack's own test cases (`.yunta/tests/`, against the
-        /// mock adapter) once it is installed. Without it nothing of the
-        /// pack executes during `add`: the audit is read, not run.
-        #[arg(long)]
-        run_tests: bool,
-    },
-    /// Re-clones an installed pack at a new ref and re-vendors it.
-    Update {
-        /// `publisher/name`.
-        pack: PackRef,
-        r#ref: String,
-        /// Confirms updating to a ref that declares executors, the same
-        /// gate as `add`: a new ref is where new executable code first
-        /// appears. `permissions.packs.executors: deny` refuses
-        /// regardless; `allow` skips the confirmation.
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Scaffolds a new pack at `./<name>`: a manifest, one verified
-    /// workflow, a self-test config and case, and a README. Checks and
-    /// tests it on creation, so the scaffold passes from the first command.
-    New {
-        /// `publisher/name`.
-        pack: PackRef,
-    },
-    /// Removes a pack's vendored directory and its lock entry.
-    Remove {
-        /// `publisher/name`.
-        pack: PackRef,
-    },
-    /// Lists every locked pack, verifying its vendored content against
-    /// the lock.
-    List,
-    /// Full static inventory of an installed pack: every
-    /// command, context source, per-node permission, required agent,
-    /// mcp server, executor, and each workflow's full prompt text,
-    /// plus whether the pack ships tests and whether they pass.
-    /// `add` runs this automatically before vendoring; this is the
-    /// on-demand form.
-    Audit {
-        /// `publisher/name`.
-        pack: PackRef,
-    },
 }

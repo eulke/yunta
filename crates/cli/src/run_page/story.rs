@@ -1,17 +1,20 @@
-//! The whole story a reader asks for with `--full`: every node with what
-//! it said or the plan it accepted, how long it worked and what it spent,
-//! the calls that failed on the way, and every task.
+//! The whole story a reader asks for with `--full`: the run's trace, every
+//! node with where it stands, where its failure returns, what it said or the
+//! plan it accepted, how long it worked or a person took on it and what it
+//! spent; the calls that failed on the way; and every task.
 
-use surco::components::{Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
+use surco::components::{Branch, Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
 use surco::doc::{Block, Depth};
 use surco::figures::{duration, Tokens};
 use surco::glyphs::{Glyphs, Mark};
 use surco::line::Tone;
 use surco::prose;
-use surco::width::indent;
+use surco::text::{counted, ordinal};
+use surco::words::{Standing, WAITED_ON_YOU};
 use yunta_core::events::TaskStatus;
 use yunta_core::NodeId;
-use yunta_engine::{NodeState, RunState};
+use yunta_engine::{NodeFrame, NodeStanding, NodeState, RunState};
+use yunta_render::state::NodeDisplay;
 
 use super::RunPage;
 
@@ -33,39 +36,35 @@ impl RunPage<'_> {
     }
 
     /// Every node the frozen workflow declares, in declaration order, a
-    /// group's children one step under it. Each row holds where the node
-    /// stands, what it said or the plan it had accepted, what holds it, how
-    /// long it worked and what it spent.
+    /// group's children hanging from it by their branches. Each row holds
+    /// where the node stands, where its failure returns, what it said or
+    /// the plan it had accepted, how long it worked or a person took on it,
+    /// and what it spent.
     fn node_table(&self, glyphs: Glyphs) -> NodeTable {
-        let rows = self
-            .frame
-            .nodes
+        let nodes = &self.frame.nodes;
+        let rows = nodes
             .iter()
-            .map(|node| {
+            .enumerate()
+            .map(|(at, node)| {
                 let display = crate::render::node_display(node);
-                let said = match self.plans.iter().find(|(id, _)| *id == node.id) {
-                    Some((_, summary)) => Some(summary.clone()),
-                    None => display.modifier.map(|said| prose::first_sentence(&said)),
-                };
-                let note = [said, handed(self.state, &node.id)]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join(&format!(" {} ", glyphs.sep()));
-                // The frame calls the node a live engine is asking about
-                // `needs you`; where it is asked is what the row adds.
-                let note = match self.engine.asks_about(&node.id) {
-                    true => "asking at its terminal".to_string(),
-                    false => note,
-                };
-                let spent = node.tokens.total();
+                let person = node.person_took();
                 NodeRow {
                     mark: display.standing.mark(),
                     word: display.standing.word(),
-                    id: format!("{}{}", indent(usize::from(node.group.is_some())), node.id),
-                    note,
-                    took: node.elapsed.map(duration).unwrap_or_default(),
-                    spent: match spent {
+                    id: node.id.to_string(),
+                    branch: branch(nodes, at),
+                    returns: node
+                        .declares
+                        .on_failure
+                        .as_ref()
+                        .map(|rule| rule.goto.to_string()),
+                    note: self.note(node, &display, person, glyphs),
+                    took: match person {
+                        true => duration(node.people),
+                        false => node.elapsed.map(duration).unwrap_or_default(),
+                    },
+                    took_by_person: person,
+                    spent: match node.tokens.total() {
                         0 => String::new(),
                         spent => Tokens(spent).to_string(),
                     },
@@ -73,6 +72,56 @@ impl RunPage<'_> {
             })
             .collect();
         NodeTable { rows }
+    }
+
+    /// What a node's row says beside it, its parts apart by the separator:
+    /// what it said or the plan it had accepted, or that a live engine is
+    /// asking about it at its terminal; how its documents were accepted, how
+    /// many attempts it took, how many times its own failure rerouted it,
+    /// its rounds with a person, a wait on a person its time column does not
+    /// show, and, for a node not yet run, what it will do.
+    fn note(
+        &self,
+        node: &NodeFrame,
+        display: &NodeDisplay,
+        person: bool,
+        glyphs: Glyphs,
+    ) -> String {
+        let accepted = self.plans.iter().find(|(id, _)| *id == node.id);
+        let said = match (self.engine.asks_about(&node.id), accepted) {
+            (true, _) => Some("asking at its terminal".to_string()),
+            (false, Some((_, summary))) => Some(summary.clone()),
+            (false, None) => display
+                .modifier
+                .as_ref()
+                .map(|said| prose::first_sentence(said)),
+        };
+        let waited = (!person && !node.people.is_zero()).then(|| match node.person_rounds() {
+            0 | 1 => format!("{WAITED_ON_YOU} {}", duration(node.people)),
+            rounds => format!(
+                "{WAITED_ON_YOU} {} over {rounds} rounds of questions",
+                duration(node.people)
+            ),
+        });
+        let rerouted = (node.reroutes > 0).then(|| match node.standing {
+            // The row's word already says the node was rerouted, so the note
+            // says how often.
+            Standing::Rerouted => times(node.reroutes),
+            _ => format!("{} {}", Standing::Rerouted.word(), times(node.reroutes)),
+        });
+        [
+            said,
+            handed(self.state, &node.id),
+            attempts(node),
+            rerouted,
+            rounds(node),
+            waited,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(ahead(node))
+        .collect::<Vec<_>>()
+        .join(&format!(" {} ", glyphs.sep()))
     }
 
     /// The last call of a run tool each node's attempt made that failed:
@@ -146,6 +195,79 @@ impl RunPage<'_> {
             ],
             rows,
         })
+    }
+}
+
+/// The branch the node at `at` of `nodes` hangs from, when a group holds it:
+/// the group's last child, the one no sibling follows, hangs from the last.
+fn branch(nodes: &[NodeFrame], at: usize) -> Option<Branch> {
+    let group = nodes.get(at)?.group.as_ref()?;
+    let followed = nodes
+        .get(at + 1)
+        .is_some_and(|next| next.group.as_ref() == Some(group));
+    Some(match followed {
+        true => Branch::Child,
+        false => Branch::Last,
+    })
+}
+
+/// How many attempts a node took, when it took more than one and its state
+/// does not already name the attempt it is on: a node running or paused on
+/// one says that attempt in its state, and a count would say it again.
+fn attempts(node: &NodeFrame) -> Option<String> {
+    if matches!(
+        node.state,
+        NodeStanding::Paused { .. } | NodeStanding::Reached(NodeState::Running { .. })
+    ) {
+        return None;
+    }
+    node.attempt
+        .filter(|attempt| *attempt > 1)
+        .map(|attempt| counted(attempt as usize, "attempt"))
+}
+
+/// A gate's rounds with a person, past its first: the round it waits in, or
+/// the round a person decided it on.
+fn rounds(node: &NodeFrame) -> Option<String> {
+    node.declares.gate.as_ref()?;
+    match (node.standing, node.person_rounds()) {
+        (_, 0 | 1) => None,
+        (Standing::NeedsYou, round) => Some(format!("its {} round", ordinal(round))),
+        (_, round) => Some(format!("on its {} round", ordinal(round))),
+    }
+}
+
+/// What a node not yet run will do, as its workflow declares: a gate what
+/// it will ask a person, and a node whose failure returns how many times at
+/// most. Where the failure goes, its row's return arrow says.
+fn ahead(node: &NodeFrame) -> Vec<String> {
+    if !matches!(node.state, NodeStanding::ToGo) {
+        return Vec::new();
+    }
+    let gate = node
+        .declares
+        .gate
+        .as_ref()
+        .map(|gate| match (&gate.question, gate.on_forge) {
+            (_, true) => "a gate: you approve the pull request".to_string(),
+            (Some(question), false) => format!("a gate: {question}"),
+            (None, false) => "a gate: you decide".to_string(),
+        });
+    let returns = node
+        .declares
+        .on_failure
+        .as_ref()
+        .filter(|rule| rule.max_reroutes > 0)
+        .map(|rule| format!("sends a failure back at most {}", times(rule.max_reroutes)));
+    gate.into_iter().chain(returns).collect()
+}
+
+/// How many times, as a person says it: once, twice, or a number of times.
+fn times(count: u32) -> String {
+    match count {
+        1 => "once".to_string(),
+        2 => "twice".to_string(),
+        n => format!("{n} times"),
     }
 }
 

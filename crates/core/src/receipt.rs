@@ -97,6 +97,11 @@ pub struct Receipt {
     pub criteria: CriteriaSummary,
     pub baseline: Option<BaselineSummary>,
     pub scope: ScopeSummary,
+    /// What the run changed from its base to its newest tree, as git last
+    /// counted it; absent while no count stands on the newest tree. The scope
+    /// counts the files the run's audits saw; this counts the whole change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed: Option<crate::events::ChangesCountedPayload>,
     pub runners: Vec<RunnerUsage>,
     pub cost: CostSummary,
     pub event_chain: EventChainStatus,

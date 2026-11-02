@@ -22,6 +22,10 @@ pub enum Tone {
     Command,
     /// What a reader skims past: a label, a duration, a path.
     Muted,
+    /// A stroke that says nothing by itself, which the words beside it say:
+    /// the stretch of a furrow still ahead, the ground a page stands on.
+    /// Fainter than what a reader skims past.
+    Faint,
     Done,
     Failed,
     Running,

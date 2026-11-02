@@ -56,9 +56,9 @@ fn status(project: &Checkout, run_id: &str, extra: &[&str]) -> String {
 }
 
 /// What each row of the node table the whole story draws says after its
-/// mark and its word: the id — a group's child two cells in — the row's
-/// note, and what it took. The rows open under the line that heads the
-/// table's figures.
+/// mark and its word: the id, a group's child after the branch it hangs
+/// from, the row's note, and what it took. The rows open under the line
+/// that heads the table's figures.
 fn rows(text: &str) -> Vec<String> {
     const AFTER_THE_WORD: usize = 14;
     text.lines()
@@ -75,8 +75,18 @@ fn rows(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// A row's id, past the branch a group's child hangs from, in either set
+/// of glyphs.
+fn id(row: &str) -> &str {
+    let row = ["├─ ", "└─ ", "+- ", "`- "]
+        .iter()
+        .find_map(|branch| row.strip_prefix(branch))
+        .unwrap_or(row);
+    row.split_whitespace().next().unwrap_or_default()
+}
+
 /// Declaration order, not alphabetical; every declared node, not only
-/// the ones the log named; and a group's children one step under it.
+/// the ones the log named; and a group's children hanging from it.
 #[test]
 fn status_lists_every_declared_node_in_declaration_order_with_children_under_their_group() {
     let (project, run_id) = shaped_run();
@@ -84,16 +94,19 @@ fn status_lists_every_declared_node_in_declaration_order_with_children_under_the
     let listed = rows(&text);
 
     assert_eq!(
-        listed
-            .iter()
-            .map(|row| row.split_whitespace().next().unwrap_or_default())
-            .collect::<Vec<_>>(),
+        listed.iter().map(|row| id(row)).collect::<Vec<_>>(),
         ["zeta", "review", "review-a", "review-b", "alpha", "omega"],
         "the frame's own order, groups with their children: {text}"
     );
     assert!(
-        listed[2].starts_with("  review-a") && listed[1].starts_with("review"),
-        "a group's children sit one step under it: {text}"
+        ["├─ review-a", "+- review-a"]
+            .iter()
+            .any(|child| listed[2].starts_with(child))
+            && ["└─ review-b", "`- review-b"]
+                .iter()
+                .any(|child| listed[3].starts_with(child))
+            && listed[1].starts_with("review"),
+        "a group's children hang from its branches, the last from its own: {text}"
     );
     assert!(
         text.lines()
@@ -271,8 +284,6 @@ fn asking_run() -> (Checkout, String, String) {
     (project, run_id, moments)
 }
 
-/// A node parked on its own questions says which ones, and says it the
-/// same way wherever a reader meets it.
 /// A planner whose first plan is refused — its one criterion passes
 /// before any work — and whose second is accepted.
 const REPLANNED_WORKFLOW: &str = r#"
@@ -347,6 +358,8 @@ fn a_finished_node_says_how_its_document_got_accepted() {
     );
 }
 
+/// A node parked on its own questions says which ones, and says it the
+/// same way wherever a reader meets it.
 #[test]
 fn status_says_which_questions_a_node_is_waiting_on() {
     let (project, run_id, _) = asking_run();
@@ -382,12 +395,7 @@ fn status_lists_the_nodes_the_frame_declares_in_its_order() {
 
     let printed: Vec<String> = rows(&status(&project, &run_id, &["--full"]))
         .iter()
-        .map(|row| {
-            row.split_whitespace()
-                .next()
-                .unwrap_or_default()
-                .to_string()
-        })
+        .map(|row| id(row).to_string())
         .collect();
 
     let document: serde_json::Value =

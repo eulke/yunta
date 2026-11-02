@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use surco::glyphs::Glyphs;
 use surco::golden::assert_golden;
 use surco::words::Standing;
-use yunta_core::events::{Claim, GateFolder};
+use yunta_core::events::{ChangesCountedPayload, Claim, GateFolder};
 use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::PlanReview;
 use yunta_core::step::NextStep;
@@ -91,6 +91,7 @@ fn publishing(review: &PlanReview) -> PublishRequest {
             ("spec.yaml".to_string(), SPEC_BYTES.to_vec()),
         ],
         shown: vec![shown_plan(review.clone())],
+        changed: None,
     }
 }
 
@@ -216,6 +217,31 @@ fn a_gate_s_pull_request_reads_as_its_page() {
         &format!("{drawn}\n"),
     );
     assert_plain_facts(&page, &review);
+}
+
+/// A pull request says what the run changed, as git last counted it, above the
+/// documents it is about; a request nothing counted says nothing of the change.
+#[test]
+fn a_pull_request_says_what_the_run_changed_above_its_documents() {
+    let mut request = publishing(&global_packs());
+    request.changed = Some(ChangesCountedPayload {
+        tree: "deadbeef".parse().unwrap(),
+        files: 9,
+        added: 412,
+        removed: 87,
+    });
+    let [plus, minus] = Glyphs::Unicode.changed();
+    let row = format!("- changed: 9 files, {plus}412 {minus}87");
+    let body = description(&request);
+    let documents = body.find("## plan:").expect("the plan is drawn");
+    assert!(
+        body.find(row.as_str()).is_some_and(|at| at < documents),
+        "{body}"
+    );
+    assert!(
+        !description(&publishing(&global_packs())).contains("- changed:"),
+        "a request nothing counted says nothing of the change"
+    );
 }
 
 /// A pull request carries the whole plan drawn as a file, then each file the

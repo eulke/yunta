@@ -21,11 +21,16 @@ use yunta_core::{Answer, QuestionsFile, Responder};
 
 /// What a decision is asked with, beside the escalation the log records:
 /// the documents the escalation shows, read from the run for the person
-/// to see. The escalation names them by hash; this is their content.
+/// to see. The escalation names them by hash; this is their content. It
+/// carries the run's counted change, which a gate's page says.
 pub struct Asking<'a> {
     pub shown: &'a [ShownDocument],
     /// The run the decision is in, which a surface names a document by.
     pub run: &'a yunta_core::RunId,
+    /// What the run changed from its base to its newest tree, as git last
+    /// counted it while that count stands on the newest tree; `None` when no
+    /// count stands on it.
+    pub changed: Option<&'a yunta_core::events::ChangesCountedPayload>,
 }
 
 pub use yunta_core::shown::{ShownContent, ShownDocument};

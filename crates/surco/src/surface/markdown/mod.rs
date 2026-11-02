@@ -89,6 +89,7 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
         Block::Gist(gist) => plain_text(&gist.0),
         Block::Fields(fields) => self::fields(fields),
         Block::Table(table) => self::table(table),
+        Block::Nodes(nodes) => self::table(&nodes.table(GLYPHS)),
         Block::Runs(runs) => self::runs(runs),
         Block::Evidence(evidence) => self::evidence(evidence),
         Block::Said(said) => said
