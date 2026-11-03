@@ -18,7 +18,6 @@ pub(crate) mod progress;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use yunta_core::caution::Caution;
 use yunta_core::events::{Escalation, StoredEvent};
 use yunta_core::{Clock, Manifest, NodeId, RunId};
 use yunta_engine::{NodeStanding, NodeState, RunFrame, RunState, ShownDocument};
@@ -27,9 +26,9 @@ use crate::commands::{advice, stats};
 use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
-use crate::json::{PreRunWarnings, RunDocument};
+use crate::json::RunDocument;
 use crate::output::{emit, Answer, Mode};
-use crate::run_page::{cautions, Decided, RunPage, Scope};
+use crate::run_page::{Decided, RunPage, Scope};
 use crate::surface::Outline;
 use node::NodePage;
 use surco::components::Note;
@@ -308,10 +307,9 @@ struct DocumentInputs<'a> {
     events: &'a [StoredEvent],
     state: &'a RunState,
     manifest: &'a Manifest,
-    now: DateTime<Utc>,
+    frame: &'a RunFrame,
     engine: Engine,
     decision: Option<(NodeId, Escalation)>,
-    cautions: Vec<Caution>,
 }
 
 impl<'a> DocumentInputs<'a> {
@@ -321,10 +319,9 @@ impl<'a> DocumentInputs<'a> {
             events: &reading.events,
             state: &reading.state,
             manifest: &reading.manifest,
-            now: reading.now,
+            frame: &reading.frame,
             engine: reading.engine.clone(),
             decision: reading.decision.clone(),
-            cautions: cautions(&reading.frame),
         }
     }
 }
@@ -337,13 +334,10 @@ impl serde::Serialize for StatusAnswer<'_> {
             inputs.events,
             inputs.state,
             inputs.manifest,
-            inputs.now,
+            inputs.frame,
             &inputs.engine,
             inputs.decision.clone(),
-        )
-        .warnings(PreRunWarnings {
-            cautions: inputs.cautions.clone(),
-        });
+        );
         serde::Serialize::serialize(&document, serializer)
     }
 }

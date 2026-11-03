@@ -424,8 +424,10 @@ other projects; `--all`, or running it outside a repository, lists every run.
 `yunta list --runs` groups runs by what can be done about them — what needs a
 person, what stalled, what a person stopped, what is running, what has closed,
 and last the runs whose log or manifest does not read back. Under `--json` each
-row names its `group` (`needs_you`, `stalled`, `stopped`, `in_flight`, `closed`)
-and the `word` the run is called by. A run is stalled when its log says it is
+row names its `group` (`needs_you`, `stalled`, `stopped`, `running`, `closed`),
+the `word` the run is called by, and, from 8 on, `said` (what holds the run, as its
+row says it, empty for a finished run), `furrow` (the word of each node, in declaration
+order) and `asking` (whether its engine is asking a person at a terminal now). A run is stalled when its log says it is
 moving and the engine its registry (`scratch/engine.json`) names is gone: a
 process that exited, or a pid the host has since given to a process that started
 later. Nothing else is called stalled — a run with no registry at all may be
@@ -531,7 +533,9 @@ print one document each: the answer the command gives, with the fields its human
 draws. From 8 on, `doctor` carries no `steps`: each row of `checks` carries `fix`
 (`said`, and `paste` when there are lines to paste) and `so` when the check has them. `resolve-gate --json` takes an option, since the menu it would otherwise show is
 for a terminal, so one without an option is refused. Each of these documents carries
-the same stamp.
+the same stamp. From 8 on, `verify` and `doctor` carry `word`, the word their headline
+says: `intact` or `broken` for `verify`, `ready` or `not ready` for `doctor`. `cancel`
+carries `standing` when the run was stopped already, as the word it is called by.
 
 A refusal under `--json` is one document as well, on stdout, and the refusal writes
 nothing to stderr: `{"schema_version": 8, "error": {"said", "detail", "next"}}`. `said`
@@ -545,8 +549,9 @@ stderr, with exit code 2.
 `run --detach --json` carry what was found before the run started: the budget caution,
 and each `files:` path a node reads that the commit the run starts from does not hold
 and an earlier node may write. `status --json` carries what a run parked on its token
-budget says about its cap against its history. `resume --json` and the control plane's
-`workflow_status` carry none. Each caution is an object tagged by `kind` in snake case.
+budget says about its cap against its history, and `resume --json` carries the same
+caution for the same run, since one run has one document. The control plane's
+`workflow_status` carries the caution its run's history gives. Each caution is an object tagged by `kind` in snake case.
 `budget_warning` and `context_warnings` keep their names and carry the words of the same
 cautions, on the documents that carry them.
 
@@ -560,7 +565,19 @@ log, so the command that drove a run to its stop and the command that reads that
 run afterwards publish the same answer, field for field, except the cautions above. `outcome` is the word
 every text surface prints for the run — `created`, `running`, `waiting`, `stalled`,
 `needs you`, `finished`, `reported`, `failed`, `stopped`, `promoted`, `broken` — so a reader who greps a
-terminal for what `status` said finds the same word in the document. A failed or
+terminal for what `status` said finds the same word in the document. From 8 on the document
+also says what the run is and how far it has come: `workflow` and `mode`, the frozen
+workflow's name and the mode it runs in; `said`, the sentence under the headline of the
+run's page, absent where the word says it all; `counts`, `{nodes: {total, by, skipped,
+left_out}, tasks?}`, where `by` holds the nodes at each word and `tasks` is absent for a
+run with no tasks; `exit_code`, what the invocation that drove it to this word exits with;
+`elapsed_secs`, its wall-clock, absent for an empty log; `time`, where that time went, by
+the shares `stats --json` names; `changed`, what it changed from its base to its newest
+tree, where that was counted; `branch`, `{name?, base}`, where `name` is absent for a run in
+a person's own checkout; `pull_requests`, `[{number, url}]`, absent when it opened none;
+`artifacts`, how many artifacts its nodes wrote; and `next`, `[{command, why}]`, the
+commands a program reads at the end of the page, each naming the run by its whole id. They
+arrive with version 8. A failed or
 broken run carries `reason`; a parked one carries `waiting_on` and, when its
 pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that
 same document for the run it just handed off, which its log calls `created` or
@@ -687,8 +704,8 @@ answers as data is JSON.
 `run --json` carries `budget_warning` when the declared cap sits under the
 workflow's historical p90 — the same sentence that goes to stderr, undecorated,
 because how a caution looks is the terminal's word and not the document's.
-Absent otherwise, and always absent from `resume --json`: the estimation belongs
-to whoever *creates* a run.
+Absent otherwise. A resumed run carries it too, read off the same history `status` reads,
+so the estimation belongs to the run, and each invocation that reports the run says it.
 
 `status --json` carries `waiting_on` for a parked run, tagged by `on`:
 `{"on": "gate", "node", "external_ref"?, "reason"?}` when a node is parked on a
@@ -745,16 +762,6 @@ A parked run's `decision.evidence` is a list of the facts a reader is shown, eac
 `{label?, value}`, written from the escalation's menu and from the options it
 withholds, and from the facts an older log attached. A fact that names itself, like a
 failing command's `exit 1`, carries no `label`.
-
-In `status --json`, `diagnostics` maps a failed node to the documents its failure
-names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
-file. `path` is always there. A content failure carries `kind`, the artifact kind
-whose shape the file was read against, and `diagnostics`, every problem that
-document has in document order. A file-level failure carries `file` instead,
-naming what went wrong with the file itself: never written, empty, past
-`limits.max_artifact_bytes`, or refused by the filesystem. A node whose most
-recent failure is a plain message has no entry at all, so what the field shows is
-always the state the node is in now.
 
 In `status --json`, `decision` carries what a parked run is waiting on:
 `{node, summary, evidence, options: [{id, label, tradeoff?, asks?}], external_ref?,

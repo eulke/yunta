@@ -46,28 +46,40 @@ pub(crate) struct VerifyAnswer {
     schema_version: u32,
     run_id: RunId,
     holds: bool,
+    /// The word the headline says: `intact` when every check holds, `broken` otherwise.
+    word: &'static str,
     checks: Vec<CheckRow>,
 }
 
 impl VerifyAnswer {
     fn of(run_id: &RunId, checks: &Checklist) -> Self {
+        let holds = checks.holds();
         Self {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.clone(),
-            holds: checks.holds(),
+            holds,
+            word: word_of(holds),
             checks: checks.checks().map(CheckRow::of).collect(),
         }
     }
 }
 
+/// The word a verdict says: `intact` when every check holds, `broken` when one does not.
+fn word_of(holds: bool) -> &'static str {
+    match holds {
+        true => "intact",
+        false => "broken",
+    }
+}
+
 impl Answer for VerifyAnswer {
     fn document(&self, _look: &Look) -> Doc {
-        let (mark, said) = match self.holds {
-            true => (Mark::Done, "intact"),
-            false => (Mark::Failed, "broken"),
+        let mark = match self.holds {
+            true => Mark::Done,
+            false => Mark::Failed,
         };
         let headline = tallied(
-            Headline::new(mark, format!("run {}", self.run_id.handle()), said),
+            Headline::new(mark, format!("run {}", self.run_id.handle()), self.word),
             &self.checks,
         );
         Doc::new().with(headline).with(checklist(&self.checks))

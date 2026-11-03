@@ -19,7 +19,7 @@ use surco::text::{counted, counted_as};
 use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::events::{EngineFact, NodeOutcome, NodeState};
 use yunta_core::Isolation;
-use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation, TimeSpent};
+use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation, RunFrame, TimeSpent};
 
 use super::{caution_row, RunPage, Scope};
 use crate::render::counter;
@@ -119,10 +119,13 @@ impl RunPage<'_> {
     /// What the run came to: the pull requests it opened, what it spent and
     /// what it changed.
     fn came_to(&self, fields: Fields, glyphs: Glyphs) -> Fields {
-        self.pull_requests()
+        pull_requests_of(self.frame)
             .into_iter()
-            .fold(fields, |fields, opened| {
-                fields.push_if("pull request", opened)
+            .fold(fields, |fields, (number, url)| {
+                fields.push_if(
+                    "pull request",
+                    yunta_render::outcome::pull_request(number, url),
+                )
             })
             .push_if("tokens", self.spent(glyphs))
             .push_if("changed", self.changed(glyphs))
@@ -146,22 +149,6 @@ impl RunPage<'_> {
     fn time_spent(&self) -> TimeSpent {
         self.state
             .time_spent((!self.state.ended()).then_some(self.engine.at))
-    }
-
-    /// Each pull request the run opened, as its number and where it is, said
-    /// whole: a node's note in the table has only the room the line leaves.
-    fn pull_requests(&self) -> Vec<String> {
-        self.frame
-            .nodes
-            .iter()
-            .filter_map(|node| match &node.state {
-                NodeStanding::Reached(NodeState::Finished {
-                    outcome: NodeOutcome::Fact(EngineFact::PullRequestOpened { number, url }),
-                    ..
-                }) => Some(yunta_render::outcome::pull_request(*number, url)),
-                _ => None,
-            })
-            .collect()
     }
 
     /// The files the run's change moved most, on a page that holds the change.
@@ -213,12 +200,7 @@ impl RunPage<'_> {
     /// How many artifacts the run's nodes wrote, and the one directory
     /// they are under. Nothing for a run that wrote none.
     fn artifacts(&self) -> String {
-        let written: usize = self
-            .frame
-            .nodes
-            .iter()
-            .map(|node| node.artifacts.len())
-            .sum();
+        let written = artifacts_written(self.frame);
         if written == 0 {
             return String::new();
         }
@@ -301,6 +283,28 @@ impl RunPage<'_> {
         }
         blocks
     }
+}
+
+/// Each pull request the run opened, by its number and where it is. A page and the run's
+/// document read them here, so both say the same pull requests.
+pub(crate) fn pull_requests_of(frame: &RunFrame) -> Vec<(u64, &str)> {
+    frame
+        .nodes
+        .iter()
+        .filter_map(|node| match &node.state {
+            NodeStanding::Reached(NodeState::Finished {
+                outcome: NodeOutcome::Fact(EngineFact::PullRequestOpened { number, url }),
+                ..
+            }) => Some((*number, url.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// How many artifacts the run's nodes wrote, across every node. A page and the run's
+/// document count them here, so both say the same number.
+pub(crate) fn artifacts_written(frame: &RunFrame) -> usize {
+    frame.nodes.iter().map(|node| node.artifacts.len()).sum()
 }
 
 /// Where a run's time went, where a person weighed in it: what was at work on it,

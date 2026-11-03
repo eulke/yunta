@@ -22,6 +22,7 @@ mod evidence;
 mod facts;
 mod story;
 
+pub(crate) use facts::{artifacts_written, pull_requests_of};
 pub(crate) use story::handed;
 
 use std::time::Duration;
@@ -202,49 +203,7 @@ impl RunPage<'_> {
     /// The page's gist: what it asks of its reader, or what holds the run,
     /// as one sentence. `None` when the run's word already says it.
     pub(crate) fn gist(&self) -> Option<String> {
-        let blocking = self.frame.blocking_findings;
-        Some(match (self.frame.standing, &self.frame.phase) {
-            (Standing::Stalled, _) => advice::STALLED.to_string(),
-            (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => {
-                match &self.engine.prompt {
-                    Some(prompt) => advice::asking(prompt, None),
-                    None => "it needs you".to_string(),
-                }
-            }
-            (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
-            (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
-            (
-                _,
-                RunPhase::Failed {
-                    failure: Some(failure),
-                },
-            ) => self.failed_claim(failure),
-            // The work is done and nobody has accepted it.
-            (_, RunPhase::Finished) if blocking > 0 => format!(
-                "finished holding {}",
-                surco::text::counted(blocking, "blocking finding")
-            ),
-            (_, RunPhase::Promoted { to: Some(mode) }) => format!("promoted to `{mode}`"),
-            (_, RunPhase::Created | RunPhase::Running) => {
-                format!("{NOTHING_NEEDS_YOU}: it is moving")
-            }
-            (
-                _,
-                RunPhase::Finished
-                | RunPhase::Failed { failure: None }
-                | RunPhase::Cancelled
-                | RunPhase::Promoted { to: None },
-            ) => return None,
-        })
-    }
-
-    /// The failure that closed the run, said as the node it happened to.
-    fn failed_claim(&self, failure: &Failure) -> String {
-        let headline = yunta_render::failure::headline(failure);
-        match failed(self.frame).find(|(_, found)| *found == failure) {
-            Some((node, _)) => format!("node `{}` failed: {headline}", node.id),
-            None => headline,
-        }
+        gist(self.frame, &self.engine)
     }
 
     /// The decision the run waits on, as the section the page ends on, and
@@ -310,6 +269,52 @@ impl RunPage<'_> {
     pub(crate) fn tokens(&self) -> Option<String> {
         let spend = &self.frame.tokens;
         (spend.total() > 0).then(|| Breakdown(spend).to_string())
+    }
+}
+
+/// The sentence under a page's headline: what the run comes to, as a person reads it. `None`
+/// for a run whose word says it all.
+pub(crate) fn gist(frame: &RunFrame, engine: &yunta_engine::Engine) -> Option<String> {
+    let blocking = frame.blocking_findings;
+    Some(match (frame.standing, &frame.phase) {
+        (Standing::Stalled, _) => advice::STALLED.to_string(),
+        (Standing::NeedsYou, RunPhase::Created | RunPhase::Running) => match &engine.prompt {
+            Some(prompt) => advice::asking(prompt, None),
+            None => "it needs you".to_string(),
+        },
+        (_, RunPhase::Waiting { on }) => advice::parked_claim(on),
+        (_, RunPhase::Broken { diagnostic }) => surco::text::one_line(diagnostic),
+        (
+            _,
+            RunPhase::Failed {
+                failure: Some(failure),
+            },
+        ) => failed_claim(frame, failure),
+        // The work is done and nobody has accepted it.
+        (_, RunPhase::Finished) if blocking > 0 => format!(
+            "finished holding {}",
+            surco::text::counted(blocking, "blocking finding")
+        ),
+        (_, RunPhase::Promoted { to: Some(mode) }) => format!("promoted to `{mode}`"),
+        (_, RunPhase::Created | RunPhase::Running) => {
+            format!("{NOTHING_NEEDS_YOU}: it is moving")
+        }
+        (
+            _,
+            RunPhase::Finished
+            | RunPhase::Failed { failure: None }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { to: None },
+        ) => return None,
+    })
+}
+
+/// The failure that closed the run, said as the node it happened to.
+fn failed_claim(frame: &RunFrame, failure: &Failure) -> String {
+    let headline = yunta_render::failure::headline(failure);
+    match failed(frame).find(|(_, found)| *found == failure) {
+        Some((node, _)) => format!("node `{}` failed: {headline}", node.id),
+        None => headline,
     }
 }
 

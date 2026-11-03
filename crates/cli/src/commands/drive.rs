@@ -391,16 +391,18 @@ async fn documented(
         Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &state).await?,
         None => None,
     };
-    Ok(crate::json::RunDocument::of(
+    let mut frame = crate::commands::status::progress::frame_of(
         run_id,
-        &events,
-        &state,
         manifest,
-        ctx.clock.now(),
+        &state,
         &engine,
-        decision,
+        ctx.clock.now(),
+    );
+    frame.prior = crate::commands::stats::budget_prior(ctx, manifest, &frame, &events).await;
+    Ok(
+        crate::json::RunDocument::of(run_id, &events, &state, manifest, &frame, &engine, decision)
+            .warnings(warnings),
     )
-    .warnings(warnings))
 }
 
 /// Prints the run as the one versioned document `run --json`,

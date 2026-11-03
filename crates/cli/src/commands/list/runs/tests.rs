@@ -15,7 +15,7 @@ fn row(id: &'static str, group: Group, age_secs: u64) -> RunRow {
         Group::NeedsYou => Standing::NeedsYou,
         Group::Stalled => Standing::Stalled,
         Group::Stopped => Standing::Stopped,
-        Group::InFlight => Standing::Running,
+        Group::Running => Standing::Running,
         Group::Closed => Standing::Finished,
     };
     RunRow {
@@ -100,8 +100,8 @@ fn a_group_answers_the_run_that_has_waited_longest_first() {
 #[test]
 fn runs_that_arrived_together_are_ordered_by_id() {
     let text = render(vec![
-        row(TIED_B, Group::InFlight, 60),
-        row(TIED_A, Group::InFlight, 60),
+        row(TIED_B, Group::Running, 60),
+        row(TIED_A, Group::Running, 60),
     ]);
     assert_eq!(listed(&text), handles(&[TIED_A, TIED_B]), "{text}");
 }
@@ -111,7 +111,7 @@ fn what_needs_a_person_is_listed_above_what_is_only_moving() {
     let text = render_at(
         vec![
             row(NEWEST, Group::Closed, 900),
-            row(TIED_A, Group::InFlight, 600),
+            row(TIED_A, Group::Running, 600),
             row(OLDEST, Group::NeedsYou, 5),
         ],
         Vec::new(),
@@ -152,7 +152,7 @@ fn a_run_that_does_not_read_back_is_counted_and_listed_in_the_whole_story_by_id(
         ]
     };
     let glance = render_at(
-        vec![row(OLDEST, Group::InFlight, 10)],
+        vec![row(OLDEST, Group::Running, 10)],
         unreadable(),
         Depth::Glance,
     );
@@ -161,7 +161,7 @@ fn a_run_that_does_not_read_back_is_counted_and_listed_in_the_whole_story_by_id(
         "{glance}"
     );
     let full = render_at(
-        vec![row(OLDEST, Group::InFlight, 10)],
+        vec![row(OLDEST, Group::Running, 10)],
         unreadable(),
         Depth::Full,
     );
@@ -187,8 +187,8 @@ fn a_stopped_run_ends_on_the_command_that_continues_it() {
 #[test]
 fn every_row_fits_the_line_and_its_age_ends_in_one_column() {
     let text = render(vec![
-        row(OLDEST, Group::InFlight, 5 * 86_400 + 13 * 3_600),
-        row(NEWEST, Group::InFlight, 30),
+        row(OLDEST, Group::Running, 5 * 86_400 + 13 * 3_600),
+        row(NEWEST, Group::Running, 30),
     ]);
     let rows: Vec<&str> = text
         .lines()

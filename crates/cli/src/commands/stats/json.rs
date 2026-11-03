@@ -103,7 +103,7 @@ pub(super) struct RunStatsJson {
 
 /// A run's wall-clock by share, in seconds.
 #[derive(Serialize)]
-struct TimeJson {
+pub(crate) struct TimeJson {
     working_secs: f64,
     rails_secs: f64,
     checks_secs: f64,
@@ -116,7 +116,8 @@ struct TimeJson {
 }
 
 impl TimeJson {
-    fn of(time: &yunta_engine::TimeSpent) -> Self {
+    /// A run's time by share, read off the time the engine measured for it.
+    pub(crate) fn of(time: &yunta_engine::TimeSpent) -> Self {
         TimeJson {
             working_secs: time.working.as_secs_f64(),
             rails_secs: time.rails.as_secs_f64(),

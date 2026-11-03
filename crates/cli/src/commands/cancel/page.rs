@@ -33,7 +33,6 @@ pub(crate) enum CancelState {
     AlreadyStopped {
         killed: usize,
         parked: bool,
-        #[serde(skip)]
         standing: Standing,
     },
     /// No node of the run was in progress, so there was nothing to signal.

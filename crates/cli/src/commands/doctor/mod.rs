@@ -76,6 +76,8 @@ pub(crate) struct DoctorAnswer {
     /// Whether `--session` opened a session per binding.
     session: bool,
     holds: bool,
+    /// The word the headline says: `ready` when every check holds, `not ready` otherwise.
+    word: &'static str,
     checks: Vec<CheckRow>,
     /// Whether the page lists every check on its own row: a glance folds
     /// the ones that hold into one.
@@ -87,24 +89,34 @@ impl DoctorAnswer {
     /// Whether this machine is ready to run, and how many checks stop a
     /// run or are worth a look.
     fn headline(&self) -> Headline {
-        let (mark, said) = match self.holds {
-            true => (Mark::Done, "ready"),
-            false => (Mark::Failed, "not ready"),
+        let mark = match self.holds {
+            true => Mark::Done,
+            false => Mark::Failed,
         };
         tallied(
-            Headline::new(mark, super::advice::doctor(), said),
+            Headline::new(mark, super::advice::doctor(), self.word),
             &self.checks,
         )
     }
 
     fn of(session: bool, full: bool, checks: &Checklist) -> Self {
+        let holds = checks.holds();
         Self {
             schema_version: SCHEMA_VERSION,
             session,
-            holds: checks.holds(),
+            holds,
+            word: word_of(holds),
             checks: checks.checks().map(CheckRow::of).collect(),
             full,
         }
+    }
+}
+
+/// The word a doctor verdict says: `ready` when every check holds, `not ready` when one does not.
+fn word_of(holds: bool) -> &'static str {
+    match holds {
+        true => "ready",
+        false => "not ready",
     }
 }
 

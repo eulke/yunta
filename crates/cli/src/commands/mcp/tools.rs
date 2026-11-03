@@ -72,17 +72,19 @@ pub(super) async fn tool_workflow_status(
     let (events, manifest) = (open.events, open.manifest.doc);
     let state = yunta_engine::derive(&events);
     let decision = crate::json::decision_of(&manifest, &open.run_dir, &state).await?;
+    let mut frame = crate::commands::status::progress::frame_of(
+        &run_id,
+        &manifest,
+        &state,
+        &engine,
+        ctx.clock.now(),
+    );
+    frame.prior = crate::commands::stats::budget_prior(&ctx, &manifest, &frame, &events).await;
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
     crate::json::to_json_string(&crate::json::RunDocument::of(
-        &run_id,
-        &events,
-        &state,
-        &manifest,
-        ctx.clock.now(),
-        &engine,
-        decision,
+        &run_id, &events, &state, &manifest, &frame, &engine, decision,
     ))
     .map_err(CliError::msg)
 }

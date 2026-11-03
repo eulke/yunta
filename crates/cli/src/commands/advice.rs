@@ -281,7 +281,17 @@ pub(crate) fn after(
     frame: &RunFrame,
     decision: Option<&GateWaitingPayload>,
 ) -> Vec<(String, &'static str)> {
-    let run = frame.run_id.handle();
+    after_for(frame, decision, Reader::Person)
+}
+
+/// What `reader` types next for a run its word describes: the steps
+/// [`after`] gives a person, with the run named the way `reader` copies it.
+pub(crate) fn after_for(
+    frame: &RunFrame,
+    decision: Option<&GateWaitingPayload>,
+    reader: Reader,
+) -> Vec<(String, &'static str)> {
+    let run = named(&frame.run_id, reader);
     let open = matches!(
         frame.phase,
         RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }

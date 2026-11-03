@@ -10,7 +10,7 @@
 //! rules live.
 
 mod facts;
-mod json;
+pub(crate) mod json;
 mod run;
 mod time;
 mod workflow;

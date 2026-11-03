@@ -42,8 +42,8 @@ pub(crate) enum Group {
     /// whenever they choose.
     Stopped,
     /// Moving on its own, parked until a limit resets, or created and not
-    /// yet started.
-    InFlight,
+    /// yet started: the runs the listing calls `running`.
+    Running,
     /// Closed, however it closed.
     Closed,
 }
@@ -63,7 +63,7 @@ impl Group {
             Standing::NeedsYou | Standing::Broken => Group::NeedsYou,
             Standing::Stalled => Group::Stalled,
             Standing::Stopped => Group::Stopped,
-            Standing::Created | Standing::Running | Standing::Waiting => Group::InFlight,
+            Standing::Created | Standing::Running | Standing::Waiting => Group::Running,
             Standing::Finished
             | Standing::Reported
             | Standing::Failed
@@ -94,13 +94,10 @@ pub(crate) struct RunRow {
     /// The command that moves it on, when a person has one to run.
     pub(crate) command: Option<String>,
     /// What holds the run, on the one line a field's row has room for.
-    #[serde(skip)]
     pub(crate) said: String,
     /// Where each of its nodes stands, in declaration order.
-    #[serde(skip)]
     pub(crate) furrow: Vec<Standing>,
     /// Whether its engine is asking a person at a terminal now.
-    #[serde(skip)]
     pub(crate) asking: bool,
 }
 
@@ -469,7 +466,7 @@ mod tests {
             assert_eq!(Group::of(word, false), Group::NeedsYou, "{word}");
         }
         for word in [Standing::Created, Standing::Running, Standing::Waiting] {
-            assert_eq!(Group::of(word, false), Group::InFlight, "{word}");
+            assert_eq!(Group::of(word, false), Group::Running, "{word}");
         }
         assert_eq!(Group::of(Standing::Stopped, false), Group::Stopped);
         for word in [

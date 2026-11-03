@@ -110,7 +110,7 @@ impl ListRunsAnswer {
     fn headline(&self) -> Headline {
         let (needs, stalled) = (self.count(Group::NeedsYou), self.count(Group::Stalled));
         let (mark, said) = match (needs, stalled) {
-            (0, 0) if self.count(Group::InFlight) > 0 => {
+            (0, 0) if self.count(Group::Running) > 0 => {
                 (Mark::Running, NOTHING_NEEDS_YOU.to_string())
             }
             (0, 0) => (Mark::Done, NOTHING_NEEDS_YOU.to_string()),
@@ -131,7 +131,7 @@ impl ListRunsAnswer {
         }
         for (group, word) in [
             (Group::Stopped, Standing::Stopped.word()),
-            (Group::InFlight, Standing::Running.word()),
+            (Group::Running, Standing::Running.word()),
             (Group::Closed, "closed"),
         ] {
             let count = self.count(group);
@@ -164,7 +164,7 @@ impl ListRunsAnswer {
             (needs_heading.as_str(), of(Group::NeedsYou, false)),
             (Standing::Stalled.word(), of(Group::Stalled, false)),
             (Standing::Stopped.word(), of(Group::Stopped, false)),
-            (Standing::Running.word(), of(Group::InFlight, false)),
+            (Standing::Running.word(), of(Group::Running, false)),
         ];
         if self.depth.reaches(Depth::Full) {
             parts.push(("closed, newest first", closed));

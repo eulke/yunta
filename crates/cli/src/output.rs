@@ -176,6 +176,16 @@ pub(crate) struct NextCommand {
     why: String,
 }
 
+impl NextCommand {
+    /// A command a reader can type next, with the one line that says what it does.
+    pub(crate) fn new(command: String, why: &str) -> Self {
+        Self {
+            command,
+            why: why.to_string(),
+        }
+    }
+}
+
 impl ErrorDocument {
     /// The refusal `error` is, as `reader` is told it.
     pub(crate) fn of(error: &CliError, reader: Reader) -> Self {
@@ -187,10 +197,7 @@ impl ErrorDocument {
                 detail,
                 next: next
                     .into_iter()
-                    .map(|(command, why)| NextCommand {
-                        command,
-                        why: why.to_string(),
-                    })
+                    .map(|(command, why)| NextCommand::new(command, why))
                     .collect(),
             },
         }
