@@ -130,7 +130,7 @@ impl RunPage<'_> {
     /// The headline: the run's mark, its workflow and mode, its word, how
     /// long it has stood there, and — in a closing — the exit code its
     /// invocation leaves; the handle that names it at the far edge.
-    fn headline(&self) -> Headline {
+    pub(crate) fn headline(&self) -> Headline {
         let word = self.frame.standing;
         let mut headline = Headline::new(
             word.mark(),

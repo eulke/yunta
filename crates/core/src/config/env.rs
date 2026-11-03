@@ -55,6 +55,7 @@ pub const TERMINAL_VARS: &[&str] = &[
     "COLORTERM",
     "COLORFGBG",
     "YUNTA_LOOK",
+    "YUNTA_MOTION",
 ];
 
 /// The ambient environment a run resolves against, captured once at a

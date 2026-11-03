@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use surco::motion::Motion;
 use surco::words::{Standing, NOTHING_NEEDS_YOU};
 use yunta_core::RunId;
 use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
@@ -183,10 +184,14 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 /// The rows one working node takes: what it is, what its tasks are doing,
 /// and what its last calls reached for.
 ///
-/// Its liveness is the age of its last event and never a spinner: the age
-/// is measured, it grows while the node says nothing, and it is the one
-/// signal that can tell a busy node from a stuck one.
-pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, look: &Look) -> Vec<Line> {
+/// A running node's spin turns a frame per event it says, and past
+/// [`QUIET_AFTER`] without one its row says how long.
+pub(super) fn node_rows(
+    frame: &RunFrame,
+    node: &NodeFrame,
+    look: &Look,
+    motion: Motion,
+) -> Vec<Line> {
     let glyphs = look.glyphs;
     // A `parallel` group's children sit one step under the group, the
     // same step a child run sits under the node that bore it.
@@ -195,7 +200,7 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, look: &Look) -> Vec<
         None => String::new(),
     };
     let detail = format!("{under}{}", indent(DETAIL_DEPTH));
-    let mut rows = vec![headline(node, glyphs).under(&under)];
+    let mut rows = vec![headline(node, glyphs, motion).under(&under)];
     if !node.running_tasks.is_empty() {
         rows.push(Line::new().plain(detail.as_str()).push(
             Tone::Muted,
@@ -224,14 +229,31 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, look: &Look) -> Vec<
     rows
 }
 
-/// The node's own row: its state, its id, the runner it resolved through
-/// with the adapter and model behind it, how long it has been working,
-/// and how long ago it last said anything.
-fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
-    let state = crate::render::node_display(node);
-    let mark = state.standing.mark();
-    let tone = Tone::of(mark);
+/// How long a running node goes without an event before its row says so: long
+/// enough that a node between two steps is not called quiet.
+const QUIET_AFTER: Duration = Duration::from_secs(10);
+
+/// The node's own row: its mark, or the frame of its spin; its id; its state and
+/// how long it has worked; how long it has been quiet, past [`QUIET_AFTER`]; and
+/// the runner it resolved through with the adapter and model behind it. When a
+/// row is cut to fit, what it runs on goes first.
+fn headline(node: &NodeFrame, glyphs: Glyphs, motion: Motion) -> Line {
+    let standing = crate::render::node_display(node).standing;
+    let running = standing == Standing::Running;
+    let quiet = node
+        .last_event_age
+        .filter(|age| running && *age >= QUIET_AFTER);
+    let mut word = standing.word().to_string();
     let mut rest = Vec::new();
+    if let Some(elapsed) = node.elapsed {
+        match running {
+            true => word.push_str(&format!(" for {}", duration(elapsed))),
+            false => rest.push(duration(elapsed)),
+        }
+    }
+    if let Some(age) = quiet {
+        rest.push(format!("quiet {}", duration(age)));
+    }
     if let Some(runner) = &node.runner {
         let mut chose = format!(
             "{} {}/{}",
@@ -242,24 +264,37 @@ fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
         }
         rest.push(chose);
     }
-    if let Some(elapsed) = node.elapsed {
-        rest.push(duration(elapsed));
-    }
-    if let Some(age) = node.last_event_age {
-        rest.push(format!("last event {} ago", duration(age)));
-    }
-    let sep = format!(" {} ", glyphs.sep());
+    let sign = match (running, motion) {
+        (true, Motion::Moves) => surco::motion::frame(glyphs, node.events).to_string(),
+        _ => glyphs.mark(standing.mark()).to_string(),
+    };
+    let tone = Tone::of(standing.mark());
+    let sign_tone = if quiet.is_some() { Tone::Muted } else { tone };
     let row = Line::new()
-        .push(
-            tone,
-            format!("{} {}", glyphs.mark(mark), state.standing.word()),
-        )
+        .push(sign_tone, sign)
         .plain(" ")
-        .push(Tone::Strong, node.id.as_str());
+        .push(Tone::Strong, node.id.as_str())
+        .plain(" ")
+        .push(tone, word);
+    let sep = format!(" {} ", glyphs.sep());
     match rest.is_empty() {
         true => row,
         false => row.push(Tone::Muted, format!("{sep}{}", rest.join(&sep))),
     }
+}
+
+/// The window's title while the run needs its person: the mark, which run, the
+/// word, and what it runs.
+pub(super) fn title(frame: &RunFrame, run_id: &RunId, glyphs: Glyphs) -> String {
+    format!(
+        "{} {} {} {} {} ({})",
+        glyphs.mark(Standing::NeedsYou.mark()),
+        run_id.handle(),
+        Standing::NeedsYou.word(),
+        glyphs.sep(),
+        frame.workflow,
+        frame.mode,
+    )
 }
 
 /// What this node's calls on the attempt it is running came to, as much as a

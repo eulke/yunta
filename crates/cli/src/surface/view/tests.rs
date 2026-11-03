@@ -3,6 +3,7 @@ use yunta_engine::RunPhase;
 use yunta_testkit::run_frame;
 
 use super::*;
+use surco::motion::Motion;
 use surco::paint::Paint;
 
 /// The look of a terminal `cells` wide.
@@ -29,8 +30,8 @@ fn the_live_view_indents_a_groups_children_under_it() {
     let mut child = yunta_testkit::node_frame(&NodeId::from("review-a"), NodeStanding::ToGo);
     child.group = Some(group.id.clone());
 
-    let top = drawn(node_rows(&frame, &group, &look(120)));
-    let under = drawn(node_rows(&frame, &child, &look(120)));
+    let top = drawn(node_rows(&frame, &group, &look(120), Motion::Moves));
+    let under = drawn(node_rows(&frame, &child, &look(120), Motion::Moves));
     assert!(
         !top[0].starts_with(' '),
         "a top-level node starts at the margin: {top:?}"
@@ -56,11 +57,89 @@ fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
         },
     ];
 
-    let rows = drawn(node_rows(&frame, &node, &look(120)));
+    let rows = drawn(node_rows(&frame, &node, &look(120), Motion::Moves));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "tasks running: T001 (checking criteria), T002"),
         "{rows:?}"
+    );
+}
+
+/// A node at work, `events` events into its attempt, `age` seconds past the last.
+fn at_work(events: u64, age: u64) -> NodeFrame {
+    let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
+    node.standing = Standing::Running;
+    node.elapsed = Some(Duration::from_secs(40));
+    node.last_event_age = Some(Duration::from_secs(age));
+    node.events = events;
+    node
+}
+
+/// The first row of `node`, as a reader sees it.
+fn first_row(node: &NodeFrame, motion: Motion) -> String {
+    let frame = run_frame(&RUN);
+    drawn(node_rows(&frame, node, &look(120), motion)).remove(0)
+}
+
+#[test]
+fn a_running_node_turns_a_frame_per_event_and_says_how_long_it_has_run() {
+    let row = |events| first_row(&at_work(events, 1), Motion::Moves);
+    assert_eq!(row(3), "⠸ implement running for 40s");
+    assert_eq!(row(4), "⠼ implement running for 40s");
+    assert_eq!(row(13), row(3), "ten frames make a turn");
+}
+
+#[test]
+fn a_node_that_falls_quiet_says_for_how_long_and_its_spin_goes_out() {
+    let row = |age| first_row(&at_work(3, age), Motion::Moves);
+    assert_eq!(row(9), "⠸ implement running for 40s");
+    assert_eq!(row(10), "⠸ implement running for 40s · quiet 10s");
+    assert_eq!(row(11), "⠸ implement running for 40s · quiet 11s");
+
+    let frame = run_frame(&RUN);
+    let tone = |age| {
+        let rows = node_rows(&frame, &at_work(3, age), &look(120), Motion::Moves);
+        rows.first()
+            .and_then(|row| row.spans().first())
+            .map(|span| span.tone)
+    };
+    assert_eq!(tone(9), Some(Tone::Running));
+    assert_eq!(tone(10), Some(Tone::Muted));
+}
+
+#[test]
+fn a_still_view_keeps_the_mark_and_every_word() {
+    let row = |age| first_row(&at_work(3, age), Motion::Still);
+    assert_eq!(row(1), "● implement running for 40s");
+    assert_eq!(row(11), "● implement running for 40s · quiet 11s");
+}
+
+/// A node that waits says the time it worked, bare: it is not how long it has
+/// waited, and silence is what waiting is.
+#[test]
+fn only_a_node_that_runs_turns_or_is_called_quiet() {
+    let mut node = at_work(3, 180);
+    node.standing = Standing::Waiting;
+    assert_eq!(first_row(&node, Motion::Moves), "● implement waiting · 40s");
+}
+
+/// The runner a node resolved through stands after what the row says of its time.
+#[test]
+fn a_row_ends_on_what_it_runs_on() {
+    let mut node = at_work(3, 11);
+    node.runner = Some(yunta_core::events::ResolvedRunner {
+        runner: "planner".into(),
+        chosen: yunta_core::RunnerCandidate {
+            adapter: "mock".into(),
+            model: "mock-model".into(),
+            agent: None,
+            effort: None,
+        },
+        discarded: Vec::new(),
+    });
+    assert_eq!(
+        first_row(&node, Motion::Moves),
+        "⠸ implement running for 40s · quiet 11s · planner mock/mock-model"
     );
 }
 
@@ -91,7 +170,7 @@ fn a_node_row_says_what_its_calls_came_to() {
     let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
     node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, &look(120)));
+    let rows = drawn(node_rows(&frame, &node, &look(120), Motion::Moves));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "read ×4 · edit crates/cli/src/pack.rs · run cargo test"),
@@ -105,13 +184,13 @@ fn a_row_with_no_room_lets_its_oldest_calls_go() {
     let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
     node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, &look(50)));
+    let rows = drawn(node_rows(&frame, &node, &look(50), Motion::Moves));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "edit crates/cli/src/pack.rs · run cargo test"),
         "{rows:?}"
     );
-    let rows = drawn(node_rows(&frame, &node, &look(20)));
+    let rows = drawn(node_rows(&frame, &node, &look(20), Motion::Moves));
     assert!(
         rows.iter().any(|row| row.trim() == "run cargo test"),
         "what it does now is what stays: {rows:?}"

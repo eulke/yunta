@@ -197,6 +197,22 @@ fn in_progress() -> Log {
         .node("build", tool_use("cargo", "digest-cargo"))
 }
 
+/// What turns a node's spin: one for each event of it the log holds, whatever
+/// the event, and none of another node's.
+#[test]
+fn a_node_counts_each_event_the_log_holds_for_it() {
+    let counted = |log: Log, id: &str| derive(&log.build()).events_of(&id.into());
+    assert_eq!(counted(in_progress(), "build"), 5);
+    let more = || {
+        in_progress()
+            .node("build", tool_use("rg", "digest-rg"))
+            .node("lint", started(1))
+    };
+    assert_eq!(counted(more(), "build"), 6);
+    assert_eq!(counted(more(), "lint"), 1);
+    assert_eq!(counted(more(), "never-started"), 0);
+}
+
 // --- the elapsed time of an open attempt -------------------------------
 
 #[test]

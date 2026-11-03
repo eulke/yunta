@@ -102,6 +102,15 @@ pub(crate) fn stdout_paint() -> Paint {
     policy().paint(std::io::stdout().is_terminal())
 }
 
+/// The look stderr gets in this process.
+pub(crate) fn stderr_look() -> Look {
+    Look {
+        glyphs: glyphs(),
+        paint: stderr_paint(),
+        width: stderr_width(),
+    }
+}
+
 /// The paint stderr gets in this process.
 pub(crate) fn stderr_paint() -> Paint {
     policy().paint(std::io::stderr().is_terminal())

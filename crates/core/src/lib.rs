@@ -78,8 +78,8 @@ pub use config::{
     ForgeConfig, GitHubForgeConfig, HomeExpansionError, Isolation, LimitsConfig, McpServerConfig,
     NetworkPermissions, PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig,
     PoolConfig, PricingEntry, ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor,
-    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, MIN_SECRET_CHARS,
-    REDACTED,
+    RunnerCandidate, SecretSource, ShortSecret, SkillsConfig, StorageConfig, TerminalConfig,
+    MIN_SECRET_CHARS, REDACTED,
 };
 pub use confinement::{temp_dirs, Commands, Confinement, ConfinementInput, EditSandbox, Worktree};
 pub use diagnostic::{

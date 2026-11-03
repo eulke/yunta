@@ -61,8 +61,8 @@ pub(crate) fn emit<A: Answer>(mode: Mode, answer: &A, look: &Look) -> Result<Out
             print_json(answer)?;
         }
         Mode::Human => document(look, answer.document(look)),
-        // `--quiet` says the run id and nothing else, and an answer has
-        // nothing to add to that.
+        // `--quiet` says the run id and its verdict, and an answer has nothing
+        // to add to that.
         Mode::Quiet => {}
     }
     Ok(answer.outcome())

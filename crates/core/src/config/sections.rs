@@ -303,6 +303,16 @@ pub struct LimitsConfig {
     pub inline_context_bytes: Option<u64>,
 }
 
+/// `terminal:` — how a live view speaks to the terminal it runs on.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalConfig {
+    /// Rings the terminal's bell when a run asks its person something. Off
+    /// unless set: the window's title says so either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bell: Option<bool>,
+}
+
 /// `baseline:` — backs the `baseline_compare` check kind; the suite the engine
 /// runs and re-runs to catch regressions ("cero regresiones" as a data
 /// comparison, never an agent's claim).

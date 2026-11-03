@@ -8,8 +8,8 @@ mod stream;
 mod words;
 
 pub(crate) use stream::{
-    glyphs, row_width, settle_color, settle_columns, settle_glyphs, stderr_paint, stderr_width,
-    stdout_look,
+    glyphs, row_width, settle_color, settle_columns, settle_glyphs, stderr_look, stderr_paint,
+    stderr_width, stdout_look,
 };
 pub(crate) use words::{engine, exit, node_display, RunExit};
 

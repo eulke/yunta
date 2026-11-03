@@ -245,6 +245,13 @@ Two environment variables move all of this:
   machine that keeps its shared baseline somewhere other than
   `/etc/yunta/config.yaml`.
 
+On the live view, when a run asks its person something, the terminal window's title
+says so, and comes back when they have answered. `terminal: { bell: true }` rings the
+bell as well: any layer may set it, and the user layer is where a person sets their
+own. `--quiet` and the lines off a terminal draw no region and tell no window. Separately,
+`YUNTA_MOTION=off` keeps the live view still: a running node's mark stops turning, and
+every word stays.
+
 ## Project commands
 
 A workflow says *what* it needs run; the project says *how*. `commands:` in the

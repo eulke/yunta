@@ -419,6 +419,14 @@ fn a_person_and_a_caution_are_painted_apart() {
     assert_eq!(Tone::of(Mark::Reroute), Tone::Caution);
 }
 
+#[test]
+fn a_title_is_set_after_keeping_the_one_there_and_carries_no_control() {
+    assert_eq!(
+        title_saved("◆ needs\tyou\x1b]2;x\x07"),
+        "\x1b[22;2t\x1b]2;◆ needs you ]2;x \x1b\\"
+    );
+}
+
 /// A word of code is plain in the sixteen colors, and its own color in 24
 /// bits: a keyword on a dark ground is written by hand below.
 #[test]

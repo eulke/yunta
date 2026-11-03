@@ -29,6 +29,7 @@ pub mod glyphs;
 pub mod golden;
 pub mod line;
 pub mod look;
+pub mod motion;
 pub mod paint;
 mod palette;
 pub mod paths;

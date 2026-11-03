@@ -53,10 +53,11 @@ pub struct NodeFrame {
     /// finished or broken. Time spent waiting on a person is not work and is
     /// left out. `None` for a node that never started.
     pub elapsed: Option<Duration>,
-    /// How long ago this node wrote its last event — what a view shows
-    /// instead of a spinner, since it is measured and grows while the
+    /// How long ago this node wrote its last event: measured, it grows while the
     /// node says nothing. `None` for a node with no events.
     pub last_event_age: Option<Duration>,
+    /// How many events of this node the log holds.
+    pub events: u64,
     /// What this node's attempts have spent, first and retries alike. A child
     /// run's spend is in no node's row, only in
     /// [`RunFrame::tokens`](super::RunFrame::tokens).
@@ -274,6 +275,7 @@ impl Reading<'_> {
             attempt: stat.map(|stat| stat.attempts),
             elapsed: stat.map(|stat| stat.active_so_far()),
             last_event_age: last_event_age(self.state, &node.id, self.now),
+            events: self.state.events_of(&node.id),
             tokens: stat.map(|stat| stat.tokens).unwrap_or_default(),
             artifacts: self
                 .state

@@ -61,6 +61,7 @@ pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
         "COLORTERM",
         "COLORFGBG",
         "YUNTA_LOOK",
+        "YUNTA_MOTION",
     ] {
         cmd.drops(name);
     }

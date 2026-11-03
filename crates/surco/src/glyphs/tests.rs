@@ -167,6 +167,7 @@ fn the_glyphs_of_bars_traces_counts_and_edges_are_one_cell_a_character() {
     for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
         let mut drawn: Vec<char> = glyphs.fine_steps().to_vec();
         drawn.extend(glyphs.changed());
+        drawn.extend(glyphs.spin().iter().flat_map(|frame| frame.chars()));
         drawn.push(glyphs.decision_edge());
         drawn.extend(glyphs.cut().chars());
         drawn.extend(glyphs.returns().chars());

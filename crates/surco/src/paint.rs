@@ -11,8 +11,8 @@
 //! policy read once from the command line and the environment by whoever
 //! runs the process, then asked per stream.
 //!
-//! This is the one place in the crate that writes an SGR escape or a
-//! terminal link.
+//! This is the one place in the crate that writes an escape: an SGR color,
+//! a terminal link, the window's title, a synchronized update or a bell.
 
 use crate::line::{Fill, Line, Span, Tone};
 use crate::palette::{self, Rgb};
@@ -293,6 +293,27 @@ impl Paint {
             }
         }
     }
+}
+
+/// Opens one update of the terminal: what follows reaches the screen together,
+/// at [`SYNC_END`]. A terminal that does not know it ignores it.
+pub const SYNC_BEGIN: &str = "\x1b[?2026h";
+/// Closes the update [`SYNC_BEGIN`] opened.
+pub const SYNC_END: &str = "\x1b[?2026l";
+/// Asks a terminal to ring.
+pub const BELL: &str = "\x07";
+/// Gives back the window title [`title_saved`] kept.
+pub const TITLE_RESTORED: &str = "\x1b[23;2t";
+
+/// Keeps the window's title, and sets it to `title`, whose control characters
+/// turn to spaces: any of them could end the sequence, and a tab between two
+/// words still keeps them apart.
+pub fn title_saved(title: &str) -> String {
+    let title: String = title
+        .chars()
+        .map(|sign| if sign.is_control() { ' ' } else { sign })
+        .collect();
+    format!("\x1b[22;2t\x1b]2;{title}\x1b\\")
 }
 
 /// A color of the sixteen, which every terminal draws in its own theme.

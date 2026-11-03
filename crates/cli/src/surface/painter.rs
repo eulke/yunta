@@ -10,7 +10,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
 use yunta_core::events::{StoredEvent, TerminalState};
 use yunta_core::{Clock, Manifest, RunId};
-use yunta_engine::{derive, run_frame_of, PriorEstimation, RunState};
+use yunta_engine::{derive, run_frame_of, PriorEstimation, RunFrame, RunState};
 use yunta_storage::AsyncStorage;
 
 pub(super) use super::draw::Draw;
@@ -203,39 +203,37 @@ impl Painter {
         }
     }
 
-    /// Redraws the region from the run as it stands at this instant,
-    /// unless a prompt has the terminal.
-    fn redraw(&mut self) {
-        if self.standing == Standing::StoodDown {
-            return;
-        }
-        let Self {
-            run_id,
-            manifest,
-            folded,
-            draw,
-            clock,
-            prior,
-            ..
-        } = self;
-        let Draw::Live(region) = draw else { return };
-        let state = derive(folded.settled());
-        let now = clock.now();
+    /// The run's state and its frame as they stand at this instant.
+    fn reading(&self) -> (RunState, RunFrame) {
+        let state = derive(self.folded.settled());
+        let now = self.clock.now();
         // The live region is drawn by the engine driving the run.
         let frame = run_frame_of(
-            run_id,
-            &manifest.workflow,
+            &self.run_id,
+            &self.manifest.workflow,
             &state,
-            prior.as_ref(),
+            self.prior.as_ref(),
             &yunta_engine::Engine::this(now),
             now,
         );
+        (state, frame)
+    }
+
+    /// Redraws the region from the run as it stands at this instant,
+    /// unless a prompt has the terminal.
+    fn redraw(&mut self) {
+        if self.standing == Standing::StoodDown || !matches!(self.draw, Draw::Live(_)) {
+            return;
+        }
+        let (state, frame) = self.reading();
         // Only a parked run has a menu to rebuild, and rebuilding one is
         // a walk of the run's state — asked exactly when the answer changes
         // what the attention row says.
         let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
-            && yunta_engine::awaits_decision(manifest, &state).is_some();
-        region.show(&frame, run_id, answerable);
+            && yunta_engine::awaits_decision(&self.manifest, &state).is_some();
+        if let Draw::Live(region) = &mut self.draw {
+            region.show(&frame, &self.run_id, answerable);
+        }
     }
 
     /// One beat: recover a hole that outlived the last one, then redraw.
@@ -284,11 +282,21 @@ impl Painter {
         self.standing = standing;
         match standing {
             Standing::StoodDown => {
-                if let Draw::Live(region) = &self.draw {
-                    region.lower();
+                if matches!(self.draw, Draw::Live(_)) {
+                    let (_, frame) = self.reading();
+                    if let Draw::Live(region) = &mut self.draw {
+                        // A prompt has the terminal: a person is being asked,
+                        // whatever the log has got to. Not from the frames: the
+                        // ones a painter catches up on after a prompt are old news.
+                        region.ask(&frame, &self.run_id);
+                        region.lower();
+                    }
                 }
             }
             Standing::Drawing => {
+                if let Draw::Live(region) = &mut self.draw {
+                    region.answered();
+                }
                 // The diagnostics first: each one says what happened to
                 // the run, and the lines under it are what happened
                 // because of it.

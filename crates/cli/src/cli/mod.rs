@@ -102,7 +102,8 @@ enum Command {
     Resume {
         #[command(flatten)]
         run: RunArg,
-        /// Prints the run id and nothing else, the same way `run` does.
+        /// Prints the run id and nothing else on stdout, and one line of verdict
+        /// on stderr, the same way `run` does.
         #[arg(long, conflicts_with = "json")]
         quiet: bool,
         /// Prints the run's outcome as one versioned JSON document:
@@ -362,9 +363,9 @@ struct RunArgs {
     /// `modes:` at all ignores this entirely.
     #[arg(long)]
     mode: Option<ModeName>,
-    /// Prints the run id and nothing else: no progress, and no
-    /// closing block. The verdict travels in the exit code. A
-    /// diagnostic and the budget warning are printed either way:
+    /// Prints the run id and nothing else on stdout, and one line of verdict
+    /// on stderr: no progress, and no closing block. The exit code says the
+    /// same. A diagnostic and the budget warning are printed either way:
     /// quiet is about progress, not about problems.
     #[arg(long, conflicts_with = "json")]
     quiet: bool,

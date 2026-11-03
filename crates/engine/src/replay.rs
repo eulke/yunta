@@ -226,6 +226,15 @@ impl RunState {
         &self.activity
     }
 
+    /// How many events of `node` the log holds, whatever they are.
+    pub fn events_of(&self, node: &NodeId) -> u64 {
+        self.activity
+            .events_by_node
+            .get(node)
+            .copied()
+            .unwrap_or_default()
+    }
+
     /// Every finding that stands, in the order each was first posted.
     /// Never deduplicated here — two nodes that find the same thing each
     /// keep their own posting; [`dedup_findings`] is the query-side view

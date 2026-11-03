@@ -103,10 +103,11 @@ fn quiet_prints_one_line_and_lets_the_exit_code_carry_the_verdict() {
         run_id,
         "the run's id and nothing else, as its help says: {text:?}"
     );
-    assert_eq!(
-        stderr(&run),
-        "",
-        "quiet has no progress to announce standing down"
+    let said = stderr(&run);
+    assert_eq!(said.lines().count(), 1, "one line of verdict: {said:?}");
+    assert!(
+        said.contains("finished") && said.contains(handle(&run_id)),
+        "what it came to, and which run: {said:?}"
     );
 }
 
@@ -148,9 +149,10 @@ fn resume_is_quiet_on_the_same_terms_run_is() {
         stdout(&resumed)
     );
     assert_eq!(
-        stderr(&resumed),
-        "",
-        "and no progress announcing that it stood down"
+        stderr(&resumed).lines().count(),
+        1,
+        "and one line of verdict, no progress: {:?}",
+        stderr(&resumed)
     );
 }
 
@@ -842,10 +844,10 @@ nodes:
 /// How a node's row is recognised: by the node it is about, and not by
 /// the mark in front of it — that mark says how the node is doing and
 /// changes while it works, while the indentation these cases are about
-/// sits before it either way. The separator is part of the needle
+/// sits before it either way. The word after the id is part of the needle
 /// because `sweep` is a prefix of `sweep-a`.
 fn headline(id: &str) -> String {
-    format!("running {id} ·")
+    format!("{id} running for")
 }
 
 /// The rows of the last painting carrying a row for every one of `ids`,

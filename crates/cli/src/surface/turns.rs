@@ -341,8 +341,13 @@ mod tests {
         let screen = drawing.screen.clone();
         drawing.drained().await;
 
+        // A run that ends with the prompt still open gives the window its title
+        // back as the surface closes, and that is all it writes.
+        let written = screen.written();
         assert_eq!(
-            screen.written(),
+            written
+                .strip_suffix(surco::paint::TITLE_RESTORED)
+                .unwrap_or(&written),
             before,
             "the surface wrote to the terminal a person was answering on"
         );

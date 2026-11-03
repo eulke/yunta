@@ -62,6 +62,7 @@ pub fn node_frame(id: &NodeId, state: NodeStanding) -> NodeFrame {
         attempt: Some(1),
         elapsed: Some(WORKING),
         last_event_age: Some(SPOKE),
+        events: 0,
         tokens: TokenUsage::default(),
         artifacts: Vec::new(),
         running_tasks: Vec::new(),

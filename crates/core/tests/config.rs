@@ -639,6 +639,22 @@ fn an_underscored_limit_literal_reads_as_the_number_it_spells() {
     );
 }
 
+/// A bell is off unless a layer asks for it; the most specific layer that says
+/// anything wins, and a layer that says nothing leaves it where it stood.
+#[test]
+fn a_bell_is_off_until_a_layer_asks_and_the_most_specific_word_stands() {
+    let layer = |bell| ConfigLayer {
+        terminal: Some(yunta_core::TerminalConfig { bell }),
+        ..Default::default()
+    };
+    let merged = |layers: Vec<ConfigLayer>| ConfigLayer::merge_layers(layers).terminal_bell();
+    assert!(!ConfigLayer::default().terminal_bell());
+    assert!(merged(vec![layer(Some(true))]));
+    assert!(!merged(vec![layer(Some(true)), layer(Some(false))]));
+    assert!(merged(vec![layer(Some(true)), layer(None)]));
+    assert!(merged(vec![layer(Some(true)), ConfigLayer::default()]));
+}
+
 #[test]
 fn limits_fields_deep_merge_across_layers_with_repo_winning() {
     let org = ConfigLayer {

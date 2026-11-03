@@ -374,6 +374,14 @@ impl Glyphs {
         }
     }
 
+    /// The frames of a spin, in the order it turns.
+    pub fn spin(self) -> &'static [&'static str] {
+        match self {
+            Self::Unicode => &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            Self::Ascii => &["|", "/", "-", "\\"],
+        }
+    }
+
     /// What marks a bar cut short, drawn over its track: the bar would run
     /// past its scale, and a note says how far.
     pub fn cut(self) -> &'static str {
