@@ -98,7 +98,7 @@ must provide — it never assumes a concrete adapter, model or secret. See
 
 ## Where a run's state can pause, and how it resumes
 
-A node can end in one of `finished | failed | skipped | waiting`. `waiting` means
+A node can end in one of `finished | failed | skipped | needs you`. `needs you` means
 a person's answer is what the node is missing: a `gate` asking for a decision,
 or a node that handed its questions over and is waiting on them. Nothing is
 running underneath either, and both survive the engine restarting exactly like

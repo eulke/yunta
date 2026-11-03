@@ -825,7 +825,7 @@ metrics to certify until `run_finished` lands.
 
 Each check is marked by what it found: `✓` it holds, `✗` it failed, `▲` worth a
 look though nothing failed (a baseline that was already red, an event kind this
-binary does not read), and `·` nothing to check — a workflow that declared no
+binary does not read), and `◌` nothing to check — a workflow that declared no
 criteria is never crossed out for it. A run that did not finish names each node
 that stands failed, with the sentence its failure is told in, the end of what it
 printed and the `yunta status <run> --node <node>` that shows the rest — in

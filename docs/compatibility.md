@@ -439,9 +439,9 @@ workflow and mode, and how long it has been where it is; a run that needs
 someone, or stalled, carries what holds it and the command that moves it under
 its row. The groups before the closed one are ordered by how long a run has been where
 it is, longest first; two runs that have been there equally long are ordered by run
-id, which for a minted one is the order they were created in. Closed runs are
-listed newest first, and only the ten newest are named — the rest are counted
-(`2 older closed runs not listed`). A run in the last group has no derived state
+id, which for a minted one is the order they were created in. `--full` lists closed
+runs newest first; a glance says how long ago the newest closed. A run in the last group
+has no derived state
 to have been in, so that group is ordered by run id alone.
 
 ## Exit codes
@@ -866,8 +866,8 @@ empty: a blank line under the heading, an empty block that shows it is empty.
 A quantity carries its unit and only the digits it has to say, the same on every
 surface and in the receipt. A count of tokens is exact below a thousand and in
 three significant digits above — `999`, `20.2k`, `1.86M` — and exact where it
-stands beside a configured limit (``run spent 200431 tokens with
-`limits.max_tokens_per_run: 200000` ``). A ratio up to one reads as whole percent and
+stands beside a configured limit (``its token budget is spent (200431 tokens with
+`limits.max_tokens_per_run: 200000`)``). A ratio up to one reads as whole percent and
 one past it as a multiple: `35%`, `120×`. A duration past a day names days and
 hours: `5d13h`. `--json` keeps every number as the integer or float it is.
 
