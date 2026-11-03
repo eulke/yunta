@@ -106,7 +106,7 @@ fn assert_headline_and_weighing(page: &Doc, plain: &str) {
     );
 }
 
-/// The page a gate of the greet plan shows above its card at a terminal: the
+/// The page a terminal with no room for a plan's desk prints above its card: the
 /// plan the decision is about, and what weighs on it.
 fn console_page() -> Doc {
     let review = review();
@@ -114,8 +114,8 @@ fn console_page() -> Doc {
     let escalation = greet_escalation(&review);
     let run = run();
     let spelling = spell();
-    gate::above(Some((&run, shown.as_slice())), &escalation, &*spelling)
-        .expect("a plan to read above the card")
+    gate::whole_page(Some((&run, shown.as_slice())), &escalation, &*spelling)
+        .expect("a plan to print")
 }
 
 /// A gate's page at a terminal matches its goldens in every environment, fits

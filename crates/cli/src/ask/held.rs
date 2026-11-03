@@ -30,6 +30,12 @@ pub(crate) trait Held {
     /// Whether a field is open, where what is pasted is what is typed. Anywhere
     /// else a paste answers nothing.
     fn typing(&self) -> bool;
+
+    /// How it looks on a terminal `columns` wide: a prompt holds to the measure a line
+    /// has, unless it lays out columns of its own.
+    fn look(&self, line: Look, _columns: usize) -> Look {
+        line
+    }
 }
 
 /// What a stroke asks of a prompt.
@@ -113,8 +119,8 @@ fn hold_until_it_ends<P: Held>(
 
 /// Draws `prompt` over what `place` last drew, at the terminal's size now.
 fn redraw<P: Held>(console: &Console, prompt: &P, place: &mut Place) -> std::io::Result<()> {
-    let look = console.look();
-    let (_, rows) = console.size();
+    let (columns, rows) = console.size();
+    let look = prompt.look(console.look(), columns);
     place.draw(console, &prompt.drawn(&look, rows), &look)
 }
 

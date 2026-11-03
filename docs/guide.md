@@ -735,16 +735,27 @@ engine refuses a plan it will show without the summary, the descriptions, the co
 and the `proves`, and tells the planner what is missing in the same answer.
 
 A gate with no `message:`, or a blank one, that shows a plan asks to approve the change
-its summary names — `Approve the plan: <summary>?`. At a terminal its page opens on one
-headline, `◆ decision · needs you`, reads each document it shows and what weighs on the
-decision, and under them a card stays where the decision opened: the question, the node
-and the run at its far edge, what the run changed, each option with what it does, and
-under them what follows the one pointed at. Arrows move, `enter` chooses, `n` adds a note
-and `esc` leaves it for later, with the run parked on it. What was typed before the
-question answers nothing, and neither does a paste. On a forge the page ends on the
-question, what weighs on it and each option with what it does.
-`abort` reads `Pause here`: nothing runs, and the decision stays open, so the next
-resume asks again.
+its summary names — `Approve the plan: <summary>?`. At a terminal a card stays where the
+decision opened: the question, the node and the run at its far edge, what the plan is
+about and how big it is, what the run changed, each option with what it does, and under
+them what follows the one pointed at. Arrows move, `enter` chooses, `n` adds a note, `r`
+reads the plan and `esc` leaves it for later, with the run parked on it. What was typed
+before the question answers nothing, and neither does a paste. Above the card stands only
+what weighs on the decision, and the documents of a decision that shows no plan. On a
+forge the page ends on the question, what weighs on it and each option with what it does.
+
+`abort` reads `Pause here`: nothing runs, and the decision stays open, so the next resume
+asks again.
+
+`r` opens the plan on the terminal's other screen, and `yunta review <run>` opens it on
+a run parked on the decision. `j` and `k` go from task to task, the arrows, `PgUp`,
+`PgDn` and `space` move what is being read, and the mouse's wheel does too, with
+selecting text still working. `p` turns a task's card over to what proves it, and `d`
+shows what was decided, what the plan risks and what it leaves out. A number chooses an
+option and `enter` confirms it, since a person reading has their hands on the keyboard;
+an option that asks for words goes back to the card with its field open. `esc` goes
+back. Under 90 columns the rail goes and the pane says which task it is; under 12 rows
+or 40 columns `r` prints the plan above the card instead.
 
 What weighs on the decision is said last on the page, right above the card, or between
 the question and its options on a forge: on a terminal the last lines printed are the

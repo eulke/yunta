@@ -1,9 +1,12 @@
 //! A plan that widens a shape other code names, put in front of the person
-//! approving it: every page that draws the plan says who else names the
-//! shape and what the plan changes of it, and `status --json` carries what
-//! the tree held of it as data.
+//! approving it: the card says how many files beyond the plan name what it
+//! changes, every page that draws the plan says who names the shape and what
+//! the plan changes of it, and `status --json` carries what the tree held of
+//! it as data.
 
-use yunta_testkit::{run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout, Terminal};
+use yunta_testkit::{
+    run_id_from, stderr, stdout, yunta_in, yunta_on_terminal_sized, Checkout, Terminal,
+};
 
 /// A planner, and the gate that shows its plan.
 const REVIEWED_PLAN: &str = r#"
@@ -94,9 +97,23 @@ fn says_what_the_shape_implies(page: &str) {
 fn the_gate_says_what_the_plan_s_shape_implies() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path());
-    let terminal: Terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
+    let terminal = yunta_on_terminal_sized!(&checkout.repo, &checkout.home, &RUN, (118, 48));
     terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
+    reads_what_it_implies(terminal);
+}
 
+/// The card, then the plan's first task at the desk.
+fn reads_what_it_implies(mut terminal: Terminal) {
+    let screen = terminal.screen();
+    assert!(
+        screen.holds("what it changes is named in 1 file outside every task"),
+        "the card says it before anyone asks: {screen:#?}"
+    );
+    terminal.keys("r");
+    terminal.wait_on_screen("the change", "the desk never opened");
+    terminal.keys("j");
+    terminal.wait_on_screen("Widen build_it", "the task never came up");
+    terminal.wait_on_screen("src/other.rs", "the task never said who names it");
     says_what_the_shape_implies(&terminal.drawn());
 }
 
@@ -106,10 +123,14 @@ fn resolve_gate_says_what_the_plan_s_shape_implies() {
     let checkout = checkout(root.path());
     let run_id = parked(&checkout);
 
-    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &["resolve-gate", &run_id]);
+    let terminal = yunta_on_terminal_sized!(
+        &checkout.repo,
+        &checkout.home,
+        &["resolve-gate", &run_id],
+        (118, 48)
+    );
     terminal.wait_on_screen("▸ ", "the run's own card was never put to the terminal");
-
-    says_what_the_shape_implies(&terminal.drawn());
+    reads_what_it_implies(terminal);
 }
 
 #[test]

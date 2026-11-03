@@ -6,7 +6,7 @@
 
 use surco::components::{Fields, Lead, Marked, Section};
 use surco::doc::{Block, Doc};
-use surco::glyphs::Mark;
+use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use yunta_core::events::AcceptedDeparture;
 use yunta_core::shown::{Answered, PlanReview};
@@ -77,7 +77,7 @@ pub(super) fn decided_for_you(review: &PlanReview) -> impl Iterator<Item = &Deci
 }
 
 /// Each decision that restates what a person answered, with the answer.
-fn answered(review: &PlanReview) -> impl Iterator<Item = (&Decision, &Answered)> {
+pub(super) fn answered(review: &PlanReview) -> impl Iterator<Item = (&Decision, &Answered)> {
     review
         .plan
         .decisions
@@ -92,9 +92,82 @@ fn answer_of<'a>(review: &'a PlanReview, decision: &Decision) -> Option<&'a Answ
     review.answered.iter().find(|answered| answered.id == *id)
 }
 
-/// One decision: what was open, what the plan chose instead of what, and
-/// why.
-fn decided(at: usize, decision: &Decision) -> Section {
+/// What the plan says of itself as a whole, as a desk reads it: its
+/// description, every diagram in it drawn, and its design.
+pub(super) fn words(review: &PlanReview) -> Doc {
+    let mut doc = Doc::new();
+    if let Some(description) = said(&review.plan.description) {
+        doc = doc.with(Block::Markdown(description.to_string()));
+    }
+    if let Some(design) = said(&review.plan.design) {
+        doc = doc.with(titled("design", vec![Block::Markdown(design.to_string())]));
+    }
+    doc
+}
+
+/// What was decided, as a person walks it: each decision made for them, with
+/// `pointed` open under a pointer and the rest by their question alone; then
+/// what they answered, what the plan risks and what it leaves out, whole.
+pub(super) fn deciding(review: &PlanReview, pointed: usize, glyphs: Glyphs) -> Doc {
+    let mut doc = Doc::new();
+    for (at, decision) in decided_for_you(review).enumerate() {
+        doc = doc.with(walked(at, decision, at == pointed, glyphs));
+    }
+    let yours: Vec<Block> = answered(review)
+        .enumerate()
+        .map(|(at, (decision, answered))| restated(at + 1, decision, answered).into())
+        .collect();
+    if !yours.is_empty() {
+        doc = doc.with(titled("you answered", yours));
+    }
+    for (title, mark, items) in [
+        ("risks", Mark::Caution, review.plan.risks.as_slice()),
+        (
+            "left out",
+            Mark::Absent,
+            review.plan.out_of_scope.as_slice(),
+        ),
+    ] {
+        if !items.is_empty() {
+            doc = doc.with(titled(
+                title,
+                vec![Marked {
+                    mark,
+                    items: items.to_vec(),
+                }
+                .into()],
+            ));
+        }
+    }
+    doc
+}
+
+/// One decision made for the person, numbered from `at`, as a person walks
+/// them: open under the pointer, and otherwise only its question.
+fn walked(at: usize, decision: &Decision, pointed: bool, glyphs: Glyphs) -> Section {
+    let opening = match pointed {
+        true => Line::new()
+            .push(Tone::NeedsYou, glyphs.pointer().to_string())
+            .plain(" "),
+        false => Line::new().plain("  "),
+    };
+    let tone = match pointed {
+        true => Tone::Strong,
+        false => Tone::Plain,
+    };
+    Section {
+        lead: None,
+        title: opening.push(tone, format!("{} {}", at + 1, decision.question)),
+        blocks: match pointed {
+            true => vec![reasons(decision).into()],
+            false => Vec::new(),
+        },
+    }
+}
+
+/// What was open, as the plan answers it: what it chose, instead of what,
+/// and why.
+fn reasons(decision: &Decision) -> Fields {
     let mut fields = Fields::new().push_if("chose", decision.choice.as_str());
     for (n, alternative) in decision.alternatives.iter().enumerate() {
         fields = fields.push_if(if n == 0 { "instead of" } else { "" }, alternative.as_str());
@@ -102,10 +175,16 @@ fn decided(at: usize, decision: &Decision) -> Section {
     if let Some(why) = said(&decision.why) {
         fields = fields.push_if("because", why);
     }
+    fields
+}
+
+/// One decision: what was open, what the plan chose instead of what, and
+/// why.
+fn decided(at: usize, decision: &Decision) -> Section {
     Section {
         lead: Some(Lead::Ordinal(at)),
         title: Line::new().push(Tone::Strong, decision.question.as_str()),
-        blocks: vec![fields.into()],
+        blocks: vec![reasons(decision).into()],
     }
 }
 

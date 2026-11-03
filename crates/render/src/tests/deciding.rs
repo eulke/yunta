@@ -4,14 +4,19 @@
 
 use std::path::PathBuf;
 
+use surco::doc::Block;
 use surco::golden::{assert_golden, ENVIRONMENTS};
 use surco::look::Look;
 use surco::surface::{Markdown, Surface, Terminal};
+use yunta_core::events::{AuthorGate, Claim, Escalation, GateOption, GateWaitingPayload, Menu};
+use yunta_core::reserved::ReservedOption;
+use yunta_core::{NonEmpty, TasksFile};
 use yunta_testkit_core::spell;
 
 use super::console_page::greet_escalation;
 use super::documents::{global_packs, goldens, read, review, run, shown_plan};
 use super::publication::description;
+use crate::gate;
 use crate::plan::Form;
 
 #[test]
@@ -186,4 +191,61 @@ fn a_browser_reads_the_tests_whole_and_leaves_what_weighs_to_the_decision() {
         !read(&global_packs(), Form::Browser).contains("Global lock state"),
         "a risk is said beside the decision"
     );
+}
+
+/// What stands above a decision's card: what weighs on it, and the documents of a decision
+/// with no plan. A plan is read at its desk.
+#[test]
+fn the_page_above_a_card_does_not_carry_a_plan() {
+    let greet = review();
+    let escalation = greet_escalation(&greet);
+    let shown = vec![shown_plan(greet)];
+    let run = run();
+    let spelling = spell();
+    let page = gate::above(Some((&run, shown.as_slice())), &escalation, &*spelling)
+        .expect("what weighs on the decision");
+    assert!(
+        matches!(page.blocks(), [Block::Section(section)] if section.title.text() == "before you decide"),
+    );
+
+    let quiet: TasksFile = yunta_core::yaml::parse(
+        "summary: Quiet\ntasks:\n  - { id: a, title: A, scope: [a], criteria: [{ cmd: 'true' }] }\n",
+    )
+    .unwrap();
+    let mut nothing_weighs = review();
+    nothing_weighs.plan = quiet;
+    nothing_weighs.tasks = Vec::new();
+    let shown = vec![shown_plan(nothing_weighs)];
+    assert!(
+        gate::above(
+            Some((&run, shown.as_slice())),
+            &withholding_nothing(),
+            &*spelling
+        )
+        .is_none(),
+        "with nothing weighing, the card opens on its question"
+    );
+
+    let page = gate::whole_page(
+        Some((&run, shown.as_slice())),
+        &withholding_nothing(),
+        &*spelling,
+    )
+    .expect("what a terminal with no room for a desk prints");
+    assert!(matches!(page.blocks().first(), Some(Block::Headline(_))));
+}
+
+/// A decision that keeps nothing from a person.
+fn withholding_nothing() -> GateWaitingPayload {
+    Escalation::new(
+        Claim::ApprovePlan {
+            summary: "Quiet".to_string(),
+        },
+        Menu::Gate(AuthorGate {
+            assignee: "lead".into(),
+            node: None,
+        }),
+        NonEmpty::from((GateOption::reserved(ReservedOption::Abort), Vec::new())),
+    )
+    .into_payload()
 }

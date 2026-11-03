@@ -107,10 +107,10 @@ fn a_gate_that_withholds_says_why_between_its_question_and_what_is_left() {
             && !drawn.contains("  approve  "),
         "the menu offers only what sends the plan back or stops the run:\n{drawn}"
     );
-    let question = drawn
-        .rfind("◆ decision · needs you")
-        .expect("the decision was put");
-    let before = &drawn[question..];
+    let weighing = drawn
+        .find("before you decide")
+        .expect("what weighs on the decision was said");
+    let before = &drawn[weighing..];
     assert!(
         before.contains("before you decide")
             && before.contains("`approve` is not offered, because")
@@ -120,7 +120,7 @@ fn a_gate_that_withholds_says_why_between_its_question_and_what_is_left() {
     );
     let screen = terminal.screen();
     assert!(
-        screen.holds("before you decide"),
+        screen.holds("`approve` is not offered, because"),
         "what weighs on the decision is on the screen the card asks on:\n{screen:#?}"
     );
 }

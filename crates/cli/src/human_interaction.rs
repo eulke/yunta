@@ -30,7 +30,7 @@ use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, QuestionsFile};
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
-use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer};
+use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer, Opens};
 use crate::error::{note, warn};
 use crate::surface::{Curtain, Diagnostics};
 
@@ -132,6 +132,8 @@ impl HumanInteraction for ConsoleInteraction {
                     changed: None,
                     routes: BTreeMap::new(),
                     node: None,
+                    called: None,
+                    opens: Opens::TheCard,
                 },
             )
         })
@@ -148,6 +150,7 @@ impl HumanInteraction for ConsoleInteraction {
     ) -> Option<HumanChoice> {
         let routes =
             yunta_render::gate::routes(escalation, asking.workflow, asking.left_out, asking.node);
+        let called = Some(crate::render::called(&asking.workflow.name, asking.mode));
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();
         let run = asking.run.clone();
@@ -164,6 +167,8 @@ impl HumanInteraction for ConsoleInteraction {
                     changed: changed.as_ref(),
                     routes,
                     node: node.as_ref(),
+                    called,
+                    opens: Opens::TheCard,
                 },
             )
         })

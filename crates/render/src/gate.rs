@@ -197,10 +197,11 @@ fn past_the_first(ranks: Vec<Vec<NodeId>>) -> Vec<Vec<NodeId>> {
     ranks.into_iter().skip(1).collect()
 }
 
-/// What a prompt's card stands under: each document the decision is about, in the
-/// form a terminal shows it, under its headline, and what weighs on the decision.
-/// `None` where the card says it all.
-pub fn above(
+/// Everything a decision has to say as one page: each document it shows, in the
+/// form a terminal shows it, under its headline, and what weighs on it last. What
+/// a terminal with no room for a desk prints above the card. `None` where the
+/// card says it all.
+pub fn whole_page(
     shown: Option<(&RunId, &[ShownDocument])>,
     escalation: &GateWaitingPayload,
     spell: &dyn Fn(&NextStep) -> String,
@@ -225,4 +226,20 @@ pub fn above(
         doc = doc.with(before);
     }
     Some(doc)
+}
+
+/// What a prompt's card stands under: everything the decision has to say,
+/// except a plan among its documents, which is read at its desk, and with it
+/// the rest of them. `None` where the card says it all.
+pub fn above(
+    shown: Option<(&RunId, &[ShownDocument])>,
+    escalation: &GateWaitingPayload,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Option<Doc> {
+    let documents: &[ShownDocument] = shown.map_or(&[], |(_, documents)| documents);
+    match crate::shown::plan_among(documents) {
+        None => whole_page(shown, escalation, spell),
+        Some(_) => crate::shown::before_you_decide(escalation.withheld(), documents)
+            .map(|before| Doc::new().with(before)),
+    }
 }

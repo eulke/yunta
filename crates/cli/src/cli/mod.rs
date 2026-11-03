@@ -121,6 +121,14 @@ enum Command {
     /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
     /// pause reason; the option must be on that decision's own menu.
     ResolveGate(ResolveGateArgs),
+    /// Read the plan a parked run waits on, and answer it.
+    ///
+    /// A full screen of the plan at a terminal: its tasks a key apart, what proves each and
+    /// what was decided. Off a terminal it prints the plan and the commands that answer it.
+    Review {
+        #[command(flatten)]
+        run: RunArg,
+    },
     /// Stop a running run and its sessions.
     ///
     /// Sends every running node's session an ordered interrupt,

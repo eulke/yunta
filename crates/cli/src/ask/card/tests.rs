@@ -12,7 +12,7 @@ use yunta_render::gate::Route;
 use super::super::held::{Held, Press};
 use super::super::keys::Stroke;
 use super::super::Escape;
-use super::{Answer, DecisionCard};
+use super::{Answer, DecisionCard, Reply};
 
 /// A gate offering to go on, to go back with words, and to pause.
 fn card() -> DecisionCard {
@@ -61,12 +61,12 @@ fn card() -> DecisionCard {
     DecisionCard::new(&escalation, Escape::Parks, routes)
 }
 
-fn answer(option: &'static str, words: Option<&str>) -> Press<Answer> {
-    Press::Answer(Answer {
+fn answer(option: &'static str, words: Option<&str>) -> Press<Reply> {
+    Press::Answer(Reply::Chose(Answer {
         option: OptionId::from_static(option),
         words: words.map(str::to_string),
         folded: false,
-    })
+    }))
 }
 
 fn typed(card: &mut DecisionCard, words: &str) {

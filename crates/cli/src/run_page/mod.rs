@@ -135,7 +135,7 @@ impl RunPage<'_> {
         let word = self.frame.standing;
         let mut headline = Headline::new(
             word.mark(),
-            format!("{} ({})", self.frame.workflow, self.frame.mode),
+            crate::render::called(&self.frame.workflow, &self.frame.mode),
             word.word(),
         );
         for fact in self.stood() {

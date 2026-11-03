@@ -22,7 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use console::Term;
 use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios};
-use surco::paint::{HIDE_CURSOR, SHOW_CURSOR};
+use surco::paint::{
+    ALT_SCREEN_OFF, ALT_SCREEN_ON, ALT_SCROLL_OFF, ALT_SCROLL_ON, HIDE_CURSOR, HOME, SHOW_CURSOR,
+};
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Env, Pid, Responder};
 
@@ -39,6 +41,7 @@ pub(crate) fn no_terminal(fallback: &str) {
 
 mod card;
 mod decision;
+mod desk;
 mod field;
 mod form;
 mod held;
@@ -46,7 +49,7 @@ mod keyboard;
 mod keys;
 mod menu;
 
-pub(crate) use decision::{decide, Ask};
+pub(crate) use decision::{decide, Ask, Opens};
 pub(crate) use field::ask_line;
 pub(crate) use form::answer;
 pub(crate) use menu::{choose, Choice};
@@ -182,6 +185,9 @@ pub(crate) struct Console {
     /// it, so what the terminal is handed back is one put-back for one
     /// taking-away.
     hidden: Arc<AtomicBool>,
+    /// Whether a prompt on this terminal is on its other screen, for the same reason:
+    /// one way back for one way there.
+    alternate: Arc<AtomicBool>,
     /// Told by whoever stopped waiting on a prompt: the prompt hears it
     /// within a tick of its read, takes what it drew off the screen and
     /// hands the terminal back, before anything else is drawn.
@@ -245,6 +251,7 @@ impl Console {
             escape,
             mode: handed_mode(diagnostics).await,
             hidden: Arc::new(AtomicBool::new(false)),
+            alternate: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
         };
         *prompted_on() = Some(console.clone());
@@ -294,6 +301,27 @@ impl Console {
         Ok(())
     }
 
+    /// Puts the terminal on its other screen, once, with the cursor at its first cell and
+    /// the wheel sending arrows.
+    pub(crate) fn alternate_on(&self) -> std::io::Result<()> {
+        if !self.alternate.swap(true, Ordering::AcqRel) {
+            self.term
+                .write_str(&format!("{ALT_SCREEN_ON}{ALT_SCROLL_ON}{HOME}"))?;
+            self.term.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Comes back from the other screen, to what was on this one.
+    pub(crate) fn alternate_off(&self) -> std::io::Result<()> {
+        if self.alternate.swap(false, Ordering::AcqRel) {
+            self.term
+                .write_str(&format!("{ALT_SCROLL_OFF}{ALT_SCREEN_OFF}"))?;
+            self.term.flush()?;
+        }
+        Ok(())
+    }
+
     /// Puts back what a prompt takes from this terminal while it is
     /// open: the line discipline every key read turns off, and the
     /// cursor a list hides for as long as it is drawing.
@@ -328,6 +356,11 @@ impl Console {
                      run `stty sane` to type into your shell again"
                 ));
             }
+        }
+        if let Err(e) = self.alternate_off() {
+            warn(format!(
+                "could not come back from the terminal's other screen: {e}"
+            ));
         }
         if let Err(e) = self.show_cursor() {
             warn(format!("could not put the terminal's cursor back: {e}"));
@@ -398,6 +431,7 @@ mod tests {
             escape: Escape::Parks,
             mode: None,
             hidden: Arc::new(AtomicBool::new(false)),
+            alternate: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
         }
     }

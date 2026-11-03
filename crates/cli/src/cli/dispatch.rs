@@ -37,6 +37,7 @@ pub(super) async fn dispatch(
         } => status_command(run, node, depth.depth(), output, look).await,
         Command::Resume { run, .. } => resume_command(run, output, look).await,
         Command::ResolveGate(args) => resolve_gate_command(args, output, look).await,
+        Command::Review { run } => review_command(run, output, look).await,
         Command::Cancel { run, .. } => cancel_command(run, output, look).await,
         Command::Close { run, by, .. } => close_command(run, by, output, look).await,
         Command::List(args) => list_command(args, output, look).await,
@@ -130,6 +131,11 @@ async fn resolve_gate_command(
         look,
     )
     .await
+}
+
+/// `yunta review`: reads the plan the run it names waits on, and answers it.
+async fn review_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::review::review(&run.named().await?, output, look).await
 }
 
 /// `yunta cancel`: stops the run it names and its sessions.

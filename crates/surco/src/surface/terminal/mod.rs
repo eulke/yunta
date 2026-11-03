@@ -11,10 +11,12 @@ use crate::words::Standing;
 
 mod card;
 pub use card::{narrowed, said_whole, Placed};
+pub use desk::LaidDesk;
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;
 mod decision;
+mod desk;
 mod diagram;
 mod diffstat;
 mod document;

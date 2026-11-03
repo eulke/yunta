@@ -17,9 +17,9 @@
 //! is ever one that run's own menu does not offer.
 
 use surco::words::Standing;
-use yunta_core::events::{GateWaitingPayload, PauseReason, Stuck};
+use yunta_core::events::{ArtifactId, GateWaitingPayload, PauseReason, Stuck};
 use yunta_core::step::NextStep;
-use yunta_core::RunId;
+use yunta_core::{ArtifactKind, RunId};
 use yunta_engine::{NodeWait, RunFrame, RunPhase, WaitingOn};
 
 use crate::error::Reader;
@@ -145,6 +145,11 @@ pub(crate) fn resolve_gate(run: &str) -> String {
 /// its menu; off one, a command per option.
 pub(crate) fn decide(run: &str) -> String {
     format!("yunta resolve-gate {run}")
+}
+
+/// Reads the plan a parked run waits on, and answers it at a terminal.
+pub(crate) fn review(run: &str) -> String {
+    format!("yunta review {run}")
 }
 
 /// Hands a run back to the engine, once whatever stopped it is settled
@@ -319,6 +324,9 @@ fn after_needs_you(
         ],
         Some(decision) => {
             let mut steps = Vec::new();
+            if shows_plan(decision) {
+                steps.push((review(run), "reads its plan, and answers it there"));
+            }
             if waits_for_tree(decision) {
                 steps.push((resume(run), "offers a retry once the run's tree changed"));
             }
@@ -326,6 +334,19 @@ fn after_needs_you(
             steps
         }
     }
+}
+
+/// Whether a decision shows a plan, the tasks document a person reads and
+/// answers at a terminal.
+fn shows_plan(decision: &GateWaitingPayload) -> bool {
+    decision.shows().iter().any(|shown| {
+        matches!(
+            shown.artifact,
+            ArtifactId::Interpreted {
+                kind: ArtifactKind::Tasks
+            }
+        )
+    })
 }
 
 /// What a person types next for a run paused on a limit's reset. The resume

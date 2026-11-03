@@ -55,7 +55,7 @@ pub(crate) fn codeless(review: &PlanReview) -> (usize, usize) {
 }
 
 /// How the run judges `task`, when `review` says.
-fn judged<'a>(review: &'a PlanReview, task: &Task) -> Option<&'a TaskReview> {
+pub(super) fn judged<'a>(review: &'a PlanReview, task: &Task) -> Option<&'a TaskReview> {
     review.tasks.iter().find(|judged| judged.task == task.id)
 }
 
@@ -90,7 +90,7 @@ fn facts(
 /// The files `task` changes, each once, in the order it names them. A test
 /// the spec wrote is the spec's: a change on one is no change of the
 /// task's, and what keeps the plan from being proven says so.
-fn changed_files<'a>(task: &'a Task, judged: Option<&TaskReview>) -> Vec<&'a str> {
+pub(super) fn changed_files<'a>(task: &'a Task, judged: Option<&TaskReview>) -> Vec<&'a str> {
     let mut files: Vec<&str> = Vec::new();
     for change in task.changes.iter().filter(|change| !denied(change, judged)) {
         if !files.contains(&change.file()) {
@@ -98,6 +98,36 @@ fn changed_files<'a>(task: &'a Task, judged: Option<&TaskReview>) -> Vec<&'a str
         }
     }
     files
+}
+
+/// The paths a task's rail row names: each file it changes, except that a directory it
+/// changes more than one file of stands for those files, once, where the first of them
+/// stood. A file at the root stands for itself.
+pub(super) fn impact_paths(files: &[&str]) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for file in files {
+        let shared = |dir: &str| {
+            files
+                .iter()
+                .copied()
+                .filter(|other| parent(other) == Some(dir))
+                .count()
+                > 1
+        };
+        let path = match parent(file) {
+            Some(dir) if shared(dir) => format!("{dir}/"),
+            _ => file.to_string(),
+        };
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+/// The directory `file` is in, when it is in one.
+fn parent(file: &str) -> Option<&str> {
+    file.rsplit_once('/').map(|(dir, _)| dir)
 }
 
 /// Whether `change` is on a test the spec wrote, which no session writes.
@@ -123,7 +153,7 @@ fn built_on(task: &Task, plan: &TasksFile) -> Vec<String> {
 /// `fields` with what tests `task`: each test the spec gives it, what it
 /// proves in the spec's words and the command that runs it; with no spec
 /// beside the plan, each criterion the plan gives it.
-fn tested(
+pub(super) fn tested(
     mut fields: Fields,
     task: &Task,
     review: &PlanReview,

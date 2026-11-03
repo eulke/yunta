@@ -12,6 +12,24 @@ pub const SHOW_CURSOR: &str = "\x1b[?25h";
 /// Erases from the cursor to the end of the screen.
 pub const CLEAR_DOWN: &str = "\x1b[J";
 
+/// Puts the terminal on its other screen, which is empty and has no history. What was on
+/// this one comes back when it is left.
+pub const ALT_SCREEN_ON: &str = "\x1b[?1049h";
+
+/// Comes back from the other screen.
+pub const ALT_SCREEN_OFF: &str = "\x1b[?1049l";
+
+/// Has the wheel send arrows on the other screen, without taking the mouse: selecting
+/// text goes on working. What the terminal had is saved first, since most have it on and
+/// a person's other programs count on that.
+pub const ALT_SCROLL_ON: &str = "\x1b[?1007s\x1b[?1007h";
+
+/// Puts back what the wheel did on the other screen.
+pub const ALT_SCROLL_OFF: &str = "\x1b[?1007r";
+
+/// Moves the cursor to the first cell of the first row.
+pub const HOME: &str = "\x1b[H";
+
 /// Moves the cursor up `rows` rows. Nothing for none: `ESC [ 0 A` moves one.
 pub fn up(rows: usize) -> String {
     match rows {

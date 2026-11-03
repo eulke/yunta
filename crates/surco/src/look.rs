@@ -91,6 +91,12 @@ impl Width {
         Self::of(Some(edge), columns).within(edge)
     }
 
+    /// Every cell a terminal `edge` cells wide has, for what lays out its own columns
+    /// and holds each to a line's measure itself.
+    pub fn whole(edge: usize) -> Self {
+        Width(edge)
+    }
+
     pub fn cells(self) -> usize {
         self.0
     }

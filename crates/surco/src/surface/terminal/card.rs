@@ -336,7 +336,7 @@ impl ChoiceRow {
 
     /// What the option says: `said`, then `: ` and `cost` when both are given, the
     /// cost in the muted tone, so a row says what it has and no more.
-    fn text(&self) -> Line {
+    pub(super) fn text(&self) -> Line {
         let mut text = Line::new().push(Tone::Plain, self.said.as_deref().unwrap_or_default());
         if self.said.is_some() && self.cost.is_some() {
             text = text.plain(": ");

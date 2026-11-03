@@ -32,6 +32,15 @@ pub(crate) struct Answer {
     pub(crate) folded: bool,
 }
 
+/// What a person did at the card.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Reply {
+    /// They answered it.
+    Chose(Answer),
+    /// They asked to read the plan it decides on.
+    Read,
+}
+
 /// One option as the card holds it.
 struct Offered {
     id: OptionId,
@@ -56,6 +65,8 @@ pub(crate) struct DecisionCard {
     at: usize,
     saying: Option<Saying>,
     escape: Escape,
+    /// Whether the plan the decision is on can be read from here, a key away.
+    reads: bool,
 }
 
 impl DecisionCard {
@@ -93,6 +104,7 @@ impl DecisionCard {
             at: 0,
             saying: None,
             escape,
+            reads: false,
         }
     }
 
@@ -102,6 +114,36 @@ impl DecisionCard {
         self.edge = edge;
         self.about = about;
         self
+    }
+
+    /// Offers the plan the decision is on, a key away.
+    pub(crate) fn reading(mut self) -> Self {
+        self.reads = true;
+        self
+    }
+
+    /// Every option, as the desk lists them.
+    pub(crate) fn rows(&self) -> Vec<ChoiceRow> {
+        self.offered
+            .iter()
+            .map(|offered| offered.row.clone())
+            .collect()
+    }
+
+    /// The option at `index`, chosen somewhere other than the card: what it comes to, or
+    /// `None` where it asks for words, with the pointer on it and its field open.
+    pub(crate) fn pick(&mut self, index: usize) -> Option<Answer> {
+        let pointed = self.offered.get(index)?;
+        if pointed.asks.is_none() {
+            return Some(Answer {
+                option: pointed.id.clone(),
+                words: None,
+                folded: false,
+            });
+        }
+        self.at = index;
+        self.open_field();
+        None
     }
 
     /// The option the pointer stands on, or `None` when the card offers nothing.
@@ -114,11 +156,7 @@ impl DecisionCard {
     fn choosing_body(&self, look: &Look) -> CardBody {
         CardBody::Choosing {
             choices: Choices {
-                rows: self
-                    .offered
-                    .iter()
-                    .map(|offered| offered.row.clone())
-                    .collect(),
+                rows: self.rows(),
                 at: self.at,
             },
             then: self
@@ -150,12 +188,18 @@ impl DecisionCard {
     /// The keys the card answers to, each with what it does, for the body it draws.
     fn keys(&self, look: &Look) -> Vec<String> {
         match &self.saying {
-            None => vec![
-                format!("{} move", look.glyphs.up_down()),
-                "enter chooses".to_string(),
-                "n adds a note".to_string(),
-                self.escape.said().to_string(),
-            ],
+            None => {
+                let mut keys = vec![
+                    format!("{} move", look.glyphs.up_down()),
+                    "enter chooses".to_string(),
+                    "n adds a note".to_string(),
+                ];
+                if self.reads {
+                    keys.push("r reads the plan".to_string());
+                }
+                keys.push(self.escape.said().to_string());
+                keys
+            }
             Some(_) => {
                 let send = match self.pointed().is_some_and(|pointed| pointed.asks.is_some()) {
                     true => "enter sends it",
@@ -186,8 +230,8 @@ impl DecisionCard {
 
     /// What a key asks of the list, with no field open: the pointer moves, Enter
     /// takes the option pointed at or opens its field, `n` opens a field for a note,
-    /// and Escape or Ctrl-C leaves.
-    fn press_in_list(&mut self, stroke: Stroke) -> Press<Answer> {
+    /// `r` asks for the plan when the card offers it, and Escape or Ctrl-C leaves.
+    fn press_in_list(&mut self, stroke: Stroke) -> Press<Reply> {
         match stroke {
             Stroke::Up | Stroke::BackTab | Stroke::Insert('k') => {
                 self.point(false);
@@ -205,16 +249,17 @@ impl DecisionCard {
                     self.open_field();
                     return Press::Stay;
                 }
-                Press::Answer(Answer {
+                Press::Answer(Reply::Chose(Answer {
                     option: pointed.id.clone(),
                     words: None,
                     folded: false,
-                })
+                }))
             }
             Stroke::Insert('n' | 'N') => {
                 self.open_field();
                 Press::Stay
             }
+            Stroke::Insert('r' | 'R') if self.reads => Press::Answer(Reply::Read),
             Stroke::Decline => Press::Decline,
             Stroke::Interrupt => Press::Interrupt,
             _ => Press::Stay,
@@ -223,7 +268,7 @@ impl DecisionCard {
 }
 
 impl Held for DecisionCard {
-    type Answer = Answer;
+    type Answer = Reply;
 
     /// Whether words are being typed for an option, so the prompt takes keys as text
     /// rather than as keys of the list.
@@ -251,7 +296,7 @@ impl Held for DecisionCard {
     /// What a stroke asks of the card. With a field open, the stroke edits the words
     /// and an answer is refused while an option that asks for words has none; with
     /// the list open, the stroke moves the pointer or answers.
-    fn press(&mut self, stroke: Stroke) -> Press<Answer> {
+    fn press(&mut self, stroke: Stroke) -> Press<Reply> {
         let Some(saying) = self.saying.as_mut() else {
             return self.press_in_list(stroke);
         };
@@ -268,11 +313,11 @@ impl Held for DecisionCard {
                     saying.refused = true;
                     return Press::Stay;
                 }
-                Press::Answer(Answer {
+                Press::Answer(Reply::Chose(Answer {
                     option: pointed.id.clone(),
                     words: (!typed.value.is_empty()).then_some(typed.value),
                     folded: typed.folded,
-                })
+                }))
             }
             Edit::Declined => {
                 self.saying = None;

@@ -31,6 +31,11 @@ impl RunExit {
     }
 }
 
+/// What a run is called on a page: the workflow it follows and the mode it follows it in.
+pub(crate) fn called(workflow: impl std::fmt::Display, mode: impl std::fmt::Display) -> String {
+    format!("{workflow} ({mode})")
+}
+
 /// What the registry of the run under `run_dir` says at `at` about the
 /// engine driving it, as this host's processes tell.
 pub(crate) fn engine(run_dir: &std::path::Path, at: DateTime<Utc>) -> Engine {

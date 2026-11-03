@@ -40,6 +40,10 @@ pub struct Terminal {
     reader: Option<std::thread::JoinHandle<()>>,
     /// How the run ended, once it has.
     ended: Option<ExitStatus>,
+    /// The cells one row of this terminal holds, as stated when it was opened.
+    columns: u16,
+    /// The rows this terminal holds, as stated when it was opened.
+    rows: u16,
 }
 
 impl Terminal {
@@ -69,9 +73,22 @@ impl Terminal {
         args: &[&str],
         vars: &[(&str, &str)],
     ) -> Self {
+        Self::open_sized(bin, dir, home, args, vars, (Self::COLUMNS, Self::ROWS))
+    }
+
+    /// [`Terminal::open_with`], on a terminal of `(columns, rows)` cells, for a
+    /// surface that lays out by the room it is given.
+    pub fn open_sized(
+        bin: &Path,
+        dir: &Path,
+        home: &Path,
+        args: &[&str],
+        vars: &[(&str, &str)],
+        (columns, rows): (u16, u16),
+    ) -> Self {
         let screen = Winsize {
-            ws_row: Self::ROWS,
-            ws_col: Self::COLUMNS,
+            ws_row: rows,
+            ws_col: columns,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
@@ -104,6 +121,8 @@ impl Terminal {
             reader: Some(collect(std::fs::File::from(pty.master), drawn.clone())),
             drawn,
             ended: None,
+            columns,
+            rows,
         }
     }
 
@@ -123,7 +142,7 @@ impl Terminal {
     /// What a person sees on this terminal now: every row as the screen holds
     /// it, whatever was drawn over what on the way there.
     pub fn screen(&self) -> Screen {
-        let mut parser = vt100::Parser::new(Self::ROWS, Self::COLUMNS, 0);
+        let mut parser = vt100::Parser::new(self.rows, self.columns, 0);
         parser.process(
             self.drawn
                 .lock()
@@ -133,11 +152,12 @@ impl Terminal {
         let screen = parser.screen();
         Screen {
             rows: screen
-                .rows(0, Self::COLUMNS)
+                .rows(0, self.columns)
                 .map(|row| row.trim_end().to_string())
                 .collect(),
             cursor: screen.cursor_position(),
             cursor_hidden: screen.hide_cursor(),
+            alternate: screen.alternate_screen(),
         }
     }
 
@@ -288,6 +308,8 @@ pub struct Screen {
     /// The row and the column the cursor stands on.
     pub cursor: (u16, u16),
     pub cursor_hidden: bool,
+    /// Whether the terminal is on its other screen.
+    pub alternate: bool,
 }
 
 impl Screen {

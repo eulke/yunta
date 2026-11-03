@@ -124,3 +124,20 @@ macro_rules! yunta_on_terminal {
         )
     };
 }
+
+/// Runs the `yunta` binary on a terminal of a stated size, `(columns, rows)`:
+/// `yunta_on_terminal_sized!(dir, home, &["review"], (90, 11))`. Same reason as
+/// [`yunta_in!`] for expanding `CARGO_BIN_EXE_yunta` at the call site.
+#[macro_export]
+macro_rules! yunta_on_terminal_sized {
+    ($dir:expr, $home:expr, $args:expr, $size:expr) => {
+        $crate::Terminal::open_sized(
+            ::std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+            $dir,
+            $home,
+            $args,
+            &[],
+            $size,
+        )
+    };
+}

@@ -20,11 +20,15 @@ use yunta_core::RunId;
 
 mod card;
 mod change;
+mod desk;
 mod flawed;
 mod head;
 mod proof;
 mod steps;
 mod tree;
+
+pub(crate) use desk::has_a_place;
+pub use desk::{about, reading, AlsoShown, Reading, Spot, View};
 
 pub(crate) use card::codeless;
 pub(crate) use flawed::concerns;

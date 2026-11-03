@@ -5,16 +5,16 @@
 //! where no decision is put beside the plan, what keeps it from being
 //! proven.
 
-use surco::components::{Fields, Fold, Marked, Section};
+use surco::components::{Code, Fields, Fold, Marked, Section};
 use surco::doc::{Block, Doc};
 use surco::glyphs::Mark;
 use surco::line::Line;
 use surco::text::counted;
-use yunta_core::shown::PlanReview;
+use yunta_core::shown::{JudgedCriterion, PlanReview};
 use yunta_core::step::NextStep;
-use yunta_core::RunId;
+use yunta_core::{RunId, Task, TaskId};
 
-use super::{titled, Form};
+use super::{card, titled, Form};
 
 /// `doc` with what proves `review`, for the run `run`; each command it
 /// names is written by `spell`. What keeps a plan from being proven is
@@ -26,7 +26,83 @@ pub(super) fn proof(
     form: Form,
     said: (&RunId, &dyn Fn(&NextStep) -> String),
 ) -> Doc {
-    let fields = guards(measured(review, form, said), review);
+    let showing = match (form, &review.spec_node) {
+        (Form::Review, Some(node)) => Some(crate::spec::status_command(said.0, node, said.1)),
+        _ => None,
+    };
+    let mut blocks = held(review, showing);
+    if form == Form::Whole {
+        blocks.extend(super::concerns(&review.flaws()));
+    }
+    match blocks.is_empty() {
+        true => doc,
+        false => doc.with(titled("proof", folded(blocks, review, form))),
+    }
+}
+
+/// What proves the plan as a whole, on the desk, where each file the spec
+/// wrote is a key away: the tests counted, the suite, every guard and the
+/// promises no guard checks.
+pub(super) fn of_plan(review: &PlanReview) -> Doc {
+    let mut blocks = held(review, None);
+    if blocks.is_empty() {
+        blocks.push(nothing("nothing here proves the plan"));
+    }
+    Doc::new().with_all(blocks)
+}
+
+/// What proves `task`, a key away from its card: what tests it, the suite
+/// every task keeps passing, its guards, what it promises that no guard of
+/// its own checks, and each file the spec wrote for it, whole.
+pub(super) fn of_task(task: &Task, review: &PlanReview) -> Doc {
+    let judged = card::judged(review, task);
+    let fields = suite(card::tested(Fields::new(), task, review, judged), review);
+    let guards = judged.map_or(&[][..], |judged| judged.guards.as_slice());
+    let fields = guards
+        .iter()
+        .enumerate()
+        .fold(fields, |fields, (n, guard)| {
+            guarded(fields, if n == 0 { "guards" } else { "" }, None, guard)
+        });
+    let mut blocks: Vec<Block> = Vec::new();
+    if !fields.is_empty() {
+        blocks.push(fields.into());
+    }
+    if !task.invariants.is_empty() && guards.is_empty() {
+        blocks.push(
+            Marked {
+                mark: Mark::Absent,
+                items: vec![format!(
+                    "{} checks {} this task keeps",
+                    unguarded_by(review),
+                    counted(task.invariants.len(), "promise")
+                )],
+            }
+            .into(),
+        );
+    }
+    if let Some(spec) = review.spec.as_ref().and_then(|spec| spec.of(&task.id)) {
+        blocks.extend(spec.files.iter().map(|file| {
+            Code::whole(
+                file.path.as_str(),
+                Some("written by the spec".to_string()),
+                &file.content,
+            )
+            .into()
+        }));
+    }
+    if blocks.is_empty() {
+        blocks.push(nothing("nothing here proves this task"));
+    }
+    Doc::new().with_all(blocks)
+}
+
+/// The blocks that hold every task: the fields of what the spec tests and
+/// the suite, each guard a task keeps, and the promises no guard checks.
+/// `showing` is the command that shows the spec's tests whole, when a
+/// review leaves them to it.
+pub(super) fn held(review: &PlanReview, showing: Option<String>) -> Vec<Block> {
+    let fields = guards(measured(review, showing), review);
     let mut blocks: Vec<Block> = Vec::new();
     if !fields.is_empty() {
         blocks.push(fields.into());
@@ -40,23 +116,22 @@ pub(super) fn proof(
             .into(),
         );
     }
-    if form == Form::Whole {
-        blocks.extend(super::concerns(&review.flaws()));
-    }
-    match blocks.is_empty() {
-        true => doc,
-        false => doc.with(titled("proof", folded(blocks, review, form))),
-    }
+    blocks
 }
 
-/// What holds every task: the tests the spec wrote, counted, with the
-/// command that shows them whole where a review leaves them out; and the
-/// suite every task keeps passing.
-fn measured(
-    review: &PlanReview,
-    form: Form,
-    (run, spell): (&RunId, &dyn Fn(&NextStep) -> String),
-) -> Fields {
+/// A block that says nothing is there to prove what it is about, so a pane
+/// is not drawn empty.
+fn nothing(said: &str) -> Block {
+    Marked {
+        mark: Mark::Absent,
+        items: vec![said.to_string()],
+    }
+    .into()
+}
+
+/// What the spec tests, counted, with `showing` the command that shows them
+/// whole; and the suite every task keeps passing.
+fn measured(review: &PlanReview, showing: Option<String>) -> Fields {
     let mut fields = Fields::new();
     if let Some(spec) = &review.spec {
         let tests = crate::spec::test_count(spec);
@@ -78,20 +153,26 @@ fn measured(
                 counted(lines, "line")
             ),
         );
-        if let (Form::Review, Some(node)) = (form, &review.spec_node) {
-            fields = fields.push_command("", crate::spec::status_command(run, node, spell));
+        if let Some(showing) = showing {
+            fields = fields.push_command("", showing);
         }
     }
-    if !review.held.is_empty() {
-        fields = review.held.iter().fold(
+    suite(fields, review)
+}
+
+/// `fields` with the suite every task keeps passing, and the command that
+/// runs it, once for all of them. Nothing when the run measured no suite.
+pub(super) fn suite(fields: Fields, review: &PlanReview) -> Fields {
+    match review.held.is_empty() {
+        true => fields,
+        false => review.held.iter().fold(
             fields.push_if(
                 "the suite",
                 "every task keeps it passing; green before this run changed anything",
             ),
             |fields, command| fields.push_command("", command.as_str()),
-        );
+        ),
     }
-    fields
 }
 
 /// `blocks` as the proof draws them: a forge's page folds them under what
@@ -141,18 +222,35 @@ fn guards(mut fields: Fields, review: &PlanReview) -> Fields {
         .flat_map(|judged| judged.guards.iter().map(move |guard| (&judged.task, guard)));
     for (n, (task, guard)) in guards.enumerate() {
         let label = if n == 0 { "guards" } else { "" };
-        fields = match guard.proves.as_deref().map(str::trim) {
-            Some(proves) if !proves.is_empty() => fields
-                .push_if(label, format!("`{task}`: {proves}"))
-                .push_command("", guard.cmd.as_str()),
-            _ => fields.push_command(label, guard.cmd.as_str()),
-        };
+        fields = guarded(fields, label, Some(task), guard);
     }
     fields
 }
 
+/// `fields` with `guard` under `label`: what it proves, with the task it
+/// guards named when `task` is given, and the command that runs it.
+fn guarded(
+    fields: Fields,
+    label: &'static str,
+    task: Option<&TaskId>,
+    guard: &JudgedCriterion,
+) -> Fields {
+    match guard.proves.as_deref().map(str::trim) {
+        Some(proves) if !proves.is_empty() => {
+            let said = match task {
+                Some(task) => format!("`{task}`: {proves}"),
+                None => proves.to_string(),
+            };
+            fields
+                .push_if(label, said)
+                .push_command("", guard.cmd.as_str())
+        }
+        _ => fields.push_command(label, guard.cmd.as_str()),
+    }
+}
+
 /// How many promises the plan's tasks keep that no guard of theirs
-/// checks: only the suite, when the run measured one.
+/// checks, and what checks them.
 fn unguarded(review: &PlanReview) -> Option<String> {
     let unguarded: usize = review
         .plan
@@ -167,14 +265,20 @@ fn unguarded(review: &PlanReview) -> Option<String> {
         })
         .map(|task| task.invariants.len())
         .sum();
-    let checker = match review.held.is_empty() {
-        true => "no guard of theirs",
-        false => "nothing but the suite",
-    };
     (unguarded > 0).then(|| {
         format!(
-            "{checker} checks {} the tasks keep",
+            "{} checks {} the tasks keep",
+            unguarded_by(review),
             counted(unguarded, "promise")
         )
     })
+}
+
+/// What checks the promises no guard of a task checks: the suite, when the
+/// run measured one, and no guard of theirs otherwise.
+fn unguarded_by(review: &PlanReview) -> &'static str {
+    match review.held.is_empty() {
+        true => "no guard of theirs",
+        false => "nothing but the suite",
+    }
 }

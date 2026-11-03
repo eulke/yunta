@@ -1,0 +1,35 @@
+ plan · EKPBGE · fragua (standard) · 4 tasks in 3 steps                                       needs you  approve-plan
+ Install packs in the user's Yunta state directory for use across projects
+ you asked  add pack global instalation support, not only project level as today
+
+   ▸ the change                      │ the change
+                                     │
+ steps                               │   Add user-wide pack installation alongside project-local vendoring. A global
+ 1   global-pack-storage             │   pack lives under the existing YUNTA_HOME (or ~/.yunta) state root, so every
+     global-pack-catalog             │   project using that same user state can discover it. `yunta pack add
+ 2   global-pack-cli                 │   --global` installs there; local installs continue to use the repository
+ 3   global-pack-docs                │   tree. Resolution prefers a project-local pack when the same workflow is
+                                     │   available locally, then falls back to global packs. Pack locks and
+ order                               │   list/remove operations remain scoped to the selected installation level.
+ storage → cli → docs                │
+ catalog → docs                      │   design
+                                     │     `PackInstallScope` selects the root before the existing staging, vendor,
+ decided for you                4  d │     lock and management operations run. Project scope uses `<repo>/.yunta`;
+ risks                          2  d │     global scope uses the Yunta user state root. Runtime catalog readers
+ left out                       2  d │     receive the global packs root from the process environment and inspect
+                                     │     local packs first, then global packs, retaining the existing ambiguity
+ implies                             │     rule within a source. Locks remain separate: project installs use
+ ▲ what it changes is named in 5     │     `.yunta/yunta.lock`; global installs use `$YUNTA_HOME/yunta.lock`.
+   files outside every task          │
+                                     │
+ impact                              │
+ crates/cli/src/pack.rs      storage │
+ crates/engin…rc/catalog.rs  catalog │
+ crates/engine/src/frozen/   catalog │
+ crates/cli/src/cli/             cli │
+ crates/cli/src/commands/        cli │
+ docs/global-install.md         docs │
+                                     │
+
+ ◆ Plan and its tests registered. Approve?
+ 1 approve   2 adjust   3 abort                                     j k task · p proof · d decided for you · esc back

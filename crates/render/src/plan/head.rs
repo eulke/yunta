@@ -25,15 +25,10 @@ pub(super) fn head(review: &PlanReview, steps: &[Vec<&Task>]) -> Doc {
     if let Some(summary) = said(&review.plan.summary) {
         doc = doc.with(Gist::new(summary));
     }
-    let flaws = review.flaws().len();
-    if flaws > 0 {
+    if let Some(flawed) = flawed(review) {
         doc = doc.with(Marked {
             mark: Mark::Caution,
-            items: vec![format!(
-                "{} {} this plan from being proven as it is written",
-                counted(flaws, "problem"),
-                agreeing(flaws, "keeps", "keep")
-            )],
+            items: vec![flawed],
         });
     }
     if let Some(asked) = said(&review.asked) {
@@ -45,13 +40,9 @@ pub(super) fn head(review: &PlanReview, steps: &[Vec<&Task>]) -> Doc {
 /// How big the plan is and what it holds for its reader, a fact each: its
 /// tasks and the steps they take, the choices it made for them, what it
 /// risks and what it leaves out.
-fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
+pub(super) fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
     let plan = &review.plan;
-    let tasks = counted(plan.tasks.len(), "task");
-    let mut facts = vec![match steps {
-        0 | 1 => tasks,
-        steps => format!("{tasks} in {steps} steps"),
-    }];
+    let mut facts = vec![size(review, steps)];
     let decided = super::change::decided_for_you(review).count();
     if decided > 0 {
         facts.push(format!("{decided} decided for you"));
@@ -63,4 +54,25 @@ fn facts(review: &PlanReview, steps: usize) -> Vec<String> {
         facts.push(format!("{} left out", plan.out_of_scope.len()));
     }
     facts
+}
+
+/// How big the plan is: its tasks, and the steps they take when they take more than one.
+pub(super) fn size(review: &PlanReview, steps: usize) -> String {
+    let tasks = counted(review.plan.tasks.len(), "task");
+    match steps {
+        0 | 1 => tasks,
+        steps => format!("{tasks} in {steps} steps"),
+    }
+}
+
+/// What keeps the plan from being proven, counted, when anything does.
+pub(super) fn flawed(review: &PlanReview) -> Option<String> {
+    let flaws = review.flaws().len();
+    (flaws > 0).then(|| {
+        format!(
+            "{} {} this plan from being proven as it is written",
+            counted(flaws, "problem"),
+            agreeing(flaws, "keeps", "keep")
+        )
+    })
 }

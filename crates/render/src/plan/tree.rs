@@ -3,6 +3,8 @@
 //! to the code that stands where it goes; in the card's words, the files
 //! beyond the plan whose code names a shape the plan changes.
 
+use std::collections::BTreeSet;
+
 use surco::components::{Against, Code, Fields};
 use surco::text::counted;
 use yunta_core::events::{InTree, Outside, ShapesReadPayload};
@@ -44,17 +46,58 @@ pub(super) fn implies(
     fields
 }
 
-/// What `shape`, drawn as `code`, implies: nothing where the tree held none
-/// of it, where its code keeps what stands there word for word, or where no
-/// file beyond the plan names it; else each such file under a row that
-/// counts them, or one row saying how many carry its name.
-fn implied(shape: &Shape, code: &Code, read: Option<&ShapesReadPayload>) -> Vec<String> {
+/// What `shape`, drawn as `code`, reaches beyond the plan: nothing where the
+/// tree held none of it, or where its code keeps what stands there word for
+/// word; else what the tree found beyond the plan of it.
+fn beyond<'a>(
+    shape: &Shape,
+    code: &Code,
+    read: Option<&'a ShapesReadPayload>,
+) -> Option<&'a Outside> {
     let Some(InTree::There { outside, .. }) = in_tree(shape, read) else {
+        return None;
+    };
+    (!matches!(code.against, Some(Against::Unchanged))).then_some(outside)
+}
+
+/// What the plan's `shapes` imply past its tasks, as a line each for a place with little
+/// room: how many files beyond the plan name what it changes, each file counted once
+/// however many shapes it names, and each shape too many files carry the name of.
+pub(super) fn implied_by_all(shapes: &[Shape], read: Option<&ShapesReadPayload>) -> Vec<String> {
+    let mut files: BTreeSet<&str> = BTreeSet::new();
+    let mut common = Vec::new();
+    for shape in shapes {
+        let code = told(
+            Code::whole(shape.file.as_str(), None, &shape.code),
+            shape,
+            read,
+        );
+        match beyond(shape, &code, read) {
+            None => {}
+            Some(Outside::Files { paths }) => files.extend(paths.iter().map(String::as_str)),
+            Some(Outside::Common { files }) => common.push(format!(
+                "`{}` is named in {}, too many to follow",
+                shape.name,
+                counted(*files, "file")
+            )),
+        }
+    }
+    let named = (!files.is_empty()).then(|| {
+        format!(
+            "what it changes is named in {} outside every task",
+            counted(files.len(), "file"),
+        )
+    });
+    named.into_iter().chain(common).collect()
+}
+
+/// What `shape`, drawn as `code`, implies: nothing where `beyond` finds nothing
+/// past the plan; else each such file under a row that counts them, or one row
+/// saying how many carry its name.
+fn implied(shape: &Shape, code: &Code, read: Option<&ShapesReadPayload>) -> Vec<String> {
+    let Some(outside) = beyond(shape, code, read) else {
         return Vec::new();
     };
-    if matches!(code.against, Some(Against::Unchanged)) {
-        return Vec::new();
-    }
     match outside {
         Outside::Files { paths } if paths.is_empty() => Vec::new(),
         Outside::Files { paths } => std::iter::once(format!(

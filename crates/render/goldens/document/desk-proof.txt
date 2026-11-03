@@ -1,0 +1,35 @@
+ plan · EKPBGE · fragua (standard) · 4 tasks in 3 steps                                       needs you  approve-plan
+ Install packs in the user's Yunta state directory for use across projects
+ you asked  add pack global instalation support, not only project level as today
+
+     the change                      │ proof · global-pack-storage                                        step 1 of 3
+                                     │
+ steps                               │   tested by    Global and project storage resolve pack directories and lock
+ 1 ▸ global-pack-storage             │                files under their separate roots.
+     global-pack-catalog             │                cargo test --workspace --test global_pack_storage \
+ 2   global-pack-cli                 │                  global_pack_storage
+ 3   global-pack-docs                │   the suite    every task keeps it passing; green before this run changed
+                                     │                anything
+ order                               │                cargo clippy --workspace --all-targets -- -D warnings
+ storage → cli → docs                │                cargo test --workspace
+ catalog → docs                      │
+                                     │   ◌ nothing but the suite checks 2 promises this task keeps
+ decided for you                4  d │
+ risks                          2  d │   crates/cli/tests/global_pack_storage.rs
+ left out                       2  d │     written by the spec
+                                     │     │ #[path = "../src/pack.rs"]
+ implies                             │     │ mod pack;
+ ▲ what it changes is named in 5     │     │
+   files outside every task          │     │ #[test]
+                                     │     │ fn global_pack_storage_keeps_project_and_user_locks_separate() {
+ impact                              │     │     let temp = tempfile::tempdir().unwrap();
+ crates/cli/src/pack.rs      storage │     │     let project = temp.path().join("project");
+ crates/engin…rc/catalog.rs  catalog │     │     let user = temp.path().join("user-state");
+ crates/engine/src/frozen/   catalog │     │
+ crates/cli/src/cli/             cli │     │     let _ = pack::installed_packs(pack::PackInstallScope::Project,
+ crates/cli/src/commands/        cli │     │       ↪ &project, &user).unwrap();
+ docs/global-install.md         docs │     │     let _ = pack::installed_packs(pack::PackInstallScope::Global,
+                                     │ … 6 more lines
+
+ ◆ Plan and its tests registered. Approve?
+ 1 approve   2 adjust   3 abort                                  j k task · p the card · d decided for you · esc back

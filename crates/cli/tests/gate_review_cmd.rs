@@ -1,7 +1,7 @@
 //! A plan put in front of the person approving it, driven end to end on a
-//! terminal: the gate draws the tasks it asks about, a correction without
-//! words is asked again, and one with words sends the plan back to the
-//! planner before the gate asks once more.
+//! terminal: the gate says what the plan is, a correction without words is
+//! asked again, and one with words sends the plan back to the planner before
+//! the gate asks once more.
 
 use yunta_testkit::{run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout, Terminal};
 
@@ -87,14 +87,10 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     let root = tempfile::tempdir().unwrap();
     let mut terminal = reviewing(root.path());
     terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
-    let drawn = terminal.drawn();
+    let screen = terminal.screen();
     assert!(
-        drawn.contains("plan: 1 task")
-            && drawn.contains("Writes the file the run is about.")
-            && drawn.contains("T001: Make it")
-            && drawn.contains("tested by    the file exists")
-            && drawn.contains("test -f made.txt"),
-        "the gate shows the plan it asks about, as the run judges it:\n{drawn}"
+        screen.holds("Make it") && screen.holds("1 task"),
+        "the card says what the plan it asks about is: {screen:#?}"
     );
 
     // `adjust`, the second option.
@@ -111,9 +107,9 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     terminal.keys("add a task that says it\r");
 
     // The planner goes again and the gate asks about the second plan.
-    terminal.wait_for(
-        "T002: Say it",
-        "the gate never showed the plan the correction made",
+    terminal.wait_on_screen(
+        "2 tasks",
+        "the gate never said what the plan the correction made is",
     );
     // `approve`, the first option, with nothing to add.
     terminal.wait_on_screen("▸ approve", "the gate never asked about the second plan");
@@ -148,7 +144,7 @@ fn an_option_that_asks_requires_its_words() {
 }
 
 #[test]
-fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
+fn resolve_gate_without_an_option_offers_the_plan_its_gate_shows() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path());
     let (repo, home) = (&checkout.repo, &checkout.home);
@@ -157,28 +153,17 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
     assert_eq!(parked.status.code(), Some(3), "{}", stderr(&parked));
     let run_id = run_id_from(&parked);
 
-    let terminal = yunta_on_terminal!(repo, home, &["resolve-gate", &run_id]);
+    let mut terminal = yunta_on_terminal!(repo, home, &["resolve-gate", &run_id]);
     terminal.wait_on_screen("▸ ", "the run's own card was never put to the terminal");
-    let drawn = terminal.drawn();
+    let screen = terminal.screen();
     assert!(
-        drawn.contains("plan: 1 task")
-            && drawn.contains("T001: Make it")
-            && drawn.contains("tested by    the file exists"),
-        "resolve-gate offered a decision without the plan it decides on:\n{drawn}"
+        screen.holds("r reads the plan") && screen.holds("Make it"),
+        "resolve-gate offered a decision without the plan it decides on: {screen:#?}"
     );
-    // Nothing is drawn above the page on this surface, so its first line is
-    // the headline.
-    let first = drawn.lines().find(|line| !line.trim().is_empty());
-    assert!(
-        first.is_some_and(|line| line.starts_with("◆ decision · needs you")),
-        "resolve-gate does not open its page on the headline:\n{drawn}"
-    );
-    // The plan is read straight after the headline.
-    let second = drawn.lines().filter(|line| !line.trim().is_empty()).nth(1);
-    assert!(
-        second.is_some_and(|line| line.starts_with("plan: 1 task")),
-        "resolve-gate does not read the plan straight after its headline:\n{drawn}"
-    );
+    terminal.keys("r");
+    terminal.wait_on_screen("Writes the file the run is about.", "the plan never opened");
+    terminal.keys("j");
+    terminal.wait_on_screen("the file's first line", "its task never came up");
 }
 
 #[test]
@@ -231,12 +216,17 @@ fn the_only_run_under(home: &std::path::Path) -> String {
     id
 }
 
-/// Checks what a gate's page opens on, once it is drawn. `--quiet` says the
-/// run's id alone on the first line, and that id is the one run under
-/// `home`. The page follows it: its headline, with the run's handle at the
-/// headline's far edge, then the plan the page reads first.
-fn opens_on_its_headline(drawn: &str, home: &std::path::Path) {
-    let id = the_only_run_under(home);
+/// `--quiet` says the run's id alone on the first line, and that id is the one
+/// run under `home`. A plan with nothing weighing on it leaves nothing above its
+/// card, so the question comes next, with the run's handle at its far edge.
+#[test]
+fn the_card_opens_right_under_the_run_with_the_question_and_its_options() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = checkout(root.path());
+    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
+    let drawn = terminal.drawn();
+    let id = the_only_run_under(&checkout.home);
     let lines: Vec<&str> = drawn
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -246,53 +236,17 @@ fn opens_on_its_headline(drawn: &str, home: &std::path::Path) {
         "the first line is not the id of the run that was started:\n{drawn}"
     );
     assert!(
-        lines
-            .get(1)
-            .is_some_and(|line| line.starts_with("◆ decision · needs you")),
-        "the page does not open on its headline:\n{drawn}"
-    );
-    assert!(
-        lines.iter().any(|line| line.contains("▸ ")),
-        "the card is not under the page:\n{drawn}"
+        !drawn.contains("decision · needs you") && !drawn.contains("T001: Make it"),
+        "nothing of the plan is above the card:\n{drawn}"
     );
     assert!(
         drawn.contains(yunta_testkit::handle(&id)),
         "the card's far edge does not name the run:\n{drawn}"
     );
-    assert!(
-        lines
-            .get(2)
-            .is_some_and(|line| line.starts_with("plan: 1 task")),
-        "the plan is not read straight after the headline:\n{drawn}"
-    );
-}
-
-#[test]
-fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
-    let root = tempfile::tempdir().unwrap();
-    let checkout = checkout(root.path());
-    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
-    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
-    let drawn = terminal.drawn();
-    opens_on_its_headline(&drawn, &checkout.home);
-    // The page reads its headline and then the plan. The question is asked
-    // after the plan, and its options follow it.
-    let headline = drawn
-        .find("◆ decision · needs you")
-        .expect("the page has no headline");
-    let plan = drawn.find("plan: 1 task").expect("the plan was shown");
     let question = drawn
         .find("◆ Plan registered. Approve?")
         .expect("the decision was put");
-    assert!(
-        headline < plan && plan < question,
-        "the page opens on its headline, reads the plan, then asks the question:\n{drawn}"
-    );
     let asked = &drawn[question..];
-    assert!(
-        !asked.contains("T001: Make it"),
-        "nothing of the plan sits between the question and its options:\n{drawn}"
-    );
     assert!(
         asked.contains("Pause here: nothing runs"),
         "the decision offers to pause the run among its options:\n{drawn}"
@@ -413,17 +367,16 @@ fn what_was_asked_is_read_before_the_plan_that_answers_it() {
         .workflow("wf", BRIEFED_PLAN)
         .file("fixture.yaml", BRIEFED)
         .committed();
-    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
+    let mut terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
     terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
-    let drawn = terminal.drawn();
-
-    let asked = drawn
-        .find("Global pack installation: brief.md of `brief`")
-        .expect(&drawn);
-    let plan = drawn.find("plan: 1 task").expect(&drawn);
-    assert!(asked < plan, "the brief is read before the plan:\n{drawn}");
-    assert!(
-        drawn[asked..plan].contains("A pack installs for the user, not one project."),
-        "{drawn}"
+    terminal.keys("r");
+    terminal.wait_on_screen(
+        "A pack installs for the user, not one project.",
+        "the brief is not what the plan's desk opens on",
+    );
+    terminal.keys("j");
+    terminal.wait_on_screen(
+        "Writes the file the run is about.",
+        "what the plan says of itself does not follow it",
     );
 }

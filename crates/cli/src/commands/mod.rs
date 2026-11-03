@@ -25,6 +25,7 @@ pub(crate) mod refusals;
 pub(crate) mod registry;
 pub mod resolve_gate;
 pub mod resume;
+pub mod review;
 pub mod run;
 pub(crate) mod run_ref;
 pub mod schema;

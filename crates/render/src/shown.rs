@@ -61,6 +61,34 @@ pub fn document(
     }
 }
 
+/// The first document among `documents` that is a plan with something to read,
+/// with the plan it holds: what a person reads at a desk. A plan with no task,
+/// description or design is a document like any other.
+pub fn plan_among(documents: &[ShownDocument]) -> Option<(&ShownDocument, &PlanReview)> {
+    documents
+        .iter()
+        .find_map(|document| match &document.content {
+            ShownContent::Tasks(review) if crate::plan::has_a_place(review) => {
+                Some((document, &**review))
+            }
+            _ => None,
+        })
+}
+
+/// What a document is called on a page that shows it beside others: the
+/// heading a text document opens on, else its artifact, named as `document`
+/// names it without the producer it came from.
+pub(crate) fn called(document: &ShownDocument) -> String {
+    let heading = match &document.content {
+        ShownContent::Text(text) => headed(text).map(|(heading, _)| heading.to_string()),
+        _ => None,
+    };
+    heading.unwrap_or_else(|| match &document.shown.artifact {
+        ArtifactId::Interpreted { kind } => kind.to_string(),
+        ArtifactId::Opaque { name } => name.to_string(),
+    })
+}
+
 /// The heading `text` opens on, and what follows it; `None` when it
 /// opens on anything else.
 fn headed(text: &str) -> Option<(&str, &str)> {

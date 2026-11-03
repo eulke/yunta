@@ -47,7 +47,12 @@ pub(super) fn steps(doc: Doc, steps: &[Vec<&Task>]) -> Doc {
         rows,
     };
     let mut blocks: Vec<Block> = vec![index.into()];
-    if let Some(order) = order(steps) {
+    let ids: Vec<&str> = steps
+        .iter()
+        .flatten()
+        .map(|task| task.id.as_str())
+        .collect();
+    if let Some(order) = order(steps, &ids) {
         blocks.push(blank());
         blocks.push(Block::Diagram(order));
     }
@@ -55,10 +60,10 @@ pub(super) fn steps(doc: Doc, steps: &[Vec<&Task>]) -> Doc {
 }
 
 /// The order a plan's tasks wait on each other in, drawn: a box for each
-/// task, labelled with its id, and an arrow from each to every task that
-/// waits on it. `None` when no task waits on another: every task is in one
-/// step, which the index says.
-fn order(steps: &[Vec<&Task>]) -> Option<Diagram> {
+/// task, labelled by `labels` in the order the steps hold the tasks, and an
+/// arrow from each to every task that waits on it. `None` when no task waits
+/// on another: every task is in one step, which the index says.
+pub(super) fn order(steps: &[Vec<&Task>], labels: &[&str]) -> Option<Diagram> {
     let tasks: Vec<&Task> = steps.iter().flatten().copied().collect();
     let place = |id: &yunta_core::TaskId| tasks.iter().position(|task| task.id == *id);
     let links: Vec<(usize, usize)> = tasks
@@ -73,6 +78,22 @@ fn order(steps: &[Vec<&Task>]) -> Option<Diagram> {
     if links.is_empty() {
         return None;
     }
-    let labels: Vec<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
-    Some(Diagram::linked(&labels, &links))
+    Some(Diagram::linked(labels, &links))
+}
+
+/// What tells `ids` apart: each without the words they all open with, where they share
+/// any and each has something left. `global-pack-storage` and `global-pack-cli` are
+/// `storage` and `cli`; `T001` and `T002` share no word and stay as they are.
+pub(super) fn short_names(ids: &[&str]) -> Vec<String> {
+    let first = ids.first().copied().unwrap_or_default();
+    let shared = first
+        .match_indices('-')
+        .map(|(at, _)| at + 1)
+        .rfind(|at| {
+            ids.iter()
+                .all(|id| id.len() > *at && id.starts_with(&first[..*at]))
+        })
+        .unwrap_or(0);
+    let cut = if ids.len() > 1 { shared } else { 0 };
+    ids.iter().map(|id| id[cut..].to_string()).collect()
 }

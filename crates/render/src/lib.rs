@@ -34,7 +34,7 @@ pub mod offers;
 pub mod outcome;
 pub mod pause;
 pub mod place;
-mod plan;
+pub mod plan;
 pub mod policy;
 pub mod published;
 pub mod receipt;
@@ -51,6 +51,7 @@ mod tests {
     mod claims;
     mod console_page;
     mod deciding;
+    mod desk;
     mod documents;
     mod failure;
     mod failure_families;

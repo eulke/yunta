@@ -123,6 +123,8 @@ impl Field {
             | Stroke::Down
             | Stroke::Tab
             | Stroke::BackTab
+            | Stroke::PageUp
+            | Stroke::PageDown
             | Stroke::Ignored => {}
         }
         Edit::Editing

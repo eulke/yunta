@@ -37,6 +37,8 @@ pub struct Asking<'a> {
     pub left_out: &'a [yunta_core::LeftOut],
     /// The node the decision is on, when it is on one.
     pub node: Option<&'a yunta_core::NodeId>,
+    /// The mode the run follows.
+    pub mode: &'a yunta_core::ModeName,
 }
 
 pub use yunta_core::shown::{ShownContent, ShownDocument};

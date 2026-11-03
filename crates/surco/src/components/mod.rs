@@ -13,6 +13,7 @@ mod card;
 mod checklist;
 mod concern;
 mod decision;
+mod desk;
 mod diffstat;
 mod document;
 mod evidence;
@@ -30,6 +31,7 @@ pub use card::{Card, CardBody, ChoiceRow, Choices, RoundRow, RoundStanding, Type
 pub use checklist::{Check, Checklist, Fix, Found};
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
+pub use desk::{Desk, DeskFoot, FootRow, Pane, RailGroup, RailRow};
 pub use diffstat::{Diffstat, FileRow, MoreFiles, COLUMNS};
 pub use document::{Against, Code, Fold, Lead, Marked, Marks, Note, Part, Prose, Section, Title};
 pub use evidence::{Evidence, Whole};

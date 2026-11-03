@@ -50,6 +50,10 @@ pub(crate) enum Stroke {
     Right,
     Home,
     End,
+    /// The page above, for a reader that moves by pages.
+    PageUp,
+    /// The page below, the way PageUp is the one above.
+    PageDown,
     /// Escape: this prompt is declined.
     Decline,
     /// Ctrl-C: the run is to be stopped.
@@ -115,6 +119,8 @@ impl Strokes {
             Key::BackTab => Stroke::BackTab,
             Key::Home => Stroke::Home,
             Key::End => Stroke::End,
+            Key::PageUp => Stroke::PageUp,
+            Key::PageDown => Stroke::PageDown,
             // A tab inside pasted text is a space — the single cell
             // every run of whitespace in a one-line answer becomes.
             Key::Tab if self.pasting => Stroke::Insert(' '),
