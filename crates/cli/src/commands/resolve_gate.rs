@@ -19,7 +19,7 @@ use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::step::NextStep;
 use yunta_core::{OptionId, Responder, RunId};
 
-use crate::ask::{Console, Escape, NoAnswer};
+use crate::ask::{Ask, Console, Escape, NoAnswer};
 use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
@@ -258,7 +258,7 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
     let called = run_id.handle();
     let decision =
         yunta_engine::current_escalation(&open.manifest.doc, &open.run_dir, &state).await?;
-    let Some((_, escalation)) = decision else {
+    let Some((node, escalation)) = decision else {
         return Err(CliError::msg(format!(
             "run {called} waits on no decision; `{}` says where it stands",
             advice::status(called)
@@ -271,19 +271,23 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
     let asked = open.manifest.doc.request();
     let shown =
         yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state, asked).await?;
-    match crate::ask::decide(
-        &console,
-        &ctx.env,
+    let routes = yunta_render::gate::routes(
         &escalation,
-        Some((run_id, &shown)),
-        state.current_change(),
-    ) {
+        &open.manifest.doc.workflow,
+        state.run.left_out(),
+        Some(&node),
+    );
+    let ask = Ask {
+        escalation: &escalation,
+        shown: Some((run_id, &shown)),
+        changed: state.current_change(),
+        routes,
+        node: Some(&node),
+    };
+    match crate::ask::decide(&console, &ctx.env, ask) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => Ok(Chosen::Not(GateState::Declined)),
         Err(NoAnswer::Interrupted) => Ok(Chosen::Not(GateState::Interrupted)),
-        Err(NoAnswer::OffMenu) => Err(CliError::msg(
-            "the menu answered with an option it does not offer: nothing recorded",
-        )),
         Err(NoAnswer::Unreadable(error)) => Err(CliError::msg(format!(
             "this terminal could not be read or drawn on ({error}): nothing recorded"
         ))),

@@ -9,6 +9,7 @@
 //! nothing to say draws nothing — no heading over an empty list, no row
 //! with an empty value.
 
+mod card;
 mod checklist;
 mod concern;
 mod decision;
@@ -25,6 +26,7 @@ mod runs;
 mod said;
 mod table;
 
+pub use card::{Card, CardBody, ChoiceRow, Choices, TypedRow};
 pub use checklist::{Check, Checklist, Fix, Found};
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};

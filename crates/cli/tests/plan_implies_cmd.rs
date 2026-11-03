@@ -95,7 +95,7 @@ fn the_gate_says_what_the_plan_s_shape_implies() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path());
     let terminal: Terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
-    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
 
     says_what_the_shape_implies(&terminal.drawn());
 }
@@ -107,10 +107,7 @@ fn resolve_gate_says_what_the_plan_s_shape_implies() {
     let run_id = parked(&checkout);
 
     let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &["resolve-gate", &run_id]);
-    terminal.wait_for(
-        "2  adjust",
-        "the run's own menu was never put to the terminal",
-    );
+    terminal.wait_on_screen("▸ ", "the run's own card was never put to the terminal");
 
     says_what_the_shape_implies(&terminal.drawn());
 }

@@ -7,7 +7,7 @@ use surco::doc::Block;
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::surface::{Description, Leaves, Markdown, Surface};
-use yunta_core::events::{ArtifactId, Leads};
+use yunta_core::events::ArtifactId;
 use yunta_core::port::{GateDecision, PublishRequest};
 use yunta_core::shown::{ShownContent, ShownDocument};
 use yunta_core::step::NextStep;
@@ -267,11 +267,6 @@ fn listed(request: &PublishRequest) -> Vec<Line> {
 
 /// What a review on the forge can answer, and what each answer does to the run.
 fn answers(decision: &GateDecision) -> Vec<DecisionOption> {
-    // Going on past the gate is what approving costs, in the words a terminal gives it.
-    let (_, approved) = crate::offers::leading(&Leads::On {
-        next: decision.then.clone(),
-        settles: false,
-    });
     let changes = match &decision.corrected_by {
         Some(node) => format!(
             "each comment reaches `{node}` as a finding; it runs again, what it makes \
@@ -283,7 +278,7 @@ fn answers(decision: &GateDecision) -> Vec<DecisionOption> {
         DecisionOption {
             id: "approve".to_string(),
             label: Some("approve this pull request, or merge it".to_string()),
-            tradeoff: approved,
+            tradeoff: Some(crate::offers::resolving(&decision.then)),
             asks: None,
         },
         DecisionOption {

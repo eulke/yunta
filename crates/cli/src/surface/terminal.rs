@@ -42,4 +42,10 @@ impl TerminalEnv {
             motion: Motion::default(),
         })
     }
+
+    /// Whether the terminal declares itself dumb: it has said it draws nothing
+    /// beyond text.
+    pub(crate) fn is_dumb(&self) -> bool {
+        self.term.as_deref() == Some("dumb")
+    }
 }

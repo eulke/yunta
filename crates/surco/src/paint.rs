@@ -17,6 +17,9 @@
 use crate::line::{Fill, Line, Span, Tone};
 use crate::palette::{self, Rgb};
 
+mod control;
+pub use control::*;
+
 #[cfg(feature = "clap")]
 mod help;
 
@@ -296,34 +299,16 @@ impl Paint {
     }
 }
 
-/// Opens one update of the terminal: what follows reaches the screen together,
-/// at [`SYNC_END`]. A terminal that does not know it ignores it.
-pub const SYNC_BEGIN: &str = "\x1b[?2026h";
-/// Closes the update [`SYNC_BEGIN`] opened.
-pub const SYNC_END: &str = "\x1b[?2026l";
-/// Asks a terminal to ring.
-pub const BELL: &str = "\x07";
-/// Gives back the window title [`title_saved`] kept.
-pub const TITLE_RESTORED: &str = "\x1b[23;2t";
-
 /// `text` as a terminal may be told it: a control character turns to a space,
 /// since any of them could move the cursor back, ring or open a sequence, and
 /// what a page repeats (a file's name, what a session said) tells a terminal
 /// nothing. A line break and a tab only say where the next word goes, so they
 /// stay, and tab-indented code keeps its shape.
-fn harmless(text: &str) -> String {
+pub(crate) fn harmless(text: &str) -> String {
     text.replace(
         |sign: char| sign.is_control() && !matches!(sign, '\n' | '\t'),
         " ",
     )
-}
-
-/// Keeps the window's title, and sets it to `title`, whose control characters
-/// turn to spaces: any of them could end the sequence, and a tab between two
-/// words still keeps them apart.
-pub fn title_saved(title: &str) -> String {
-    let title = harmless(title).replace(['\n', '\t'], " ");
-    format!("\x1b[22;2t\x1b]2;{title}\x1b\\")
 }
 
 /// A color of the sixteen, which every terminal draws in its own theme.

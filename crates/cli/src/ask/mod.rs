@@ -20,13 +20,14 @@ use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use dialoguer::console::{Key, Term};
+use console::Term;
 use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios};
+use surco::paint::{HIDE_CURSOR, SHOW_CURSOR};
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Env, Pid, Responder};
 
 use crate::error::warn;
-use crate::surface::Diagnostics;
+use crate::surface::{Diagnostics, TerminalEnv};
 
 /// What `--interactive` says when there is no terminal to ask on, before
 /// the `fallback` the command takes instead.
@@ -36,13 +37,16 @@ pub(crate) fn no_terminal(fallback: &str) {
     ));
 }
 
+mod card;
 mod decision;
 mod field;
 mod form;
+mod held;
+mod keyboard;
 mod keys;
 mod menu;
 
-pub(crate) use decision::decide;
+pub(crate) use decision::{decide, Ask};
 pub(crate) use field::ask_line;
 pub(crate) use form::answer;
 pub(crate) use menu::{choose, Choice};
@@ -70,7 +74,7 @@ impl Escape {
     /// The phrase, as every prompt says it.
     pub(crate) fn said(self) -> &'static str {
         match self {
-            Escape::Parks => "esc parks the run",
+            Escape::Parks => "esc leaves it for later",
             Escape::LeavesWaiting => "esc leaves the run waiting",
             Escape::KeepsDefault => "esc keeps the detected default",
             Escape::TakesTheFirst => "esc takes the first",
@@ -86,17 +90,15 @@ pub(crate) const ANSWER: &str = "> ";
 /// The console the last prompt opened on this process's terminal, or
 /// `None` in a process where no prompt opened one.
 ///
-/// A key read turns the line discipline off for as long as it reads and
-/// puts it back between reads, so the thread left behind by a read
-/// nobody is coming to finish takes it again a moment after anyone else
-/// hands it over. Nothing runs after that thread except the process
-/// leaving, which is why what a prompt took is kept here and handed
-/// back by [`restore_terminal`] rather than by whoever stopped waiting
-/// on the prompt.
-///
 /// One console, not a list: prompts open one at a time, each one ends
 /// before the next opens, and the terminal the last of them left is the
 /// terminal this process leaves behind.
+///
+/// A prompt holds the terminal in its own mode until it ends, and every
+/// ending it can reach puts that back. A panic is the one it cannot, and
+/// nothing runs after that thread except the process leaving, which is
+/// why what a prompt took is kept here and handed back by
+/// [`restore_terminal`].
 static PROMPTED_ON: Mutex<Option<Console>> = Mutex::new(None);
 
 /// Hands the terminal back as this process leaves: the line discipline
@@ -132,8 +134,6 @@ pub(crate) enum NoAnswer {
     /// Ctrl-C, already re-raised at this process so the run's own
     /// cancellation is on its way.
     Interrupted,
-    /// The list answered with a choice that is not on it.
-    OffMenu,
     /// The console could not be read or drawn on.
     Unreadable(std::io::Error),
     /// The thread the prompt ran on ended without producing either.
@@ -182,13 +182,19 @@ pub(crate) struct Console {
     /// it, so what the terminal is handed back is one put-back for one
     /// taking-away.
     hidden: Arc<AtomicBool>,
+    /// Told by whoever stopped waiting on a prompt: the prompt hears it
+    /// within a tick of its read, takes what it drew off the screen and
+    /// hands the terminal back, before anything else is drawn.
+    stopped: Arc<AtomicBool>,
 }
 
 impl Console {
     /// Whether a prompt here reaches a person: stdin and stderr both on
     /// a terminal, which is what [`Console::open`] asks before it opens.
     pub(crate) fn attended() -> bool {
-        std::io::stdin().is_terminal() && Term::stderr().is_term()
+        std::io::stdin().is_terminal()
+            && Term::stderr().is_term()
+            && !TerminalEnv::settled().is_dumb()
     }
 
     /// The console this process can prompt on, or `None` when it has
@@ -202,8 +208,11 @@ impl Console {
     /// the run.
     ///
     /// Nothing attended at all is the ordinary headless case and passes
-    /// without a word. A person at the keyboard whose run has nowhere to
-    /// draw is not: the run parks on them, so it says what was missing.
+    /// without a word. A terminal that declares itself dumb is headless
+    /// too: it has said it draws nothing beyond text, so nobody is asked
+    /// there and the run parks, saying the command for each option. A
+    /// person at the keyboard whose run has nowhere to draw is not: the
+    /// run parks on them, so it says what was missing.
     ///
     /// What it has to say goes out through `diagnostics`, the run's own
     /// door, rather than straight to stderr: a line written around a
@@ -213,6 +222,9 @@ impl Console {
     /// [`Diagnostics::none`](crate::surface::Diagnostics::none), which
     /// is the same door onto nothing.
     pub(crate) async fn open(diagnostics: &Diagnostics, escape: Escape) -> Option<Self> {
+        if TerminalEnv::settled().is_dumb() {
+            return None;
+        }
         if !std::io::stdin().is_terminal() {
             return None;
         }
@@ -233,6 +245,7 @@ impl Console {
             escape,
             mode: handed_mode(diagnostics).await,
             hidden: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
         };
         *prompted_on() = Some(console.clone());
         Some(console)
@@ -252,17 +265,6 @@ impl Console {
     /// The terminal the prompt libraries draw their own blocks on.
     pub(crate) fn term(&self) -> &Term {
         &self.term
-    }
-
-    /// The next keystroke.
-    ///
-    /// The read puts the terminal in raw mode, which turns off the line
-    /// discipline's signal keys, so a typed Ctrl-C arrives here as
-    /// [`Key::CtrlC`] instead of reaching this process as a signal.
-    /// [`Console::interrupt`] is what puts it back on the one path that
-    /// stops a run.
-    pub(crate) fn read_key(&self) -> std::io::Result<Key> {
-        self.term.read_key_raw()
     }
 
     /// The cells one row drawn on this terminal may take: the width a
@@ -309,10 +311,20 @@ impl Console {
         self.term.write_line(line)
     }
 
-    /// Records that a prompt on this terminal has taken the cursor
-    /// away, so [`Console::restore`] knows there is one to put back.
-    pub(crate) fn hiding(&self) {
-        self.hidden.store(true, Ordering::Release);
+    /// Hides the cursor, once, so [`Console::restore`] knows there is one to put back.
+    pub(crate) fn hide_cursor(&self) -> std::io::Result<()> {
+        if !self.hidden.swap(true, Ordering::AcqRel) {
+            self.term.write_str(HIDE_CURSOR)?;
+        }
+        Ok(())
+    }
+
+    /// Shows the cursor again, when it is hidden: one put-back for one taking-away.
+    pub(crate) fn show_cursor(&self) -> std::io::Result<()> {
+        if self.hidden.swap(false, Ordering::AcqRel) {
+            self.term.write_str(SHOW_CURSOR)?;
+        }
+        Ok(())
     }
 
     /// Puts back what a prompt takes from this terminal while it is
@@ -320,16 +332,15 @@ impl Console {
     /// cursor a list hides for as long as it is drawing.
     ///
     /// A prompt does this for itself as it ends, whichever way it ends.
-    /// The process does it for the one ending a prompt cannot reach — a
-    /// read abandoned mid-key, where the thread that would have put
-    /// them back is still waiting on a key nobody is going to press.
-    /// Left as that read left it, the shell this run returns to echoes
-    /// nothing a person types into it, shows no cursor to type at, and
-    /// answers no Enter, and nothing that runs next puts any of it
-    /// back. The process and not whoever stopped waiting on the prompt,
-    /// because that thread turns raw mode back on between its own
-    /// reads: anything that hands the terminal over while it still runs
-    /// is handing over a terminal it takes again.
+    /// The process does it for the one ending a prompt cannot reach
+    /// itself — a panic, where the prompt's own code never gets to put
+    /// them back. Left as the panic left it, the shell this run returns
+    /// to echoes nothing a person types into it, shows no cursor to
+    /// type at, and answers no Enter, and nothing that runs next puts
+    /// any of it back. The process and not whoever ended the prompt,
+    /// because a read that is still running turns raw mode back on
+    /// between its own reads: anything that hands the terminal over
+    /// while it still runs is handing over a terminal it takes again.
     ///
     /// The two are put back on different terms because they are taken
     /// on different terms. Setting the terminal to the mode it was
@@ -351,10 +362,7 @@ impl Console {
                 ));
             }
         }
-        if !self.hidden.swap(false, Ordering::AcqRel) {
-            return;
-        }
-        if let Err(e) = self.term.show_cursor() {
+        if let Err(e) = self.show_cursor() {
             warn(format!("could not put the terminal's cursor back: {e}"));
         }
     }
@@ -423,13 +431,16 @@ mod tests {
             escape: Escape::Parks,
             mode: None,
             hidden: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
         }
     }
 
     #[test]
     fn the_console_a_prompt_opened_is_handed_back_by_the_process_exactly_once() {
         let console = console();
-        console.hiding();
+        console
+            .hide_cursor()
+            .expect("a test's stderr takes the cursor's hiding");
         *prompted_on() = Some(console.clone());
 
         restore_terminal();

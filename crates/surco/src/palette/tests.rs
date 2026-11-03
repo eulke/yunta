@@ -73,7 +73,7 @@ fn every_colored_tone_reads_on_its_ground_and_on_a_line_fill() {
             let color = tone(ground, colored).expect("a colored tone has a color");
             let on_ground = contrast(color, GROUND.on(ground));
             assert!(on_ground >= 4.3, "{ground:?} / {colored:?}: {on_ground:.2}");
-            for line in [Fill::Tint, Fill::Code] {
+            for line in [Fill::Tint, Fill::Selection, Fill::Code] {
                 let behind = fill(ground, line).expect("a line fill has a color");
                 let on_fill = contrast(color, behind);
                 assert!(

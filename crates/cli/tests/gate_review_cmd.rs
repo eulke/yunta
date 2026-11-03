@@ -86,7 +86,7 @@ fn reviewing(root: &std::path::Path) -> Terminal {
 fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = reviewing(root.path());
-    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let drawn = terminal.drawn();
     assert!(
         drawn.contains("plan: 1 task")
@@ -116,11 +116,7 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
         "the gate never showed the plan the correction made",
     );
     // `approve`, the first option, with nothing to add.
-    terminal.keys("\r");
-    terminal.wait_for(
-        "enter records it, n adds a note",
-        "approving asked for words it does not need",
-    );
+    terminal.wait_on_screen("▸ approve", "the gate never asked about the second plan");
     terminal.keys("\r");
 
     let drawn = terminal.ended();
@@ -131,7 +127,7 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
 fn an_option_that_asks_requires_its_words() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = reviewing(root.path());
-    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     // `adjust` sends the plan back to the session that wrote it, and the
     // words are what it picks its work back up with.
     terminal.keys("\x1b[B\r");
@@ -162,10 +158,7 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
     let run_id = run_id_from(&parked);
 
     let terminal = yunta_on_terminal!(repo, home, &["resolve-gate", &run_id]);
-    terminal.wait_for(
-        "2  adjust",
-        "the run's own menu was never put to the terminal",
-    );
+    terminal.wait_on_screen("▸ ", "the run's own card was never put to the terminal");
     let drawn = terminal.drawn();
     assert!(
         drawn.contains("plan: 1 task")
@@ -253,11 +246,18 @@ fn opens_on_its_headline(drawn: &str, home: &std::path::Path) {
         "the first line is not the id of the run that was started:\n{drawn}"
     );
     assert!(
-        lines.get(1).is_some_and(|line| {
-            line.starts_with("◆ decision · needs you")
-                && line.trim_end().ends_with(yunta_testkit::handle(&id))
-        }),
-        "the page does not open on its headline, with the run's handle at its edge:\n{drawn}"
+        lines
+            .get(1)
+            .is_some_and(|line| line.starts_with("◆ decision · needs you")),
+        "the page does not open on its headline:\n{drawn}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("▸ ")),
+        "the card is not under the page:\n{drawn}"
+    );
+    assert!(
+        drawn.contains(yunta_testkit::handle(&id)),
+        "the card's far edge does not name the run:\n{drawn}"
     );
     assert!(
         lines
@@ -272,7 +272,7 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path());
     let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
-    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let drawn = terminal.drawn();
     opens_on_its_headline(&drawn, &checkout.home);
     // The page reads its headline and then the plan. The question is asked
@@ -294,7 +294,7 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
         "nothing of the plan sits between the question and its options:\n{drawn}"
     );
     assert!(
-        asked.contains("abort: Pause here"),
+        asked.contains("Pause here: nothing runs"),
         "the decision offers to pause the run among its options:\n{drawn}"
     );
     assert!(
@@ -303,7 +303,7 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
             line.trim_start()
                 .trim_start_matches(['|', '▎'])
                 .trim_start()
-                .starts_with("approve:")
+                .starts_with("▸ approve")
         }),
         "the decision draws its options as rows, approve among them:\n{drawn}"
     );
@@ -332,7 +332,7 @@ fn a_gate_with_no_message_asks_to_approve_its_plan() {
     let on_terminal = tempfile::tempdir().unwrap();
     let checkout = checkout_with(on_terminal.path(), &workflow);
     let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
-    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let drawn = terminal.drawn();
     assert!(
         drawn.contains("◆ Approve the plan: Make it?"),
@@ -414,7 +414,7 @@ fn what_was_asked_is_read_before_the_plan_that_answers_it() {
         .file("fixture.yaml", BRIEFED)
         .committed();
     let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
-    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let drawn = terminal.drawn();
 
     let asked = drawn

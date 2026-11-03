@@ -85,17 +85,14 @@ async fn a_gate_that_declares_abort_pauses_the_run_when_abort_is_chosen() {
     assert_eq!(
         offered,
         vec![
-            (
-                "proceed",
-                Some("resolves this gate; `ship` runs next".to_string()),
-            ),
+            ("proceed", Some("resolves this gate".to_string()),),
             (
                 "abort",
                 Some("nothing runs; this decision stays open".to_string()),
             ),
             (
                 "revise",
-                Some("re-routes to `plan` and asks again once it completes".to_string()),
+                Some("re-routes there, and asks again once it completes".to_string()),
             ),
         ],
         "abort sits where the author put it and says what it does"

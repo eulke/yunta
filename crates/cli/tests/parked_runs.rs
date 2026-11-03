@@ -646,14 +646,12 @@ fn resolve_gate_without_an_option_offers_the_menu() {
     let run_id = run_id_from(&run);
 
     let mut terminal = yunta_testkit::yunta_on_terminal!(&repo, &home, &["resolve-gate", &run_id]);
-    terminal.wait_for(
-        "> 1  retry",
-        "the run's own menu was never put to the terminal",
+    terminal.wait_on_screen(
+        "▸ retry",
+        "the run's own card was never put to the terminal",
     );
     // `abort`, the second option, with nothing to add.
     terminal.keys("\x1b[B\r");
-    terminal.wait_for("enter records it", "choosing never said how it is recorded");
-    terminal.keys("\r");
     let drawn = terminal.ended();
     assert!(terminal.ran_to_the_end(), "{drawn}");
     assert!(drawn.contains("resolved `abort`"), "{drawn}");

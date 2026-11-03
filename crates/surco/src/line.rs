@@ -87,6 +87,8 @@ impl Tone {
 pub enum Fill {
     /// The decision that waits, set apart from the page.
     Tint,
+    /// The row a pointer stands on, set apart from the rest of a decision.
+    Selection,
     /// Code shown as code.
     Code,
     /// A word a change adds.

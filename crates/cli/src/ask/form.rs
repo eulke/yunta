@@ -64,6 +64,8 @@ pub(crate) fn answer(
     )?;
     let mut answers = Vec::new();
     for (index, question) in questions.questions.iter().enumerate() {
+        // A key pressed while the previous question was up is not an answer to this one.
+        console.discard_typed();
         console.say("")?;
         let mut asking = Line::new()
             .push(Tone::Muted, format!("{}/{total}", index + 1))
@@ -125,7 +127,7 @@ fn picked(
     if !question.required {
         choices.push(Choice::named(SKIP, None));
     }
-    let value = choose(console, "answer", choices)?;
+    let value = choose(console, choices)?;
     console.say(&format!("{ANSWER}{}", value.as_deref().unwrap_or(SKIP)))?;
     Ok(value)
 }

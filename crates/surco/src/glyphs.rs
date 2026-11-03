@@ -176,6 +176,22 @@ impl Glyphs {
         }
     }
 
+    /// What points at the one option of a list a key would take.
+    pub fn pointer(self) -> char {
+        match self {
+            Self::Unicode => '▸',
+            Self::Ascii => '*',
+        }
+    }
+
+    /// What says the keys that move up and down a list: `↑↓ move`.
+    pub fn up_down(self) -> &'static str {
+        match self {
+            Self::Unicode => "↑↓",
+            Self::Ascii => "up/down",
+        }
+    }
+
     /// What stands between a file and what in it a reader is shown, and
     /// between a thing and what is inside it: `src/greet.rs › Greeter`.
     pub fn within(self) -> &'static str {

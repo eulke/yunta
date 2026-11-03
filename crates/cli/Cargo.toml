@@ -48,13 +48,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # capture, which is what leaves the operator's scrollback, text selection
 # and typed Ctrl-C exactly as they were.
 indicatif.workspace = true
-# The prompts a gate and a questions artifact need: a list whose options
-# each carry their tradeoff, answerable by arrow or by typing, and a
-# line of free text. `fuzzy-select` is the variant that accepts both at
-# once. It re-raises SIGINT on Ctrl-C, so the interrupt keeps arriving
-# through the one cancellation bridge instead of becoming a second
-# source of truth about whether a person stopped the run.
-dialoguer = { workspace = true, features = ["fuzzy-select"] }
+# Reads a key at a time, for the prompts a gate and a questions artifact need. Already in the tree through indicatif.
+console.workspace = true
 # `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
@@ -65,7 +60,7 @@ async-trait.workspace = true
 # itself cannot reach. `term` alone — the signal and process halves stay
 # behind `yunta-adapters`, which already puts this crate in the binary,
 # so nothing new is linked in.
-nix = { workspace = true, features = ["term"] }
+nix = { workspace = true, features = ["term", "poll"] }
 # `yunta mcp`: the control-plane MCP server, stdio. `server` +
 # `transport-io` only — no HTTP transport, no client features: the
 # per-run MCP server is a separate, later concern with its own

@@ -16,15 +16,15 @@
 use surco::text::one_line;
 use surco::width::cell_width;
 
-use super::keys::{Stroke, Strokes, PASTE_OFF, PASTE_ON};
+use super::held::Quiet;
+use super::keys::{Stroke, Strokes};
 use super::{Answered, Console, NoAnswer};
-use crate::error::warn;
 
 /// Said once, when the answer being recorded came from text that
 /// spanned more than one line: a question takes one line, and the
 /// difference belongs to whoever pasted it rather than to a silent
 /// truncation.
-const FOLDED: &str = "the text pasted here spanned more than one line, \
+pub(super) const FOLDED: &str = "the text pasted here spanned more than one line, \
                       and this answer is those lines joined into one";
 
 /// A finished answer.
@@ -65,20 +65,30 @@ impl Field {
             .collect()
     }
 
-    /// What a row of `room` cells shows of the line, and how many of
-    /// those cells come after the cursor.
+    /// What a row of `room` cells shows of the line, split at the
+    /// cursor: the characters before it and the ones after it.
     ///
     /// The row is filled backwards from the cursor first and forwards
     /// with what is left, so the end of a line being typed stays in
     /// sight and the cursor is never drawn off the row.
-    pub(crate) fn row(&self, room: usize) -> (String, usize) {
+    pub(crate) fn parts(&self, room: usize) -> (String, String) {
         let room = room.max(1);
         let drawn = self.drawn();
         let at = self.cursor.min(drawn.chars().count());
         let head: Vec<char> = drawn.chars().take(at).collect();
         let (behind, taken) = fitting(head.into_iter().rev(), room);
-        let (ahead, after) = fitting(drawn.chars().skip(at), room.saturating_sub(taken));
-        (behind.into_iter().rev().chain(ahead).collect(), after)
+        let (ahead, _) = fitting(drawn.chars().skip(at), room.saturating_sub(taken));
+        (
+            behind.into_iter().rev().collect(),
+            ahead.into_iter().collect(),
+        )
+    }
+
+    /// What a row of `room` cells shows of the line, and how many of
+    /// those cells come after the cursor.
+    pub(crate) fn row(&self, room: usize) -> (String, usize) {
+        let (before, after) = self.parts(room);
+        (format!("{before}{after}"), cell_width(&after))
     }
 
     /// What `stroke` asks of the line, applied.
@@ -102,7 +112,13 @@ impl Field {
             Stroke::Enter => return Edit::Answered(self.finish()),
             Stroke::Decline => return Edit::Declined,
             Stroke::Interrupt => return Edit::Interrupted,
-            Stroke::Backspace | Stroke::Delete | Stroke::Ignored => {}
+            Stroke::Backspace
+            | Stroke::Delete
+            | Stroke::Up
+            | Stroke::Down
+            | Stroke::Tab
+            | Stroke::BackTab
+            | Stroke::Ignored => {}
         }
         Edit::Editing
     }
@@ -147,7 +163,7 @@ fn fitting(characters: impl Iterator<Item = char>, room: usize) -> (Vec<char>, u
 /// keystrokes it came from. Escape ends the prompt with no answer and
 /// Ctrl-C stops the run.
 pub(crate) fn ask_line(console: &Console, prompt: &str) -> Answered<Typed> {
-    let marked = Marked::on(console)?;
+    let quiet = Quiet::on(console)?;
     let mut field = Field::default();
     let mut strokes = Strokes::default();
     let typed = loop {
@@ -156,17 +172,25 @@ pub(crate) fn ask_line(console: &Console, prompt: &str) -> Answered<Typed> {
         let room = console.width().saturating_sub(cell_width(prompt) + 1);
         let (row, back) = field.row(room);
         console.draw_line(prompt, &row, back)?;
-        match field.apply(strokes.read(console.read_key()?)) {
+        let key = match console.read_key() {
+            Ok(key) => key,
+            Err(failed) => return Err(closed(console, NoAnswer::from(failed))),
+        };
+        match field.apply(strokes.read(key)) {
             Edit::Editing => {}
             Edit::Answered(typed) => break typed,
             Edit::Declined => return Err(closed(console, NoAnswer::Declined)),
             Edit::Interrupted => {
+                // Only once the line is ended and the terminal given back, so what
+                // the run says about being stopped starts on a line of its own.
+                let ended = closed(console, NoAnswer::Interrupted);
+                drop(quiet);
                 console.interrupt();
-                return Err(closed(console, NoAnswer::Interrupted));
+                return Err(ended);
             }
         }
     };
-    drop(marked);
+    drop(quiet);
     console.end_line(&format!("{prompt}{}", typed.value))?;
     if typed.folded {
         console.say(FOLDED)?;
@@ -181,32 +205,6 @@ fn closed(console: &Console, why: NoAnswer) -> NoAnswer {
     match console.say("") {
         Ok(()) => why,
         Err(failed) => NoAnswer::Unreadable(failed),
-    }
-}
-
-/// The terminal's paste marking, held for one line.
-///
-/// Requested when the line opens and withdrawn when it closes on every
-/// path out — answered, declined, interrupted or unreadable — so a mode
-/// this process asked for never outlives the prompt that needed it.
-struct Marked<'a> {
-    console: &'a Console,
-}
-
-impl<'a> Marked<'a> {
-    fn on(console: &'a Console) -> std::io::Result<Self> {
-        console.term().write_str(PASTE_ON)?;
-        Ok(Self { console })
-    }
-}
-
-impl Drop for Marked<'_> {
-    fn drop(&mut self) {
-        if let Err(e) = self.console.term().write_str(PASTE_OFF) {
-            warn(format!(
-                "could not restore the terminal's paste marking: {e}"
-            ));
-        }
     }
 }
 

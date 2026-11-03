@@ -221,14 +221,14 @@ fn back_options_read_as_written() {
         words(&gate(back(true)), "revise"),
         said(
             "Back to `plan`",
-            "sends what you say back to `plan`, and asks again once it completes"
+            "sends what you say, and asks again once it completes"
         )
     );
     assert_eq!(
         words(&gate(back(false)), "revise"),
         said(
             "Back to `plan`",
-            "re-routes to `plan` and asks again once it completes"
+            "re-routes there, and asks again once it completes"
         )
     );
 }
@@ -237,24 +237,20 @@ fn back_options_read_as_written() {
 fn on_options_read_as_written() {
     assert_eq!(
         words(&gate(on(Vec::new(), false)), "proceed"),
-        said(
-            "Resolve the gate",
-            "resolves this gate; nothing in the workflow waits on it"
-        )
+        said("Resolve the gate", "nothing in the workflow waits on it")
     );
     assert_eq!(
         words(&gate(on(Vec::new(), true)), "proceed"),
         said(
             "Resolve the gate",
-            "resolves this gate; nothing in the workflow waits on it, and settles every finding \
-             it shows"
+            "nothing in the workflow waits on it, and settles every finding it shows"
         )
     );
     assert_eq!(
         words(&gate(on(vec!["pr".into()], true)), "proceed"),
         said(
             "On to `pr`",
-            "resolves this gate; `pr` runs next, and settles every finding it shows"
+            "resolves this gate, and settles every finding it shows"
         )
     );
     assert_eq!(

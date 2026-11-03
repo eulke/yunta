@@ -159,6 +159,12 @@ const TINT: Tuned = Tuned {
     light: Rgb(246, 233, 243),
 };
 
+/// The row a pointer stands on, a step from the tint it stands in.
+const SELECTION: Tuned = Tuned {
+    dark: Rgb(48, 36, 58),
+    light: Rgb(252, 245, 250),
+};
+
 /// The ground of a code block.
 const CODE: Tuned = Tuned {
     dark: Rgb(26, 24, 31),
@@ -272,6 +278,7 @@ fn code(syntax: Syntax) -> Tuned {
 pub(crate) fn fill(ground: Ground, fill: Fill) -> Option<Rgb> {
     let color = match fill {
         Fill::Tint => TINT,
+        Fill::Selection => SELECTION,
         Fill::Code => CODE,
         Fill::Added => ADDED,
         Fill::Removed => REMOVED,

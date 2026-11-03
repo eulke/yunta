@@ -157,7 +157,8 @@ fn a_plan_with_flaws_says_why_an_option_is_withheld_once_under_the_section() {
         "{}",
         record.join("\n")
     );
-    let section = crate::gate::asked(&escalation, &shown);
+    let section =
+        crate::shown::before_you_decide(escalation.withheld(), &shown).expect("what weighs on it");
     let drawn = Terminal::on(Look::plain()).draw(&surco::doc::Doc::new().with(section));
     assert_eq!(
         drawn.matches("is not offered, because").count(),

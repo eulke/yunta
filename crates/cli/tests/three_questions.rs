@@ -194,7 +194,7 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
         .committed();
     let (repo, home) = (&checkout.repo, &checkout.home);
     let mut terminal = yunta_on_terminal!(repo, home, &["run", "wf.yaml", "--quiet"]);
-    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let run_id = drawn_run_id(&terminal.drawn());
 
     let status = yunta_in!(repo, home, &["status", &run_id]);
@@ -219,11 +219,6 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
 
     // `abort`, the second option, with nothing to add.
     terminal.keys("\x1b[B\r");
-    terminal.wait_for(
-        "enter records it",
-        "aborting asked for words it does not need",
-    );
-    terminal.keys("\r");
     terminal.ended();
 
     let after = stdout(&yunta_in!(repo, home, &["status", &run_id]));

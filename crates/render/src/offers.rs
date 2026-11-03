@@ -5,13 +5,16 @@
 use surco::components::DecisionOption;
 use surco::text;
 use yunta_core::events::{Asks, GateOption, GateWaitingPayload, Leads, Menu, ScopeWait};
-use yunta_core::listed_globs;
 use yunta_core::reserved::ReservedOption;
+use yunta_core::{listed_globs, NodeId};
 
 use crate::blocks::{departure_words, remedy_words, reroute_words};
 
 /// The label of an option that pauses the run with its decision open.
 pub(crate) const PAUSE_HERE: &str = "Pause here";
+
+/// What going on past a gate does when no node waits on it.
+const NOTHING_WAITS: &str = "nothing in the workflow waits on it";
 
 /// What choosing an option that pauses the run does: nothing runs, and its
 /// decision stays open.
@@ -95,25 +98,18 @@ pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
     match leads {
         Leads::Back { node, resumes } => {
             let tradeoff = if *resumes {
-                format!("sends what you say back to `{node}`, and asks again once it completes")
+                "sends what you say, and asks again once it completes".to_string()
             } else {
-                format!("re-routes to `{node}` and asks again once it completes")
+                "re-routes there, and asks again once it completes".to_string()
             };
             (format!("Back to `{node}`"), Some(tradeoff))
         }
         Leads::On { next, settles } => {
             let (label, tradeoff) = if next.is_empty() {
-                (
-                    "Resolve the gate".to_string(),
-                    "resolves this gate; nothing in the workflow waits on it".to_string(),
-                )
+                ("Resolve the gate".to_string(), NOTHING_WAITS.to_string())
             } else {
                 let onward = text::listed(next.iter().map(|id| id.as_str()));
-                let runs = text::agreeing(next.len(), "runs", "run");
-                (
-                    format!("On to {onward}"),
-                    format!("resolves this gate; {onward} {runs} next"),
-                )
+                (format!("On to {onward}"), "resolves this gate".to_string())
             };
             let tradeoff = if *settles {
                 format!("{tradeoff}, and settles every finding it shows")
@@ -123,6 +119,17 @@ pub(crate) fn leading(leads: &Leads) -> (String, Option<String>) {
             (label, Some(tradeoff))
         }
     }
+}
+
+/// What going on past a gate does, for a reader whose option does not say where it
+/// goes: on a forge, an approval's label is the forge's own.
+pub(crate) fn resolving(next: &[NodeId]) -> String {
+    if next.is_empty() {
+        return format!("resolves this gate; {NOTHING_WAITS}");
+    }
+    let onward = text::listed(next.iter().map(|id| id.as_str()));
+    let runs = text::agreeing(next.len(), "runs", "run");
+    format!("resolves this gate; {onward} {runs} next")
 }
 
 /// The grant and the denial of a scope request, which name the paths it asks for.

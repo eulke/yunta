@@ -72,12 +72,7 @@ fn asking(root: &std::path::Path, config: &str) -> Checkout {
 
 /// A gate answered with its first option, with nothing to add.
 fn answered(terminal: &mut yunta_testkit::Terminal) -> String {
-    terminal.wait_for("abort", "the gate never put its options on the console");
-    terminal.keys("\r");
-    terminal.wait_for(
-        "enter records it, n adds a note",
-        "approving asked for words it does not need",
-    );
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     terminal.keys("\r");
     terminal.ended()
 }

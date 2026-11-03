@@ -37,15 +37,10 @@ fn table(decision: &Decision) -> String {
 }
 
 /// The column titles of a decision's table: a command chooses an option here,
-/// the prompt under the page chooses it when a person answers there, and a
-/// reviewer answers it on the forge the decision is on.
+/// and a reviewer answers it on the forge the decision is on.
 fn header(chosen: &Chosen) -> Vec<String> {
     match chosen {
         Chosen::Here { .. } => ["option", "what it does", "what happens", "command"]
-            .into_iter()
-            .map(cell)
-            .collect(),
-        Chosen::AtThePrompt => ["option", "what it does", "what happens"]
             .into_iter()
             .map(cell)
             .collect(),

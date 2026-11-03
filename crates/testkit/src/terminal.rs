@@ -122,6 +122,36 @@ impl Terminal {
         )
     }
 
+    /// What a person sees on this terminal now: every row as the screen holds
+    /// it, whatever was drawn over what on the way there.
+    pub fn screen(&self) -> Screen {
+        let mut parser = vt100::Parser::new(Self::ROWS, Self::COLUMNS, 0);
+        parser.process(
+            self.drawn
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_bytes(),
+        );
+        let screen = parser.screen();
+        Screen {
+            rows: screen
+                .rows(0, Self::COLUMNS)
+                .map(|row| row.trim_end().to_string())
+                .collect(),
+            cursor: screen.cursor_position(),
+            cursor_hidden: screen.hide_cursor(),
+        }
+    }
+
+    /// Waits until `needle` stands on the screen, failing with `what` and the
+    /// screen as it is.
+    pub fn wait_on_screen(&self, needle: &str, what: &str) {
+        wait_until(
+            || self.screen().holds(needle),
+            || format!("{what}\non the screen:\n{}", self.screen().rows.join("\n")),
+        );
+    }
+
     /// Waits until `needle` has been drawn, failing with `what` and
     /// everything drawn so far.
     pub fn wait_for(&self, needle: &str, what: &str) {
@@ -221,37 +251,6 @@ impl Terminal {
             .is_some_and(|between| between.contains(CLEAR_ROW))
     }
 
-    /// How many rows a redrawing list wrote after `from`, and how many
-    /// it then went back over to clear them.
-    ///
-    /// Everything from the row `from` names to the first escape
-    /// sequence after it, and the `ESC [ n A` that sequence opens with.
-    /// A list that clears more rows than it wrote takes the rows above
-    /// it with them — the evidence a person is deciding on.
-    pub fn drew_and_cleared(&self, from: &str) -> (usize, usize) {
-        let drawn = self.drawn();
-        let list = drawn
-            .split_once(from)
-            .map(|(_, rest)| rest)
-            .unwrap_or_else(|| panic!("the list never drew `{from}`:\n{drawn}"));
-        let (rows, cleared) = list
-            .split_once(ESCAPE)
-            .unwrap_or_else(|| panic!("the list never went back over what it drew:\n{drawn}"));
-        let cleared = cleared
-            .strip_prefix('[')
-            .and_then(|rest| rest.split_once('A'))
-            .and_then(|(rows, _)| rows.parse().ok())
-            .unwrap_or_else(|| {
-                panic!("what the list did after its rows was not a move back over them:\n{drawn}")
-            });
-        // `from` is the first row's own text, so that row is counted
-        // here rather than read off `lines()`.
-        (
-            rows.lines().count() + usize::from(!rows.starts_with('\n')) - 1,
-            cleared,
-        )
-    }
-
     /// Every row a line being typed was redrawn on: what followed each
     /// clearing of that row, up to whatever was written next.
     pub fn rows_redrawn(&self) -> Vec<String> {
@@ -295,6 +294,28 @@ impl Terminal {
             drop(reader.join());
         }
         self.drawn()
+    }
+}
+
+/// A terminal's screen at one moment, as a person reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Screen {
+    /// Every row, with what it ends in spaces gone.
+    pub rows: Vec<String>,
+    /// The row and the column the cursor stands on.
+    pub cursor: (u16, u16),
+    pub cursor_hidden: bool,
+}
+
+impl Screen {
+    /// Whether any row holds `needle`.
+    pub fn holds(&self, needle: &str) -> bool {
+        self.rows.iter().any(|row| row.contains(needle))
+    }
+
+    /// How many rows hold `needle`.
+    pub fn count(&self, needle: &str) -> usize {
+        self.rows.iter().filter(|row| row.contains(needle)).count()
     }
 }
 

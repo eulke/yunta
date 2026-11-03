@@ -1,51 +1,29 @@
 //! The one list a person picks from.
 //!
-//! Every menu the console surface has is this one: the options a gate
-//! offers, the values a `choice` question declares, the two a `boolean`
-//! question has. Arrows move through it, typing filters it, Enter takes
-//! what is highlighted and Escape leaves without an answer.
-//!
-//! Each option's position is printed beside it and is its shortcut:
-//! typing the number brings it to the top of the list. It is the only
-//! shortcut available — an option carries an id and a label and no key,
-//! and the ids a gate's own menu is built from (`approve`, `adjust`,
-//! `abort`) share their first letter, so an initial is neither
-//! declarable nor derivable.
-//!
-//! An option's label is read once, above the list, under the same number
-//! the list is picked by. A decision's options carry none: what each does
-//! is on the page above the prompt. The list itself is one short row per
-//! option, its name, because that is the only shape it redraws correctly
-//! and the name is what a person picks it by. It clears what it wrote by
-//! adding two counts: the line breaks its own drawing carries, and a
-//! correction for a row it takes the terminal to have wrapped, measured
-//! against the terminal's width in bytes. An option drawn as a block
-//! answers the first count and collides with the second, and every
-//! keystroke then clears more rows than the list drew and walks it up
-//! over what a person is deciding on. A row kept inside the terminal's
-//! width in bytes wraps nowhere and draws no correction, so what is
-//! cleared is what was written.
-//!
-//! The keys are named on lines of their own for the same reason: the
-//! filter is typed on the list's own top row, and a legend in front of
-//! it would push that row past the terminal's width after a few
-//! characters.
+//! Every list the console surface has is this one: the values a `choice` question
+//! declares, the two a `boolean` question has, the shapes `yunta new` offers, and
+//! so on. Arrows move through it, typing narrows it to what matches, Enter takes
+//! what is pointed at and Escape leaves without an answer. A row has no number: a
+//! digit narrows the list as any letter does, so a value with digits in it is typed
+//! as written. A decision is not this list: its letters are keys.
 
-use dialoguer::FuzzySelect;
-use surco::width::{joined, wrap, INDENT, INDENT_WIDTH};
+use surco::components::{ChoiceRow, Choices};
+use surco::line::{Line, Tone};
+use surco::look::Look;
+use surco::surface::Placed;
 
-use super::{Answered, Console, NoAnswer};
+use super::held::{hold, Held, Press};
+use super::keys::Stroke;
+use super::{Answered, Console, Escape};
 
-/// The keys a list answers to, one entry each, so the line that names
-/// them can break between keys.
-const KEYS: [&str; 3] = ["arrows move", "type to filter", "enter chooses"];
+/// The rows of a terminal a list leaves to what stands around it: its filter, its
+/// keys, the question a caller said above it, and the row a prompt never draws on.
+const AROUND: usize = 4;
 
-/// One option: what it is called, what it does when its name does not say
-/// it, and what the caller gets back for it.
+/// One option: what it is called, what it does when its name does not say it, and
+/// what the caller gets back for it.
 pub(crate) struct Choice<T> {
-    /// What the option is picked by — the row the list holds.
     pub(crate) name: String,
-    /// What it does, beside its name, when the name does not say it.
     pub(crate) label: Option<String>,
     pub(crate) value: T,
 }
@@ -59,279 +37,176 @@ impl<T> Choice<T> {
             value,
         }
     }
+}
 
-    /// The option in one line: its name, and what it does when that is
-    /// said apart from it.
-    fn head(&self) -> String {
-        match &self.label {
-            Some(label) => format!("{}: {label}", self.name),
-            None => self.name.clone(),
+/// Puts `choices` to the person and returns the value behind the one picked. What
+/// they answer is said above it, by the caller.
+pub(crate) fn choose<T>(console: &Console, choices: Vec<Choice<T>>) -> Answered<T> {
+    hold(console, &mut Picker::new(choices, console.escape()))
+}
+
+/// A list being answered.
+pub(super) struct Picker<T> {
+    choices: Vec<Choice<T>>,
+    /// What was typed to narrow it.
+    filter: String,
+    /// Where the pointer stands among what the filter leaves.
+    at: usize,
+    escape: Escape,
+}
+
+impl<T> Picker<T> {
+    /// A list of `choices` with nothing typed and the pointer on the first of them.
+    pub(super) fn new(choices: Vec<Choice<T>>, escape: Escape) -> Self {
+        Self {
+            choices,
+            filter: String::new(),
+            at: 0,
+            escape,
+        }
+    }
+
+    /// The indices of the options the filter leaves: the best answers to what was
+    /// typed first, and in the order they were given among equals.
+    fn matching(&self) -> Vec<usize> {
+        let typed = self.filter.to_lowercase();
+        let mut found: Vec<(u8, usize)> = self
+            .choices
+            .iter()
+            .enumerate()
+            .filter_map(|(index, choice)| {
+                Some((answers(&choice.name.to_lowercase(), &typed)?, index))
+            })
+            .collect();
+        found.sort_unstable();
+        found.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// The index of the option the pointer is on, or `None` when the filter leaves
+    /// nothing.
+    fn pointed(&self) -> Option<usize> {
+        self.matching().get(self.at).copied()
+    }
+
+    /// The keys the list answers to, and what Escape does here, wrapped to `room`.
+    fn keys(&self, look: &Look) -> Vec<Line> {
+        let separator = format!(" {} ", look.glyphs.sep());
+        let keys = [
+            format!("{} move", look.glyphs.up_down()),
+            "type to filter".to_string(),
+            "enter chooses".to_string(),
+            self.escape.said().to_string(),
+        ]
+        .join(separator.as_str());
+        Line::new().push(Tone::Muted, keys).wrap(look.width.cells())
+    }
+
+    /// Moves the pointer by one row within what the filter leaves, around at its ends.
+    fn move_by(&mut self, forward: bool) {
+        let rows = self.matching().len().max(1);
+        self.at = match forward {
+            true => (self.at + 1) % rows,
+            false => (self.at + rows - 1) % rows,
+        };
+    }
+
+    /// Takes the option the pointer is on, or stays when the filter leaves nothing.
+    fn answer(&mut self) -> Press<T> {
+        match self.pointed() {
+            Some(index) => Press::Answer(self.choices.swap_remove(index).value),
+            None => Press::Stay,
         }
     }
 }
 
-/// Puts `choices` to the person — `verb` says what picking one does —
-/// and returns the value behind the one picked.
-pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) -> Answered<T> {
-    let width = console.width();
-    let read = read(&choices, width);
-    let rows = rows(&choices, width);
-    // What is read above the list is whatever the list's own rows do
-    // not say: an option's label, and a name a row had to cut. An option
-    // a row holds whole is read on that row.
-    if read
-        .iter()
-        .zip(&rows)
-        .any(|(option, row)| option.trim_start() != row.as_str())
-    {
-        for option in &read {
-            console.say(option)?;
-        }
-        console.say("")?;
+/// How well `name` answers what was typed, the lower the better: the whole of it, its
+/// start, a run of it, or its letters in order with anything between them. `None` where
+/// it holds none of those. Both are lowercase.
+fn answers(name: &str, typed: &str) -> Option<u8> {
+    match () {
+        () if name == typed => Some(0),
+        () if name.starts_with(typed) => Some(1),
+        () if name.contains(typed) => Some(2),
+        () if holds_in_order(name, typed) => Some(3),
+        () => None,
     }
-    let escape = console.escape().said();
-    for line in joined(&[KEYS[0], KEYS[1], KEYS[2], escape], ",", width) {
-        console.say(&line)?;
-    }
-    let cursor = Cursor::taken(console);
-    let picked = FuzzySelect::new()
-        .with_prompt(verb)
-        .items(&rows)
-        // Without a highlighted option to start from, the first Enter
-        // answers nothing.
-        .default(0)
-        // What was picked is said by whoever asked, in one line, rather
-        // than by echoing an option back.
-        .report(false)
-        .interact_on_opt(console.term())
-        .map_err(|failed| NoAnswer::from(std::io::Error::from(failed)))?
-        .ok_or(NoAnswer::Declined)?;
-    drop(cursor);
-    choices
-        .into_iter()
-        .nth(picked)
-        .map(|choice| choice.value)
-        .ok_or(NoAnswer::OffMenu)
 }
 
-/// Every option as it is read: its position and its text, which is its
-/// name and label, each broken to `width` cells and every line after the
-/// first sitting under the text of the first.
-fn read<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
-    let digits = digits(choices);
-    let indent = " ".repeat(INDENT_WIDTH + digits + INDENT_WIDTH);
-    let room = width.saturating_sub(indent.len());
-    choices
-        .iter()
-        .enumerate()
-        .map(|(index, choice)| {
-            let mut lines: Vec<String> = Vec::new();
-            for line in wrap(&choice.head(), room) {
-                match lines.is_empty() {
-                    true => lines.push(format!("{INDENT}{:>digits$}{INDENT}{line}", index + 1)),
-                    false => lines.push(format!("{indent}{line}")),
-                }
+/// Whether `name` holds the letters of `typed` in order, whatever stands between them.
+fn holds_in_order(name: &str, typed: &str) -> bool {
+    let mut wanted = typed.chars().peekable();
+    for character in name.chars() {
+        if wanted.peek() == Some(&character) {
+            wanted.next();
+        }
+    }
+    wanted.peek().is_none()
+}
+
+impl<T> Held for Picker<T> {
+    type Answer = T;
+
+    fn drawn(&self, look: &Look, rows: usize) -> Placed {
+        let matching = self.matching();
+        let keys = self.keys(look);
+        // A key line that wraps takes from the list.
+        let room = rows.saturating_sub(AROUND + keys.len().saturating_sub(1));
+        let mut lines = Vec::new();
+        if !self.filter.is_empty() {
+            lines.push(
+                Line::new()
+                    .push(Tone::Muted, "filter ")
+                    .push(Tone::Strong, self.filter.as_str()),
+            );
+        }
+        if matching.is_empty() {
+            lines.push(Line::new().push(Tone::Muted, "nothing matches"));
+        } else {
+            let list = Choices {
+                rows: matching
+                    .iter()
+                    .filter_map(|&index| self.choices.get(index))
+                    .map(|choice| ChoiceRow {
+                        name: choice.name.clone(),
+                        said: choice.label.clone(),
+                        cost: None,
+                    })
+                    .collect(),
+                at: self.at.min(matching.len() - 1),
+            };
+            lines.extend(list.fitted(look, look.width.cells(), room));
+        }
+        lines.extend(keys);
+        Placed {
+            lines,
+            cursor: None,
+        }
+    }
+
+    fn press(&mut self, stroke: Stroke) -> Press<T> {
+        match stroke {
+            Stroke::Up | Stroke::BackTab => self.move_by(false),
+            Stroke::Down | Stroke::Tab => self.move_by(true),
+            Stroke::Insert(character) => {
+                self.filter.push(character);
+                self.at = 0;
             }
-            lines.join("\n")
-        })
-        .collect()
-}
-
-/// Every option as the list holds it: its position and its name on one
-/// row, inside `width` bytes.
-///
-/// Cut by bytes and not by cells because that is what the list measures
-/// a row it has to clear by; what a cut leaves out is on the line above
-/// the list, whole, under the same number.
-fn rows<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
-    let digits = digits(choices);
-    choices
-        .iter()
-        .enumerate()
-        .map(|(index, choice)| {
-            within(
-                &format!("{:>digits$}{INDENT}{}", index + 1, choice.name),
-                width.saturating_sub(INDENT_WIDTH + 1),
-            )
-        })
-        .collect()
-}
-
-/// The places a position takes once every option has one.
-fn digits<T>(choices: &[Choice<T>]) -> usize {
-    choices.len().to_string().len()
-}
-
-/// `line` up to the last whole character that keeps it inside `bytes`.
-fn within(line: &str, bytes: usize) -> String {
-    let mut kept = String::new();
-    for character in line.chars() {
-        if kept.len() + character.len_utf8() > bytes {
-            break;
+            Stroke::Backspace => {
+                self.filter.pop();
+                self.at = 0;
+            }
+            Stroke::Enter => return self.answer(),
+            Stroke::Decline => return Press::Decline,
+            Stroke::Interrupt => return Press::Interrupt,
+            _ => {}
         }
-        kept.push(character);
+        Press::Stay
     }
-    kept
-}
 
-/// The cursor, put back after the list has drawn over it.
-///
-/// The list hides the cursor while it draws and shows it again only
-/// where it is answered or declined. A prompt that ends any other way —
-/// a person stopping the run, a console that stopped reading — would
-/// hand the shell it returns to a terminal with no cursor in it, which
-/// nothing that runs next puts back.
-struct Cursor<'a> {
-    console: &'a Console,
-}
-
-impl<'a> Cursor<'a> {
-    /// Records that the list is about to hide `console`'s cursor.
-    fn taken(console: &'a Console) -> Self {
-        console.hiding();
-        Self { console }
-    }
-}
-
-impl Drop for Cursor<'_> {
-    fn drop(&mut self) {
-        self.console.restore();
+    fn typing(&self) -> bool {
+        false
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use surco::width::LINE_WIDTH;
-
-    /// The cells an option's text has once the marker, the position and
-    /// the gap after it are drawn.
-    const ROOM: usize = LINE_WIDTH - INDENT_WIDTH - 1 - INDENT_WIDTH;
-
-    #[test]
-    fn every_option_is_numbered_from_one() {
-        let choices: Vec<Choice<u8>> = ["approve", "adjust", "abort"]
-            .iter()
-            .enumerate()
-            .map(|(index, name)| Choice::named(*name, index as u8))
-            .collect();
-        assert_eq!(
-            read(&choices, LINE_WIDTH),
-            vec!["  1  approve", "  2  adjust", "  3  abort"]
-        );
-        assert_eq!(
-            rows(&choices, LINE_WIDTH),
-            vec!["1  approve", "2  adjust", "3  abort"]
-        );
-    }
-
-    #[test]
-    fn an_option_too_long_for_one_line_is_broken_rather_than_left_to_the_terminal() {
-        // A tradeoff an exhausted re-route shows, which runs past what a
-        // line has room for.
-        let block = read(
-            &[Choice {
-                label: Some(
-                    "Re-route to `fix` once more: uses one extra correction attempt \
-                     beyond the declared max_reroutes (0); escalates again if `fix` \
-                     doesn't fix it"
-                        .to_string(),
-                ),
-                ..Choice::named("retry", 0u8)
-            }],
-            LINE_WIDTH,
-        );
-        let block = block.first().map(String::as_str).unwrap_or_default();
-        assert!(
-            block.lines().count() > 2,
-            "the tradeoff did not break: {block:?}"
-        );
-        for (at, line) in block.lines().enumerate() {
-            let drawn = surco::width::cell_width(line);
-            assert!(
-                drawn <= LINE_WIDTH,
-                "line {at} takes {drawn} cells: {line:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_second_line_sits_under_the_first_and_not_deeper() {
-        let long = Choice {
-            label: Some(
-                "resolves this gate, and the run goes on past it to `ship`, which runs next"
-                    .to_string(),
-            ),
-            ..Choice::named("approve", 0u8)
-        };
-        let read = read(std::slice::from_ref(&long), LINE_WIDTH);
-        let first = read.first().map(String::as_str).unwrap_or_default();
-        let (head, rest) = first.split_once('\n').unwrap_or_default();
-        assert_eq!(
-            head,
-            "  1  approve: resolves this gate, and the run goes on past it to `ship`, which"
-        );
-        assert_eq!(rest, "     runs next");
-        assert_eq!(
-            rest.len() - rest.trim_start().len(),
-            head.find("approve").unwrap_or_default(),
-            "a line the label breaks onto sits under the option's own text"
-        );
-    }
-
-    #[test]
-    fn a_row_of_the_list_never_takes_more_bytes_than_the_terminal_is_wide() {
-        // The list corrects the rows it clears for a row it takes the
-        // terminal to have wrapped, and measures that in bytes. A row
-        // inside the terminal's width in bytes wraps nowhere and draws
-        // no correction, so what it clears is what it wrote.
-        const TERMINAL: usize = 40;
-        let rows = rows(
-            &[Choice {
-                label: Some("no room for this on a row".to_string()),
-                ..Choice::named(format!("retry-{}", "é".repeat(ROOM)), 0u8)
-            }],
-            TERMINAL,
-        );
-        for row in &rows {
-            assert!(
-                row.len() + INDENT_WIDTH < TERMINAL,
-                "{} bytes on a terminal {TERMINAL} wide: {row:?}",
-                row.len()
-            );
-            assert!(
-                !row.contains('\n'),
-                "a row the list counts as one is one: {row:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn what_a_row_leaves_out_is_read_whole_above_the_list() {
-        let long = Choice {
-            label: Some("one more attempt".to_string()),
-            ..Choice::named("re-route-to-fix-once-more", 0u8)
-        };
-        let rows = rows(std::slice::from_ref(&long), 20);
-        let read = read(std::slice::from_ref(&long), LINE_WIDTH);
-        let row = rows.first().map(String::as_str).unwrap_or_default();
-        let block = read.first().map(String::as_str).unwrap_or_default();
-        assert!(row.len() < 20 - INDENT_WIDTH, "{row:?}");
-        assert!(block.contains(&long.name), "{block:?}");
-        assert!(
-            block.contains("one more attempt"),
-            "what the row had no space for is read above it: {block:?}"
-        );
-    }
-
-    #[test]
-    fn what_an_option_does_is_read_once_above_the_row_that_names_it() {
-        let retry = Choice {
-            label: Some("Re-route to `fix` once more".to_string()),
-            ..Choice::named("retry", 0u8)
-        };
-        let read = read(std::slice::from_ref(&retry), LINE_WIDTH);
-        assert_eq!(read, ["  1  retry: Re-route to `fix` once more"]);
-        assert_eq!(rows(std::slice::from_ref(&retry), LINE_WIDTH), ["1  retry"]);
-    }
-}
+mod tests;

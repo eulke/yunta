@@ -246,6 +246,8 @@ fn asked(console: &Console, prompt: &str, default: &str) -> String {
     let asking = Line::new()
         .push(Tone::Strong, prompt)
         .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
+    // A key pressed before this question was drawn is not an answer to it.
+    console.discard_typed();
     // A terminal that cannot be drawn on cannot be asked either: the
     // default stands, as it does for a line left empty.
     if console.say(&look.paint.line(&asking)).is_err() {

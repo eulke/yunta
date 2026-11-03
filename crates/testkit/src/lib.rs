@@ -55,7 +55,7 @@ pub use owner::Owner;
 pub use repo::{bare_origin, git, git_output, init_repo, read, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
-pub use terminal::{runs_root, Terminal};
+pub use terminal::{runs_root, Screen, Terminal};
 pub use tools::{tools_environment, ToolsHost};
 pub use wait::{after, wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 

@@ -38,7 +38,7 @@ fn forge_line(chosen: &Chosen) -> Option<String> {
             r#"<p class="otherwise">on {}</p>"#,
             text::words(forge)
         )),
-        Chosen::Here { .. } | Chosen::AtThePrompt => None,
+        Chosen::Here { .. } => None,
     }
 }
 

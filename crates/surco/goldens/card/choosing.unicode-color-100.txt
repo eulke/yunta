@@ -1,0 +1,10 @@
+␛[1;35m▎␛[0m ␛[1;35m◆␛[0m ␛[1mPlan and its tests registered. Approve?␛[0m                                    ␛[2mapprove-plan · 3GQF5Q␛[0m
+␛[1;35m▎␛[0m 8 files, +295 −73
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[1;35m▸␛[0m ␛[1mapprove  ␛[0mOn to `implement`: ␛[2mresolves this gate␛[0m
+␛[1;35m▎␛[0m   adjust   Back to `plan`: ␛[2msends what you say, and asks again once it completes␛[0m
+␛[1;35m▎␛[0m   abort    Pause here: ␛[2mnothing runs; this decision stays open␛[0m
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[2mthen␛[0m  review ×2, conform → ship
+␛[1;35m▎␛[0m
+␛[1;35m▎␛[0m ␛[2m↑↓ move · enter chooses · n adds a note · esc leaves it for later␛[0m

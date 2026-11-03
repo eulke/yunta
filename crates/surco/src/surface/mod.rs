@@ -15,7 +15,7 @@ mod terminal;
 pub(crate) use html::tests::visible;
 pub use html::Html;
 pub use markdown::{Description, Leaves, Markdown};
-pub use terminal::Terminal;
+pub use terminal::{Placed, Terminal};
 
 use crate::components::Code;
 use crate::doc::Doc;

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::components::{
     Cell, Chosen, Code, Column, Concern, Decision, DecisionOption, Diffstat, Evidence, Fields,
     FileRow, Fix, Fold, Gist, Headline, Holds, Marked, MoreFiles, Prose, Row, Section, Table,
@@ -265,21 +267,23 @@ fn plain_text_keeps_what_html_would_read_as_a_tag() {
     );
 }
 
-/// A decision answered at the prompt under it is a table of its options,
-/// what each does and what happens, with no command: the prompt chooses.
+/// A decision is a table of its options, what each does and what happens, and an
+/// option no command chooses leaves its cell empty.
 #[test]
-fn a_decision_answered_at_the_prompt_is_a_table_without_commands() {
+fn an_option_no_command_chooses_leaves_its_cell_empty() {
     let decision = Decision {
-        chosen: Chosen::AtThePrompt,
+        chosen: Chosen::Here {
+            commands: BTreeMap::new(),
+        },
         options: vec![option("approve", "On to `build`", "resolves this gate")],
         otherwise: Vec::new(),
     };
     assert_eq!(
         Markdown.draw(&Doc::new().with(decision)),
         concat!(
-            "| option | what it does | what happens |\n",
-            "|---|---|---|\n",
-            "| **approve** | On to `build` | resolves this gate |\n",
+            "| option | what it does | what happens | command |\n",
+            "|---|---|---|---|\n",
+            "| **approve** | On to `build` | resolves this gate |  |\n",
         )
     );
 }
@@ -300,7 +304,9 @@ fn words_keep_a_sign_html_would_read_as_a_tag_wherever_they_stand() {
         }],
     };
     let decision = Decision {
-        chosen: Chosen::AtThePrompt,
+        chosen: Chosen::Here {
+            commands: BTreeMap::new(),
+        },
         options: vec![DecisionOption {
             id: "approve".to_string(),
             label: Some("Keep Option<T>".to_string()),
@@ -332,9 +338,9 @@ fn words_keep_a_sign_html_would_read_as_a_tag_wherever_they_stand() {
             "|---|\n",
             "| Parse Vec\\<u8> |\n",
             "\n",
-            "| option | what it does | what happens |\n",
-            "|---|---|---|\n",
-            "| **approve** | Keep Option\\<T> | returns Result\\<T><br>asks: which \\<kind>? |\n",
+            "| option | what it does | what happens | command |\n",
+            "|---|---|---|---|\n",
+            "| **approve** | Keep Option\\<T> | returns Result\\<T><br>asks: which \\<kind>? |  |\n",
         )
     );
 }

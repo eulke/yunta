@@ -48,9 +48,6 @@ pub enum Chosen {
     /// chooses it. What follows the options is typed `elsewhere`, never on
     /// the forge.
     OnTheForge { forge: String, elsewhere: String },
-    /// At the prompt drawn under it: each option's words say what it does,
-    /// and the prompt is how it is chosen, so no command chooses it.
-    AtThePrompt,
 }
 
 impl Decision {

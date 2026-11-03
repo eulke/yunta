@@ -61,4 +61,5 @@ mod tests {
     mod offers;
     mod publication;
     mod retry;
+    mod routes;
 }

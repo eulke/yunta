@@ -732,7 +732,10 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
     let (repo, home) = project(root.path(), EXHAUSTED);
 
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
-    terminal.wait_for("esc parks the run", "the menu was never put to anyone");
+    terminal.wait_on_screen(
+        "esc leaves it for later",
+        "the card was never put to anyone",
+    );
     terminal.keys("\x1b");
 
     let drawn = terminal.ended();
@@ -928,7 +931,7 @@ fn a_failed_bash_node_leaves_its_tail_above_the_region() {
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
     // A node with nowhere to re-route to asks what to do; Escape parks
     // the run.
-    terminal.wait_for("> 1  retry", "the failure never asked what to do next");
+    terminal.wait_on_screen("▸ retry", "the failure never asked what to do next");
     terminal.keys("\x1b");
     let drawn = terminal.ended();
     assert_eq!(terminal.exit_code(), Some(3), "{drawn}");

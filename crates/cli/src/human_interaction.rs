@@ -19,6 +19,10 @@
 //! own cancellation, so a run stopped from outside stops waiting on a
 //! person who is no longer being asked anything.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -26,7 +30,7 @@ use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::{Env, QuestionsFile};
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
-use crate::ask::{answer, decide, Answered, Console, Escape, NoAnswer};
+use crate::ask::{answer, decide, Answered, Ask, Console, Escape, NoAnswer};
 use crate::error::{note, warn};
 use crate::surface::{Curtain, Diagnostics};
 
@@ -78,32 +82,33 @@ impl ConsoleInteraction {
         P: FnOnce(&Console) -> Answered<T> + Send + 'static,
     {
         let console = Console::open(&self.diagnostics, Escape::Parks).await?;
+        let stop = console.stopper();
         self.curtain.lower().await;
         let _turn = Turn(&self.curtain);
         let reading = tokio::task::spawn_blocking(move || prompt(&console));
-        self.read(reading).await.and_then(settled)
+        self.read(reading, stop).await.and_then(settled)
     }
 
-    /// What `reading` answered, or `None` once the run is cancelled out
-    /// from under it.
+    /// What `reading` answered, or `None` once the run is cancelled out from under it.
     ///
-    /// The abandoned read is the one task this process does not keep a
-    /// handle on, and it is deliberate: a thread parked in a terminal
-    /// read cannot be told to stop, and the key that would free it is
-    /// one nobody is going to press now that the run is stopping. So
-    /// the engine gets its answer, unwinds the run and kills the tree,
-    /// and `main` leaves without waiting on the read.
-    ///
-    /// What that read took from the terminal is not put back here. The
-    /// thread is still running, and it turns raw mode back on between
-    /// its own reads, so the last word on what the terminal is left in
-    /// belongs to the process: `main` hands it back through
-    /// [`crate::ask::restore_terminal`] once nothing is left to take it
-    /// again.
-    async fn read<T>(&self, reading: JoinHandle<Answered<T>>) -> Option<Answered<T>> {
+    /// A cancelled run tells the prompt to stop and waits for it: within a tick of
+    /// its read the prompt has taken what it drew off the screen and handed the
+    /// terminal back, so what the run says next is not drawn under a question nobody
+    /// can answer any more.
+    async fn read<T>(
+        &self,
+        mut reading: JoinHandle<Answered<T>>,
+        stop: Arc<AtomicBool>,
+    ) -> Option<Answered<T>> {
         tokio::select! {
-            read = reading => Some(read.unwrap_or_else(|failed| Err(NoAnswer::Failed(failed.to_string())))),
-            () = self.cancel.cancelled() => None,
+            read = &mut reading => {
+                Some(read.unwrap_or_else(|failed| Err(NoAnswer::Failed(failed.to_string()))))
+            }
+            () = self.cancel.cancelled() => {
+                stop.store(true, Ordering::Release);
+                drop(reading.await);
+                None
+            }
         }
     }
 }
@@ -117,29 +122,49 @@ impl HumanInteraction for ConsoleInteraction {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let escalation = escalation.clone();
         let env = self.env.clone();
-        self.prompted(move |console| decide(console, &env, &escalation, None, None))
-            .await
+        self.prompted(move |console| {
+            decide(
+                console,
+                &env,
+                Ask {
+                    escalation: &escalation,
+                    shown: None,
+                    changed: None,
+                    routes: BTreeMap::new(),
+                    node: None,
+                },
+            )
+        })
+        .await
     }
 
-    /// The decision, with the documents it is about drawn above its
-    /// question and what weighs on it beside its options.
+    /// The decision, held as a card: the documents it is about drawn above it, what
+    /// the run changed and what follows each answer worked out here, where the
+    /// workflow and the run can be read, before the blocking read starts.
     async fn resolve_in(
         &self,
         escalation: &GateWaitingPayload,
         asking: &yunta_engine::Asking<'_>,
     ) -> Option<HumanChoice> {
+        let routes =
+            yunta_render::gate::routes(escalation, asking.workflow, asking.left_out, asking.node);
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();
         let run = asking.run.clone();
         let changed = asking.changed.cloned();
+        let node = asking.node.cloned();
         let env = self.env.clone();
         self.prompted(move |console| {
             decide(
                 console,
                 &env,
-                &escalation,
-                Some((&run, &shown)),
-                changed.as_ref(),
+                Ask {
+                    escalation: &escalation,
+                    shown: Some((&run, &shown)),
+                    changed: changed.as_ref(),
+                    routes,
+                    node: node.as_ref(),
+                },
             )
         })
         .await
@@ -187,10 +212,6 @@ fn settled<T>(read: Answered<T>) -> Option<T> {
         // cancellation; a second account of it here would be a second
         // story about whether a person stopped the run.
         Err(NoAnswer::Interrupted) => None,
-        Err(NoAnswer::OffMenu) => {
-            warn("the prompt answered with an option that was not on the menu: nothing recorded");
-            None
-        }
         Err(NoAnswer::Unreadable(e)) => {
             warn(format!("could not read your answer from the terminal: {e}"));
             None

@@ -4,14 +4,17 @@
 //! terminal draws it above the prompt that answers the decision, and a forge
 //! draws it as the description of the pull request a reviewer answers on.
 
+use std::collections::BTreeMap;
+
 use surco::components::{Fields, Gist, Headline, Lead, Note, Section};
 use surco::doc::{Block, Doc};
+use surco::glyphs::{Glyphs, Mark};
 use surco::line::{Line, Tone};
 use surco::words::Standing;
-use yunta_core::events::GateWaitingPayload;
+use yunta_core::events::{GateWaitingPayload, Leads};
 use yunta_core::shown::ShownDocument;
 use yunta_core::step::NextStep;
-use yunta_core::RunId;
+use yunta_core::{LeftOut, NodeId, OptionId, RunId, Workflow};
 
 use crate::shown::Form;
 
@@ -39,11 +42,7 @@ pub struct GatePage<'a> {
 /// The page: one headline, then where it waits, what it leaves out, what the
 /// run changed, each document in its form, and the decision last.
 pub fn page(page: GatePage<'_>, spell: &dyn Fn(&NextStep) -> String) -> Doc {
-    let headline = Headline::new(
-        Standing::NeedsYou.mark(),
-        "decision",
-        Standing::NeedsYou.word(),
-    );
+    let headline = decision_headline();
     let headline = match page.shown {
         Some((run, _)) => headline.edge(run.handle()),
         None => headline,
@@ -65,6 +64,16 @@ pub fn page(page: GatePage<'_>, spell: &dyn Fn(&NextStep) -> String) -> Doc {
         }
     }
     doc.with(page.decision)
+}
+
+/// The headline every decision's page opens on: the mark of what needs a
+/// person, and the word it is called by.
+fn decision_headline() -> Headline {
+    Headline::new(
+        Standing::NeedsYou.mark(),
+        "decision",
+        Standing::NeedsYou.word(),
+    )
 }
 
 /// A decision as the section a page ends on: led by the mark of what
@@ -89,23 +98,131 @@ pub fn record(escalation: &GateWaitingPayload, shown: &[ShownDocument]) -> Vec<S
     }
 }
 
-/// The decision a prompt asks, as the section its page ends on: titled by
-/// its question, then the record the engine attached, what weighs on it,
-/// and each option with what it does and costs. No option names a command:
-/// the prompt under it is how it is chosen.
-pub fn asked(escalation: &GateWaitingPayload, shown: &[ShownDocument]) -> Section {
-    let before = crate::shown::before_you_decide(escalation.withheld(), shown);
-    let mut blocks: Vec<Block> = record(escalation, shown)
-        .into_iter()
-        .map(|line| Note(line).into())
-        .collect();
-    if let Some(before) = before {
-        blocks.push(before.into());
+/// What follows an answer past what its label names, by rank.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Route {
+    /// The run goes on past the gate and the nodes the label names: what runs after them.
+    On(Vec<Vec<NodeId>>),
+    /// The run goes back to the node the label names: what runs after it, the gate
+    /// that asks again last.
+    Back(Vec<Vec<NodeId>>),
+}
+
+impl Route {
+    /// The route as a line: each rank apart by the arrow, what runs side by side
+    /// apart by a comma, and a node run once per agent as its name and how many
+    /// times. Going back ends on the mark of what needs a person.
+    pub fn said(&self, glyphs: Glyphs) -> String {
+        let (ranks, back) = match self {
+            Route::On(ranks) => (ranks, false),
+            Route::Back(ranks) => (ranks, true),
+        };
+        let last = ranks.len().saturating_sub(1);
+        let said: Vec<String> = ranks
+            .iter()
+            .enumerate()
+            .map(|(at, rank)| match (back, at == last) {
+                (true, true) => {
+                    format!(
+                        "{} {}",
+                        glyphs.mark(Mark::NeedsYou),
+                        rank_said(rank, glyphs)
+                    )
+                }
+                _ => rank_said(rank, glyphs),
+            })
+            .collect();
+        said.join(format!(" {} ", glyphs.arrow()).as_str())
     }
-    let options = crate::offers::decision_options(escalation);
-    blocks.push(crate::blocks::decision::at_the_prompt(options).into());
-    decision(
-        crate::claim::sentence(escalation.summary(), escalation.failure()),
-        blocks,
-    )
+}
+
+/// One rank: each name once, in order, with how many times it runs when more than
+/// once, a node run per agent being `name@agent`.
+fn rank_said(rank: &[NodeId], glyphs: Glyphs) -> String {
+    let mut names: Vec<(&str, usize)> = Vec::new();
+    for id in rank {
+        // A node run per agent is `name@agent`, and a reader counts it by its name.
+        let name = id
+            .as_str()
+            .split_once('@')
+            .map_or(id.as_str(), |(name, _)| name);
+        match names.iter().position(|(seen, _)| *seen == name) {
+            Some(at) => names[at].1 += 1,
+            None => names.push((name, 1)),
+        }
+    }
+    names
+        .into_iter()
+        .map(|(name, count)| match count {
+            1 => name.to_string(),
+            _ => format!("{name} {}{count}", glyphs.times()),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What follows each answer `escalation` offers that leads somewhere, past what its
+/// label names: going on says what runs after the nodes it goes on to, and going back
+/// says what runs again before `gate` asks again. A pause leads nowhere; neither does
+/// a gate nothing waits on, nor going back from a decision on no node. An answer whose
+/// label and words say all of it, going on to the last node or back to the one right
+/// before the gate, has no route.
+pub fn routes(
+    escalation: &GateWaitingPayload,
+    workflow: &Workflow,
+    left_out: &[LeftOut],
+    gate: Option<&NodeId>,
+) -> BTreeMap<OptionId, Route> {
+    escalation
+        .options()
+        .iter()
+        .filter_map(|option| {
+            let route = match option.leads.as_ref()? {
+                Leads::On { next, .. } => {
+                    let ranks = past_the_first(workflow.ranks_from(next, left_out));
+                    (!ranks.is_empty()).then_some(Route::On(ranks))?
+                }
+                Leads::Back { node, .. } => {
+                    let ranks = past_the_first(workflow.ranks_between(node, gate?, left_out));
+                    (ranks.len() > 1).then_some(Route::Back(ranks))?
+                }
+            };
+            Some((option.id.clone(), route))
+        })
+        .collect()
+}
+
+/// `ranks` past the first, which is what an option's label names.
+fn past_the_first(ranks: Vec<Vec<NodeId>>) -> Vec<Vec<NodeId>> {
+    ranks.into_iter().skip(1).collect()
+}
+
+/// What a prompt's card stands under: each document the decision is about, in the
+/// form a terminal shows it, under its headline, and what weighs on the decision.
+/// `None` where the card says it all.
+pub fn above(
+    shown: Option<(&RunId, &[ShownDocument])>,
+    escalation: &GateWaitingPayload,
+    spell: &dyn Fn(&NextStep) -> String,
+) -> Option<Doc> {
+    let documents: &[ShownDocument] = match shown {
+        Some((_, documents)) => documents,
+        None => &[],
+    };
+    let before = crate::shown::before_you_decide(escalation.withheld(), documents);
+    if documents.is_empty() && before.is_none() {
+        return None;
+    }
+    let mut doc = Doc::new();
+    if let Some((run, documents)) = shown.filter(|(_, documents)| !documents.is_empty()) {
+        doc = doc.with(decision_headline());
+        for document in documents {
+            let drawn = crate::shown::document(document, run, Form::Review, spell);
+            doc = doc.with_all(drawn.into_blocks());
+        }
+    }
+    if let Some(before) = before {
+        doc = doc.with(before);
+    }
+    Some(doc)
 }

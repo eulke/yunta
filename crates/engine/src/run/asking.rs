@@ -45,6 +45,9 @@ impl RunCtx<'_> {
             shown: &shown,
             run: self.run_id,
             changed: state.current_change(),
+            workflow: &self.manifest.workflow,
+            left_out: state.run.left_out(),
+            node,
         };
         let answered = {
             let _asking = self.asking(node, task).await?;

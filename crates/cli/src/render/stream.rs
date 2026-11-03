@@ -6,7 +6,7 @@
 use std::io::IsTerminal;
 use std::sync::OnceLock;
 
-use dialoguer::console::Term;
+use console::Term;
 use surco::glyphs::{parse_choice, GlyphEnv, Glyphs, OVERRIDE_VAR};
 use surco::look::{Look, Width};
 use surco::paint::{look_of, ColorPolicy, ColorWhen, Paint, LOOK_VAR};
@@ -19,12 +19,12 @@ static GLYPHS: OnceLock<Glyphs> = OnceLock::new();
 /// layer is named on stderr. `main` calls it once, before anything is
 /// printed; a later call changes nothing.
 ///
-/// The menu a prompt draws is drawn by a library that decides color for
-/// itself, from the environment alone: it is told here what this policy
-/// decided for stderr, so `--color never` and `NO_COLOR` reach the menu
-/// as they reach every other line.
+/// A library that draws on stderr decides color for itself, from the
+/// environment alone: it is told here what this policy decided for
+/// stderr, so `--color never` and `NO_COLOR` reach it as they reach every
+/// other line.
 pub(crate) fn settle_color(policy: ColorPolicy, look: Option<&str>) {
-    dialoguer::console::set_colors_enabled_stderr(paints(&policy, std::io::stderr().is_terminal()));
+    console::set_colors_enabled_stderr(paints(&policy, std::io::stderr().is_terminal()));
     POLICY.get_or_init(|| policy);
     // Said once the policy is settled, because the word `warning` takes its paint.
     if let Some(sentence) = unknown_look(look) {

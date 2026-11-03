@@ -3,7 +3,7 @@
 //! from being proven is said between the question and the options, and
 //! the option it withholds is refused with why wherever it is chosen.
 
-use yunta_testkit::{run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout, Terminal};
+use yunta_testkit::{run_id_from, stderr, stdout, yunta_in, yunta_on_terminal, Checkout};
 
 /// The planner, the node that specifies its tasks, and the gate that
 /// shows both.
@@ -98,11 +98,13 @@ fn a_gate_that_withholds_says_why_between_its_question_and_what_is_left() {
     let root = tempfile::tempdir().unwrap();
     let checkout = checkout(root.path());
     let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
-    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ ", "the gate never put its card on the console");
     let drawn = terminal.drawn();
 
     assert!(
-        drawn.contains("1  adjust") && !drawn.contains("  approve"),
+        drawn.contains("▸ adjust")
+            && !drawn.contains("▸ approve")
+            && !drawn.contains("  approve  "),
         "the menu offers only what sends the plan back or stops the run:\n{drawn}"
     );
     let question = drawn
@@ -116,16 +118,10 @@ fn a_gate_that_withholds_says_why_between_its_question_and_what_is_left() {
             && before.contains("risk: A greeting file left half written reads as no"),
         "what weighs on the decision is said beside its options:\n{drawn}"
     );
-    let screen: Vec<&str> = drawn.lines().collect();
-    let menu = screen
-        .iter()
-        .rposition(|line| line.contains("2  abort"))
-        .expect("the menu was drawn");
-    let last = &screen[(menu + 1).saturating_sub(usize::from(Terminal::ROWS))..=menu];
+    let screen = terminal.screen();
     assert!(
-        last.iter().any(|line| line.contains("before you decide")),
-        "what weighs on the decision is on the screen the menu asks on:\n{}",
-        last.join("\n")
+        screen.holds("before you decide"),
+        "what weighs on the decision is on the screen the card asks on:\n{screen:#?}"
     );
 }
 

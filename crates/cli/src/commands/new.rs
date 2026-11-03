@@ -19,7 +19,7 @@ use yunta_core::{ConfigLayer, Workflow};
 
 use super::advice;
 use super::verdict::{check_again, file_named, Found};
-use crate::ask::{choose, Choice, Console, Escape};
+use crate::ask::{choose, Choice, Console, Escape, NoAnswer};
 use crate::error::{CliError, Outcome};
 use crate::output::document;
 use crate::project;
@@ -162,9 +162,11 @@ nodes:
 ";
 
 /// The shape picked off the one list this binary puts choices on —
-/// same arrows, same filter, same numbering, same Escape — or the
-/// first shape when nobody picks: a skeleton is a starting point, and
-/// "not me, not now" about which one is the plainest one.
+/// same arrows, same filter, same Escape — or the first shape when
+/// nobody picks: a skeleton is a starting point, and "not me, not now"
+/// about which one is the plainest one. What the list is for is said
+/// above it first, and a console that cannot be drawn on takes the
+/// first shape the same way.
 fn picked(console: &Console) -> Shape {
     let choices = Shape::all()
         .into_iter()
@@ -173,7 +175,11 @@ fn picked(console: &Console) -> Shape {
             ..Choice::named(shape.label(), shape)
         })
         .collect();
-    choose(console, "choose a shape", choices).unwrap_or(Shape::OneNode)
+    console
+        .say("choose a shape")
+        .map_err(NoAnswer::from)
+        .and_then(|()| choose(console, choices))
+        .unwrap_or(Shape::OneNode)
 }
 
 /// A safe file stem: letters, digits, `-` and `_` only, non-empty — the

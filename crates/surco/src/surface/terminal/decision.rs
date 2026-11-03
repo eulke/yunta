@@ -58,11 +58,11 @@ impl Decision {
     }
 
     /// The title the other ways out stand under: `or` when each option is
-    /// chosen at a terminal, by a command or at its prompt, and what is typed
-    /// elsewhere when a forge holds the choice.
+    /// chosen at a terminal by a command, and what is typed elsewhere when a
+    /// forge holds the choice.
     pub(in crate::surface) fn otherwise_title(&self) -> &str {
         match &self.chosen {
-            Chosen::Here { .. } | Chosen::AtThePrompt => super::OR,
+            Chosen::Here { .. } => super::OR,
             Chosen::OnTheForge { elsewhere, .. } => elsewhere.as_str(),
         }
     }
@@ -70,6 +70,8 @@ impl Decision {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use crate::components::{Chosen, Decision, DecisionOption};
     use crate::line::Fill;
     use crate::look::Look;
@@ -77,7 +79,9 @@ mod tests {
     /// A decision with one option that has a cost, and one way out.
     fn decision() -> Decision {
         Decision {
-            chosen: Chosen::AtThePrompt,
+            chosen: Chosen::Here {
+                commands: BTreeMap::new(),
+            },
             options: vec![DecisionOption {
                 id: "approve".to_string(),
                 label: None,

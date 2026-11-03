@@ -727,14 +727,20 @@ engine refuses a plan it will show without the summary, the descriptions, the co
 and the `proves`, and tells the planner what is missing in the same answer.
 
 A gate with no `message:`, or a blank one, that shows a plan asks to approve the change
-its summary names — `Approve the plan: <summary>?`. Its page opens on one headline,
-`◆ decision · needs you`, reads each document it shows, and ends on the question, what
-weighs on it and each option with what it does; the menu under it is how you choose.
+its summary names — `Approve the plan: <summary>?`. At a terminal its page opens on one
+headline, `◆ decision · needs you`, reads each document it shows and what weighs on the
+decision, and under them a card stays where the decision opened: the question, the node
+and the run at its far edge, what the run changed, each option with what it does, and
+under them what follows the one pointed at. Arrows move, `enter` chooses, `n` adds a note
+and `esc` leaves it for later, with the run parked on it. What was typed before the
+question answers nothing, and neither does a paste. On a forge the page ends on the
+question, what weighs on it and each option with what it does.
 `abort` reads `Pause here`: nothing runs, and the decision stays open, so the next
 resume asks again.
 
-What weighs on the decision is said last, between the question and its options:
-on a terminal the last lines printed are the first ones read. Under "before you
+What weighs on the decision is said last on the page, right above the card, or between
+the question and its options on a forge: on a terminal the last lines printed are the
+first ones read. Under "before you
 decide" come what the gate does not offer and why, how the planner got the plan
 accepted when that took more than one handover, how many changes show no code, and
 each risk the plan names. `yunta status` prints the same block above the options of

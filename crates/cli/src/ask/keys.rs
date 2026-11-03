@@ -6,11 +6,11 @@
 //! if it had been typed, so a line break inside it is the same byte as
 //! the Enter that ends an answer — which is how one paste of two lines
 //! answers two questions with nobody pressing anything between them.
-//! [`PASTE_ON`] asks the terminal to mark the block it pastes; between
-//! the markers a break is [`Stroke::PastedBreak`] and belongs to the
-//! answer being typed, and only outside them does Enter end it. A
-//! terminal that does not honor the request marks nothing, and a pasted
-//! break arrives as the Enter it looks like.
+//! `surco::paint::PASTE_ON` asks the terminal to mark the block it
+//! pastes; between the markers a break is [`Stroke::PastedBreak`] and
+//! belongs to the answer being typed, and only outside them does Enter
+//! end it. A terminal that does not honor the request marks nothing,
+//! and a pasted break arrives as the Enter it looks like.
 //!
 //! The second is everything a key sends that is not a character. An
 //! arrow is an escape, a bracket and a letter; a line read whole keeps
@@ -19,15 +19,7 @@
 //! closes it and named — a cursor move when it is one, nothing when it
 //! is not.
 
-use dialoguer::console::Key;
-
-/// Asks the terminal to mark pasted text (`DECSET 2004`): what arrives
-/// between the two markers was pasted rather than typed.
-pub(crate) const PASTE_ON: &str = "\x1b[?2004h";
-
-/// Withdraws the request, leaving the terminal in the mode it was
-/// handed over in.
-pub(crate) const PASTE_OFF: &str = "\x1b[?2004l";
+use console::Key;
 
 /// The parameters of the sequence a terminal opens a paste with.
 const PASTE_BEGIN: &str = "200";
@@ -62,6 +54,12 @@ pub(crate) enum Stroke {
     Decline,
     /// Ctrl-C: the run is to be stopped.
     Interrupt,
+    Up,
+    Down,
+    /// The next row of a list, the way Down is.
+    Tab,
+    /// The row before, the way Up is.
+    BackTab,
     /// Nothing the line acts on.
     Ignored,
 }
@@ -77,6 +75,11 @@ pub(crate) struct Strokes {
 }
 
 impl Strokes {
+    /// Whether the terminal has said it is pasting: what arrives now was not typed.
+    pub(crate) fn pasting(&self) -> bool {
+        self.pasting
+    }
+
     /// What `key` asks of the line.
     pub(crate) fn read(&mut self, key: Key) -> Stroke {
         if self.parameters.is_some() {
@@ -107,11 +110,15 @@ impl Strokes {
             Key::Del => Stroke::Delete,
             Key::ArrowLeft => Stroke::Left,
             Key::ArrowRight => Stroke::Right,
+            Key::ArrowUp => Stroke::Up,
+            Key::ArrowDown => Stroke::Down,
+            Key::BackTab => Stroke::BackTab,
             Key::Home => Stroke::Home,
             Key::End => Stroke::End,
             // A tab inside pasted text is a space — the single cell
             // every run of whitespace in a one-line answer becomes.
             Key::Tab if self.pasting => Stroke::Insert(' '),
+            Key::Tab => Stroke::Tab,
             Key::Char(character) if !character.is_control() => Stroke::Insert(character),
             _ => Stroke::Ignored,
         }
@@ -238,6 +245,14 @@ mod tests {
     fn escape_declines_and_ctrl_c_interrupts() {
         assert_eq!(strokes(vec![Key::Escape]), vec![Stroke::Decline]);
         assert_eq!(strokes(vec![Key::CtrlC]), vec![Stroke::Interrupt]);
+    }
+
+    #[test]
+    fn vertical_keys_move_through_a_list_and_type_nothing() {
+        assert_eq!(
+            strokes(vec![Key::ArrowUp, Key::ArrowDown, Key::Tab, Key::BackTab]),
+            vec![Stroke::Up, Stroke::Down, Stroke::Tab, Stroke::BackTab]
+        );
     }
 
     #[test]

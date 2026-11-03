@@ -1,7 +1,6 @@
 //! The gate's page at a terminal, as the person answering it reads it.
 
 use surco::doc::{Block, Doc};
-use surco::glyphs::Glyphs;
 use surco::golden::{assert_golden, Environment, ENVIRONMENTS};
 use surco::look::Look;
 use surco::paint::Paint;
@@ -18,12 +17,7 @@ use yunta_testkit_core::spell;
 
 use super::documents::{review, run, shown_plan};
 use super::publication::gate_goldens;
-use crate::changes;
-use crate::gate::{self, GatePage};
-use crate::plan::Form;
-
-/// The question the greet plan's gate asks, which its decision is titled by.
-const QUESTION: &str = "Approve the plan: Greet a person by name, and say goodbye too?";
+use crate::gate;
 
 /// The payload of the escalation a gate of the greet plan raises: its claim
 /// asks to approve the plan's change, its menu offers approve, adjust and
@@ -92,10 +86,10 @@ fn weighing(block: &Block) -> bool {
     matches!(block, Block::Section(before) if before.title.text() == "before you decide")
 }
 
-/// The page opens on its headline and ends on its decision: its last block is
-/// the section titled by the question, which holds what weighs on it, and no
-/// command that resolves a gate at a prompt is drawn.
-fn assert_headline_and_decision(page: &Doc, plain: &str) {
+/// The page opens on its headline and ends on what weighs on the decision: its
+/// last block is the section that says it, and no command that resolves a gate
+/// is drawn.
+fn assert_headline_and_weighing(page: &Doc, plain: &str) {
     assert!(
         matches!(page.blocks().first(), Some(Block::Headline(_))),
         "{plain}"
@@ -106,54 +100,39 @@ fn assert_headline_and_decision(page: &Doc, plain: &str) {
         "{plain}"
     );
     assert!(!plain.contains("resolve-gate"), "{plain}");
-    let Some(Block::Section(decision)) = page.blocks().last() else {
-        panic!("the page does not end on a section:\n{plain}");
-    };
-    assert_eq!(decision.title.text(), QUESTION, "{plain}");
     assert!(
-        decision.blocks.iter().any(weighing),
-        "what weighs on it is not drawn under it: {plain}"
+        page.blocks().last().is_some_and(weighing),
+        "the page does not end on what weighs on the decision:\n{plain}"
     );
 }
 
-/// The page a gate of the greet plan shows above its prompt at a terminal that
-/// draws `glyphs`: the plan the question is about, and the decision the page
-/// ends on.
-fn console_page(glyphs: Glyphs) -> Doc {
+/// The page a gate of the greet plan shows above its card at a terminal: the
+/// plan the decision is about, and what weighs on it.
+fn console_page() -> Doc {
     let review = review();
     let shown = vec![shown_plan(review.clone())];
     let escalation = greet_escalation(&review);
     let run = run();
     let spelling = spell();
-    gate::page(
-        GatePage {
-            shown: Some((&run, shown.as_slice())),
-            waits: None,
-            note: None,
-            changed: changes::said(9, 412, 87, glyphs),
-            form: Form::Review,
-            decision: gate::asked(&escalation, &shown),
-        },
-        &*spelling,
-    )
+    gate::above(Some((&run, shown.as_slice())), &escalation, &*spelling)
+        .expect("a plan to read above the card")
 }
 
 /// A gate's page at a terminal matches its goldens in every environment, fits
-/// each width, opens on its headline and ends on its decision. Every structural
-/// check runs in every environment before the first golden is compared, so a
-/// page that is wrong says how in each environment, goldens or not. Each page
-/// is built with the glyphs of the environment it is drawn in, since the
-/// changed row is text the page is given.
+/// each width, opens on its headline and ends on what weighs on the decision.
+/// Every structural check runs in every environment before the first golden is
+/// compared, so a page that is wrong says how in each environment, goldens or
+/// not.
 #[test]
 fn a_gate_s_page_at_a_terminal_matches_its_goldens() {
     for environment in &ENVIRONMENTS {
-        let page = console_page(Look::of(environment).glyphs);
+        let page = console_page();
         assert_fits(&page, environment);
         let plain = Terminal::on(unpainted(environment)).draw(&page);
-        assert_headline_and_decision(&page, &plain);
+        assert_headline_and_weighing(&page, &plain);
     }
     for environment in &ENVIRONMENTS {
-        let page = console_page(Look::of(environment).glyphs);
+        let page = console_page();
         let drawn = Terminal::on(Look::of(environment)).draw(&page);
         assert_golden(&environment.golden(&gate_goldens(), "console"), &drawn);
     }

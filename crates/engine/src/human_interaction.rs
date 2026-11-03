@@ -31,6 +31,12 @@ pub struct Asking<'a> {
     /// counted it while that count stands on the newest tree; `None` when no
     /// count stands on it.
     pub changed: Option<&'a yunta_core::events::ChangesCountedPayload>,
+    /// The workflow the run follows, which says what follows each answer.
+    pub workflow: &'a yunta_core::Workflow,
+    /// What the run leaves out of it, which does not follow.
+    pub left_out: &'a [yunta_core::LeftOut],
+    /// The node the decision is on, when it is on one.
+    pub node: Option<&'a yunta_core::NodeId>,
 }
 
 pub use yunta_core::shown::{ShownContent, ShownDocument};

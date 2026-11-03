@@ -33,7 +33,7 @@ mod view;
 use std::io::Write;
 use std::sync::Arc;
 
-use dialoguer::console::Term;
+use console::Term;
 #[cfg(test)]
 use indicatif::TermLike;
 use tokio::task::JoinHandle;
@@ -109,7 +109,7 @@ impl Delivery {
                 reason: NOT_A_TERMINAL,
             };
         }
-        if env.term.as_deref() == Some("dumb") {
+        if env.is_dumb() {
             return Self::Lines {
                 reason: DUMB_TERMINAL,
             };

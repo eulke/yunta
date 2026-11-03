@@ -9,6 +9,8 @@ use crate::surface::Surface;
 use crate::width::{cell_width, INDENT};
 use crate::words::Standing;
 
+mod card;
+pub use card::Placed;
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;

@@ -15,11 +15,8 @@ use std::path::Path;
 use yunta_core::events::{EventPayload, GateEvent, GateResolvedPayload, HumanChoice};
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
 
-/// What a decision put to a person opens with: its headline.
-const DECISION: &str = "decision · needs you";
-
-/// What settles an option that asks for nothing.
-const SETTLE: &str = "enter records it, n adds a note";
+/// What a decision put to a person points at first, by the option it offers first.
+const POINTED: &str = "▸ ";
 
 /// A node that asks: the session hands the questions over and ends, and
 /// the round with the person happens after it closes.
@@ -170,7 +167,7 @@ fn approving(root: &Path) -> Terminal {
 fn a_console_prompt_does_not_stall_the_run_tools_listener() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
 
     // While the prompt waits for an answer, a SIGINT must still be
     // handled: the Ctrl-C task shares the run's runtime with the console
@@ -187,22 +184,19 @@ fn a_console_prompt_does_not_stall_the_run_tools_listener() {
 fn the_prompt_names_no_worktree() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     // Where the run works is a fact about the run, which `yunta status`
     // says; the prompt says what the decision is about and what each
     // option costs.
-    let drawn = terminal.drawn();
-    let prompt = &drawn[drawn.find(DECISION).expect("the prompt never opened")..];
-    assert!(!prompt.contains("the run works in"), "{prompt}");
+    let screen = terminal.screen();
+    assert!(!screen.holds("the run works in"), "{screen:?}");
 }
 
 #[test]
 fn choosing_an_option_that_asks_nothing_records_it_with_one_key() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = approving(root.path());
-    terminal.wait_for("> 1  approve", "the gate never put its menu on the console");
-    terminal.keys("\r");
-    terminal.wait_for(SETTLE, "choosing never said how the choice is recorded");
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     terminal.keys("\r");
 
     let drawn = terminal.ended();
@@ -216,11 +210,9 @@ fn choosing_an_option_that_asks_nothing_records_it_with_one_key() {
 fn pressing_n_adds_a_note() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = approving(root.path());
-    terminal.wait_for("> 1  approve", "the gate never put its menu on the console");
-    terminal.keys("\r");
-    terminal.wait_for(SETTLE, "choosing never said how the choice is recorded");
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     terminal.keys("n");
-    terminal.wait_for("note > ", "`n` never opened a line for the note");
+    terminal.wait_on_screen("enter records it", "`n` never opened a line for the note");
     terminal.keys("ship it after lunch\r");
 
     let drawn = terminal.ended();
@@ -234,13 +226,13 @@ fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
     terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
-    terminal.wait_for(DECISION, "the gate never put its decision on the console");
+    terminal.wait_on_screen(POINTED, "the gate never put its decision on the console");
 
     // The region and the prompt write to the same stream, and the one
     // that draws second lands on what the other put there. So the
     // region comes down first, and stays down until the prompt ends.
     assert!(
-        terminal.cleared_before("nodes ", DECISION),
+        terminal.cleared_before("nodes ", POINTED),
         "the region was still pinned to the terminal the prompt drew on:\n{}",
         terminal.drawn()
     );
@@ -250,7 +242,7 @@ fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
 fn an_interrupt_at_an_open_prompt_stops_the_run_and_the_process_with_it() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     terminal.interrupt();
 
     // A person at the menu is no longer being asked anything. The read
@@ -292,43 +284,262 @@ fn an_interrupt_at_an_open_prompt_stops_the_run_and_the_process_with_it() {
     );
 }
 
+/// A key redraws the card over itself: what stands above it stays, and the card
+/// is there once.
 #[test]
-fn a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further() {
+fn a_keystroke_in_the_card_redraws_it_in_place() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
-    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     wait_until(
         || !terminal.line_discipline_is_back(),
-        || "the gate did not put the terminal in raw mode before reading keys".into(),
+        || "the gate did not take the terminal before reading keys".into(),
     );
-    // Any key redraws the list, and the redraw begins by clearing the
-    // rows it last wrote. Clearing more than it wrote takes the rows
-    // above it — the evidence the decision is being made on.
+    let before = terminal.screen();
+    let top = before
+        .rows
+        .iter()
+        .position(|row| row.contains("▸ retry"))
+        .unwrap_or(0);
     terminal.keys("\x1b[B");
-    terminal.wait_for("> 2  abort", "the list never moved");
+    terminal.wait_on_screen("▸ abort", "the pointer never moved");
 
-    let (drew, cleared) = terminal.drew_and_cleared("> 1  retry");
-    assert_eq!(
-        cleared,
-        drew,
-        "the list drew {drew} rows and went back over {cleared}:\n{}",
-        terminal.drawn()
+    let after = terminal.screen();
+    assert_eq!(after.count(POINTED), 1, "{after:#?}");
+    assert_eq!(after.count("retry"), before.count("retry"), "{after:#?}");
+    assert_eq!(after.rows[..top], before.rows[..top], "{after:#?}");
+    assert!(after.cursor_hidden, "no field is open: {after:#?}");
+}
+
+/// A run whose gate opens after a moment, for what is typed before it.
+fn gated_after_a_moment(root: &Path) -> Terminal {
+    let checkout = Checkout::under(root)
+        .working_in_place()
+        .workflow(
+            "wf",
+            "name: late\nnodes:\n  - id: wait\n    kind: bash\n    run: \"sleep 2\"\n  - id: ship\n    \
+             kind: gate\n    depends_on: [wait]\n    assignee: lead\n    message: \"Ship it?\"\n",
+        )
+        .committed();
+    let (repo, home) = (checkout.repo, checkout.home);
+    yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"])
+}
+
+/// With one key answering, an Enter typed while the run worked would answer a
+/// question nobody had read.
+#[test]
+fn a_key_typed_before_the_question_answers_nothing() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = gated_after_a_moment(root.path());
+    terminal.keys("\r\r");
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    wait_until(
+        || !terminal.line_discipline_is_back(),
+        || "the gate did not take the terminal before reading keys".into(),
     );
+    assert!(
+        terminal.screen().holds("▸ approve"),
+        "{:#?}",
+        terminal.screen()
+    );
+    assert!(recorded(root.path()).is_none(), "nobody answered it");
+    terminal.keys("\r");
+
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+}
+
+/// A line break in pasted text is the byte an Enter is, and a card takes neither
+/// a paste nor anything in it for an answer.
+#[test]
+fn a_paste_answers_no_decision() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = approving(root.path());
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    terminal.keys("\x1b[200~n\rmore\r\x1b[201~");
+    terminal.keys("\x1b[B");
+    terminal.wait_on_screen("▸ abort", "the card stopped reading keys after the paste");
+    assert!(
+        !terminal.screen().holds("enter records it"),
+        "{:#?}",
+        terminal.screen()
+    );
+    assert!(
+        recorded(root.path()).is_none(),
+        "a paste answered the decision"
+    );
+}
+
+/// A run stopped on a gate that offers to go back with words: only a session picks
+/// its work back up with what it is told, so the node it goes back to is an agent's.
+fn adjusting(root: &Path) -> Terminal {
+    let checkout = Checkout::under(root)
+        .config(CONFIG)
+        .workflow(
+            "wf",
+            "name: adjusting\nnodes:\n  - id: plan\n    kind: prompt\n    runner: executor\n    \
+             prompt: \"Plan it.\"\n  - id: ok\n    kind: gate\n    depends_on: [plan]\n    \
+             assignee: lead\n    message: \"Good?\"\n    options: [approve, adjust]\n    on: { \
+             adjust: plan }\n",
+        )
+        .file(
+            "fixture.yaml",
+            "dialect: claude-code\nsessions:\n  - steps:\n      - { type: note, text: \"one\" }\n    \
+             outcome: { type: completed, summary: planned }\n  - steps:\n      - { type: note, \
+             text: \"two\" }\n    outcome: { type: completed, summary: planned again }\n",
+        )
+        .committed();
+    let (repo, home) = (checkout.repo, checkout.home);
+    yunta_on_terminal!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml"
+        ]
+    )
+}
+
+/// An option that asks opens its field where the card stands, with the cursor on
+/// it; esc goes back to the list, and an empty answer is said back, not sent.
+#[test]
+fn an_option_that_asks_opens_its_field_in_place() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = adjusting(root.path());
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    terminal.keys("\x1b[B");
+    terminal.wait_on_screen("▸ adjust", "the pointer never moved");
+    terminal.keys("\r");
+    terminal.wait_on_screen("what should change?", "the option never asked for words");
+    let screen = terminal.screen();
+    assert!(
+        !screen.cursor_hidden,
+        "a field shows its cursor: {screen:#?}"
+    );
+    let (row, column) = screen.cursor;
+    assert!(
+        screen.rows[usize::from(row)].starts_with("▎ >") && column == 4,
+        "the cursor stands on the field, past its prompt: {screen:#?}"
+    );
+    assert!(
+        !screen.holds("approve"),
+        "the field stands in for the list: {screen:#?}"
+    );
+
+    terminal.keys("\r");
+    terminal.wait_on_screen("this option needs an answer", "an empty answer was sent");
+    terminal.keys("half");
+    terminal.keys("\x1b");
+    terminal.wait_on_screen("enter chooses", "esc never went back to the list");
+    let screen = terminal.screen();
+    assert!(
+        screen.holds("▸ adjust"),
+        "the pointer stays where it was: {screen:#?}"
+    );
+    assert!(screen.cursor_hidden, "{screen:#?}");
+    assert!(recorded(root.path()).is_none(), "nothing was answered");
+}
+
+/// Answered, the card is gone from the screen and what was chosen is left in the
+/// history, with the words it was said with.
+#[test]
+fn an_answered_card_leaves_what_was_chosen() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = adjusting(root.path());
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    terminal.keys("\x1b[B");
+    terminal.wait_on_screen("▸ adjust", "the pointer never moved");
+    terminal.keys("\r");
+    terminal.wait_on_screen("what should change?", "the option never asked for words");
+    terminal.keys("keep the lock\r");
+    terminal.wait_for(
+        "chose `adjust`: keep the lock",
+        "what was chosen was not left in the history",
+    );
+    // The gate asks again once `plan` has run again.
+    terminal.wait_on_screen("▸ approve", "the gate never asked again");
+    let screen = terminal.screen();
+    assert_eq!(screen.count(POINTED), 1, "one card at a time: {screen:#?}");
+    assert!(!screen.holds("what should change?"), "{screen:#?}");
+}
+
+/// A terminal that declares itself dumb has said it draws nothing beyond text, so
+/// nobody is asked there: the run parks and says the command for each option.
+#[test]
+fn a_dumb_terminal_is_asked_nothing_and_the_run_parks_with_its_commands() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = Checkout::under(root.path())
+        .working_in_place()
+        .workflow(
+            "wf",
+            "name: approving\nnodes:\n  - id: ship\n    kind: gate\n    assignee: lead\n    \
+             message: \"Ship it?\"\n",
+        )
+        .committed();
+    let mut terminal = yunta_on_terminal!(
+        &checkout.repo,
+        &checkout.home,
+        &["run", "wf.yaml"],
+        &[("TERM", "dumb")]
+    );
+    let drawn = terminal.ended();
+    assert_eq!(terminal.exit_code(), Some(3), "{drawn}");
+    assert!(!drawn.contains(POINTED), "{drawn}");
+    assert!(drawn.contains("resolve-gate"), "{drawn}");
+}
+
+/// Stopping the run ends a typed line where it stands, so what the run says next
+/// starts on a line of its own rather than running into half an answer.
+#[test]
+fn an_interrupt_ends_a_typed_line_where_it_stands() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = asking(
+        root.path(),
+        "questions:\n  - id: summary\n    text: \"What changed?\"\n    answer_type: text\n    \
+         required: true\n",
+    );
+    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    terminal.keys("half an ans");
+    terminal.wait_on_screen("> half an ans", "the words never reached the line");
+    terminal.keys("\x03");
+    let drawn = terminal.ended();
+    let screen = terminal.screen();
+    assert!(
+        screen.rows.iter().any(|row| row == "> half an ans"),
+        "{screen:#?}\n{drawn}"
+    );
+    assert!(terminal.line_discipline_is_back(), "{drawn}");
+}
+
+/// Stopping the run takes the card off the screen before the closing draws, so
+/// what the run leaves is not read under a question nobody can answer any more.
+#[test]
+fn an_interrupt_takes_the_card_off_the_screen() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = approving(root.path());
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
+    terminal.interrupt();
+    let drawn = terminal.ended();
+    let screen = terminal.screen();
+    assert_eq!(screen.count(POINTED), 0, "{screen:#?}\n{drawn}");
+    assert!(terminal.cursor_is_back(), "{drawn}");
+    assert!(terminal.line_discipline_is_back(), "{drawn}");
 }
 
 #[test]
 fn an_escalation_says_what_happened_above_the_options_it_offers() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for(
-        "> 1  retry",
-        "the gate never put its options on the console",
-    );
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     let drawn = terminal.drawn();
     let happened = drawn
         .find("re-routes to `fix` are exhausted")
         .expect("a decision opens with the account of what raised it");
-    let options = drawn.find("retry: ").unwrap_or_default();
+    let options = drawn.find("▸ retry").unwrap_or_default();
     assert!(
         happened < options,
         "what happened is read before what to do about it, not after it:\n{drawn}"
@@ -339,10 +550,7 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
 fn an_escalation_says_the_record_behind_its_claim_once() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for(
-        "> 1  retry",
-        "the gate never put its options on the console",
-    );
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     let drawn = terminal.drawn();
 
     // The claim says what happened and the record says what the log
@@ -357,8 +565,8 @@ fn an_escalation_says_the_record_behind_its_claim_once() {
     // `exit 1` too, and that is a different surface reporting a
     // different thing, not this block saying one thing twice.
     let decision = &drawn[drawn
-        .find(DECISION)
-        .expect("the prompt never opened its block")..];
+        .find("re-routes to `fix` are exhausted")
+        .expect("the prompt never opened its card")..];
     assert_eq!(
         decision.matches("exit 1").count(),
         1,
@@ -370,10 +578,7 @@ fn an_escalation_says_the_record_behind_its_claim_once() {
 fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
     let root = tempfile::tempdir().unwrap();
     let terminal = approving(root.path());
-    terminal.wait_for(
-        "> 1  approve",
-        "the gate never put its options on the console",
-    );
+    terminal.wait_on_screen("▸ approve", "the gate never put its card on the console");
     let drawn = terminal.drawn();
 
     // The summary is an account of what happened and the evidence is
@@ -387,8 +592,7 @@ fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
     let attached = drawn
         .find("assignee: the release lead")
         .unwrap_or_else(|| panic!("the prompt drew no evidence at all:\n{drawn}"));
-    let decision = drawn.find(DECISION).expect("the prompt never opened");
-    let options = decision + drawn[decision..].find("approve:").expect("no option rows");
+    let options = drawn.find("▸ approve").expect("no option rows");
     assert!(
         claim < attached,
         "the record is read under the claim it audits:\n{drawn}"
@@ -537,7 +741,7 @@ fn a_choice_is_answered_by_arrow_or_by_typing_its_value() {
         "1/2  Which environment?",
         "the first question was never asked",
     );
-    terminal.wait_for("2  production", "the declared values were never offered");
+    terminal.wait_on_screen("▸ staging", "the declared values were never offered");
     // Down one, then Enter.
     terminal.keys("\x1b[B\r");
     terminal.wait_for("2/2  Which tier?", "the first answer never landed");
@@ -584,7 +788,7 @@ fn a_prompt_that_ends_on_an_interrupt_leaves_the_terminal_its_cursor() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
     terminal.raw();
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     // The list hides the cursor while it draws. Ending any way but
     // answered or declined and leaving it hidden hands the shell the run
     // returns to a terminal with no cursor, which nothing after it puts
@@ -612,7 +816,7 @@ fn a_prompt_that_ends_on_an_interrupt_leaves_the_terminal_its_cursor() {
 fn a_prompt_abandoned_mid_read_leaves_the_terminal_reading_and_echoing_again() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    terminal.wait_on_screen("▸ retry", "the gate never put its card on the console");
     // The read turns the line discipline off for as long as it reads,
     // and this is the moment it has: waiting on it is what makes the
     // interrupt below land on a prompt that holds the terminal.

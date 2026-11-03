@@ -28,8 +28,9 @@ const TONES: [Tone; 20] = [
 ];
 
 /// Every fill a span or a line can carry.
-const FILLS: [Fill; 5] = [
+const FILLS: [Fill; 6] = [
     Fill::Tint,
+    Fill::Selection,
     Fill::Code,
     Fill::Added,
     Fill::Removed,
