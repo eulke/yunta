@@ -81,14 +81,6 @@ impl GateWaitingPayload {
         &self.summary
     }
 
-    /// The same payload with its claim replaced. A copy of a document that
-    /// was already audited, so the claim is not checked against the evidence
-    /// again.
-    pub fn with_claim(mut self, claim: impl Into<Claim>) -> Self {
-        self.summary = claim.into();
-        self
-    }
-
     /// The facts an older log attached beside the claim: empty on a line
     /// written now.
     pub fn evidence(&self) -> &Evidence {
@@ -119,15 +111,6 @@ impl GateWaitingPayload {
     pub fn failure(&self) -> Option<&FailureMenu> {
         match &self.menu {
             Some(Menu::Failure(menu)) => Some(menu),
-            _ => None,
-        }
-    }
-
-    /// The departure from the plan a task's session declared, as the question
-    /// about it is written. `None` on every other escalation.
-    pub fn departure(&self) -> Option<&DepartureMenu> {
-        match &self.menu {
-            Some(Menu::Departure(menu)) => Some(menu),
             _ => None,
         }
     }

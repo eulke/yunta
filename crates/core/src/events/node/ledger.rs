@@ -378,11 +378,6 @@ impl NodeLedger {
         self.per_node.is_empty()
     }
 
-    /// How many nodes the log names.
-    pub fn len(&self) -> usize {
-        self.per_node.len()
-    }
-
     /// Whether `node` has a derived state: it started, closed, failed
     /// or is waiting. A node the log only mentions — a re-route target
     /// named by the node that left, a runner resolved ahead of time —

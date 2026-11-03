@@ -72,11 +72,6 @@ impl ChildLedger {
         self.tokens
     }
 
-    /// The highest loop iteration the log reports.
-    pub fn iterations(&self) -> u32 {
-        self.iterations
-    }
-
     /// Folds one child-domain event.
     pub fn apply(&mut self, event: &ChildEvent, meta: &EventMeta<'_>) {
         match event {

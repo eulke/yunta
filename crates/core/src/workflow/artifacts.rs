@@ -299,14 +299,6 @@ impl ArtifactKind {
         }
     }
 
-    /// The kind a submission tool name belongs to, or `None` for a name
-    /// no kind submits through.
-    pub fn from_submit_tool(name: &str) -> Option<Self> {
-        ArtifactKind::ALL
-            .into_iter()
-            .find(|kind| kind.submit_tool() == Some(name))
-    }
-
     /// The run tools one finding is posted, replaced and taken back
     /// through. Findings are the one kind whose entries arrive
     /// separately, so these are named rather than derived per kind.

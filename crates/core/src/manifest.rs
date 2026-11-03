@@ -73,11 +73,6 @@ impl FrozenPaths {
         })
     }
 
-    /// The absolute root every run.dir of this run's tree sits under.
-    pub fn runs_root(&self) -> &Path {
-        &self.runs_root
-    }
-
     /// The absolute root every isolated worktree of this run's tree sits
     /// under.
     pub fn worktrees_root(&self) -> &Path {

@@ -122,11 +122,6 @@ impl WorktreeIntegrity {
         })
     }
 
-    /// Where the worktree's HEAD is now.
-    pub fn head(&self) -> &CommitSha {
-        &self.head
-    }
-
     /// Why the state derived from the run's log no longer describes this
     /// worktree, or `None` when the run's base commit is still behind its
     /// HEAD.

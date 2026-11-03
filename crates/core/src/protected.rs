@@ -99,12 +99,6 @@ pub struct Pathspecs {
     pub loose: Vec<String>,
 }
 
-impl Pathspecs {
-    pub fn is_empty(&self) -> bool {
-        self.rooted.is_empty() && self.loose.is_empty()
-    }
-}
-
 /// Serialized as `{reason, glob}`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
@@ -155,23 +149,10 @@ impl Protected {
         Protected::try_from(entries)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     /// Every protected glob, in the order the reasons are read.
     pub fn every(&self) -> Vec<ScopeGlob> {
         self.entries
             .iter()
-            .map(|entry| entry.glob.clone())
-            .collect()
-    }
-
-    /// The globs a loop's close judges: every one but the approved tests.
-    pub fn at_loop_close(&self) -> Vec<ScopeGlob> {
-        self.entries
-            .iter()
-            .filter(|entry| entry.reason != Protection::ApprovedTest)
             .map(|entry| entry.glob.clone())
             .collect()
     }

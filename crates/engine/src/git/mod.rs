@@ -11,9 +11,9 @@
 //! it belonged to is already gone.
 //!
 //! What a call is for decides how it reads git's answer: [`read`] for
-//! output, [`ask`] and [`attempt`] for an exit that means yes or no, and
-//! [`change`] for a mutation. An [`Effect`] says whether a mutation takes
-//! the mutation lock, which only worktree metadata needs.
+//! output, [`ask`] for an exit that means yes or no, and [`change`] for a
+//! mutation. An [`Effect`] says whether a mutation takes the mutation
+//! lock, which only worktree metadata needs.
 
 mod error;
 mod mutation;
@@ -148,25 +148,6 @@ pub async fn change(
     }
 }
 
-/// A mutation git may decline, answered by its exit: `exits` names the exit
-/// that means done and the one that means declined, and any other exit is an
-/// error. Takes the lock its `effect` asks for, as [`change`] does.
-pub async fn attempt(
-    dir: &Path,
-    effect: Effect,
-    args: &[&str],
-    exits: Exits,
-    sup: Supervision<'_>,
-) -> Result<bool, GitError> {
-    match effect {
-        Effect::Metadata => {
-            let held = held_for(dir, args, sup).await?;
-            attempt_held(&held, dir, args, exits, sup).await
-        }
-        Effect::Objects | Effect::Refs | Effect::Checkout => yes_or_no(dir, args, exits, sup).await,
-    }
-}
-
 /// [`change`] for a caller that holds the mutation lock already. The call
 /// takes no lock of its own: a nested wait on the lock held would never end.
 pub async fn change_held(
@@ -178,7 +159,9 @@ pub async fn change_held(
     read(dir, args, sup).await
 }
 
-/// [`attempt`] for a caller that holds the mutation lock already.
+/// A mutation git may decline, answered by its exit, for a caller that holds
+/// the mutation lock already. The call takes no lock of its own, as
+/// [`change_held`] does.
 pub async fn attempt_held(
     _held: &MutationLock,
     dir: &Path,

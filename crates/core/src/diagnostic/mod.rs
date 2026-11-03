@@ -90,15 +90,6 @@ impl DocumentKind {
             DocumentKind::Artifact(kind) => kind.label(),
         }
     }
-
-    /// The artifact kind this is, absent for a document that is not an
-    /// artifact.
-    pub fn artifact(self) -> Option<ArtifactKind> {
-        match self {
-            DocumentKind::Workflow => None,
-            DocumentKind::Artifact(kind) => Some(kind),
-        }
-    }
 }
 
 impl From<ArtifactKind> for DocumentKind {
