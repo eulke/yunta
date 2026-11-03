@@ -58,6 +58,7 @@ impl NodeRecord {
         match p.message_type {
             AgentMessageType::ToolUse => self.calls.push(ToolCall {
                 tool_name: p.tool_name.clone(),
+                action: p.tool_action(),
                 target: p.target.clone(),
                 at,
             }),
@@ -128,6 +129,8 @@ pub struct ToolCall {
     /// The tool the adapter named; `None` when it reported a call under
     /// no name.
     pub tool_name: Option<String>,
+    /// What the call does.
+    pub action: crate::events::ToolAction,
     /// What the call acted on, as the log carries it; `None` when the
     /// adapter reported none.
     pub target: Option<crate::events::ToolTarget>,

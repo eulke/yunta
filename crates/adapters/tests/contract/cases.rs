@@ -47,7 +47,7 @@ fn script(steps: Vec<Step>, outcome: Outcome) -> Script {
 }
 
 /// A script of `steps` that completes.
-fn completed(steps: Vec<Step>) -> Script {
+pub(super) fn completed(steps: Vec<Step>) -> Script {
     script(steps, Outcome::Completed("ok".to_string()))
 }
 

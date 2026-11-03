@@ -1,9 +1,7 @@
-//! [`decide`] — what the run does next, as a function of the state its
-//! log derives and nothing else.
-//!
-//! The signature already says it takes no log. What these check is the
-//! consequence: two logs that derive the same state decide the same
-//! thing, so an audit event nobody's state reads can never move the run.
+//! [`decide`] — what the run does next, as a function of the state its log
+//! derives and nothing else. The signature already says it takes no log. What
+//! these check is the consequence: two logs that derive the same state decide
+//! the same thing, so an audit event nobody's state reads can never move the run.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -93,6 +91,7 @@ fn audit() -> EventPayload {
     EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::Note,
         tool_name: None,
+        action: None,
         target: None,
         input_tokens: None,
         output_tokens: None,

@@ -20,8 +20,9 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use yunta_core::{InvalidId, ModelName, RunTool, SessionId, ToolNaming};
 
+use crate::action::{self, Checkout};
 use crate::failure;
-use yunta_core::events::{FailureCause, RefusalCause, ToolTarget};
+use yunta_core::events::{FailureCause, RefusalCause, ToolAction, ToolTarget};
 use yunta_core::fence::Coverage;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
@@ -102,6 +103,7 @@ impl LimitReading {
 pub(super) fn parse_line(
     line: &str,
     fence: Option<&Coverage>,
+    checkout: &Checkout,
     run_tool_calls: &mut HashMap<String, RunTool>,
     reported: &mut Reported,
     limit: &mut LimitReading,
@@ -117,7 +119,7 @@ pub(super) fn parse_line(
         }
         ClaudeLine::Assistant(value) => {
             limit.assistant(&value);
-            let mut events = assistant_message(&value, run_tool_calls);
+            let mut events = assistant_message(&value, checkout, run_tool_calls);
             events.extend(message_usage(&value, reported));
             events
         }
@@ -180,6 +182,7 @@ fn failed(error: AgentError) -> AgentEvent {
 
 fn assistant_message(
     value: &Value,
+    checkout: &Checkout,
     run_tool_calls: &mut HashMap<String, RunTool>,
 ) -> Vec<AgentEvent> {
     let Some(content) = value
@@ -201,7 +204,10 @@ fn assistant_message(
             }
         }
     }
-    content.iter().filter_map(content_event).collect()
+    content
+        .iter()
+        .filter_map(|item| content_event(item, checkout))
+        .collect()
 }
 
 fn failed_run_tools(
@@ -232,19 +238,22 @@ fn failed_run_tools(
         .collect()
 }
 
-fn content_event(item: &Value) -> Option<AgentEvent> {
+fn content_event(item: &Value, checkout: &Checkout) -> Option<AgentEvent> {
     match item.get("type").and_then(Value::as_str)? {
         "text" => Some(AgentEvent::Note {
             text: item.get("text")?.as_str()?.to_string(),
         }),
         "tool_use" => {
             let called = item.get("name")?.as_str()?;
+            let input = item.get("input").unwrap_or(&Value::Null);
+            let (action, target) = tool_call(called, input, checkout);
             Some(AgentEvent::ToolUse {
                 // A run tool is logged under its own name, however the CLI
                 // called it; every other tool keeps the name it was given.
                 name: RunTool::from_called(called, ToolNaming::McpPrefixed)
                     .map_or_else(|| called.to_string(), |tool| tool.name().to_string()),
-                target: tool_target(item.get("input").unwrap_or(&Value::Null)),
+                action,
+                target,
             })
         }
         // "thinking"/"redacted_thinking" and anything future: not
@@ -254,24 +263,39 @@ fn content_event(item: &Value) -> Option<AgentEvent> {
     }
 }
 
-/// What a tool call acted on, as this CLI reports it.
+/// What a tool call does and what it acted on, as this CLI reports it.
 ///
-/// A path names the repository, so the log carries it as written: that
-/// is how a reader finds the file. A command, a pattern or a URL is
-/// whatever the session typed — the engine cannot vouch for it and never
-/// repeats it, so those are identified and not shown.
-fn tool_target(input: &Value) -> ToolTarget {
-    for key in ["file_path", "path"] {
+/// A run tool and another server's tool are named by what the workflow declares.
+/// A command is read for what it does. Any other tool says what it does by its
+/// name, and a path it was given names the repository where it stays inside the
+/// checkout. A pattern, a URL or any other input is whatever the session typed:
+/// the engine cannot vouch for it and never repeats it, so it is identified and
+/// not shown.
+fn tool_call(called: &str, input: &Value, checkout: &Checkout) -> (ToolAction, ToolTarget) {
+    if let Some(tool) = RunTool::from_called(called, ToolNaming::McpPrefixed) {
+        return (tool.action(), tool.target());
+    }
+    if let Some((server, tool)) = called
+        .strip_prefix("mcp__")
+        .and_then(|rest| rest.split_once("__"))
+    {
+        return action::of_other_server(server, tool);
+    }
+    if let Some(command) = input.get("command").and_then(Value::as_str) {
+        return action::of_command(command, checkout);
+    }
+    let action = ToolAction::of_tool(called);
+    for key in ["file_path", "notebook_path", "path"] {
         if let Some(path) = input.get(key).and_then(Value::as_str) {
-            return ToolTarget::of_path(std::path::Path::new(path));
+            return action::of_path(action, path, checkout);
         }
     }
-    for key in ["command", "pattern", "url"] {
+    for key in ["pattern", "url", "query"] {
         if let Some(text) = input.get(key).and_then(Value::as_str) {
-            return ToolTarget::opaque(text.as_bytes());
+            return (action, ToolTarget::opaque(text.as_bytes()));
         }
     }
-    ToolTarget::opaque(input.to_string().as_bytes())
+    (action, ToolTarget::opaque(input.to_string().as_bytes()))
 }
 
 /// What this session's usage has reported so far: every assistant message

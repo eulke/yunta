@@ -168,6 +168,7 @@ fn spend_log() -> Vec<StoredEvent> {
     let usage = AgentMessagePayload {
         message_type: AgentMessageType::Usage,
         tool_name: None,
+        action: None,
         target: None,
         input_tokens: Some(40),
         output_tokens: Some(0),

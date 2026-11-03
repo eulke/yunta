@@ -496,3 +496,5 @@ fn a_stopped_formatter_is_kept_and_a_finished_one_is_not() {
         "a finished formatter is not kept"
     );
 }
+
+mod calls;

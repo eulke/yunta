@@ -68,6 +68,17 @@ pub enum Step {
     },
     /// A call to one of the run tools, named the way the CLI names it.
     RunToolCalled(RunTool),
+    /// Reading a file, however the CLI goes about it.
+    ReadFile(String),
+    /// Changing a file, however the CLI goes about it.
+    EditFile(String),
+    /// Writing a new file, however the CLI goes about it.
+    WriteFile(String),
+    /// A call to a tool of another MCP server.
+    OtherMcp {
+        server: String,
+        tool: String,
+    },
     /// Tokens the session spent: `input` is all it read, and `cached` the part
     /// of that read from the cache, absent when the CLI reports none.
     Usage {
@@ -250,7 +261,7 @@ impl Subject for CodexSubject {
 
 /// What claude-code declares: every capability it has, with the run tools
 /// named the way its CLI lists them.
-fn claude_capabilities() -> Capabilities {
+pub(super) fn claude_capabilities() -> Capabilities {
     Capabilities {
         resume_session: true,
         fence: FenceLevel::ToolCalls,
@@ -313,54 +324,14 @@ async fn play_stub(
 /// The fixture that plays `script` as one session of the claude-code
 /// dialect, written as YAML and read back by the mock's own parser.
 fn mock_fixture(script: &Script) -> MockFixture {
-    let steps: Vec<Value> = script.steps.iter().map(mock_step).collect();
-    let mut session = json!({ "steps": steps, "outcome": mock_outcome(&script.outcome) });
+    let steps: Vec<Value> = script.steps.iter().map(wire::mock_step).collect();
+    let mut session = json!({ "steps": steps, "outcome": wire::mock_outcome(&script.outcome) });
     if let Some(model) = &script.model {
         session["model"] = json!(model);
     }
     let document = json!({ "dialect": "claude-code", "sessions": [session] });
     let yaml = yunta_core::yaml::to_string(&document).expect("the script renders as YAML");
     MockFixture::parse_without_a_run(&yaml).expect("the script is a fixture")
-}
-
-/// One step of a script as the mock's fixture spells it: a run tool named the
-/// way the claude-code dialect names it, and a stop refusal as the CLI's text.
-fn mock_step(step: &Step) -> Value {
-    match step {
-        Step::Note(text) => json!({ "type": "note", "text": text }),
-        Step::StopRefused { reason } => {
-            json!({ "type": "note", "text": format!("{STOP_TURN}{reason}") })
-        }
-        Step::ToolUse { name, target } => {
-            json!({ "type": "tool_use", "name": name, "target": target })
-        }
-        Step::RunToolCalled(tool) => json!({
-            "type": "tool_use",
-            "name": tool.called(claude_capabilities().tool_naming),
-            "target": "",
-        }),
-        Step::Usage {
-            input,
-            output,
-            cached,
-        } => json!({
-            "type": "usage",
-            "input_tokens": input,
-            "output_tokens": output,
-            "cached_input_tokens": cached,
-        }),
-        Step::UnknownLine => json!({ "type": "unknown_line" }),
-        Step::BeforeOpen(text) => json!({ "type": "before_open", "text": text }),
-    }
-}
-
-/// A script's outcome as the mock's fixture spells it.
-fn mock_outcome(outcome: &Outcome) -> Value {
-    match outcome {
-        Outcome::Completed(summary) => json!({ "type": "completed", "summary": summary }),
-        Outcome::Failed(message) => json!({ "type": "failed", "message": message }),
-        Outcome::Crash => json!({ "type": "crash" }),
-    }
 }
 
 /// A script that completes at once, for a subject asked only for its adapter.

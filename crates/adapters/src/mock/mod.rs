@@ -21,6 +21,7 @@
 mod check;
 mod effects;
 mod error;
+mod file_act;
 mod fixture;
 mod launch;
 mod run_tool;
@@ -28,6 +29,7 @@ mod script;
 mod session;
 mod stand_in;
 
+pub use file_act::FileAct;
 pub use fixture::{
     FixtureError, KillBehavior, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt,
     RunPaths, SessionScript, ToolExpectation,

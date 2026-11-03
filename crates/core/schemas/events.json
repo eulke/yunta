@@ -43,6 +43,17 @@
     "AgentMessagePayload": {
       "type": "object",
       "properties": {
+        "action": {
+          "description": "What the call does, as its adapter read it. Absent on anything but a\ntool call, and in a log older than the word: see [`Self::tool_action`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "cached_input_tokens": {
           "type": [
             "integer",
@@ -12470,6 +12481,21 @@
       "required": [
         "input",
         "output"
+      ]
+    },
+    "ToolAction": {
+      "description": "What a tool call does, as a person reads it: one word, whichever CLI made\nthe call. It says nothing the session typed.",
+      "type": "string",
+      "enum": [
+        "read",
+        "edit",
+        "write",
+        "search",
+        "list",
+        "run",
+        "fetch",
+        "call",
+        "submit"
       ]
     },
     "ToolNaming": {

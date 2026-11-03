@@ -13,7 +13,7 @@ use surco::words::Standing;
 use yunta_core::best_effort::BestEffortStep;
 use yunta_core::events::{
     artifacts, children, findings, gates, node, run, session, AgentMessageType,
-    GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage, ToolTarget,
+    GateResolvedPayload, LoggedWords, NoteDigest, TokenUsage,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::NonEmpty;
@@ -190,7 +190,11 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
             model,
             fence,
         } => opened(agent.as_ref(), model.as_ref(), fence.as_ref(), sep),
-        H::Called { tool, target } => called(tool.as_deref(), target.as_ref()),
+        H::Called {
+            tool,
+            action,
+            target,
+        } => yunta_render::target::said(*action, tool.as_deref(), target.as_ref()),
         H::Message {
             kind,
             note,
@@ -282,18 +286,6 @@ fn service_words(lost: Option<&str>, waited: Option<std::time::Duration>) -> Str
             "its service answers again after {}; the session goes on",
             surco::figures::duration(waited.unwrap_or_default())
         ),
-    }
-}
-
-/// A tool call, with what it acted on when the log says.
-fn called(tool: Option<&str>, target: Option<&ToolTarget>) -> String {
-    let called = match tool {
-        Some(tool) => format!("called {tool}"),
-        None => "called a tool it did not name".to_string(),
-    };
-    match target {
-        Some(target) => format!("{called} on {}", yunta_render::target::line(target)),
-        None => called,
     }
 }
 

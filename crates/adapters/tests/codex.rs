@@ -57,7 +57,8 @@ async fn a_run_tool_is_named_the_way_this_cli_hands_it_to_the_model() {
 }
 
 #[tokio::test]
-async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
+async fn a_command_execution_item_maps_to_tool_use_showing_its_program_and_subcommand_and_digesting_it(
+) {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -79,9 +80,9 @@ async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target }
+        AgentEvent::ToolUse { name, target, .. }
             if name == "command_execution"
-                && target.display().is_none()
+                && target.display() == Some("cargo test")
                 && *target.digest() == yunta_core::sha256_hex(b"cargo test")
     )));
 }
@@ -108,7 +109,7 @@ async fn a_file_change_item_maps_to_tool_use_digesting_its_first_path() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target }
+        AgentEvent::ToolUse { name, target, .. }
             if name == "file_change"
                 && target.display() == Some("src/lib.rs")
     )));
@@ -136,7 +137,7 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target }
+        AgentEvent::ToolUse { name, target, .. }
             if name == "mcp_tool_call"
                 && target.display() == Some("yunta:query")
     )));
@@ -199,7 +200,7 @@ async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target }
+        AgentEvent::ToolUse { name, target, .. }
             if name == "web_search"
                 && target.display().is_none()
                 && *target.digest() == yunta_core::sha256_hex(b"codex exec json schema")

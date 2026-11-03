@@ -38,6 +38,7 @@ use yunta_core::{
     SessionId, ToolNaming,
 };
 
+use crate::action::Checkout;
 use crate::dialect::{require_hook, Plan};
 use crate::mount::MountPlan;
 use config::ConfigOverride;
@@ -91,7 +92,7 @@ impl CodexAdapter {
             cwd: &req.cwd,
             env: &plan.env,
             prompt: &req.prompt,
-            parser: Box::new(CodexParser::new(plan.coverage)),
+            parser: Box::new(CodexParser::new(plan.coverage, plan.checkout)),
             held: Some(Box::new(mounts)),
         })
         .await
@@ -132,6 +133,7 @@ pub(crate) fn plan(
         scratch: Vec::new(),
         mounts: MountPlan::of(SKILLS_MOUNT, req),
         coverage: req.confinement.coverage(&req.cwd),
+        checkout: Checkout::at(&req.cwd),
     })
 }
 
@@ -254,20 +256,23 @@ pub(crate) struct CodexParser {
     /// What the sandbox this session runs under actually fenced — computed
     /// once, when the session was planned.
     fence: Coverage,
+    /// The tree the session works in, which its paths are read against.
+    checkout: Checkout,
 }
 
 impl CodexParser {
-    pub(crate) fn new(fence: Coverage) -> Self {
+    pub(crate) fn new(fence: Coverage, checkout: Checkout) -> Self {
         Self {
             last_message: String::new(),
             fence,
+            checkout,
         }
     }
 }
 
 impl LineParser for CodexParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        let events = parse::parse_line(line, &self.last_message, &self.fence);
+        let events = parse::parse_line(line, &self.last_message, &self.fence, &self.checkout);
         if let Some(text) = events.iter().rev().find_map(|event| match event {
             AgentEvent::Note { text } => Some(text.clone()),
             _ => None,

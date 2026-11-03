@@ -5,6 +5,15 @@ use yunta_testkit::run_frame;
 use super::*;
 use surco::paint::Paint;
 
+/// The look of a terminal `cells` wide.
+fn look(cells: usize) -> Look {
+    Look {
+        glyphs: Glyphs::Unicode,
+        paint: Paint::Plain,
+        width: surco::look::Width::row(cells, None),
+    }
+}
+
 fn drawn(rows: Vec<Line>) -> Vec<String> {
     rows.iter().map(|row| Paint::Plain.line(row)).collect()
 }
@@ -20,8 +29,8 @@ fn the_live_view_indents_a_groups_children_under_it() {
     let mut child = yunta_testkit::node_frame(&NodeId::from("review-a"), NodeStanding::ToGo);
     child.group = Some(group.id.clone());
 
-    let top = drawn(node_rows(&frame, &group, Glyphs::Ascii));
-    let under = drawn(node_rows(&frame, &child, Glyphs::Ascii));
+    let top = drawn(node_rows(&frame, &group, &look(120)));
+    let under = drawn(node_rows(&frame, &child, &look(120)));
     assert!(
         !top[0].starts_with(' '),
         "a top-level node starts at the margin: {top:?}"
@@ -47,7 +56,7 @@ fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
         },
     ];
 
-    let rows = drawn(node_rows(&frame, &node, Glyphs::Ascii));
+    let rows = drawn(node_rows(&frame, &node, &look(120)));
     assert!(
         rows.iter()
             .any(|row| row.trim() == "tasks running: T001 (checking criteria), T002"),
@@ -55,31 +64,57 @@ fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
     );
 }
 
+/// The calls of a node, newest first as the frame holds them: a run of a
+/// program, an edit, and four reads, of two files and of one it cannot show.
+fn activity() -> Vec<yunta_engine::ToolCall> {
+    use yunta_core::events::{ToolAction, ToolTarget};
+    let call = |action, target: Option<ToolTarget>| yunta_engine::ToolCall {
+        tool_name: Some("any".to_string()),
+        action,
+        target,
+        at: chrono::DateTime::UNIX_EPOCH,
+    };
+    let path = |path: &str| Some(ToolTarget::of_path(std::path::Path::new(path)));
+    vec![
+        call(ToolAction::Run, Some(ToolTarget::named("cargo test"))),
+        call(ToolAction::Edit, path("crates/cli/src/pack.rs")),
+        call(ToolAction::Read, path("b.rs")),
+        call(ToolAction::Read, path("a.rs")),
+        call(ToolAction::Read, path("a.rs")),
+        call(ToolAction::Read, None),
+    ]
+}
+
 #[test]
-fn a_node_row_names_what_its_calls_touched() {
+fn a_node_row_says_what_its_calls_came_to() {
     let frame = run_frame(&RUN);
     let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
-    let call =
-        |tool: &str, target: Option<yunta_core::events::ToolTarget>| yunta_engine::ToolCall {
-            tool_name: Some(tool.to_string()),
-            target,
-            at: chrono::DateTime::UNIX_EPOCH,
-        };
-    node.activity = vec![
-        call(
-            "Edit",
-            Some(yunta_core::events::ToolTarget::of_path(
-                std::path::Path::new("src/lib.rs"),
-            )),
-        ),
-        call("Bash", None),
-    ];
+    node.activity = activity();
 
-    let rows = drawn(node_rows(&frame, &node, Glyphs::Ascii));
+    let rows = drawn(node_rows(&frame, &node, &look(120)));
     assert!(
         rows.iter()
-            .any(|row| row.trim() == "calls: Edit src/lib.rs, Bash"),
+            .any(|row| row.trim() == "read ×4 · edit crates/cli/src/pack.rs · run cargo test"),
         "{rows:?}"
+    );
+}
+
+#[test]
+fn a_row_with_no_room_lets_its_oldest_calls_go() {
+    let frame = run_frame(&RUN);
+    let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
+    node.activity = activity();
+
+    let rows = drawn(node_rows(&frame, &node, &look(50)));
+    assert!(
+        rows.iter()
+            .any(|row| row.trim() == "edit crates/cli/src/pack.rs · run cargo test"),
+        "{rows:?}"
+    );
+    let rows = drawn(node_rows(&frame, &node, &look(20)));
+    assert!(
+        rows.iter().any(|row| row.trim() == "run cargo test"),
+        "what it does now is what stays: {rows:?}"
     );
 }
 

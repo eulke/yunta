@@ -235,7 +235,11 @@ pub(super) async fn apply_agent_event(
             fence,
         } => session_opened(ctx, session_id, model, fence).await?,
         AgentEvent::RunToolRejected { tool } => rejected_tool(ctx, tool).await?,
-        AgentEvent::ToolUse { name, target } => tool_use(ctx, name, target).await?,
+        AgentEvent::ToolUse {
+            name,
+            action,
+            target,
+        } => tool_use(ctx, name, action, target).await?,
         AgentEvent::Note { text } => note(ctx, text).await?,
         AgentEvent::Usage {
             input_tokens,
@@ -323,6 +327,7 @@ async fn rejected_tool(
 async fn tool_use(
     ctx: &AgentEventCtx<'_>,
     name: String,
+    action: yunta_core::events::ToolAction,
     target: yunta_core::events::ToolTarget,
 ) -> Result<(), DispatchError> {
     emit_audit(
@@ -331,6 +336,7 @@ async fn tool_use(
             yunta_core::events::AgentMessagePayload {
                 message_type: yunta_core::events::AgentMessageType::ToolUse,
                 tool_name: Some(name),
+                action: Some(action),
                 target: Some(target),
                 input_tokens: None,
                 output_tokens: None,
@@ -353,6 +359,7 @@ async fn note(ctx: &AgentEventCtx<'_>, text: String) -> Result<(), DispatchError
             yunta_core::events::AgentMessagePayload {
                 message_type: yunta_core::events::AgentMessageType::Note,
                 tool_name: None,
+                action: None,
                 target: None,
                 input_tokens: None,
                 output_tokens: None,
@@ -384,6 +391,7 @@ async fn usage(
             yunta_core::events::AgentMessagePayload {
                 message_type: yunta_core::events::AgentMessageType::Usage,
                 tool_name: None,
+                action: None,
                 target: None,
                 input_tokens,
                 output_tokens,

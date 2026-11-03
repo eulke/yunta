@@ -260,10 +260,12 @@ pub enum AgentEvent {
     /// engine, que lo lee de su propio listener. Ningún argumento ni texto de
     /// error del CLI cruza esta frontera.
     RunToolRejected { tool: RunTool },
-    /// Actividad resumida: qué herramienta usó, sobre qué. `display`
-    /// solo cuando el argumento nombra el repositorio; el digest,
+    /// Actividad resumida: qué hizo la llamada y sobre qué. El adapter lee
+    /// la acción, porque es el único que ve el texto, y la lee igual en toda
+    /// CLI. `display` solo lleva lo que puede garantizar: una ruta dentro del
+    /// checkout, o un programa y su subcomando de una tabla fija; el digest,
     /// siempre. Nunca contenido completo ni secretos (§4, O3).
-    ToolUse { name: String, target: ToolTarget },
+    ToolUse { name: String, action: ToolAction, target: ToolTarget },
     /// Uso acumulable de tokens. Frecuencia: al menos al cierre;
     /// idealmente incremental. Requerido si `usage_reporting`. Cada cuenta
     /// es opcional: ausente significa no informada, nunca cero.

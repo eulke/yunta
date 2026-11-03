@@ -57,7 +57,7 @@ pub use registry::sample_payloads;
 pub use registry::KIND_VERSION;
 pub use run::{ledger::*, metrics::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
-pub use session::{ledger::*, note::*, payloads::*, SessionEvent};
+pub use session::{ledger::*, note::*, payloads::*, tool_action::*, SessionEvent};
 pub use spend::Spend;
 pub use tasks::{ledger::*, payloads::*, stop::*, TaskEvent};
 pub use unknown::UnknownKindCount;

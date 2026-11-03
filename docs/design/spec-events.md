@@ -243,7 +243,8 @@ que `from_tree` es exactamente el árbol de `found` (D201).
 |---|---|---|---|
 | `message_type` [inferido] | enum `tool_use \| usage \| note` | sí | distingue cuál variante de `AgentEvent` originó el mensaje |
 | `tool_name` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.name` |
-| `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre, `display` solo cuando el argumento nombra el repositorio — nunca contenido completo |
+| `action` [inferido] | `Option<enum read \| edit \| write \| search \| list \| run \| fetch \| call \| submit>` | no | de `ToolUse.action`: qué hace la llamada, leído por el adapter. Un log anterior no lo trae, y se lee por `tool_name` |
+| `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre: del texto entero de un comando, y de una ruta tal como se muestra, así dos grafías de un archivo son un solo objetivo; `display` solo lo que el engine puede garantizar: una ruta dentro del checkout, o un programa y su subcomando de una tabla fija — nunca contenido completo |
 | `input_tokens` / `output_tokens` [inferido] | `Option<u64>` | solo si `usage` | de `Usage` |
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché. Es parte de `input_tokens`, nunca un total aparte: `cached ≤ input`. El gasto suma `input` y `output`, y el caché ya está dentro del input |
 | `note` [inferido] | `Option<{bytes, sha256}>` | solo si `note` | resumen mecánico del texto de `Note`: `bytes` y los doce primeros dígitos hexadecimales de su sha256 — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado. La crónica escribe «N bytes, sha256 <prefijo>» desde estos dos datos |

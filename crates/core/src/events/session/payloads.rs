@@ -5,6 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::tool_action::ToolAction;
 use super::NoteDigest;
 use crate::best_effort::BestEffortStep;
 use crate::confinement::{Commands, Confinement, Worktree};
@@ -358,9 +359,10 @@ pub struct ToolTarget {
 }
 
 impl ToolTarget {
-    /// A path the session acted on: shown as written, which is how a
-    /// reader finds the file, and hashed so two edits of one file read
-    /// as the same target.
+    /// A path the session acted on: shown as given, which is how a reader
+    /// finds the file, and hashed as shown, so two edits of one file read
+    /// as the same target. An adapter hands it over relative to the checkout,
+    /// and shows nothing of one outside it; the rail names what it refused.
     pub fn of_path(path: &Path) -> Self {
         Self::named(&path.display().to_string())
     }
@@ -371,6 +373,15 @@ impl ToolTarget {
         ToolTarget {
             digest: crate::sha256_hex(name.as_bytes()),
             display: Some(name.to_owned()),
+        }
+    }
+
+    /// A piece of a longer text that the engine can vouch for: shown as given,
+    /// while what identifies the target stays the hash of the whole text.
+    pub fn showing(shown: &str, whole: &[u8]) -> Self {
+        ToolTarget {
+            display: Some(shown.to_owned()),
+            digest: crate::sha256_hex(whole),
         }
     }
 
@@ -401,6 +412,10 @@ pub struct AgentMessagePayload {
     pub message_type: AgentMessageType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// What the call does, as its adapter read it. Absent on anything but a
+    /// tool call, and in a log older than the word: see [`Self::tool_action`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<ToolAction>,
     /// What the tool acted on. Absent for a message that is not a tool
     /// call, and for a log written before the engine recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -418,6 +433,18 @@ pub struct AgentMessagePayload {
     /// carries its digest instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<LoggedWords>,
+}
+
+impl AgentMessagePayload {
+    /// What this call does: what its adapter read, or, in a log older than
+    /// the word, what its tool's name says.
+    pub fn tool_action(&self) -> ToolAction {
+        self.action.unwrap_or_else(|| {
+            self.tool_name
+                .as_deref()
+                .map_or(ToolAction::Call, ToolAction::of_tool)
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -186,7 +186,8 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 /// Its liveness is the age of its last event and never a spinner: the age
 /// is measured, it grows while the node says nothing, and it is the one
 /// signal that can tell a busy node from a stuck one.
-pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> Vec<Line> {
+pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, look: &Look) -> Vec<Line> {
+    let glyphs = look.glyphs;
     // A `parallel` group's children sit one step under the group, the
     // same step a child run sits under the node that bore it.
     let under = match node.group {
@@ -207,17 +208,13 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
             ),
         ));
     }
-    let calls = recent_calls(node);
+    let calls = calls_row(node, look, cell_width(&detail));
     if !calls.is_empty() {
         // The envelope names a node and never a session, so at loop
         // concurrency above one no log can say which of a node's
         // sessions made a call: they are the node's, which is the whole
         // truth the log carries.
-        rows.push(
-            Line::new()
-                .plain(detail.as_str())
-                .push(Tone::Muted, format!("calls: {calls}")),
-        );
+        rows.push(Line::new().plain(detail.as_str()).push(Tone::Muted, calls));
     }
     rows.extend(children_of(frame, &node.id).into_iter().map(|child| {
         Line::new()
@@ -265,22 +262,30 @@ fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
     }
 }
 
-/// The tool calls this node made on the attempt it is running, newest
-/// first, each with what it acted on, as many as a row has room for.
-fn recent_calls(node: &NodeFrame) -> String {
-    /// How many calls a row shows. Enough to see what a node is working
-    /// through, few enough that the names still fit beside the label.
-    const SHOWN: usize = 4;
-    join(node.activity.iter().take(SHOWN).map(|call| {
-        let tool = call
-            .tool_name
-            .clone()
-            .unwrap_or_else(|| "an unnamed tool".to_string());
-        match &call.target {
-            Some(target) => format!("{tool} {}", yunta_render::target::line(target)),
-            None => tool,
+/// What this node's calls on the attempt it is running came to, as much as a
+/// row has room for past `taken` cells: the oldest let go first, so what it
+/// does now is what stays.
+fn calls_row(node: &NodeFrame, look: &Look, taken: usize) -> String {
+    let room = look.width.cells().saturating_sub(taken);
+    let apart = format!(" {} ", look.glyphs.sep());
+    let gathered = yunta_render::target::gathered(&node.activity, look.glyphs.times());
+    let mut kept: Vec<&str> = Vec::new();
+    let mut used = 0;
+    for group in gathered.iter().rev() {
+        let more = cell_width(group)
+            + if kept.is_empty() {
+                0
+            } else {
+                cell_width(&apart)
+            };
+        if !kept.is_empty() && used + more > room {
+            break;
         }
-    }))
+        used += more;
+        kept.push(group);
+    }
+    kept.reverse();
+    kept.join(apart.as_str())
 }
 
 /// Every node the run is working on right now, in the workflow's own

@@ -6,7 +6,7 @@ use super::NoteDigest;
 use crate::best_effort::BestEffortStep;
 use crate::events::{
     AgentMessageType, LoggedWords, RailFailedPayload, RailSummaryPayload, RunToolFailedPayload,
-    RunToolRefusedPayload, SessionEvent, ToolTarget,
+    RunToolRefusedPayload, SessionEvent, ToolAction, ToolTarget,
 };
 use crate::fence::Coverage;
 use crate::port::PolicyApplied;
@@ -30,6 +30,7 @@ pub enum Happening {
     /// because a call is what a reader scans for.
     Called {
         tool: Option<String>,
+        action: ToolAction,
         target: Option<ToolTarget>,
     },
     /// Anything else the session said: what kind of message it was,
@@ -104,6 +105,7 @@ impl From<&SessionEvent> for Happening {
             SessionEvent::Message(p) => match &p.tool_name {
                 Some(_) => Happening::Called {
                     tool: p.tool_name.clone(),
+                    action: p.tool_action(),
                     target: p.target.clone(),
                 },
                 None => Happening::Message {

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use yunta_core::rail::RailEvent;
 use yunta_core::{ModelName, SessionId, ToolNaming};
 
-use crate::mock::{MockOutcome, MockStep};
+use crate::mock::{FileAct, MockOutcome, MockStep};
 
 /// Counts the ids given out, so every message and tool use of the process
 /// carries one of its own. A session counts a message's usage once per id,
@@ -38,6 +38,19 @@ pub(crate) fn render(step: &MockStep, _naming: ToolNaming) -> Vec<String> {
                 "id": next_id("toolu"),
                 "name": name,
                 "input": { "command": target },
+            }]),
+            None,
+        )],
+        MockStep::FileCall { action, path, .. } => vec![assistant(
+            json!([{
+                "type": "tool_use",
+                "id": next_id("toolu"),
+                "name": match action {
+                    FileAct::Read => "Read",
+                    FileAct::Edit => "Edit",
+                    FileAct::Write => "Write",
+                },
+                "input": { "file_path": path },
             }]),
             None,
         )],

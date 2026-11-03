@@ -20,6 +20,7 @@
 // separate crates neither reaches.
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+mod action;
 mod claude_code;
 mod codex;
 mod dialect;

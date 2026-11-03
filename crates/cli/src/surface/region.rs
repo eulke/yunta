@@ -105,7 +105,7 @@ impl Region {
         self.attend(attention);
         let rows: Vec<String> = view::working(frame)
             .into_iter()
-            .flat_map(|node| view::node_rows(frame, node, self.glyphs))
+            .flat_map(|node| view::node_rows(frame, node, &self.look()))
             .map(|row| self.fit(&row))
             .collect();
         self.resize(rows.len());
