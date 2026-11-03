@@ -10,8 +10,8 @@
 //! surface already builds, and changes none of them.
 
 use crate::components::{
-    Checklist, Code, Concern, Decision, Evidence, Fields, Furrow, Gist, Headline, Marked, Next,
-    NodeTable, Note, Paths, Problem, Prose, Refusal, Runs, Said, Section, Table,
+    Checklist, Code, Concern, Decision, Diffstat, Evidence, Fields, Furrow, Gist, Headline, Marked,
+    Next, NodeTable, Note, Paths, Problem, Prose, Refusal, Runs, Said, Section, Table,
 };
 use crate::line::Line;
 
@@ -68,6 +68,8 @@ pub enum Block {
     Said(Said),
     /// A heading, and each path it names.
     Paths(Paths),
+    /// What a change came to, file by file.
+    Diffstat(Diffstat),
     Decision(Decision),
     Checklist(Checklist),
     /// A problem found in a text, pointed at in its line.
@@ -121,6 +123,7 @@ block_from!(
     Evidence(Evidence),
     Said(Said),
     Paths(Paths),
+    Diffstat(Diffstat),
     Decision(Decision),
     Checklist(Checklist),
     Problem(Problem),

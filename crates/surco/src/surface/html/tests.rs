@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use super::Html;
 use crate::components::{
-    Chosen, Code, Decision, DecisionOption, Evidence, Fields, Furrow, Gist, Headline, Marked, Next,
-    Prose, Section, Title, Whole,
+    Chosen, Code, Decision, DecisionOption, Diffstat, Evidence, Fields, FileRow, Furrow, Gist,
+    Headline, Marked, MoreFiles, Next, Prose, Section, Title, Whole,
 };
 use crate::diagram::Diagram;
 use crate::doc::{Block, Doc};
@@ -179,6 +179,36 @@ fn nothing_to_draw_draws_nothing() {
     let body = Html.body(&Doc::new().with(nothing));
     assert!(!body.contains("<aside"), "{body}");
     assert!(body.contains("no-decide"), "{body}");
+}
+
+#[test]
+fn a_change_lists_its_files_with_what_each_moved() {
+    let body = Html.body(&Doc::new().with(Diffstat {
+        files: vec![FileRow {
+            path: "src/<lib>.rs".to_string(),
+            added: 142,
+            removed: 38,
+        }],
+        more: Some(MoreFiles {
+            files: 5,
+            added: 123,
+            removed: 16,
+        }),
+    }));
+    assert!(body.contains("<code>src/&lt;lib&gt;.rs</code>"), "{body}");
+    assert!(
+        body.contains(r#"<td class="figure"><span class="done">+142</span></td>"#),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"<td class="figure"><span class="failed">−38</span></td>"#),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"<th class="figure">removed</th>"#),
+        "{body}"
+    );
+    assert!(body.contains("5 more files, +123 −16"), "{body}");
 }
 
 #[test]

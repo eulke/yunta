@@ -154,6 +154,23 @@ pub struct ChangesCountedPayload {
     pub added: u64,
     /// How many lines the change removes.
     pub removed: u64,
+    /// The files the change moves most, the largest first, as many as a page
+    /// names. Absent in a log older than the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub largest: Vec<FileChange>,
+}
+
+/// One file of a change, as git counts it: a renamed file by its new path, and a
+/// binary file with no lines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FileChange {
+    /// The file, relative to the repository. A byte of its name that is not
+    /// text reads as the replacement character.
+    pub path: String,
+    /// How many lines the change adds to it.
+    pub added: u64,
+    /// How many lines the change removes from it.
+    pub removed: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

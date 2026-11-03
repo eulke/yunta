@@ -94,6 +94,10 @@ error: no run is called `7E5PH5`; did you mean `7E5PH4`?
   ? EKPBGE  fragua (standard)  implement asks at its ter...                  32m
   # 60Y934  fragua (quick)     stopped while it ran          yunta resume 60Y934
 
+  crates/cli/src/pack.rs  +142 -38  ###################
+  docs/notes.md            +38      ####
+  7 more files, +232 -49
+
   a line a page composed itself
 
 | approve: builds the plan

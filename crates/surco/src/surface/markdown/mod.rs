@@ -16,6 +16,7 @@ use text::{cell, cell_code_span, code_span, literal, plain_text};
 mod code;
 mod decision;
 mod description;
+mod diffstat;
 mod fence;
 pub(in crate::surface) mod fold;
 mod headline;
@@ -99,6 +100,7 @@ fn block(block: &Block, depth: usize, page: Page) -> String {
             .collect::<Vec<_>>()
             .join("  \n"),
         Block::Paths(paths) => self::paths(paths),
+        Block::Diffstat(stat) => diffstat::diffstat(stat),
         Block::Decision(decision) => decision::decision(decision),
         Block::Checklist(list) => self::checklist(list),
         Block::Problem(problem) => self::problem(problem),

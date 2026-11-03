@@ -39,6 +39,16 @@ pub enum FineBar {
     },
 }
 
+impl FineBar {
+    /// The bar as text, whichever it is.
+    pub fn drawn(self) -> String {
+        match self {
+            FineBar::Measured(drawn) => drawn,
+            FineBar::Cut { before, cut, after } => format!("{before}{cut}{after}"),
+        }
+    }
+}
+
 /// `value` against `scale`, which measures `cells` cells, in the steps a
 /// fine bar climbs: an eighth of a cell in Unicode, a whole cell in ASCII,
 /// rounded to the nearest. A value past the scale is cut. A value of zero

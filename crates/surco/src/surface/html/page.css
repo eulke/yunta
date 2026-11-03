@@ -99,6 +99,9 @@ th.figure,td.figure{text-align:right;font-variant-numeric:tabular-nums;font-size
 td.state{white-space:nowrap}
 td.id{font-weight:600;color:var(--strong);white-space:nowrap;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:13px}
 td.rest{color:var(--muted);font-size:13.5px}
+.diffstat table{width:auto}
+.diffstat td.bar{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:11px;line-height:1;white-space:nowrap}
+.diffstat .foot{margin-top:6px}
 
 /* Code on its own ground, a change marked in it. */
 figure{margin:0;min-width:0;display:flex;flex-direction:column;gap:6px}

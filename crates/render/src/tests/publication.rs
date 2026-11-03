@@ -229,6 +229,7 @@ fn a_pull_request_says_what_the_run_changed_above_its_documents() {
         files: 9,
         added: 412,
         removed: 87,
+        largest: Vec::new(),
     });
     let [plus, minus] = Glyphs::Unicode.changed();
     let row = format!("- changed: 9 files, {plus}412 {minus}87");

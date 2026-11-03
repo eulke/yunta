@@ -1,6 +1,7 @@
 use crate::components::{
-    Cell, Chosen, Code, Column, Concern, Decision, DecisionOption, Evidence, Fields, Fix, Fold,
-    Gist, Headline, Holds, Marked, Prose, Row, Section, Table, Title,
+    Cell, Chosen, Code, Column, Concern, Decision, DecisionOption, Diffstat, Evidence, Fields,
+    FileRow, Fix, Fold, Gist, Headline, Holds, Marked, MoreFiles, Prose, Row, Section, Table,
+    Title,
 };
 use crate::doc::{Block, Doc};
 use crate::glyphs::Mark;
@@ -450,5 +451,34 @@ fn a_command_is_a_code_span_no_backtick_inside_it_closes() {
     assert_eq!(
         Markdown.draw(&Doc::new().with(fields)),
         "- run: ``echo `date` | wc``\n- then: `` `ls` ``\n"
+    );
+}
+
+/// A change reads as a table a forge renders: a bar in a path stays in its cell,
+/// a count of zero leaves its cell empty, and the rest follows in words.
+#[test]
+fn a_change_is_a_table_and_what_the_rest_come_to() {
+    let file = |path: &str, added, removed| FileRow {
+        path: path.to_string(),
+        added,
+        removed,
+    };
+    let stat = Diffstat {
+        files: vec![file("src/a|b.rs", 142, 38), file("logo.png", 0, 0)],
+        more: Some(MoreFiles {
+            files: 5,
+            added: 123,
+            removed: 16,
+        }),
+    };
+    assert_eq!(
+        Markdown.draw(&Doc::new().with(stat)),
+        concat!(
+            "| file | added | removed |\n",
+            "|---|---|---|\n",
+            r"| `src/a\|b.rs` | +142 | −38 |",
+            "\n| `logo.png` |  |  |\n",
+            "\n5 more files, +123 −16\n",
+        )
     );
 }

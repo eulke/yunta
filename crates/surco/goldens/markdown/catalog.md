@@ -126,6 +126,13 @@ _new · 1 line_
 | ◆ needs you | `EKPBGE` | fragua (standard) | implement asks at its terminal | 32m |
 | ■ stopped | `60Y934` | fragua (quick) | stopped while it ran | `yunta resume 60Y934` |
 
+| file | added | removed |
+|---|---|---|
+| `crates/cli/src/pack.rs` | +142 | −38 |
+| `docs/notes.md` | +38 |  |
+
+7 more files, +232 −49
+
 a line a page composed itself
 
 | option | what it does | what happens | command |

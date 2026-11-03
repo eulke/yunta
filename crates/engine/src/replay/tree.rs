@@ -114,6 +114,7 @@ mod tests {
             files: 9,
             added: 412,
             removed: 87,
+            largest: Vec::new(),
         };
         (None, EventPayload::Run(RunEvent::ChangesCounted(change)))
     }

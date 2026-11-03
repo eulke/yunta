@@ -93,6 +93,10 @@
   ␛[1;35m◆␛[0m ␛[1mEKPBGE␛[0m  ␛[2mfragua (standard)␛[0m  ␛[32m━␛[0m␛[32m━━␛[0m␛[32m━␛[0m␛[32m━␛[0m␛[32m━━␛[0m␛[1;35m━␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m␛[2m┄␛[0m␛[2m┄┄␛[0m␛[2m┄␛[0m  implement asks at its ter…                  ␛[2m32m␛[0m
   ␛[2m■␛[0m ␛[1m60Y934␛[0m  ␛[2mfragua (quick)   ␛[0m  ␛[32m━━━␛[0m␛[32m━━━␛[0m␛[2m━━━␛[0m␛[2m┄┄␛[0m␛[2m┄┄┄␛[0m␛[2m┄┄┄␛[0m␛[2m┄┄┄␛[0m  stopped while it ran        ␛[1myunta resume 60Y934␛[0m
 
+  crates/cli/src/pack.rs  ␛[32m+142␛[0m ␛[31m−38␛[0m  ␛[32m███████████████␛[0m␛[31m████␛[0m
+  docs/notes.md           ␛[32m +38␛[0m ␛[31m   ␛[0m  ␛[32m████␛[0m
+  ␛[2m7 more files, +232 −49␛[0m
+
   a line a page composed itself
 
 ␛[1;35m▎␛[0m ␛[1mapprove␛[0m: builds the plan

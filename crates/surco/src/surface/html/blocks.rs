@@ -89,6 +89,7 @@ pub(super) fn block(reader: &mut Reader, block: &Block, depth: usize) -> String 
         Block::Evidence(evidence) => tables::evidence(evidence),
         Block::Said(said) => said_lines(&said.0),
         Block::Paths(listed) => paths(listed),
+        Block::Diffstat(stat) => tables::diffstat(stat),
         Block::Decision(asked) => decision::decision(asked),
         Block::Checklist(list) => tables::checklist(list),
         Block::Problem(problem) => notices::problem(problem),

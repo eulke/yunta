@@ -7,9 +7,12 @@ use super::blocks::furrow;
 use super::notices::hung;
 use super::text;
 use super::GLYPHS;
+use crate::bars::{fine_bar, BAR_WIDTH};
 use crate::components::{
-    Cell, Check, Checklist, Column, Edge, Evidence, Found, Holds, Row, RunLine, Runs, Table, Whole,
+    Cell, Check, Checklist, Column, Diffstat, Edge, Evidence, Found, Holds, Row, RunLine, Runs,
+    Table, Whole, COLUMNS,
 };
+use crate::figures::signed_lines;
 use crate::line::Tone;
 
 /// A table as a browser draws it: a header of column titles when any column
@@ -246,5 +249,50 @@ fn check_row(check: &Check) -> String {
         text::words(&crate::text::one_line(&check.subject)),
         text::words(&check.said),
         hung(check.so.as_deref(), check.fix.as_ref()),
+    )
+}
+
+/// A change, file by file: each file's path as code, its figures in their tones,
+/// and a bar of each against the file that moves most; then what the rest come to.
+pub(super) fn diffstat(stat: &Diffstat) -> String {
+    if stat.files.is_empty() {
+        return String::new();
+    }
+    let [path, added, removed] = COLUMNS;
+    let column = |title, holds| Column { title, holds };
+    let titles = head(&[
+        column(path, Holds::Id),
+        column(added, Holds::Figure),
+        column(removed, Holds::Figure),
+        column("", Holds::Words),
+    ]);
+    let figure = |said: String, class| match said.is_empty() {
+        true => r#"<td class="figure"></td>"#.to_string(),
+        false => format!(r#"<td class="figure"><span class="{class}">{said}</span></td>"#),
+    };
+    let scale = stat.scale() as f64;
+    let bar = |count: u64| fine_bar(count as f64, scale, BAR_WIDTH, GLYPHS).drawn();
+    let rows: String = stat
+        .files
+        .iter()
+        .map(|file| {
+            let [added, removed] = signed_lines(file.added, file.removed, GLYPHS);
+            format!(
+                r#"<tr><td class="id"><code>{}</code></td>{}{}<td class="bar"><span class="done">{}</span><span class="failed">{}</span></td></tr>"#,
+                text::esc(&file.path),
+                figure(added, "done"),
+                figure(removed, "failed"),
+                bar(file.added),
+                bar(file.removed),
+            )
+        })
+        .collect();
+    let more = stat
+        .more
+        .as_ref()
+        .map(|more| format!(r#"<p class="foot">{}</p>"#, text::esc(&more.said(GLYPHS))))
+        .unwrap_or_default();
+    format!(
+        r#"<div class="scroll diffstat"><table>{titles}<tbody>{rows}</tbody></table>{more}</div>"#
     )
 }

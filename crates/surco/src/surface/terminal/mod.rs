@@ -14,6 +14,7 @@ pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;
 mod decision;
 mod diagram;
+mod diffstat;
 mod document;
 mod evidence;
 mod fields;
@@ -101,6 +102,7 @@ impl Terminal {
             Block::Evidence(block) => block.lines(look),
             Block::Said(block) => block.lines(look),
             Block::Paths(block) => block.lines(look),
+            Block::Diffstat(block) => block.lines(look),
             Block::Decision(block) => block.lines(look),
             Block::Checklist(block) => block.lines(look),
             Block::Problem(block) => block.lines(look),

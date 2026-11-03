@@ -121,6 +121,17 @@ impl PauseReason {
             _ => false,
         }
     }
+
+    /// Whether this pause waits on a person's answer: not a stop a person
+    /// made, which nobody owes an answer, and not a wait a clock ends. A
+    /// sentence an older log kept says too little to tell, so it does not.
+    pub fn waits_on_a_person(&self) -> bool {
+        match self {
+            PauseReason::Recorded { .. } => false,
+            PauseReason::ChildPaused { child, .. } => child.waits_on_a_person(),
+            reason => !reason.by_a_person() && reason.reset_wait().is_none(),
+        }
+    }
 }
 
 #[cfg(test)]

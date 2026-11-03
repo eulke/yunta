@@ -62,6 +62,8 @@ const WAITING: &str = r#"{"kind":"gate_waiting","summary":"Approve?","evidence":
 const RESOLVED: &str =
     r#"{"kind":"gate_resolved","chosen_option":"approve","resolved_by":"unverified:someone"}"#;
 const PAUSED: &str = r#"{"kind":"run_paused","reason":"cancelled by user"}"#;
+const PARKED_ON_GATE: &str = r#"{"kind":"run_paused","pause":{"type":"escalation","gate":{"assignee":"lead","node":"approve"},"options":[{"id":"approve","leads":{"on":{"next":[],"settles":false}}},{"id":"abort"}],"summary":"Approve?"}}"#;
+const HELD_FOR_RESET: &str = r#"{"kind":"run_paused","pause":{"type":"awaiting_reset","node":"a","at":"2026-01-01T10:00:00Z"}}"#;
 const ASKING: &str = r#"{"kind":"asking_opened"}"#;
 const RESUMED: &str = r#"{"kind":"run_resumed"}"#;
 const RUN_FINISHED: &str = r#"{"kind":"run_finished","terminal_state":"done","metrics":{"tokens":{"input":0,"output":0}}}"#;
@@ -214,6 +216,55 @@ fn a_person_s_wait_ends_when_the_run_pauses() {
     assert_eq!(time.people, Duration::from_secs(30));
     assert_eq!(time.parked, Duration::from_secs(60));
     assert_eq!(time.between, Duration::from_secs(10));
+}
+
+/// A gate nobody answered at a terminal parks the run on a person: the wait
+/// until it wakes is theirs, and the gate's, which only the pause names.
+#[test]
+fn a_run_parked_on_a_gate_waits_on_a_person_until_it_wakes() {
+    let events = log(&[
+        (0, None, CREATED),
+        (10, None, PARKED_ON_GATE),
+        (70, None, RESUMED),
+    ]);
+
+    let time = time_of(&events);
+
+    assert_eq!(time.people, Duration::from_secs(60));
+    assert_eq!(time.parked, Duration::ZERO);
+    assert_eq!(
+        derive(&events)
+            .people_at(None)
+            .get(&NodeId::from("approve")),
+        Some(&Duration::from_secs(60))
+    );
+}
+
+/// Still parked, a person's wait runs to the instant read, with no event to
+/// close it.
+#[test]
+fn a_run_still_parked_on_a_gate_waits_on_a_person_to_the_instant_read() {
+    let events = log(&[(0, None, CREATED), (10, None, PARKED_ON_GATE)]);
+    let now = events[0].timestamp + chrono::Duration::seconds(70);
+
+    let time = derive(&events).time_spent(Some(now));
+
+    assert_eq!(time.people, Duration::from_secs(60));
+}
+
+/// A wait a clock ends is nobody's answer: parked, as a person's own stop is.
+#[test]
+fn a_run_held_for_a_limit_s_reset_is_parked() {
+    let events = log(&[
+        (0, None, CREATED),
+        (10, None, HELD_FOR_RESET),
+        (70, None, RESUMED),
+    ]);
+
+    let time = time_of(&events);
+
+    assert_eq!(time.parked, Duration::from_secs(60));
+    assert_eq!(time.people, Duration::ZERO);
 }
 
 /// A person's time is credited to each node a person was asked about: two

@@ -442,3 +442,25 @@ fn a_word_of_code_is_plain_in_sixteen_colors_and_colored_in_24_bits() {
         "\x1b[38;2;61;90;166mfn\x1b[0m"
     );
 }
+
+/// What a page repeats tells a terminal nothing, on every paint: a sequence a
+/// file name holds reads as its letters, and nothing rings or moves back.
+#[test]
+fn what_a_line_says_tells_a_terminal_nothing() {
+    let line = Line::new().push(Tone::Done, "src/\u{1b}[31mred\u{7}.rs\r");
+    for paint in [Paint::Plain, Paint::LINKED, DARK_24, LIGHT_24] {
+        let painted = paint.line(&line);
+        assert!(painted.contains("src/ [31mred .rs "), "{painted:?}");
+        assert!(!painted.contains(['\u{7}', '\r']), "{painted:?}");
+    }
+}
+
+/// A line break and a tab only say where the next word goes: tab-indented code
+/// keeps its shape.
+#[test]
+fn a_break_and_a_tab_stay_what_they_are() {
+    assert_eq!(
+        Paint::Plain.word(Tone::Plain, "two\n\tlines"),
+        "two\n\tlines"
+    );
+}

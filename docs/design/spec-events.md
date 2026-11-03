@@ -1034,6 +1034,7 @@ El cambio del run tal como lo cuenta git, desde su commit de partida hasta su á
 | `files` | `u32` | sí | cuántos archivos toca el cambio: un archivo renombrado cuenta una vez, y los binarios también. |
 | `added` | `u64` | sí | cuántas líneas agrega el cambio. |
 | `removed` | `u64` | sí | cuántas líneas elimina el cambio. |
+| `largest` | lista de `{path, added, removed}` | sí; vacía —y omitida del log— en un cambio sin archivos, y ausente en un log anterior al campo | los archivos que más mueve el cambio, el mayor primero, hasta cuatro; un archivo renombrado por su ruta nueva, un binario sin líneas. Un byte de una ruta que no es texto se lee como el carácter de reemplazo. |
 
 ### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** pausa / estado terminal, métricas

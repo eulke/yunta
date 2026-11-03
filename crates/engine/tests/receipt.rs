@@ -75,6 +75,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             files: 9,
             added: 412,
             removed: 87,
+            largest: Vec::new(),
         }),
         runners: vec![
             RunnerUsage {

@@ -2,6 +2,8 @@
 //! environment, the 24-bit ones among them, and as Markdown: what a new
 //! surface has to draw, and what a change to one block is seen against.
 
+mod closing;
+
 use std::path::{Path, PathBuf};
 
 use super::tests::words;
@@ -16,6 +18,7 @@ use crate::paint::Paint;
 use crate::surface::{visible, Description, Html, Markdown, Surface, Terminal};
 use crate::width::cell_width;
 use crate::words::Standing;
+use closing::closing;
 
 fn goldens() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens")
@@ -387,44 +390,6 @@ fn fan_out_rows() -> Vec<NodeRow> {
     ]
 }
 
-/// The blocks a plan and a run's rows are drawn with, and how a document
-/// closes: the decisions, the facts, and what to type next.
-fn closing() -> Vec<Block> {
-    let column = |title, holds| Column { title, holds };
-    let table = Table {
-        columns: vec![
-            column("step", Holds::Words),
-            column("task", Holds::Id),
-            column("", Holds::Rest),
-        ],
-        rows: vec![Row {
-            mark: Some(Mark::Running),
-            cells: vec![
-                Cell::plain("1"),
-                Cell::plain("cli-global"),
-                Cell::plain("Global and project flags"),
-            ],
-        }],
-    };
-    let nodes = NodeTable {
-        rows: planned_rows().into_iter().chain(fan_out_rows()).collect(),
-    };
-    vec![
-        table.into(),
-        nodes.into(),
-        field().into(),
-        Block::Lines(vec![Line::new().plain("  a line a page composed itself")]),
-        decision().into(),
-        on_the_forge().into(),
-        Note("the run holds its own state on disk.".to_string()).into(),
-        Fields::new().push_if("tokens", "20.2k spent").into(),
-        Next {
-            steps: vec![("yunta status 7E5PH4".to_string(), "where it stands")],
-        }
-        .into(),
-    ]
-}
-
 /// Every block the document is made of, each once: what the golden tests
 /// and the color tests draw.
 pub(super) fn catalog() -> Doc {
@@ -479,4 +444,23 @@ fn markdown_says_every_word_the_terminal_says_of_every_block() {
         let lost: Vec<&String> = terminal.difference(&said).collect();
         assert!(lost.is_empty(), "{form} dropped {lost:?}");
     }
+}
+
+/// A change that names no file has nothing to say, on any surface.
+#[test]
+fn a_change_that_names_no_file_draws_nothing() {
+    let none = || {
+        Doc::new().with(Diffstat {
+            files: Vec::new(),
+            more: None,
+        })
+    };
+    let look = Look {
+        glyphs: Glyphs::Unicode,
+        paint: Paint::Plain,
+        width: Width::of(Some(120), None),
+    };
+    assert_eq!(Terminal::on(look).draw(&none()).trim(), "");
+    assert_eq!(Markdown.draw(&none()).trim(), "");
+    assert!(!Html.body(&none()).contains("<table"));
 }

@@ -75,6 +75,7 @@ pub(crate) fn changes_counted() -> ChangesCountedPayload {
         files: 9,
         added: 412,
         removed: 87,
+        largest: Vec::new(),
     }
 }
 

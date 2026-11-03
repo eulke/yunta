@@ -3,20 +3,23 @@
 //!
 //! At a glance a page says how far the run has come, where its nodes and
 //! tasks stand, what it cautions and what it could not read. A closing
-//! adds what the run took, what it changed and where its work is; `--full`
-//! says every fact; `--dig` adds where the run itself is kept.
+//! adds the pull requests the run opened, what it took, what it changed,
+//! where its time went and where its work is; `--full` says every fact;
+//! `--dig` adds where the run itself is kept.
 
 use std::time::Duration;
 
-use surco::components::{Fields, Said, Section};
+use surco::components::{Diffstat, Fields, Said, Section};
 use surco::doc::{Block, Depth};
 use surco::figures::duration;
 use surco::glyphs::Glyphs;
 use surco::line::{Line, Tone};
 use surco::paths;
 use surco::text::{counted, counted_as};
+use surco::words::{AT_WORK, WAITING_ON_YOU};
+use yunta_core::events::{EngineFact, NodeOutcome, NodeState};
 use yunta_core::Isolation;
-use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation};
+use yunta_engine::{NodeFrame, NodeStanding, PriorEstimation, TimeSpent};
 
 use super::{caution_row, RunPage, Scope};
 use crate::render::counter;
@@ -30,7 +33,7 @@ impl RunPage<'_> {
     /// checks them. A fact with nothing to say is not a row.
     pub(super) fn facts(&self, glyphs: Glyphs) -> Fields {
         let full = self.depth.reaches(Depth::Full);
-        let harvest = self.scope == Scope::Closing || full;
+        let harvest = self.holds_harvest();
         let mut fields = Fields::new().push_if("progress", counter::progress(self.frame, glyphs));
         // The whole story names every node and task in a table of its own.
         if !full {
@@ -44,17 +47,11 @@ impl RunPage<'_> {
             fields = fields.push_if("left out", left);
         }
         if harvest {
-            fields = fields
-                .push_if("tokens", self.spent(glyphs))
-                .push_if("changed", self.changed(glyphs));
+            fields = self.came_to(fields, glyphs);
         }
         fields = fields.push_if("caution", caution_row(self.frame));
         if harvest {
-            fields = fields
-                .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
-                .push_if("branch", self.branch())
-                .push_if("artifacts", self.artifacts())
-                .push_if("degraded", self.degraded());
+            fields = self.went_to(fields, glyphs);
         }
         if full {
             fields = fields
@@ -111,6 +108,70 @@ impl RunPage<'_> {
             .current_change()
             .and_then(|change| yunta_render::changes::of(change, glyphs))
             .unwrap_or_default()
+    }
+
+    /// Whether this page holds what a run gathered: a closing does, and a
+    /// status page as deep as the whole story.
+    fn holds_harvest(&self) -> bool {
+        self.scope == Scope::Closing || self.depth.reaches(Depth::Full)
+    }
+
+    /// What the run came to: the pull requests it opened, what it spent and
+    /// what it changed.
+    fn came_to(&self, fields: Fields, glyphs: Glyphs) -> Fields {
+        self.pull_requests()
+            .into_iter()
+            .fold(fields, |fields, opened| {
+                fields.push_if("pull request", opened)
+            })
+            .push_if("tokens", self.spent(glyphs))
+            .push_if("changed", self.changed(glyphs))
+    }
+
+    /// Where the run's time went and where its work is.
+    fn went_to(&self, fields: Fields, glyphs: Glyphs) -> Fields {
+        fields
+            .push_if(
+                "time",
+                time_row(&self.time_spent(), glyphs).unwrap_or_default(),
+            )
+            .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
+            .push_if("branch", self.branch())
+            .push_if("artifacts", self.artifacts())
+            .push_if("degraded", self.degraded())
+    }
+
+    /// Where the run's time went, read to the instant the page is read at while
+    /// the run is open: the log says nothing of a wait until it is answered.
+    fn time_spent(&self) -> TimeSpent {
+        self.state
+            .time_spent((!self.state.ended()).then_some(self.engine.at))
+    }
+
+    /// Each pull request the run opened, as its number and where it is, said
+    /// whole: a node's note in the table has only the room the line leaves.
+    fn pull_requests(&self) -> Vec<String> {
+        self.frame
+            .nodes
+            .iter()
+            .filter_map(|node| match &node.state {
+                NodeStanding::Reached(NodeState::Finished {
+                    outcome: NodeOutcome::Fact(EngineFact::PullRequestOpened { number, url }),
+                    ..
+                }) => Some(yunta_render::outcome::pull_request(*number, url)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The files the run's change moved most, on a page that holds the change.
+    pub(super) fn changed_files(&self) -> Option<Diffstat> {
+        if !self.holds_harvest() {
+            return None;
+        }
+        self.state
+            .current_change()
+            .and_then(yunta_render::changes::by_file)
     }
 
     /// The run's longest nodes, longest first. `None` for a run where no
@@ -219,8 +280,7 @@ impl RunPage<'_> {
     /// run of its own, with its own id to go and read. Nothing for a run
     /// that composed none, which is most of them.
     pub(super) fn children(&self, glyphs: Glyphs) -> Vec<Block> {
-        let told = self.scope == Scope::Closing || self.depth.reaches(Depth::Full);
-        if !told || self.frame.children.is_empty() {
+        if !self.holds_harvest() || self.frame.children.is_empty() {
             return Vec::new();
         }
         let mut blocks = vec![Block::Heading("children".to_string())];
@@ -241,6 +301,24 @@ impl RunPage<'_> {
         }
         blocks
     }
+}
+
+/// Where a run's time went, where a person weighed in it: what was at work on it,
+/// and what waited on a person, a part under a second being no part. Nothing for
+/// a run no person held up: the row of its slowest nodes says where its time went.
+pub(super) fn time_row(time: &TimeSpent, glyphs: Glyphs) -> Option<String> {
+    if time.people.as_secs() == 0 {
+        return None;
+    }
+    let waited = format!("{} {WAITING_ON_YOU}", duration(time.people));
+    Some(match time.working.as_secs() {
+        0 => waited,
+        _ => format!(
+            "{} {AT_WORK} {} {waited}",
+            duration(time.working),
+            glyphs.sep()
+        ),
+    })
 }
 
 /// What this workflow's past runs cost, in the one phrasing every surface

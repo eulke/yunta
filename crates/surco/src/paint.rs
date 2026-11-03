@@ -233,19 +233,20 @@ impl Paint {
 
     /// `text` in `tone`, painted.
     pub fn word(self, tone: Tone, text: &str) -> String {
+        let text = harmless(text);
         match self {
-            Paint::Plain => text.to_string(),
+            Paint::Plain => text,
             Paint::Color {
                 layer: Layer::Ansi16,
                 ..
             } => match sgr(tone) {
                 Some(sgr) => format!("\x1b[{sgr}m{text}\x1b[0m"),
-                None => text.to_string(),
+                None => text,
             },
             Paint::Color {
                 layer: Layer::Truecolor(ground),
                 ..
-            } => truecolor(ground, tone, None, None, text),
+            } => truecolor(ground, tone, None, None, &text),
         }
     }
 
@@ -257,7 +258,7 @@ impl Paint {
             Paint::Color {
                 layer: Layer::Truecolor(ground),
                 ..
-            } => truecolor(ground, span.tone, span.fill, fill, &span.text),
+            } => truecolor(ground, span.tone, span.fill, fill, &harmless(&span.text)),
             Paint::Plain
             | Paint::Color {
                 layer: Layer::Ansi16,
@@ -305,14 +306,23 @@ pub const BELL: &str = "\x07";
 /// Gives back the window title [`title_saved`] kept.
 pub const TITLE_RESTORED: &str = "\x1b[23;2t";
 
+/// `text` as a terminal may be told it: a control character turns to a space,
+/// since any of them could move the cursor back, ring or open a sequence, and
+/// what a page repeats (a file's name, what a session said) tells a terminal
+/// nothing. A line break and a tab only say where the next word goes, so they
+/// stay, and tab-indented code keeps its shape.
+fn harmless(text: &str) -> String {
+    text.replace(
+        |sign: char| sign.is_control() && !matches!(sign, '\n' | '\t'),
+        " ",
+    )
+}
+
 /// Keeps the window's title, and sets it to `title`, whose control characters
 /// turn to spaces: any of them could end the sequence, and a tab between two
 /// words still keeps them apart.
 pub fn title_saved(title: &str) -> String {
-    let title: String = title
-        .chars()
-        .map(|sign| if sign.is_control() { ' ' } else { sign })
-        .collect();
+    let title = harmless(title).replace(['\n', '\t'], " ");
     format!("\x1b[22;2t\x1b]2;{title}\x1b\\")
 }
 

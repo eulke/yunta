@@ -150,6 +150,10 @@ pub const NEED_YOU: &str = "need you";
 /// asked about: what the run spent waiting on the reader.
 pub const WAITING_ON_YOU: &str = "waiting on you";
 
+/// The part of a run's time something was at work on it: sessions, and the
+/// engine's own steps inside a node.
+pub const AT_WORK: &str = "at work";
+
 /// What a node that is not a gate spent waiting on a person's answers.
 pub const WAITED_ON_YOU: &str = "waited on you";
 

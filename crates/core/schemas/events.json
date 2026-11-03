@@ -1017,6 +1017,13 @@
           "format": "uint32",
           "minimum": 0
         },
+        "largest": {
+          "description": "The files the change moves most, the largest first, as many as a page\nnames. Absent in a log older than the field.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          }
+        },
         "removed": {
           "description": "How many lines the change removes.",
           "type": "integer",
@@ -5010,6 +5017,33 @@
         "none",
         "tool_calls",
         "filesystem"
+      ]
+    },
+    "FileChange": {
+      "description": "One file of a change, as git counts it: a renamed file by its new path, and a\nbinary file with no lines.",
+      "type": "object",
+      "properties": {
+        "added": {
+          "description": "How many lines the change adds to it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "path": {
+          "description": "The file, relative to the repository. A byte of its name that is not\ntext reads as the replacement character.",
+          "type": "string"
+        },
+        "removed": {
+          "description": "How many lines the change removes from it.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "added",
+        "removed"
       ]
     },
     "FileProblem": {

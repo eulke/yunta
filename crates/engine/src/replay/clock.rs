@@ -13,8 +13,10 @@
 //! A person is being asked from the `asking_opened` the engine writes when
 //! it begins asking until the answer the asking ends with — a gate
 //! resolved, questions answered — or the invocation stops asking: the run
-//! pauses, finishes, or wakes again. Two tasks of a loop working at once
-//! share their stretches, and each stretch counts once, under the first
+//! pauses, finishes, or wakes again. A run parked on a person's answer waits
+//! on them until it wakes; a stop a person made and a wait a clock ends are
+//! parked, since nobody owes those an answer. Two tasks of a loop working at
+//! once share their stretches, and each stretch counts once, under the first
 //! bucket of [`TimeSpent`] that it fits.
 //!
 //! A person's time is also credited to each node a person was asked about
@@ -28,8 +30,8 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::{
-    CriterionResult, CriterionType, EventPayload, GateLedger, NodeEvent, NodeLedger, Phase,
-    RunEvent, RunLedger, RunPhaseRaw, SessionEvent, StoredEvent, Suspensions, TaskEvent,
+    CriterionResult, CriterionType, EventPayload, GateLedger, NodeEvent, NodeLedger, PauseReason,
+    Phase, RunEvent, RunLedger, RunPhaseRaw, SessionEvent, StoredEvent, Suspensions, TaskEvent,
     TaskLedger,
 };
 use yunta_core::NodeId;
@@ -57,7 +59,8 @@ pub struct TimeSpent {
     /// Sessions cut off from their service, waiting for it to answer,
     /// with nothing else at work.
     pub offline: Duration,
-    /// Parked between a pause and the wake that followed it.
+    /// Parked between a pause and the wake that followed it, with nobody
+    /// owing it an answer: a stop a person made, a limit's reset.
     pub parked: Duration,
     /// Nothing open: the engine between one step and the next.
     pub between: Duration,
@@ -176,15 +179,16 @@ impl Timeline {
 /// What the ledgers hold open at the moment a stretch closes, read before
 /// the event that closes it is applied.
 pub(crate) struct Open {
-    /// Parked between a pause and the wake that followed it.
+    /// Parked between a pause and the wake that followed it, with nobody
+    /// owing it an answer.
     paused: bool,
     /// Some node has an attempt open.
     attempting: bool,
     /// Some node is cut off from its service, and every open attempt
     /// belongs to a node that is.
     attempts_offline: bool,
-    /// A person is being asked something, or a node waits on a question
-    /// a person answers elsewhere.
+    /// A person is being asked something, a node waits on a question a
+    /// person answers elsewhere, or the run is parked on a person's answer.
     people: bool,
     /// The nodes a person is asked about: a gate asking, or a node whose
     /// questions or published gate a person answers elsewhere. A run-level
@@ -202,16 +206,21 @@ impl Open {
         gates: &GateLedger,
         tasks: &TaskLedger,
     ) -> Self {
+        let owed = run
+            .paused()
+            .map(|(pause, _)| pause)
+            .filter(|pause| pause.waits_on_a_person());
         Open {
-            paused: matches!(run.phase(), RunPhaseRaw::Paused),
+            paused: matches!(run.phase(), RunPhaseRaw::Paused) && owed.is_none(),
             attempting: nodes.attempting(),
             attempts_offline: nodes.attempts_offline(),
-            people: !gates.asking().is_empty() || !gates.awaiting().is_empty(),
+            people: owed.is_some() || !gates.asking().is_empty() || !gates.awaiting().is_empty(),
             asked: gates
                 .asking()
                 .iter()
                 .flatten()
                 .chain(gates.awaiting())
+                .chain(owed.and_then(PauseReason::gate))
                 .cloned()
                 .collect(),
             checking: !tasks.checking().is_empty(),

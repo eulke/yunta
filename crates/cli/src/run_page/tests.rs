@@ -272,6 +272,7 @@ fn counted(files: u32, added: u64, removed: u64) -> Vec<StoredEvent> {
                 files,
                 added,
                 removed,
+                largest: Vec::new(),
             },
         )))
         .build()
@@ -467,3 +468,5 @@ fn the_trace_says_each_nodes_rounds_returns_and_waits() {
         assert!(!on_attempt.contains("2 attempts"), "{on_attempt}");
     }
 }
+
+mod harvest;

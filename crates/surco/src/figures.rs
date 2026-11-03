@@ -9,6 +9,8 @@
 use std::fmt;
 use std::time::Duration;
 
+use crate::glyphs::Glyphs;
+
 /// A count of tokens.
 ///
 /// Exact below a thousand and three significant digits above, with the
@@ -207,6 +209,30 @@ pub fn latency(took: Duration) -> String {
         (0, 0) => "under 1 ms".to_string(),
         (0, millis) => format!("{millis} ms"),
         _ => duration(took),
+    }
+}
+
+/// What a change adds and takes out, each as its sign and its figure, and
+/// nothing for a count of zero: `["+412", "−87"]`.
+pub fn signed_lines(added: u64, removed: u64, glyphs: Glyphs) -> [String; 2] {
+    let [plus, minus] = glyphs.changed();
+    let signed = |sign: char, count: u64| match count {
+        0 => String::new(),
+        count => format!("{sign}{count}"),
+    };
+    [signed(plus, added), signed(minus, removed)]
+}
+
+/// `files` with the lines they move after them, as a diffstat reads:
+/// `9 files, +412 −87`, and `2 files` for files that move no line.
+pub fn files_moving(files: String, added: u64, removed: u64, glyphs: Glyphs) -> String {
+    let lines: Vec<String> = signed_lines(added, removed, glyphs)
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .collect();
+    match lines.is_empty() {
+        true => files,
+        false => format!("{files}, {}", lines.join(" ")),
     }
 }
 

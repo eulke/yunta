@@ -49,6 +49,7 @@ pub(super) async fn record(
         files: stat.files,
         added: stat.added,
         removed: stat.removed,
+        largest: stat.largest,
     };
     ctx.emit(node, EventPayload::Run(RunEvent::ChangesCounted(counted)))
         .await?;

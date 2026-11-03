@@ -26,7 +26,7 @@ fn fact_sentence(fact: &EngineFact) -> String {
     match fact {
         EngineFact::ExitStatus { code } => format!("exit {code}"),
         EngineFact::PullRequestOpened { number, url } => {
-            format!("pull request #{number}: {url}")
+            format!("pull request {}", pull_request(*number, url))
         }
         EngineFact::ChildrenFinished { count } => {
             format!("{} finished", text::counted_as(*count, "child", "children"))
@@ -56,6 +56,11 @@ fn fact_sentence(fact: &EngineFact) -> String {
             Approval::Merge => format!("merged by {by}"),
         },
     }
+}
+
+/// A pull request as a reader is told it: its number and where it is.
+pub fn pull_request(number: u64, url: &str) -> String {
+    format!("#{number}: {url}")
 }
 
 /// A comparison that found no regression. The memo does not say who asked

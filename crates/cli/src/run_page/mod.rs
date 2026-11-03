@@ -100,6 +100,7 @@ impl RunPage<'_> {
             .with_all(self.evidence(look.glyphs))
             .with_all(self.story(look.glyphs))
             .with(self.facts(look.glyphs))
+            .with_all(self.changed_files().map(Block::from))
             .with_all(self.children(look.glyphs));
         // What waits on the reader is the last thing on the page, where
         // the eye is when the page ends.

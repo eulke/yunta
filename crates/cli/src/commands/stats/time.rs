@@ -9,7 +9,7 @@ use surco::figures::duration;
 use surco::line::{Line, Tone};
 use surco::look::Look;
 use surco::width::{cell_width, id_column, middle_cut, INDENT};
-use surco::words::WAITING_ON_YOU;
+use surco::words::{AT_WORK, WAITING_ON_YOU};
 use yunta_core::rail::timing::Histogram;
 use yunta_core::rail::RailEvent;
 use yunta_core::NodeId;
@@ -76,7 +76,7 @@ pub(super) fn gist(time: &TimeSpent, at: Option<&NodeId>) -> Option<String> {
         None => WAITING_ON_YOU.to_string(),
     };
     let (spent, on) = [
-        (time.working, "agents and the engine at work".to_string()),
+        (time.working, format!("agents and the engine {AT_WORK}")),
         (time.rails, "formatting what sessions wrote".to_string()),
         (time.checks, "checks on the tasks' trees".to_string()),
         (
