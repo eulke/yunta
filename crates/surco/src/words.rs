@@ -150,6 +150,12 @@ pub const NEED_YOU: &str = "need you";
 /// asked about: what the run spent waiting on the reader.
 pub const WAITING_ON_YOU: &str = "waiting on you";
 
+/// A question of a round that has its answer.
+pub const ANSWERED: &str = "answered";
+
+/// A question of a round that is still to come.
+pub const TO_ANSWER: &str = "to answer";
+
 /// The part of a run's time something was at work on it: sessions, and the
 /// engine's own steps inside a node.
 pub const AT_WORK: &str = "at work";

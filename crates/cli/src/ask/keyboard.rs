@@ -54,15 +54,6 @@ impl Console {
         }
     }
 
-    /// The next keystroke, however long it takes.
-    pub(crate) fn read_key(&self) -> std::io::Result<Key> {
-        loop {
-            if let Some(key) = self.next_key()? {
-                return Ok(key);
-            }
-        }
-    }
-
     /// The columns and the rows of this terminal.
     pub(crate) fn size(&self) -> (usize, usize) {
         let (rows, columns) = self.term.size();

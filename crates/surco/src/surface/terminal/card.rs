@@ -132,6 +132,10 @@ impl Card {
                 typed,
                 refused,
             } => saying(chosen, asks, typed, refused.as_deref(), look, room),
+            CardBody::Round(rows) => {
+                let left = most.saturating_sub(head.len() + foot.len());
+                round::lines(rows, look, room, left)
+            }
         };
         let cursor = cursor.map(|(row, cell)| (head.len() + row, EDGE + cell));
         let lines = head.into_iter().chain(middle).chain(foot).collect();
@@ -205,6 +209,31 @@ fn saying(
         ));
     }
     (lines, Some(cursor))
+}
+
+/// A list with what narrows it over it, in at most `budget` lines of `room` cells: what
+/// was typed, when anything was, and the rows it leaves, or that it leaves none.
+pub fn narrowed(
+    choices: Option<&Choices>,
+    filter: Option<&str>,
+    look: &Look,
+    room: usize,
+    budget: usize,
+) -> Vec<Line> {
+    let mut lines: Vec<Line> = filter
+        .map(|typed| {
+            Line::new()
+                .push(Tone::Muted, "filter ")
+                .push(Tone::Strong, typed)
+        })
+        .into_iter()
+        .collect();
+    let left = budget.saturating_sub(lines.len());
+    match choices {
+        Some(choices) => lines.extend(choices.fitted(look, room, left)),
+        None => lines.push(Line::new().push(Tone::Muted, "nothing matches")),
+    }
+    lines
 }
 
 /// `text` wrapped in `room` cells, its first row opened by `mark` in the mark's own
@@ -352,6 +381,9 @@ fn on_the_edge(row: Line, glyphs: Glyphs) -> Line {
     };
     drawn.filled(fill)
 }
+
+mod round;
+pub use round::said_whole;
 
 #[cfg(test)]
 mod tests;

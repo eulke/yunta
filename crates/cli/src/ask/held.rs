@@ -37,11 +37,21 @@ pub(crate) trait Held {
 pub(crate) enum Press<T> {
     /// It stays, drawn again.
     Stay,
+    /// It stays, on another question: what was typed for the last one is no answer
+    /// to this one.
+    Moved,
     /// It is answered.
     Answer(T),
     /// The person leaves it without an answer.
     Decline,
     /// The person stops the run.
+    Interrupt,
+}
+
+/// What ended a prompt.
+enum Ended<T> {
+    Answer(T),
+    Decline,
     Interrupt,
 }
 
@@ -55,11 +65,11 @@ pub(crate) fn hold<P: Held>(console: &Console, prompt: &mut P) -> Answered<P::An
     let erased = place.erase(console);
     drop(quiet);
     match ended? {
-        Press::Answer(answer) => erased.map(|()| answer).map_err(NoAnswer::from),
-        Press::Stay | Press::Decline => Err(NoAnswer::Declined),
+        Ended::Answer(answer) => erased.map(|()| answer).map_err(NoAnswer::from),
+        Ended::Decline => Err(NoAnswer::Declined),
         // Only now, with the prompt off the screen, so what the run says about being
         // stopped starts where the prompt stood.
-        Press::Interrupt => {
+        Ended::Interrupt => {
             console.interrupt();
             Err(NoAnswer::Interrupted)
         }
@@ -68,13 +78,14 @@ pub(crate) fn hold<P: Held>(console: &Console, prompt: &mut P) -> Answered<P::An
 
 /// Reads keys and applies them to `prompt` until a stroke ends it, or the console is
 /// stopped. A stroke that stays redraws it, and so does a tick that finds the terminal
-/// changed size. What it returns is what ended the prompt: never [`Press::Stay`].
+/// changed size. A stroke that moves to another question discards what was typed
+/// before it is drawn.
 fn hold_until_it_ends<P: Held>(
     console: &Console,
     prompt: &mut P,
     place: &mut Place,
     strokes: &mut Strokes,
-) -> Answered<Press<P::Answer>> {
+) -> Answered<Ended<P::Answer>> {
     redraw(console, prompt, place)?;
     loop {
         let Some(key) = console.next_key()? else {
@@ -89,7 +100,13 @@ fn hold_until_it_ends<P: Held>(
         }
         match prompt.press(stroke) {
             Press::Stay => redraw(console, prompt, place)?,
-            ended => return Ok(ended),
+            Press::Moved => {
+                console.discard_typed();
+                redraw(console, prompt, place)?;
+            }
+            Press::Answer(answer) => return Ok(Ended::Answer(answer)),
+            Press::Decline => return Ok(Ended::Decline),
+            Press::Interrupt => return Ok(Ended::Interrupt),
         }
     }
 }
@@ -104,7 +121,7 @@ fn redraw<P: Held>(console: &Console, prompt: &P, place: &mut Place) -> std::io:
 /// The terminal as a prompt holds it: each key reaches the read as it is pressed
 /// rather than at the end of a line, nothing typed is echoed between one read and the
 /// next, and a paste is marked. Put back on every path out, with a cursor a prompt hid.
-pub(super) struct Quiet<'a> {
+struct Quiet<'a> {
     console: &'a Console,
     /// The mode it was found in. `None` where the terminal will not say, which
     /// leaves it as it is.
@@ -118,7 +135,7 @@ impl<'a> Quiet<'a> {
     /// it should.
     /// The guard is built before anything is changed, so a failure on the way in
     /// returns through its drop, which puts back whatever was changed by then.
-    pub(super) fn on(console: &'a Console) -> std::io::Result<Self> {
+    fn on(console: &'a Console) -> std::io::Result<Self> {
         let guard = Self {
             console,
             found: tcgetattr(std::io::stdin()).ok(),
@@ -244,15 +261,16 @@ impl Place {
     }
 }
 
-/// The lines as they are written: each painted, one after another, with a line
-/// break between them. A line break also returns the carriage, since output
-/// processing is on.
+/// The lines as they are written: each painted, one after another, with a carriage
+/// return and a line feed between them. The return is written here rather than left
+/// to the terminal's output processing, so a line starts at the left edge whether or
+/// not that processing is on.
 fn lines_out(lines: &[surco::line::Line], look: &Look) -> String {
     lines
         .iter()
         .map(|line| look.paint.line(line))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\r\n")
 }
 
 /// The terminal rows a line `width` cells wide takes on a terminal `columns` wide. An

@@ -10,7 +10,7 @@
 use surco::components::{ChoiceRow, Choices};
 use surco::line::{Line, Tone};
 use surco::look::Look;
-use surco::surface::Placed;
+use surco::surface::{narrowed, Placed};
 
 use super::held::{hold, Held, Press};
 use super::keys::Stroke;
@@ -88,12 +88,44 @@ impl<T> Picker<T> {
         self.matching().get(self.at).copied()
     }
 
+    /// What the filter leaves as a list to draw, or `None` when it leaves nothing.
+    pub(super) fn list(&self) -> Option<Choices> {
+        let matching = self.matching();
+        if matching.is_empty() {
+            return None;
+        }
+        Some(Choices {
+            rows: matching
+                .iter()
+                .filter_map(|&index| self.choices.get(index))
+                .map(|choice| ChoiceRow {
+                    name: choice.name.clone(),
+                    said: choice.label.clone(),
+                    cost: None,
+                })
+                .collect(),
+            at: self.at.min(matching.len() - 1),
+        })
+    }
+
+    /// What was typed to narrow the list, when anything was.
+    pub(super) fn filter(&self) -> Option<&str> {
+        (!self.filter.is_empty()).then_some(self.filter.as_str())
+    }
+
+    /// This list with its pointer on the option at `index`, among all of them.
+    pub(super) fn pointing_at(mut self, index: usize) -> Self {
+        self.at = index;
+        self
+    }
+
     /// The keys the list answers to, and what Escape does here, wrapped to `room`.
     fn keys(&self, look: &Look) -> Vec<Line> {
         let separator = format!(" {} ", look.glyphs.sep());
+        let [move_keys, filter_keys] = list_keys(look);
         let keys = [
-            format!("{} move", look.glyphs.up_down()),
-            "type to filter".to_string(),
+            move_keys,
+            filter_keys,
             "enter chooses".to_string(),
             self.escape.said().to_string(),
         ]
@@ -117,6 +149,14 @@ impl<T> Picker<T> {
             None => Press::Stay,
         }
     }
+}
+
+/// The keys any list answers to, whatever holds it.
+pub(super) fn list_keys(look: &Look) -> [String; 2] {
+    [
+        format!("{} move", look.glyphs.up_down()),
+        "type to filter".to_string(),
+    ]
 }
 
 /// How well `name` answers what was typed, the lower the better: the whole of it, its
@@ -147,35 +187,16 @@ impl<T> Held for Picker<T> {
     type Answer = T;
 
     fn drawn(&self, look: &Look, rows: usize) -> Placed {
-        let matching = self.matching();
         let keys = self.keys(look);
         // A key line that wraps takes from the list.
         let room = rows.saturating_sub(AROUND + keys.len().saturating_sub(1));
-        let mut lines = Vec::new();
-        if !self.filter.is_empty() {
-            lines.push(
-                Line::new()
-                    .push(Tone::Muted, "filter ")
-                    .push(Tone::Strong, self.filter.as_str()),
-            );
-        }
-        if matching.is_empty() {
-            lines.push(Line::new().push(Tone::Muted, "nothing matches"));
-        } else {
-            let list = Choices {
-                rows: matching
-                    .iter()
-                    .filter_map(|&index| self.choices.get(index))
-                    .map(|choice| ChoiceRow {
-                        name: choice.name.clone(),
-                        said: choice.label.clone(),
-                        cost: None,
-                    })
-                    .collect(),
-                at: self.at.min(matching.len() - 1),
-            };
-            lines.extend(list.fitted(look, look.width.cells(), room));
-        }
+        let mut lines = narrowed(
+            self.list().as_ref(),
+            self.filter(),
+            look,
+            look.width.cells(),
+            room,
+        );
         lines.extend(keys);
         Placed {
             lines,

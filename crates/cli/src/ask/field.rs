@@ -6,19 +6,20 @@
 //! own characters in the text, and a line break that arrived inside a
 //! paste folds into the line instead of ending it.
 //!
-//! What the terminal shows is one row, whatever the line grows to. A
-//! redraw clears the row the cursor is on and a cursor move stays on it,
-//! so a line drawn wider than the row would leave every earlier draw
-//! standing on the rows below it and put the cursor out of reach of its
-//! own text. The line scrolls under the row instead: [`Field::row`] is
-//! the part of it the row has space for, taken around the cursor.
+//! What the terminal shows is one row, whatever the line grows to: the
+//! line scrolls under the row rather than wrapping below it, so the
+//! cursor stays on the text it edits. [`Field::parts`] is the part of it
+//! the row has space for, taken around the cursor.
 
+use surco::line::Line;
+use surco::look::Look;
+use surco::surface::Placed;
 use surco::text::one_line;
 use surco::width::cell_width;
 
-use super::held::Quiet;
-use super::keys::{Stroke, Strokes};
-use super::{Answered, Console, NoAnswer};
+use super::held::{hold, Held, Press};
+use super::keys::Stroke;
+use super::{Console, NoAnswer, ANSWER};
 
 /// Said once, when the answer being recorded came from text that
 /// spanned more than one line: a question takes one line, and the
@@ -31,6 +32,9 @@ pub(super) const FOLDED: &str = "the text pasted here spanned more than one line
 pub(crate) struct Typed {
     /// The line, with every run of whitespace collapsed to one space.
     pub(crate) value: String,
+    /// The line as it was typed, with the line breaks a paste brought: what a person
+    /// comes back to, so pressing enter on it again says the same of it.
+    pub(crate) line: String,
     /// Whether folding it took line breaks out of pasted text.
     pub(crate) folded: bool,
 }
@@ -57,6 +61,14 @@ pub(crate) enum Edit {
 }
 
 impl Field {
+    /// A line that already holds `text`, line breaks included, with the cursor at its
+    /// end: an answer a person came back to.
+    pub(super) fn holding(text: &str) -> Self {
+        let characters: Vec<char> = text.chars().collect();
+        let cursor = characters.len();
+        Self { characters, cursor }
+    }
+
     /// The line as it is drawn — one line, whatever it holds.
     pub(crate) fn drawn(&self) -> String {
         self.characters
@@ -82,13 +94,6 @@ impl Field {
             behind.into_iter().rev().collect(),
             ahead.into_iter().collect(),
         )
-    }
-
-    /// What a row of `room` cells shows of the line, and how many of
-    /// those cells come after the cursor.
-    pub(crate) fn row(&self, room: usize) -> (String, usize) {
-        let (before, after) = self.parts(room);
-        (format!("{before}{after}"), cell_width(&after))
     }
 
     /// What `stroke` asks of the line, applied.
@@ -131,10 +136,11 @@ impl Field {
 
     /// The answer the line holds.
     fn finish(&self) -> Typed {
-        let typed: String = self.characters.iter().collect();
+        let line: String = self.characters.iter().collect();
         Typed {
-            value: one_line(&typed),
-            folded: typed.lines().filter(|line| !line.trim().is_empty()).count() > 1,
+            value: one_line(&line),
+            folded: line.lines().filter(|row| !row.trim().is_empty()).count() > 1,
+            line,
         }
     }
 }
@@ -156,56 +162,80 @@ fn fitting(characters: impl Iterator<Item = char>, room: usize) -> (Vec<char>, u
     (kept, taken)
 }
 
-/// Reads one answer, drawn after `prompt` and edited in place.
-///
-/// Returns when the person presses Enter: the line stays on screen as
-/// what was recorded, which is the collapsed value rather than the
-/// keystrokes it came from. Escape ends the prompt with no answer and
-/// Ctrl-C stops the run.
-pub(crate) fn ask_line(console: &Console, prompt: &str) -> Answered<Typed> {
-    let quiet = Quiet::on(console)?;
-    let mut field = Field::default();
-    let mut strokes = Strokes::default();
-    let typed = loop {
-        // Read every draw: the terminal a run is answered on can be
-        // resized while the answer is being typed.
-        let room = console.width().saturating_sub(cell_width(prompt) + 1);
-        let (row, back) = field.row(room);
-        console.draw_line(prompt, &row, back)?;
-        let key = match console.read_key() {
-            Ok(key) => key,
-            Err(failed) => return Err(closed(console, NoAnswer::from(failed))),
-        };
-        match field.apply(strokes.read(key)) {
-            Edit::Editing => {}
-            Edit::Answered(typed) => break typed,
-            Edit::Declined => return Err(closed(console, NoAnswer::Declined)),
-            Edit::Interrupted => {
-                // Only once the line is ended and the terminal given back, so what
-                // the run says about being stopped starts on a line of its own.
-                let ended = closed(console, NoAnswer::Interrupted);
-                drop(quiet);
-                console.interrupt();
-                return Err(ended);
-            }
-        }
-    };
-    drop(quiet);
-    console.end_line(&format!("{prompt}{}", typed.value))?;
-    if typed.folded {
-        console.say(FOLDED)?;
-    }
-    Ok(typed)
+/// A line being answered, under `asked`.
+struct LineAsked<'a> {
+    asked: &'a Line,
+    field: Field,
 }
 
-/// Ends the line the abandoned prompt was drawing on and hands back
-/// `why`, so whatever is said about the run next starts on a line of
-/// its own instead of running into a half-typed answer.
-fn closed(console: &Console, why: NoAnswer) -> NoAnswer {
-    match console.say("") {
-        Ok(()) => why,
-        Err(failed) => NoAnswer::Unreadable(failed),
+impl Held for LineAsked<'_> {
+    type Answer = Typed;
+
+    /// The question, and the row the words are typed on, with the cursor on it. Read
+    /// every draw: the terminal can be resized while the answer is being typed.
+    fn drawn(&self, look: &Look, _rows: usize) -> Placed {
+        let room = look.width.cells().saturating_sub(cell_width(ANSWER) + 1);
+        let (before, after) = self.field.parts(room);
+        let cursor = (1, cell_width(ANSWER) + cell_width(&before));
+        Placed {
+            lines: vec![
+                self.asked.clone(),
+                Line::new().plain(ANSWER).plain(before).plain(after),
+            ],
+            cursor: Some(cursor),
+        }
     }
+
+    /// Enter answers with the line, whatever it holds; every other stroke edits it.
+    fn press(&mut self, stroke: Stroke) -> Press<Typed> {
+        match self.field.apply(stroke) {
+            Edit::Editing => Press::Stay,
+            Edit::Answered(typed) => Press::Answer(typed),
+            Edit::Declined => Press::Decline,
+            Edit::Interrupted => Press::Interrupt,
+        }
+    }
+
+    /// Every key is a key of the line.
+    fn typing(&self) -> bool {
+        true
+    }
+}
+
+/// Asks for one line under `asked`, with `kept` standing where no answer is given: a line
+/// left empty keeps it, and so does Escape or a terminal that cannot be drawn on.
+///
+/// What stays on the screen is the question and the value that stands, which is the
+/// collapsed line rather than the keystrokes it came from. `None` where Ctrl-C stopped
+/// what is running: nothing of the prompt stays, and no value stands.
+pub(crate) fn ask_line(console: &Console, asked: &Line, kept: &str) -> Option<String> {
+    let mut prompt = LineAsked {
+        asked,
+        field: Field::default(),
+    };
+    let typed = match hold(console, &mut prompt) {
+        Ok(typed) => Some(typed),
+        Err(NoAnswer::Interrupted) => return None,
+        Err(_) => None,
+    };
+    let folded = typed.as_ref().is_some_and(|typed| typed.folded);
+    let stands = typed
+        .map(|typed| typed.value)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| kept.to_string());
+    let said = [
+        console.look().paint.line(asked),
+        format!("{ANSWER}{stands}"),
+    ];
+    for line in said
+        .iter()
+        .map(String::as_str)
+        .chain(folded.then_some(FOLDED))
+    {
+        // best-effort: the value stands whether or not it could be said.
+        console.say(line).ok();
+    }
+    Some(stands)
 }
 
 #[cfg(test)]
@@ -290,7 +320,8 @@ mod tests {
             field.apply(stroke);
         }
         assert_eq!(field.finish().value, "");
-        assert_eq!(field.row(ROOM).1, 0);
+        let (_, after) = field.parts(ROOM);
+        assert_eq!(cell_width(&after), 0);
     }
 
     #[test]
@@ -300,27 +331,33 @@ mod tests {
             field.apply(stroke);
         }
         field.apply(Stroke::Home);
-        assert_eq!(field.row(ROOM).1, 4);
+        let (_, after) = field.parts(ROOM);
+        assert_eq!(cell_width(&after), 4);
     }
 
     #[test]
     fn a_line_wider_than_the_row_is_drawn_as_the_part_of_it_around_the_cursor() {
-        // A row that redrew a line wider than itself would wrap it onto
-        // rows the next redraw does not clear, leaving every earlier
-        // draw standing underneath.
+        // A line wider than its row would wrap below it, and the cursor
+        // would be on another row than the text it edits.
         const ROW: usize = 8;
         let mut field = Field::default();
         for stroke in insert("abcdefghijkl") {
             field.apply(stroke);
         }
-        let (drawn, after) = field.row(ROW);
+        let (before, after) = field.parts(ROW);
+        let drawn = format!("{before}{after}");
         assert_eq!(drawn, "efghijkl", "the end of the line stays in sight");
-        assert_eq!(after, 0, "the cursor sits where the typing is");
+        assert_eq!(cell_width(&after), 0, "the cursor sits where the typing is");
 
         field.apply(Stroke::Home);
-        let (drawn, after) = field.row(ROW);
+        let (before, after) = field.parts(ROW);
+        let drawn = format!("{before}{after}");
         assert_eq!(drawn, "abcdefgh", "the row follows the cursor back");
-        assert_eq!(after, ROW, "the cursor sits before everything drawn");
+        assert_eq!(
+            cell_width(&after),
+            ROW,
+            "the cursor sits before everything drawn"
+        );
     }
 
     #[test]
@@ -332,12 +369,13 @@ mod tests {
         for stroke in insert("実装レビュー") {
             field.apply(stroke);
         }
-        let (drawn, after) = field.row(ROW);
+        let (before, after) = field.parts(ROW);
+        let drawn = format!("{before}{after}");
         assert_eq!(
             drawn, "ュー",
             "a character two cells wide is never cut in half"
         );
         assert_eq!(cell_width(&drawn), 4);
-        assert_eq!(after, 0);
+        assert_eq!(cell_width(&after), 0);
     }
 }

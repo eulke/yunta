@@ -29,6 +29,9 @@ pub enum CardBody {
         /// Why the words given were not taken.
         refused: Option<String>,
     },
+    /// A round of questions, in order, one of them answered at a time: a list open on it
+    /// takes the lines the other rows leave, which only one list can.
+    Round(Vec<RoundRow>),
 }
 
 /// A list with one row pointed at.
@@ -54,4 +57,37 @@ pub struct TypedRow {
     pub before: String,
     /// What it shows after the cursor.
     pub after: String,
+}
+
+/// One question of a round.
+pub struct RoundRow {
+    /// What it asks.
+    pub asked: String,
+    /// What a reader should know about answering it, when anything: that it is
+    /// optional and what is assumed without an answer.
+    pub note: Option<String>,
+    /// Where it stands in the round.
+    pub stands: RoundStanding,
+}
+
+/// Where one question of a round stands.
+pub enum RoundStanding {
+    /// Answered, with the answer as a reader reads it.
+    Answered(String),
+    /// Being answered, by typing.
+    Typing {
+        typed: TypedRow,
+        /// Why the words given were not taken.
+        refused: Vec<String>,
+    },
+    /// Being answered, from a list. No `choices` where what was typed leaves none.
+    Picking {
+        choices: Option<Choices>,
+        /// What was typed to narrow the list, when anything was.
+        filter: Option<String>,
+        /// Why what was picked was not taken.
+        refused: Vec<String>,
+    },
+    /// Still to be answered.
+    Ahead,
 }

@@ -594,6 +594,14 @@ it for every node that asks — `quick: { include: [...], ask: required }` — a
 node's own `ask:` beats its mode's. `yunta check` refuses `ask:` on a node that
 asks nothing.
 
+At a terminal a round is one card that stays where it opened: what was answered, the
+question being answered with its field or its list under it, and what is to come. `enter`
+answers and moves on, `shift-tab` goes back with what was said held in place, and what the
+engine refuses is said under the answer, in its words. A question that may be left says what
+is assumed without an answer. Nothing is recorded until the last one is answered: `esc`
+leaves the round with nothing recorded, and when it ends the card comes off and each question
+stays in the history with its answer whole.
+
 Under the default `defaults.on_failure: pause`, a run also stops for a person when a node
 fails in a way only a person can settle. A usage limit that names the time it resets is
 not a question: the run pauses with `awaiting_reset` and resumes by itself at that time.

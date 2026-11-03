@@ -7,8 +7,8 @@
 //! all of them arrive as the same object: a summary, the evidence the
 //! engine attached to it, and options that each declare what they trade
 //! off. [`decide`] renders that object, once, for all of them. The
-//! other shape is a `kind: questions` artifact, which is a sequence of
-//! prompts rather than a menu, and [`answer`] walks it.
+//! other shape is a `kind: questions` artifact, which is a round of
+//! questions rather than a menu, and [`answer`] holds it in one place.
 //!
 //! Escape ends any prompt here with no answer: the run parks with its
 //! state intact, which is the gesture for "not me, not now". Ctrl-C is
@@ -85,7 +85,7 @@ impl Escape {
 /// What marks a line an answer is given on, typed or echoed back, so a
 /// person reads a round as answers under the things that asked for
 /// them.
-pub(crate) const ANSWER: &str = "> ";
+pub(super) const ANSWER: &str = "> ";
 
 /// The console the last prompt opened on this process's terminal, or
 /// `None` in a process where no prompt opened one.
@@ -267,48 +267,15 @@ impl Console {
         &self.term
     }
 
-    /// The cells one row drawn on this terminal may take: the width a
-    /// line here gets, never past the terminal's edge, since a prompt
-    /// redraws its rows in place.
-    pub(crate) fn width(&self) -> usize {
-        self.look().width.cells()
-    }
-
     /// How a line drawn on this terminal looks: the paint stderr gets,
-    /// and rows no wider than [`Console::width`].
+    /// and rows no wider than the terminal's edge, since a prompt redraws
+    /// its rows in place.
     pub(crate) fn look(&self) -> surco::look::Look {
         surco::look::Look {
             glyphs: crate::render::glyphs(),
             paint: crate::render::stderr_paint(),
             width: crate::render::row_width(usize::from(self.term.size().1)),
         }
-    }
-
-    /// Redraws the row a line is being typed on: `prompt`, then `text`,
-    /// with the cursor left `back` cells from the end.
-    ///
-    /// One row, drawn over itself: the clearing and the cursor move both
-    /// act on the row the cursor is on, so `prompt` and `text` together
-    /// have to fit one. [`Console::width`] is what says how much that
-    /// is.
-    pub(crate) fn draw_line(&self, prompt: &str, text: &str, back: usize) -> std::io::Result<()> {
-        self.term.clear_line()?;
-        self.term.write_str(prompt)?;
-        self.term.write_str(text)?;
-        self.term.move_cursor_left(back)?;
-        self.term.flush()
-    }
-
-    /// Finishes the row being typed on: what it was showing gives way to
-    /// `line`, and the cursor moves past it.
-    ///
-    /// Written as a line rather than redrawn in place, so an answer
-    /// wider than the terminal is left on screen whole — laid out by the
-    /// terminal over as many rows as it takes — rather than as the part
-    /// of it the editing row had room for.
-    pub(crate) fn end_line(&self, line: &str) -> std::io::Result<()> {
-        self.term.clear_line()?;
-        self.term.write_line(line)
     }
 
     /// Hides the cursor, once, so [`Console::restore`] knows there is one to put back.

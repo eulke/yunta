@@ -20,6 +20,7 @@ use yunta_engine::process::Supervision;
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::{CliError, Outcome};
 use crate::interrupt::Interrupt;
+use crate::render::RunExit;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -240,45 +241,35 @@ const CLAUDE_MD_SUGGESTION: [&str; 3] = [
 /// — so a person who has answered a run answers `init` the same way.
 /// An empty line takes the default, and so does Escape: "not me, not
 /// now" about a setting that already has a detected value is that
-/// value.
-fn asked(console: &Console, prompt: &str, default: &str) -> String {
-    let look = console.look();
+/// value. `None` where Ctrl-C stopped `init`.
+fn asked(console: &Console, prompt: &str, default: &str) -> Option<String> {
     let asking = Line::new()
         .push(Tone::Strong, prompt)
         .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
-    // A key pressed before this question was drawn is not an answer to it.
-    console.discard_typed();
-    // A terminal that cannot be drawn on cannot be asked either: the
-    // default stands, as it does for a line left empty.
-    if console.say(&look.paint.line(&asking)).is_err() {
-        return default.to_string();
-    }
-    match ask_line(console, crate::ask::ANSWER) {
-        Ok(typed) if !typed.value.is_empty() => typed.value,
-        _ => default.to_string(),
-    }
+    ask_line(console, &asking, default)
 }
 
 /// The project's name and base branch, as `init` answers them: asked on
 /// `console` when there is one, each prompt keeping its detected value when
-/// it is left empty, and the detected values as they stand otherwise.
+/// it is left empty, and the detected values as they stand otherwise. `None`
+/// where a person stopped `init` at one of them: nothing more is asked.
 fn project_answers(
     console: Option<&Console>,
     default_name: String,
     default_branch: String,
-) -> (String, String) {
+) -> Option<(String, String)> {
     match console {
         Some(console) => {
             // What Escape does, said once above the prompts it applies
             // to — the same place every other surface says it.
             // best-effort: the notice informs only; a refused write falls back to the defaults.
             let _ = console.say(console.escape().said());
-            (
-                asked(console, "project name", &default_name),
-                asked(console, "base branch", &default_branch),
-            )
+            Some((
+                asked(console, "project name", &default_name)?,
+                asked(console, "base branch", &default_branch)?,
+            ))
         }
-        None => (default_name, default_branch),
+        None => Some((default_name, default_branch)),
     }
 }
 
@@ -326,8 +317,11 @@ pub async fn init(interactive: bool, force: bool, look: &Look) -> Result<Outcome
     let default_branch = detect_base_branch(&repo, supervision).await?;
     let detected = crate::detect::Detected::in_repo(&repo, supervision).await?;
 
-    let (project_name, base_branch) =
-        project_answers(console.as_ref(), default_name, default_branch);
+    let Some((project_name, base_branch)) =
+        project_answers(console.as_ref(), default_name, default_branch)
+    else {
+        return Ok(RunExit::Interrupted.outcome());
+    };
 
     let probed = crate::detect::probe_known_adapters().await;
     let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);

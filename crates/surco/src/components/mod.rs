@@ -26,7 +26,7 @@ mod runs;
 mod said;
 mod table;
 
-pub use card::{Card, CardBody, ChoiceRow, Choices, TypedRow};
+pub use card::{Card, CardBody, ChoiceRow, Choices, RoundRow, RoundStanding, TypedRow};
 pub use checklist::{Check, Checklist, Fix, Found};
 pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};

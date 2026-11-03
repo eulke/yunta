@@ -23,12 +23,6 @@ pub(crate) fn surface_lines(doc: Doc, look: &Look) -> Vec<Line> {
     surco::surface::Terminal::on(*look).lines(&doc)
 }
 
-/// `block` laid out for a terminal stream whose lines look like `look`,
-/// unpainted.
-pub(crate) fn block_lines(block: impl Into<Block>, look: &Look) -> Vec<Line> {
-    surco::surface::Terminal::on(*look).block(&block.into())
-}
-
 /// `blocks`, in order, laid out the same way.
 pub(crate) fn blocks_lines(blocks: &[Block], look: &Look) -> Vec<Line> {
     surco::surface::Terminal::on(*look).blocks(blocks)

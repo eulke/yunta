@@ -10,7 +10,7 @@ use crate::width::{cell_width, INDENT};
 use crate::words::Standing;
 
 mod card;
-pub use card::Placed;
+pub use card::{narrowed, said_whole, Placed};
 mod checklist;
 pub(in crate::surface) use checklist::{FIX, SO};
 mod concern;

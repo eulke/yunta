@@ -23,9 +23,7 @@ use nix::unistd::Pid;
 use crate::wait::{wait_for, wait_until, WAIT_DEADLINE};
 
 /// What a terminal is told to do, as the bytes a run writes to say it:
-/// the introducer every sequence opens with, and the three sequences
-/// this harness reads a run's drawing by.
-const ESCAPE: char = '\u{1b}';
+/// the three sequences this harness reads a run's drawing by.
 const HIDE_CURSOR: &str = "\u{1b}[?25l";
 const SHOW_CURSOR: &str = "\u{1b}[?25h";
 const CLEAR_ROW: &str = "\u{1b}[2K";
@@ -249,21 +247,6 @@ impl Terminal {
         before
             .get(pinned_at..)
             .is_some_and(|between| between.contains(CLEAR_ROW))
-    }
-
-    /// Every row a line being typed was redrawn on: what followed each
-    /// clearing of that row, up to whatever was written next.
-    pub fn rows_redrawn(&self) -> Vec<String> {
-        self.drawn()
-            .split(CLEAR_ROW)
-            .skip(1)
-            .map(|rest| {
-                rest.split([ESCAPE, '\n', '\r'])
-                    .next()
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .collect()
     }
 
     /// Whether the run came back saying it did everything it was asked
