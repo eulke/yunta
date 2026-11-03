@@ -335,13 +335,9 @@ impl Forge for GitHubForge {
         }
         // Every lap commits what it decides on, so a pull request reused
         // after a request for changes shows the correction.
-        let message = CommitMessage::new(
-            format!("publish what gate `{}` decides on", req.decision.node),
-            &req.run_id,
-        )
-        .node(&req.decision.node)
-        .text();
         for (path, content) in super::gate_files(req, &*self.spell) {
+            let message =
+                CommitMessage::of_published(&req.run_id, &req.decision.node, &path).text();
             self.commit_artifact(&path, &content, &req.branch, &message)
                 .await?;
         }

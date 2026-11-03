@@ -19,12 +19,8 @@ use yunta_core::protected::Pathspecs;
 use yunta_core::{CommitSha, NodeId, RunId, TaskId, TreeId};
 
 use super::{head_commit, WorktreeError};
-use crate::git::{self, Effect, Exits, GitError, IS_ANCESTOR};
+use crate::git::{self, Effect, GitError, IS_ANCESTOR};
 use crate::process::Supervision;
-
-/// What `diff --cached --quiet` exits with when nothing is staged: 0. A
-/// staged change exits 1.
-const NOTHING_STAGED: Exits = Exits { yes: 0, no: 1 };
 
 /// Whether `node`'s work is done by units of its own — a loop's tasks,
 /// or an audited node — and lands on the run's tree once it passes.
@@ -236,6 +232,19 @@ pub async fn commit_work(
     message: &str,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
+    if stage_work(unit, supervision).await?.is_empty() {
+        return Ok(());
+    }
+    commit_staged(unit, message, supervision).await
+}
+
+/// Stages everything the unit did, and answers with the paths the commit will hold, so a caller
+/// can say what the commit is before it is made. What git ignores and the request file stay out
+/// of it; a unit that changed nothing answers with no paths.
+pub async fn stage_work(
+    unit: &Unit,
+    supervision: Supervision<'_>,
+) -> Result<Vec<PathBuf>, WorktreeError> {
     let exclude = super::capture::request_file_pathspec();
     git::change(
         &unit.worktree,
@@ -244,16 +253,23 @@ pub async fn commit_work(
         supervision,
     )
     .await?;
-    if git::ask(
+    let bytes = git::read_bytes(
         &unit.worktree,
-        &["diff", "--cached", "--quiet"],
-        NOTHING_STAGED,
+        &["diff", "--cached", "--name-only", "-z"],
         supervision,
     )
-    .await?
-    {
-        return Ok(());
-    }
+    .await?;
+    Ok(crate::scope::nul_separated_paths(&bytes))
+}
+
+/// Commits what `stage_work` staged in `unit` under `message`, and points the unit's ref at it:
+/// the unit works on no branch, and the ref is what keeps the commit when its checkout goes to
+/// somebody else.
+pub async fn commit_staged(
+    unit: &Unit,
+    message: &str,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
     git::change(
         &unit.worktree,
         Effect::Checkout,

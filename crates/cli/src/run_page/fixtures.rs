@@ -235,6 +235,30 @@ fn tasks_log() -> Vec<yunta_core::events::StoredEvent> {
         .build()
 }
 
+/// The log of a run with one task, blocked, whose last attempt left work.
+pub(crate) fn blocked_log() -> Vec<yunta_core::events::StoredEvent> {
+    let blocked = TaskStatusChangedPayload::blocked(
+        TaskId::from("T001"),
+        Seq::from(1u64),
+        Some(CommitSha::from_static("deadbeef00")),
+        yunta_core::events::TaskCause::ScopeDecisionOwed,
+    );
+    Log::for_run(RUN.as_str())
+        .event(EventPayload::Tasks(TaskEvent::Registered(
+            TaskRegisteredPayload {
+                task_id: TaskId::from("T001"),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
+            },
+        )))
+        .node(
+            "implement",
+            EventPayload::Tasks(TaskEvent::StatusChanged(blocked)),
+        )
+        .build()
+}
+
 /// One way a run stands, with everything its page reads.
 pub(crate) struct Case {
     pub(crate) name: &'static str,

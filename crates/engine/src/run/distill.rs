@@ -256,11 +256,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     if !ran(ctx.worktree, &["add", DISTILLED_DIR], supervision).await? {
         return distill_failed(ctx, "distill-add", DistillStep::Add).await;
     }
-    let message = yunta_core::commit_message::CommitMessage::new(
-        format!("docs(knowledge): distill from {}", ctx.run_id.as_str()),
-        ctx.run_id,
-    )
-    .text();
+    let message = yunta_core::commit_message::CommitMessage::of_distilled(ctx.run_id).text();
     if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await? {
         return distill_failed(ctx, "distill-commit", DistillStep::Commit).await;
     }

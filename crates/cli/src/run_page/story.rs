@@ -3,6 +3,7 @@
 //! plan it accepted, how long it worked or a person took on it and what it
 //! spent; the calls that failed on the way; and every task.
 
+use crate::commands::advice;
 use surco::components::{Branch, Cell, Column, Fields, Holds, NodeRow, NodeTable, Row, Table};
 use surco::doc::{Block, Depth};
 use surco::figures::{duration, Tokens};
@@ -175,6 +176,10 @@ impl RunPage<'_> {
                 let mut said = record.status.as_str().to_string();
                 if record.attempts > 1 {
                     said.push_str(&format!(" after {} attempts", record.attempts));
+                }
+                if let Some((_, commit)) = &record.left_work {
+                    let shown = advice::show_commit(commit.abbreviated());
+                    said.push_str(&format!("; its work is at {shown}"));
                 }
                 Row {
                     mark: Some(task_mark(record.status)),

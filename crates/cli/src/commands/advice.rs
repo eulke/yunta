@@ -254,6 +254,12 @@ pub(crate) fn status_node(run: &str, node: &str) -> String {
     format!("yunta status {run} --node {node}")
 }
 
+/// Shows a commit a run's work is held in, by the id a reader meets it under: a blocked
+/// task's last attempt left its work in one.
+pub(crate) fn show_commit(commit: &str) -> String {
+    format!("git show {commit}")
+}
+
 /// Gathers a finished run's manifest, log and artifacts into the bundle
 /// that certifies it.
 pub(crate) fn receipt(run: &str) -> String {

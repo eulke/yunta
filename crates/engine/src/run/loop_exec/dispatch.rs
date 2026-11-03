@@ -314,13 +314,7 @@ pub(super) async fn left_work(
     let supervision = ctx.supervision(cancel);
     commit_work(
         unit,
-        &CommitMessage::new(
-            format!("task {}: the work its last attempt left", task.id),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
+        &CommitMessage::of_left_task(ctx.run_id, &node.id, &task.id).text(),
         supervision,
     )
     .await?;
@@ -340,13 +334,7 @@ pub(super) async fn commit_task_work(
 ) -> Result<(), RunError> {
     commit_work(
         unit,
-        &CommitMessage::new(
-            surco::text::detailed(format!("task {}", task.id), &task.title),
-            ctx.run_id,
-        )
-        .node(&node.id)
-        .task(&task.id)
-        .text(),
+        &CommitMessage::of_task(ctx.run_id, &node.id, &task.id, &task.title).text(),
         supervision,
     )
     .await?;

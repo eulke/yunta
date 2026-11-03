@@ -81,7 +81,7 @@ nodes:
     assert_eq!(git_output(&bench.worktree, &["status", "--porcelain"]), "");
     assert_eq!(
         git_output(&bench.worktree, &["log", "-1", "--format=%s"]).trim(),
-        "node second: second"
+        "node second: changes two.txt"
     );
 }
 

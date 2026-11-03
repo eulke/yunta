@@ -151,7 +151,11 @@ the tree the log names; a node or task that works in a checkout of its own commi
 there with `git commit`, and so does distilling knowledge at the end of a run — your
 hooks run for those. Every commit ends in trailers that name the run, and the node and
 task whose work it holds (`Yunta-Run:`, `Yunta-Node:`, `Yunta-Task:`), so
-`git log --grep "Yunta-Run: <run id>"` lists a run's commits.
+`git log --grep "Yunta-Run: <run id>"` lists a run's commits. A commit's subject says what
+it holds: a task's commit says its title, and a node's commit says its `description`, or
+what it changed when it declares none (`node fix-lint: changes crates/cli/src/pack.rs`).
+A subject is one line of at most 72 characters; a longer one stops at a word, and is said
+whole under it.
 
 `permissions: read-only | edit | full` is a separate, coarser ceiling, mapped onto the
 adapter's own session profile: it governs which *tools* the agent may use at all — a

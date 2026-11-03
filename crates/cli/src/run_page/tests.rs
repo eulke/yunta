@@ -18,7 +18,7 @@ use yunta_engine::{
 use yunta_testkit::{node_frame, run_frame};
 use yunta_testkit_core::{fixed_now, Log};
 
-use super::fixtures::{cases, outline, Case, RUN};
+use super::fixtures::{blocked_log, cases, outline, Case, RUN};
 use super::{RunPage, Scope};
 
 /// Every depth a page is read at, by the name its golden carries.
@@ -196,6 +196,16 @@ fn spend_log() -> Vec<StoredEvent> {
         )
         .node("build", EventPayload::Session(SessionEvent::Message(usage)))
         .build()
+}
+
+/// The one commit a person may want from a blocked task is named where the task is, with
+/// the command that shows it.
+#[test]
+fn a_blocked_task_says_where_its_work_is() {
+    let mut page = page_of(blocked_log(), Scope::Status);
+    page.depth = Depth::Full;
+    let drawn = draw(&page, &Look::plain());
+    assert!(drawn.contains("its work is at git show deadbee"), "{drawn}");
 }
 
 /// The page of the run `events` write, in `scope`.

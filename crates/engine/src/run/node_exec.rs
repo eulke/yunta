@@ -144,9 +144,7 @@ async fn node_unit(
     let base = crate::worktree::snapshot_commit(
         ctx.worktree,
         &crate::run_dir::index_for(ctx.run_dir, &who),
-        &CommitMessage::new("the tree a unit of work started from", ctx.run_id)
-            .node(&node.id)
-            .text(),
+        &CommitMessage::of_unit_start(ctx.run_id, &node.id).text(),
         ctx.root_supervision(),
     )
     .await?;

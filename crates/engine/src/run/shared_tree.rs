@@ -76,17 +76,29 @@ pub(super) async fn at_close(
         return Box::pin(refused_in_place(ctx, node, staged)).await;
     }
     let _landing = ctx.landing.lock().await;
-    let Some(message) = commit_message(ctx, node, landing).await? else {
+    let Some(close) = close_of(ctx, node, landing).await? else {
         return Ok(AtClose::default());
     };
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
     // Boxed: a close runs at the bottom of every composed run's stack.
-    let refused = Box::pin(refuse_denied(ctx, node, &index, staged)).await?;
+    let (refused, changed) = Box::pin(refuse_denied(ctx, node, &index, staged)).await?;
+    let said = match close.failed_at {
+        Some(attempt) => {
+            CommitMessage::of_failed_node(ctx.run_id, &node.id, attempt, &close.beside)
+        }
+        None => CommitMessage::of_node(
+            ctx.run_id,
+            &node.id,
+            node.description.as_deref(),
+            &changed,
+            &close.beside,
+        ),
+    };
     let captured = Box::pin(crate::worktree::commit_tree(
         ctx.worktree,
         &index,
-        &message,
+        &said.text(),
         ctx.root_supervision(),
     ))
     .await?;
@@ -104,13 +116,14 @@ async fn node_judged(ctx: &RunCtx<'_>, node: &Node) -> Result<Protected, RunErro
 }
 
 /// What the run's tree would commit that `node`'s close judges by protects,
-/// put back as `HEAD` has it.
+/// put back as `HEAD` has it. Answers with what it refused, and with what
+/// the commit will hold: what the tree would add, less those paths.
 async fn refuse_denied(
     ctx: &RunCtx<'_>,
     node: &Node,
     index: &Path,
     staged: &[PathBuf],
-) -> Result<Vec<Trespass>, RunError> {
+) -> Result<(Vec<Trespass>, Vec<PathBuf>), RunError> {
     let protected = node_judged(ctx, node).await?;
     let pathspecs = ctx.protected().pathspecs();
     let supervision = ctx.root_supervision();
@@ -125,7 +138,11 @@ async fn refuse_denied(
         .map(|trespass| trespass.path.clone())
         .collect();
     crate::worktree::restore(ctx.worktree, &paths, supervision).await?;
-    Ok(refused)
+    let changed = added
+        .into_iter()
+        .filter(|path| !paths.contains(path))
+        .collect();
+    Ok((refused, changed))
 }
 
 /// In a person's own checkout nothing is committed or put back: what
@@ -186,22 +203,46 @@ pub(super) async fn untreed_base(ctx: &RunCtx<'_>) -> Result<CommitSha, RunError
     }
 }
 
-/// What `node`'s commit says, read off the run's state — or `None` while
-/// another node is still working in the same tree. The state is dropped
-/// here, before any git runs.
-async fn commit_message(
+/// What a node's close commit says, as the run's state records it: which
+/// attempt failed, and which nodes' work the commit holds beside its own.
+struct Close {
+    /// How many attempts it took, when it failed.
+    failed_at: Option<u32>,
+    /// The nodes that closed while it worked, whose work it holds too.
+    beside: Vec<String>,
+}
+
+/// What `node`'s close commit says, read from the run's state before any git
+/// runs, so the commit's words come from what the run recorded. `None` while
+/// another node works in the run's tree: the tree then holds that node's work
+/// too, and whichever node closes last commits it.
+async fn close_of(
     ctx: &RunCtx<'_>,
     node: &Node,
     landing: Landing,
-) -> Result<Option<String>, RunError> {
+) -> Result<Option<Close>, RunError> {
     let state = ctx.run_view().await?.state;
     if working_beside(&ctx.manifest.workflow, &state, &node.id) {
         return Ok(None);
     }
-    let said = message(&ctx.manifest.workflow, &state, node, landing);
-    Ok(Some(
-        CommitMessage::new(said, ctx.run_id).node(&node.id).text(),
-    ))
+    let record = state.nodes.get(&node.id);
+    let failed_at = match landing {
+        Landing::Finished => None,
+        Landing::Failed => Some(record.map_or(1, |record| record.attempts)),
+    };
+    let started = record.and_then(|record| record.last_started);
+    let beside: Vec<String> = tree_sharers(&ctx.manifest.workflow)
+        .filter(|other| other.id != node.id)
+        .filter(|other| {
+            state.nodes.get(&other.id).is_some_and(|other| {
+                other
+                    .last_terminal
+                    .is_some_and(|closed| Some(closed) > started)
+            })
+        })
+        .map(|other| format!("`{}`", other.id))
+        .collect();
+    Ok(Some(Close { failed_at, beside }))
 }
 
 /// Commits what the run's tree holds that no node committed, as `node`
@@ -290,13 +331,18 @@ pub(super) async fn land_unit(
         return Ok(None);
     };
     let supervision = ctx.root_supervision();
-    let said = CommitMessage::new(
-        surco::text::detailed(format!("node {}", node.id), &close_title(node)),
-        ctx.run_id,
-    )
-    .node(&node.id)
-    .text();
-    crate::worktree::commit_work(mine.unit, &said, supervision).await?;
+    let changed = crate::worktree::stage_work(mine.unit, supervision).await?;
+    if !changed.is_empty() {
+        let said = CommitMessage::of_node(
+            ctx.run_id,
+            &node.id,
+            node.description.as_deref(),
+            &changed,
+            &[],
+        )
+        .text();
+        crate::worktree::commit_staged(mine.unit, &said, supervision).await?;
+    }
     let landing = ctx.landing.lock().await;
     match crate::worktree::rebase_onto(mine.unit, mine.into, supervision).await? {
         crate::worktree::Rebase::Onto(_) => {}
@@ -325,15 +371,6 @@ pub(super) async fn land_unit(
     Ok(None)
 }
 
-/// What a node's landing commit is about, for a person reading the
-/// branch: what the node declares it does, or its id when it says
-/// nothing about itself.
-fn close_title(node: &Node) -> String {
-    node.description
-        .clone()
-        .unwrap_or_else(|| node.id.to_string())
-}
-
 /// Whether `mine` is `node`'s own checkout, not one its group opened.
 fn owns(mine: &super::ctx::NodeUnit<'_>, node: &Node) -> bool {
     mine.unit.who == crate::worktree::UnitId::Node(node.id.clone())
@@ -347,20 +384,13 @@ async fn found_message(ctx: &RunCtx<'_>, node: &Node) -> Result<Option<String>, 
     if working_beside(&ctx.manifest.workflow, &state, &node.id) {
         return Ok(None);
     }
-    let subject = format!("found in the run's tree before node {} started", node.id);
     let interrupted = state
         .nodes
         .get(&node.id)
         .filter(|record| record.open_since.is_some())
         .map(|record| record.attempts);
-    let said = match interrupted {
-        Some(attempt) => {
-            format!("{subject}\n\nHolds what attempt {attempt} left when it was interrupted.")
-        }
-        None => subject,
-    };
     Ok(Some(
-        CommitMessage::new(said, ctx.run_id).node(&node.id).text(),
+        CommitMessage::of_found(ctx.run_id, &node.id, interrupted).text(),
     ))
 }
 
@@ -406,46 +436,4 @@ fn working_beside(workflow: &yunta_core::Workflow, state: &RunState, node: &Node
                 Some(NodeState::Running { .. })
             )
     })
-}
-
-/// What the commit says: the node and what it declares it does, or which
-/// of its attempts failed; and the nodes that closed while it worked,
-/// whose work it holds too.
-fn message(
-    workflow: &yunta_core::Workflow,
-    state: &RunState,
-    node: &Node,
-    landing: Landing,
-) -> String {
-    let record = state.nodes.get(&node.id);
-    let title = match landing {
-        Landing::Finished => node
-            .description
-            .clone()
-            .unwrap_or_else(|| node.id.to_string()),
-        Landing::Failed => format!(
-            "what attempt {} left when it failed",
-            record.map_or(1, |record| record.attempts)
-        ),
-    };
-    let started = record.and_then(|record| record.last_started);
-    let beside: Vec<String> = tree_sharers(workflow)
-        .filter(|other| other.id != node.id)
-        .filter(|other| {
-            state.nodes.get(&other.id).is_some_and(|other| {
-                other
-                    .last_terminal
-                    .is_some_and(|closed| Some(closed) > started)
-            })
-        })
-        .map(|other| format!("`{}`", other.id))
-        .collect();
-    let subject = format!("node {}: {title}", node.id);
-    match beside.is_empty() {
-        true => subject,
-        false => format!(
-            "{subject}\n\nHolds what {} left in the run's tree while this node worked.",
-            beside.join(", ")
-        ),
-    }
 }

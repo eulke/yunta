@@ -196,7 +196,10 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     // commit exists in the worktree.
     let subjects = bench.commit_subjects();
     assert!(
-        subjects.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
+        subjects.contains(&format!(
+            "docs(knowledge): distill from {}",
+            bench.run_id.handle()
+        )),
         "got: {subjects:?}"
     );
 }
