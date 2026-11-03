@@ -14,6 +14,7 @@ pub mod init;
 pub mod list;
 pub mod mcp;
 pub mod new;
+pub mod open;
 pub mod pack;
 pub mod pack_audit;
 pub(crate) mod pack_needs;

@@ -164,6 +164,11 @@ pub(crate) fn close(run: &str) -> String {
     format!("yunta close {run}")
 }
 
+/// The command that draws a run's page again and opens it.
+pub(crate) fn open(run: &str) -> String {
+    format!("yunta open {run}")
+}
+
 /// Reclaims the disk runs past their retention hold.
 pub(crate) fn gc() -> String {
     "yunta gc".to_string()

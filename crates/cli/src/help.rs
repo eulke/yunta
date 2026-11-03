@@ -24,7 +24,7 @@ pub(crate) const GROUPS: [(&str, &[&str]); 6] = [
     ("Run", &["run", "resume", "test"]),
     (
         "Follow and decide",
-        &["status", "list", "resolve-gate", "cancel", "close"],
+        &["status", "open", "list", "resolve-gate", "cancel", "close"],
     ),
     ("Audit", &["verify", "receipt", "stats"]),
     ("Extend and maintain", &["pack", "mcp", "gc", "completions"]),

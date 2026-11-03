@@ -17,7 +17,7 @@ mod code;
 mod decision;
 mod description;
 mod fence;
-mod fold;
+pub(in crate::surface) mod fold;
 mod headline;
 mod text;
 

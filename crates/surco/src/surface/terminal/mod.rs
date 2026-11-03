@@ -18,7 +18,7 @@ mod document;
 mod evidence;
 mod fields;
 mod headline;
-mod markdown;
+pub(in crate::surface) mod markdown;
 mod next;
 pub(in crate::surface) use next::{NEXT, OR};
 mod page;

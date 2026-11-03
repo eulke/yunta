@@ -52,6 +52,21 @@ fn the_status_page_matches_its_goldens_at_every_depth() {
     }
 }
 
+/// Every page as a browser reads it. A golden holds what a page says, not
+/// what dresses it.
+#[test]
+fn the_status_page_reads_in_a_browser() {
+    use surco::surface::Html;
+    let look = Html.look();
+    let goldens = Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/open");
+    for case in &cases() {
+        assert_golden(
+            &goldens.join(format!("{}.html", case.name)),
+            &Html.body(&case.page(Scope::Status, Depth::Full).document(&look)),
+        );
+    }
+}
+
 #[test]
 fn a_page_opens_on_its_headline() {
     for case in &cases() {

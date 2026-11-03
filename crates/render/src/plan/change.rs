@@ -43,7 +43,7 @@ pub(super) fn change(mut doc: Doc, review: &PlanReview, form: Form) -> Doc {
     // only the whole plan draws them here.
     let risks: &[String] = match form {
         Form::Whole => plan.risks.as_slice(),
-        Form::Review | Form::Published => &[],
+        Form::Review | Form::Published | Form::Browser => &[],
     };
     for (title, mark, items) in [
         ("risks", Mark::Caution, risks),

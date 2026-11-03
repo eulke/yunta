@@ -165,6 +165,20 @@ impl Doc {
         &self.blocks
     }
 
+    /// Where the decision this document waits on stands: the last block that is
+    /// one, or a section that holds one. A page draws it apart, and what it is
+    /// about goes before it.
+    pub fn decision_at(&self) -> Option<usize> {
+        self.blocks.iter().rposition(|block| match block {
+            Block::Decision(_) => true,
+            Block::Section(section) => section
+                .blocks
+                .iter()
+                .any(|inner| matches!(inner, Block::Decision(_))),
+            _ => false,
+        })
+    }
+
     /// What this document says, as blocks another document can hold.
     pub fn into_blocks(self) -> Vec<Block> {
         self.blocks

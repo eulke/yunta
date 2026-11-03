@@ -40,6 +40,11 @@ pub enum Form {
     /// shows, each card and the proof folded, and no command that shows the
     /// spec's tests whole, since the whole plan is published beside it.
     Published,
+    /// In a browser, where a decision is made on it and there is room: what a
+    /// review shows, and each file the spec wrote, whole, after the cards, with
+    /// no command to show them, since a page runs none; its risks said beside
+    /// the decision.
+    Browser,
     /// Everything the plan says, and each file the spec wrote, whole, after
     /// the cards.
     Whole,
@@ -71,7 +76,7 @@ pub fn document(
     });
     let doc = match form {
         Form::Review | Form::Published => doc,
-        Form::Whole => tests_whole(doc, review),
+        Form::Browser | Form::Whole => tests_whole(doc, review),
     };
     proof::proof(doc, review, form, (run, spell))
 }
@@ -82,7 +87,7 @@ pub fn document(
 fn card_block(card: Section, form: Form) -> Block {
     match form {
         Form::Published => Fold(card).into(),
-        Form::Review | Form::Whole => card.into(),
+        Form::Review | Form::Browser | Form::Whole => card.into(),
     }
 }
 

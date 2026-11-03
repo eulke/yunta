@@ -6,7 +6,7 @@ mod across;
 mod down;
 pub mod flowchart;
 mod grid;
-mod layer;
+pub(crate) mod layer;
 pub(crate) mod outline;
 pub(crate) mod place;
 pub(crate) mod split;

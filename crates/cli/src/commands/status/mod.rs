@@ -32,6 +32,7 @@ use crate::output::{emit, Answer, Mode};
 use crate::run_page::{cautions, Decided, RunPage, Scope};
 use crate::surface::Outline;
 use node::NodePage;
+use surco::components::Note;
 use surco::doc::{Depth, Doc};
 use surco::look::Look;
 use yunta_engine::Engine;
@@ -189,6 +190,42 @@ async fn run_page_for<'a>(
         decision: decided,
         plans,
     })
+}
+
+/// A run's page as a browser reads it, and the folder it goes in: as deep as
+/// `--full`, and, where it waits on a decision, each document the decision is
+/// about, whole, before it: a browser has the room a terminal does not.
+pub(crate) async fn page_for_a_browser(
+    ctx: &Context,
+    run_id: &RunId,
+) -> Result<(Doc, PathBuf), CliError> {
+    let reading = Reading::of(ctx, run_id).await?;
+    let page = run_page_for(ctx, run_id, &reading, (Mode::Human, Depth::Full)).await?;
+    let doc = page.document(&surco::surface::Html.look());
+    let at = doc.decision_at();
+    let mut blocks = doc.into_blocks();
+    if let Some(decided) = &page.decision {
+        let at = at.unwrap_or(blocks.len());
+        let shown = decided.shown.iter().flat_map(|document| {
+            yunta_render::shown::document(
+                document,
+                run_id,
+                yunta_render::shown::Form::Browser,
+                &advice::spell,
+            )
+            .into_blocks()
+        });
+        blocks.splice(at..at, shown.collect::<Vec<_>>());
+    }
+    blocks.push(
+        Note(format!(
+            "drawn at {}; `{}` draws it again.",
+            reading.now.format("%Y-%m-%d %H:%M UTC"),
+            advice::open(run_id.handle()),
+        ))
+        .into(),
+    );
+    Ok((Doc::new().with_all(blocks), reading.run_dir.clone()))
 }
 
 /// The decision a parked run waits on, with what the page already says

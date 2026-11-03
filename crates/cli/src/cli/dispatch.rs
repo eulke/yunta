@@ -51,6 +51,7 @@ pub(super) async fn dispatch(
         Command::Test { dir } => commands::test::test(dir.as_deref(), look).await,
         Command::Verify { run, .. } => verify_command(run, output, look).await,
         Command::Receipt { run, .. } => receipt_command(run, output, look).await,
+        Command::Open { run, .. } => open_command(run, output, look).await,
         Command::Pack { action } => pack_command(action, look).await,
         Command::Stats {
             run,
@@ -184,6 +185,11 @@ async fn graph_command(
 /// `yunta verify`: checks the run's event chain and its artifacts.
 async fn verify_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
     commands::verify::verify(&run.named().await?, output, look).await
+}
+
+/// `yunta open`: writes the run's page and opens it.
+async fn open_command(run: RunArg, output: Mode, look: &Look) -> Result<Outcome, CliError> {
+    commands::open::open(&run.named().await?, output, look).await
 }
 
 /// `yunta receipt`: writes the Verified Work Receipt of the finished run.

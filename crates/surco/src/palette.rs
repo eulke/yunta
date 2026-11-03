@@ -184,6 +184,54 @@ const PILL_INK: Tuned = Tuned {
     light: Rgb(255, 255, 255),
 };
 
+/// What only a page has, on each ground: its ground, the panel a button stands
+/// on, the words no tone colors, the rule between things, and the wash behind a
+/// code span. The ground is the one the palette is tuned on, so its floors of
+/// contrast hold on a page; the rest stand close to it.
+const PAGE: [(&str, Tuned); 5] = [
+    (
+        "ground",
+        Tuned {
+            dark: Rgb(21, 19, 26),
+            light: Rgb(251, 250, 246),
+        },
+    ),
+    (
+        "panel",
+        Tuned {
+            dark: Rgb(27, 25, 34),
+            light: Rgb(255, 255, 255),
+        },
+    ),
+    (
+        "ink",
+        Tuned {
+            dark: Rgb(231, 227, 220),
+            light: Rgb(36, 33, 43),
+        },
+    ),
+    (
+        "rule",
+        Tuned {
+            dark: Rgb(42, 39, 50),
+            light: Rgb(228, 224, 232),
+        },
+    ),
+    (
+        "wash",
+        Tuned {
+            dark: Rgb(34, 31, 41),
+            light: Rgb(239, 237, 242),
+        },
+    ),
+];
+
+/// The colors only a page has on `ground`, each with the name a page's style
+/// reads it by.
+pub(crate) fn page(ground: Ground) -> [(&'static str, Rgb); 5] {
+    PAGE.map(|(name, tuned)| (name, tuned.on(ground)))
+}
+
 /// The color `tone` is drawn in on `ground`, or None for the terminal's own
 /// text color: plain text, and a command, which is bold rather than colored.
 pub(crate) fn tone(ground: Ground, tone: Tone) -> Option<Rgb> {

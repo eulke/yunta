@@ -243,6 +243,18 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Open a run's page in a browser.
+    ///
+    /// Writes the run's page into its folder, with each document a decision
+    /// it waits on is about, whole, and opens it. A page runs nothing: its
+    /// buttons copy commands. Run from a script, it says where the page is.
+    Open {
+        #[command(flatten)]
+        run: RunArg,
+        /// Prints where the page is as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Install, update, remove and list packs.
     Pack {
         #[command(subcommand)]
@@ -451,6 +463,7 @@ impl Command {
             | Command::Doctor { json, .. }
             | Command::Verify { json, .. }
             | Command::Receipt { json, .. }
+            | Command::Open { json, .. }
             | Command::Stats { json, .. }
             | Command::Schema { json, .. } => *json,
             _ => false,

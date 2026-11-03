@@ -183,6 +183,8 @@ to say what it did not understand can name those keys; `yunta status` does.
 The receipt is the exception to being read back: nothing reads a `receipt.json`,
 because `yunta receipt` derives it from the log every time. Its `schema_version`
 is for whoever consumes the file outside yunta, who has no log to derive it from.
+Nothing reads the `page.html` that `yunta open` writes back either: it is drawn anew
+each time, and its markup is not a format anyone can hold on to.
 
 Every commit a run makes ends in git trailers naming where it came from:
 `Yunta-Run: <run id>` always, `Yunta-Node: <node>` when a node's work made it, and

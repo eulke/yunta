@@ -88,6 +88,6 @@ async fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), C
 
 /// Writes one rendering beside the run, naming the file it could not
 /// write.
-fn save(path: &Path, contents: &str) -> Result<(), CliError> {
+pub(super) fn save(path: &Path, contents: &str) -> Result<(), CliError> {
     std::fs::write(path, contents).map_err(|source| CliError::io("write", path.display(), source))
 }

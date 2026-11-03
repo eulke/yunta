@@ -10,7 +10,7 @@ use surco::surface::{Markdown, Surface, Terminal};
 use yunta_testkit_core::spell;
 
 use super::console_page::greet_escalation;
-use super::documents::{goldens, review, run, shown_plan};
+use super::documents::{global_packs, goldens, read, review, run, shown_plan};
 use super::publication::description;
 use crate::plan::Form;
 
@@ -163,5 +163,26 @@ fn a_plan_with_flaws_says_why_an_option_is_withheld_once_under_the_section() {
         drawn.matches("is not offered, because").count(),
         1,
         "{drawn}"
+    );
+}
+
+/// A browser has the room a terminal does not and runs no command: its plan
+/// holds each test its spec wrote, and leaves what weighs on the decision to the
+/// decision.
+#[test]
+fn a_browser_reads_the_tests_whole_and_leaves_what_weighs_to_the_decision() {
+    let drawn = read(&review(), Form::Browser);
+    let tests = drawn
+        .find("the spec's tests")
+        .unwrap_or_else(|| panic!("no test is drawn whole:\n{drawn}"));
+    assert!(drawn[tests..].contains("tests/greet.rs"), "{drawn}");
+    assert!(!drawn.contains("--node"), "{drawn}");
+    assert!(
+        !drawn.contains("`greet` plans to change `tests/greet.rs`, a test the spec wrote"),
+        "said beside the decision:\n{drawn}"
+    );
+    assert!(
+        !read(&global_packs(), Form::Browser).contains("Global lock state"),
+        "a risk is said beside the decision"
     );
 }

@@ -107,7 +107,7 @@ fn folded(blocks: Vec<Block>, review: &PlanReview, form: Form) -> Vec<Block> {
             .into()],
             None => blocks,
         },
-        Form::Review | Form::Whole => blocks,
+        Form::Review | Form::Browser | Form::Whole => blocks,
     }
 }
 

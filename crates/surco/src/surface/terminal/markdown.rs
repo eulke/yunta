@@ -15,7 +15,7 @@
 //! How prose reads, its emphasis and its code spans, and which lines are list
 //! items and headings, is read in [`prose`].
 
-mod prose;
+pub(in crate::surface) mod prose;
 
 use std::ops::Range;
 

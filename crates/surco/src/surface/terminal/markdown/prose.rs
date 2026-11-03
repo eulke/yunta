@@ -11,7 +11,7 @@ use crate::line::{Line, Tone};
 /// of backticks no run of as many closes is text. A `**` inside a code span
 /// is the code's; the ones outside pair across it, so emphasis may hold
 /// code, and a last `**` that none closes is text.
-pub(super) fn spans(text: &str) -> Line {
+pub(in crate::surface) fn spans(text: &str) -> Line {
     let code = crate::code::code_spans(text);
     let marks = paired_marks(text, &code);
     let mut cuts: Vec<(Range<usize>, Cut)> = code
@@ -72,7 +72,7 @@ fn words(line: Line, text: &str, strong: bool) -> Line {
 /// The words of a list item or a heading from `at` on, read in its whole
 /// `line`, so a run of backticks right after its marks is text unless a code
 /// span closes it, as the lexer reads it.
-pub(super) fn marked_spans(line: &str, at: usize) -> Line {
+pub(in crate::surface) fn marked_spans(line: &str, at: usize) -> Line {
     let read = spans(line);
     read.slice(at..read.text().len())
 }
@@ -96,7 +96,7 @@ pub(super) fn heading_spans(line: &str, at: usize) -> Line {
 /// with no marker, for a line that is one. A heading opens with one to six
 /// `#` that a space, a tab or the line's end follows; any other line that
 /// starts with `#` is prose.
-pub(super) fn list_item(line: &str) -> Option<(&str, &str)> {
+pub(in crate::surface) fn list_item(line: &str) -> Option<(&str, &str)> {
     for mark in ["- ", "* ", "+ "] {
         if let Some(item) = line.strip_prefix(mark) {
             return Some((mark, item));

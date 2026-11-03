@@ -800,6 +800,17 @@ alongside `manifest.yaml`. A `pull_request` node puts the same document in the p
 request it opens, read as the run's last step begins: what the run held its work to
 and found so far, under the word `running`.
 
+## A run's page in a browser
+
+`yunta open <run>` writes the run's page into its folder as `page.html` and opens
+it: one file, which asks nothing of the network, and no server behind it. It reads
+as `yunta status <run> --full` does. Where the run waits on a decision, each document
+the decision is about stands whole on the page, its tests included, with the decision
+beside it. A page runs nothing: what moves the run is a command, on a button that
+copies it. From a script it opens nothing and says where the page is; `--json` gives
+`{"page": "<path>"}`. A page is what the run held when it was drawn, and says when
+that was: `yunta open <run>` draws it again.
+
 ## MCP
 
 Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:

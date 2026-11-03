@@ -154,7 +154,7 @@ impl Line {
             self.spans.push(Span {
                 text,
                 tone: Tone::Plain,
-                link: Some(file_uri(target)),
+                link: Some(file_url(target)),
                 fill: None,
             });
         }
@@ -361,7 +361,7 @@ impl Line {
 /// the path but a letter, a digit, `-._~` and `/` written as `%` and its two
 /// hex digits. A space or a `#` in a name would otherwise end the address
 /// early, and a control character in it would end the link that carries it.
-fn file_uri(target: &std::path::Path) -> String {
+pub(crate) fn file_url(target: &std::path::Path) -> String {
     let mut uri = String::from("file://");
     for &byte in target.as_os_str().as_encoded_bytes() {
         match byte {

@@ -70,7 +70,7 @@ fn escaped(text: &str) -> String {
 
 /// `text` with each pair of backticks in it set as code, and a backtick with
 /// no pair left as written
-fn code_pairs(text: &str) -> String {
+pub(in crate::surface) fn code_pairs(text: &str) -> String {
     let mut parts = text.split('`');
     let mut out = parts.next().unwrap_or_default().to_string();
     while let Some(code) = parts.next() {

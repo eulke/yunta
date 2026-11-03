@@ -13,7 +13,7 @@ use crate::golden::{assert_golden, ENVIRONMENTS, RICH};
 use crate::line::{Line, Tone};
 use crate::look::{Look, Width};
 use crate::paint::Paint;
-use crate::surface::{Description, Markdown, Surface, Terminal};
+use crate::surface::{visible, Description, Html, Markdown, Surface, Terminal};
 use crate::width::cell_width;
 use crate::words::Standing;
 
@@ -442,6 +442,7 @@ fn every_block_matches_its_goldens_in_every_environment() {
     let doc = catalog();
     // First, so that a color golden that fails does not keep it from being compared.
     assert_golden(&goldens().join("markdown/catalog.md"), &Markdown.draw(&doc));
+    assert_golden(&goldens().join("html/catalog.html"), &Html.body(&doc));
     for environment in ENVIRONMENTS.iter().chain(&RICH) {
         let look = Look::of(environment);
         let drawn = Terminal::on(look).draw(&doc);
@@ -471,6 +472,7 @@ fn markdown_says_every_word_the_terminal_says_of_every_block() {
     let forms = [
         ("Markdown", Markdown.draw(&doc)),
         ("Description", Description::default().draw(&doc)),
+        ("HTML", visible(&Html.body(&doc))),
     ];
     for (form, drawn) in &forms {
         let said = words(drawn);
