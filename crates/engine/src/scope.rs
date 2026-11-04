@@ -265,14 +265,20 @@ pub fn node_scope_in_force(node: &yunta_core::Node, state: &RunState) -> Option<
 /// The paths that differ between `from` and `to` — each a commit or a
 /// tree, by git's name for it: what a run changed between its base and
 /// the tree an attempt starts from, or what a unit changed since it began.
+///
+/// A move is both of its paths, whatever the repository's own configuration
+/// says: a path a file left is changed as a deleted one is, and git pairing
+/// the two ends would list only where the file arrived, so that nothing would
+/// judge the path it took the file from. Not [`crate::git::numstat()`], which
+/// pairs them to count a moved file once for a person.
 pub async fn changed_between(
     cwd: &Path,
     from: &str,
     to: &str,
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let bytes =
-        crate::git::read_bytes(cwd, &["diff", "--name-only", "-z", from, to], supervision).await?;
+    let args = ["diff", "--no-renames", "--name-only", "-z", from, to];
+    let bytes = crate::git::read_bytes(cwd, &args, supervision).await?;
     Ok(nul_separated_paths(&bytes))
 }
 
