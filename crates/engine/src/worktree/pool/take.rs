@@ -49,12 +49,35 @@ impl CheckoutPool {
             };
             let (number, path) = (candidate.slot.number, candidate.slot.path);
             if still_fits(&home, number, &path, user, target, supervision).await? {
+                clear_stopped_git(&path, supervision).await?;
                 slot::owned(&home, number, None).await;
                 return Ok(Taken::Held(path, lease));
             }
         }
         Ok(Taken::Nothing { listed })
     }
+}
+
+/// Clears the lock a git stopped mid-way left in `checkout`, which would
+/// refuse every git after it. Nothing else runs git in a checkout while it is
+/// held, so a lock found now is nobody's. One that will not go is met by the
+/// next git, which says so.
+async fn clear_stopped_git(
+    checkout: &Path,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let lock = crate::git::read(
+        checkout,
+        &["rev-parse", "--git-path", "index.lock"],
+        supervision,
+    )
+    .await?;
+    if let Err(error) = tokio::fs::remove_file(checkout.join(lock.trim())).await {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(%error, "failed to clear a stopped git's index lock");
+        }
+    }
+    Ok(())
 }
 
 /// `ranked` with its best few told apart by how many paths separate each

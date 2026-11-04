@@ -148,6 +148,33 @@ async fn a_checkout_nobody_recorded_is_known_by_what_it_holds() {
     assert_eq!(canonical(&following), canonical(&empty.worktree));
 }
 
+/// A git killed mid-way leaves its lock behind, and every git after it would
+/// refuse to work in that checkout. Nothing else runs git in a checkout while
+/// it is held, so taking one clears what a stopped git left.
+#[tokio::test]
+async fn a_lock_a_stopped_git_left_goes_when_its_checkout_is_taken() {
+    let world = World::new();
+    let supervision = world.owner.supervision();
+    let (checkout, held) = world
+        .pool
+        .open_detached(&world.head(), supervision)
+        .await
+        .unwrap();
+    world.pool.give_back(held, supervision).await.unwrap();
+    let path = yunta_testkit::git_output(&checkout, &["rev-parse", "--git-path", "index.lock"]);
+    let lock = checkout.join(path.trim());
+    write(&lock, "");
+
+    let (again, _held) = world
+        .pool
+        .open_detached(&world.head(), supervision)
+        .await
+        .expect("a stopped git's lock does not keep the checkout from its next user");
+
+    assert_eq!(canonical(&again), canonical(&checkout));
+    assert!(!lock.exists());
+}
+
 /// A checkout the pool adds holds its source and no build, and says so.
 #[tokio::test]
 async fn a_checkout_the_pool_adds_is_recorded_without_a_build() {
